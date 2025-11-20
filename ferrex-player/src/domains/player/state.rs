@@ -1,18 +1,13 @@
 use crate::domains::media::library::MediaFile;
-use iced_video_player::{AudioTrack, SubtitleTrack, ToneMappingConfig, Video};
+use crate::domains::player::video_backend::{AudioTrack, SubtitleTrack, ToneMappingConfig, Video};
+use iced::ContentFit;
+use iced_video_player as standard_video;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-// Seek bar interaction constants  
+// Seek bar interaction constants
 pub const SEEK_BAR_VISUAL_HEIGHT: f32 = 4.0; // The visible bar height
 pub const SEEK_BAR_CLICK_TOLERANCE_MULTIPLIER: f32 = 7.0; // Allow clicks within 7x the visual bar height
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AspectRatio {
-    Original,
-    Fill,
-    Fit,
-    Stretch,
-}
 
 #[derive(Debug)]
 pub struct PlayerDomainState {
@@ -22,7 +17,10 @@ pub struct PlayerDomainState {
     pub current_url: Option<url::Url>,
 
     // Video instance
-    pub video_opt: Option<Video>,
+    pub video_opt: Option<Arc<Video>>,
+    // Leaked reference for widget (to avoid leaking on every render)
+    // This is a workaround until iced supports owned videos
+    pub video_leaked: Option<&'static standard_video::Video>,
 
     // Watch progress tracking
     pub last_progress_update: Option<Instant>,
@@ -36,6 +34,7 @@ pub struct PlayerDomainState {
     pub dragging: bool,
     pub last_seek_position: Option<f64>,
     pub last_mouse_y: Option<f32>, // Track vertical mouse position for seek bar validation
+    pub seek_bar_hovered: bool, // Track if mouse is hovering over the seek bar
     pub seeking: bool,
     pub seek_started_time: Option<Instant>,
 
@@ -48,7 +47,7 @@ pub struct PlayerDomainState {
     pub volume: f64,
     pub is_muted: bool,
     pub playback_speed: f64,
-    pub aspect_ratio: AspectRatio,
+    pub content_fit: ContentFit,
 
     // Playlist control (NEW - for Phase 2 direct commands)
     pub is_shuffle_enabled: bool,
@@ -112,6 +111,7 @@ impl Default for PlayerDomainState {
             current_media_id: None,
             current_url: None,
             video_opt: None,
+            video_leaked: None,
             last_progress_update: None,
             last_progress_sent: 0.0,
             pending_resume_position: None,
@@ -121,6 +121,7 @@ impl Default for PlayerDomainState {
             dragging: false,
             last_seek_position: None,
             last_mouse_y: None,
+            seek_bar_hovered: false,
             seeking: false,
             seek_started_time: None,
             controls: true,
@@ -129,7 +130,7 @@ impl Default for PlayerDomainState {
             volume: 1.0,
             is_muted: false,
             playback_speed: 1.0,
-            aspect_ratio: AspectRatio::Fit,
+            content_fit: ContentFit::Contain,
             is_shuffle_enabled: false,
             is_repeat_enabled: false,
             show_settings: false,
@@ -172,6 +173,7 @@ impl PlayerDomainState {
         self.current_media_id = None;
         self.current_url = None;
         self.video_opt = None;
+        self.video_leaked = None;
         self.last_progress_update = None;
         self.last_progress_sent = 0.0;
         self.pending_resume_position = None;
@@ -193,6 +195,7 @@ impl PlayerDomainState {
         self.is_hdr_content = false;
         self.is_loading_video = false;
         self.source_duration = None;
+        self.content_fit = ContentFit::Contain;
     }
 
     pub fn is_playing(&self) -> bool {

@@ -143,6 +143,7 @@ fn watch_progress_subscription(state: &State) -> Subscription<DomainMessage> {
                 .as_ref()
                 .unwrap()
                 .duration()
+                .unwrap_or(Duration::ZERO)
                 .as_secs_f64(),
         ) {
             (Some(media_id), position, duration) => {

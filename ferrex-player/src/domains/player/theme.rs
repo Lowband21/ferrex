@@ -6,7 +6,8 @@ use iced::{
 // Container styles
 pub fn container_player(_theme: &iced::Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(Color::BLACK)),
+        // Transparent background to allow Wayland subsurface video to show through
+        background: Some(Background::Color(Color::TRANSPARENT)),
         text_color: Some(Color::WHITE),
         ..Default::default()
     }
@@ -122,9 +123,17 @@ pub fn container_hdr_badge(_theme: &iced::Theme) -> container::Style {
 }
 
 // Seek bar container styles
-pub fn container_seek_bar_background(_theme: &iced::Theme) -> container::Style {
+pub fn container_seek_bar_background(_theme: &iced::Theme, hovered: bool) -> container::Style {
+    let background_color = if hovered {
+        // Light grey when hovered
+        Color::from_rgba(0.6, 0.6, 0.6, 0.6)
+    } else {
+        // Dark grey when not hovered
+        Color::from_rgba(0.3, 0.3, 0.3, 0.5)
+    };
+    
     container::Style {
-        background: Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.1))),
+        background: Some(Background::Color(background_color)),
         ..Default::default()
     }
 }

@@ -1,4 +1,4 @@
-use iced::Task;
+use iced::{Task, Theme};
 use lucide_icons::lucide_font_bytes;
 
 // Use all modules from lib
@@ -8,12 +8,50 @@ use ferrex_player::{
 
 use common::messages::DomainMessage;
 use domains::ui::theme;
+use iced::Program;
+use reqwest::header::VIA;
 use state_refactored::State;
+
+/*
+pub struct MyApp;
+
+// Conditional renderer type based on features
+//#[cfg(target_os = "linux")]
+pub type AppRenderer = iced_wgpu::Renderer;
+
+impl Program for MyApp {
+    type State = State;
+    type Message = DomainMessage;
+    //type Theme = theme::Theme;
+    type Renderer = AppRenderer; // Using the conditional type
+                                 //type Executor = DefaultExecutor;
+
+    fn name() -> &'static str {
+        "Ferrex Player"
+    }
+
+    /*
+    fn init(&self) -> (Self::State, Task<Self::Message>) {
+        init::init()
+    } */
+
+    fn update(&self, state: &mut Self::State, message: Self::Message) -> Task<Self::Message> {
+        update::update(state, message)
+    }
+
+    fn view<'a>(
+        &self,
+        state: &'a Self::State,
+        _window: Id,
+    ) -> Element<'a, Self::Message, Self::Theme, Self::Renderer> {
+        view::view(state)
+    }
+}*/
 
 fn main() -> iced::Result {
     // Initialize logger with debug level if not set
     if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "ferrex_player=debug");
+        std::env::set_var("RUST_LOG", "info");
     }
     env_logger::init();
 
@@ -131,16 +169,21 @@ fn main() -> iced::Result {
         (state, auth_task)
     };
 
-    iced::application(init, update::update, view::view)
-        .subscription(subscriptions::subscription)
-        .font(lucide_font_bytes())
-        .theme(|_| theme::MediaServerTheme::theme())
-        .present_mode(iced::PresentMode::Mailbox) // Enable 120fps+ with no VSync
-        .window(iced::window::Settings {
-            size: iced::Size::new(1280.0, 720.0),
-            resizable: true,
-            decorations: true,
-            ..Default::default()
-        })
-        .run()
+    iced::application::<State, DomainMessage, Theme, iced_wgpu::Renderer>(
+        init,
+        update::update,
+        view::view,
+    )
+    .subscription(subscriptions::subscription)
+    .font(lucide_font_bytes())
+    .theme(|_| theme::MediaServerTheme::theme())
+    .present_mode(iced::PresentMode::AutoNoVsync) // Enable 120fps+ with no VSync
+    .window(iced::window::Settings {
+        size: iced::Size::new(1280.0, 720.0),
+        resizable: true,
+        decorations: true,
+        transparent: true, // Allow transparent background for Wayland subsurface video
+        ..Default::default()
+    })
+    .run()
 }

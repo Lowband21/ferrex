@@ -12,10 +12,7 @@ opt-level = 3
 
 [dependencies]
 ferrex-core = { path = "../ferrex-core", default-features = false }
-# Core GUI framework
-#iced = { version = "0.13.1", features = ["tokio", "debug", "image", "canvas", "advanced", "wgpu"] }
-#iced = { git = "https://github.com/iced-rs/iced.git", features = ["tokio", "debug", "image", "canvas", "advanced", "wgpu"] }
-iced = { path = "../iced_fork", features = [
+iced = { path = "../iced_fork", default-features = false, features = [
     "tokio",
     "debug",
     "image",
@@ -25,7 +22,9 @@ iced = { path = "../iced_fork", features = [
     "prefer_10bit",
     "high-refresh-rate",
     "batch",
-] }
+] } # Core GUI framework
+#iced = { version = "0.13.1", features = ["tokio", "debug", "image", "canvas", "advanced", "wgpu"] }
+#iced = { git = "https://github.com/iced-rs/iced.git", features = ["tokio", "debug", "image", "canvas", "advanced", "wgpu"] }
 iced_wgpu = { path = "../iced_fork/wgpu", features = ["image", "batch"] }
 
 # Icons
@@ -35,6 +34,7 @@ lucide-icons = { path = "../lucide_icons_iced_0.14", features = ["iced"] }
 #iced_video_player = { git = "https://github.com/Lowband21/iced_video_player", branch = "http-seeking-pitch-correction", rev = "c8f47a8" }
 #iced_video_player = { git = "https://github.com/Lowband21/iced_video_player", rev = "c8f47a8" }
 iced_video_player = { path = "../iced_video_player" }
+iced_video_player_wayland = { path = "../iced_video_player_wayland" }
 gstreamer = "0.24.1"
 gstreamer-app = "0.24"
 gstreamer-pbutils = "0.24"

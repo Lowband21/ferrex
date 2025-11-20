@@ -79,6 +79,7 @@ scripts/
 
 # Fork directories (managed separately)
 iced_video_player/
+iced_video_player_wayland/
 lucide_icons_iced_0.14/
 iced_fork/
 cosmic_time_fork/

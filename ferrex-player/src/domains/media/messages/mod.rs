@@ -1,6 +1,5 @@
-use iced_video_player::{ToneMappingAlgorithm, ToneMappingPreset};
+use crate::domains::player::video_backend::{ToneMappingAlgorithm, ToneMappingPreset};
 
-use crate::domains::player::AspectRatio;
 use crate::infrastructure::api_types::MediaId;
 
 use super::library::MediaFile;
@@ -45,7 +44,7 @@ pub enum Message {
 
     // Video state
     VideoLoaded(bool), // Success flag
-    VideoCreated(Result<std::sync::Arc<iced_video_player::Video>, String>),
+    VideoCreated(Result<std::sync::Arc<crate::domains::player::video_backend::Video>, String>),
     MediaAvailabilityChecked(MediaFile),
     MediaUnavailable(String, String), // reason, message
 
@@ -66,7 +65,6 @@ pub enum Message {
     // Playback settings
     SetPlaybackSpeed(f64),
     ToggleSettings,
-    SetAspectRatio(AspectRatio),
 
     // Fullscreen control
     ToggleFullscreen,
@@ -108,12 +106,10 @@ impl std::fmt::Debug for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             // For VideoCreated, don't debug the entire Video object
-            Self::VideoCreated(result) => {
-                match result {
-                    Ok(_) => write!(f, "Message::VideoCreated(Ok(<Video>))"),
-                    Err(e) => write!(f, "Message::VideoCreated(Err({:?}))", e),
-                }
-            }
+            Self::VideoCreated(result) => match result {
+                Ok(_) => write!(f, "Message::VideoCreated(Ok(<Video>))"),
+                Err(e) => write!(f, "Message::VideoCreated(Err({:?}))", e),
+            },
             // For variants with MediaFile, provide concise debug output
             Self::PlayMedia(media) => write!(f, "Message::PlayMedia({})", media.filename),
             Self::PlayMediaWithId(media, id) => {
@@ -122,14 +118,14 @@ impl std::fmt::Debug for Message {
             Self::MediaAvailabilityChecked(media) => {
                 write!(f, "Message::MediaAvailabilityChecked({})", media.filename)
             }
-            
+
             // Simple variants can use their name
             Self::Play => write!(f, "Message::Play"),
             Self::Pause => write!(f, "Message::Pause"),
             Self::PlayPause => write!(f, "Message::PlayPause"),
             Self::Stop => write!(f, "Message::Stop"),
             Self::LoadMediaById(id) => write!(f, "Message::LoadMediaById({:?})", id),
-            
+
             // Seeking
             Self::Seek(pos) => write!(f, "Message::Seek({})", pos),
             Self::SeekRelative(delta) => write!(f, "Message::SeekRelative({})", delta),
@@ -138,82 +134,105 @@ impl std::fmt::Debug for Message {
             Self::SeekDone => write!(f, "Message::SeekDone"),
             Self::SeekForward => write!(f, "Message::SeekForward"),
             Self::SeekBackward => write!(f, "Message::SeekBackward"),
-            
+
             // Volume
             Self::SetVolume(vol) => write!(f, "Message::SetVolume({})", vol),
             Self::ToggleMute => write!(f, "Message::ToggleMute"),
-            
+
             // Events
             Self::EndOfStream => write!(f, "Message::EndOfStream"),
             Self::NewFrame => write!(f, "Message::NewFrame"),
             Self::Reload => write!(f, "Message::Reload"),
             Self::ShowControls => write!(f, "Message::ShowControls"),
             Self::CheckControlsVisibility => write!(f, "Message::CheckControlsVisibility"),
-            
+
             // Progress tracking
             Self::ProgressUpdateSent(id, pos, dur) => {
                 write!(f, "Message::ProgressUpdateSent({:?}, {}, {})", id, pos, dur)
             }
             Self::ProgressUpdateFailed => write!(f, "Message::ProgressUpdateFailed"),
             Self::SendProgressUpdateWithData(id, pos, dur) => {
-                write!(f, "Message::SendProgressUpdateWithData({:?}, {}, {})", id, pos, dur)
+                write!(
+                    f,
+                    "Message::SendProgressUpdateWithData({:?}, {}, {})",
+                    id, pos, dur
+                )
             }
             Self::WatchProgressFetched(id, pos) => {
                 write!(f, "Message::WatchProgressFetched({:?}, {:?})", id, pos)
             }
-            
+
             // Video state
             Self::VideoLoaded(success) => write!(f, "Message::VideoLoaded({})", success),
             Self::MediaUnavailable(reason, msg) => {
                 write!(f, "Message::MediaUnavailable({}, {})", reason, msg)
             }
-            
+
             // Track selection
             Self::AudioTrackSelected(idx) => write!(f, "Message::AudioTrackSelected({})", idx),
-            Self::SubtitleTrackSelected(idx) => write!(f, "Message::SubtitleTrackSelected({:?})", idx),
+            Self::SubtitleTrackSelected(idx) => {
+                write!(f, "Message::SubtitleTrackSelected({:?})", idx)
+            }
             Self::ToggleSubtitles => write!(f, "Message::ToggleSubtitles"),
             Self::ToggleSubtitleMenu => write!(f, "Message::ToggleSubtitleMenu"),
             Self::CycleAudioTrack => write!(f, "Message::CycleAudioTrack"),
             Self::CycleSubtitleTrack => write!(f, "Message::CycleSubtitleTrack"),
             Self::CycleSubtitleSimple => write!(f, "Message::CycleSubtitleSimple"),
             Self::TracksLoaded => write!(f, "Message::TracksLoaded"),
-            
+
             // Quality
             Self::ToggleQualityMenu => write!(f, "Message::ToggleQualityMenu"),
             Self::QualityVariantSelected(profile) => {
                 write!(f, "Message::QualityVariantSelected({})", profile)
             }
-            
+
             // Settings
             Self::SetPlaybackSpeed(speed) => write!(f, "Message::SetPlaybackSpeed({})", speed),
             Self::ToggleSettings => write!(f, "Message::ToggleSettings"),
-            Self::SetAspectRatio(ratio) => write!(f, "Message::SetAspectRatio({:?})", ratio),
-            
+
             // Fullscreen
             Self::ToggleFullscreen => write!(f, "Message::ToggleFullscreen"),
             Self::ExitFullscreen => write!(f, "Message::ExitFullscreen"),
-            
+
             // Mouse/UI
             Self::MouseMoved => write!(f, "Message::MouseMoved"),
             Self::VideoClicked => write!(f, "Message::VideoClicked"),
             Self::VideoDoubleClicked => write!(f, "Message::VideoDoubleClicked"),
-            
+
             // Tone mapping - simplified output
-            Self::ToggleToneMapping(enabled) => write!(f, "Message::ToggleToneMapping({})", enabled),
+            Self::ToggleToneMapping(enabled) => {
+                write!(f, "Message::ToggleToneMapping({})", enabled)
+            }
             Self::SetToneMappingPreset(_) => write!(f, "Message::SetToneMappingPreset"),
             Self::SetToneMappingAlgorithm(_) => write!(f, "Message::SetToneMappingAlgorithm"),
-            Self::SetToneMappingWhitePoint(val) => write!(f, "Message::SetToneMappingWhitePoint({})", val),
-            Self::SetToneMappingExposure(val) => write!(f, "Message::SetToneMappingExposure({})", val),
-            Self::SetToneMappingSaturation(val) => write!(f, "Message::SetToneMappingSaturation({})", val),
-            Self::SetHableShoulderStrength(val) => write!(f, "Message::SetHableShoulderStrength({})", val),
-            Self::SetHableLinearStrength(val) => write!(f, "Message::SetHableLinearStrength({})", val),
+            Self::SetToneMappingWhitePoint(val) => {
+                write!(f, "Message::SetToneMappingWhitePoint({})", val)
+            }
+            Self::SetToneMappingExposure(val) => {
+                write!(f, "Message::SetToneMappingExposure({})", val)
+            }
+            Self::SetToneMappingSaturation(val) => {
+                write!(f, "Message::SetToneMappingSaturation({})", val)
+            }
+            Self::SetHableShoulderStrength(val) => {
+                write!(f, "Message::SetHableShoulderStrength({})", val)
+            }
+            Self::SetHableLinearStrength(val) => {
+                write!(f, "Message::SetHableLinearStrength({})", val)
+            }
             Self::SetHableLinearAngle(val) => write!(f, "Message::SetHableLinearAngle({})", val),
             Self::SetHableToeStrength(val) => write!(f, "Message::SetHableToeStrength({})", val),
             Self::SetMonitorBrightness(val) => write!(f, "Message::SetMonitorBrightness({})", val),
-            Self::SetToneMappingBrightness(val) => write!(f, "Message::SetToneMappingBrightness({})", val),
-            Self::SetToneMappingContrast(val) => write!(f, "Message::SetToneMappingContrast({})", val),
-            Self::SetToneMappingSaturationBoost(val) => write!(f, "Message::SetToneMappingSaturationBoost({})", val),
-            
+            Self::SetToneMappingBrightness(val) => {
+                write!(f, "Message::SetToneMappingBrightness({})", val)
+            }
+            Self::SetToneMappingContrast(val) => {
+                write!(f, "Message::SetToneMappingContrast({})", val)
+            }
+            Self::SetToneMappingSaturationBoost(val) => {
+                write!(f, "Message::SetToneMappingSaturationBoost({})", val)
+            }
+
             // Internal
             Self::_LoadVideo => write!(f, "Message::_LoadVideo"),
             Self::Noop => write!(f, "Message::Noop"),
@@ -284,7 +303,6 @@ impl Message {
             // Playback settings
             Self::SetPlaybackSpeed(_) => "Media::SetPlaybackSpeed",
             Self::ToggleSettings => "Media::ToggleSettings",
-            Self::SetAspectRatio(_) => "Media::SetAspectRatio",
 
             // Fullscreen control
             Self::ToggleFullscreen => "Media::ToggleFullscreen",

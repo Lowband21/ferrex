@@ -58,7 +58,7 @@ pub fn update_player(
                     crate::domains::media::messages::Message::SendProgressUpdateWithData(
                         state.current_media_id.unwrap(),
                         video.position().as_secs_f64(),
-                        video.duration().as_secs_f64(),
+                        video.duration().unwrap_or(Duration::ZERO).as_secs_f64(),
                     ),
                 )))
             } else {
@@ -73,7 +73,7 @@ pub fn update_player(
                     crate::domains::media::messages::Message::SendProgressUpdateWithData(
                         state.current_media_id.unwrap(),
                         video.position().as_secs_f64(),
-                        video.duration().as_secs_f64(),
+                        video.duration().unwrap_or(Duration::ZERO).as_secs_f64(),
                     ),
                 )))
             } else {
@@ -89,7 +89,7 @@ pub fn update_player(
                     crate::domains::media::messages::Message::SendProgressUpdateWithData(
                         state.current_media_id.unwrap(),
                         video.position().as_secs_f64(),
-                        video.duration().as_secs_f64(),
+                        video.duration().unwrap_or(Duration::ZERO).as_secs_f64(),
                     ),
                 )))
             } else {
@@ -156,15 +156,11 @@ pub fn update_player(
                     state.seeking = true;
                     state.seek_started_time = Some(std::time::Instant::now());
                     let duration = Duration::try_from_secs_f64(seek_position).unwrap_or_default();
-                    if let Err(e) = video.seek(duration, false) {
-                        log::error!("Seek failed: {:?}", e);
-                        state.seeking = false;
-                        state.seek_started_time = None;
-                    } else {
-                        // Update position immediately for better UX
-                        state.position = seek_position;
-                        log::debug!("Seek initiated, position set to: {:.2}s", seek_position);
-                    }
+                    video.seek(duration, false);
+                } else if let Some(seek_position) = state.last_seek_position {
+                    // Update position immediately for better UX
+                    state.position = seek_position;
+                    log::debug!("Seek initiated, position set to: {:.2}s", seek_position);
                 }
 
                 state.last_seek_position = None;
@@ -254,14 +250,9 @@ pub fn update_player(
                 state.seeking = true;
                 state.seek_started_time = Some(std::time::Instant::now());
                 let duration = Duration::try_from_secs_f64(new_position).unwrap_or_default();
-                if let Err(e) = video.seek(duration, false) {
-                    log::error!("Relative seek failed: {:?}", e);
-                    state.seeking = false;
-                    state.seek_started_time = None;
-                } else {
-                    // Update position immediately for better UX
-                    state.position = new_position;
-                }
+                video.seek(duration, false);
+                // Update position immediately for better UX
+                state.position = new_position;
 
                 state.update_controls(true);
             }
@@ -364,10 +355,12 @@ pub fn update_player(
 
                 // Update duration if it wasn't available during load
                 if state.duration <= 0.0 {
-                    let new_duration = video.duration().as_secs_f64();
-                    if new_duration > 0.0 {
-                        log::info!("Duration now available: {} seconds", new_duration);
-                        state.duration = new_duration;
+                    if let Some(new_duration) = video.duration() {
+                        let new_duration = new_duration.as_secs_f64();
+                        if new_duration > 0.0 {
+                            log::info!("Duration now available: {} seconds", new_duration);
+                            state.duration = new_duration;
+                        }
                     } else {
                         log::debug!("NewFrame: Duration still not available from video");
                     }
@@ -468,6 +461,9 @@ pub fn update_player(
             let within_seek_zone =
                 (point.y - seek_bar_vertical_center).abs() <= max_vertical_distance;
 
+            // Update seek bar hover state
+            state.seek_bar_hovered = within_seek_zone;
+
             // Only calculate seek position if within vertical bounds OR already dragging
             if within_seek_zone || state.dragging {
                 let percentage = (point.x / window_size.width).clamp(0.0, 1.0) as f64;
@@ -502,13 +498,10 @@ pub fn update_player(
                     if let Some(video) = state.video_opt.as_mut() {
                         let duration =
                             Duration::try_from_secs_f64(seek_position).unwrap_or_default();
-                        if let Err(e) = video.seek(duration, false) {
-                            log::error!("Seek failed: {:?}", e);
-                        } else {
-                            state.last_seek_time = Some(Instant::now());
-                            // Clear pending seek since we just performed it
-                            state.pending_seek_position = None;
-                        }
+                        video.seek(duration, false);
+                        state.last_seek_time = Some(Instant::now());
+                        // Clear pending seek since we just performed it
+                        state.pending_seek_position = None;
                     }
                 } else {
                     // Store pending seek position to be executed later
@@ -548,8 +541,8 @@ pub fn update_player(
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::SetAspectRatio(ratio) => {
-            state.aspect_ratio = ratio;
+        Message::SetContentFit(fit) => {
+            state.content_fit = fit;
             DomainUpdateResult::task(Task::none())
         }
 
@@ -644,9 +637,10 @@ pub fn update_player(
 
         Message::SetToneMappingAlgorithm(algorithm) => {
             state.tone_mapping_config.algorithm = algorithm;
-            state.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+            state.tone_mapping_config.preset =
+                crate::domains::player::video_backend::ToneMappingPreset::Custom;
             // Update algorithm params based on the selected algorithm
-            use iced_video_player::{AlgorithmParams, ToneMappingAlgorithm};
+            use crate::domains::player::video_backend::{AlgorithmParams, ToneMappingAlgorithm};
             state.tone_mapping_config.algorithm_params = match algorithm {
                 ToneMappingAlgorithm::ReinhardExtended => AlgorithmParams::ReinhardExtended {
                     white_point: 4.0,
@@ -675,7 +669,8 @@ pub fn update_player(
             {
                 *white_point = value;
             }
-            state.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+            state.tone_mapping_config.preset =
+                crate::domains::player::video_backend::ToneMappingPreset::Custom;
             if let Some(video) = &mut state.video_opt {
                 video.set_tone_mapping_config(state.tone_mapping_config.clone());
             }
@@ -690,7 +685,8 @@ pub fn update_player(
                 *exposure = value;
             }
             state.tone_mapping_config.exposure_adjustment = value;
-            state.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+            state.tone_mapping_config.preset =
+                crate::domains::player::video_backend::ToneMappingPreset::Custom;
             if let Some(video) = &mut state.video_opt {
                 video.set_tone_mapping_config(state.tone_mapping_config.clone());
             }
@@ -699,7 +695,8 @@ pub fn update_player(
 
         Message::SetToneMappingSaturation(value) => {
             state.tone_mapping_config.saturation_adjustment = value;
-            state.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+            state.tone_mapping_config.preset =
+                crate::domains::player::video_backend::ToneMappingPreset::Custom;
             if let Some(video) = &mut state.video_opt {
                 video.set_tone_mapping_config(state.tone_mapping_config.clone());
             }
@@ -714,7 +711,8 @@ pub fn update_player(
             {
                 *saturation_boost = value;
             }
-            state.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+            state.tone_mapping_config.preset =
+                crate::domains::player::video_backend::ToneMappingPreset::Custom;
             if let Some(video) = &mut state.video_opt {
                 video.set_tone_mapping_config(state.tone_mapping_config.clone());
             }
@@ -729,7 +727,8 @@ pub fn update_player(
             {
                 *shoulder_strength = value;
             }
-            state.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+            state.tone_mapping_config.preset =
+                crate::domains::player::video_backend::ToneMappingPreset::Custom;
             if let Some(video) = &mut state.video_opt {
                 video.set_tone_mapping_config(state.tone_mapping_config.clone());
             }
@@ -744,7 +743,8 @@ pub fn update_player(
             {
                 *linear_strength = value;
             }
-            state.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+            state.tone_mapping_config.preset =
+                crate::domains::player::video_backend::ToneMappingPreset::Custom;
             if let Some(video) = &mut state.video_opt {
                 video.set_tone_mapping_config(state.tone_mapping_config.clone());
             }
@@ -759,7 +759,8 @@ pub fn update_player(
             {
                 *linear_angle = value;
             }
-            state.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+            state.tone_mapping_config.preset =
+                crate::domains::player::video_backend::ToneMappingPreset::Custom;
             if let Some(video) = &mut state.video_opt {
                 video.set_tone_mapping_config(state.tone_mapping_config.clone());
             }
@@ -774,7 +775,8 @@ pub fn update_player(
             {
                 *toe_strength = value;
             }
-            state.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+            state.tone_mapping_config.preset =
+                crate::domains::player::video_backend::ToneMappingPreset::Custom;
             if let Some(video) = &mut state.video_opt {
                 video.set_tone_mapping_config(state.tone_mapping_config.clone());
             }
@@ -791,7 +793,8 @@ pub fn update_player(
 
         Message::SetToneMappingBrightness(value) => {
             state.tone_mapping_config.brightness_adjustment = value;
-            state.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+            state.tone_mapping_config.preset =
+                crate::domains::player::video_backend::ToneMappingPreset::Custom;
             if let Some(video) = &mut state.video_opt {
                 video.set_tone_mapping_config(state.tone_mapping_config.clone());
             }
@@ -800,7 +803,8 @@ pub fn update_player(
 
         Message::SetToneMappingContrast(value) => {
             state.tone_mapping_config.contrast_adjustment = value;
-            state.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+            state.tone_mapping_config.preset =
+                crate::domains::player::video_backend::ToneMappingPreset::Custom;
             if let Some(video) = &mut state.video_opt {
                 video.set_tone_mapping_config(state.tone_mapping_config.clone());
             }

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::messages::Message;
 use crate::common::messages::{DomainMessage, DomainUpdate, DomainUpdateResult};
 use crate::infrastructure::services::api::ApiService;
@@ -111,56 +113,43 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
             match result {
                 Ok(video_arc) => {
                     log::info!("Video object created successfully");
-                    // Try to extract the video from the Arc
-                    match std::sync::Arc::try_unwrap(video_arc) {
-                        Ok(mut video) => {
-                            // Get duration from the video
-                            let duration = video.duration().as_secs_f64();
-                            if duration > 0.0 {
-                                log::info!("Video duration: {:.1}s", duration);
-                                state.domains.player.state.duration = duration;
-                            } else {
-                                log::warn!("Video duration not available yet");
-                            }
 
-                            state.domains.player.state.video_opt = Some(video);
+                    // Get duration from the video
+                    let duration = video_arc.duration().unwrap_or(Duration::ZERO).as_secs_f64();
+                    if duration > 0.0 {
+                        log::info!("Video duration: {:.1}s", duration);
+                        state.domains.player.state.duration = duration;
+                    } else {
+                        log::warn!("Video duration not available yet");
+                    }
+
+                    // Check for resume position and seek if needed
+                    if let Some(resume_pos) = state.domains.player.state.pending_resume_position {
+                        log::info!("Resuming playback at position: {:.1}s", resume_pos);
+                        // Convert to Duration for seeking
+                        let resume_duration = std::time::Duration::from_secs_f32(resume_pos);
+                        video_arc.seek(resume_duration, false);
+                        // Clear the pending resume position
+                        state.domains.player.state.pending_resume_position = None;
+                    }
+
+                    // Store the video Arc
+                    state.domains.player.state.video_opt = Some(video_arc);
+
+                    // Notify that video is loaded
+                    state.domains.ui.state.view = crate::domains::ui::types::ViewState::Player;
+
+                    // Start playing immediately
+                    if let Some(video) = &state.domains.player.state.video_opt {
+                        video.set_paused(false);
+                        if video.position() != Duration::from_secs(0) {
                             state.domains.player.state.is_loading_video = false;
-                            // Notify that video is loaded
-                            state.domains.ui.state.view =
-                                crate::domains::ui::types::ViewState::Player;
-
-                            // Check for resume position and seek if needed
-                            if let Some(resume_pos) =
-                                state.domains.player.state.pending_resume_position
-                            {
-                                if let Some(video) = &mut state.domains.player.state.video_opt {
-                                    log::info!("Resuming playback at position: {:.1}s", resume_pos);
-                                    // Convert to Duration for seeking
-                                    let resume_duration =
-                                        std::time::Duration::from_secs_f32(resume_pos);
-                                    if let Err(e) = video.seek(resume_duration, false) {
-                                        log::error!("Failed to seek to resume position: {:?}", e);
-                                    }
-                                    // Clear the pending resume position
-                                    state.domains.player.state.pending_resume_position = None;
-                                }
-                            }
-
-                            // Start playing immediately
-                            if let Some(video) = &mut state.domains.player.state.video_opt {
-                                video.set_paused(false);
-                            }
-                            DomainUpdateResult::task(Task::done(DomainMessage::Media(
-                                Message::VideoLoaded(true),
-                            )))
-                        }
-                        Err(_) => {
-                            log::error!("Failed to unwrap Arc<Video> - multiple references exist");
-                            DomainUpdateResult::task(Task::done(DomainMessage::Media(
-                                Message::VideoLoaded(false),
-                            )))
                         }
                     }
+
+                    DomainUpdateResult::task(Task::done(DomainMessage::Media(
+                        Message::VideoLoaded(true),
+                    )))
                 }
                 Err(error) => {
                     log::error!("Failed to create video: {}", error);
@@ -173,8 +162,10 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
         }
 
         Message::_LoadVideo => {
-            // Load the video directly
-            //
+            let load_video_task = DomainUpdateResult::task(
+                crate::domains::player::video::load_video(state).map(DomainMessage::Media),
+            );
+
             #[cfg(feature = "external-mpv-player")]
             let load_video_task = {
                 // Check if we should use external MPV for HDR content
@@ -213,11 +204,6 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                     )
                 }
             };
-
-            #[cfg(not(feature = "external-mpv-player"))]
-            let load_video_task = DomainUpdateResult::task(
-                crate::domains::player::video::load_video(state).map(DomainMessage::Media),
-            );
 
             load_video_task
         }

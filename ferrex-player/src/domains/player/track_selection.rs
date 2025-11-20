@@ -1,5 +1,5 @@
 use super::state::PlayerDomainState;
-use iced_video_player::{AudioTrack, SubtitleTrack};
+use crate::domains::player::video_backend::{AudioTrack, SubtitleTrack};
 
 impl PlayerDomainState {
     /// Query and update available tracks from the video
@@ -28,9 +28,7 @@ impl PlayerDomainState {
     /// Select an audio track by index
     pub fn select_audio_track(&mut self, index: i32) -> Result<(), String> {
         if let Some(video) = &mut self.video_opt {
-            video
-                .select_audio_track(index)
-                .map_err(|e| format!("Failed to select audio track: {:?}", e))?;
+            video.set_audio_track(index);
             self.current_audio_track = index;
 
             // Show notification
@@ -61,9 +59,7 @@ impl PlayerDomainState {
                 }
             }
 
-            video
-                .select_subtitle_track(index)
-                .map_err(|e| format!("Failed to select subtitle track: {:?}", e))?;
+            video.set_subtitle_track(index);
             self.current_subtitle_track = index;
 
             // Update subtitle enabled state based on selection

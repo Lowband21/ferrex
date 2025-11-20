@@ -1,16 +1,18 @@
 use super::theme;
 use super::track_selection::format_subtitle_track;
-use crate::domains::player::{messages::Message, state::PlayerDomainState, AspectRatio};
-use iced::Font;
+use crate::domains::player::video_backend::{
+    AlgorithmParams, AudioTrack, SubtitleTrack, ToneMappingAlgorithm, ToneMappingPreset,
+};
+use crate::domains::player::{messages::Message, state::PlayerDomainState};
+use crate::domains::search::metrics::ConnectionQuality;
+use iced::Theme;
 use iced::{
     widget::{
         button, checkbox, column, container, mouse_area, pick_list, row, slider, stack, text, Space,
     },
     Alignment, Element, Length,
 };
-use iced_video_player::{
-    AlgorithmParams, AudioTrack, SubtitleTrack, ToneMappingAlgorithm, ToneMappingPreset,
-};
+use iced::{ContentFit, Font};
 use lucide_icons::Icon;
 
 /// Get the lucide font
@@ -39,8 +41,8 @@ fn icon_button(icon: Icon, message: Option<Message>) -> Element<'static, Message
 
 impl PlayerDomainState {
     /// Build the full controls overlay
-    pub fn build_controls(&self) -> Element<Message> {
-        column![
+    pub fn build_controls(&self) -> iced::Element<Message, Theme> {
+        let controls = column![
             // Top bar with title and buttons
             container(
                 row![
@@ -66,13 +68,9 @@ impl PlayerDomainState {
                             if self.is_hdr_content {
                                 row![
                                     Space::with_width(Length::Fixed(10.0)),
-                                    container(
-                                        text("HDR")
-                                            .size(12)
-                                            .color([1.0, 0.8, 0.0, 1.0])
-                                    )
-                                    .padding([2, 6])
-                                    .style(theme::container_hdr_badge),
+                                    container(text("HDR").size(12).color([1.0, 0.8, 0.0, 1.0]))
+                                        .padding([2, 6])
+                                        .style(theme::container_hdr_badge),
                                 ]
                             } else {
                                 row![]
@@ -107,23 +105,26 @@ impl PlayerDomainState {
                 //Space::with_height(Length::Fixed(15.0)),
                 // Control buttons - with padding
                 container(self.build_control_buttons())
-                    .padding(crate::infrastructure::constants::player_controls::CONTROL_BUTTONS_PADDING)
+                    .padding(
+                        crate::infrastructure::constants::player_controls::CONTROL_BUTTONS_PADDING
+                    )
                     .width(Length::Fill),
             ]
             .spacing(0)
             .width(Length::Fill),
-        ]
-        .into()
+        ];
+        controls.into()
     }
 
     /// Build the custom seek bar
-    /// 
+    ///
     /// The seek bar has a visual height of 4px but a hit zone of 30px for easier interaction.
     /// Mouse clicks are validated to be within 7x the visual bar height (28px) vertically to prevent
     /// accidental seeks when clicking elsewhere on the screen.
     fn build_seek_bar(&self) -> Element<Message> {
         let bar_height = super::state::SEEK_BAR_VISUAL_HEIGHT;
-        let hit_area_height = crate::infrastructure::constants::player_controls::SEEK_BAR_HIT_ZONE_HEIGHT;
+        let hit_area_height =
+            crate::infrastructure::constants::player_controls::SEEK_BAR_HIT_ZONE_HEIGHT;
 
         // Calculate percentages
         // Use source duration if available (for HLS this is the full media duration)
@@ -163,7 +164,7 @@ impl PlayerDomainState {
             //    .style(theme::container_seek_bar_buffered),
             container(Space::with_height(bar_height))
                 .width(Length::FillPortion(unplayed_portion))
-                .style(theme::container_seek_bar_background),
+                .style(move |theme| theme::container_seek_bar_background(theme, self.seek_bar_hovered)),
         ])
         .width(Length::Fill)
         .height(bar_height);
@@ -274,7 +275,9 @@ impl PlayerDomainState {
                             .width(Length::Fixed(80.0))
                             .style(theme::slider_volume)
                     )
-                    .height(crate::infrastructure::constants::player_controls::CONTROL_BUTTONS_HEIGHT)
+                    .height(
+                        crate::infrastructure::constants::player_controls::CONTROL_BUTTONS_HEIGHT
+                    )
                     .align_y(iced::alignment::Vertical::Center),
                     Space::with_width(Length::Fixed(20.0)),
                     // Subtitle button (with indicator if text subtitles are available)
@@ -333,7 +336,7 @@ impl PlayerDomainState {
     }
 
     /// Build the settings panel content
-    pub fn build_settings_panel(&self) -> Element<Message> {
+    pub fn build_settings_panel(&self) -> iced::Element<Message, Theme> {
         container(
             column![
                 // Header
@@ -370,16 +373,17 @@ impl PlayerDomainState {
                     Space::with_width(Length::Fill),
                     pick_list(
                         &[
-                            AspectRatio::Original,
-                            AspectRatio::Fit,
-                            AspectRatio::Fill,
-                            AspectRatio::Stretch,
+                            ContentFit::Contain,
+                            ContentFit::Cover,
+                            ContentFit::Fill,
+                            ContentFit::None,
+                            ContentFit::ScaleDown,
                         ][..],
-                        Some(self.aspect_ratio),
-                        Message::SetAspectRatio
+                        Some(self.content_fit),
+                        Message::SetContentFit
                     )
                     .width(Length::Fixed(120.0))
-                    .style(theme::pick_list_dark::<AspectRatio>),
+                    .style(theme::pick_list_dark::<ContentFit>),
                 ]
                 .align_y(Alignment::Center),
                 Space::with_height(Length::Fixed(15.0)),
@@ -399,8 +403,8 @@ impl PlayerDomainState {
                             text("HDR Information").size(13).style(theme::text_muted),
                             Space::with_height(Length::Fixed(4.0)),
                             text("HDR content detected")
-                            .size(11)
-                            .style(theme::text_bright),
+                                .size(11)
+                                .style(theme::text_bright),
                             if let Some(media) = &self.current_media {
                                 if let Some(metadata) = &media.metadata {
                                     let mut metadata_column = column![].spacing(2);
@@ -555,7 +559,7 @@ impl PlayerDomainState {
     }
 
     /// Build the quality/tone mapping menu popup
-    pub fn build_quality_menu(&self) -> Element<Message> {
+    pub fn build_quality_menu(&self) -> iced::Element<Message, Theme, iced_wgpu::Renderer> {
         let mut content = column![
             // Header
             row![
@@ -607,7 +611,7 @@ impl PlayerDomainState {
                 text("Preset:").size(14),
                 Space::with_width(Length::Fill),
                 pick_list(preset_names, Some(current_preset_name), |selected| {
-                    use iced_video_player::ToneMappingPreset;
+                    use crate::domains::player::video_backend::ToneMappingPreset;
                     let preset = match selected {
                         "Custom" => ToneMappingPreset::Custom,
                         "Default" => ToneMappingPreset::Default,
@@ -1009,7 +1013,7 @@ impl PlayerDomainState {
     }
 
     /// Build the subtitle menu popup
-    pub fn build_subtitle_menu(&self) -> Element<Message> {
+    pub fn build_subtitle_menu(&self) -> iced::Element<Message, Theme, iced_wgpu::Renderer> {
         container(
             column![
                 // Header
@@ -1103,18 +1107,6 @@ impl std::fmt::Display for SubtitleOption {
         match self {
             SubtitleOption::Disabled => write!(f, "Disabled"),
             SubtitleOption::Track(track) => write!(f, "{}", format_subtitle_track(track)),
-        }
-    }
-}
-
-// AspectRatio display implementation for pick_list
-impl std::fmt::Display for AspectRatio {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AspectRatio::Original => write!(f, "Original"),
-            AspectRatio::Fill => write!(f, "Fill"),
-            AspectRatio::Fit => write!(f, "Fit"),
-            AspectRatio::Stretch => write!(f, "Stretch"),
         }
     }
 }

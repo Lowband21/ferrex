@@ -1,11 +1,13 @@
 use super::messages::Message;
-use super::state::{AspectRatio, PlayerDomainState, TrackNotification};
+use super::state::{PlayerDomainState, TrackNotification};
 use super::theme;
+use crate::domains::player::video_backend::{self, VideoInner, VideoPlayer};
+use iced::Theme;
 use iced::{
     widget::{column, container, mouse_area, row, stack, text, Space},
     ContentFit, Element, Length, Padding,
 };
-use iced_video_player::VideoPlayer;
+use std::sync::Arc;
 
 #[cfg_attr(
     any(
@@ -17,7 +19,8 @@ use iced_video_player::VideoPlayer;
 )]
 impl PlayerDomainState {
     /// Build the main player view
-    pub fn view(&self) -> Element<Message> {
+    /// Note: Returns wgpu renderer elements since video playback requires GPU acceleration
+    pub fn view(&self) -> iced::Element<Message, Theme> {
         log::trace!("PlayerState::view() called - position: {:.2}s, duration: {:.2}s, source_duration: {:?}, controls: {}",
             self.position, self.duration, self.source_duration, self.controls);
 
@@ -54,53 +57,68 @@ impl PlayerDomainState {
             let clickable_video = self.video_view(video);
 
             // Create overlay if controls are visible
-            let player_with_overlay: Element<Message> = if self.controls {
-                stack![clickable_video, self.controls_overlay()].into()
+            let player_with_overlay: iced::Element<Message, Theme> = if self.controls {
+                let controls = self.controls_overlay();
+                // Use Into trait to convert
+                iced::widget::Stack::with_children(vec![clickable_video, controls]).into()
             } else {
                 clickable_video
             };
 
             // Add settings panel if visible
-            let player_with_settings = if self.show_settings {
-                stack![
+            let player_with_settings: iced::Element<Message, Theme> = if self.show_settings {
+                let settings = self.settings_panel();
+                let positioned_settings = container(row![
+                    Space::with_width(Length::Fill),
+                    container(settings).style(theme::container_settings_panel_wrapper),
+                    Space::with_width(Length::Fixed(80.0)), // Offset from right edge
+                ])
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(iced::alignment::Vertical::Bottom)
+                .padding(Padding {
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: 100.0,
+                    left: 0.0,
+                }); // Position above controls
+
+                iced::widget::Stack::with_children(vec![
                     player_with_overlay,
-                    // Position settings panel in bottom right, near the settings button
-                    container(row![
-                        Space::with_width(Length::Fill),
-                        container(self.settings_panel())
-                            .style(theme::container_settings_panel_wrapper),
-                        Space::with_width(Length::Fixed(80.0)), // Offset from right edge
-                    ])
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .align_y(iced::alignment::Vertical::Bottom)
-                    .padding(Padding {
-                        top: 0.0,
-                        right: 0.0,
-                        bottom: 100.0,
-                        left: 0.0
-                    }) // Position above controls
-                ]
+                    positioned_settings.into(),
+                ])
                 .into()
             } else {
                 player_with_overlay
             };
 
             // Add subtitle menu if visible
-            let player_with_menus = if self.show_quality_menu {
-                stack![player_with_settings, self.quality_menu_overlay()].into()
+            let player_with_menus: iced::Element<Message, Theme, iced_wgpu::Renderer> = if self
+                .show_quality_menu
+            {
+                let quality_menu = self.quality_menu_overlay();
+                iced::widget::Stack::with_children(vec![player_with_settings, quality_menu.into()])
+                    .into()
             } else if self.show_subtitle_menu {
-                stack![player_with_settings, self.subtitle_menu_overlay()].into()
+                let subtitle_menu = self.subtitle_menu_overlay();
+                iced::widget::Stack::with_children(vec![player_with_settings, subtitle_menu.into()])
+                    .into()
             } else {
                 player_with_settings
             };
 
             // Add track notification overlay if present
-            let player_with_notification = if let Some(notification) = &self.track_notification {
-                stack![player_with_menus, self.notification_overlay(notification)].into()
-            } else {
-                player_with_menus
-            };
+            let player_with_notification: iced::Element<Message, Theme, iced_wgpu::Renderer> =
+                if let Some(notification) = &self.track_notification {
+                    let notification_overlay = self.notification_overlay(notification);
+                    iced::widget::Stack::with_children(vec![
+                        player_with_menus,
+                        notification_overlay.into(),
+                    ])
+                    .into()
+                } else {
+                    player_with_menus
+                };
 
             // Wrap with mouse movement detection and release handling for seek bar
             let interactive = mouse_area(player_with_notification)
@@ -151,28 +169,44 @@ impl PlayerDomainState {
     }
 
     /// Build the video player view
-    fn video_view<'a>(&self, video: &'a iced_video_player::Video) -> Element<'a, Message> {
-        let player = VideoPlayer::new(video)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .on_new_frame(Message::NewFrame)
-            .on_seek_done(Message::SeekDone);
-
-        let player = match self.aspect_ratio {
-            AspectRatio::Fill => player.content_fit(ContentFit::Cover),
-            AspectRatio::Fit => player.content_fit(ContentFit::Contain),
-            AspectRatio::Stretch => player.content_fit(ContentFit::Fill),
-            AspectRatio::Original => player.content_fit(ContentFit::None),
+    fn video_view<'a>(
+        &self,
+        video: &'a crate::domains::player::video_backend::Video,
+    ) -> Element<'a, Message> {
+        // Create the appropriate video player widget based on the backend
+        let player: iced::Element<Message, Theme, iced_wgpu::Renderer> = match video.inner() {
+            VideoInner::Wayland(wayland_video_arc) => {
+                iced_video_player_wayland::VideoPlayer::new(wayland_video_arc)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .content_fit(self.content_fit)
+                    .on_new_frame(Message::NewFrame)  // Add NewFrame message for position updates
+                    .into()
+            }
+            VideoInner::Standard(std_video) => {
+                // For standard video, we need to leak the reference (temporary solution)
+                // TODO: Fix this memory leak by properly managing lifetime
+                let owned_video = std_video.clone();
+                let leaked: &'static iced_video_player::Video = Box::leak(Box::new(owned_video));
+                iced_video_player::VideoPlayer::<Message, Theme, iced_wgpu::Renderer>::new(leaked)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .content_fit(self.content_fit)
+                    .on_new_frame(Message::NewFrame)  // Ensure standard player also has this
+                    .into()
+            }
         };
 
-        // Wrap in a mouse area to handle clicks
-        iced::widget::mouse_area(container(player).width(Length::Fill).height(Length::Fill))
+        // Wrap in a black background container first, then a mouse area to handle clicks
+        //let video_with_background = container(player).width(Length::Fill).height(Length::Fill);
+
+        iced::widget::mouse_area(player)
             .on_press(Message::VideoClicked)
             .into()
     }
 
     /// Build the controls overlay
-    fn controls_overlay(&self) -> Element<Message> {
+    fn controls_overlay(&self) -> iced::Element<Message, Theme> {
         // Delegate to controls.rs for the full implementation
         self.build_controls()
     }
@@ -181,7 +215,7 @@ impl PlayerDomainState {
     fn notification_overlay<'a>(
         &self,
         notification: &'a TrackNotification,
-    ) -> Element<'a, Message> {
+    ) -> iced::Element<'a, Message, Theme> {
         container(
             container(
                 text(&notification.message)
@@ -198,13 +232,13 @@ impl PlayerDomainState {
     }
 
     /// Build the settings panel
-    fn settings_panel(&self) -> Element<Message> {
+    fn settings_panel(&self) -> iced::Element<Message, Theme, iced_wgpu::Renderer> {
         // Delegate to controls.rs for the full implementation
         self.build_settings_panel()
     }
 
-    /// Build the subtitle menu overlay
-    fn quality_menu_overlay(&self) -> Element<Message> {
+    /// Build the quality menu overlay
+    fn quality_menu_overlay(&self) -> iced::Element<Message, Theme, iced_wgpu::Renderer> {
         // Position the menu near the quality button (bottom right)
         container(row![
             Space::with_width(Length::Fill),
@@ -223,7 +257,7 @@ impl PlayerDomainState {
         .into()
     }
 
-    fn subtitle_menu_overlay(&self) -> Element<Message> {
+    fn subtitle_menu_overlay(&self) -> iced::Element<Message, Theme, iced_wgpu::Renderer> {
         // Position the menu near the subtitle button (bottom right)
         container(row![
             Space::with_width(Length::Fill),
@@ -245,7 +279,7 @@ impl PlayerDomainState {
     /// Build a minimal player view for embedding (e.g., in library view)
     pub fn minimal_view(&self) -> Option<Element<Message>> {
         self.video_opt.as_ref().map(|video| {
-            let player = VideoPlayer::new(video)
+            let player = video_backend::video_player(video)
                 .width(Length::Fill)
                 .height(Length::Fixed(200.0))
                 .on_new_frame(Message::NewFrame)

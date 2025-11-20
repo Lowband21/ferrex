@@ -9,6 +9,7 @@ pub mod theme;
 pub mod track_selection;
 pub mod update;
 pub mod video;
+pub mod video_backend;
 pub mod view;
 
 #[cfg(feature = "external-mpv-player")]
@@ -24,7 +25,7 @@ use std::sync::{Arc, RwLock as StdRwLock};
 use uuid::Uuid;
 
 // Re-export key types
-pub use state::{AspectRatio, TrackNotification};
+pub use state::TrackNotification;
 
 /// Player domain wrapper - PlayerState is the actual domain state
 #[derive(Debug)]

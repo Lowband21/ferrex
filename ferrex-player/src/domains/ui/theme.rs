@@ -43,14 +43,14 @@ impl MediaServerTheme {
     // Background colors
     pub const BACKGROUND: Color = Color::from_rgb(0.0, 0.0, 0.0); // #000000 - same as BLACK
     pub const SURFACE_DIM: Color = Color::from_rgb(0.08, 0.08, 0.08); // #141414 - slightly lighter than black
-    
+
     // View-specific default gradient colors
-    pub const LIBRARY_BG_PRIMARY: Color = Self::SOFT_GREY_DARK;   // Library view primary gradient
+    pub const LIBRARY_BG_PRIMARY: Color = Self::SOFT_GREY_DARK; // Library view primary gradient
     pub const LIBRARY_BG_SECONDARY: Color = Self::SOFT_GREY_LIGHT; // Library view secondary gradient
 
     pub fn theme() -> Theme {
         let mut palette = theme::Palette::DARK;
-        palette.background = Self::BLACK;
+        palette.background = Color::TRANSPARENT;
         palette.text = Self::TEXT_PRIMARY;
         palette.primary = Self::ACCENT_BLUE;
         palette.success = Self::SUCCESS;
@@ -79,7 +79,7 @@ impl Container {
         match self {
             Container::Default => |_| container::Style {
                 text_color: Some(MediaServerTheme::TEXT_PRIMARY),
-                background: None, // Transparent to show background shader
+                background: Some(Background::Color(Color::TRANSPARENT)),
                 border: Border::default(),
                 shadow: Shadow::default(),
                 snap: false,

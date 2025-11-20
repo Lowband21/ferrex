@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use iced::{Point, Task};
 
-use iced_video_player::Video;
+use crate::domains::player::video_backend::Video;
 
 use gstreamer as gst;
 
@@ -88,7 +88,7 @@ pub fn load_external_video(state: &mut State) -> Task<crate::domains::media::mes
 
     // Get resume position from player state
     let resume_position = state.domains.player.state.pending_resume_position;
-    
+
     // Spawn external MPV with window settings, position, and resume position
     match external_mpv::start_external_playback(
         url.as_str(),
@@ -100,7 +100,7 @@ pub fn load_external_video(state: &mut State) -> Task<crate::domains::media::mes
         Ok(handle) => {
             state.domains.player.state.external_mpv_handle = Some(Box::new(handle));
             state.domains.player.state.is_loading_video = false;
-            
+
             // Clear pending resume position after use
             state.domains.player.state.pending_resume_position = None;
 
@@ -160,6 +160,11 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Me
     // Check if this is HDR content based on server metadata
     let (use_hdr_pipeline, needs_metadata_fetch) =
         if let Some(current_media) = &state.domains.player.state.current_media {
+            if let Some(metadata) = &current_media.metadata {
+                if let Some(duration) = metadata.duration {
+                    state.domains.player.state.duration = duration;
+                }
+            }
             // Always log metadata for debugging
             log::info!("Checking HDR status for: {}", current_media.filename);
 
@@ -212,12 +217,13 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Me
         use_hdr_pipeline
     };
 
+    /* // Performed in iced_video_player, redundant to do here
     // Initialize GStreamer if needed
     if let Err(e) = gst::init() {
         log::warn!("GStreamer init returned: {:?}", e);
     } else {
         log::info!("GStreamer initialized successfully");
-    }
+    } */
 
     // Check GStreamer version
     log::info!(
@@ -249,24 +255,8 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Me
     log::debug!("URL bytes: {:?}", url_string.as_bytes());
 
     // Store tone mapping config for the async task
-    let tone_mapping_config_final = state.domains.player.state.tone_mapping_config.clone();
+    //let tone_mapping_config_final = state.domains.player.state.tone_mapping_config.clone();
 
-    // Initialize GStreamer if needed (do this before spawning task)
-    if let Err(e) = gst::init() {
-        log::warn!("GStreamer init returned: {:?}", e);
-    } else {
-        log::info!("GStreamer initialized successfully");
-    }
-
-    // Check GStreamer version
-    log::info!(
-        "GStreamer version: {}.{}.{}",
-        gst::version().0,
-        gst::version().1,
-        gst::version().2
-    );
-
-    // Set view to player (with loading spinner)
     state.domains.ui.state.view = ViewState::Player;
 
     // Create the loading task
@@ -280,41 +270,48 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Me
             let result = tokio::task::spawn_blocking(move || {
                 log::info!("Creating video for URL: {}", video_url);
 
-                // Get tone mapping config from state (passed via the closure context)
-                let tone_mapping_config = tone_mapping_config_final.clone();
+                //// Get tone mapping config from state (passed via the closure context)
+                //let tone_mapping_config = tone_mapping_config_final.clone();
 
-                if use_hdr_pipeline_final {
-                    log::info!("Attempting HDR pipeline with tone mapping config");
-                    match Video::new_with_config(&url, tone_mapping_config) {
-                        Ok(video) => {
-                            log::info!("HDR pipeline created successfully");
-                            Ok(video)
-                        }
-                        Err(e) => {
-                            log::error!("HDR pipeline failed: {:?}", e);
-                            log::warn!("Falling back to standard pipeline");
-                            // Try standard pipeline as fallback
-                            Video::new_with_config(&url, tone_mapping_config)
-                        }
-                    }
-                } else {
-                    Video::new_with_config(&url, tone_mapping_config)
-                }
+                //if use_hdr_pipeline_final {
+                //    log::info!("Attempting HDR pipeline with tone mapping config");
+                //    match Video::new_with_config(&url, tone_mapping_config) {
+                //        Ok(video) => {
+                //            log::info!("HDR pipeline created successfully");
+                //            Ok(video)
+                //        }
+                //        Err(e) => {
+                //            log::error!("HDR pipeline failed: {:?}", e);
+                //            log::warn!("Falling back to standard pipeline");
+                //            // Try standard pipeline as fallback
+                //            Video::new_with_config(&url, tone_mapping_config)
+                //        }
+                //    }
+                //} else {
+                //    Video::new_with_config(&url, tone_mapping_config)
+                //}
+                Video::new(&url)
             })
             .await;
 
             match result {
-                Ok(Ok(video)) => {
-                    // Wrap the video in Arc and return it
-                    Ok(Arc::new(video))
+                Ok(video_arc) => {
+                    // Video::new already returns Result<Arc<Video>, VideoError>
+                    video_arc
                 }
-                Ok(Err(e)) => Err(format!("{:?}", e)),
-                Err(e) => Err(format!("Task error: {:?}", e)),
+                Err(e) => {
+                    // Convert JoinError to VideoError
+                    Err(crate::domains::player::video_backend::VideoError::Standard(
+                        format!("Task error: {:?}", e),
+                    ))
+                }
             }
         },
         |result| {
             // Convert to media domain message with video object
-            crate::domains::media::messages::Message::VideoCreated(result)
+            // Convert VideoError to String for the message
+            let result_string = result.map_err(|e| format!("{:?}", e));
+            crate::domains::media::messages::Message::VideoCreated(result_string)
         },
     )
 }
