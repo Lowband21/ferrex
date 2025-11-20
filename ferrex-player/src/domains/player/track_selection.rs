@@ -62,7 +62,10 @@ impl PlayerDomainState {
             }
 
             if let Err(e) = video.select_subtitle_track(index) {
-                return Err(format!("Failed to select subtitle track {:?}: {}", index, e));
+                return Err(format!(
+                    "Failed to select subtitle track {:?}: {}",
+                    index, e
+                ));
             }
             self.current_subtitle_track = index;
 

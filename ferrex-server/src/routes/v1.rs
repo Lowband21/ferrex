@@ -261,10 +261,10 @@ fn create_libraries_routes(state: AppState) -> Router<AppState> {
             "/libraries/{id}/indices/filter",
             post(post_library_filtered_indices_handler),
         )
-    //.route_layer(middleware::from_fn_with_state(
-    //    state.clone(),
-    //    auth::middleware::auth_middleware,
-    //))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ))
 }
 
 /// Create metadata routes

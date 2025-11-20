@@ -3,7 +3,7 @@ use crate::{
     database::traits::MediaDatabaseTrait,
     query::{SortBy, SortOrder},
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use uuid::Uuid;
 
 /// Manages in-memory sorting for libraries
@@ -23,13 +23,48 @@ impl IndexManager {
         library_type: crate::LibraryType,
         sort_field: SortBy,
         sort_order: SortOrder,
+        user_id: Option<Uuid>,
     ) -> Result<Vec<Uuid>> {
         let media_items = self
             .db
             .backend()
             .get_library_media_references(library_id, library_type)
             .await?;
-        self.sort_media(&media_items, sort_field, sort_order).await
+        let watch_data = if matches!(sort_field, SortBy::WatchProgress | SortBy::LastWatched) {
+            let user_id = user_id.ok_or_else(|| {
+                crate::MediaError::InvalidMedia(
+                    "watch-based sorting requires an authenticated user".to_string(),
+                )
+            })?;
+            Some(self.load_watch_data(user_id).await?)
+        } else {
+            None
+        };
+
+        self.sort_media(&media_items, sort_field, sort_order, watch_data.as_ref())
+            .await
+    }
+
+    /// Compute a title-based position map for a library to translate UUIDs into indices
+    /// Uses the database's natural ordering (ORDER BY title) to maintain consistency
+    pub async fn compute_title_position_map(
+        &self,
+        library_id: LibraryID,
+        library_type: crate::LibraryType,
+    ) -> Result<HashMap<Uuid, u32>> {
+        // Get media items directly from database - they're already ordered by title
+        let media_items = self
+            .db
+            .backend()
+            .get_library_media_references(library_id, library_type)
+            .await?;
+
+        let mut positions = HashMap::with_capacity(media_items.len());
+        for (idx, media) in media_items.iter().enumerate() {
+            let media_id = Self::get_media_id(media);
+            positions.insert(media_id, idx as u32);
+        }
+        Ok(positions)
     }
 
     /// Sort media items based on the specified field
@@ -38,6 +73,7 @@ impl IndexManager {
         media_items: &[Media],
         sort_field: SortBy,
         sort_order: SortOrder,
+        watch_data: Option<&WatchData>,
     ) -> Result<Vec<Uuid>> {
         let mut indexed_items: Vec<(usize, &Media)> = media_items.iter().enumerate().collect();
 
@@ -93,6 +129,24 @@ impl IndexManager {
                     let b_res = Self::get_resolution(b.1);
                     Self::compare_optional(a_res, b_res)
                 }
+                SortBy::WatchProgress => {
+                    if let Some(data) = watch_data {
+                        let a_ratio = data.progress(&Self::get_media_id(a.1));
+                        let b_ratio = data.progress(&Self::get_media_id(b.1));
+                        Self::compare_optional_partial(a_ratio, b_ratio)
+                    } else {
+                        std::cmp::Ordering::Equal
+                    }
+                }
+                SortBy::LastWatched => {
+                    if let Some(data) = watch_data {
+                        let a_last = data.last_watched(&Self::get_media_id(a.1));
+                        let b_last = data.last_watched(&Self::get_media_id(b.1));
+                        Self::compare_optional(a_last, b_last)
+                    } else {
+                        std::cmp::Ordering::Equal
+                    }
+                }
                 _ => std::cmp::Ordering::Equal,
             };
             if sort_order == SortOrder::Descending {
@@ -144,7 +198,9 @@ impl IndexManager {
 
         match media {
             Media::Movie(m) => match &m.details {
-                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => parse(&details.release_date),
+                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
+                    parse(&details.release_date)
+                }
                 _ => None,
             },
             Media::Series(s) => match &s.details {
@@ -197,24 +253,56 @@ impl IndexManager {
 
     fn get_bitrate(media: &Media) -> Option<u64> {
         match media {
-            Media::Movie(m) => m.file.media_file_metadata.as_ref().and_then(|meta| meta.bitrate),
-            Media::Episode(e) => e.file.media_file_metadata.as_ref().and_then(|meta| meta.bitrate),
+            Media::Movie(m) => m
+                .file
+                .media_file_metadata
+                .as_ref()
+                .and_then(|meta| meta.bitrate),
+            Media::Episode(e) => e
+                .file
+                .media_file_metadata
+                .as_ref()
+                .and_then(|meta| meta.bitrate),
             _ => None,
         }
     }
 
     fn get_resolution(media: &Media) -> Option<u32> {
         match media {
-            Media::Movie(m) => m.file.media_file_metadata.as_ref().and_then(|meta| meta.height),
-            Media::Episode(e) => e.file.media_file_metadata.as_ref().and_then(|meta| meta.height),
+            Media::Movie(m) => m
+                .file
+                .media_file_metadata
+                .as_ref()
+                .and_then(|meta| meta.height),
+            Media::Episode(e) => e
+                .file
+                .media_file_metadata
+                .as_ref()
+                .and_then(|meta| meta.height),
             _ => None,
         }
     }
 
     fn get_content_rating(media: &Media) -> Option<String> {
         match media {
-            Media::Movie(_m) => None, // TODO: populate from metadata when available
-            Media::Series(_s) => None,
+            Media::Movie(m) => match &m.details {
+                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => details
+                    .content_rating
+                    .as_ref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string()),
+                _ => None,
+            },
+            Media::Series(s) => match &s.details {
+                MediaDetailsOption::Details(TmdbDetails::Series(details)) => details
+                    .content_rating
+                    .as_ref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string()),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -238,29 +326,147 @@ impl IndexManager {
         }
     }
 
-    fn compare_optional_partial<T: PartialOrd>(
-        a: Option<T>,
-        b: Option<T>,
-    ) -> std::cmp::Ordering {
+    fn compare_optional_partial<T: PartialOrd>(a: Option<T>, b: Option<T>) -> std::cmp::Ordering {
         match (a, b) {
-            (Some(a), Some(b)) => a
-                .partial_cmp(&b)
-                .unwrap_or(std::cmp::Ordering::Equal),
+            (Some(a), Some(b)) => a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => std::cmp::Ordering::Equal,
         }
     }
 
-    fn compare_optional_str(
-        a: Option<&str>,
-        b: Option<&str>,
-    ) -> std::cmp::Ordering {
+    fn compare_optional_str(a: Option<&str>, b: Option<&str>) -> std::cmp::Ordering {
         match (a, b) {
             (Some(a), Some(b)) => a.cmp(b),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => std::cmp::Ordering::Equal,
         }
+    }
+}
+
+struct WatchData {
+    progress: HashMap<Uuid, ProgressEntry>,
+    completed: HashMap<Uuid, i64>,
+}
+
+impl WatchData {
+    fn progress(&self, media_id: &Uuid) -> Option<f32> {
+        if let Some(entry) = self.progress.get(media_id) {
+            Some(entry.ratio)
+        } else if self.completed.contains_key(media_id) {
+            Some(1.0)
+        } else {
+            None
+        }
+    }
+
+    fn last_watched(&self, media_id: &Uuid) -> Option<i64> {
+        if let Some(entry) = self.progress.get(media_id) {
+            Some(entry.last_watched)
+        } else {
+            self.completed.get(media_id).copied()
+        }
+    }
+}
+
+struct ProgressEntry {
+    ratio: f32,
+    last_watched: i64,
+}
+
+impl IndexManager {
+    async fn load_watch_data(&self, user_id: Uuid) -> Result<WatchData> {
+        use crate::database::postgres::PostgresDatabase;
+
+        let backend = self.db.backend();
+        let pg = backend
+            .as_any()
+            .downcast_ref::<PostgresDatabase>()
+            .ok_or_else(|| {
+                crate::MediaError::InvalidMedia(
+                    "watch-based sorting is only supported on Postgres backend".to_string(),
+                )
+            })?;
+
+        use sqlx::Row;
+
+        let progress_rows = sqlx::query(
+            r#"
+            SELECT media_uuid, position, duration, last_watched
+            FROM user_watch_progress
+            WHERE user_id = $1
+            ORDER BY last_watched DESC
+            "#,
+        )
+        .bind(user_id)
+        .fetch_all(pg.pool())
+        .await
+        .map_err(|e| {
+            crate::MediaError::Internal(format!(
+                "Failed to load watch progress for user {}: {}",
+                user_id, e
+            ))
+        })?;
+
+        let mut progress = HashMap::new();
+        for row in progress_rows {
+            let duration: f32 = match row.try_get("duration") {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if duration <= 0.0 {
+                continue;
+            }
+            let position: f32 = match row.try_get("position") {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            let media_uuid: Uuid = match row.try_get("media_uuid") {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            let last_watched: i64 = row.try_get("last_watched").unwrap_or(0);
+            let ratio = (position / duration).clamp(0.0, 1.0);
+            progress.insert(
+                media_uuid,
+                ProgressEntry {
+                    ratio,
+                    last_watched,
+                },
+            );
+        }
+
+        let completed_rows = sqlx::query(
+            r#"
+            SELECT media_uuid, completed_at
+            FROM user_completed_media
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(user_id)
+        .fetch_all(pg.pool())
+        .await
+        .map_err(|e| {
+            crate::MediaError::Internal(format!(
+                "Failed to load completed media for user {}: {}",
+                user_id, e
+            ))
+        })?;
+
+        let mut completed = HashMap::new();
+        for row in completed_rows {
+            let media_uuid: Uuid = match row.try_get("media_uuid") {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            let completed_at: i64 = row.try_get("completed_at").unwrap_or(0);
+            completed.insert(media_uuid, completed_at);
+        }
+
+        Ok(WatchData {
+            progress,
+            completed,
+        })
     }
 }

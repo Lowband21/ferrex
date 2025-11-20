@@ -228,6 +228,7 @@ mod tests {
                 vote_average: Some(7.5f32),
                 vote_count: Some(1000),
                 popularity: Some(85.3f32),
+                content_rating: None,
                 genres: vec![],
                 production_companies: vec![],
                 poster_path: None,

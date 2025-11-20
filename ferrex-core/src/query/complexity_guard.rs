@@ -1,5 +1,6 @@
 use crate::{
     MediaError, Result,
+    api_types::ScalarRange,
     query::{
         MediaQuery,
         decision_engine::{QueryComplexity, QueryComplexityAnalyzer},
@@ -279,8 +280,8 @@ mod tests {
                     "Drama".to_string(),
                     "Comedy".to_string(),
                 ],
-                year_range: Some((2000, 2023)),
-                rating_range: Some((7.0, 10.0)),
+                year_range: Some(ScalarRange::new(2000, 2023)),
+                rating_range: Some(ScalarRange::new(7.0, 10.0)),
                 watch_status: Some(crate::watch_status::WatchStatusFilter::InProgress),
                 ..Default::default()
             },

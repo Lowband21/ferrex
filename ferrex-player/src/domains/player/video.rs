@@ -266,8 +266,13 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::M
                     && video.subtitles_enabled()
                 {
                     // Use window size for overlay; can refine to video size later
-                    let (w, h) = (state.window_size.width as i32, state.window_size.height as i32);
-                    if let Ok(mut overlay) = subwave_overlay::SubtitleOverlay::new(&url, w.max(1), h.max(1)) {
+                    let (w, h) = (
+                        state.window_size.width as i32,
+                        state.window_size.height as i32,
+                    );
+                    if let Ok(mut overlay) =
+                        subwave_overlay::SubtitleOverlay::new(&url, w.max(1), h.max(1))
+                    {
                         // Share clock from main pipeline for rough sync
                         let main_pipe = video.pipeline();
                         overlay.adopt_clock_from(&main_pipe);

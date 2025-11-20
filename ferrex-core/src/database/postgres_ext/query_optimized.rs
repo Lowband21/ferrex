@@ -79,19 +79,19 @@ impl PostgresDatabase {
         }
 
         // Add year range filter
-        if let Some((min_year, max_year)) = query.filters.year_range {
+        if let Some(range) = &query.filters.year_range {
             sql_builder.push(" AND mm.release_year BETWEEN ");
-            sql_builder.push_bind(min_year as i32);
+            sql_builder.push_bind(range.min as i32);
             sql_builder.push(" AND ");
-            sql_builder.push_bind(max_year as i32);
+            sql_builder.push_bind(range.max as i32);
         }
 
         // Add rating range filter
-        if let Some((min_rating, max_rating)) = query.filters.rating_range {
+        if let Some(range) = &query.filters.rating_range {
             sql_builder.push(" AND mm.vote_average BETWEEN ");
-            sql_builder.push_bind(BigDecimal::from_str(&min_rating.to_string()).unwrap());
+            sql_builder.push_bind(BigDecimal::from_str(&range.min.to_string()).unwrap());
             sql_builder.push(" AND ");
-            sql_builder.push_bind(BigDecimal::from_str(&max_rating.to_string()).unwrap());
+            sql_builder.push_bind(BigDecimal::from_str(&range.max.to_string()).unwrap());
         }
 
         // Add search query if present
@@ -167,19 +167,19 @@ impl PostgresDatabase {
         }
 
         // Add year range filter
-        if let Some((min_year, max_year)) = query.filters.year_range {
+        if let Some(range) = &query.filters.year_range {
             sql_builder.push(" AND sm.first_air_year BETWEEN ");
-            sql_builder.push_bind(min_year as i32);
+            sql_builder.push_bind(range.min as i32);
             sql_builder.push(" AND ");
-            sql_builder.push_bind(max_year as i32);
+            sql_builder.push_bind(range.max as i32);
         }
 
         // Add rating range filter
-        if let Some((min_rating, max_rating)) = query.filters.rating_range {
+        if let Some(range) = &query.filters.rating_range {
             sql_builder.push(" AND sm.vote_average BETWEEN ");
-            sql_builder.push_bind(BigDecimal::from_str(&min_rating.to_string()).unwrap());
+            sql_builder.push_bind(BigDecimal::from_str(&range.min.to_string()).unwrap());
             sql_builder.push(" AND ");
-            sql_builder.push_bind(BigDecimal::from_str(&max_rating.to_string()).unwrap());
+            sql_builder.push_bind(BigDecimal::from_str(&range.max.to_string()).unwrap());
         }
 
         sql_builder.push(
@@ -822,9 +822,28 @@ impl PostgresDatabase {
             metadata.and_then(|meta| meta.bitrate)
         }
 
-        fn extract_content_rating(_media: &Media) -> Option<String> {
-            // TODO: populate from TMDB content ratings when available
-            None
+        fn extract_content_rating(media: &Media) -> Option<String> {
+            match media {
+                Media::Movie(m) => match &m.details {
+                    MediaDetailsOption::Details(TmdbDetails::Movie(details)) => details
+                        .content_rating
+                        .as_ref()
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string()),
+                    _ => None,
+                },
+                Media::Series(s) => match &s.details {
+                    MediaDetailsOption::Details(TmdbDetails::Series(details)) => details
+                        .content_rating
+                        .as_ref()
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string()),
+                    _ => None,
+                },
+                _ => None,
+            }
         }
     }
 

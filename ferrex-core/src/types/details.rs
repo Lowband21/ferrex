@@ -32,6 +32,7 @@ pub struct EnhancedMovieDetails {
     pub vote_average: Option<f32>,
     pub vote_count: Option<u32>,
     pub popularity: Option<f32>,
+    pub content_rating: Option<String>,
     pub genres: Vec<String>,
     pub production_companies: Vec<String>,
 
@@ -67,6 +68,7 @@ pub struct EnhancedSeriesDetails {
     pub vote_average: Option<f32>,
     pub vote_count: Option<u32>,
     pub popularity: Option<f32>,
+    pub content_rating: Option<String>,
     pub genres: Vec<String>,
     pub networks: Vec<String>,
 

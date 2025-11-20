@@ -14,7 +14,7 @@ use yoke::Yoke;
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 
 use super::{
-    LibraryYoke, MediaYoke, MovieYoke, SeasonYoke, SeriesYoke, EpisodeYoke, repository::MediaRepo,
+    EpisodeYoke, LibraryYoke, MediaYoke, MovieYoke, SeasonYoke, SeriesYoke, repository::MediaRepo,
 };
 
 /// Marker types for capability roles
@@ -306,7 +306,10 @@ impl<R: ReadCap> Accessor<R> {
     }
 
     /// Get all seasons for a series
-    pub fn get_series_seasons(&self, series_id: &SeriesID) -> RepositoryResult<Vec<SeasonReference>> {
+    pub fn get_series_seasons(
+        &self,
+        series_id: &SeriesID,
+    ) -> RepositoryResult<Vec<SeasonReference>> {
         self.with_repo(|repo| repo.get_series_seasons_internal(series_id))
     }
 

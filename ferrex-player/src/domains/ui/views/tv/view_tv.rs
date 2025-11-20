@@ -1,13 +1,19 @@
+use crate::domains::ui::components;
+use crate::domains::ui::views::grid::macros::parse_hex_color;
 use crate::{
     domains::{
         metadata::image_types::Priority,
-        ui::{messages::Message, theme, views::grid::macros::ThemeColorAccess, widgets::image_for::image_for},
-    }, media_card, state_refactored::State
+        ui::{
+            messages::Message, theme, views::grid::macros::ThemeColorAccess,
+            widgets::image_for::image_for,
+        },
+    },
+    media_card,
+    state_refactored::State,
 };
-use crate::domains::ui::views::grid::macros::parse_hex_color;
-use crate::domains::ui::components;
 use ferrex_core::{
-    ArchivedMediaDetailsOption, EpisodeID, EpisodeLike, ImageSize, ImageType, MediaID, MediaIDLike, SeasonID, SeasonLike, SeriesDetailsLike, SeriesID, SeriesLike
+    ArchivedMediaDetailsOption, EpisodeID, EpisodeLike, ImageSize, ImageType, MediaID, MediaIDLike,
+    SeasonID, SeasonLike, SeriesDetailsLike, SeriesID, SeriesLike,
 };
 use iced::{
     Element, Length,
@@ -153,32 +159,37 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
     {
         Ok(s) => s,
         Err(e) => {
-            log::warn!("[TV] Failed to fetch seasons for series {}: {:?}", series_id, e);
+            log::warn!(
+                "[TV] Failed to fetch seasons for series {}: {:?}",
+                series_id,
+                e
+            );
             Vec::new()
         }
     };
 
     // Extract details from the series reference
-    let (series_details, description, rating, total_episodes) = if let Some(series_details) = series_details_opt {
-        /*
-        log::info!(
-            "Series {} has overview: {:?}",
-            series_ref.title.as_str(),
-            series_details
-                .overview
-                .as_ref()
-                .map(|o| crate::domains::ui::views::macros::truncate_text(o, 50))
-        ); */
-        (
-            Some(series_details),
-            series_details.overview.as_ref(),
-            series_details.vote_average.as_ref(),
-            series_details.number_of_episodes.as_ref(),
-        )
-    } else {
-        log::warn!("Series {} has no TMDB details", series.title.to_string());
-        (None, None, None, None)
-    };
+    let (series_details, description, rating, total_episodes) =
+        if let Some(series_details) = series_details_opt {
+            /*
+            log::info!(
+                "Series {} has overview: {:?}",
+                series_ref.title.as_str(),
+                series_details
+                    .overview
+                    .as_ref()
+                    .map(|o| crate::domains::ui::views::macros::truncate_text(o, 50))
+            ); */
+            (
+                Some(series_details),
+                series_details.overview.as_ref(),
+                series_details.vote_average.as_ref(),
+                series_details.number_of_episodes.as_ref(),
+            )
+        } else {
+            log::warn!("Series {} has no TMDB details", series.title.to_string());
+            (None, None, None, None)
+        };
 
     /*
     // Stats - use the seasons we already fetched
@@ -545,12 +556,20 @@ pub fn view_season_detail<'a>(
                 arc
             }
             Err(e) => {
-                log::warn!("[TV] Failed to fetch season yoke for {}: {:?}", season_uuid, e);
+                log::warn!(
+                    "[TV] Failed to fetch season yoke for {}: {:?}",
+                    season_uuid,
+                    e
+                );
                 return container(
                     column![
-                        text("Media Not Found").size(24).color(theme::MediaServerTheme::TEXT_SECONDARY),
+                        text("Media Not Found")
+                            .size(24)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
                         Space::with_height(10),
-                        text("Repository error:").size(16).color(theme::MediaServerTheme::TEXT_SUBDUED),
+                        text("Repository error:")
+                            .size(16)
+                            .color(theme::MediaServerTheme::TEXT_SUBDUED),
                     ]
                     .spacing(10)
                     .align_x(iced::Alignment::Center),
@@ -602,7 +621,11 @@ pub fn view_season_detail<'a>(
     } else {
         format!("Season {}", season_number)
     };
-    details = details.push(text(title).size(32).color(theme::MediaServerTheme::TEXT_PRIMARY));
+    details = details.push(
+        text(title)
+            .size(32)
+            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+    );
 
     let episode_count = season.num_episodes();
     details = details.push(
@@ -616,9 +639,13 @@ pub fn view_season_detail<'a>(
         if let Some(desc) = season_details.overview.as_ref() {
             details = details.push(Space::with_height(10));
             details = details.push(
-                container(text(desc.to_string()).size(14).color(theme::MediaServerTheme::TEXT_PRIMARY))
-                    .width(Length::Fill)
-                    .padding(10),
+                container(
+                    text(desc.to_string())
+                        .size(14)
+                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                )
+                .width(Length::Fill)
+                .padding(10),
             );
         }
     }
@@ -716,7 +743,6 @@ pub fn view_season_detail<'a>(
 
     // Create the main content container
 
-
     // Create the main content container
     let content_container = container(content).width(Length::Fill);
 
@@ -763,13 +789,7 @@ pub fn view_episode_detail<'a>(
 ) -> Element<'a, Message> {
     // Try to get episode yoke from cache or fetch on-demand
     let ep_uuid = episode_id.to_uuid();
-    let episode_yoke_arc = match state
-        .domains
-        .ui
-        .state
-        .episode_yoke_cache
-        .peek_ref(&ep_uuid)
-    {
+    let episode_yoke_arc = match state.domains.ui.state.episode_yoke_cache.peek_ref(&ep_uuid) {
         Some(arc) => arc,
         _ => match state
             .domains
@@ -792,9 +812,13 @@ pub fn view_episode_detail<'a>(
                 log::warn!("[TV] Failed to fetch episode yoke for {}: {:?}", ep_uuid, e);
                 return container(
                     column![
-                        text("Media Not Found").size(24).color(theme::MediaServerTheme::TEXT_SECONDARY),
+                        text("Media Not Found")
+                            .size(24)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
                         Space::with_height(10),
-                        text("Repository error:").size(16).color(theme::MediaServerTheme::TEXT_SUBDUED),
+                        text("Repository error:")
+                            .size(16)
+                            .color(theme::MediaServerTheme::TEXT_SUBDUED),
                     ]
                     .spacing(10)
                     .align_x(iced::Alignment::Center),
@@ -888,9 +912,13 @@ pub fn view_episode_detail<'a>(
     if let Some(desc) = overview {
         details = details.push(Space::with_height(20));
         details = details.push(
-            container(text(desc.to_string()).size(14).color(theme::MediaServerTheme::TEXT_PRIMARY))
-                .width(Length::Fill)
-                .padding(10),
+            container(
+                text(desc.to_string())
+                    .size(14)
+                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            )
+            .width(Length::Fill)
+            .padding(10),
         );
     }
 

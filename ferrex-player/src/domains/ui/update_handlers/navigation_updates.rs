@@ -303,11 +303,8 @@ pub fn handle_view_series(state: &mut State, series_id: SeriesID) -> Task<Messag
         // Queue request if not in cache
         if let Some(details) = series.details() {
             if details.backdrop_path.is_some() {
-                let request = ImageRequest::new(
-                    series.id.to_uuid(),
-                    ImageSize::Backdrop,
-                    ImageType::Series,
-                );
+                let request =
+                    ImageRequest::new(series.id.to_uuid(), ImageSize::Backdrop, ImageType::Series);
                 if state.image_service.get(&request).is_none() {
                     state.image_service.request_image(request);
                 }
@@ -384,7 +381,6 @@ pub fn handle_view_season(
             backdrop_handle: None,
         };
 
-
         prepare_depth_regions_for_transition(state, &new_view);
 
         if let Some(hex) = season.theme_color() {
@@ -412,13 +408,16 @@ pub fn handle_view_season(
 
         if let Some(details) = season.details() {
             if details.poster_path.is_some() || details.name.len() > 0 {
-                let request = ImageRequest::new(season.id().to_uuid(), ImageSize::Backdrop, ImageType::Season);
+                let request = ImageRequest::new(
+                    season.id().to_uuid(),
+                    ImageSize::Backdrop,
+                    ImageType::Season,
+                );
                 if state.image_service.get(&request).is_none() {
                     state.image_service.request_image(request);
                 }
             }
         }
-
 
         state.domains.ui.state.view = new_view;
 
@@ -433,9 +432,7 @@ pub fn handle_view_season(
             .unwrap_or(0);
         // Episodes are typically wide (16:9); use a wider item width
         let mut ep_cs = crate::domains::ui::views::carousel::CarouselState::new_with_dimensions(
-            total_eps,
-            400.0,
-            15.0,
+            total_eps, 400.0, 15.0,
         );
         ep_cs.update_items_per_page(state.window_size.width);
         state.domains.ui.state.season_episodes_carousel = Some(ep_cs);
@@ -447,7 +444,6 @@ pub fn handle_view_season(
             .season_yoke_cache
             .insert(season_uuid, std::sync::Arc::new(yoke));
     } else {
-
         let new_view = ViewState::SeasonDetail {
             series_id,
             season_id,
@@ -483,7 +479,6 @@ pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Mes
     // Save current scroll position before navigating away
     save_current_scroll_state(state);
 
-
     let episode_uuid = episode_id.to_uuid();
     if let Ok(yoke) = state
         .domains
@@ -498,7 +493,6 @@ pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Mes
         };
 
         prepare_depth_regions_for_transition(state, &new_view);
-
 
         state.domains.ui.state.view = new_view;
         state

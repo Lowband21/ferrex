@@ -155,59 +155,18 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         }
         ui::Message::SetSortBy(sort_by) => {
             state.domains.ui.state.sort_by = sort_by;
-
-            // Kick off server-backed sorted index fetch for active library (movies-only for now)
-            let api = state.api_service.clone();
-            let active_lib = state.tab_manager.active_tab_id().library_id();
-            if let Some(lib_id) = active_lib {
-                let core_sort = sort_by;
-                let core_order = state.domains.ui.state.sort_order;
-
-                let task = Task::perform(
-                    async move {
-                        match api
-                            .fetch_sorted_indices(lib_id.as_uuid(), core_sort, core_order)
-                            .await
-                        {
-                            Ok(positions) => ui::Message::ApplySortedPositions(lib_id, positions),
-                            Err(e) => ui::Message::SortedIndexFailed(e.to_string()),
-                        }
-                    },
-                    |msg| DomainMessage::Ui(msg),
-                );
-                DomainUpdateResult::task(task)
-            } else {
-                DomainUpdateResult::task(Task::none())
-            }
+            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                ui::Message::RequestFilteredPositions,
+            )))
         }
         ui::Message::ToggleSortOrder => {
             state.domains.ui.state.sort_order = match state.domains.ui.state.sort_order {
                 SortOrder::Ascending => SortOrder::Descending,
                 SortOrder::Descending => SortOrder::Ascending,
             };
-
-            // Kick off server-backed sorted index fetch for active library
-            let api = state.api_service.clone();
-            let active_lib = state.tab_manager.active_tab_id().library_id();
-            if let Some(lib_id) = active_lib {
-                let sort = state.domains.ui.state.sort_by;
-                let order = state.domains.ui.state.sort_order;
-                let task = Task::perform(
-                    async move {
-                        match api
-                            .fetch_sorted_indices(lib_id.as_uuid(), sort, order)
-                            .await
-                        {
-                            Ok(positions) => ui::Message::ApplySortedPositions(lib_id, positions),
-                            Err(e) => ui::Message::SortedIndexFailed(e.to_string()),
-                        }
-                    },
-                    |msg| DomainMessage::Ui(msg),
-                );
-                DomainUpdateResult::task(task)
-            } else {
-                DomainUpdateResult::task(Task::none())
-            }
+            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                ui::Message::RequestFilteredPositions,
+            )))
         }
         ui::Message::ApplyFilteredPositions(library_id, positions) => {
             if let Some(tab) = state
@@ -223,8 +182,10 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         }
         ui::Message::RequestFilteredPositions => {
             // Build a FilterIndicesRequest from current UI filters (Phase 1: movies only)
-            use ferrex_core::FilterIndicesRequest;
-            use ferrex_core::query::types::MediaTypeFilter;
+            use ferrex_core::query::{
+                filtering::{FilterRequestParams, build_filter_indices_request},
+                types::MediaTypeFilter,
+            };
             let api = state.api_service.clone();
             let active_lib = state.tab_manager.active_tab_id().library_id();
             let active_type = state.tab_manager.active_tab_type().cloned();
@@ -239,12 +200,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                         SortOrder::Ascending => SortOrder::Ascending,
                         SortOrder::Descending => SortOrder::Descending,
                     };
-                    let search = if state.domains.ui.state.search_query.is_empty() {
-                        None
-                    } else {
-                        Some(state.domains.ui.state.search_query.trim().to_string())
-                    };
-                    let genres: Vec<String> = state
+                    let genre_names: Vec<String> = state
                         .domains
                         .ui
                         .state
@@ -253,23 +209,27 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                         .map(|g| g.api_name().to_string())
                         .collect();
 
-                    let year_range = state.domains.ui.state.selected_decade.map(|d| {
-                        let start = d.start_year();
-                        let end = start.saturating_add(9);
-                        (start, end)
-                    });
-
-                    // Resolution and watch status are not yet supported server-side
-                    // rating_range omitted
-                    let spec = FilterIndicesRequest {
-                        media_type: Some(MediaTypeFilter::Movie),
-                        genres,
-                        year_range,
-                        rating_range: None,
-                        search,
-                        sort: Some(core_sort),
-                        order: Some(core_order),
+                    let search = state.domains.ui.state.search_query.as_str();
+                    let trimmed = search.trim();
+                    let search = if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
                     };
+
+                    let params = FilterRequestParams {
+                        media_type: Some(MediaTypeFilter::Movie),
+                        genres: &genre_names,
+                        decade: state.domains.ui.state.selected_decade,
+                        explicit_year_range: None,
+                        rating: None,
+                        resolution: state.domains.ui.state.selected_resolution,
+                        watch_status: state.domains.ui.state.selected_watch_status,
+                        search,
+                        sort: core_sort,
+                        order: core_order,
+                    };
+                    let spec = build_filter_indices_request(params);
                     let task = Task::perform(
                         async move {
                             match api.fetch_filtered_indices(lib_id.as_uuid(), &spec).await {
@@ -283,7 +243,10 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                     );
                     DomainUpdateResult::task(task)
                 } else {
-                    // Series: do nothing in Phase 1
+                    log::debug!(
+                        "Skip filtered indices request for non-movie library {:?}",
+                        lib_type
+                    );
                     DomainUpdateResult::task(Task::none())
                 }
             } else {
@@ -336,7 +299,9 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             state.domains.ui.state.selected_decade = None;
             state.domains.ui.state.selected_resolution = ferrex_core::UiResolution::Any;
             state.domains.ui.state.selected_watch_status = ferrex_core::UiWatchStatus::Any;
-            DomainUpdateResult::task(Task::none())
+            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                ui::Message::RequestFilteredPositions,
+            )))
         }
         ui::Message::ShowAdminDashboard => {
             state.domains.ui.state.view = ViewState::AdminDashboard;
@@ -362,20 +327,6 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                     lib_state.apply_sorted_positions(&positions);
                 }
             }
-            state.tab_manager.refresh_active_tab();
-            DomainUpdateResult::task(Task::none())
-        }
-        ui::Message::ApplySortedIndex(library_id, ids) => {
-            use std::collections::HashMap;
-            // Update MediaRepo.sorted_indices for the library and refresh tab
-            if let Some(repo) = state.media_repo.write().as_mut() {
-                // Use Accessor API to store sorted indices if/when exposed; for now, compute immediately
-                // and store on-demand in the UI layer or refresh the tab which will request indices again.
-                // Placeholder: no direct repo mutation here to avoid private field access.
-            }
-            // Mark and refresh the specific library tab
-            let tab_id = crate::domains::ui::tabs::TabId::Library(library_id);
-            state.tab_manager.mark_tab_needs_refresh(tab_id);
             state.tab_manager.refresh_active_tab();
             DomainUpdateResult::task(Task::none())
         }

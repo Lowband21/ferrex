@@ -1,6 +1,7 @@
 pub mod builder;
 pub mod complexity_guard;
 pub mod decision_engine;
+pub mod filtering;
 pub mod sorting;
 pub mod types;
 

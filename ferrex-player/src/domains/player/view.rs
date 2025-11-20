@@ -72,7 +72,9 @@ impl PlayerDomainState {
                 let controls = self.controls_overlay();
                 let mut children: Vec<iced::Element<Message, Theme, iced_wgpu::Renderer>> =
                     vec![clickable_video];
-                if let Some(ov) = subtitle_overlay { children.push(ov); }
+                if let Some(ov) = subtitle_overlay {
+                    children.push(ov);
+                }
                 children.push(controls);
                 iced::widget::Stack::with_children(children).into()
             } else {

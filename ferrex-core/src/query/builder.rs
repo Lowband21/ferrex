@@ -1,5 +1,5 @@
 use super::types::*;
-use crate::{LibraryID, watch_status::WatchStatusFilter};
+use crate::{LibraryID, api_types::ScalarRange, watch_status::WatchStatusFilter};
 use uuid::Uuid;
 
 /// Fluent API for building media queries
@@ -67,13 +67,19 @@ impl MediaQueryBuilder {
 
     /// Filter by year range
     pub fn year_range(mut self, start: u16, end: u16) -> Self {
-        self.query.filters.year_range = Some((start, end));
+        self.query.filters.year_range = Some(ScalarRange::new(start, end));
         self
     }
 
     /// Filter by rating range
     pub fn rating_range(mut self, min: f32, max: f32) -> Self {
-        self.query.filters.rating_range = Some((min, max));
+        self.query.filters.rating_range = Some(ScalarRange::new(min, max));
+        self
+    }
+
+    /// Filter by resolution range (vertical pixels)
+    pub fn resolution_range(mut self, min: u16, max: u16) -> Self {
+        self.query.filters.resolution_range = Some(ScalarRange::new(min, max));
         self
     }
 

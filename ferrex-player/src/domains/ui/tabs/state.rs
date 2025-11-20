@@ -2,11 +2,11 @@
 
 use crate::domains::ui::view_models::AllViewModel;
 use crate::domains::ui::views::grid::VirtualGridState;
-use crate::infrastructure::api_types::{LibraryType, Media};
+use crate::infrastructure::api_types::LibraryType;
 use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
 use ferrex_core::{
-    ArchivedLibraryExt, ArchivedMediaID, ArchivedMovieReference, ArchivedSeriesReference,
-    LibraryID, MediaOps,
+    ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedMovieReference,
+    ArchivedSeriesReference, LibraryID, MediaOps,
 };
 use uuid::Uuid;
 
@@ -80,6 +80,16 @@ impl TabState {
     }
 }
 
+impl LibraryTabState {
+    fn extract_media_uuid(media: &ArchivedMedia) -> Option<Uuid> {
+        match media {
+            ArchivedMedia::Movie(movie) => Some(Uuid::from_bytes(movie.id.0)),
+            ArchivedMedia::Series(series) => Some(Uuid::from_bytes(series.id.0)),
+            _ => None,
+        }
+    }
+}
+
 /// State for the "All" tab showing curated content
 #[derive(Debug)]
 pub struct AllTabState {
@@ -122,6 +132,9 @@ pub struct LibraryTabState {
 
     /// Cached server-provided positions into archived slice (movies only, Phase 1)
     pub cached_positions: Option<Vec<u32>>,
+
+    /// Cached mapping of the currently active filtered/sorted positions into archived slice indices
+    filtered_indices: Option<Vec<usize>>,
 
     /// Cached media items for this library
     /// This is an enum to support both movie and TV libraries
@@ -169,17 +182,15 @@ impl LibraryTabState {
         library_type: LibraryType,
         accessor: Accessor<ReadOnly>,
     ) -> Self {
-        // Initialize with appropriate cached media type
         let cached_media = match library_type {
             LibraryType::Movies => CachedMedia::Movies(Vec::new()),
             LibraryType::Series => CachedMedia::TvShows(Vec::new()),
         };
 
-        // Create grid state with deterministic scrollable_id based on library ID
         let scrollable_id = iced::widget::scrollable::Id::new(format!("library-{}", library_id));
         let grid_state = VirtualGridState::with_id(
-            0, // Will be updated when content loads
-            5, // Default columns
+            0,
+            5,
             crate::infrastructure::constants::virtual_grid::ROW_HEIGHT,
             scrollable_id,
         );
@@ -190,13 +201,13 @@ impl LibraryTabState {
             grid_state,
             cached_index_ids: Vec::new(),
             cached_positions: None,
+            filtered_indices: None,
             cached_media,
             needs_refresh: true,
             navigation_history: Vec::new(),
             accessor,
         };
 
-        // Initial refresh from repo
         state.refresh_from_repo();
 
         state
@@ -204,44 +215,56 @@ impl LibraryTabState {
 
     /// Apply server-provided sorted positions to reorder the current grid
     pub fn apply_sorted_positions(&mut self, positions: &[u32]) {
-        // Cache positions
         self.cached_positions = Some(positions.to_vec());
 
-        if !self.accessor.is_initialized() {
-            // Still update counts so grid knows length
-            self.grid_state.total_items = positions.len();
+        if !matches!(self.library_type, LibraryType::Movies) {
+            self.filtered_indices = None;
+            self.grid_state.total_items = self.cached_index_ids.len();
             self.grid_state.calculate_visible_range();
             return;
         }
 
-        // Map positions to movie IDs from the archived library slice
+        if !self.accessor.is_initialized() {
+            self.filtered_indices = Some(Vec::new());
+            self.cached_index_ids.clear();
+            self.grid_state.total_items = 0;
+            self.grid_state.calculate_visible_range();
+            return;
+        }
+
         let lib_uuid = self.library_id.as_uuid();
         let yoke_opt = self
             .accessor
             .get_archived_library_yoke(&lib_uuid)
             .ok()
             .flatten();
-        if let Some(yoke) = yoke_opt {
-            let lib = yoke.get();
-            let slice = lib.media_as_slice();
-            let mut ids: Vec<Uuid> = Vec::with_capacity(positions.len());
-            for &pos in positions {
-                let idx = pos as usize;
-                if let Some(m) = slice.get(idx) {
-                    if let ferrex_core::ArchivedMedia::Movie(movie) = m {
-                        ids.push(Uuid::from_bytes(movie.id.0));
-                    }
+        let Some(yoke) = yoke_opt else {
+            self.filtered_indices = Some(Vec::new());
+            self.cached_index_ids.clear();
+            self.grid_state.total_items = 0;
+            self.grid_state.calculate_visible_range();
+            return;
+        };
+
+        let slice = yoke.get().media_as_slice();
+
+        let mut filtered_indices = Vec::with_capacity(positions.len());
+        let mut ids = Vec::with_capacity(positions.len());
+
+        for &pos in positions {
+            let idx = pos as usize;
+            if let Some(media) = slice.get(idx) {
+                if let Some(uuid) = Self::extract_media_uuid(media) {
+                    filtered_indices.push(idx);
+                    ids.push(uuid);
                 }
             }
-            self.cached_index_ids = ids;
-            self.grid_state.total_items = self.cached_index_ids.len();
-            self.grid_state.calculate_visible_range();
-        } else {
-            // Could not get archived yoke; just update count and visible range
-            self.grid_state.total_items = positions.len();
-            self.grid_state.calculate_visible_range();
         }
 
+        self.filtered_indices = Some(filtered_indices);
+        self.cached_index_ids = ids;
+        self.grid_state.total_items = self.cached_index_ids.len();
+        self.grid_state.calculate_visible_range();
         self.needs_refresh = false;
     }
 
@@ -251,27 +274,50 @@ impl LibraryTabState {
             return;
         }
 
+        self.cached_positions = None;
+        self.filtered_indices = None;
+
         if self.accessor.is_initialized() {
-            // Use the lightweight index of IDs for this library
-            match self.accessor.get_sorted_index_by_library(&self.library_id) {
-                Ok(ids) => {
-                    self.cached_index_ids = ids;
-                    self.grid_state.total_items = self.cached_index_ids.len();
-                    // Ensure visible range is computed for immediate rendering
-                    self.grid_state.calculate_visible_range();
-                }
-                Err(e) => {
-                    log::warn!(
-                        "LibraryTabState::refresh_from_repo - failed to get index for {}: {:?}",
-                        self.library_id,
-                        e
-                    );
-                    self.grid_state.total_items = 0;
-                    self.grid_state.calculate_visible_range();
-                }
+            let lib_uuid = self.library_id.as_uuid();
+            let yoke_opt = self
+                .accessor
+                .get_archived_library_yoke(&lib_uuid)
+                .ok()
+                .flatten();
+
+            if let Some(yoke) = yoke_opt {
+                let slice = yoke.get().media_as_slice();
+                self.cached_index_ids = match self.library_type {
+                    LibraryType::Movies => slice
+                        .iter()
+                        .filter_map(|media| {
+                            if let ArchivedMedia::Movie(movie) = media {
+                                Some(Uuid::from_bytes(movie.id.0))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
+                    LibraryType::Series => slice
+                        .iter()
+                        .filter_map(|media| {
+                            if let ArchivedMedia::Series(series) = media {
+                                Some(Uuid::from_bytes(series.id.0))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
+                };
+
+                self.grid_state.total_items = self.cached_index_ids.len();
+                self.grid_state.calculate_visible_range();
+            } else {
+                self.cached_index_ids.clear();
+                self.grid_state.total_items = 0;
+                self.grid_state.calculate_visible_range();
             }
 
-            // Keep cached_media empty until archived refs are wired into tab caches
             self.cached_media = match self.library_type {
                 LibraryType::Movies => CachedMedia::Movies(Vec::new()),
                 LibraryType::Series => CachedMedia::TvShows(Vec::new()),
@@ -338,11 +384,11 @@ impl LibraryTabState {
 
         // If we have server-provided positions (movies Phase 1), use them to compute visible IDs
         if matches!(self.library_type, LibraryType::Movies) {
-            if let Some(pos) = &self.cached_positions {
-                let visible_positions = pos.get(range.clone()).unwrap_or(&[]);
-                return visible_positions
+            if let Some(indices) = &self.filtered_indices {
+                let visible = indices.get(range.clone()).unwrap_or(&[]);
+                return visible
                     .iter()
-                    .filter_map(|p| slice.get(*p as usize))
+                    .filter_map(|idx| slice.get(*idx))
                     .map(|m| m.id())
                     .collect();
             }

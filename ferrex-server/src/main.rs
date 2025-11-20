@@ -266,7 +266,7 @@ async fn main() -> anyhow::Result<()> {
     let db = if let Some(db_url) = &config.database_url {
         // Check if the URL looks like PostgreSQL
         if db_url.starts_with("postgres://") || db_url.starts_with("postgresql://") {
-            info!("Connecting to PostgreSQL database");
+            info!("Connecting to PostgreSQL database at {}", db_url);
 
             // Use Redis cache if available
             let with_cache = config.redis_url.is_some();

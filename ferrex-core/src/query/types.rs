@@ -1,4 +1,4 @@
-use crate::{LibraryID, watch_status::WatchStatusFilter};
+use crate::{LibraryID, api_types::ScalarRange, watch_status::WatchStatusFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -19,8 +19,9 @@ pub struct MediaFilters {
     pub media_type: Option<MediaTypeFilter>,
     pub watch_status: Option<WatchStatusFilter>,
     pub genres: Vec<String>,
-    pub year_range: Option<(u16, u16)>,
-    pub rating_range: Option<(f32, f32)>,
+    pub year_range: Option<ScalarRange<u16>>,
+    pub rating_range: Option<ScalarRange<f32>>,
+    pub resolution_range: Option<ScalarRange<u16>>,
     pub library_ids: Vec<Uuid>,
 }
 

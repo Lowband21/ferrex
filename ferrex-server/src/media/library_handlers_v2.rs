@@ -1,7 +1,7 @@
 use crate::AppState;
 use axum::{
     body::Bytes,
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Json},
 };
@@ -15,6 +15,7 @@ use ferrex_core::ParsedMediaInfo;
 use ferrex_core::TmdbDetails;
 use ferrex_core::indices::IndexManager;
 use ferrex_core::query::types::{SortBy, SortOrder};
+use ferrex_core::user::User;
 use ferrex_core::{
     database::traits::MediaFilters, ApiResponse, CreateLibraryRequest, EnhancedMovieDetails,
     EnhancedSeriesDetails, FetchMediaRequest, Library, LibraryID, LibraryMediaResponse,
@@ -29,6 +30,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
+use super::index_filters::{FilterQueryError, build_filtered_movie_query};
 
 pub async fn get_library_media_util(
     state: &AppState,
@@ -155,6 +158,7 @@ fn parse_sort_order(s: &str) -> Option<SortOrder> {
 /// Get presorted media indices for a library (movie libraries supported)
 pub async fn get_library_sorted_indices_handler(
     State(state): State<AppState>,
+    Extension(user): Extension<User>,
     Path(library_id): Path<Uuid>,
     Query(params): Query<SortedIdsQuery>,
 ) -> impl IntoResponse {
@@ -197,7 +201,13 @@ pub async fn get_library_sorted_indices_handler(
     // Build sorted IDs using core index manager (in-memory sort for now)
     let index_mgr = IndexManager::new(state.db.clone());
     let sorted_ids = match index_mgr
-        .sort_media_ids_for_library(library_ref.id, lib_type, sort_field, sort_order)
+        .sort_media_ids_for_library(
+            library_ref.id,
+            lib_type,
+            sort_field,
+            sort_order,
+            Some(user.id),
+        )
         .await
     {
         Ok(ids) => ids,
@@ -264,12 +274,12 @@ pub async fn get_library_sorted_indices_handler(
 /// Filter indices (movies Phase 1)
 pub async fn post_library_filtered_indices_handler(
     State(state): State<AppState>,
+    Extension(user): Extension<User>,
     Path(library_id): Path<Uuid>,
     Json(spec): Json<FilterIndicesRequest>,
 ) -> impl IntoResponse {
     info!("Getting filtered indices for library: {}", library_id);
 
-    // Resolve library
     let library_ref = match state.db.backend().get_library_reference(library_id).await {
         Ok(lib) => lib,
         Err(e) => {
@@ -283,7 +293,21 @@ pub async fn post_library_filtered_indices_handler(
         return Err(StatusCode::NOT_IMPLEMENTED);
     }
 
-    // Build base order map (title asc) for positions
+    let index_manager = IndexManager::new(state.db.clone());
+    let pos_map = match index_manager
+        .compute_title_position_map(library_ref.id, library_ref.library_type)
+        .await
+    {
+        Ok(map) => map,
+        Err(e) => {
+            error!(
+                "Failed to compute base positions for library {}: {}",
+                library_id, e
+            );
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
     let pool = state
         .db
         .backend()
@@ -291,86 +315,18 @@ pub async fn post_library_filtered_indices_handler(
         .downcast_ref::<ferrex_core::database::postgres::PostgresDatabase>()
         .expect("Postgres backend")
         .pool();
-    let base_ids: Vec<Uuid> = match sqlx::query_scalar!(
-        r#"SELECT mr.id FROM movie_references mr WHERE mr.library_id=$1 ORDER BY mr.title"#,
-        library_ref.id.as_uuid()
-    )
-    .fetch_all(pool)
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            error!("Failed to get base order for library {}: {}", library_id, e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+
+    let mut qb = match build_filtered_movie_query(library_ref.id.as_uuid(), &spec, Some(user.id)) {
+        Ok(builder) => builder,
+        Err(err) => {
+            warn!("Rejected filtered indices request: {}", err);
+            return Err(match err {
+                FilterQueryError::MissingUserContext(_) => StatusCode::BAD_REQUEST,
+                FilterQueryError::UnsupportedMediaType(_) => StatusCode::NOT_IMPLEMENTED,
+                FilterQueryError::InvalidNumeric(_) => StatusCode::BAD_REQUEST,
+            });
         }
     };
-    let mut pos_map = HashMap::with_capacity(base_ids.len());
-    for (i, id) in base_ids.iter().enumerate() {
-        pos_map.insert(*id, i as u32);
-    }
-
-    // Build filtered id list using optimized SQL inlined here (Phase 1: genres, year_range, rating_range, search, sort)
-    use sqlx::{Postgres, QueryBuilder};
-    let mut qb = QueryBuilder::<Postgres>::new(
-        r#"
-        SELECT mr.id
-        FROM movie_references mr
-        JOIN media_files mf ON mr.file_id = mf.id
-        LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id
-        WHERE mr.library_id =
-        "#,
-    );
-    qb.push_bind(library_ref.id.as_uuid());
-
-    // genres filter
-    if !spec.genres.is_empty() {
-        qb.push(" AND mm.genre_names && ");
-        qb.push_bind(&spec.genres);
-    }
-
-    // year range
-    if let Some((min_y, max_y)) = spec.year_range {
-        qb.push(" AND mm.release_year BETWEEN ");
-        qb.push_bind(min_y as i32);
-        qb.push(" AND ");
-        qb.push_bind(max_y as i32);
-    }
-
-    // rating range
-    if let Some((min_r, max_r)) = spec.rating_range {
-        use std::str::FromStr;
-        qb.push(" AND mm.vote_average BETWEEN ");
-        qb.push_bind(sqlx::types::BigDecimal::from_str(&min_r.to_string()).unwrap());
-        qb.push(" AND ");
-        qb.push_bind(sqlx::types::BigDecimal::from_str(&max_r.to_string()).unwrap());
-    }
-
-    // search (ILIKE simple)
-    if let Some(text) = &spec.search {
-        qb.push(" AND (mr.title ILIKE ");
-        qb.push_bind(format!("%{}%", text));
-        qb.push(" OR mm.overview ILIKE ");
-        qb.push_bind(format!("%{}%", text));
-        qb.push(")");
-    }
-
-    // sorting
-    let sort_field = spec.sort.unwrap_or(SortBy::Title);
-    let sort_order = spec.order.unwrap_or(SortOrder::Ascending);
-    qb.push(" ORDER BY ");
-    qb.push(match sort_field {
-        SortBy::Title => "LOWER(mr.title)",
-        SortBy::DateAdded => "mf.created_at",
-        SortBy::ReleaseDate => "mm.release_date",
-        SortBy::Rating => "mm.vote_average",
-        SortBy::Runtime => "mm.runtime",
-        SortBy::Popularity => "mm.popularity",
-        _ => "LOWER(mr.title)",
-    });
-    qb.push(match sort_order {
-        SortOrder::Ascending => " ASC NULLS LAST",
-        SortOrder::Descending => " DESC NULLS LAST",
-    });
 
     let rows = match qb.build().fetch_all(pool).await {
         Ok(rows) => rows,
@@ -380,8 +336,7 @@ pub async fn post_library_filtered_indices_handler(
         }
     };
 
-    // Map ids -> positions
-    let mut positions: Vec<u32> = Vec::with_capacity(rows.len());
+    let mut positions = Vec::with_capacity(rows.len());
     for row in rows {
         let id: Uuid = row.get("id");
         if let Some(p) = pos_map.get(&id) {
@@ -393,6 +348,7 @@ pub async fn post_library_filtered_indices_handler(
         content_version: 1,
         indices: positions,
     };
+
     match rkyv::to_bytes::<RkyvError>(&response) {
         Ok(bytes) => Ok::<_, StatusCode>((
             [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
@@ -489,6 +445,7 @@ pub async fn fetch_media_handler(
                                                                                     .popularity
                                                                                     as f32,
                                                                             ),
+                                                                            content_rating: None,
                                                                             genres: vec![], // Not available in MovieBase
                                                                             production_companies: vec![], // Not available in MovieBase
                                                                             poster_path: details
@@ -608,6 +565,7 @@ pub async fn fetch_media_handler(
                                                                 vote_average: Some(details.inner.vote_average as f32),
                                                                 vote_count: Some(details.inner.vote_count as u32),
                                                                 popularity: Some(details.inner.popularity as f32),
+                                                                content_rating: None,
                                                                 genres: vec![], // Not available in TVShowBase
                                                                 networks: vec![], // Not available in TVShowBase
                                                                 poster_path: details.inner.poster_path.clone(),

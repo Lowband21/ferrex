@@ -247,7 +247,10 @@ pub struct ImageData {
 
 // ===== Index-based Sorting/Filtering Types =====
 
-use crate::query::types::{MediaTypeFilter, SortBy, SortOrder};
+use crate::{
+    query::types::{MediaTypeFilter, SortBy, SortOrder},
+    watch_status::WatchStatusFilter,
+};
 
 /// Compact response for index-based sorting/filtering
 #[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
@@ -256,6 +259,19 @@ pub struct IndicesResponse {
     pub content_version: u32,
     /// Positions into the client's archived media slice for the target library
     pub indices: Vec<u32>,
+}
+
+/// Inclusive range for scalar filters
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Hash)]
+pub struct ScalarRange<T> {
+    pub min: T,
+    pub max: T,
+}
+
+impl<T> ScalarRange<T> {
+    pub fn new(min: T, max: T) -> Self {
+        Self { min, max }
+    }
 }
 
 /// Request payload for index-based filtering
@@ -267,9 +283,13 @@ pub struct FilterIndicesRequest {
     #[serde(default)]
     pub genres: Vec<String>,
     /// Filter by inclusive year range (release year)
-    pub year_range: Option<(u16, u16)>,
-    /// Filter by inclusive rating range (vote_average)
-    pub rating_range: Option<(f32, f32)>,
+    pub year_range: Option<ScalarRange<u16>>,
+    /// Filter by inclusive rating range (vote_average, 0-10 scale)
+    pub rating_range: Option<ScalarRange<f32>>,
+    /// Filter by inclusive resolution range (vertical pixels)
+    pub resolution_range: Option<ScalarRange<u16>>,
+    /// Optional watch status filter derived from authenticated user
+    pub watch_status: Option<WatchStatusFilter>,
     /// Optional simple search text (applied to title/overview)
     pub search: Option<String>,
     /// Optional sort field (snake_case per SortBy serde)

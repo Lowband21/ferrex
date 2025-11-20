@@ -16,6 +16,10 @@ use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
+use tmdb_api::{
+    common::release_date::ReleaseDateKind, movie::release_dates::MovieReleaseDatesResult,
+    tvshow::content_rating::ContentRatingResult as TvContentRatingResult,
+};
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
 use tracing::warn;
@@ -56,6 +60,69 @@ impl Default for StreamingScannerConfig {
             force_refresh: false,
         }
     }
+}
+
+const PREFERRED_REGIONS: [&str; 6] = ["US", "GB", "CA", "AU", "NZ", "FR"];
+
+fn extract_movie_certification(data: &MovieReleaseDatesResult) -> Option<String> {
+    let preferred_kinds = [
+        ReleaseDateKind::Theatrical,
+        ReleaseDateKind::TheatricalLimited,
+        ReleaseDateKind::Digital,
+        ReleaseDateKind::Physical,
+        ReleaseDateKind::TV,
+        ReleaseDateKind::Premiere,
+    ];
+
+    let mut pick_from_release_dates =
+        |release_dates: &[tmdb_api::common::release_date::ReleaseDate]| {
+            for kind in preferred_kinds.iter() {
+                if let Some(cert) = release_dates
+                    .iter()
+                    .filter(|rd| &rd.kind == kind)
+                    .filter_map(|rd| rd.certification.as_ref())
+                    .find(|cert| !cert.trim().is_empty())
+                {
+                    return Some(cert.trim().to_string());
+                }
+            }
+
+            release_dates
+                .iter()
+                .filter_map(|rd| rd.certification.as_ref())
+                .find(|cert| !cert.trim().is_empty())
+                .map(|cert| cert.trim().to_string())
+        };
+
+    for region in PREFERRED_REGIONS {
+        if let Some(located) = data.results.iter().find(|r| r.iso_3166_1 == region) {
+            if let Some(cert) = pick_from_release_dates(&located.release_dates) {
+                return Some(cert);
+            }
+        }
+    }
+
+    data.results
+        .iter()
+        .filter_map(|r| pick_from_release_dates(&r.release_dates))
+        .next()
+}
+
+fn extract_series_content_rating(data: &TvContentRatingResult) -> Option<String> {
+    for region in PREFERRED_REGIONS {
+        if let Some(entry) = data.results.iter().find(|r| r.iso_3166_1 == *region) {
+            let rating = entry.rating.trim();
+            if !rating.is_empty() {
+                return Some(rating.to_string());
+            }
+        }
+    }
+
+    data.results
+        .iter()
+        .map(|entry| entry.rating.trim())
+        .find(|rating| !rating.is_empty())
+        .map(|rating| rating.to_string())
 }
 
 /// Scanner output events sent to player during scanning
@@ -959,6 +1026,24 @@ impl StreamingScannerV2 {
             .await
             .map_err(|e| MediaError::Internal(format!("Failed to fetch movie details: {}", e)))?;
 
+        let movie_certification = {
+            self.rate_limit_tmdb().await;
+            match self
+                .tmdb_provider
+                .get_movie_release_dates(tmdb_match.tmdb_id)
+                .await
+            {
+                Ok(release_dates) => extract_movie_certification(&release_dates),
+                Err(e) => {
+                    warn!(
+                        "Failed to fetch movie release dates for TMDB ID {}: {}",
+                        tmdb_match.tmdb_id, e
+                    );
+                    None
+                }
+            }
+        };
+
         // Fetch additional metadata
         let images = {
             self.rate_limit_tmdb().await;
@@ -1304,6 +1389,7 @@ impl StreamingScannerV2 {
             vote_average: Some(tmdb_details.inner.vote_average as f32),
             vote_count: Some(tmdb_details.inner.vote_count as u32),
             popularity: Some(tmdb_details.inner.popularity as f32),
+            content_rating: movie_certification,
             genres,
             production_companies,
             poster_path: cached_posters.first().map(|img| img.endpoint.clone()),
@@ -1982,6 +2068,24 @@ impl StreamingScannerV2 {
                 .map(|n| n.name.clone())
                 .collect::<Vec<String>>();
 
+            let series_content_rating = {
+                self.rate_limit_tmdb().await;
+                match self
+                    .tmdb_provider
+                    .get_tv_content_ratings(details.inner.id as u64)
+                    .await
+                {
+                    Ok(ratings) => extract_series_content_rating(&ratings),
+                    Err(e) => {
+                        warn!(
+                            "Failed to fetch TV content ratings for TMDB ID {}: {}",
+                            details.inner.id, e
+                        );
+                        None
+                    }
+                }
+            };
+
             // Create enhanced series details
             let enhanced = EnhancedSeriesDetails {
                 id: details.inner.id as u64,
@@ -1994,6 +2098,7 @@ impl StreamingScannerV2 {
                 vote_average: Some(details.inner.vote_average as f32),
                 vote_count: Some(details.inner.vote_count as u32),
                 popularity: Some(details.inner.popularity as f32),
+                content_rating: series_content_rating,
                 genres,
                 networks,
                 poster_path: cached_posters.first().map(|img| img.endpoint.clone()),

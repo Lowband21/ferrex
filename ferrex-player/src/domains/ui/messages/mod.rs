@@ -21,9 +21,8 @@ pub enum Message {
     ViewEpisode(EpisodeID),
 
     // Sorting
-    SetSortBy(SortBy),                            // Change sort field
-    ToggleSortOrder,                              // Toggle ascending/descending
-    ApplySortedIndex(LibraryID, Vec<uuid::Uuid>), // Apply fetched sorted IDs for a library (legacy)
+    SetSortBy(SortBy),                           // Change sort field
+    ToggleSortOrder,                             // Toggle ascending/descending
     ApplySortedPositions(LibraryID, Vec<u32>), // Apply fetched position indices for a library (Phase 1)
     ApplyFilteredPositions(LibraryID, Vec<u32>), // Apply fetched filtered position indices (Phase 1)
     RequestFilteredPositions, // Trigger fetching filtered positions for active library
@@ -175,7 +174,6 @@ impl Message {
             // Sorting
             Self::SetSortBy(_) => "UI::SetSortBy",
             Self::ToggleSortOrder => "UI::ToggleSortOrder",
-            Self::ApplySortedIndex(_, _) => "UI::ApplySortedIndex",
             Self::ApplySortedPositions(_, _) => "UI::ApplySortedPositions",
             Self::ApplyFilteredPositions(_, _) => "UI::ApplyFilteredPositions",
             Self::RequestFilteredPositions => "UI::RequestFilteredPositions",
@@ -327,7 +325,6 @@ impl std::fmt::Debug for Message {
             Self::ViewEpisode(id) => write!(f, "UI::ViewEpisode({})", id),
             Self::SetSortBy(sort) => write!(f, "UI::SetSortBy({:?})", sort),
             Self::ToggleSortOrder => write!(f, "UI::ToggleSortOrder"),
-            Self::ApplySortedIndex(_, _) => write!(f, "UI::ApplySortedIndex"),
             Self::ApplySortedPositions(_, _) => write!(f, "UI::ApplySortedPositions"),
             Self::ApplyFilteredPositions(_, _) => write!(f, "UI::ApplyFilteredPositions"),
             Self::RequestFilteredPositions => write!(f, "UI::RequestFilteredPositions"),

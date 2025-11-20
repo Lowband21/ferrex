@@ -436,10 +436,9 @@ pub fn update_player(
                 let num_aud_tks = state.available_audio_tracks.len();
                 let num_sub_tks = state.available_subtitle_tracks.len();
 
-                if num_aud_tks <= 0 || num_sub_tks <=0 {
+                if num_aud_tks <= 0 || num_sub_tks <= 0 {
                     update_tks = true;
                 }
-
 
                 // Check for seek timeout (500ms)
                 if state.seeking {

@@ -291,9 +291,7 @@ impl BackgroundScanner {
                             // Run the scan against folder inventory
                             let scanner_task = Arc::clone(&scanner);
                             tokio::spawn(async move {
-                                if let Err(e) =
-                                    scanner_task.scan_library(library_ref, tx).await
-                                {
+                                if let Err(e) = scanner_task.scan_library(library_ref, tx).await {
                                     error!("Inventory-driven scan failed: {}", e);
                                 }
                             });

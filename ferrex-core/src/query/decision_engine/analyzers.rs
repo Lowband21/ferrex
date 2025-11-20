@@ -1,5 +1,6 @@
 //! Analyzers for data completeness and query complexity
 
+use crate::api_types::ScalarRange;
 use crate::query::decision_engine::types::QueryContext;
 use crate::query::types::{MediaQuery, SortBy};
 use crate::{Media, MediaDetailsOption, MovieReference, SeriesReference};
@@ -244,6 +245,7 @@ mod tests {
                         vote_average: Some(7.5),
                         vote_count: Some(100),
                         popularity: Some(50.0),
+                        content_rating: None,
                         genres: vec![],
                         production_companies: vec![],
                         poster_path: None,
@@ -331,7 +333,7 @@ mod tests {
         // Complex query
         let mut complex_query = moderate_query.clone();
         complex_query.filters.genres = vec!["Action".to_string()];
-        complex_query.filters.year_range = Some((2020, 2024));
+        complex_query.filters.year_range = Some(ScalarRange::new(2020, 2024));
         complex_query.filters.watch_status = Some(crate::WatchStatusFilter::InProgress);
         complex_query.search = Some(crate::query::types::SearchQuery {
             text: "test".to_string(),

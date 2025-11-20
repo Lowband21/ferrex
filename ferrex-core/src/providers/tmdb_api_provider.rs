@@ -32,11 +32,13 @@ use tmdb_api::{
         details::MovieDetails,
         images::{MovieImages, MovieImagesResult},
         popular::MoviePopular,
+        release_dates::{MovieReleaseDates, MovieReleaseDatesResult},
         search::MovieSearch,
     },
     prelude::Command,
     tvshow::{
         aggregate_credits::{TVShowAggregateCredits, TVShowAggregateCreditsResult},
+        content_rating::{ContentRatingResult as TvContentRatingResult, TVShowContentRating},
         details::TVShowDetails,
         episode::details::TVShowEpisodeDetails,
         images::{TVShowImages, TVShowImagesResult},
@@ -201,6 +203,17 @@ impl TmdbApiProvider {
             .map_err(|e| ProviderError::ApiError(e.to_string()))
     }
 
+    /// Get regional release dates for a movie (contains certifications)
+    pub async fn get_movie_release_dates(
+        &self,
+        id: u64,
+    ) -> Result<MovieReleaseDatesResult, ProviderError> {
+        MovieReleaseDates::new(id)
+            .execute(&self.client)
+            .await
+            .map_err(|e| ProviderError::ApiError(e.to_string()))
+    }
+
     /// Get movie images
     pub async fn get_movie_images(&self, id: u64) -> Result<MovieImagesResult, ProviderError> {
         let images_cmd = MovieImages::new(id);
@@ -223,6 +236,17 @@ impl TmdbApiProvider {
     pub async fn get_series(&self, id: u64) -> Result<tmdb_api::tvshow::TVShow, ProviderError> {
         let details_cmd = TVShowDetails::new(id);
         details_cmd
+            .execute(&self.client)
+            .await
+            .map_err(|e| ProviderError::ApiError(e.to_string()))
+    }
+
+    /// Get TV content ratings (per region)
+    pub async fn get_tv_content_ratings(
+        &self,
+        id: u64,
+    ) -> Result<TvContentRatingResult, ProviderError> {
+        TVShowContentRating::new(id)
             .execute(&self.client)
             .await
             .map_err(|e| ProviderError::ApiError(e.to_string()))

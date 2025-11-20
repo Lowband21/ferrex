@@ -523,7 +523,6 @@ impl MediaOps for ArchivedMovieReference {
     }
 }
 
-
 impl MediaOps for ArchivedSeriesReference {
     type Id = SeriesID;
 

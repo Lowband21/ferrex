@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use ferrex_core::{
     ArchivedLibrary, ArchivedLibraryExt, ArchivedLibraryID, ArchivedMedia, ArchivedMediaID,
-    LibraryID, Media, MediaID, MediaIDLike, MediaLike, MediaType, EpisodeReference, SeasonID,
+    EpisodeReference, LibraryID, Media, MediaID, MediaIDLike, MediaLike, MediaType, SeasonID,
     SeasonReference, SeriesID, SortBy, SortOrder,
 };
 use rkyv::{Archived, deserialize, rancor::Error, util::AlignedVec, vec::ArchivedVec};
@@ -347,7 +347,8 @@ impl MediaRepo {
             return Ok(SeasonYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
                 |data: &AlignedVec| unsafe {
-                    let archived_libraries = rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&data);
+                    let archived_libraries =
+                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&data);
                     match archived_libraries
                         .iter()
                         .find(|l| l.get_id().as_uuid() == library_id)
@@ -389,7 +390,8 @@ impl MediaRepo {
             return Ok(EpisodeYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
                 |data: &AlignedVec| unsafe {
-                    let archived_libraries = rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&data);
+                    let archived_libraries =
+                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&data);
                     match archived_libraries
                         .iter()
                         .find(|l| l.get_id().as_uuid() == library_id)
@@ -688,12 +690,13 @@ impl MediaRepo {
         let series_uuid = series_id.as_uuid();
 
         // Determine which library this series belongs to
-        let &library_id = self.media_id_index.get(series_uuid).ok_or_else(|| {
-            RepositoryError::NotFound {
-                entity_type: "Series".to_string(),
-                id: series_uuid.to_string(),
-            }
-        })?;
+        let &library_id =
+            self.media_id_index
+                .get(series_uuid)
+                .ok_or_else(|| RepositoryError::NotFound {
+                    entity_type: "Series".to_string(),
+                    id: series_uuid.to_string(),
+                })?;
 
         let mut results: Vec<SeasonReference> = Vec::new();
 
@@ -719,7 +722,8 @@ impl MediaRepo {
                             // Match parent series
                             if season.series_id.as_uuid() == series_uuid {
                                 // Prefer runtime modified version if present
-                                if let Some(modified) = self.modifications.get_modified(&media_uuid) {
+                                if let Some(modified) = self.modifications.get_modified(&media_uuid)
+                                {
                                     if let Some(s) = modified.clone().to_season() {
                                         results.push(s);
                                     } else if let Ok(Media::Season(s)) =
@@ -767,12 +771,13 @@ impl MediaRepo {
         let season_uuid = season_id.as_uuid();
 
         // Determine which library this season belongs to
-        let &library_id = self.media_id_index.get(season_uuid).ok_or_else(|| {
-            RepositoryError::NotFound {
-                entity_type: "Season".to_string(),
-                id: season_uuid.to_string(),
-            }
-        })?;
+        let &library_id =
+            self.media_id_index
+                .get(season_uuid)
+                .ok_or_else(|| RepositoryError::NotFound {
+                    entity_type: "Season".to_string(),
+                    id: season_uuid.to_string(),
+                })?;
 
         let mut results: Vec<EpisodeReference> = Vec::new();
 
@@ -796,7 +801,8 @@ impl MediaRepo {
                     match media_ref {
                         ArchivedMedia::Episode(ep) => {
                             if ep.season_id.as_uuid() == season_uuid {
-                                if let Some(modified) = self.modifications.get_modified(&media_uuid) {
+                                if let Some(modified) = self.modifications.get_modified(&media_uuid)
+                                {
                                     if let Some(e) = modified.clone().to_episode() {
                                         results.push(e);
                                     } else if let Ok(Media::Episode(e)) =

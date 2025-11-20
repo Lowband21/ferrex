@@ -82,6 +82,7 @@ urlencoding = "2.1"
 #tokio-tungstenite = "0.20"
 
 dashmap.workspace = true
+num-traits = "0.2.19"
 
 # Process management
 [target.'cfg(unix)'.dependencies]

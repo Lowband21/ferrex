@@ -236,7 +236,7 @@ impl ApiService for ApiClientAdapter {
         // Use the rkyv request method to get binary response
         let bytes = self
             .client
-            .execute_rkyv_request::<LibraryMediaResponse>(request)
+            .execute_rkyv_request(request)
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
 
