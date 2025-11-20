@@ -1,0 +1,21 @@
+# Simpler development environment
+FROM rust:1.75-bookworm
+
+# Install only essential dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    pkg-config \
+    clang \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up working directory
+WORKDIR /app
+
+# Expose server port
+EXPOSE 3000
+
+# Default command
+CMD ["cargo", "run", "--bin", "server"]

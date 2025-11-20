@@ -1,0 +1,41 @@
+[package]
+name = "rusty-media-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Time handling
+chrono.workspace = true
+
+# UUID generation
+uuid.workspace = true
+
+# Database
+surrealdb.workspace = true
+
+# File system
+walkdir.workspace = true
+
+# Media processing
+ffmpeg-next.workspace = true
+
+# Regex
+regex.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true

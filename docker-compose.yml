@@ -1,0 +1,96 @@
+version: '3.9'
+
+services:
+  # Development server
+  server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    container_name: rusty_media_server_dev
+    volumes:
+      - .:/app:z
+      - cargo-cache:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - target-cache:/app/target
+    ports:
+      - "3000:3000"
+    environment:
+      - RUST_LOG=debug
+      - DATABASE_URL=postgresql://postgres:password@db:5432/rusty_media
+      - REDIS_URL=redis://cache:6379
+    depends_on:
+      - db
+      - cache
+    networks:
+      - rusty_media_net
+    command: cargo watch -x 'run --bin server' -w server/src
+
+  # PostgreSQL database (optional, for future use)
+  db:
+    image: postgres:16-alpine
+    container_name: rusty_media_db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=rusty_media
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - rusty_media_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis cache (optional, for future use)
+  cache:
+    image: redis:7-alpine
+    container_name: rusty_media_cache
+    ports:
+      - "6379:6379"
+    networks:
+      - rusty_media_net
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO for S3-compatible storage testing
+  minio:
+    image: minio/minio:latest
+    container_name: rusty_media_minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio-data:/data
+    networks:
+      - rusty_media_net
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  cargo-cache:
+  cargo-git:
+  target-cache:
+
+networks:
+  rusty_media_net:
+    driver: bridge

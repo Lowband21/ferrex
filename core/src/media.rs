@@ -1,0 +1,120 @@
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaFile {
+    pub id: Uuid,
+    pub path: PathBuf,
+    pub filename: String,
+    pub size: u64,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub metadata: Option<MediaMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaMetadata {
+    // Technical metadata from FFmpeg
+    pub duration: Option<f64>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
+    pub bitrate: Option<u64>,
+    pub framerate: Option<f64>,
+    pub file_size: u64,
+    
+    // Parsed from filename
+    pub parsed_info: Option<ParsedMediaInfo>,
+    
+    // Future: External database info
+    pub external_info: Option<ExternalMediaInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParsedMediaInfo {
+    pub media_type: MediaType,
+    pub title: String,
+    pub year: Option<u32>,
+    
+    // TV Show specific
+    pub show_name: Option<String>,
+    pub season: Option<u32>,
+    pub episode: Option<u32>,
+    pub episode_title: Option<String>,
+    
+    // Quality/release info
+    pub resolution: Option<String>,
+    pub source: Option<String>,
+    pub release_group: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum MediaType {
+    Movie,
+    TvEpisode,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalMediaInfo {
+    // TMDB/TVDB/IMDB IDs for future lookups
+    pub tmdb_id: Option<u32>,
+    pub tvdb_id: Option<u32>,
+    pub imdb_id: Option<String>,
+    
+    // External metadata
+    pub description: Option<String>,
+    pub poster_url: Option<String>,
+    pub backdrop_url: Option<String>,
+    pub genres: Vec<String>,
+    pub rating: Option<f32>,
+    pub release_date: Option<chrono::NaiveDate>,
+    
+    // TV Show specific external info
+    pub show_description: Option<String>,
+    pub show_poster_url: Option<String>,
+    pub season_poster_url: Option<String>,
+    pub episode_still_url: Option<String>,
+}
+
+impl MediaFile {
+    pub fn new(path: PathBuf) -> crate::Result<Self> {
+        let filename = path
+            .file_name()
+            .ok_or_else(|| crate::MediaError::InvalidMedia("Invalid file path".to_string()))?
+            .to_string_lossy()
+            .to_string();
+
+        let metadata = path.metadata()?;
+        
+        Ok(Self {
+            id: Uuid::new_v4(),
+            path,
+            filename,
+            size: metadata.len(),
+            created_at: chrono::Utc::now(),
+            metadata: None,
+        })
+    }
+    
+    /// Extract full metadata for this media file
+    pub fn extract_metadata(&mut self) -> crate::Result<()> {
+        let mut extractor = crate::MetadataExtractor::new();
+        let metadata = extractor.extract_metadata(&self.path)?;
+        self.metadata = Some(metadata);
+        Ok(())
+    }
+    
+    pub fn is_video_file(&self) -> bool {
+        let video_extensions = ["mp4", "mkv", "avi", "mov", "webm", "flv", "wmv"];
+        
+        if let Some(extension) = self.path.extension() {
+            if let Some(ext_str) = extension.to_str() {
+                return video_extensions.contains(&ext_str.to_lowercase().as_str());
+            }
+        }
+        
+        false
+    }
+}

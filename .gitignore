@@ -1,0 +1,75 @@
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Build artifacts
+dist/
+build/
+out/
+
+# Logs
+*.log
+logs/
+
+# Test media files
+test-media/
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.webm
+*.flv
+*.wmv
+*.m4v
+*.mpg
+*.mpeg
+*.3gp
+*.ogv
+*.ts
+*.mts
+*.m2ts
+
+# Database
+*.db
+*.db-journal
+data/
+
+# MCP
+.mcp/memory/
+.mcp/cache/
+
+# Documentation build
+docs/_build/
+docs/_site/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Coverage
+coverage/
+*.lcov
+tarpaulin-report.html
+
+# Reference libraries
+iced_video_player_cosmic
+iced_video_player_normal
+cosmic-player

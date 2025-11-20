@@ -1,0 +1,66 @@
+[workspace]
+members = [
+    "server",
+    "core",
+    "desktop_iced",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/rusty_media_server"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# HTTP/Web
+axum = "0.7"
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
+
+# Database
+surrealdb = { version = "1.5", features = ["kv-mem"] }
+
+# Media processing
+ffmpeg-next = "7.0"
+
+# File system
+walkdir = "2.5"
+
+# Regex
+regex = "1.10"
+
+# UUID generation
+uuid = { version = "1.10", features = ["v4", "serde"] }
+
+# Configuration
+config = "0.14"
+
+# Testing
+mockall = "0.13"
+tempfile = "3.12"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3

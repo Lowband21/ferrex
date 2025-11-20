@@ -1,0 +1,40 @@
+# Development environment for Rusty Media Server
+FROM rust:1.75-bookworm
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libswscale-dev \
+    libswresample-dev \
+    pkg-config \
+    clang \
+    libclang-dev \
+    postgresql-client \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cargo tools
+RUN cargo install cargo-watch cargo-nextest cargo-tarpaulin
+
+# Set up working directory
+WORKDIR /app
+
+# Create non-root user
+RUN useradd -m -u 1000 rustdev && chown -R rustdev:rustdev /app
+USER rustdev
+
+# Set environment variables
+ENV RUST_LOG=debug
+ENV RUST_BACKTRACE=1
+
+# Expose server port
+EXPOSE 3000
+
+# Default command
+CMD ["cargo", "watch", "-x", "run"]
