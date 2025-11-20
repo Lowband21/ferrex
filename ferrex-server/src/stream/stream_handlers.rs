@@ -169,7 +169,7 @@ pub async fn stream_with_progress_handler(
                 format!("bytes {}-{}/{}", range.start, range.end, file_size),
             )
             .header(header::ACCEPT_RANGES, "bytes")
-            .header("Cache-Control", "public, max-age=3600")
+            .header("Cache-Control", "private, no-store")
             .header("Connection", "keep-alive")
             .body(axum::body::Body::from_stream(stream))
             .expect("failed to build PARTIAL_CONTENT response"));
@@ -186,7 +186,7 @@ pub async fn stream_with_progress_handler(
         .header(header::CONTENT_TYPE, content_type)
         .header(header::CONTENT_LENGTH, file_size.to_string())
         .header(header::ACCEPT_RANGES, "bytes")
-        .header("Cache-Control", "public, max-age=3600")
+        .header("Cache-Control", "private, no-store")
         .header("Connection", "keep-alive")
         .body(axum::body::Body::from_stream(stream))
         .expect("failed to build OK response"))

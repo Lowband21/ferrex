@@ -230,10 +230,11 @@ impl ConfigLoader {
         let dev_mode = env.dev_mode.or(file_dev_mode).unwrap_or(false);
 
         let security = SecurityConfig {
+            // Secure by default outside dev: if unset, default to true when not in dev_mode
             enforce_https: env
                 .enforce_https
                 .or(file_security.enforce_https)
-                .unwrap_or(false),
+                .unwrap_or(!dev_mode),
             trust_proxy_headers: env
                 .trust_proxy_headers
                 .or(file_security.trust_proxy_headers)

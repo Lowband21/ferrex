@@ -835,6 +835,23 @@ where
         )
         .await?;
 
+    // Guard: when HTTPS is enforced in non-dev and TLS terminates at a reverse proxy,
+    // TRUST_PROXY_HEADERS must be enabled to correctly detect client protocol.
+    // Fail fast with actionable guidance to avoid silent insecure posture.
+    let tls = resolve_tls_paths(&args);
+    if config.security.enforce_https
+        && !config.dev_mode
+        && !tls.terminates_here()
+        && !config.security.trust_proxy_headers
+    {
+        anyhow::bail!(
+            "ENFORCE_HTTPS=true but TLS is not configured locally and TRUST_PROXY_HEADERS=false. \
+            If TLS terminates at your reverse proxy, set TRUST_PROXY_HEADERS=true so the server can \
+            honor X-Forwarded-Proto and enforce HTTPS correctly. Alternatively, configure TLS_CERT_PATH \
+            and TLS_KEY_PATH to enable HTTPS directly."
+        );
+    }
+
     let ServerSetup { router, mode } =
         build_server_setup(state, Arc::clone(&config), &args);
 
