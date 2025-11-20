@@ -10,6 +10,20 @@ keywords.workspace = true
 categories.workspace = true
 description = "Cross-platform desktop player for Ferrex with a focus on performance, cutting edge features, and media compatibility"
 
+[lints.rustdoc]
+broken_intra_doc_links = "warn"
+private_intra_doc_links = "warn"
+missing_crate_level_docs = "allow"
+private_doc_tests = "warn"
+invalid_codeblock_attributes = "warn"
+invalid_rust_codeblocks = "warn"
+bare_urls = "warn"
+
+[lints.rust]
+# Player exposes many internal modules publicly today; allow during 0.1.0-alpha
+missing_docs = "allow"
+missing_debug_implementations = "warn"
+
 [dependencies]
 ferrex-core = { path = "../ferrex-core", default-features = false, features = [
   "rkyv",

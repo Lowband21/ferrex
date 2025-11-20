@@ -21,6 +21,7 @@ https://github.com/user-attachments/assets/e7b42e2f-59fa-4347-a5f8-cc49192d5d41
   <img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-informational?logo=docker&style=flat" />
   <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat" />
   <img alt="Status" src="https://img.shields.io/badge/status-active--development-yellow?style=flat" />
+  <a href="https://lowband21.github.io/ferrex/"><img alt="Docs" src="https://img.shields.io/badge/docs-github%20pages-0078D4?style=flat" /></a>
 </p>
 
 
@@ -62,6 +63,11 @@ Self‑hosters and performance‑minded enthusiasts who value a fluid desktop ex
 
 - Fastest way to try it: see [Demo Mode](docs/demo-mode.md) to seed a disposable library.
 - Screenshots and short clips will be added soon.
+
+## Documentation
+
+- Preview rustdocs (WIP): https://lowband21.github.io/ferrex/
+  - Early content; APIs and docs are evolving and incomplete ahead of 0.1.0‑alpha.
 
 ## Quickstart
 

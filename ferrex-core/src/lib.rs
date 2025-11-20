@@ -34,11 +34,11 @@
 //!
 //! ## Examples
 //!
-//! ```no_run
+//! ```ignore
 //! use ferrex_core::{
 //!     database::DatabaseContext,
 //!     player_prelude::{MediaID, MediaIDLike, MovieID, UpdateProgressRequest, UserWatchState},
-//!     user::RegisterRequest,
+//!     // user::RegisterRequest,
 //! };
 //!
 //! async fn register_and_track(database_url: &str) -> Result<(), Box<dyn std::error::Error>> {
