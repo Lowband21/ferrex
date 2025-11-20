@@ -20,7 +20,7 @@ Thumbs.db
 # Environment
 .env
 .env.local
-config/*
+config/
 
 # Build artifacts
 dist/
@@ -62,6 +62,9 @@ tmp/
 temp/
 *.tmp
 todo.md
+
+# Personal notes (untracked)
+notes/
 
 # Coverage
 coverage/

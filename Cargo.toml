@@ -218,7 +218,14 @@ debug = 0
 panic = "abort"
 
 [profile.dev]
-opt-level = 1
+
+[workspace.metadata.dist]
+ci = "github"
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-apple-darwin",
+]
+installers = ["shell", "powershell"]
 
 [profile.dev.package.ferrex-player]
 opt-level = 1

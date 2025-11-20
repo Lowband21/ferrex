@@ -146,6 +146,26 @@ Please include:
 
 CI builds the workspace on Linux/macOS/Windows and runs format, advisories, deny, and clippy. Some DB-dependent tests may not run in CI; please run them locally.
 
+## Dependency Updates
+
+Dependabot maintains third‑party dependencies with small, predictable batches.
+
+- Schedule: weekly on Mondays at 04:00 UTC.
+- Scope: Cargo workspace, GitHub Actions, and Dockerfiles under `docker/`.
+- Grouping:
+  - Cargo: one PR for all patch updates, one for all minor updates (majors are separate).
+  - Actions/Docker: one PR grouping patch + minor updates.
+- Labels: `dependencies`. Reviewer: `@Lowband21`.
+- Commit conventions: Conventional Commits (e.g., `chore(deps): …`, `chore(actions): …`).
+
+Review/merge guidelines:
+
+- Let CI run. For Cargo updates, ensure `cargo build`, `cargo deny`, and `cargo audit` pass.
+- Skim release notes for non‑trivial changes or transitive advisory fixes.
+- Prefer squash merge with the generated title. Keep one PR per group for a clean history.
+
+If a dependency needs to be pinned or ignored, propose a change to `.github/dependabot.yml` with rationale.
+
 ## DCO (Required)
 
 Ferrex uses the Developer Certificate of Origin (DCO) 1.1. Sign off every commit to certify you wrote the code or otherwise have the right to submit it.

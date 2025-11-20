@@ -15,6 +15,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build-windows-dist:
     name: Build ferrex-player (Windows)
@@ -66,9 +69,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage, $bin, $libg | Out-Null
 
           # Copy launcher scripts and README from repo
-          Copy-Item -Force build-windows\\run-ferrex.bat $stage
-          Copy-Item -Force build-windows\\run-ferrex.ps1 $stage
-          Copy-Item -Force build-windows\\README.txt $stage
+          Copy-Item -Force utils\\build-windows\\run-ferrex.bat $stage
+          Copy-Item -Force utils\\build-windows\\run-ferrex.ps1 $stage
+          Copy-Item -Force utils\\build-windows\\README.txt $stage
 
           # Copy freshly built executable
           $exe = Join-Path $root "target\\$env:TARGET\\${{ github.event.inputs.profile || 'release' }}\\ferrex-player.exe"
@@ -106,3 +109,13 @@ jobs:
         with:
           name: ferrex-player-windows
           path: ${{ env.ZIP_FILE }}
+
+      - name: Attach artifact to GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          allowUpdates: true
+          draft: false
+          prerelease: false
+          artifacts: "${{ env.ZIP_FILE }}"
+          artifactErrorsFailBuild: true

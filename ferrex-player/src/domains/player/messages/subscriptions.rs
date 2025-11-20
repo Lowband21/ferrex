@@ -67,7 +67,7 @@ fn keyboard_shortcuts(state: &State) -> Subscription<DomainMessage> {
     }
 
     iced::keyboard::on_key_press(|key, modifiers| {
-        use iced::keyboard::{key::Named, Key};
+        use iced::keyboard::{Key, key::Named};
         let msg = match key {
             Key::Named(Named::Space) => Some(Message::PlayPause),
             Key::Named(Named::ArrowLeft) => {

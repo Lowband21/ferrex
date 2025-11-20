@@ -2,6 +2,8 @@
 
 Ferrex ships with an optional **demo mode** that seeds a disposable media library, relaxes certain validation rules, and auto-configures demo credentials. This helps developers, QA, and prospective users explore Ferrex without sourcing real media.
 
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/3726b3ab-d7fb-44d9-a185-50062e350a3a" />
+
 ---
 
 ## At a Glance

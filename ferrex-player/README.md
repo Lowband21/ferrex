@@ -40,6 +40,15 @@ A high-performance media player built with Iced and GStreamer, featuring video r
    FERREX_SERVER_URL=https://localhost:3000 cargo run -p ferrex-player
    ```
 
+### MPV path resolution on Windows
+
+- The player searches for `mpv.exe` on `PATH`, via `where mpv`, and in common locations:
+  - `C:\\ProgramData\\chocolatey\\bin\\mpv.exe`
+  - `C:\\ProgramData\\chocolatey\\lib\\mpv.install\\tools\\mpv\\mpv.exe`
+  - `%USERPROFILE%\\scoop\\shims\\mpv.exe`
+  - It also falls back to `mpvnet.exe` if found.
+- You can override with `FERREX_MPV_PATH=C:\\full\\path\\to\\mpv.exe`.
+
 3. **Media scanning**:
    - The player displays media indexed by the server.
    - Make sure the server has at least one library configured (with `MEDIA_ROOT` set) and trigger a scan via the API if needed:
@@ -52,6 +61,7 @@ A high-performance media player built with Iced and GStreamer, featuring video r
 ## Features
 
 - Hardware-accelerated video playback via GStreamer
+- Optional external playback via MPV (for HDR passthrough)
 - Non-blocking video updates using iced_video_player
 - Media library grid view with thumbnails (coming soon)
 - Playback controls with auto-hide
@@ -122,3 +132,4 @@ cargo run --features profile-with-tracing
 - **Slider**: Seek through video
 - **Volume slider**: Adjust volume
 - **Back button**: Return to library
+- **3‑dot menu**: Choose “Play in MPV” to hand off playback to external MPV

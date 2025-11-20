@@ -32,17 +32,25 @@ jobs:
             pkg-config \
             libglib2.0-dev \
             libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev
+            libgstreamer-plugins-base1.0-dev \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libavdevice-dev \
+            libavfilter-dev \
+            libswscale-dev \
+            libswresample-dev
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install pkg-config glib gstreamer gst-plugins-base
+          brew install pkg-config glib gstreamer gst-plugins-base ffmpeg
 
       # On Windows leverage GitHub action to install official MSVC GStreamer runtime + devel packages
       - name: Setup GStreamer (Windows)
         if: runner.os == 'Windows'
+        # v.1.5.3 not v1.5.3
         uses: marcpabst/setup-gstreamer@v.1.5.3
         with:
           version: '1.26.6'
@@ -100,11 +108,11 @@ jobs:
       - name: Clippy (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: cargo clippy --workspace --target ${{ matrix.target }} -- -W warnings
+        run: cargo clippy -p ferrex-player --target ${{ matrix.target }} -- -W warnings
 
       - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: cargo build --workspace --all-features --target ${{ matrix.target }}
+        run: cargo build -p ferrex-player --target ${{ matrix.target }}
   #     - name: Build documentation (TODO)
   #       run: cargo doc --workspace --no-deps --all-features -- -D warnings
