@@ -4,6 +4,24 @@ version: '3.9'
 # Use with: docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
 
 services:
+  ferrex:
+    network_mode: "service:tailscale"
+    ports: []
+    # In Tailscale mode all services share the tailscale network namespace.
+    # This removes inter-service DNS names like 'db' and 'cache'.
+    # Force the server to talk to Postgres/Redis via localhost within the
+    # shared namespace.
+    environment:
+      DATABASE_HOST: 127.0.0.1
+      REDIS_URL: redis://127.0.0.1:6379
+    depends_on:
+      tailscale:
+        condition: service_healthy
+      db:
+        condition: service_started
+      cache:
+        condition: service_started
+
   # Optional: if you have a `ferrex` service in another compose file,
   # you can overlay the following on that service there:
   #
@@ -17,20 +35,19 @@ services:
   tailscale:
     image: tailscale/tailscale:latest
     container_name: ferrex_tailscale
-    hostname: ferrex-tailscale
+    hostname: ferrex
     environment:
       - TS_AUTH_ONCE=true                 # only prompt for login on first run
       - TS_STATE_DIR=/var/lib/tailscale   # persist state across restarts
       - TS_ENABLE_HEALTH_CHECK=true       # exposes http://localhost:9002/healthz inside container
       - TS_AUTHKEY=${TS_AUTHKEY:-}        # optional: set for headless/CI joins
-      # - TS_EXTRA_ARGS=--advertise-tags=tag:ferrex  # optional: ACL tags
+    #  - TS_EXTRA_ARGS=--advertise-tags=tag:ferrex  # optional: ACL tags
     volumes:
       - tailscale-data:/var/lib/tailscale
     devices:
       - /dev/net/tun:/dev/net/tun
     cap_add:
       - NET_ADMIN
-    # Minimal healthcheck; for stricter gating, query /healthz with a tiny HTTP client.
     healthcheck:
       test: ["CMD", "tailscale", "status"]
       interval: 30s
@@ -40,10 +57,17 @@ services:
   # When running with tailscale, you typically don't want to expose
   # database/cache host ports. The following overrides clear them.
   db:
+    network_mode: "service:tailscale"
     ports: []
+    depends_on:
+      tailscale:
+        condition: service_healthy
   cache:
+    network_mode: "service:tailscale"
     ports: []
+    depends_on:
+      tailscale:
+        condition: service_healthy
 
 volumes:
   tailscale-data:
-

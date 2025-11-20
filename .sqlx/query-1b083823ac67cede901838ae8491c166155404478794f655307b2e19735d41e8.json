@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rolsuper AS \"is_superuser!: bool\" FROM pg_roles WHERE rolname = current_user",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "is_superuser!: bool",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "1b083823ac67cede901838ae8491c166155404478794f655307b2e19735d41e8"
+}

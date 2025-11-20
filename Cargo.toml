@@ -197,7 +197,7 @@ jsonwebtoken = "^9.3"
 argon2 = "^0.5.3"
 
 [profile.release]
-lto = "fat"
+lto = "thin"
 codegen-units = 16
 opt-level = 3
 
@@ -210,6 +210,12 @@ opt-level = 1
 [profile.priority]
 inherits = "dev"
 opt-level = 1
+
+[profile.priority.package.ferrex-core]
+opt-level = 3
+
+[profile.priority.package.ferrex-server]
+opt-level = 3
 
 [profile.priority.package.ferrex-player]
 opt-level = 3

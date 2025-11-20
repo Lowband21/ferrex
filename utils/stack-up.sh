@@ -126,13 +126,22 @@ PY
 
 CONFIG_DIR_RAW="${CONFIG_DIR_OVERRIDE:-$ROOT_DIR/config}"
 CONFIG_DIR="$(resolve_path "$CONFIG_DIR_RAW")"
-ENV_FILE="$CONFIG_DIR/.env"
+ENV_FILE="$CONFIG_DIR/.env.runtime"
+CONFIG_FILE="$CONFIG_DIR/ferrex.toml"
 
 mkdir -p "$CONFIG_DIR"
 
 run_bootstrap() {
   local include_force="${1:-0}"
-  local env_vars=("FERREX_CONFIG_DIR=$CONFIG_DIR" "FERREX_INIT_NON_INTERACTIVE=$INIT_NON_INTERACTIVE" "FERREX_ENABLE_WILD=$ENABLE_WILD")
+  local env_vars=(
+    "FERREX_CONFIG_DIR=$CONFIG_DIR"
+    "FERREX_INIT_NON_INTERACTIVE=$INIT_NON_INTERACTIVE"
+    "FERREX_ENABLE_WILD=$ENABLE_WILD"
+    "FERREX_INIT_MODE=${FERREX_INIT_MODE:-host}"
+  )
+  if [[ "$MODE" = "tailscale" ]]; then
+    env_vars+=("FERREX_INIT_TAILSCALE=1")
+  fi
 
   if [[ "$include_force" = "force" ]]; then
     if [[ "$FORCE_INIT" -eq 1 || "$FORCE_DB_RESET" -eq 1 ]]; then
@@ -154,6 +163,7 @@ force_init_needed() {
   [[ "$FORCE_INIT" -eq 1 ]] && return 0
   [[ "$FORCE_DB_RESET" -eq 1 ]] && return 0
   [[ ! -s "$ENV_FILE" ]] && return 0
+  [[ ! -s "$CONFIG_FILE" ]] && return 0
   return 1
 }
 
@@ -194,7 +204,6 @@ if [[ ! -s "$FERREX_RUNTIME_ENV_FILE" ]]; then
   source "$ENV_FILE"
   set +a
 
-  export FERREX_CONFIG_DIR="${FERREX_CONFIG_DIR:-$CONFIG_DIR}"
   export FERREX_RUNTIME_ENV_FILE="${FERREX_RUNTIME_ENV_FILE:-$CONFIG_DIR/.env.runtime}"
 
   if [[ ! -s "$FERREX_RUNTIME_ENV_FILE" ]]; then

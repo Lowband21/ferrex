@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT current_database() AS \"db!: String\",\n                   pg_get_userbyid(datdba) AS \"owner!: String\"\n            FROM pg_database\n            WHERE datname = current_database()\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "db!: String",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 1,
+        "name": "owner!: String",
+        "type_info": "Name"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "005945da6b05cfb5bdb15dd60d6aa6c874fd5113d24227bc6ccb2329904db849"
+}

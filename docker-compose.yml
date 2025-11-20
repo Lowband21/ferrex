@@ -1,12 +1,11 @@
 version: '3.9'
 
 services:
-  # PostgreSQL for testing
   db:
     image: postgres:18
     security_opt:
       - "seccomp:./seccomp-allow-iouring.json"
-    container_name: ferrex_media_db_simple
+    container_name: ferrex_media_db
     command:
       - "postgres"
       - "-c"
@@ -17,24 +16,26 @@ services:
       - "max_connections=100"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: '${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in config/.env (run just init-config)}'
+      POSTGRES_PASSWORD_FILE: /run/ferrex-secrets/postgres_superuser_password
       POSTGRES_DB: ${FERREX_DB:-ferrex}
+      POSTGRES_INITDB_ARGS: "${POSTGRES_INITDB_ARGS:---auth-host=scram-sha-256 --auth-local=scram-sha-256}"
       # App-specific init (consumed by /docker-entrypoint-initdb.d scripts)
       FERREX_DB: ${FERREX_DB:-ferrex}
       FERREX_APP_USER: ${FERREX_APP_USER:-ferrex_app}
-      FERREX_APP_PASSWORD: '${FERREX_APP_PASSWORD:?Set FERREX_APP_PASSWORD in config/.env (run just init-config)}'
+      FERREX_APP_PASSWORD_FILE: /run/ferrex-secrets/ferrex_app_password
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./pgsock:/var/run/postgresql
       - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+      - ${FERREX_SECRETS_DIR:-./config/secrets}:/run/ferrex-secrets:ro
     shm_size: "1g"
 
   # Redis for caching
   cache:
-    image: redis:7.4.0-alpine3.20
-    container_name: ferrex_media_cache_simple
+    image: redis:8-alpine
+    container_name: ferrex_media_cache
     ports:
       - "6379:6379"
     command: redis-server --appendonly yes
@@ -53,16 +54,27 @@ services:
       - cache
     # Load environment for server container
     env_file:
-      - config/.env
+      - ${FERREX_RUNTIME_ENV_FILE:-config/.env.runtime}
+    environment:
+      DATABASE_HOST: ${POSTGRES_INTERNAL_HOST:-db}
+      DATABASE_PORT: ${POSTGRES_INTERNAL_PORT:-5432}
+      DATABASE_NAME: ${FERREX_DB:-ferrex}
+      DATABASE_USER: ${FERREX_APP_USER:-ferrex_app}
+      FERREX_APP_PASSWORD_FILE: /run/ferrex-secrets/ferrex_app_password
+      DATABASE_PASSWORD_FILE: /run/ferrex-secrets/ferrex_app_password
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD_FILE: /run/ferrex-secrets/postgres_superuser_password
+      RUST_LOG: ${RUST_LOG:-info}
+      REDIS_URL: ${REDIS_URL_CONTAINER:-redis://cache:6379}
+      FERREX_CONFIG_PATH: /app/config/ferrex.toml
+      TMDB_API_KEY: ${TMDB_API_KEY}
     ports:
       - "3000:3000"
     volumes:
-      # App config + optional rate limits
-      - ./config:/app/config
-      # Cache directories (optional but recommended to persist between restarts)
-      - ./cache:/app/cache
-      # Media library paths
-      - ./media:/media:ro
+      - ${FERREX_CONFIG_DIR:-./config}:/app/config
+      - ${FERREX_SECRETS_DIR:-./config/secrets}:/run/ferrex-secrets:ro
+      - ${CACHE_ROOT:-./cache}:/app/cache:rw
+      - ${MEDIA_ROOT:-./media}:/media:ro
       # Optional TLS certs if terminating at app
       # - ./certs:/certs:ro
 

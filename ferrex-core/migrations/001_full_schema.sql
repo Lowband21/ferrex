@@ -9,7 +9,6 @@ CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
 -- Name: EXTENSION citext; Type: COMMENT; Schema: -; Owner: 
 --
 
-COMMENT ON EXTENSION citext IS 'data type for case-insensitive character strings';
 
 
 --
@@ -23,7 +22,6 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 -- Name: EXTENSION pg_trgm; Type: COMMENT; Schema: -; Owner: 
 --
 
-COMMENT ON EXTENSION pg_trgm IS 'text similarity measurement and index searching based on trigrams';
 
 
 --
@@ -37,7 +35,11 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 -- Name: EXTENSION pgcrypto; Type: COMMENT; Schema: -; Owner: 
 --
 
-COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions, including gen_random_bytes()';
+
+
+--
+-- Create the dedicated schema; owner will be the creating role
+CREATE SCHEMA IF NOT EXISTS ferrex;
 
 
 --
@@ -5914,3 +5916,193 @@ COMMENT ON COLUMN public.auth_device_sessions.device_public_key IS 'Device-bound
 --
 
 COMMENT ON COLUMN public.auth_device_sessions.device_key_alg IS 'Algorithm for device public key (e.g., ed25519)';
+
+--
+-- Move application objects to `ferrex` schema and apply privileges
+--
+-- Notes:
+-- - This baseline ships app objects initially in public (per dump), then moves them
+--   into `ferrex` to achieve the desired end-state without touching every statement.
+-- - Extensions remain in public.
+
+-- Types (enums/domains) -> ferrex (idempotent)
+DO $$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN
+    SELECT t.oid, n.nspname, t.typname
+    FROM pg_type t
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE n.nspname = 'public'
+      AND t.typtype IN ('e','d')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        JOIN pg_extension e ON e.oid = d.refobjid
+        WHERE d.objid = t.oid AND d.deptype = 'e'
+      )
+  LOOP
+    -- If a type with the same name already exists in ferrex, drop the public one; otherwise move it.
+    IF EXISTS (
+      SELECT 1 FROM pg_type t2 JOIN pg_namespace n2 ON n2.oid = t2.typnamespace
+      WHERE n2.nspname = 'ferrex' AND t2.typname = r.typname
+    ) THEN
+      EXECUTE format('DROP TYPE IF EXISTS %I.%I CASCADE', r.nspname, r.typname);
+    ELSE
+      EXECUTE format('ALTER TYPE %I.%I SET SCHEMA ferrex', r.nspname, r.typname);
+    END IF;
+  END LOOP;
+END $$;
+
+-- Functions -> ferrex (exclude extension-owned) (idempotent)
+DO $$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN
+    SELECT p.oid, n.nspname, p.proname, pg_get_function_identity_arguments(p.oid) AS args
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        JOIN pg_extension e ON e.oid = d.refobjid
+        WHERE d.objid = p.oid AND d.deptype = 'e'
+      )
+  LOOP
+    IF EXISTS (
+      SELECT 1 FROM pg_proc p2 JOIN pg_namespace n2 ON n2.oid = p2.pronamespace
+      WHERE n2.nspname = 'ferrex'
+        AND p2.proname = r.proname
+        AND pg_get_function_identity_arguments(p2.oid) = r.args
+    ) THEN
+      -- Drop duplicate in public to avoid name conflicts
+      EXECUTE format('DROP FUNCTION IF EXISTS %I.%I(%s) CASCADE', r.nspname, r.proname, r.args);
+    ELSE
+      EXECUTE format('ALTER FUNCTION %I.%I(%s) SET SCHEMA ferrex', r.nspname, r.proname, r.args);
+    END IF;
+  END LOOP;
+END $$;
+
+-- Tables -> ferrex (idempotent)
+DO $$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN
+    SELECT c.oid, n.nspname, c.relname
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relkind IN ('r','p')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        JOIN pg_extension e ON e.oid = d.refobjid
+        WHERE d.objid = c.oid AND d.deptype = 'e'
+      )
+      AND c.relname <> '_sqlx_migrations'
+  LOOP
+    IF EXISTS (
+      SELECT 1 FROM pg_class c2 JOIN pg_namespace n2 ON n2.oid = c2.relnamespace
+      WHERE n2.nspname = 'ferrex' AND c2.relname = r.relname AND c2.relkind IN ('r','p')
+    ) THEN
+      -- Prefer ferrex; drop stray public copy (includes dependent indexes)
+      EXECUTE format('DROP TABLE IF EXISTS %I.%I CASCADE', r.nspname, r.relname);
+    ELSE
+      EXECUTE format('ALTER TABLE %I.%I SET SCHEMA ferrex', r.nspname, r.relname);
+    END IF;
+  END LOOP;
+END $$;
+
+-- Sequences -> ferrex (none expected but included for completeness, idempotent)
+DO $$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN
+    SELECT c.oid, n.nspname, c.relname
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relkind = 'S'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        JOIN pg_extension e ON e.oid = d.refobjid
+        WHERE d.objid = c.oid AND d.deptype = 'e'
+      )
+  LOOP
+    IF EXISTS (
+      SELECT 1 FROM pg_class c2 JOIN pg_namespace n2 ON n2.oid = c2.relnamespace
+      WHERE n2.nspname = 'ferrex' AND c2.relname = r.relname AND c2.relkind = 'S'
+    ) THEN
+      EXECUTE format('DROP SEQUENCE IF EXISTS %I.%I CASCADE', r.nspname, r.relname);
+    ELSE
+      EXECUTE format('ALTER SEQUENCE %I.%I SET SCHEMA ferrex', r.nspname, r.relname);
+    END IF;
+  END LOOP;
+END $$;
+
+-- Views / Materialized Views -> ferrex (idempotent)
+DO $$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN
+    SELECT c.oid, n.nspname, c.relname, c.relkind
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relkind IN ('v','m')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        JOIN pg_extension e ON e.oid = d.refobjid
+        WHERE d.objid = c.oid AND d.deptype = 'e'
+      )
+  LOOP
+    IF EXISTS (
+      SELECT 1 FROM pg_class c2 JOIN pg_namespace n2 ON n2.oid = c2.relnamespace
+      WHERE n2.nspname = 'ferrex' AND c2.relname = r.relname AND c2.relkind = r.relkind
+    ) THEN
+      IF r.relkind = 'v' THEN
+        EXECUTE format('DROP VIEW IF EXISTS %I.%I CASCADE', r.nspname, r.relname);
+      ELSE
+        EXECUTE format('DROP MATERIALIZED VIEW IF EXISTS %I.%I CASCADE', r.nspname, r.relname);
+      END IF;
+    ELSE
+      IF r.relkind = 'v' THEN
+        EXECUTE format('ALTER VIEW %I.%I SET SCHEMA ferrex', r.nspname, r.relname);
+      ELSE
+        EXECUTE format('ALTER MATERIALIZED VIEW %I.%I SET SCHEMA ferrex', r.nspname, r.relname);
+      END IF;
+    END IF;
+  END LOOP;
+END $$;
+
+-- Apply privileges and defaults to the current role running the migration
+DO $$
+DECLARE
+  role_name text := current_user;
+BEGIN
+  EXECUTE format('GRANT USAGE, CREATE ON SCHEMA ferrex TO %I', role_name);
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ferrex TO %I', role_name);
+  EXECUTE format('GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA ferrex TO %I', role_name);
+  EXECUTE format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ferrex TO %I', role_name);
+
+  EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA ferrex GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I', role_name, role_name);
+  EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA ferrex GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO %I', role_name, role_name);
+  EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA ferrex GRANT EXECUTE ON FUNCTIONS TO %I', role_name, role_name);
+END $$;
+
+-- Set a database-level default search_path so unqualified names resolve to `ferrex` first.
+-- Rationale: tests and tools that don't set search_path still see the app schema.
+DO $$
+DECLARE
+  db_name text := current_database();
+BEGIN
+  BEGIN
+    EXECUTE format('ALTER DATABASE %I SET search_path = ferrex, public', db_name);
+  EXCEPTION WHEN insufficient_privilege THEN
+    -- Not a database owner or superuser: skip. The application sets search_path per-connection.
+    NULL;
+  END;
+END $$;

@@ -18,10 +18,16 @@ do
     fi
 done
 
-# Reset ownership each start in case the cache volume is newly mounted or owned by root.
-if chown -R "${SERVER_USER}:${SERVER_GROUP}" "${CACHE_ROOT}"; then
-    exec gosu "${SERVER_USER}:${SERVER_GROUP}" "${SERVER_BINARY}" "$@"
+# If running as root inside the container, chown the cache and drop privileges to
+# SERVER_USER:SERVER_GROUP. On rootless runs (e.g., podman with --user), we skip
+# gosu and execute directly to avoid EPERM when switching users.
+if [ "$(id -u)" = "0" ]; then
+    if chown -R "${SERVER_USER}:${SERVER_GROUP}" "${CACHE_ROOT}"; then
+        exec gosu "${SERVER_USER}:${SERVER_GROUP}" "${SERVER_BINARY}" "$@"
+    fi
+    >&2 echo "warning: failed to set cache ownership; starting ${SERVER_BINARY} as root"
+    exec "${SERVER_BINARY}" "$@"
+else
+    echo "info: running as UID $(id -u):$(id -g); skipping gosu"
+    exec "${SERVER_BINARY}" "$@"
 fi
-
->&2 echo "warning: failed to set cache ownership; starting ${SERVER_BINARY} as root"
-exec "${SERVER_BINARY}" "$@"

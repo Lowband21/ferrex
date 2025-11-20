@@ -1,5 +1,7 @@
 # Development environment for Rusty Media Server
 FROM rust:1.90.0-slim-trixie
+ARG ENABLE_WILD=1
+ENV PATH="/usr/local/cargo/bin:${PATH}"
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,13 +16,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     clang \
     libclang-dev \
+    ca-certificates \
     postgresql-client \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install cargo tools
-RUN cargo install cargo-watch cargo-nextest cargo-tarpaulin
+# Install cargo-binstall once, then fetch the tooling without compiling from source.
+RUN curl -L --proto '=https' --tlsv1.2 -sSf \
+        https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh \
+        | bash
+RUN cargo binstall wild-linker --no-confirm --force \
+    && cargo install cargo-watch \
+    && cargo install cargo-nextest \
+    && cargo install cargo-tarpaulin
 
 # Set up working directory
 WORKDIR /app
@@ -32,6 +41,7 @@ USER rustdev
 # Set environment variables
 ENV RUST_LOG=debug
 ENV RUST_BACKTRACE=1
+ENV RUSTFLAGS="-Clinker=clang -Clink-arg=--ld-path=wild"
 
 # Expose server port
 EXPOSE 3000
