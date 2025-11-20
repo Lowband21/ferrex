@@ -119,7 +119,13 @@ fn gpu_write_texture_padded_roundtrip() {
 
     let slice = readback.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
-    device.poll(wgpu::PollType::Wait);
+    // Wait for the most recent submission to complete with no timeout
+    device
+        .poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        })
+        .expect("device.poll failed");
     let mapped = slice.get_mapped_range();
 
     for y in 0..height as usize {

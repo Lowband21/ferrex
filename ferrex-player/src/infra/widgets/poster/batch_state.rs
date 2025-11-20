@@ -88,6 +88,7 @@ pub struct PosterBatchState {
     loaded_times: HashMap<u64, Instant>,
     // Avoid log flooding: remember last layer we logged per instance id
     logged_layers: HashMap<u64, i32>,
+    groups: Vec<PosterGroup>,
 }
 
 impl PosterBatchState {
@@ -246,6 +247,24 @@ impl PosterBatchState {
 
         self.pending_instances.push(instance);
     }
+
+    fn push_group_instance(&mut self, group: Arc<wgpu::BindGroup>) {
+        match self.groups.last_mut() {
+            Some(last) if Arc::ptr_eq(&last.atlas, &group) => {
+                last.instance_count += 1;
+            }
+            _ => self.groups.push(PosterGroup {
+                atlas: group,
+                instance_count: 1,
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PosterGroup {
+    atlas: Arc<wgpu::BindGroup>,
+    instance_count: u32,
 }
 
 impl std::fmt::Debug for PosterBatchState {
@@ -337,6 +356,7 @@ impl PrimitiveBatchState for PosterBatchState {
             uploads_this_frame: 0,
             loaded_times: HashMap::new(),
             logged_layers: HashMap::new(),
+            groups: Vec::new(),
         }
     }
 
@@ -345,13 +365,22 @@ impl PrimitiveBatchState for PosterBatchState {
     }
 
     fn prepare(&mut self, context: &mut PrepareContext<'_>) {
+        self.groups.clear();
+
         if let Some(image_cache) = context.resources.image_cache() {
             // Mutable access is required so cached lookups register cache hits
             // and keep atlas allocations alive across the renderer's trim pass.
             let atlas_layout = image_cache.texture_layout();
-            self.ensure_pipeline(context.device, atlas_layout);
+            self.ensure_pipeline(context.device, atlas_layout.clone());
+
+            // Keep track of the last atlas bind group we saw this frame so we can
+            // reuse it when we draw placeholders for images that missed the budget.
+            let mut last_group: Option<Arc<wgpu::BindGroup>> = None;
 
             for pending in std::mem::take(&mut self.pending_primitives) {
+                // Bind group for the texture atlas containing this image
+                let mut bind_group: Option<Arc<wgpu::BindGroup>> = None;
+
                 let mut atlas_region =
                     image_cache.cached_raster_region(&pending.handle);
                 let was_cached = atlas_region.is_some();
@@ -359,47 +388,101 @@ impl PrimitiveBatchState for PosterBatchState {
                 if !was_cached {
                     // Diagnostic: log computed row/padded stride for non-256-aligned widths
                     if log::log_enabled!(log::Level::Debug) {
-                        let dims = image_cache.measure_image(&pending.handle);
-                        let width = dims.width;
-                        let height = dims.height;
-                        if width > 0 && height > 0 {
-                            let row_bytes = width as usize * 4;
-                            let align =
-                                wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
-                            let padded = if row_bytes == 0 {
-                                0
-                            } else {
-                                ((row_bytes + align - 1) / align) * align
-                            };
-                            if row_bytes % align != 0 {
-                                log::debug!(
-                                    "Poster atlas upload: {}x{} RGBA, row_bytes={} padded_bytes_per_row={} (align {}), extent=({}, {}, 1)",
-                                    width,
-                                    height,
-                                    row_bytes,
-                                    padded,
-                                    align,
-                                    width,
-                                    height
-                                );
+                        if let Some(dims) =
+                            image_cache.measure_image(&pending.handle)
+                        {
+                            let width = dims.width;
+                            let height = dims.height;
+                            if width > 0 && height > 0 {
+                                let row_bytes = width as usize * 4;
+                                let align =
+                                    wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+                                let padded = if row_bytes == 0 {
+                                    0
+                                } else {
+                                    ((row_bytes + align - 1) / align) * align
+                                };
+                                if row_bytes % align != 0 {
+                                    log::debug!(
+                                        "Poster atlas upload: {}x{} RGBA, row_bytes={} padded_bytes_per_row={} (align {}), extent=({}, {}, 1)",
+                                        width,
+                                        height,
+                                        row_bytes,
+                                        padded,
+                                        align,
+                                        width,
+                                        height
+                                    );
+                                }
                             }
                         }
                     }
                     if self.uploads_this_frame >= MAX_UPLOADS_PER_FRAME {
-                        self.push_placeholder(&pending);
+                        // Over budget: draw a placeholder instance and, if we
+                        // have seen any atlas bind group already, use it.
+                        let instance = create_placeholder_instance(
+                            &pending.bounds,
+                            pending.radius,
+                            pending.theme_color,
+                            pending.animated_bounds.as_ref(),
+                            pending.progress,
+                            pending.progress_color,
+                        );
+                        self.pending_instances.push(instance);
+
+                        let group_arc = match &last_group {
+                            Some(group) => Arc::clone(group),
+                            None => {
+                                let fallback =
+                                    Arc::clone(image_cache.bind_group());
+                                last_group = Some(fallback.clone());
+                                fallback
+                            }
+                        };
+
+                        self.push_group_instance(group_arc);
+
                         continue;
                     }
 
                     self.uploads_this_frame += 1;
-                    atlas_region = image_cache.ensure_raster_region(
+                    // Attempt upload and get bind group
+                    if let Some((_entry, group)) = image_cache.upload_raster(
                         context.device,
                         context.encoder,
+                        context.belt,
                         &pending.handle,
-                    );
+                    ) {
+                        bind_group = Some(group.clone());
+                        last_group = Some(group.clone());
+                    }
+                    // Re-check the cached region after upload
+                    atlas_region =
+                        image_cache.cached_raster_region(&pending.handle);
                 }
 
                 let Some(region) = atlas_region else {
-                    self.push_placeholder(&pending);
+                    // Still no region: draw a placeholder; use last_group if present
+                    let instance = create_placeholder_instance(
+                        &pending.bounds,
+                        pending.radius,
+                        pending.theme_color,
+                        pending.animated_bounds.as_ref(),
+                        pending.progress,
+                        pending.progress_color,
+                    );
+                    self.pending_instances.push(instance);
+
+                    let group_arc = match &last_group {
+                        Some(group) => Arc::clone(group),
+                        None => {
+                            let fallback = Arc::clone(image_cache.bind_group());
+                            last_group = Some(fallback.clone());
+                            fallback
+                        }
+                    };
+
+                    self.push_group_instance(group_arc);
                     continue;
                 };
 
@@ -469,7 +552,35 @@ impl PrimitiveBatchState for PosterBatchState {
                     pending.progress_color,
                 );
 
+                // Track groups by atlas bind group. If none obtained yet, try to
+                // fallback to the main atlas bind group by triggering an upload_raster
+                // call (which will provide it if available).
+                if bind_group.is_none() {
+                    if let Some((_entry, group)) = image_cache.upload_raster(
+                        context.device,
+                        context.encoder,
+                        context.belt,
+                        &pending.handle,
+                    ) {
+                        bind_group = Some(group.clone());
+                        last_group = Some(group.clone());
+                    }
+                }
+
+                // If we still do not have a bind group, associate this instance
+                // with the last known group (placeholders use invalid UVs).
+                let Some(group_arc) = bind_group.or_else(|| last_group.clone())
+                else {
+                    // No group at all this frame: instance was already enqueued.
+                    // It will be skipped in render until a group becomes available in a later frame.
+                    continue;
+                };
+
+                // Append instance and update grouping for render segmentation
                 self.pending_instances.push(instance);
+
+                last_group = Some(group_arc.clone());
+                self.push_group_instance(group_arc);
             }
         } else {
             if !self.pending_primitives.is_empty() {
@@ -594,11 +705,6 @@ impl PrimitiveBatchState for PosterBatchState {
             return;
         }
 
-        let Some(image_cache) = context.resources.image_cache() else {
-            log::error!("RoundedImageBatchState::render missing image cache");
-            return;
-        };
-
         let (Some(instance_buffer), Some(globals_bind_group), Some(pipeline)) = (
             self.instance_manager.buffer(),
             self.globals_bind_group.as_ref(),
@@ -611,11 +717,8 @@ impl PrimitiveBatchState for PosterBatchState {
             return;
         };
 
-        let atlas_bind_group = image_cache.bind_group();
-
         render_pass.set_pipeline(pipeline);
         render_pass.set_bind_group(0, globals_bind_group, &[]);
-        render_pass.set_bind_group(1, atlas_bind_group, &[]);
 
         let scissor = context.scissor_rect;
         render_pass.set_scissor_rect(
@@ -625,7 +728,26 @@ impl PrimitiveBatchState for PosterBatchState {
             scissor.height,
         );
         render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
-        render_pass.draw(0..4, start..end);
+
+        // Draw grouped by atlas bind group to ensure correct sampling
+        let mut offset: u32 = 0;
+        for group in &self.groups {
+            let group_start = offset;
+            let group_end = offset + group.instance_count;
+
+            let draw_start = start.max(group_start);
+            let draw_end = end.min(group_end);
+
+            if draw_start < draw_end {
+                render_pass.set_bind_group(1, group.atlas.as_ref(), &[]);
+                render_pass.draw(0..4, draw_start..draw_end);
+            }
+
+            offset = group_end;
+            if offset >= end {
+                break;
+            }
+        }
     }
 
     fn trim(&mut self) {
@@ -642,6 +764,7 @@ impl PrimitiveBatchState for PosterBatchState {
         self.pending_instances.clear();
         self.pending_primitives.clear();
         self.uploads_this_frame = 0;
+        self.groups.clear();
     }
 
     fn instance_count(&self) -> usize {

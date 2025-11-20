@@ -249,31 +249,31 @@ iced_widget = { git = "https://github.com/Lowband21/iced-ferrex.git", package = 
 iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_wgpu" }
 
 # [patch.crates-io]
-# iced = { path = "./vendor/iced-ferrex", package = "iced" }
-# iced_core = { path = "./vendor/iced-ferrex/core", package = "iced_core" }
-# iced_widget = { path = "./vendor/iced-ferrex/widget", package = "iced_widget" }
-# iced_wgpu = { path = "./vendor/iced-ferrex/wgpu", package = "iced_wgpu" }
-# iced_winit = { path = "./vendor/iced-ferrex/winit", package = "iced_winit" }
+# iced = { path = "../../fxecodev/iced_ferrex", package = "iced" }
+# iced_core = { path = "../../fxecodev/iced_ferrex/core", package = "iced_core" }
+# iced_widget = { path = "../../fxecodev/iced_ferrex/widget", package = "iced_widget" }
+# iced_wgpu = { path = "../../fxecodev/iced_ferrex/wgpu", package = "iced_wgpu" }
+# iced_winit = { path = "../../fxecodev/iced_ferrex/winit", package = "iced_winit" }
 
 # [patch."https://github.com/iced-rs/iced.git"]
-# iced = { path = "./vendor/iced-ferrex", package = "iced" }
-# iced_core = { path = "./vendor/iced-ferrex/core", package = "iced_core" }
-# iced_widget = { path = "./vendor/iced-ferrex/widget", package = "iced_widget" }
-# iced_wgpu = { path = "./vendor/iced-ferrex/wgpu", package = "iced_wgpu" }
-# iced_winit = { path = "./vendor/iced-ferrex/winit", package = "iced_winit" }
+# iced = { path = "../../fxecodev/iced_ferrex", package = "iced" }
+# iced_core = { path = "../../fxecodev/iced_ferrex/core", package = "iced_core" }
+# iced_widget = { path = "../../fxecodev/iced_ferrex/widget", package = "iced_widget" }
+# iced_wgpu = { path = "../../fxecodev/iced_ferrex/wgpu", package = "iced_wgpu" }
+# iced_winit = { path = "../../fxecodev/iced_ferrex/winit", package = "iced_winit" }
 
 # [patch."https://github.com/Lowband21/iced-ferrex.git"]
-# iced = { path = "./vendor/iced-ferrex", package = "iced" }
-# iced_core = { path = "./vendor/iced-ferrex/core", package = "iced_core" }
-# iced_widget = { path = "./vendor/iced-ferrex/widget", package = "iced_widget" }
-# iced_wgpu = { path = "./vendor/iced-ferrex/wgpu", package = "iced_wgpu" }
-# iced_winit = { path = "./vendor/iced-ferrex/winit", package = "iced_winit" }
-# iced_test = { path = "./vendor/iced-ferrex/test", package = "iced_test" }
+# iced = { path = "../../fxecodev/iced_ferrex", package = "iced" }
+# iced_core = { path = "../../fxecodev/iced_ferrex/core", package = "iced_core" }
+# iced_widget = { path = "../../fxecodev/iced_ferrex/widget", package = "iced_widget" }
+# iced_wgpu = { path = "../../fxecodev/iced_ferrex/wgpu", package = "iced_wgpu" }
+# iced_winit = { path = "../../fxecodev/iced_ferrex/winit", package = "iced_winit" }
+# iced_test = { path = "../../fxecodev/iced_ferrex/test", package = "iced_test" }
 
 # [patch."https://github.com/Lowband21/iced_aw_ferrex.git"]
-# iced_aw = { path = "../../iced_aw" }
+# iced_aw = { path = "../../fxecodev/iced_aw" }
 
 # [patch."https://github.com/Lowband21/subwave.git"]
-# subwave_unified = { path = "../../subwave/subwave_unified" }
-# subwave_core = { path = "../../subwave/subwave_core" }
-# subwave_wayland = { path = "../../subwave/subwave_wayland" }
+# subwave_unified = { path = "../../fxecodev/subwave/subwave_unified" }
+# subwave_core = { path = "../../fxecodev/subwave/subwave_core" }
+# subwave_wayland = { path = "../../fxecodev/subwave/subwave_wayland" }

@@ -128,6 +128,7 @@ impl PrimitiveBatchState for TexturePreloaderBatchState {
             let _ = image_cache.ensure_raster_region(
                 context.device,
                 context.encoder,
+                context.belt,
                 &handle,
             );
         }
