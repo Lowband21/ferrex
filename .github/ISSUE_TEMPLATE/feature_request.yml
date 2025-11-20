@@ -1,0 +1,83 @@
+name: Feature request
+description: Propose an idea or enhancement to improve Ferrex.
+title: "feat: <short summary>"
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! For security requests (hardening, vulnerabilities), follow the Security Policy instead of filing a public issue.
+
+        Security: https://github.com/Lowband21/ferrex/blob/main/.github/SECURITY.md
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues to avoid duplicates.
+          required: true
+        - label: I read the Contributing Guide and Code of Conduct.
+          required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Target area(s)
+      multiple: true
+      options:
+        - server
+        - player
+        - core
+        - model
+        - contracts
+        - database / SQLx
+        - docker / compose
+        - build / CI
+        - docs
+        - other / unsure
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem does this solve? Why is it important?
+      placeholder: Users need to …
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the feature or change you’d like to see.
+      placeholder: Add a new … that …
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you tried or considered and why they’re less ideal.
+      placeholder: Alternative A …; Alternative B …
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and impact
+      description: Affected users, rough complexity, migration concerns, and possible risks.
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context/screenshots
+      description: Links, mockups, or prior art that helps evaluate the idea.
+
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: Contribution
+      options:
+        - label: I’m willing to help implement this.

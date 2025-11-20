@@ -1,0 +1,119 @@
+name: Bug report
+description: Report a reproducible problem, crash, or incorrect behavior.
+title: "bug: <short summary>"
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! For security issues, do not use this form — please see the Security Policy instead.
+
+        Security: https://github.com/Lowband21/ferrex/blob/main/.github/SECURITY.md
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      description: Please confirm the following to help us triage efficiently.
+      options:
+        - label: I searched existing issues to avoid duplicates.
+          required: true
+        - label: I read the Contributing Guide and Code of Conduct.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component(s)
+      description: Select the area(s) most related to the issue.
+      multiple: true
+      options:
+        - server
+        - player
+        - core
+        - model
+        - contracts
+        - database / SQLx
+        - docker / compose
+        - build / CI
+        - docs
+        - other / unsure
+
+  - type: input
+    id: version
+    attributes:
+      label: Ferrex version or commit
+      description: "Release tag (e.g., v0.x.y) or commit SHA (git rev-parse HEAD). If using a prebuilt binary, include its filename."
+      placeholder: v0.x.y or 0123abcd
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment details
+      description: Provide OS/arch, how you ran Ferrex, and relevant tool versions.
+      placeholder: |
+        OS: Ubuntu 22.04 (x86_64) / macOS 14.5 (arm64) / Windows 11
+        Run method: cargo / just / docker
+        Rust: rustc 1.7x.x (if built locally)
+        Database: Postgres <version> (if applicable)
+        Other: GPU/driver, shell, etc.
+      render: bash
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Clear, minimal steps to trigger the bug. Include configs or sample data if relevant.
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: A concise description of what you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: What actually happened. Include full error messages.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs/output
+      description: Paste logs with sensitive data removed. Use fenced code blocks for readability.
+      placeholder: |
+        ```text
+        <logs here>
+        ```
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context/screenshots
+      description: Links, screenshots, or anything else that helps.
+
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: Contribution
+      options:
+        - label: I’m willing to open a PR to help fix this.

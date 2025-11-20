@@ -1,0 +1,54 @@
+name: Docs improvement
+description: Fix or improve documentation, examples, or comments.
+title: "docs: <short summary>"
+labels:
+  - documentation
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues to avoid duplicates.
+          required: true
+        - label: I read the Contributing Guide and Code of Conduct.
+          required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      multiple: true
+      options:
+        - README
+        - docs/*
+        - ferrex-server
+        - ferrex-player
+        - examples / snippets
+        - comments / inline docs
+        - other / unsure
+
+  - type: input
+    id: location
+    attributes:
+      label: Link(s) to source
+      description: File path(s) or URLs to the content to change.
+      placeholder: e.g., docs/faq.md or ferrex-player/README.md
+
+  - type: textarea
+    id: current
+    attributes:
+      label: Current content
+      description: What’s confusing, incorrect, or missing?
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Provide the updated text or outline the improvement.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, references, or examples that help clarify the change.
