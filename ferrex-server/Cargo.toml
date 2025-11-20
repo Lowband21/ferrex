@@ -64,3 +64,4 @@ ferrex-core = { path = "../ferrex-core" }
 [dev-dependencies]
 mockall.workspace = true
 tempfile.workspace = true
+hyper = "0.14"

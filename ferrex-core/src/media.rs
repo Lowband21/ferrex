@@ -10,6 +10,8 @@ pub struct MediaFile {
     pub size: u64,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub metadata: Option<MediaMetadata>,
+    pub library_id: Option<Uuid>,
+    pub parent_media_id: Option<Uuid>, // For extras: link to parent movie/episode
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +45,10 @@ pub struct ParsedMediaInfo {
     pub episode: Option<u32>,
     pub episode_title: Option<String>,
 
+    // Extra specific
+    pub extra_type: Option<ExtraType>,
+    pub parent_title: Option<String>, // Title of the parent movie/show
+
     // Quality/release info
     pub resolution: Option<String>,
     pub source: Option<String>,
@@ -54,7 +60,21 @@ pub struct ParsedMediaInfo {
 pub enum MediaType {
     Movie,
     TvEpisode,
+    Extra,
     Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub enum ExtraType {
+    BehindTheScenes,
+    DeletedScenes,
+    Featurette,
+    Interview,
+    Scene,
+    Short,
+    Trailer,
+    Other,
 }
 
 impl std::fmt::Display for MediaType {
@@ -62,7 +82,23 @@ impl std::fmt::Display for MediaType {
         match self {
             MediaType::Movie => write!(f, "Movie"),
             MediaType::TvEpisode => write!(f, "TvEpisode"),
+            MediaType::Extra => write!(f, "Extra"),
             MediaType::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
+impl std::fmt::Display for ExtraType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExtraType::BehindTheScenes => write!(f, "Behind the Scenes"),
+            ExtraType::DeletedScenes => write!(f, "Deleted Scenes"),
+            ExtraType::Featurette => write!(f, "Featurette"),
+            ExtraType::Interview => write!(f, "Interview"),
+            ExtraType::Scene => write!(f, "Scene"),
+            ExtraType::Short => write!(f, "Short"),
+            ExtraType::Trailer => write!(f, "Trailer"),
+            ExtraType::Other => write!(f, "Other"),
         }
     }
 }
@@ -148,7 +184,15 @@ impl MediaFile {
             size: metadata.len(),
             created_at: chrono::Utc::now(),
             metadata: None,
+            library_id: None,
+            parent_media_id: None,
         })
+    }
+
+    pub fn new_with_library(path: PathBuf, library_id: Uuid) -> crate::Result<Self> {
+        let mut media_file = Self::new(path)?;
+        media_file.library_id = Some(library_id);
+        Ok(media_file)
     }
 
     /// Extract full metadata for this media file

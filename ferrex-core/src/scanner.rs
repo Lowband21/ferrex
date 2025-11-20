@@ -1,7 +1,8 @@
-use crate::{MediaError, MediaFile, Result};
+use crate::{MediaError, MediaFile, Result, LibraryType};
 use std::path::Path;
 use tracing::{debug, info, warn};
 use walkdir::{DirEntry, WalkDir};
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct MediaScanner {
@@ -11,6 +12,9 @@ pub struct MediaScanner {
     pub max_depth: Option<usize>,
     /// Whether to follow symbolic links
     pub follow_links: bool,
+    /// Library context for scanning
+    pub library_id: Option<Uuid>,
+    pub library_type: Option<LibraryType>,
 }
 
 impl Default for MediaScanner {
@@ -35,6 +39,8 @@ impl Default for MediaScanner {
             ],
             max_depth: None,
             follow_links: false,
+            library_id: None,
+            library_type: None,
         }
     }
 }
@@ -70,6 +76,13 @@ impl MediaScanner {
         self
     }
 
+    /// Set library context for scanning
+    pub fn with_library(mut self, library_id: Uuid, library_type: LibraryType) -> Self {
+        self.library_id = Some(library_id);
+        self.library_type = Some(library_type);
+        self
+    }
+
     /// Check if a file is a supported video file based on extension
     pub fn is_video_file(&self, path: &Path) -> bool {
         if let Some(extension) = path.extension() {
@@ -79,6 +92,104 @@ impl MediaScanner {
             }
         }
         false
+    }
+
+    /// Check if a path should be scanned based on library type
+    pub fn should_scan_path(&self, _path: &Path) -> bool {
+        // For now, we scan all video files regardless of library type
+        // In the future, we can add logic to:
+        // - For TV Shows: only scan files in series folder structures
+        // - For Movies: skip files in series folders
+        // - Handle extras folders differently
+        true
+    }
+
+    /// Determine if a file is likely in a TV show structure
+    pub fn is_tv_show_structure(path: &Path) -> bool {
+        // Check if the file is in a typical TV show folder structure
+        // e.g., "Show Name/Season 01/episode.mkv" or "Show Name/S01E01.mkv"
+        
+        // Get parent directories
+        if let Some(parent) = path.parent() {
+            if let Some(parent_name) = parent.file_name() {
+                if let Some(name_str) = parent_name.to_str() {
+                    let name_lower = name_str.to_lowercase();
+                    
+                    // Check for season folder patterns
+                    if name_lower.starts_with("season ") || 
+                       name_lower.starts_with("s") && name_lower.len() > 1 && 
+                       name_lower.chars().nth(1).map_or(false, |c| c.is_numeric()) {
+                        return true;
+                    }
+                }
+            }
+            
+            // Check grandparent for show folder (Show Name/Season X/file.mkv)
+            if let Some(grandparent) = parent.parent() {
+                if let Some(_grandparent_name) = grandparent.file_name() {
+                    if let Some(parent_name) = parent.file_name() {
+                        if let Some(parent_str) = parent_name.to_str() {
+                            let parent_lower = parent_str.to_lowercase();
+                            if parent_lower.starts_with("season ") || 
+                               parent_lower.starts_with("s") && parent_lower.len() > 1 {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Check filename for episode patterns
+        if let Some(filename) = path.file_stem() {
+            if let Some(name_str) = filename.to_str() {
+                let name_lower = name_str.to_lowercase();
+                
+                // Common episode patterns: S01E01, 1x01, etc.
+                if name_lower.contains("s") && name_lower.contains("e") {
+                    return true;
+                }
+                if name_lower.contains("x") && 
+                   name_lower.chars().any(|c| c.is_numeric()) {
+                    return true;
+                }
+            }
+        }
+        
+        false
+    }
+
+    /// Scan a library's paths for media files
+    pub fn scan_library(&self, library_paths: &[std::path::PathBuf]) -> Result<ScanResult> {
+        let mut combined_result = ScanResult {
+            total_files: 0,
+            video_files: Vec::new(),
+            skipped_files: 0,
+            errors: Vec::new(),
+        };
+
+        for path in library_paths {
+            match self.scan_directory(path) {
+                Ok(result) => {
+                    combined_result.total_files += result.total_files;
+                    combined_result.video_files.extend(result.video_files);
+                    combined_result.skipped_files += result.skipped_files;
+                    combined_result.errors.extend(result.errors);
+                }
+                Err(e) => {
+                    warn!("Failed to scan library path {}: {}", path.display(), e);
+                    combined_result.errors.push(format!("Failed to scan {}: {}", path.display(), e));
+                }
+            }
+        }
+
+        info!(
+            "Library scan complete: {} total files, {} video files found",
+            combined_result.total_files,
+            combined_result.video_files.len()
+        );
+
+        Ok(combined_result)
     }
 
     /// Scan a directory for media files
@@ -143,7 +254,7 @@ impl MediaScanner {
                 }
                 Err(e) => {
                     warn!("Error walking directory: {}", e);
-                    result.errors.push(format!("Directory walk error: {}", e));
+                    result.errors.push(format!("Directory walk error: {e}"));
                 }
             }
         }
@@ -188,12 +299,41 @@ impl MediaScanner {
             return Ok(());
         }
 
+        // Apply library type-specific filtering
+        match self.library_type {
+            Some(LibraryType::TvShows) => {
+                // For TV libraries, we might want to ensure files are in proper structure
+                if !Self::is_tv_show_structure(path) {
+                    debug!("Skipping file not in TV show structure: {}", path.display());
+                    // For now, we'll still include it but log it
+                    // In the future, we might want to be stricter
+                }
+            }
+            Some(LibraryType::Movies) => {
+                // For movie libraries, we might want to skip files in TV show structures
+                if Self::is_tv_show_structure(path) {
+                    debug!("Found file in TV show structure in Movies library: {}", path.display());
+                    // For now, we'll still include it but log it
+                    // In the future, we might want to skip these
+                }
+            }
+            None => {
+                // No library context, scan everything
+            }
+        }
+
         // Create MediaFile from the path
-        match MediaFile::new(path.to_path_buf()) {
+        let media_file_result = if let Some(library_id) = self.library_id {
+            MediaFile::new_with_library(path.to_path_buf(), library_id)
+        } else {
+            MediaFile::new(path.to_path_buf())
+        };
+        
+        match media_file_result {
             Ok(media_file) => {
                 debug!(
-                    "Found video file: {} ({})",
-                    media_file.filename, media_file.size
+                    "Found video file: {} ({}) [library: {:?}]",
+                    media_file.filename, media_file.size, self.library_id
                 );
                 result.video_files.push(media_file);
             }
@@ -201,7 +341,7 @@ impl MediaScanner {
                 warn!("Failed to create MediaFile for {}: {}", path.display(), e);
                 result
                     .errors
-                    .push(format!("MediaFile creation failed: {}", e));
+                    .push(format!("MediaFile creation failed: {e}"));
             }
         }
 

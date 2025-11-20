@@ -1,4 +1,4 @@
-use crate::{MediaError, MediaMetadata, MediaType, ParsedMediaInfo, Result};
+use crate::{MediaError, MediaMetadata, MediaType, ParsedMediaInfo, Result, TvParser, ExtrasParser, LibraryType};
 use ffmpeg_next as ffmpeg;
 use regex::Regex;
 use std::path::Path;
@@ -7,6 +7,8 @@ use tracing::{debug, info};
 pub struct MetadataExtractor {
     /// Whether FFmpeg has been initialized
     initialized: bool,
+    /// Library context for type-specific parsing
+    library_type: Option<LibraryType>,
 }
 
 impl Default for MetadataExtractor {
@@ -17,7 +19,23 @@ impl Default for MetadataExtractor {
 
 impl MetadataExtractor {
     pub fn new() -> Self {
-        Self { initialized: false }
+        Self { 
+            initialized: false,
+            library_type: None,
+        }
+    }
+
+    /// Create a new extractor with library context
+    pub fn with_library_type(library_type: LibraryType) -> Self {
+        Self {
+            initialized: false,
+            library_type: Some(library_type),
+        }
+    }
+
+    /// Set library type for context-aware parsing
+    pub fn set_library_type(&mut self, library_type: Option<LibraryType>) {
+        self.library_type = library_type;
     }
 
     /// Check if a file is likely a sample based on duration and file size
@@ -80,7 +98,7 @@ impl MetadataExtractor {
         let technical_metadata = self.extract_ffmpeg_metadata(file_path)?;
 
         // Parse filename for show/episode info
-        let parsed_info = self.parse_filename(file_path);
+        let parsed_info = self.parse_filename_with_type(file_path);
 
         // Get file size
         let file_size = file_path.metadata().map_err(MediaError::Io)?.len();
@@ -213,7 +231,91 @@ impl MetadataExtractor {
         Ok(technical)
     }
 
-    /// Parse filename to extract show/episode information
+    /// Parse filename with library type context
+    fn parse_filename_with_type<P: AsRef<Path>>(&self, file_path: P) -> Option<ParsedMediaInfo> {
+        let file_path = file_path.as_ref();
+        
+        // First check if this is an extra
+        if let Some(extra_type) = ExtrasParser::parse_extra_info(file_path) {
+            let filename = file_path.file_stem()?.to_str()?;
+            let parent_title = ExtrasParser::extract_parent_title(file_path);
+            
+            return Some(ParsedMediaInfo {
+                media_type: MediaType::Extra,
+                title: self.clean_filename(filename),
+                year: self.extract_year(filename),
+                show_name: None,
+                season: None,
+                episode: None,
+                episode_title: None,
+                extra_type: Some(extra_type),
+                parent_title,
+                resolution: self.extract_resolution(filename),
+                source: self.extract_source(filename),
+                release_group: self.extract_release_group(filename),
+            });
+        }
+        
+        // Use ExtrasParser for better type detection (which includes extras detection)
+        let media_type = ExtrasParser::determine_media_type(file_path, self.library_type.as_ref());
+        
+        match media_type {
+            MediaType::TvEpisode => {
+                // Use TvParser for episode parsing
+                if let Some(episode_info) = TvParser::parse_episode_info(file_path) {
+                    let show_name = TvParser::extract_series_name(file_path)
+                        .or_else(|| self.extract_show_name_from_path(file_path));
+                    let episode_title = TvParser::extract_episode_title(file_path);
+                    let filename = file_path.file_stem()?.to_str()?;
+                    
+                    return Some(ParsedMediaInfo {
+                        media_type: MediaType::TvEpisode,
+                        title: episode_title.clone().unwrap_or_else(|| self.clean_filename(filename)),
+                        year: self.extract_year(filename),
+                        show_name,
+                        season: Some(episode_info.season),
+                        episode: Some(episode_info.episode),
+                        episode_title,
+                        extra_type: None,
+                        parent_title: None,
+                        resolution: self.extract_resolution(filename),
+                        source: self.extract_source(filename),
+                        release_group: self.extract_release_group(filename),
+                    });
+                }
+            }
+            MediaType::Movie => {
+                return self.parse_as_movie(file_path.file_stem()?.to_str()?, file_path);
+            }
+            MediaType::Extra => {
+                // This should have been caught above, but handle it here too
+                let filename = file_path.file_stem()?.to_str()?;
+                let extra_type = ExtrasParser::parse_extra_info(file_path);
+                let parent_title = ExtrasParser::extract_parent_title(file_path);
+                
+                return Some(ParsedMediaInfo {
+                    media_type: MediaType::Extra,
+                    title: self.clean_filename(filename),
+                    year: self.extract_year(filename),
+                    show_name: None,
+                    season: None,
+                    episode: None,
+                    episode_title: None,
+                    extra_type,
+                    parent_title,
+                    resolution: self.extract_resolution(filename),
+                    source: self.extract_source(filename),
+                    release_group: self.extract_release_group(filename),
+                });
+            }
+            _ => {}
+        }
+        
+        // Fallback to old parsing logic
+        self.parse_filename(file_path)
+    }
+
+    /// Parse filename to extract show/episode information (legacy method)
     fn parse_filename<P: AsRef<Path>>(&self, file_path: P) -> Option<ParsedMediaInfo> {
         let file_path = file_path.as_ref();
         let filename = file_path.file_stem()?.to_str()?;
@@ -283,6 +385,8 @@ impl MetadataExtractor {
                 season,
                 episode: self.extract_episode_number_from_filename(filename),
                 episode_title: None,
+                extra_type: None,
+                parent_title: None,
                 resolution: self.extract_resolution(filename),
                 source: self.extract_source(filename),
                 release_group: self.extract_release_group(filename),
@@ -415,7 +519,7 @@ impl MetadataExtractor {
                             if let (Some(title_match), Some(year_match)) = (captures.get(1), captures.get(2)) {
                                 let title = title_match.as_str().trim().to_string();
                                 if let Ok(year) = year_match.as_str().parse::<u32>() {
-                                    if year >= 1900 && year <= 2100 {
+                                    if (1900..=2100).contains(&year) {
                                         info!("Successfully parsed movie from folder: {} ({})", title, year);
                                         return Some(ParsedMediaInfo {
                                             media_type: MediaType::Movie,
@@ -425,6 +529,8 @@ impl MetadataExtractor {
                                             season: None,
                                             episode: None,
                                             episode_title: None,
+                                            extra_type: None,
+                                            parent_title: None,
                                             resolution: self.extract_resolution(filename),
                                             source: self.extract_source(filename),
                                             release_group: self.extract_release_group(filename),
@@ -468,11 +574,11 @@ impl MetadataExtractor {
 
         // Remove year from the title if present
         if let Some(y) = year {
-            cleaned_title = cleaned_title.replace(&format!(" {}", y), "");
-            cleaned_title = cleaned_title.replace(&format!("({})", y), "");
-            cleaned_title = cleaned_title.replace(&format!(".{}", y), "");  // Handle .2008 at end
-            cleaned_title = cleaned_title.replace(&format!(".{}.", y), " ");
-            cleaned_title = cleaned_title.replace(&format!(" {} ", y), " ");
+            cleaned_title = cleaned_title.replace(&format!(" {y}"), "");
+            cleaned_title = cleaned_title.replace(&format!("({y})"), "");
+            cleaned_title = cleaned_title.replace(&format!(".{y}"), "");  // Handle .2008 at end
+            cleaned_title = cleaned_title.replace(&format!(".{y}."), " ");
+            cleaned_title = cleaned_title.replace(&format!(" {y} "), " ");
         }
 
         // Now clean the title
@@ -486,6 +592,8 @@ impl MetadataExtractor {
             season: None,
             episode: None,
             episode_title: None,
+            extra_type: None,
+            parent_title: None,
             resolution: self.extract_resolution(filename),
             source: self.extract_source(filename),
             release_group: self.extract_release_group(filename),
@@ -530,14 +638,14 @@ impl MetadataExtractor {
                 .replace_all(&cleaned, " ")
                 .to_string();
             // Also remove any lone parentheses
-            cleaned = cleaned.replace('(', " ").replace(')', " ");
+            cleaned = cleaned.replace(['(', ')'], " ");
             if cleaned.len() == old_len {
                 break; // Prevent infinite loop
             }
         }
 
         // Replace dots and underscores with spaces
-        cleaned = cleaned.replace('.', " ").replace('_', " ");
+        cleaned = cleaned.replace(['.', '_'], " ");
         
         // Remove standalone years (1900-2100)
         cleaned = Regex::new(r"\b(19|20)\d{2}\b")
@@ -587,14 +695,15 @@ impl MetadataExtractor {
             return Some(ParsedMediaInfo {
                 media_type: MediaType::TvEpisode,
                 title: format!(
-                    "{} - S{:02}E{:02} - {}",
-                    show_name, season, episode, episode_title
+                    "{show_name} - S{season:02}E{episode:02} - {episode_title}"
                 ),
                 year: None,
                 show_name: Some(show_name),
                 season: Some(season),
                 episode: Some(episode),
                 episode_title: Some(episode_title),
+                extra_type: None,
+                parent_title: None,
                 resolution: Some(resolution),
                 source: self.extract_source(quality_info),
                 release_group: Some(release_group),
@@ -609,8 +718,7 @@ impl MetadataExtractor {
             let show_name = captures
                 .get(1)?
                 .as_str()
-                .replace('.', " ")
-                .replace('_', " ")
+                .replace(['.', '_'], " ")
                 .trim()
                 .to_string();
             let season: u32 = captures.get(2)?.as_str().parse().ok()?;
@@ -631,7 +739,7 @@ impl MetadataExtractor {
 
             return Some(ParsedMediaInfo {
                 media_type: MediaType::TvEpisode,
-                title: format!("{} - S{:02}E{:02}", show_name, season, episode),
+                title: format!("{show_name} - S{season:02}E{episode:02}"),
                 year: self.extract_year(&show_name),
                 show_name: Some(self.clean_filename(&show_name)),
                 season: Some(season),
@@ -641,6 +749,8 @@ impl MetadataExtractor {
                 } else {
                     Some(episode_title)
                 },
+                extra_type: None,
+                parent_title: None,
                 resolution: self.extract_resolution(filename),
                 source: self.extract_source(filename),
                 release_group: self.extract_release_group(filename),
@@ -655,8 +765,7 @@ impl MetadataExtractor {
             let show_name = captures
                 .get(1)?
                 .as_str()
-                .replace('.', " ")
-                .replace('_', " ")
+                .replace(['.', '_'], " ")
                 .trim()
                 .to_string();
             let season: u32 = captures.get(2)?.as_str().parse().ok()?;
@@ -676,7 +785,7 @@ impl MetadataExtractor {
 
             return Some(ParsedMediaInfo {
                 media_type: MediaType::TvEpisode,
-                title: format!("{} - S{:02}E{:02}", show_name, season, episode),
+                title: format!("{show_name} - S{season:02}E{episode:02}"),
                 year: self.extract_year(&show_name),
                 show_name: Some(self.clean_filename(&show_name)),
                 season: Some(season),
@@ -686,6 +795,8 @@ impl MetadataExtractor {
                 } else {
                     Some(episode_title)
                 },
+                extra_type: None,
+                parent_title: None,
                 resolution: self.extract_resolution(filename),
                 source: self.extract_source(filename),
                 release_group: self.extract_release_group(filename),
@@ -699,15 +810,14 @@ impl MetadataExtractor {
             let show_name = captures
                 .get(1)?
                 .as_str()
-                .replace('.', " ")
-                .replace('_', " ")
+                .replace(['.', '_'], " ")
                 .trim()
                 .to_string();
             let season: u32 = captures.get(2)?.as_str().parse().ok()?;
             let episode: u32 = captures.get(3)?.as_str().parse().ok()?;
 
             // Only accept if it looks like a valid season/episode combo
-            if season >= 1 && season <= 20 && episode >= 1 && episode <= 99 {
+            if (1..=20).contains(&season) && (1..=99).contains(&episode) {
                 // Extract episode title if present
                 let remainder = captures.get(4).map(|m| m.as_str()).unwrap_or("");
                 let episode_title = if remainder.contains('.') || remainder.contains('_') {
@@ -723,7 +833,7 @@ impl MetadataExtractor {
 
                 return Some(ParsedMediaInfo {
                     media_type: MediaType::TvEpisode,
-                    title: format!("{} - S{:02}E{:02}", show_name, season, episode),
+                    title: format!("{show_name} - S{season:02}E{episode:02}"),
                     year: self.extract_year(&show_name),
                     show_name: Some(self.clean_filename(&show_name)),
                     season: Some(season),
@@ -733,6 +843,8 @@ impl MetadataExtractor {
                     } else {
                         Some(episode_title)
                     },
+                    extra_type: None,
+                    parent_title: None,
                     resolution: self.extract_resolution(filename),
                     source: self.extract_source(filename),
                     release_group: self.extract_release_group(filename),
@@ -776,6 +888,8 @@ impl MetadataExtractor {
                 season: None,
                 episode: None,
                 episode_title: None,
+                extra_type: None,
+                parent_title: None,
                 resolution: self.extract_resolution(quality_info),
                 source: self.extract_source(quality_info),
                 release_group: Some(release_group),
@@ -800,6 +914,8 @@ impl MetadataExtractor {
                 season: None,
                 episode: None,
                 episode_title: None,
+                extra_type: None,
+                parent_title: None,
                 resolution: self.extract_resolution(quality_info),
                 source: self.extract_source(quality_info),
                 release_group: self.extract_release_group(quality_info),
@@ -823,6 +939,8 @@ impl MetadataExtractor {
                 season: None,
                 episode: None,
                 episode_title: None,
+                extra_type: None,
+                parent_title: None,
                 resolution: self.extract_resolution(filename),
                 source: self.extract_source(filename),
                 release_group: self.extract_release_group(filename),
@@ -836,7 +954,7 @@ impl MetadataExtractor {
             let title = captures.get(1)?.as_str().trim().to_string();
             let year: u32 = captures.get(2)?.as_str().parse().ok()?;
 
-            if year >= 1900 && year <= 2100 {
+            if (1900..=2100).contains(&year) {
                 debug!("Parsed movie (pattern 4): {} ({})", title, year);
 
                 return Some(ParsedMediaInfo {
@@ -847,6 +965,8 @@ impl MetadataExtractor {
                     season: None,
                     episode: None,
                     episode_title: None,
+                    extra_type: None,
+                    parent_title: None,
                     resolution: self.extract_resolution(filename),
                     source: self.extract_source(filename),
                     release_group: self.extract_release_group(filename),
@@ -867,6 +987,8 @@ impl MetadataExtractor {
                 season: None,
                 episode: None,
                 episode_title: None,
+                extra_type: None,
+                parent_title: None,
                 resolution: self.extract_resolution(filename),
                 source: self.extract_source(filename),
                 release_group: self.extract_release_group(filename),
@@ -893,7 +1015,7 @@ impl MetadataExtractor {
             .to_string();
 
         // Clean up any remaining dots or underscores
-        cleaned = cleaned.replace('.', " ").replace('_', " ");
+        cleaned = cleaned.replace(['.', '_'], " ");
 
         // Normalize whitespace
         cleaned = cleaned.split_whitespace().collect::<Vec<&str>>().join(" ");
@@ -939,7 +1061,7 @@ impl MetadataExtractor {
             .to_string();
 
         // Replace dots and underscores with spaces
-        cleaned = cleaned.replace('.', " ").replace('_', " ");
+        cleaned = cleaned.replace(['.', '_'], " ");
         
         // Additional cleanup for remaining quality indicators that might have been missed
         let quality_terms = Regex::new(r"(?i)\b(WEB-DL|WEBDL|WEB DL|BluRay|Bluray|BDRip|BRRip|DVDRip|HDTV|x264|x265|h264|h265|HEVC)\b").unwrap();
@@ -956,7 +1078,7 @@ impl MetadataExtractor {
         // Try year in parentheses first (Movie Title (2023))
         if let Some(captures) = Regex::new(r"\((\d{4})\)").unwrap().captures(filename) {
             if let Ok(year) = captures.get(1)?.as_str().parse::<u32>() {
-                if year >= 1900 && year <= 2100 {
+                if (1900..=2100).contains(&year) {
                     return Some(year);
                 }
             }
@@ -965,7 +1087,7 @@ impl MetadataExtractor {
         // Try year with dots (Movie.Title.2023.BluRay)
         if let Some(captures) = Regex::new(r"\.(\d{4})\.").unwrap().captures(filename) {
             if let Ok(year) = captures.get(1)?.as_str().parse::<u32>() {
-                if year >= 1900 && year <= 2100 {
+                if (1900..=2100).contains(&year) {
                     return Some(year);
                 }
             }
@@ -974,7 +1096,7 @@ impl MetadataExtractor {
         // Try year at end of title before quality info
         if let Some(captures) = Regex::new(r"\s(\d{4})\s").unwrap().captures(filename) {
             if let Ok(year) = captures.get(1)?.as_str().parse::<u32>() {
-                if year >= 1900 && year <= 2100 {
+                if (1900..=2100).contains(&year) {
                     return Some(year);
                 }
             }
@@ -983,7 +1105,7 @@ impl MetadataExtractor {
         // Try year at end with dot prefix (Movie.Title.1999)
         if let Some(captures) = Regex::new(r"\.(\d{4})$").unwrap().captures(filename) {
             if let Ok(year) = captures.get(1)?.as_str().parse::<u32>() {
-                if year >= 1900 && year <= 2100 {
+                if (1900..=2100).contains(&year) {
                     return Some(year);
                 }
             }
@@ -1111,8 +1233,7 @@ mod tests {
                 }
                 Err(e) => {
                     println!(
-                        "Metadata extraction failed (expected if file doesn't exist): {}",
-                        e
+                        "Metadata extraction failed (expected if file doesn't exist): {e}"
                     );
                 }
             }

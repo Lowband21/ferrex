@@ -1,4 +1,4 @@
-use crate::{MediaFile, MediaMetadata, Result};
+use crate::{Library, MediaFile, MediaMetadata, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -11,6 +11,7 @@ pub struct MediaFilters {
     pub season: Option<u32>,
     pub order_by: Option<String>,
     pub limit: Option<u64>,
+    pub library_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -74,6 +75,14 @@ pub trait MediaDatabaseTrait: Send + Sync {
         season: i32,
         episode: i32,
     ) -> Result<()>;
+
+    // Library management methods
+    async fn create_library(&self, library: Library) -> Result<String>;
+    async fn get_library(&self, id: &str) -> Result<Option<Library>>;
+    async fn list_libraries(&self) -> Result<Vec<Library>>;
+    async fn update_library(&self, id: &str, library: Library) -> Result<()>;
+    async fn delete_library(&self, id: &str) -> Result<()>;
+    async fn update_library_last_scan(&self, id: &str) -> Result<()>;
 }
 
 pub enum DatabaseBackend {

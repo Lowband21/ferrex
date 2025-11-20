@@ -2,7 +2,7 @@ use crate::MediaDatabase;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use futures::stream::{self, StreamExt};
 use futures_util::stream::Stream;
-use ferrex_core::{MediaFile, MediaScanner, MetadataExtractor};
+use ferrex_core::{MediaFile, MediaScanner, MetadataExtractor, StreamingScanner, StreamingScannerConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -47,6 +47,9 @@ pub struct ScanRequest {
     pub extract_metadata: bool,
     pub force_rescan: bool,
     pub paths: Option<Vec<String>>, // Multiple paths support
+    pub library_id: Option<Uuid>,
+    pub library_type: Option<ferrex_core::LibraryType>,
+    pub use_streaming: bool, // Use new streaming scanner
 }
 
 // Media event types for SSE
@@ -165,6 +168,117 @@ impl ScanManager {
         Ok(scan_id)
     }
 
+    /// Start a streaming scan for a library
+    pub async fn start_library_scan(&self, library: Arc<ferrex_core::Library>, force_rescan: bool) -> Result<String, anyhow::Error> {
+        let scan_id = Uuid::new_v4().to_string();
+        
+        info!("Starting streaming scan {} for library: {} ({})", scan_id, library.name, library.id);
+        
+        // Create initial progress
+        let progress = ScanProgress {
+            scan_id: scan_id.clone(),
+            status: ScanStatus::Pending,
+            path: library.paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "),
+            total_files: 0,
+            scanned_files: 0,
+            stored_files: 0,
+            metadata_fetched: 0,
+            skipped_samples: 0,
+            errors: vec![],
+            current_file: None,
+            started_at: chrono::Utc::now(),
+            completed_at: None,
+            estimated_time_remaining: None,
+        };
+        
+        // Store in active scans
+        self.active_scans
+            .write()
+            .await
+            .insert(scan_id.clone(), progress.clone());
+        
+        // Send media event for scan started
+        self.send_media_event(MediaEvent::ScanStarted {
+            scan_id: scan_id.clone(),
+        })
+        .await;
+        
+        // Create streaming scanner
+        let config = StreamingScannerConfig {
+            folder_workers: 4,
+            file_workers: 8,
+            batch_size: 100,
+            progress_buffer: 1000,
+            extract_metadata: true,
+            fetch_external_metadata: true,
+            generate_thumbnails: true,
+        };
+        
+        let streaming_scanner = Arc::new(StreamingScanner::with_config(config, self.db.clone()));
+        let scan_handle = streaming_scanner.scan_library(library.clone(), force_rescan);
+        
+        // Convert streaming progress to our format and relay
+        let scan_manager = Arc::new(self.clone());
+        let scan_id_clone = scan_id.clone();
+        let scan_handle_id = scan_handle.scan_id();
+        
+        tokio::spawn(async move {
+            let mut progress_stream = scan_handle.progress_stream();
+            
+            while let Some(progress_event) = progress_stream.next().await {
+                match progress_event {
+                    ferrex_core::ScanProgress::ScanStarted { .. } => {
+                        scan_manager.update_progress(&scan_id_clone, |p| {
+                            p.status = ScanStatus::Scanning;
+                        }).await;
+                    }
+                    ferrex_core::ScanProgress::FileScanned { filename, current, total_estimate, .. } => {
+                        scan_manager.update_progress(&scan_id_clone, |p| {
+                            p.current_file = Some(filename);
+                            p.scanned_files = current;
+                            p.total_files = total_estimate;
+                            p.stored_files = current; // Assuming stored equals scanned
+                        }).await;
+                    }
+                    ferrex_core::ScanProgress::MetadataExtracted { .. } => {
+                        scan_manager.update_progress(&scan_id_clone, |p| {
+                            p.metadata_fetched += 1;
+                        }).await;
+                    }
+                    ferrex_core::ScanProgress::Error { error, .. } => {
+                        scan_manager.update_progress(&scan_id_clone, |p| {
+                            p.errors.push(error);
+                        }).await;
+                    }
+                    ferrex_core::ScanProgress::ScanCompleted { total_files, duration_secs: _, .. } => {
+                        scan_manager.update_progress(&scan_id_clone, |p| {
+                            p.status = ScanStatus::Completed;
+                            p.completed_at = Some(chrono::Utc::now());
+                            p.total_files = total_files;
+                            p.current_file = None;
+                            p.estimated_time_remaining = None;
+                        }).await;
+                        
+                        // Send scan completed event
+                        scan_manager.send_media_event(MediaEvent::ScanCompleted {
+                            scan_id: scan_id_clone.clone(),
+                        }).await;
+                        
+                        // Move to history
+                        if let Some(progress) = scan_manager.active_scans.write().await.remove(&scan_id_clone) {
+                            scan_manager.scan_history.write().await.push(progress);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            
+            info!("Streaming scan {} completed", scan_handle_id);
+        });
+        
+        Ok(scan_id)
+    }
+
     /// Execute the actual scan
     async fn execute_scan(
         &self,
@@ -189,6 +303,11 @@ impl ScanManager {
                 scanner = scanner.with_max_depth(depth);
             }
             scanner = scanner.with_follow_links(request.follow_links);
+            
+            // Add library context if available
+            if let (Some(library_id), Some(library_type)) = (request.library_id, request.library_type.clone()) {
+                scanner = scanner.with_library(library_id, library_type);
+            }
 
             match scanner.scan_directory(path) {
                 Ok(result) => {
@@ -229,7 +348,11 @@ impl ScanManager {
 
         // Phase 3: Process files concurrently
         let extractor = if request.extract_metadata {
-            Some(MetadataExtractor::new())
+            if let Some(library_type) = request.library_type.clone() {
+                Some(MetadataExtractor::with_library_type(library_type))
+            } else {
+                Some(MetadataExtractor::new())
+            }
         } else {
             None
         };

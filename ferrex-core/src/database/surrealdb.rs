@@ -21,13 +21,15 @@ struct MediaRecord {
     size: u64,
     created_at: chrono::DateTime<chrono::Utc>,
     metadata: Option<crate::MediaMetadata>,
+    library_id: Option<uuid::Uuid>,
+    parent_media_id: Option<uuid::Uuid>,
 }
 
 impl SurrealDatabase {
     pub async fn new() -> Result<Self> {
         let db = Surreal::new::<Mem>(())
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to create database: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to create database: {e}")))?;
 
         let namespace = "ferrex_media".to_string();
         let database_name = "media_server".to_string();
@@ -35,7 +37,7 @@ impl SurrealDatabase {
         db.use_ns(&namespace)
             .use_db(&database_name)
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to select database: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to select database: {e}")))?;
 
         info!(
             "Initialized in-memory SurrealDB: {}/{}",
@@ -86,6 +88,8 @@ impl MediaDatabaseTrait for SurrealDatabase {
             size: media_file.size,
             created_at: media_file.created_at,
             metadata: media_file.metadata.clone(),
+            library_id: media_file.library_id,
+            parent_media_id: media_file.parent_media_id,
         };
 
         let result: Option<MediaRecord> = self
@@ -93,11 +97,11 @@ impl MediaDatabaseTrait for SurrealDatabase {
             .update(("media", &id))
             .content(&record)
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to store media: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to store media: {e}")))?;
 
         match result {
             Some(_) => {
-                let full_id = format!("media:{}", id);
+                let full_id = format!("media:{id}");
                 info!("Stored media file with ID: {}", full_id);
                 Ok(full_id)
             }
@@ -116,11 +120,11 @@ impl MediaDatabaseTrait for SurrealDatabase {
             .bind(("path", path))
             .await
             .map_err(|e| {
-                MediaError::InvalidMedia(format!("Failed to retrieve media by path: {}", e))
+                MediaError::InvalidMedia(format!("Failed to retrieve media by path: {e}"))
             })?;
 
         let records: Vec<MediaRecord> = result.take(0).map_err(|e| {
-            MediaError::InvalidMedia(format!("Failed to parse media records: {}", e))
+            MediaError::InvalidMedia(format!("Failed to parse media records: {e}"))
         })?;
 
         Ok(records.into_iter().next().map(|record| MediaFile {
@@ -130,6 +134,8 @@ impl MediaDatabaseTrait for SurrealDatabase {
             size: record.size,
             created_at: record.created_at,
             metadata: record.metadata,
+            library_id: record.library_id,
+            parent_media_id: record.parent_media_id,
         }))
     }
 
@@ -145,7 +151,7 @@ impl MediaDatabaseTrait for SurrealDatabase {
 
         let result: Option<MediaRecord> =
             self.db.select((table, record_id)).await.map_err(|e| {
-                MediaError::InvalidMedia(format!("Failed to retrieve media: {}", e))
+                MediaError::InvalidMedia(format!("Failed to retrieve media: {e}"))
             })?;
 
         Ok(result.map(|record| MediaFile {
@@ -155,6 +161,8 @@ impl MediaDatabaseTrait for SurrealDatabase {
             size: record.size,
             created_at: record.created_at,
             metadata: record.metadata,
+            library_id: record.library_id,
+            parent_media_id: record.parent_media_id,
         }))
     }
 
@@ -166,20 +174,22 @@ impl MediaDatabaseTrait for SurrealDatabase {
 
         if let Some(media_type) = &filters.media_type {
             conditions.push(format!(
-                "metadata.parsed_info.media_type = '{}'",
-                media_type
+                "metadata.parsed_info.media_type = '{media_type}'"
             ));
         }
 
         if let Some(show_name) = &filters.show_name {
             conditions.push(format!(
-                "metadata.parsed_info.show_name = \"{}\"",
-                show_name
+                "metadata.parsed_info.show_name = \"{show_name}\""
             ));
         }
 
         if let Some(season) = filters.season {
-            conditions.push(format!("metadata.parsed_info.season = {}", season));
+            conditions.push(format!("metadata.parsed_info.season = {season}"));
+        }
+
+        if let Some(library_id) = &filters.library_id {
+            conditions.push(format!("library_id = uuid('{library_id}')"));
         }
 
         if !conditions.is_empty() {
@@ -194,7 +204,7 @@ impl MediaDatabaseTrait for SurrealDatabase {
         }
 
         if let Some(limit) = filters.limit {
-            query.push_str(&format!(" LIMIT {}", limit));
+            query.push_str(&format!(" LIMIT {limit}"));
         }
 
         debug!("Executing query: {}", query);
@@ -203,10 +213,10 @@ impl MediaDatabaseTrait for SurrealDatabase {
             .db
             .query(&query)
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to query media: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to query media: {e}")))?;
 
         let records: Vec<serde_json::Value> = result.take(0).map_err(|e| {
-            MediaError::InvalidMedia(format!("Failed to parse query result: {}", e))
+            MediaError::InvalidMedia(format!("Failed to parse query result: {e}"))
         })?;
 
         debug!("Query returned {} records", records.len());
@@ -245,6 +255,16 @@ impl MediaDatabaseTrait for SurrealDatabase {
                         .get("metadata")
                         .and_then(|v| serde_json::from_value(v.clone()).ok());
 
+                    let library_id = record
+                        .get("library_id")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| uuid::Uuid::parse_str(s).ok());
+
+                    let parent_media_id = record
+                        .get("parent_media_id")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| uuid::Uuid::parse_str(s).ok());
+
                     media_files.push(MediaFile {
                         id: uuid,
                         path: path_buf,
@@ -252,6 +272,8 @@ impl MediaDatabaseTrait for SurrealDatabase {
                         size,
                         created_at: created_dt,
                         metadata,
+                        library_id,
+                        parent_media_id,
                     });
                 }
             }
@@ -267,16 +289,16 @@ impl MediaDatabaseTrait for SurrealDatabase {
             .db
             .query("SELECT count() FROM media GROUP ALL")
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to get total count: {}", e)))?
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to get total count: {e}")))?
             .take((0, "count"))
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to parse count: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to parse count: {e}")))?;
 
         let type_counts: Vec<(String, i64)> = self.db
             .query("SELECT metadata.parsed_info.media_type as type, count() as count FROM media GROUP BY type")
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to get type counts: {}", e)))?
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to get type counts: {e}")))?
             .take(0)
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to parse type counts: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to parse type counts: {e}")))?;
 
         let mut by_type = HashMap::new();
         for (media_type, count) in type_counts {
@@ -287,9 +309,9 @@ impl MediaDatabaseTrait for SurrealDatabase {
             .db
             .query("SELECT math::sum(size) as total_size FROM media GROUP ALL")
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to get total size: {}", e)))?
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to get total size: {e}")))?
             .take((0, "total_size"))
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to parse total size: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to parse total size: {e}")))?;
 
         Ok(MediaStats {
             total_files: total_count.unwrap_or(0) as u64,
@@ -305,11 +327,11 @@ impl MediaDatabaseTrait for SurrealDatabase {
             .bind(("path", path))
             .await
             .map_err(|e| {
-                MediaError::InvalidMedia(format!("Failed to check file existence: {}", e))
+                MediaError::InvalidMedia(format!("Failed to check file existence: {e}"))
             })?
             .take(0)
             .map_err(|e| {
-                MediaError::InvalidMedia(format!("Failed to parse existence check: {}", e))
+                MediaError::InvalidMedia(format!("Failed to parse existence check: {e}"))
             })?;
 
         Ok(!result.is_empty())
@@ -351,7 +373,7 @@ impl MediaDatabaseTrait for SurrealDatabase {
         self.db
             .delete::<Option<MediaFile>>(("media", id))
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to delete media: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to delete media: {e}")))?;
         Ok(())
     }
 
@@ -360,7 +382,213 @@ impl MediaDatabaseTrait for SurrealDatabase {
             .db
             .select("media")
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to get all media: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to get all media: {e}")))?;
         Ok(media_files)
+    }
+
+    // Library management methods
+    async fn create_library(&self, library: crate::Library) -> Result<String> {
+        let id = library.id.to_string();
+        
+        // Convert paths to strings for storage
+        let paths: Vec<String> = library.paths.iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        
+        #[derive(Serialize, Deserialize)]
+        struct LibraryRecord {
+            id: String,
+            name: String,
+            library_type: String,
+            paths: Vec<String>,
+            scan_interval_minutes: u32,
+            last_scan: Option<chrono::DateTime<chrono::Utc>>,
+            enabled: bool,
+            created_at: chrono::DateTime<chrono::Utc>,
+            updated_at: chrono::DateTime<chrono::Utc>,
+        }
+        
+        let record = LibraryRecord {
+            id: id.clone(),
+            name: library.name,
+            library_type: format!("{:?}", library.library_type),
+            paths,
+            scan_interval_minutes: library.scan_interval_minutes,
+            last_scan: library.last_scan,
+            enabled: library.enabled,
+            created_at: library.created_at,
+            updated_at: library.updated_at,
+        };
+        
+        let _: Option<LibraryRecord> = self
+            .db
+            .create(("libraries", &id))
+            .content(&record)
+            .await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to create library: {e}")))?;
+        
+        Ok(id)
+    }
+
+    async fn get_library(&self, id: &str) -> Result<Option<crate::Library>> {
+        #[derive(Deserialize)]
+        struct LibraryRecord {
+            name: String,
+            library_type: String,
+            paths: Vec<String>,
+            scan_interval_minutes: u32,
+            last_scan: Option<chrono::DateTime<chrono::Utc>>,
+            enabled: bool,
+            created_at: chrono::DateTime<chrono::Utc>,
+            updated_at: chrono::DateTime<chrono::Utc>,
+        }
+        
+        let result: Option<LibraryRecord> = self
+            .db
+            .select(("libraries", id))
+            .await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to get library: {e}")))?;
+        
+        Ok(result.map(|record| {
+            let library_type = match record.library_type.as_str() {
+                "Movies" => crate::LibraryType::Movies,
+                "TvShows" => crate::LibraryType::TvShows,
+                _ => crate::LibraryType::Movies,
+            };
+            
+            let paths = record.paths.into_iter()
+                .map(std::path::PathBuf::from)
+                .collect();
+            
+            crate::Library {
+                id: uuid::Uuid::parse_str(id).unwrap_or_default(),
+                name: record.name,
+                library_type,
+                paths,
+                scan_interval_minutes: record.scan_interval_minutes,
+                last_scan: record.last_scan,
+                enabled: record.enabled,
+                created_at: record.created_at,
+                updated_at: record.updated_at,
+            }
+        }))
+    }
+
+    async fn list_libraries(&self) -> Result<Vec<crate::Library>> {
+        let records: Vec<serde_json::Value> = self
+            .db
+            .select("libraries")
+            .await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to list libraries: {e}")))?;
+        
+        let mut libraries = Vec::new();
+        
+        for record in records {
+            if let (Some(id), Some(name), Some(library_type), Some(paths)) = (
+                record.get("id").and_then(|v| v.as_str()),
+                record.get("name").and_then(|v| v.as_str()),
+                record.get("library_type").and_then(|v| v.as_str()),
+                record.get("paths").and_then(|v| v.as_array()),
+            ) {
+                let library_type = match library_type {
+                    "Movies" => crate::LibraryType::Movies,
+                    "TvShows" => crate::LibraryType::TvShows,
+                    _ => crate::LibraryType::Movies,
+                };
+                
+                let paths: Vec<std::path::PathBuf> = paths.iter()
+                    .filter_map(|p| p.as_str())
+                    .map(std::path::PathBuf::from)
+                    .collect();
+                
+                libraries.push(crate::Library {
+                    id: uuid::Uuid::parse_str(id).unwrap_or_default(),
+                    name: name.to_string(),
+                    library_type,
+                    paths,
+                    scan_interval_minutes: record.get("scan_interval_minutes")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(60) as u32,
+                    last_scan: record.get("last_scan")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse().ok()),
+                    enabled: record.get("enabled")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true),
+                    created_at: record.get("created_at")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or_else(chrono::Utc::now),
+                    updated_at: record.get("updated_at")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or_else(chrono::Utc::now),
+                });
+            }
+        }
+        
+        Ok(libraries)
+    }
+
+    async fn update_library(&self, id: &str, library: crate::Library) -> Result<()> {
+        let paths: Vec<String> = library.paths.iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        
+        #[derive(Serialize)]
+        struct LibraryUpdate {
+            name: String,
+            paths: Vec<String>,
+            scan_interval_minutes: u32,
+            enabled: bool,
+            updated_at: chrono::DateTime<chrono::Utc>,
+        }
+        
+        let update = LibraryUpdate {
+            name: library.name,
+            paths,
+            scan_interval_minutes: library.scan_interval_minutes,
+            enabled: library.enabled,
+            updated_at: chrono::Utc::now(),
+        };
+        
+        let _: Option<serde_json::Value> = self
+            .db
+            .update(("libraries", id))
+            .merge(update)
+            .await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to update library: {e}")))?;
+        
+        Ok(())
+    }
+
+    async fn delete_library(&self, id: &str) -> Result<()> {
+        self.db
+            .delete::<Option<serde_json::Value>>(("libraries", id))
+            .await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to delete library: {e}")))?;
+        Ok(())
+    }
+
+    async fn update_library_last_scan(&self, id: &str) -> Result<()> {
+        #[derive(Serialize)]
+        struct ScanUpdate {
+            last_scan: chrono::DateTime<chrono::Utc>,
+            updated_at: chrono::DateTime<chrono::Utc>,
+        }
+        
+        let update = ScanUpdate {
+            last_scan: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        
+        let _: Option<serde_json::Value> = self
+            .db
+            .update(("libraries", id))
+            .merge(update)
+            .await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to update library last scan: {e}")))?;
+        
+        Ok(())
     }
 }

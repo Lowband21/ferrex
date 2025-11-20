@@ -25,6 +25,7 @@ mod util;
 mod views;
 mod virtual_list;
 mod widgets;
+mod performance_config;
 
 use gstreamer as gst;
 use iced_video_player::Video;
@@ -54,6 +55,16 @@ enum MediaEvent {
     ScanCompleted { scan_id: String },
 }
 
+/// Get icon character string
+fn icon_char(icon: lucide_icons::Icon) -> String {
+    icon.unicode().to_string()
+}
+
+/// Helper function to create icon text
+fn icon_text(icon: lucide_icons::Icon) -> text::Text<'static> {
+    text(icon.unicode()).font(lucide_font()).size(20)
+}
+
 fn main() -> iced::Result {
     env_logger::init();
 
@@ -68,6 +79,16 @@ fn main() -> iced::Result {
         };
 
         // Load library on startup
+        // Load libraries on startup instead of media files
+        let libraries_task =
+            Task::perform(media_library::fetch_libraries(server_url.clone()), |result| {
+                match result {
+                    Ok(libraries) => Message::LibrariesLoaded(Ok(libraries)),
+                    Err(e) => Message::LibrariesLoaded(Err(e.to_string())),
+                }
+            });
+        
+        // Legacy library loading for backward compatibility
         let library_task =
             Task::perform(media_library::fetch_library(server_url.clone()), |result| {
                 match result {
@@ -80,7 +101,7 @@ fn main() -> iced::Result {
         let scans_task =
             Task::perform(check_active_scans(server_url.clone()), Message::ActiveScansChecked);
 
-        (state, Task::batch([library_task, scans_task]))
+        (state, Task::batch([libraries_task, library_task, scans_task]))
     };
     
     iced::application(init, update, view)
@@ -234,6 +255,8 @@ fn view(state: &State) -> Element<Message> {
 
     let content = match &state.view {
         ViewState::Library => view_library_old(state),
+        ViewState::LibraryManagement => view_library_management(state),
+        ViewState::AdminDashboard => view_admin_dashboard(state),
         ViewState::Player => view_player(state),
         ViewState::LoadingVideo { url } => view_loading_video(url),
         ViewState::VideoError { message } => view_video_error(message),
@@ -280,6 +303,25 @@ fn view_library_old(state: &State) -> Element<Message> {
         .style(theme::Container::Default.style())
         .into()
     } else {
+        // Create header with admin button
+        let header: iced::widget::Row<Message> = row![
+            text("Media Library")
+                .size(28)
+                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            Space::with_width(Length::Fill),
+            button(
+                text(icon_char(Icon::Settings))
+                    .font(lucide_font())
+                    .size(20)
+                    .color(theme::MediaServerTheme::TEXT_PRIMARY)
+            )
+            .on_press(Message::ShowAdminDashboard)
+            .style(theme::Button::Secondary.style())
+            .padding(10),
+        ]
+        .align_y(iced::Alignment::Center)
+        .padding([10, 20]);
+        
         // Create tabs
         let tabs = row![
             button(text("All").size(16))
@@ -342,6 +384,10 @@ fn view_library_old(state: &State) -> Element<Message> {
                     Some(Message::ForceRescan)
                 })
                 .style(theme::Button::Destructive.style()),
+            Space::with_width(10),
+            button("Manage Libraries")
+                .on_press(Message::ShowLibraryManagement)
+                .style(theme::Button::Secondary.style()),
             // Show scan progress button if there's an active scan or progress
             //if state.active_scan_id.is_some() || state.scan_progress.is_some() {
             Element::from(row![
@@ -951,11 +997,6 @@ fn lucide_font() -> Font {
     Font::with_name("lucide")
 }
 
-// Helper function to create icon text
-fn icon_text(icon: Icon) -> text::Text<'static> {
-    text(icon.unicode()).font(lucide_font()).size(20)
-}
-
 // Glassy button style closure (keeping for settings panel)
 fn glassy_button_style(_theme: &iced::Theme, _status: button::Status) -> button::Style {
     button::Style {
@@ -1287,7 +1328,7 @@ fn subscription(state: &State) -> Subscription<Message> {
     // Poster monitor background task - moderate frequency to avoid channel overflow
     if state.poster_monitor.is_some() {
         subscriptions.push(
-            iced::time::every(std::time::Duration::from_millis(100)) // Check every 500ms to avoid flooding
+            iced::time::every(performance_config::posters::MONITOR_TICK_INTERVAL)
                 .map(|_| Message::PosterMonitorTick),
         );
     }
@@ -1623,6 +1664,21 @@ async fn start_media_scan(server_url: String, force_rescan: bool) -> Result<Stri
     } else {
         Err(anyhow::anyhow!("Invalid response from server"))
     }
+}
+
+// Library-specific scan function
+async fn start_library_scan(
+    server_url: String,
+    library_id: String,
+    streaming: bool,
+) -> Result<String, anyhow::Error> {
+    log::info!(
+        "Starting library scan (library_id: {}, streaming: {})",
+        library_id,
+        streaming
+    );
+
+    media_library::scan_library(server_url, library_id, streaming).await
 }
 
 async fn fetch_scan_progress(
@@ -2078,4 +2134,449 @@ async fn check_media_availability(
         .json::<MediaAvailability>()
         .await
         .map_err(|e| format!("Failed to parse response: {}", e))
+}
+
+// Admin Dashboard View
+fn view_admin_dashboard(state: &State) -> Element<Message> {
+    let mut content = column![].spacing(30).padding(20);
+
+    // Header with back button
+    content = content.push(
+        row![
+            button(
+                row![icon_text(Icon::ArrowLeft), text(" Back to Library")]
+                    .spacing(5)
+                    .align_y(iced::Alignment::Center)
+            )
+            .on_press(Message::HideAdminDashboard)
+            .style(theme::Button::Secondary.style()),
+            Space::with_width(Length::Fill),
+            text("Admin Dashboard")
+                .size(32)
+                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            Space::with_width(Length::Fill),
+            Space::with_width(Length::Fixed(100.0)), // Balance the back button
+        ]
+        .align_y(iced::Alignment::Center),
+    );
+
+    // Admin sections grid
+    let admin_sections = row![
+        // Library Management section
+        container(
+            column![
+                row![
+                    text("📚").size(32),
+                    Space::with_width(15),
+                    column![
+                        text("Library Management")
+                            .size(20)
+                            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                        text("Manage media libraries, scanning, and organization")
+                            .size(14)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    ]
+                    .spacing(5),
+                ]
+                .align_y(iced::Alignment::Center),
+                Space::with_height(20),
+                button("Manage Libraries")
+                    .on_press(Message::ShowLibraryManagement)
+                    .style(theme::Button::Primary.style())
+                    .padding([12, 20])
+                    .width(Length::Fill),
+            ]
+            .spacing(15)
+            .padding(20)
+        )
+        .style(theme::Container::Card.style())
+        .width(Length::Fill),
+        
+        Space::with_width(20),
+        
+        // Server Settings section
+        container(
+            column![
+                row![
+                    text("⚙️").size(32),
+                    Space::with_width(15),
+                    column![
+                        text("Server Settings")
+                            .size(20)
+                            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                        text("Configure server settings, API, and performance")
+                            .size(14)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    ]
+                    .spacing(5),
+                ]
+                .align_y(iced::Alignment::Center),
+                Space::with_height(20),
+                button("Server Settings")
+                    .on_press(Message::NoOp) // TODO: Implement server settings
+                    .style(theme::Button::Secondary.style())
+                    .padding([12, 20])
+                    .width(Length::Fill),
+            ]
+            .spacing(15)
+            .padding(20)
+        )
+        .style(theme::Container::Card.style())
+        .width(Length::Fill),
+    ]
+    .align_y(iced::Alignment::Start);
+
+    content = content.push(admin_sections);
+
+    // Second row of admin sections
+    let admin_sections_2 = row![
+        // Player Settings section
+        container(
+            column![
+                row![
+                    text("🎬").size(32),
+                    Space::with_width(15),
+                    column![
+                        text("Player Settings")
+                            .size(20)
+                            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                        text("Configure video player, codecs, and playback")
+                            .size(14)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    ]
+                    .spacing(5),
+                ]
+                .align_y(iced::Alignment::Center),
+                Space::with_height(20),
+                button("Player Settings")
+                    .on_press(Message::NoOp) // TODO: Implement player settings
+                    .style(theme::Button::Secondary.style())
+                    .padding([12, 20])
+                    .width(Length::Fill),
+            ]
+            .spacing(15)
+            .padding(20)
+        )
+        .style(theme::Container::Card.style())
+        .width(Length::Fill),
+        
+        Space::with_width(20),
+        
+        // System Info section
+        container(
+            column![
+                row![
+                    text("📊").size(32),
+                    Space::with_width(15),
+                    column![
+                        text("System Information")
+                            .size(20)
+                            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                        text("View system stats, logs, and health monitoring")
+                            .size(14)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    ]
+                    .spacing(5),
+                ]
+                .align_y(iced::Alignment::Center),
+                Space::with_height(20),
+                button("System Info")
+                    .on_press(Message::NoOp) // TODO: Implement system info
+                    .style(theme::Button::Secondary.style())
+                    .padding([12, 20])
+                    .width(Length::Fill),
+            ]
+            .spacing(15)
+            .padding(20)
+        )
+        .style(theme::Container::Card.style())
+        .width(Length::Fill),
+    ]
+    .align_y(iced::Alignment::Start);
+
+    content = content.push(admin_sections_2);
+
+    // System Status section (full width)
+    let system_status = container(
+        column![
+            text("System Status")
+                .size(20)
+                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            Space::with_height(15),
+            row![
+                column![
+                    text("Server Status")
+                        .size(14)
+                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    text("🟢 Online")
+                        .size(16)
+                        .color(iced::Color::from_rgb(0.0, 0.8, 0.0)),
+                ]
+                .spacing(5),
+                Space::with_width(50),
+                column![
+                    text("Libraries")
+                        .size(14)
+                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    text(format!("{} configured", state.libraries.len()))
+                        .size(16)
+                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                ]
+                .spacing(5),
+                Space::with_width(50),
+                column![
+                    text("Total Media")
+                        .size(14)
+                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    text(format!("{} movies, {} shows", state.movies.len(), state.tv_shows.len()))
+                        .size(16)
+                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                ]
+                .spacing(5),
+                Space::with_width(Length::Fill),
+                // Scan status
+                if state.scanning || state.scan_progress.is_some() {
+                    Element::from(
+                        column![
+                            text("Scan Status")
+                                .size(14)
+                                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                            text("🔄 Scanning...")
+                                .size(16)
+                                .color(iced::Color::from_rgb(0.0, 0.6, 1.0)),
+                        ]
+                        .spacing(5)
+                    )
+                } else {
+                    Element::from(
+                        column![
+                            text("Scan Status")
+                                .size(14)
+                                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                            text("✅ Idle")
+                                .size(16)
+                                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                        ]
+                        .spacing(5)
+                    )
+                },
+            ]
+            .align_y(iced::Alignment::Start),
+        ]
+        .spacing(10)
+        .padding(20)
+    )
+    .style(theme::Container::Card.style())
+    .width(Length::Fill);
+
+    content = content.push(system_status);
+
+    scrollable(
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Shrink),
+    )
+    .direction(scrollable::Direction::Vertical(
+        scrollable::Scrollbar::default(),
+    ))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(theme::Scrollable::style())
+    .into()
+}
+
+// Library Form View
+fn view_library_form<'a>(state: &'a State, form_data: &'a crate::state::LibraryFormData) -> Element<'a, Message> {
+    use iced::widget::{checkbox, radio, text_input};
+    
+    let mut content = column![].spacing(20).padding(20);
+
+    // Header with back button
+    content = content.push(
+        row![
+            button(
+                row![icon_text(Icon::ArrowLeft), text(" Back to Library Management")]
+                    .spacing(5)
+                    .align_y(iced::Alignment::Center)
+            )
+            .on_press(Message::HideLibraryForm)
+            .style(theme::Button::Secondary.style()),
+            Space::with_width(Length::Fill),
+            text(if form_data.editing { "Edit Library" } else { "Create Library" })
+                .size(28)
+                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            Space::with_width(Length::Fill),
+            Space::with_width(Length::Fixed(100.0)), // Balance the back button
+        ]
+        .align_y(iced::Alignment::Center),
+    );
+
+    // Simple form for now
+    content = content.push(
+        container(
+            column![
+                text("Library Form - Coming Soon")
+                    .size(20)
+                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                text("This will contain the library creation/edit form")
+                    .size(14)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            ]
+            .spacing(10)
+            .padding(20)
+        )
+        .style(theme::Container::Card.style())
+        .width(Length::Fill)
+    );
+
+    scrollable(
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Shrink),
+    )
+    .direction(scrollable::Direction::Vertical(
+        scrollable::Scrollbar::default(),
+    ))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(theme::Scrollable::style())
+    .into()
+}
+
+// Library Management View
+fn view_library_management(state: &State) -> Element<Message> {
+    // If form is open, show the form instead
+    if let Some(form_data) = &state.library_form_data {
+        return view_library_form(state, form_data);
+    }
+    
+    let mut content = column![].spacing(20).padding(20);
+
+    // Header with back button
+    content = content.push(
+        row![
+            button(
+                row![icon_text(Icon::ArrowLeft), text(" Back to Library")]
+                    .spacing(5)
+                    .align_y(iced::Alignment::Center)
+            )
+            .on_press(Message::HideLibraryManagement)
+            .style(theme::Button::Secondary.style()),
+            Space::with_width(Length::Fill),
+            text("Library Management")
+                .size(28)
+                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            Space::with_width(Length::Fill),
+            button("Create Library")
+                .on_press(Message::ShowLibraryForm(None))
+                .style(theme::Button::Primary.style()),
+        ]
+        .align_y(iced::Alignment::Center),
+    );
+
+    // Libraries list
+    if state.libraries.is_empty() {
+        content = content.push(
+            container(
+                column![
+                    text("📚").size(64),
+                    text("No libraries configured")
+                        .size(24)
+                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                    text("Create a library to start organizing your media")
+                        .size(16)
+                        .color(theme::MediaServerTheme::TEXT_SECONDARY)
+                ]
+                .spacing(10)
+                .align_x(iced::Alignment::Center),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
+        );
+    } else {
+        content = content.push(Space::with_height(20));
+        
+        for library in &state.libraries {
+            let library_card = container(
+                column![
+                    row![
+                        column![
+                            text(&library.name)
+                                .size(20)
+                                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                            text(format!(
+                                "{} • {} paths • {}",
+                                library.library_type,
+                                library.paths.len(),
+                                if library.enabled { "Enabled" } else { "Disabled" }
+                            ))
+                            .size(14)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                            if !library.paths.is_empty() {
+                                Element::from(
+                                    text(library.paths.join(", "))
+                                        .size(12)
+                                        .color(theme::MediaServerTheme::TEXT_DIMMED),
+                                )
+                            } else {
+                                Element::from(Space::with_height(0))
+                            },
+                        ]
+                        .spacing(5)
+                        .width(Length::Fill),
+                        Space::with_width(20),
+                        column![
+                            button("Select")
+                                .on_press(Message::SelectLibrary(library.id.clone()))
+                                .style(if state.current_library_id.as_ref() == Some(&library.id) {
+                                    theme::Button::Primary.style()
+                                } else {
+                                    theme::Button::Secondary.style()
+                                }),
+                            button("✏️ Edit")
+                                .on_press(Message::ShowLibraryForm(Some(library.clone())))
+                                .style(theme::Button::Secondary.style()),
+                            button(
+                                if library.library_type == "Movies" {
+                                    "🎬 Scan Movies"
+                                } else {
+                                    "📺 Scan TV Shows"
+                                }
+                            )
+                            .on_press(Message::ScanLibrary_(library.id.clone()))
+                            .style(theme::Button::Secondary.style()),
+                            button("🗑 Delete")
+                                .on_press(Message::DeleteLibrary(library.id.clone()))
+                                .style(theme::Button::Destructive.style()),
+                        ]
+                        .spacing(5)
+                        .align_x(iced::Alignment::End),
+                    ]
+                    .align_y(iced::Alignment::Center)
+                ]
+                .spacing(10)
+                .padding(15),
+            )
+            .width(Length::Fill)
+            .style(theme::Container::Card.style());
+            
+            content = content.push(library_card);
+            content = content.push(Space::with_height(10));
+        }
+    }
+
+    scrollable(
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Shrink),
+    )
+    .direction(scrollable::Direction::Vertical(
+        scrollable::Scrollbar::default(),
+    ))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(theme::Scrollable::style())
+    .into()
 }

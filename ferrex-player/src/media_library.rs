@@ -10,6 +10,17 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Library {
+    pub id: String,
+    pub name: String,
+    pub library_type: String, // "Movies" or "TvShows"
+    pub paths: Vec<String>,
+    pub scan_interval_minutes: u32,
+    pub last_scan: Option<String>,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaFile {
     pub id: String,
     pub filename: String,
@@ -17,6 +28,7 @@ pub struct MediaFile {
     pub size: u64,
     pub created_at: String,
     pub metadata: Option<MediaMetadata>,
+    pub library_id: Option<String>, // Library this media belongs to
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +74,8 @@ pub struct ExternalInfo {
     pub show_poster_url: Option<String>,
     pub season_poster_url: Option<String>,
     pub episode_still_url: Option<String>,
+    pub extra_type: Option<String>, // For extras: "BehindTheScenes", "DeletedScenes", etc.
+    pub parent_title: Option<String>, // For extras: title of parent movie/show
 }
 
 impl MediaFile {
@@ -325,6 +339,7 @@ impl MediaLibrary {
     }
 }
 
+/// Fetch all media files (legacy function - for backward compatibility)
 pub async fn fetch_library(server_url: String) -> Result<Vec<MediaFile>, anyhow::Error> {
     log::info!("Fetching library from: {}/library", server_url);
     let start = std::time::Instant::now();
@@ -539,4 +554,213 @@ pub async fn fetch_season_details(
     } else {
         Err(anyhow::anyhow!("Season not found"))
     }
+}
+
+// Library Management API Functions
+
+/// Fetch all libraries
+pub async fn fetch_libraries(server_url: String) -> anyhow::Result<Vec<Library>> {
+    log::info!("Fetching libraries from: {}/libraries", server_url);
+    let client = reqwest::Client::new();
+    let response = client.get(format!("{}/libraries", server_url)).send().await?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Server returned error: {}",
+            response.status()
+        ));
+    }
+
+    let json: serde_json::Value = response.json().await?;
+    
+    if let Some(libraries) = json.get("libraries") {
+        let library_list: Vec<Library> = serde_json::from_value(libraries.clone())?;
+        log::info!("Fetched {} libraries", library_list.len());
+        Ok(library_list)
+    } else if let Some(error) = json.get("error") {
+        Err(anyhow::anyhow!("Server error: {}", error))
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+/// Create a new library
+pub async fn create_library(
+    server_url: String,
+    library: Library,
+) -> anyhow::Result<Library> {
+    log::info!("Creating library: {}", library.name);
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("{}/libraries", server_url))
+        .json(&library)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Server returned error: {}",
+            response.status()
+        ));
+    }
+
+    let json: serde_json::Value = response.json().await?;
+    
+    if let Some(created_library) = json.get("library") {
+        let library: Library = serde_json::from_value(created_library.clone())?;
+        log::info!("Created library: {}", library.name);
+        Ok(library)
+    } else if let Some(error) = json.get("error") {
+        Err(anyhow::anyhow!("Server error: {}", error))
+    } else {
+        Err(anyhow::anyhow!("Invalid response from server"))
+    }
+}
+
+/// Update an existing library
+pub async fn update_library(
+    server_url: String,
+    library: Library,
+) -> anyhow::Result<Library> {
+    log::info!("Updating library: {}", library.name);
+    let client = reqwest::Client::new();
+    let response = client
+        .put(format!("{}/libraries/{}", server_url, library.id))
+        .json(&library)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Server returned error: {}",
+            response.status()
+        ));
+    }
+
+    let json: serde_json::Value = response.json().await?;
+    
+    if let Some(updated_library) = json.get("library") {
+        let library: Library = serde_json::from_value(updated_library.clone())?;
+        log::info!("Updated library: {}", library.name);
+        Ok(library)
+    } else if let Some(error) = json.get("error") {
+        Err(anyhow::anyhow!("Server error: {}", error))
+    } else {
+        Err(anyhow::anyhow!("Invalid response from server"))
+    }
+}
+
+/// Delete a library
+pub async fn delete_library(server_url: String, library_id: String) -> anyhow::Result<()> {
+    log::info!("Deleting library: {}", library_id);
+    let client = reqwest::Client::new();
+    let response = client
+        .delete(format!("{}/libraries/{}", server_url, library_id))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Server returned error: {}",
+            response.status()
+        ));
+    }
+
+    log::info!("Deleted library: {}", library_id);
+    Ok(())
+}
+
+/// Scan a specific library
+pub async fn scan_library(
+    server_url: String,
+    library_id: String,
+    streaming: bool,
+) -> anyhow::Result<String> {
+    log::info!("Starting scan for library: {} (streaming: {})", library_id, streaming);
+    let client = reqwest::Client::new();
+    
+    let mut url = format!("{}/libraries/{}/scan", server_url, library_id);
+    if streaming {
+        url.push_str("?streaming=true");
+    }
+    
+    let response = client.post(&url).send().await?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Server returned error: {}",
+            response.status()
+        ));
+    }
+
+    let json: serde_json::Value = response.json().await?;
+    
+    if let Some(scan_id) = json.get("scan_id").and_then(|id| id.as_str()) {
+        log::info!("Started scan with ID: {}", scan_id);
+        Ok(scan_id.to_string())
+    } else if let Some(error) = json.get("error") {
+        Err(anyhow::anyhow!("Scan error: {}", error))
+    } else {
+        Err(anyhow::anyhow!("Invalid response from server"))
+    }
+}
+
+/// Fetch media files from a specific library
+pub async fn fetch_library_media(
+    server_url: String,
+    library_id: String,
+) -> Result<Vec<MediaFile>, anyhow::Error> {
+    log::info!("Fetching media from library: {}", library_id);
+    let start = std::time::Instant::now();
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+
+    let response = client
+        .get(format!("{}/libraries/{}/media", server_url, library_id))
+        .send()
+        .await?;
+
+    log::info!("Server responded in {:?}", start.elapsed());
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Server returned error: {}",
+            response.status()
+        ));
+    }
+
+    // Get response bytes first
+    let bytes = response.bytes().await?;
+    log::info!("Downloaded {} bytes in {:?}", bytes.len(), start.elapsed());
+
+    // Move JSON parsing to background thread to avoid blocking UI
+    let parse_result = tokio::task::spawn_blocking(move || {
+        let parse_start = std::time::Instant::now();
+        let json: serde_json::Value = serde_json::from_slice(&bytes)?;
+        log::info!("JSON parsed in {:?}", parse_start.elapsed());
+
+        // Check if response has the expected structure
+        if let Some(media_files) = json.get("media_files") {
+            let deserialize_start = std::time::Instant::now();
+            let files: Vec<MediaFile> = serde_json::from_value(media_files.clone())?;
+            log::info!(
+                "Deserialized {} media files in {:?}",
+                files.len(),
+                deserialize_start.elapsed()
+            );
+            Ok(files)
+        } else if let Some(error) = json.get("error") {
+            Err(anyhow::anyhow!("Server error: {}", error))
+        } else {
+            // Empty library
+            log::info!("Library is empty");
+            Ok(Vec::new())
+        }
+    })
+    .await?;
+
+    log::info!("Total fetch time: {:?}", start.elapsed());
+    parse_result
 }

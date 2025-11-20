@@ -19,17 +19,18 @@ use crate::{
     poster_cache::{self, PosterState},
     poster_monitor::PosterMonitor,
     profiling::PROFILER,
-    start_media_scan,
+    start_media_scan, start_library_scan,
     state::{ScanStatus, SortBy, SortOrder, State, ViewMode, ViewState},
     util::{sort_media, trigger_metadata_fetch},
     virtual_list::VirtualGridState,
     MediaEvent,
+    performance_config::posters,
 };
 
 // Scrolling performance constants - tune these based on profiling
 // Lower FAST_SCROLL_THRESHOLD for more aggressive fast mode activation
 // Higher values keep normal rendering longer but may cause stuttering
-const FAST_SCROLL_THRESHOLD: f32 = 10000.0; // pixels per second - when to switch to fast mode
+const FAST_SCROLL_THRESHOLD: f32 = 5000.0; // pixels per second - when to switch to fast mode (lowered for better performance)
 
 // Lower SCROLL_STOP_DEBOUNCE_MS for quicker poster loading after scroll
 // Higher values reduce unnecessary loads during small scroll adjustments  
@@ -279,6 +280,381 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     Err(e) => Message::LibraryLoaded(Err(e.to_string())),
                 },
             )
+        }
+        
+        // Library Management Messages
+        Message::LibrariesLoaded(result) => {
+            match result {
+                Ok(libraries) => {
+                    log::info!("Loaded {} libraries", libraries.len());
+                    state.libraries = libraries;
+                    
+                    // If we have libraries but no current library selected, select the first enabled one
+                    if state.current_library_id.is_none() {
+                        if let Some(library) = state.libraries.iter().find(|l| l.enabled) {
+                            let library_id = library.id.clone();
+                            let server_url = state.server_url.clone();
+                            return Task::perform(
+                                media_library::fetch_library_media(server_url, library_id.clone()),
+                                move |result| match result {
+                                    Ok(files) => Message::LibrarySelected(library_id.clone(), Ok(files)),
+                                    Err(e) => Message::LibrarySelected(library_id.clone(), Err(e.to_string())),
+                                },
+                            );
+                        }
+                    }
+                    
+                    state.error_message = None;
+                }
+                Err(e) => {
+                    log::error!("Failed to load libraries: {}", e);
+                    state.error_message = Some(format!("Failed to load libraries: {}", e));
+                }
+            }
+            Task::none()
+        }
+        
+        Message::LoadLibraries => {
+            let server_url = state.server_url.clone();
+            Task::perform(
+                media_library::fetch_libraries(server_url),
+                |result| match result {
+                    Ok(libraries) => Message::LibrariesLoaded(Ok(libraries)),
+                    Err(e) => Message::LibrariesLoaded(Err(e.to_string())),
+                },
+            )
+        }
+        
+        Message::CreateLibrary(library) => {
+            let server_url = state.server_url.clone();
+            Task::perform(
+                media_library::create_library(server_url, library),
+                |result| match result {
+                    Ok(created_library) => Message::LibraryCreated(Ok(created_library)),
+                    Err(e) => Message::LibraryCreated(Err(e.to_string())),
+                },
+            )
+        }
+        
+        Message::LibraryCreated(result) => {
+            match result {
+                Ok(library) => {
+                    log::info!("Created library: {}", library.name);
+                    state.libraries.push(library);
+                    state.error_message = None;
+                    state.library_form_data = None; // Close form on success
+                    state.library_form_errors.clear();
+                }
+                Err(e) => {
+                    log::error!("Failed to create library: {}", e);
+                    state.library_form_errors.clear();
+                    state.library_form_errors.push(format!("Failed to create library: {}", e));
+                }
+            }
+            Task::none()
+        }
+        
+        Message::UpdateLibrary(library) => {
+            let server_url = state.server_url.clone();
+            Task::perform(
+                media_library::update_library(server_url, library),
+                |result| match result {
+                    Ok(updated_library) => Message::LibraryUpdated(Ok(updated_library)),
+                    Err(e) => Message::LibraryUpdated(Err(e.to_string())),
+                },
+            )
+        }
+        
+        Message::LibraryUpdated(result) => {
+            match result {
+                Ok(library) => {
+                    log::info!("Updated library: {}", library.name);
+                    if let Some(index) = state.libraries.iter().position(|l| l.id == library.id) {
+                        state.libraries[index] = library;
+                    }
+                    state.error_message = None;
+                    state.library_form_data = None; // Close form on success
+                    state.library_form_errors.clear();
+                }
+                Err(e) => {
+                    log::error!("Failed to update library: {}", e);
+                    state.library_form_errors.clear();
+                    state.library_form_errors.push(format!("Failed to update library: {}", e));
+                }
+            }
+            Task::none()
+        }
+        
+        Message::DeleteLibrary(library_id) => {
+            let server_url = state.server_url.clone();
+            let id_for_response = library_id.clone();
+            Task::perform(
+                media_library::delete_library(server_url, library_id),
+                move |result| match result {
+                    Ok(()) => Message::LibraryDeleted(Ok(id_for_response)),
+                    Err(e) => Message::LibraryDeleted(Err(e.to_string())),
+                },
+            )
+        }
+        
+        Message::LibraryDeleted(result) => {
+            match result {
+                Ok(library_id) => {
+                    log::info!("Deleted library: {}", library_id);
+                    state.libraries.retain(|l| l.id != library_id);
+                    
+                    // If we deleted the current library, clear selection
+                    if state.current_library_id.as_ref() == Some(&library_id) {
+                        state.current_library_id = None;
+                        state.movies.clear();
+                        state.tv_shows.clear();
+                        state.tv_shows_sorted.clear();
+                    }
+                    
+                    state.error_message = None;
+                }
+                Err(e) => {
+                    log::error!("Failed to delete library: {}", e);
+                    state.error_message = Some(format!("Failed to delete library: {}", e));
+                }
+            }
+            Task::none()
+        }
+        
+        Message::SelectLibrary(library_id) => {
+            log::info!("Selecting library: {}", library_id);
+            state.current_library_id = Some(library_id.clone());
+            state.loading = true;
+            
+            let server_url = state.server_url.clone();
+            Task::perform(
+                media_library::fetch_library_media(server_url, library_id.clone()),
+                move |result| match result {
+                    Ok(files) => Message::LibrarySelected(library_id.clone(), Ok(files)),
+                    Err(e) => Message::LibrarySelected(library_id.clone(), Err(e.to_string())),
+                },
+            )
+        }
+        
+        Message::LibrarySelected(library_id, result) => {
+            state.loading = false;
+            match result {
+                Ok(files) => {
+                    log::info!("Selected library {} with {} files", library_id, files.len());
+                    
+                    // Update the library with new files
+                    state.library.set_files(files.clone());
+                    state.error_message = None;
+                    
+                    // Organize media similar to LibraryLoaded
+                    let _sort_by = state.sort_by;
+                    let _sort_order = state.sort_order;
+                    Task::perform(
+                        async move {
+                            tokio::spawn(async move {
+                                // MediaOrganizer is a unit struct, no need to instantiate
+                                MediaOrganizer::organize_media(&files)
+                            }).await.unwrap_or_else(|e| {
+                                log::error!("Organization task failed: {}", e);
+                                (Vec::new(), HashMap::new())
+                            })
+                        },
+                        |(movies, tv_shows)| Message::MediaOrganized(movies, tv_shows),
+                    )
+                }
+                Err(e) => {
+                    log::error!("Failed to load library media: {}", e);
+                    state.error_message = Some(format!("Failed to load library: {}", e));
+                    Task::none()
+                }
+            }
+        }
+        
+        Message::ScanLibrary_(library_id) => {
+            log::info!("Starting scan for library: {}", library_id);
+            state.scanning = true;
+            state.error_message = None;
+            state.scan_progress = None;
+            
+            let server_url = state.server_url.clone();
+            Task::perform(
+                start_library_scan(server_url, library_id, true), // Enable streaming
+                |result| match result {
+                    Ok(scan_id) => Message::ScanStarted(Ok(scan_id)),
+                    Err(e) => Message::ScanStarted(Err(e.to_string())),
+                },
+            )
+        }
+        
+        Message::ShowLibraryManagement => {
+            state.view = ViewState::LibraryManagement;
+            state.show_library_management = true;
+            
+            // Load libraries if not already loaded
+            if state.libraries.is_empty() {
+                let server_url = state.server_url.clone();
+                Task::perform(
+                    media_library::fetch_libraries(server_url),
+                    |result| match result {
+                        Ok(libraries) => Message::LibrariesLoaded(Ok(libraries)),
+                        Err(e) => Message::LibrariesLoaded(Err(e.to_string())),
+                    },
+                )
+            } else {
+                Task::none()
+            }
+        }
+        
+        Message::HideLibraryManagement => {
+            state.view = ViewState::Library;
+            state.show_library_management = false;
+            state.library_form_data = None; // Clear form when leaving management view
+            Task::none()
+        }
+        
+        Message::ShowAdminDashboard => {
+            state.view = ViewState::AdminDashboard;
+            Task::none()
+        }
+        
+        Message::HideAdminDashboard => {
+            state.view = ViewState::Library;
+            Task::none()
+        }
+        
+        // Library form management
+        Message::ShowLibraryForm(library) => {
+            state.library_form_errors.clear();
+            state.library_form_data = Some(match library {
+                Some(lib) => {
+                    // Editing existing library
+                    crate::state::LibraryFormData {
+                        id: lib.id,
+                        name: lib.name,
+                        library_type: lib.library_type,
+                        paths: lib.paths.join(", "),
+                        scan_interval_minutes: lib.scan_interval_minutes.to_string(),
+                        enabled: lib.enabled,
+                        editing: true,
+                    }
+                }
+                None => {
+                    // Creating new library
+                    crate::state::LibraryFormData {
+                        id: String::new(),
+                        name: String::new(),
+                        library_type: "Movies".to_string(),
+                        paths: String::new(),
+                        scan_interval_minutes: "60".to_string(),
+                        enabled: true,
+                        editing: false,
+                    }
+                }
+            });
+            Task::none()
+        }
+        
+        Message::HideLibraryForm => {
+            state.library_form_data = None;
+            state.library_form_errors.clear();
+            Task::none()
+        }
+        
+        Message::UpdateLibraryFormName(name) => {
+            if let Some(ref mut form_data) = state.library_form_data {
+                form_data.name = name;
+            }
+            Task::none()
+        }
+        
+        Message::UpdateLibraryFormType(library_type) => {
+            if let Some(ref mut form_data) = state.library_form_data {
+                form_data.library_type = library_type;
+            }
+            Task::none()
+        }
+        
+        Message::UpdateLibraryFormPaths(paths) => {
+            if let Some(ref mut form_data) = state.library_form_data {
+                form_data.paths = paths;
+            }
+            Task::none()
+        }
+        
+        Message::UpdateLibraryFormScanInterval(interval) => {
+            if let Some(ref mut form_data) = state.library_form_data {
+                form_data.scan_interval_minutes = interval;
+            }
+            Task::none()
+        }
+        
+        Message::ToggleLibraryFormEnabled => {
+            if let Some(ref mut form_data) = state.library_form_data {
+                form_data.enabled = !form_data.enabled;
+            }
+            Task::none()
+        }
+        
+        Message::SubmitLibraryForm => {
+            if let Some(ref form_data) = state.library_form_data {
+                // Validate form
+                state.library_form_errors.clear();
+                
+                if form_data.name.trim().is_empty() {
+                    state.library_form_errors.push("Library name is required".to_string());
+                }
+                
+                if form_data.paths.trim().is_empty() {
+                    state.library_form_errors.push("At least one path is required".to_string());
+                }
+                
+                if let Err(_) = form_data.scan_interval_minutes.parse::<u32>() {
+                    state.library_form_errors.push("Scan interval must be a valid number".to_string());
+                }
+                
+                if !state.library_form_errors.is_empty() {
+                    return Task::none();
+                }
+                
+                // Create library object from form data
+                let library = media_library::Library {
+                    id: if form_data.editing { form_data.id.clone() } else { String::new() },
+                    name: form_data.name.trim().to_string(),
+                    library_type: form_data.library_type.clone(),
+                    paths: form_data.paths
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect(),
+                    scan_interval_minutes: form_data.scan_interval_minutes.parse().unwrap_or(60),
+                    last_scan: None,
+                    enabled: form_data.enabled,
+                };
+                
+                if form_data.editing {
+                    // Update existing library
+                    let server_url = state.server_url.clone();
+                    Task::perform(
+                        media_library::update_library(server_url, library),
+                        |result| match result {
+                            Ok(updated_library) => Message::LibraryUpdated(Ok(updated_library)),
+                            Err(e) => Message::LibraryUpdated(Err(e.to_string())),
+                        },
+                    )
+                } else {
+                    // Create new library
+                    let server_url = state.server_url.clone();
+                    Task::perform(
+                        media_library::create_library(server_url, library),
+                        |result| match result {
+                            Ok(created_library) => Message::LibraryCreated(Ok(created_library)),
+                            Err(e) => Message::LibraryCreated(Err(e.to_string())),
+                        },
+                    )
+                }
+            } else {
+                Task::none()
+            }
         }
 
         Message::ScanLibrary => {
@@ -892,7 +1268,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
             // Only load posters if we have capacity (limit concurrent loads)
             let current_loading = state.loading_posters.len();
-            let max_concurrent = 3usize; // Max concurrent poster loads
+            let max_concurrent = posters::MAX_CONCURRENT_LOADS;
             let available_slots = max_concurrent.saturating_sub(current_loading);
 
             if available_slots == 0 {
@@ -1065,6 +1441,64 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
 
+        Message::PosterProcessed(media_id, result) => {
+            let mut tasks = Vec::new();
+            
+            match result {
+                Ok((thumbnail_handle, full_size_handle, was_visible)) => {
+                    // Check if poster is still visible (may have scrolled out of view during processing)
+                    let is_still_visible = state.is_media_visible(&media_id);
+                    
+                    if was_visible && is_still_visible {
+                        // Limit concurrent animations for performance
+                        let active_animations = state.poster_animation_types.len();
+                        if active_animations < 5 {
+                            log::debug!("Poster {} is still visible, starting flip animation", media_id);
+                            // Start at 0 opacity for animation
+                            state.poster_cache.set_loaded(media_id.clone(), thumbnail_handle, full_size_handle);
+                            state.poster_cache.update_opacity(&media_id, 0.0); // Start at 0 opacity
+                            state.poster_animation_states.insert(media_id.clone(), 0.0);
+                            
+                            // Set flip animation type with slightly longer duration
+                            state.poster_animation_types.insert(
+                                media_id.clone(), 
+                                (crate::widgets::AnimationType::Flip { duration: Duration::from_millis(800) }, Instant::now())
+                            );
+
+                            // Start animation
+                            tasks.push(Task::perform(
+                                async move { media_id },
+                                Message::AnimatePoster,
+                            ));
+                        } else {
+                            log::debug!("Too many animations active ({}), skipping animation for {}", active_animations, media_id);
+                            // Too many animations, just show immediately
+                            state.poster_cache.set_loaded(media_id.clone(), thumbnail_handle, full_size_handle);
+                            state.poster_cache.update_opacity(&media_id, 1.0);
+                        }
+                    } else {
+                        log::debug!("Poster {} is not visible, setting to full opacity immediately", media_id);
+                        // Not visible, set to full opacity immediately
+                        state.poster_cache.set_loaded(media_id.clone(), thumbnail_handle, full_size_handle);
+                        state.poster_cache.update_opacity(&media_id, 1.0);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to process poster for {}: {}", media_id, e);
+                    state.poster_cache.set_failed(media_id);
+                }
+            }
+            
+            // Since we finished processing one poster, check if we should load more
+            tasks.push(Task::perform(async {}, |_| Message::PosterMonitorTick));
+            
+            if tasks.is_empty() {
+                Task::none()
+            } else {
+                Task::batch(tasks)
+            }
+        }
+        
         Message::AnimatePoster(media_id) => {
             // Animate poster only if still visible
             if !state.is_media_visible(&media_id) {
@@ -1107,7 +1541,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     // Continue animation
                     Task::perform(
                         async move {
-                            tokio::time::sleep(std::time::Duration::from_millis(16)).await; // ~60fps
+                            tokio::time::sleep(std::time::Duration::from_millis(25)).await; // ~40fps for smoother performance
                             media_id
                         },
                         Message::AnimatePoster,
@@ -1129,7 +1563,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         if *opacity < 1.0 {
                             Task::perform(
                                 async move {
-                                    tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+                                    tokio::time::sleep(std::time::Duration::from_millis(25)).await; // ~40fps
                                     media_id
                                 },
                                 Message::AnimatePoster,
@@ -1183,9 +1617,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::PosterMonitorTick => {
             let mut tasks = Vec::new();
             
-            // Skip poster loading entirely during fast scrolling
-            if state.fast_scrolling {
-                log::debug!("Skipping poster loading during fast scrolling");
+            // Skip poster loading during any meaningful scrolling
+            if state.fast_scrolling || state.scroll_velocity > 1000.0 {
+                log::debug!("Skipping poster loading during scrolling (velocity: {:.0} px/s)", state.scroll_velocity);
                 return Task::none();
             }
 

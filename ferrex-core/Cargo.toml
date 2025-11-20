@@ -44,6 +44,11 @@ reqwest.workspace = true
 # Async traits
 async-trait.workspace = true
 
+# Async runtime
+tokio.workspace = true
+tokio-stream.workspace = true
+futures.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 tokio.workspace = true

@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use serde_json;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -95,6 +94,8 @@ impl PostgresDatabase {
             size: r.get::<i64, _>("file_size") as u64,
             created_at: r.get("created_at"),
             metadata,
+            library_id: r.try_get("library_id").ok(),
+            parent_media_id: r.try_get("parent_media_id").ok(),
         }
     }
     pub async fn new(connection_string: &str) -> Result<Self> {
@@ -105,7 +106,7 @@ impl PostgresDatabase {
             .connect(connection_string)
             .await
             .map_err(|e| {
-                MediaError::InvalidMedia(format!("Failed to connect to PostgreSQL: {}", e))
+                MediaError::InvalidMedia(format!("Failed to connect to PostgreSQL: {e}"))
             })?;
 
         info!("Successfully connected to PostgreSQL");
@@ -119,6 +120,28 @@ impl PostgresDatabase {
         // Simple approach: just create tables if they don't exist
         // PostgreSQL's CREATE TABLE IF NOT EXISTS handles this gracefully
 
+        // Create libraries table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS libraries (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name TEXT NOT NULL,
+                library_type TEXT NOT NULL,
+                paths TEXT[] NOT NULL,
+                scan_interval_minutes INTEGER NOT NULL DEFAULT 60,
+                last_scan TIMESTAMPTZ,
+                enabled BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            MediaError::InvalidMedia(format!("Failed to create libraries table: {e}"))
+        })?;
+
         // Create media_files table
         sqlx::query(
             r#"
@@ -129,6 +152,8 @@ impl PostgresDatabase {
                 file_size BIGINT NOT NULL,
                 media_type TEXT NOT NULL DEFAULT 'unknown',
                 parent_directory TEXT NOT NULL,
+                library_id UUID REFERENCES libraries(id) ON DELETE CASCADE,
+                parent_media_id UUID REFERENCES media_files(id) ON DELETE CASCADE,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 last_scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -138,17 +163,56 @@ impl PostgresDatabase {
         .execute(pool)
         .await
         .map_err(|e| {
-            MediaError::InvalidMedia(format!("Failed to create media_files table: {}", e))
+            MediaError::InvalidMedia(format!("Failed to create media_files table: {e}"))
+        })?;
+
+        // Add library_id column if it doesn't exist (for migration from older schema)
+        sqlx::query(
+            r#"
+            DO $$ 
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                              WHERE table_name='media_files' AND column_name='library_id') THEN
+                    ALTER TABLE media_files ADD COLUMN library_id UUID REFERENCES libraries(id) ON DELETE CASCADE;
+                END IF;
+            END $$
+            "#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            MediaError::InvalidMedia(format!("Failed to add library_id column: {e}"))
+        })?;
+
+        // Add parent_media_id column if it doesn't exist (for extras support)
+        sqlx::query(
+            r#"
+            DO $$ 
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                              WHERE table_name='media_files' AND column_name='parent_media_id') THEN
+                    ALTER TABLE media_files ADD COLUMN parent_media_id UUID REFERENCES media_files(id) ON DELETE CASCADE;
+                END IF;
+            END $$
+            "#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            MediaError::InvalidMedia(format!("Failed to add parent_media_id column: {e}"))
         })?;
 
         // Create indexes
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_media_files_path ON media_files(file_path)")
             .execute(pool)
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to create index: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to create index: {e}")))?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_media_files_parent_dir ON media_files(parent_directory)")
             .execute(pool).await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to create index: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to create index: {e}")))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_media_files_library ON media_files(library_id)")
+            .execute(pool).await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to create index: {e}")))?;
 
         // Create media_metadata table
         sqlx::query(
@@ -172,7 +236,7 @@ impl PostgresDatabase {
         )
         .execute(pool)
         .await
-        .map_err(|e| MediaError::InvalidMedia(format!("Failed to create table: {}", e)))?;
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to create table: {e}")))?;
 
         // Create external_metadata table
         sqlx::query(
@@ -200,7 +264,7 @@ impl PostgresDatabase {
         )
         .execute(pool)
         .await
-        .map_err(|e| MediaError::InvalidMedia(format!("Failed to create table: {}", e)))?;
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to create table: {e}")))?;
 
         info!("Database migrations completed successfully");
         Ok(())
@@ -223,6 +287,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             .map(|p| match p.media_type {
                 crate::MediaType::Movie => "movie",
                 crate::MediaType::TvEpisode => "tv_show",
+                crate::MediaType::Extra => "extra",
                 crate::MediaType::Unknown => "unknown",
             })
             .unwrap_or("unknown")
@@ -236,11 +301,13 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let id: (Uuid,) = sqlx::query_as(
             r#"
-            INSERT INTO media_files (id, file_path, file_name, file_size, media_type, parent_directory)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO media_files (id, file_path, file_name, file_size, media_type, parent_directory, library_id, parent_media_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (file_path) DO UPDATE
             SET file_name = EXCLUDED.file_name,
                 file_size = EXCLUDED.file_size,
+                library_id = EXCLUDED.library_id,
+                parent_media_id = EXCLUDED.parent_media_id,
                 updated_at = NOW()
             RETURNING id
             "#
@@ -251,16 +318,17 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .bind(media_file.size as i64)
         .bind(media_type)
         .bind(parent_dir)
+        .bind(media_file.library_id)
+        .bind(media_file.parent_media_id)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| MediaError::InvalidMedia(format!("Failed to store media: {}", e)))?;
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to store media: {e}")))?;
 
         if let Some(metadata) = &media_file.metadata {
             let parsed_info_json = metadata
                 .parsed_info
                 .as_ref()
-                .map(|pi| serde_json::to_value(pi).ok())
-                .flatten();
+                .and_then(|pi| serde_json::to_value(pi).ok());
 
             sqlx::query!(
                 r#"
@@ -289,7 +357,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             .execute(&self.pool)
             .await
             .map_err(|e| {
-                MediaError::InvalidMedia(format!("Failed to store technical metadata: {}", e))
+                MediaError::InvalidMedia(format!("Failed to store technical metadata: {e}"))
             })?;
 
             // Store external metadata if available
@@ -312,7 +380,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let row = sqlx::query(
             r#"
             SELECT 
-                mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at,
+                mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at, mf.library_id, mf.parent_media_id,
                 mm.duration_seconds, mm.width, mm.height, mm.video_codec, mm.audio_codec,
                 mm.parsed_info,
                 em.external_id, em.title, em.overview, em.release_date,
@@ -327,7 +395,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .bind(path)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| MediaError::InvalidMedia(format!("Failed to retrieve media by path: {}", e)))?;
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to retrieve media by path: {e}")))?;
 
         match row {
             Some(row) => Ok(Some(self.row_to_media_file(row))),
@@ -346,12 +414,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
         };
 
         let uuid = Uuid::parse_str(uuid_str)
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {e}")))?;
 
         let row = sqlx::query(
             r#"
             SELECT 
-                mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at,
+                mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at, mf.library_id, mf.parent_media_id,
                 mm.duration_seconds, mm.width, mm.height, mm.video_codec, mm.audio_codec,
                 mm.parsed_info,
                 em.external_id, em.title, em.overview, em.release_date,
@@ -366,7 +434,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .bind(uuid)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| MediaError::InvalidMedia(format!("Failed to retrieve media: {}", e)))?;
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to retrieve media: {e}")))?;
 
         Ok(row.map(|r| self.row_to_media_file(r)))
     }
@@ -377,7 +445,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let mut query = String::from(
             r#"
             SELECT 
-                mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at, mf.media_type,
+                mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at, mf.media_type, mf.library_id, mf.parent_media_id,
                 mm.duration_seconds, mm.width, mm.height, mm.video_codec, mm.audio_codec,
                 mm.parsed_info,
                 em.external_id, em.title, em.overview, em.release_date,
@@ -394,23 +462,26 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         if filters.media_type.is_some() {
             param_count += 1;
-            query.push_str(&format!(" AND mf.media_type = ${}", param_count));
+            query.push_str(&format!(" AND mf.media_type = ${param_count}"));
         }
 
         if filters.show_name.is_some() {
             param_count += 1;
             query.push_str(&format!(
-                " AND mm.parsed_info->>'show_name' = ${}",
-                param_count
+                " AND mm.parsed_info->>'show_name' = ${param_count}"
             ));
         }
 
         if filters.season.is_some() {
             param_count += 1;
             query.push_str(&format!(
-                " AND (mm.parsed_info->>'season')::int = ${}",
-                param_count
+                " AND (mm.parsed_info->>'season')::int = ${param_count}"
             ));
+        }
+
+        if filters.library_id.is_some() {
+            param_count += 1;
+            query.push_str(&format!(" AND mf.library_id = ${param_count}"));
         }
 
         match filters.order_by.as_deref() {
@@ -421,7 +492,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         }
 
         if let Some(limit) = filters.limit {
-            query.push_str(&format!(" LIMIT {}", limit));
+            query.push_str(&format!(" LIMIT {limit}"));
         }
 
         let mut query_builder = sqlx::query(&query);
@@ -438,10 +509,14 @@ impl MediaDatabaseTrait for PostgresDatabase {
             query_builder = query_builder.bind(*season as i32);
         }
 
+        if let Some(library_id) = &filters.library_id {
+            query_builder = query_builder.bind(library_id);
+        }
+
         let rows = query_builder
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to list media: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to list media: {e}")))?;
 
         let mut media_files = Vec::new();
         for row in rows {
@@ -524,6 +599,8 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 size: row.get::<i64, _>("file_size") as u64,
                 created_at: row.get("created_at"),
                 metadata,
+                library_id: row.try_get("library_id").ok(),
+                parent_media_id: row.try_get("parent_media_id").ok(),
             });
         }
 
@@ -538,14 +615,14 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| MediaError::InvalidMedia(format!("Failed to get stats: {}", e)))?;
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to get stats: {e}")))?;
 
         let type_rows = sqlx::query!(
             "SELECT media_type, COUNT(*) as count FROM media_files GROUP BY media_type"
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MediaError::InvalidMedia(format!("Failed to get type stats: {}", e)))?;
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to get type stats: {e}")))?;
 
         let mut by_type = HashMap::new();
         for row in type_rows {
@@ -573,7 +650,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| MediaError::InvalidMedia(format!("Failed to check file existence: {}", e)))?;
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to check file existence: {e}")))?;
 
         Ok(result.exists.unwrap_or(false))
     }
@@ -592,7 +669,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             };
 
             let uuid = Uuid::parse_str(uuid_str)
-                .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {}", e)))?;
+                .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {e}")))?;
 
             let title = external
                 .description
@@ -645,7 +722,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             .execute(&self.pool)
             .await
             .map_err(|e| {
-                MediaError::InvalidMedia(format!("Failed to store external metadata: {}", e))
+                MediaError::InvalidMedia(format!("Failed to store external metadata: {e}"))
             })?;
         }
 
@@ -672,7 +749,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| MediaError::InvalidMedia(format!("Failed to store TV show: {}", e)))?;
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to store TV show: {e}")))?;
 
         for season in &show_info.seasons {
             sqlx::query!(
@@ -693,7 +770,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             )
             .execute(&self.pool)
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to store season: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to store season: {e}")))?;
         }
 
         Ok(show_info.id.to_string())
@@ -706,7 +783,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| MediaError::InvalidMedia(format!("Failed to get TV show: {}", e)))?;
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to get TV show: {e}")))?;
 
         if let Some(show) = show_row {
             let seasons = sqlx::query!(
@@ -715,7 +792,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             )
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to get seasons: {}", e)))?
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to get seasons: {e}")))?
             .into_iter()
             .map(|s| SeasonInfo {
                 id: s.id,
@@ -757,7 +834,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         };
 
         let file_uuid = Uuid::parse_str(uuid_str)
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid file UUID: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Invalid file UUID: {e}")))?;
 
         sqlx::query!(
             r#"
@@ -774,7 +851,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| MediaError::InvalidMedia(format!("Failed to link episode to file: {}", e)))?;
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to link episode to file: {e}")))?;
 
         Ok(())
     }
@@ -788,12 +865,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
         };
 
         let uuid = Uuid::parse_str(uuid_str)
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {e}")))?;
 
         sqlx::query!("DELETE FROM media_files WHERE id = $1", uuid)
             .execute(&self.pool)
             .await
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to delete media: {}", e)))?;
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to delete media: {e}")))?;
 
         Ok(())
     }
@@ -802,7 +879,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let rows = sqlx::query(
             r#"
             SELECT 
-                mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at,
+                mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at, mf.library_id, mf.parent_media_id,
                 mm.duration_seconds, mm.width, mm.height, mm.video_codec, mm.audio_codec,
                 mm.parsed_info,
                 em.external_id, em.title, em.overview, em.release_date,
@@ -816,7 +893,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MediaError::InvalidMedia(format!("Failed to fetch all media: {}", e)))?;
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to fetch all media: {e}")))?;
 
         let mut media_files = Vec::new();
         for row in rows {
@@ -824,5 +901,179 @@ impl MediaDatabaseTrait for PostgresDatabase {
         }
 
         Ok(media_files)
+    }
+
+    // Library management methods
+    async fn create_library(&self, library: crate::Library) -> Result<String> {
+        let paths: Vec<String> = library.paths.iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+
+        let id: (Uuid,) = sqlx::query_as(
+            r#"
+            INSERT INTO libraries (id, name, library_type, paths, scan_interval_minutes, enabled, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id
+            "#
+        )
+        .bind(library.id)
+        .bind(&library.name)
+        .bind(format!("{:?}", library.library_type))
+        .bind(&paths)
+        .bind(library.scan_interval_minutes as i32)
+        .bind(library.enabled)
+        .bind(library.created_at)
+        .bind(library.updated_at)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to create library: {e}")))?;
+
+        Ok(id.0.to_string())
+    }
+
+    async fn get_library(&self, id: &str) -> Result<Option<crate::Library>> {
+        let uuid = Uuid::parse_str(id)
+            .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {e}")))?;
+
+        let row = sqlx::query(
+            r#"
+            SELECT id, name, library_type, paths, scan_interval_minutes, last_scan, enabled, created_at, updated_at
+            FROM libraries
+            WHERE id = $1
+            "#
+        )
+        .bind(uuid)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to get library: {e}")))?;
+
+        match row {
+            Some(row) => {
+                let library_type_str: String = row.get("library_type");
+                let library_type = match library_type_str.as_str() {
+                    "Movies" => crate::LibraryType::Movies,
+                    "TvShows" => crate::LibraryType::TvShows,
+                    _ => crate::LibraryType::Movies, // Default
+                };
+
+                let paths: Vec<String> = row.get("paths");
+                let paths = paths.into_iter()
+                    .map(std::path::PathBuf::from)
+                    .collect();
+
+                Ok(Some(crate::Library {
+                    id: row.get("id"),
+                    name: row.get("name"),
+                    library_type,
+                    paths,
+                    scan_interval_minutes: row.get::<i32, _>("scan_interval_minutes") as u32,
+                    last_scan: row.get("last_scan"),
+                    enabled: row.get("enabled"),
+                    created_at: row.get("created_at"),
+                    updated_at: row.get("updated_at"),
+                }))
+            }
+            None => Ok(None)
+        }
+    }
+
+    async fn list_libraries(&self) -> Result<Vec<crate::Library>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, name, library_type, paths, scan_interval_minutes, last_scan, enabled, created_at, updated_at
+            FROM libraries
+            ORDER BY name
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to list libraries: {e}")))?;
+
+        let libraries = rows.into_iter().map(|row| {
+            let library_type_str: String = row.get("library_type");
+            let library_type = match library_type_str.as_str() {
+                "Movies" => crate::LibraryType::Movies,
+                "TvShows" => crate::LibraryType::TvShows,
+                _ => crate::LibraryType::Movies,
+            };
+
+            let paths: Vec<String> = row.get("paths");
+            let paths = paths.into_iter()
+                .map(std::path::PathBuf::from)
+                .collect();
+
+            crate::Library {
+                id: row.get("id"),
+                name: row.get("name"),
+                library_type,
+                paths,
+                scan_interval_minutes: row.get::<i32, _>("scan_interval_minutes") as u32,
+                last_scan: row.get("last_scan"),
+                enabled: row.get("enabled"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            }
+        }).collect();
+
+        Ok(libraries)
+    }
+
+    async fn update_library(&self, id: &str, library: crate::Library) -> Result<()> {
+        let uuid = Uuid::parse_str(id)
+            .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {e}")))?;
+
+        let paths: Vec<String> = library.paths.iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+
+        sqlx::query(
+            r#"
+            UPDATE libraries
+            SET name = $2, paths = $3, scan_interval_minutes = $4, enabled = $5, updated_at = NOW()
+            WHERE id = $1
+            "#
+        )
+        .bind(uuid)
+        .bind(library.name)
+        .bind(&paths)
+        .bind(library.scan_interval_minutes as i32)
+        .bind(library.enabled)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to update library: {e}")))?;
+
+        Ok(())
+    }
+
+    async fn delete_library(&self, id: &str) -> Result<()> {
+        let uuid = Uuid::parse_str(id)
+            .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {e}")))?;
+
+        sqlx::query("DELETE FROM libraries WHERE id = $1")
+            .bind(uuid)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to delete library: {e}")))?;
+
+        Ok(())
+    }
+
+    async fn update_library_last_scan(&self, id: &str) -> Result<()> {
+        let uuid = Uuid::parse_str(id)
+            .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {e}")))?;
+
+        sqlx::query(
+            r#"
+            UPDATE libraries
+            SET last_scan = NOW(), updated_at = NOW()
+            WHERE id = $1
+            "#
+        )
+        .bind(uuid)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to update library last scan: {e}")))?;
+
+        Ok(())
     }
 }

@@ -100,6 +100,16 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     return output;
 }
 
+// Convert sRGB color to linear color space
+fn srgb_to_linear(color: vec3<f32>) -> vec3<f32> {
+    return pow(color, vec3<f32>(2.2));
+}
+
+// Convert linear color to sRGB color space
+fn linear_to_srgb(color: vec3<f32>) -> vec3<f32> {
+    return pow(color, vec3<f32>(1.0 / 2.2));
+}
+
 // Signed distance function for rounded rectangle
 fn rounded_rect_sdf(p: vec2<f32>, center: vec2<f32>, half_size: vec2<f32>, radius: f32) -> f32 {
     let d = abs(p - center) - half_size + vec2<f32>(radius);
@@ -109,12 +119,15 @@ fn rounded_rect_sdf(p: vec2<f32>, center: vec2<f32>, half_size: vec2<f32>, radiu
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Sample the texture
-    var color = textureSample(image_texture, texture_sampler, input.tex_coord);
+    let sampled_color = textureSample(image_texture, texture_sampler, input.tex_coord);
+    
+    // Convert from sRGB to linear color space for processing
+    var linear_rgb = srgb_to_linear(sampled_color.rgb);
     
     // For backface, we could show a different texture or solid color
     // For now, just tint it darker to show it's the back
     if input.is_backface > 0.5 {
-        color = vec4<f32>(color.rgb * 0.7, color.a);
+        linear_rgb = linear_rgb * 0.7;
     }
     
     // Calculate signed distance to rounded rectangle edge
@@ -131,7 +144,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let alpha = 1.0 - smoothstep(-2.0, 2.0, dist);
     
     // Apply alpha clipping and opacity
-    color.a = color.a * alpha * input.opacity;
+    let final_alpha = sampled_color.a * alpha * input.opacity;
     
-    return color;
+    // Convert back to sRGB for display
+    let final_rgb = linear_to_srgb(linear_rgb);
+    
+    return vec4<f32>(final_rgb, final_alpha);
 }

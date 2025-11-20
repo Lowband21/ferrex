@@ -16,6 +16,12 @@ pub enum MediaError {
 
     #[error("Media not found: {0}")]
     NotFound(String),
+
+    #[error("Operation cancelled: {0}")]
+    Cancelled(String),
+
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 pub type Result<T> = std::result::Result<T, MediaError>;

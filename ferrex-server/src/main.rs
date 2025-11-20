@@ -1,7 +1,7 @@
-mod config;
-mod metadata_service;
-mod scan_manager;
-mod thumbnail_service;
+pub mod config;
+pub mod metadata_service;
+pub mod scan_manager;
+pub mod thumbnail_service;
 
 use axum::{
     extract::{Path, Query, State},
@@ -12,7 +12,7 @@ use axum::{
 };
 use config::Config;
 use ferrex_core::{
-    database::traits::MediaFilters, EpisodeSummary, MediaDatabase, MediaScanner, MetadataExtractor,
+    database::traits::MediaFilters, EpisodeSummary, Library, LibraryType, MediaDatabase, MediaScanner, MetadataExtractor,
     ScanResult, SeasonDetails, SeasonSummary, TvShowDetails,
 };
 use serde::{Deserialize, Serialize};
@@ -27,12 +27,12 @@ use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone)]
-struct AppState {
-    db: Arc<MediaDatabase>,
-    config: Arc<Config>,
-    metadata_service: Arc<metadata_service::MetadataService>,
-    thumbnail_service: Arc<thumbnail_service::ThumbnailService>,
-    scan_manager: Arc<scan_manager::ScanManager>,
+pub struct AppState {
+    pub db: Arc<MediaDatabase>,
+    pub config: Arc<Config>,
+    pub metadata_service: Arc<metadata_service::MetadataService>,
+    pub thumbnail_service: Arc<thumbnail_service::ThumbnailService>,
+    pub scan_manager: Arc<scan_manager::ScanManager>,
 }
 
 #[tokio::main]
@@ -139,7 +139,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn create_app(state: AppState) -> Router {
+pub fn create_app(state: AppState) -> Router {
     Router::new()
         .route("/ping", get(ping_handler))
         .route("/health", get(health_handler))
@@ -176,6 +176,12 @@ fn create_app(state: AppState) -> Router {
             "/shows/:show_name/seasons/:season_num",
             get(season_details_handler),
         )
+        // Library management endpoints
+        .route("/libraries", get(list_libraries_handler).post(create_library_handler))
+        .route("/libraries/:id", get(get_library_handler))
+        .route("/libraries/:id", axum::routing::put(update_library_handler))
+        .route("/libraries/:id", axum::routing::delete(delete_library_handler))
+        .route("/libraries/:id/scan", post(scan_library_handler))
         // Temporary maintenance endpoint
         .route(
             "/maintenance/delete-by-title/:title",
@@ -199,6 +205,33 @@ struct MetadataRequest {
     path: String,
 }
 
+#[derive(Deserialize)]
+struct CreateLibraryRequest {
+    name: String,
+    library_type: String,
+    paths: Vec<String>,
+    #[serde(default = "default_scan_interval")]
+    scan_interval_minutes: u32,
+    #[serde(default = "default_enabled")]
+    enabled: bool,
+}
+
+#[derive(Deserialize)]
+struct UpdateLibraryRequest {
+    name: Option<String>,
+    paths: Option<Vec<String>>,
+    scan_interval_minutes: Option<u32>,
+    enabled: Option<bool>,
+}
+
+fn default_scan_interval() -> u32 {
+    60
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize)]
 struct LibraryFilters {
     media_type: Option<String>,
@@ -206,6 +239,7 @@ struct LibraryFilters {
     season: Option<u32>,
     order_by: Option<String>,
     limit: Option<u64>,
+    library_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -408,6 +442,7 @@ async fn library_handler_impl(
         season: filters.season,
         order_by: filters.order_by,
         limit: filters.limit,
+        library_id: filters.library_id.and_then(|id| uuid::Uuid::parse_str(&id).ok()),
     };
 
     match db.backend().list_media(media_filters).await {
@@ -1381,6 +1416,303 @@ async fn season_details_handler(
         }
         Err(e) => {
             warn!("Failed to retrieve season details: {}", e);
+            Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
+// Library management handlers
+async fn list_libraries_handler(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
+    info!("Listing all libraries");
+    
+    match state.db.backend().list_libraries().await {
+        Ok(libraries) => {
+            info!("Found {} libraries", libraries.len());
+            Ok(Json(json!({
+                "status": "success",
+                "libraries": libraries
+            })))
+        }
+        Err(e) => {
+            warn!("Failed to list libraries: {}", e);
+            Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
+async fn get_library_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    info!("Getting library: {}", id);
+    
+    match state.db.backend().get_library(&id).await {
+        Ok(Some(library)) => {
+            Ok(Json(json!({
+                "status": "success",
+                "library": library
+            })))
+        }
+        Ok(None) => {
+            warn!("Library not found: {}", id);
+            Err(StatusCode::NOT_FOUND)
+        }
+        Err(e) => {
+            warn!("Failed to get library: {}", e);
+            Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
+async fn create_library_handler(
+    State(state): State<AppState>,
+    Json(request): Json<CreateLibraryRequest>,
+) -> Result<Json<Value>, StatusCode> {
+    info!("Creating library: {}", request.name);
+    
+    // Parse library type
+    let library_type = match request.library_type.to_lowercase().as_str() {
+        "movies" => LibraryType::Movies,
+        "tvshows" | "tv_shows" | "tv" => LibraryType::TvShows,
+        _ => {
+            return Ok(Json(json!({
+                "status": "error",
+                "error": "Invalid library type. Use 'movies' or 'tvshows'"
+            })));
+        }
+    };
+    
+    // Convert string paths to PathBuf
+    let paths: Vec<std::path::PathBuf> = request.paths.into_iter()
+        .map(std::path::PathBuf::from)
+        .collect();
+    
+    // Validate paths exist
+    for path in &paths {
+        if !path.exists() {
+            return Ok(Json(json!({
+                "status": "error",
+                "error": format!("Path does not exist: {}", path.display())
+            })));
+        }
+    }
+    
+    let library = Library {
+        id: uuid::Uuid::new_v4(),
+        name: request.name,
+        library_type,
+        paths,
+        scan_interval_minutes: request.scan_interval_minutes,
+        last_scan: None,
+        enabled: request.enabled,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    
+    match state.db.backend().create_library(library).await {
+        Ok(id) => {
+            info!("Library created with ID: {}", id);
+            Ok(Json(json!({
+                "status": "success",
+                "id": id,
+                "message": "Library created successfully"
+            })))
+        }
+        Err(e) => {
+            warn!("Failed to create library: {}", e);
+            Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
+async fn update_library_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<UpdateLibraryRequest>,
+) -> Result<Json<Value>, StatusCode> {
+    info!("Updating library: {}", id);
+    
+    // Get existing library
+    let mut library = match state.db.backend().get_library(&id).await {
+        Ok(Some(lib)) => lib,
+        Ok(None) => {
+            warn!("Library not found: {}", id);
+            return Err(StatusCode::NOT_FOUND);
+        }
+        Err(e) => {
+            warn!("Failed to get library: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    
+    // Update fields
+    if let Some(name) = request.name {
+        library.name = name;
+    }
+    
+    if let Some(paths) = request.paths {
+        let new_paths: Vec<std::path::PathBuf> = paths.into_iter()
+            .map(std::path::PathBuf::from)
+            .collect();
+        
+        // Validate paths exist
+        for path in &new_paths {
+            if !path.exists() {
+                return Ok(Json(json!({
+                    "status": "error",
+                    "error": format!("Path does not exist: {}", path.display())
+                })));
+            }
+        }
+        
+        library.paths = new_paths;
+    }
+    
+    if let Some(interval) = request.scan_interval_minutes {
+        library.scan_interval_minutes = interval;
+    }
+    
+    if let Some(enabled) = request.enabled {
+        library.enabled = enabled;
+    }
+    
+    library.updated_at = chrono::Utc::now();
+    
+    match state.db.backend().update_library(&id, library).await {
+        Ok(()) => {
+            info!("Library updated: {}", id);
+            Ok(Json(json!({
+                "status": "success",
+                "message": "Library updated successfully"
+            })))
+        }
+        Err(e) => {
+            warn!("Failed to update library: {}", e);
+            Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
+async fn delete_library_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    info!("Deleting library: {}", id);
+    
+    match state.db.backend().delete_library(&id).await {
+        Ok(()) => {
+            info!("Library deleted: {}", id);
+            Ok(Json(json!({
+                "status": "success",
+                "message": "Library deleted successfully"
+            })))
+        }
+        Err(e) => {
+            warn!("Failed to delete library: {}", e);
+            Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
+// Library scan handler
+async fn scan_library_handler(
+    State(state): State<AppState>,
+    Path(library_id): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, StatusCode> {
+    info!("Scan request for library: {}", library_id);
+    
+    // Get the library details
+    let library = match state.db.backend().get_library(&library_id).await {
+        Ok(Some(lib)) => lib,
+        Ok(None) => {
+            warn!("Library not found: {}", library_id);
+            return Ok(Json(json!({
+                "status": "error",
+                "error": "Library not found"
+            })));
+        }
+        Err(e) => {
+            warn!("Failed to get library: {}", e);
+            return Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })));
+        }
+    };
+    
+    // Check if library is enabled
+    if !library.enabled {
+        return Ok(Json(json!({
+            "status": "error",
+            "error": "Library is disabled"
+        })));
+    }
+    
+    // Check for force rescan parameter
+    let force_rescan = params.get("force")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+    
+    // Check if we should use streaming scanner (default to true for libraries)
+    let use_streaming = params.get("streaming")
+        .map(|v| v != "false" && v != "0")
+        .unwrap_or(true);
+    
+    let library_name = library.name.clone();
+    
+    // Start the scan
+    let scan_result = if use_streaming {
+        // Use new streaming scanner for better performance
+        state.scan_manager.start_library_scan(Arc::new(library), force_rescan).await
+    } else {
+        // Fall back to traditional scanner if requested
+        let scan_request = scan_manager::ScanRequest {
+            paths: Some(library.paths.iter().map(|p| p.to_string_lossy().to_string()).collect()),
+            path: None,
+            library_id: Some(library.id),
+            library_type: Some(library.library_type),
+            extract_metadata: true,
+            follow_links: false,
+            force_rescan,
+            max_depth: None,
+            use_streaming: false,
+        };
+        state.scan_manager.start_scan(scan_request).await
+    };
+    
+    match scan_result {
+        Ok(scan_id) => {
+            // Update library last scan time
+            let _ = state.db.backend().update_library_last_scan(&library_id).await;
+            
+            info!("Library scan started with ID: {}", scan_id);
+            Ok(Json(json!({
+                "status": "success",
+                "scan_id": scan_id,
+                "message": format!("Scan started for library: {}", library_name)
+            })))
+        }
+        Err(e) => {
+            warn!("Failed to start library scan: {}", e);
             Ok(Json(json!({
                 "status": "error",
                 "error": e.to_string()

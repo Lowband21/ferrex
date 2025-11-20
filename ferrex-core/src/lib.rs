@@ -1,13 +1,21 @@
 pub mod database;
 pub mod error;
+pub mod extras_parser;
+pub mod library;
 pub mod media;
 pub mod metadata;
 pub mod providers;
 pub mod scanner;
+pub mod streaming_scanner;
+pub mod tv_parser;
 
 pub use database::*;
 pub use error::*;
+pub use extras_parser::ExtrasParser;
+pub use library::*;
 pub use media::*;
 pub use metadata::*;
 pub use providers::{MetadataProvider, ProviderError, TmdbProvider};
 pub use scanner::*;
+pub use streaming_scanner::*;
+pub use tv_parser::{TvParser, EpisodeInfo};

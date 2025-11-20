@@ -206,6 +206,7 @@ impl MetadataProvider for TmdbProvider {
         let endpoint = match query.media_type {
             MediaType::Movie => "search/movie",
             MediaType::TvEpisode => "search/tv",
+            MediaType::Extra => "search/multi", // Extras should search both movies and TV
             MediaType::Unknown => "search/multi",
         };
 
@@ -220,12 +221,13 @@ impl MetadataProvider for TmdbProvider {
             let year_param = match query.media_type {
                 MediaType::Movie => "year",
                 MediaType::TvEpisode => "first_air_date_year",
+                MediaType::Extra => "year", // Extras use generic year param
                 MediaType::Unknown => "year",
             };
             params.push((year_param, &year_str));
         }
 
-        let url = format!("{}/{}", TMDB_API_BASE, endpoint);
+        let url = format!("{TMDB_API_BASE}/{endpoint}");
         tracing::debug!("TMDB request URL: {}", url);
 
         let response = self.client.get(&url).query(&params).send().await?;
@@ -303,6 +305,7 @@ impl MetadataProvider for TmdbProvider {
         match media_type {
             MediaType::Movie => self.get_movie_metadata(id).await,
             MediaType::TvEpisode => self.get_tv_metadata(id).await,
+            MediaType::Extra => self.get_movie_metadata(id).await, // Extras default to movie metadata
             MediaType::Unknown => Err(ProviderError::ApiError("Unknown media type".to_string())),
         }
     }
@@ -357,13 +360,14 @@ impl TmdbProvider {
 
                 Ok(metadata)
             }
+            MediaType::Extra => self.get_movie_metadata(id).await, // Extras default to movie metadata
             MediaType::Unknown => Err(ProviderError::ApiError("Unknown media type".to_string())),
         }
     }
 
     async fn get_movie_metadata(&self, id: u32) -> Result<DetailedMediaInfo, ProviderError> {
         // Fetch movie details
-        let details_url = format!("{}/movie/{}", TMDB_API_BASE, id);
+        let details_url = format!("{TMDB_API_BASE}/movie/{id}");
         let details_response = self
             .client
             .get(&details_url)
@@ -381,7 +385,7 @@ impl TmdbProvider {
             .map_err(|e| ProviderError::ParseError(e.to_string()))?;
 
         // Fetch credits
-        let credits_url = format!("{}/movie/{}/credits", TMDB_API_BASE, id);
+        let credits_url = format!("{TMDB_API_BASE}/movie/{id}/credits");
         let credits_response = self
             .client
             .get(&credits_url)
@@ -395,7 +399,7 @@ impl TmdbProvider {
             .map_err(|e| ProviderError::ParseError(e.to_string()))?;
 
         // Fetch images
-        let images_url = format!("{}/movie/{}/images", TMDB_API_BASE, id);
+        let images_url = format!("{TMDB_API_BASE}/movie/{id}/images");
         let images_response = self
             .client
             .get(&images_url)
@@ -470,7 +474,7 @@ impl TmdbProvider {
 
     async fn get_tv_metadata(&self, id: u32) -> Result<DetailedMediaInfo, ProviderError> {
         // Fetch TV show details
-        let details_url = format!("{}/tv/{}", TMDB_API_BASE, id);
+        let details_url = format!("{TMDB_API_BASE}/tv/{id}");
         let details_response = self
             .client
             .get(&details_url)
@@ -488,7 +492,7 @@ impl TmdbProvider {
             .map_err(|e| ProviderError::ParseError(e.to_string()))?;
 
         // Fetch credits
-        let credits_url = format!("{}/tv/{}/credits", TMDB_API_BASE, id);
+        let credits_url = format!("{TMDB_API_BASE}/tv/{id}/credits");
         let credits_response = self
             .client
             .get(&credits_url)
@@ -502,7 +506,7 @@ impl TmdbProvider {
             .map_err(|e| ProviderError::ParseError(e.to_string()))?;
 
         // Fetch images
-        let images_url = format!("{}/tv/{}/images", TMDB_API_BASE, id);
+        let images_url = format!("{TMDB_API_BASE}/tv/{id}/images");
         let images_response = self
             .client
             .get(&images_url)
@@ -581,7 +585,7 @@ impl TmdbProvider {
         tv_id: u32,
         season_number: u32,
     ) -> Result<TmdbSeasonDetails, ProviderError> {
-        let url = format!("{}/tv/{}/season/{}", TMDB_API_BASE, tv_id, season_number);
+        let url = format!("{TMDB_API_BASE}/tv/{tv_id}/season/{season_number}");
         let response = self
             .client
             .get(&url)
@@ -609,8 +613,7 @@ impl TmdbProvider {
         episode_number: u32,
     ) -> Result<TmdbEpisode, ProviderError> {
         let url = format!(
-            "{}/tv/{}/season/{}/episode/{}",
-            TMDB_API_BASE, tv_id, season_number, episode_number
+            "{TMDB_API_BASE}/tv/{tv_id}/season/{season_number}/episode/{episode_number}"
         );
         let response = self
             .client

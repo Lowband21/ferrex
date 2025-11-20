@@ -1,8 +1,9 @@
 use crate::carousel::CarouselState;
 use crate::image_cache::ImageCache;
-use crate::media_library::{MediaFile, MediaLibrary};
+use crate::media_library::{Library, MediaFile, MediaLibrary};
 use crate::metadata_cache::MetadataCache;
 use crate::models::{SeasonDetails, TvShow, TvShowDetails};
+use crate::performance_config;
 use crate::player::PlayerState;
 use crate::poster_cache::PosterCache;
 use crate::poster_monitor::PosterMonitor;
@@ -44,6 +45,8 @@ pub struct ScanProgress {
 pub enum ViewState {
     #[default]
     Library,
+    LibraryManagement, // New view for library management
+    AdminDashboard, // New comprehensive admin dashboard
     Player,
     LoadingVideo {
         url: String,
@@ -90,6 +93,18 @@ pub enum SortOrder {
     Ascending,
 }
 
+// Library form data for creating/editing libraries
+#[derive(Debug, Clone)]
+pub struct LibraryFormData {
+    pub id: String,
+    pub name: String,
+    pub library_type: String,
+    pub paths: String, // comma-separated paths as entered by user
+    pub scan_interval_minutes: String,
+    pub enabled: bool,
+    pub editing: bool, // true if editing existing library, false if creating new
+}
+
 // Application state
 #[derive(Debug)]
 pub struct State {
@@ -100,8 +115,17 @@ pub struct State {
     pub sort_order: SortOrder,
 
     // Media library
-    pub library: MediaLibrary,
+    pub library: MediaLibrary, // Legacy - for backward compatibility
     pub server_url: String,
+    
+    // Library management
+    pub libraries: Vec<Library>,
+    pub current_library_id: Option<String>,
+    pub show_library_management: bool,
+    
+    // Library form
+    pub library_form_data: Option<LibraryFormData>,
+    pub library_form_errors: Vec<String>,
 
     // Player module state
     pub player: PlayerState,
@@ -249,9 +273,9 @@ impl State {
     /// Only marks as many posters as there are available loading slots
     pub fn mark_visible_posters_for_loading(&mut self) -> Vec<String> {
         PROFILER.start("mark_visible_posters");
-        const MAX_CONCURRENT_LOADS: usize = 3;
-        const PRELOAD_AHEAD_ROWS: usize = 2; // Number of rows to preload ahead
-        const PRELOAD_BELOW_ROWS: usize = 5; // Number of rows to preload below visible area
+        const MAX_CONCURRENT_LOADS: usize = performance_config::posters::MAX_CONCURRENT_LOADS;
+        const PRELOAD_AHEAD_ROWS: usize = performance_config::scrolling::PRELOAD_AHEAD_ROWS;
+        const PRELOAD_BELOW_ROWS: usize = performance_config::scrolling::PRELOAD_BELOW_ROWS;
 
         // Calculate available slots
         let current_loading = self.loading_posters.len();
@@ -420,6 +444,16 @@ impl Default for State {
             sort_order: SortOrder::default(),
             library: MediaLibrary::new(),
             server_url: String::new(),
+            
+            // Library management
+            libraries: Vec::new(),
+            current_library_id: None,
+            show_library_management: false,
+            
+            // Library form
+            library_form_data: None,
+            library_form_errors: Vec::new(),
+            
             player: PlayerState::default(),
             loading: false,
             error_message: None,
@@ -447,7 +481,7 @@ impl Default for State {
             loading_posters: HashSet::new(),
             poster_animation_states: HashMap::new(),
             poster_animation_types: HashMap::new(),
-            poster_load_semaphore: Arc::new(tokio::sync::Semaphore::new(8)), // Max 8 concurrent poster loads
+            poster_load_semaphore: Arc::new(tokio::sync::Semaphore::new(performance_config::posters::MAX_BACKGROUND_PROCESSING)),
             poster_monitor: None,
             poster_mark_progress: 0,
             last_scroll_time: None,

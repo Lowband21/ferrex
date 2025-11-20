@@ -164,6 +164,7 @@ pub fn episode_card_with_cache<'a>(
         size: 0,
         created_at: String::new(),
         metadata: None,
+        library_id: None, // Episode from details view, no library association
     };
 
     // Add play button overlay

@@ -2,11 +2,12 @@ use crate::{
     media_library::MediaFile,
     models::{MediaOrganizer, Season, TvShow},
     poster_cache::{PosterCache, PosterState},
-    theme,
+    theme::{self, MediaServerTheme},
     widgets::{rounded_image, rounded_image_shader, AnimationType},
     Message,
 };
 use iced::{
+    advanced::graphics::image::image_rs::codecs::ico::IcoDecoder,
     widget::{button, column, container, row, scrollable, text, Column, Row, Space, Stack},
     Element, Length,
 };
@@ -41,7 +42,9 @@ pub fn movie_card<'a>(
     // Create poster element with fixed dimensions
     let poster_element_base: Element<Message> = match poster_cache.get(&file.id) {
         Some(PosterState::Loaded {
-            thumbnail, opacity: _, ..
+            thumbnail,
+            opacity: _,
+            ..
         }) => {
             // TEST: Use shader-based rounded image widget
             rounded_image_shader(thumbnail.clone())
@@ -799,6 +802,7 @@ pub fn episode_card<'a>(
         size: 0,
         created_at: String::new(),
         metadata: None,
+        library_id: None, // Episode from details view, no library association
     };
 
     // Add play button overlay
@@ -920,7 +924,7 @@ pub fn movie_card_lazy<'a>(
 
     let poster_element_base: Element<Message> = match poster_state {
         Some(PosterState::Loaded {
-            thumbnail, opacity: _, ..
+            thumbnail, opacity, ..
         }) => {
             // Use shader-based rounded image with opacity from poster cache
             let mut rounded_img = rounded_image_shader(thumbnail.clone())
@@ -928,14 +932,14 @@ pub fn movie_card_lazy<'a>(
                 .width(Length::Fixed(200.0))
                 .height(Length::Fixed(300.0))
                 .opacity(opacity);
-            
+
             // Check if this poster has an active animation
             if let Some((animation_type, start_time)) = animation_types.get(&file.id) {
                 rounded_img = rounded_img
                     .with_animation(*animation_type)
                     .with_load_time(*start_time);
             }
-            
+
             rounded_img.into()
         }
         Some(PosterState::Loading) => container(
@@ -965,26 +969,17 @@ pub fn movie_card_lazy<'a>(
                     0.0, 0.0, 0.0, 0.4,
                 ))),
                 border: iced::Border {
-                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
-                    width: 0.0,
+                    color: MediaServerTheme::ACCENT_BLUE,
+                    width: 4.0,
                     radius: 8.0.into(),
                 },
-                ..Default::default()
-            })
-            .into();
-        let poster_border: Element<Message> = container("")
-            .width(Length::Fixed(200.0))
-            .height(Length::Fixed(300.0))
-            .style(move |_| container::Style {
-                //background: Some(iced::Background::Color(Color::from_rgba(
-                //    0.0, 0.0, 0.0, 1.0,
-                //))),
-                border: iced::Border {
-                    color: Color::from_rgba(0.1, 0.1, 0.1, 1.0),
-                    width: 0.0,
-                    radius: 8.0.into(),
+                shadow: iced::Shadow {
+                    color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                    offset: iced::Vector { x: 0.0, y: 0.0 },
+                    blur_radius: 12.0.into(),
                 },
-                ..Default::default()
+                text_color: None,
+                snap: false,
             })
             .into();
 
@@ -1038,10 +1033,9 @@ pub fn movie_card_lazy<'a>(
         .padding(8);
 
         Stack::new()
-            //.push(poster_border)
             .push(poster_element_base)
-            //.push(overlay_background)
-            //.push(overlay_content)
+            .push(overlay_background)
+            .push(overlay_content)
             .width(Length::Fixed(200.0))
             .height(Length::Fixed(300.0))
             .into()
@@ -1131,7 +1125,7 @@ pub fn tv_show_card_lazy<'a>(
                     .width(Length::Fixed(200.0))
                     .height(Length::Fixed(300.0))
                     .opacity(opacity);
-                
+
                 // Check if this poster has an active animation
                 if let Some(poster_id) = &poster_id {
                     if let Some((animation_type, start_time)) = animation_types.get(poster_id) {
@@ -1140,7 +1134,7 @@ pub fn tv_show_card_lazy<'a>(
                             .with_load_time(*start_time);
                     }
                 }
-                
+
                 rounded_img.into()
             }
             Some(PosterState::Loading) => container(
