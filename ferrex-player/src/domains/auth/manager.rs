@@ -8,7 +8,7 @@ use directories::ProjectDirs;
 use ferrex_core::auth::{AuthResult as ServerAuthResult, DeviceInfo, Platform};
 use ferrex_core::rbac::UserPermissions;
 use ferrex_core::user::{AuthToken, LoginRequest, RegisterRequest, User};
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

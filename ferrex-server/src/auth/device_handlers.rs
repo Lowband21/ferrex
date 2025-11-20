@@ -1,16 +1,17 @@
 //! Device-aware authentication handlers
 
 use argon2::{
-    password_hash::{rand_core::OsRng, SaltString},
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
+    password_hash::{SaltString, rand_core::OsRng},
 };
-use axum::{extract::State, http::HeaderMap, Extension, Json};
+use axum::{Extension, Json, extract::State, http::HeaderMap};
 use chrono::{Duration, Utc};
 use ferrex_core::{
     api_types::ApiResponse,
     auth::{
-        generate_trust_token, AuthError, AuthEvent, AuthEventType, AuthResult, AuthenticatedDevice,
-        DeviceInfo, DeviceRegistration, DeviceUserCredential, Platform, SessionDeviceSession,
+        AuthError, AuthEvent, AuthEventType, AuthResult, AuthenticatedDevice, DeviceInfo,
+        DeviceRegistration, DeviceUserCredential, Platform, SessionDeviceSession,
+        generate_trust_token,
     },
     user::User,
 };
@@ -21,8 +22,8 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
-    errors::{AppError, AppResult},
     AppState,
+    errors::{AppError, AppResult},
 };
 
 /// Device fingerprint from user agent and other factors
@@ -489,7 +490,7 @@ pub async fn set_device_pin(
     Json(request): Json<SetPinRequest>,
 ) -> AppResult<Json<ApiResponse<()>>> {
     // Validate PIN
-    use ferrex_core::auth::{validate_pin, PinPolicy};
+    use ferrex_core::auth::{PinPolicy, validate_pin};
     let mut policy = PinPolicy::default();
     policy.min_length = 4; // Allow 4-digit PINs
 

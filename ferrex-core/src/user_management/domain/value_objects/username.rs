@@ -82,7 +82,9 @@ pub enum UsernameError {
     #[error("Username contains invalid characters: only alphanumeric and underscore allowed")]
     InvalidCharacters,
 
-    #[error("Username format invalid: cannot start/end with underscore or contain consecutive underscores")]
+    #[error(
+        "Username format invalid: cannot start/end with underscore or contain consecutive underscores"
+    )]
     InvalidFormat,
 }
 

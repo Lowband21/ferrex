@@ -10,8 +10,8 @@ use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::auth::types::CredentialType;
 use ferrex_core::user::User;
 use iced::{
-    widget::{button, checkbox, column, container, row, text, text_input, Space},
     Alignment, Element, Length, Theme,
+    widget::{Space, button, checkbox, column, container, row, text, text_input},
 };
 
 /// Shows the credential entry screen (password or PIN)

@@ -14,7 +14,7 @@ use iced::wgpu;
 use iced::widget::image::Handle;
 use iced::widget::shader::Program;
 use iced::widget::shader::{Primitive, Storage};
-use iced::{mouse, Color, Element, Event, Length, Point, Rectangle};
+use iced::{Color, Element, Event, Length, Point, Rectangle, mouse};
 use iced_wgpu::image as wgpu_image;
 use iced_wgpu::primitive::PrimitiveBatchState;
 use rounded_image_batch_state::RoundedImageInstance;
@@ -1366,11 +1366,14 @@ impl Primitive for RoundedImagePrimitive {
             state.globals_buffer.as_ref().unwrap(),
             0,
             wgpu::BufferSize::new(std::mem::size_of::<Globals>() as u64).unwrap(),
-        ) { Some(mut view) => {
-            view.copy_from_slice(bytemuck::cast_slice(&[globals]));
-        } _ => {
-            log::error!("Failed to map globals buffer for writing");
-        }}
+        ) {
+            Some(mut view) => {
+                view.copy_from_slice(bytemuck::cast_slice(&[globals]));
+            }
+            _ => {
+                log::error!("Failed to map globals buffer for writing");
+            }
+        }
 
         // Profile texture upload to atlas
         #[cfg(feature = "profile-with-tracy")]
@@ -1423,11 +1426,14 @@ impl Primitive for RoundedImagePrimitive {
             &instance_buffer,
             0,
             wgpu::BufferSize::new(std::mem::size_of::<Instance>() as u64).unwrap(),
-        ) { Some(mut view) => {
-            view.copy_from_slice(bytemuck::cast_slice(&[instance]));
-        } _ => {
-            log::error!("Failed to map instance buffer for writing");
-        }}
+        ) {
+            Some(mut view) => {
+                view.copy_from_slice(bytemuck::cast_slice(&[instance]));
+            }
+            _ => {
+                log::error!("Failed to map instance buffer for writing");
+            }
+        }
 
         let key = self as *const _ as usize;
         state

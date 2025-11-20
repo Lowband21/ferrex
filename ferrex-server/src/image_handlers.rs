@@ -2,7 +2,7 @@ use crate::AppState;
 use axum::{
     body::Body,
     extract::{Path, Query, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use ferrex_core::database::traits::ImageLookupParams;

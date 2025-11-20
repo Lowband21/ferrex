@@ -9,7 +9,6 @@ pub mod theme;
 pub mod track_selection;
 pub mod update;
 pub mod video;
-pub mod video_backend;
 pub mod view;
 
 #[cfg(feature = "external-mpv-player")]

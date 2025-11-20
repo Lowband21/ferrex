@@ -7,14 +7,14 @@ use crate::domains::ui::widgets::rounded_image_shader::AnimatedPosterBounds;
 use crate::{
     domains::metadata::image_types::{ImageRequest, Priority},
     domains::ui::messages::Message,
-    domains::ui::widgets::{rounded_image_shader, AnimationType},
+    domains::ui::widgets::{AnimationType, rounded_image_shader},
     infrastructure::api_types::{
         EpisodeReference, MovieReference, SeasonReference, SeriesReference,
     },
     infrastructure::service_registry,
 };
 use ferrex_core::{ImageSize, ImageType, MediaIDLike};
-use iced::{widget::image::Handle, Color, Element, Length};
+use iced::{Color, Element, Length, widget::image::Handle};
 use lucide_icons::Icon;
 use std::hash::{Hash, Hasher};
 use uuid::Uuid;
@@ -278,95 +278,98 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
         // Check if we have access to the image service
         if let Some(image_service) = image_service {
             // Check the cache first
-            match image_service.get().get_with_load_time(&request) { Some((handle, loaded_at)) => {
-                #[cfg(any(
-                    feature = "profile-with-puffin",
-                    feature = "profile-with-tracy",
-                    feature = "profile-with-tracing"
-                ))]
-                profiling::scope!("image_for::CacheHit");
+            match image_service.get().get_with_load_time(&request) {
+                Some((handle, loaded_at)) => {
+                    #[cfg(any(
+                        feature = "profile-with-puffin",
+                        feature = "profile-with-tracy",
+                        feature = "profile-with-tracing"
+                    ))]
+                    profiling::scope!("image_for::CacheHit");
 
-                image.cached_data = Some(CachedImageData {
-                    handle: handle.clone(),
-                    loaded_at,
-                    request_hash,
-                });
+                    image.cached_data = Some(CachedImageData {
+                        handle: handle.clone(),
+                        loaded_at,
+                        request_hash,
+                    });
 
-                let mut shader: rounded_image_shader::RoundedImage =
-                    rounded_image_shader(handle, Some(request_hash))
-                        .radius(image.radius)
-                        .with_animated_bounds(bounds)
-                        .is_hovered(image.is_hovered);
+                    let mut shader: rounded_image_shader::RoundedImage =
+                        rounded_image_shader(handle, Some(request_hash))
+                            .radius(image.radius)
+                            .with_animated_bounds(bounds)
+                            .is_hovered(image.is_hovered);
 
-                if let Some(color) = image.theme_color {
-                    shader = shader.theme_color(color);
+                    if let Some(color) = image.theme_color {
+                        shader = shader.theme_color(color);
+                    }
+
+                    if let Some(play_msg) = image.on_play.clone() {
+                        shader = shader.on_play(play_msg);
+                    }
+
+                    if let Some(click_msg) = image.on_click.clone() {
+                        shader = shader.on_click(click_msg);
+                    }
+
+                    /*
+                    if let Some(load_time) = loaded_at {
+                        shader = shader.with_load_time(load_time);
+                    } else {
+                    } */
+
+                    /*
+                    let should_animate = if let Some(load_time) = loaded_at {
+                        // Get animation duration
+                        let animation_duration = match image.animation {
+                            AnimationType::None => Duration::from_secs(0),
+                            AnimationType::Fade { duration } => duration,
+                            AnimationType::Flip { duration } => duration,
+                            AnimationType::EnhancedFlip { total_duration, .. } => total_duration,
+                            AnimationType::PlaceholderSunken => Duration::from_secs(0), // No animation for placeholder
+                        };
+
+                        // Check if image was loaded recently (within 2x animation duration)
+                        // This gives us a window where animations will play even if there's
+                        // a slight delay between loading and display
+                        let elapsed = load_time.elapsed();
+                        let should = elapsed <= animation_duration * 10;
+
+                        should
+                    } else {
+                        false
+                    }; */
+
+                    //if should_animate {
+                    shader = shader.with_animation(image.animation);
+                    //} else {
+                    //shader = shader.with_animation(AnimationType::None);
+                    //}
+
+                    // Set progress indicator if provided
+                    if let Some(progress) = image.progress {
+                        shader = shader.progress(progress);
+
+                        let progress_color = Color::from_rgb(0.0, 0.47, 1.0); // Default blue
+
+                        shader = shader.progress_color(progress_color);
+                    }
+
+                    shader.into()
                 }
+                _ => {
+                    // Profile image request for loading
+                    #[cfg(any(
+                        feature = "profile-with-puffin",
+                        feature = "profile-with-tracy",
+                        feature = "profile-with-tracing"
+                    ))]
+                    profiling::scope!("image_for::CacheMiss");
 
-                if let Some(play_msg) = image.on_play.clone() {
-                    shader = shader.on_play(play_msg);
+                    image_service.get().request_image(request);
+
+                    create_loading_placeholder(bounds, image.radius, image.theme_color)
                 }
-
-                if let Some(click_msg) = image.on_click.clone() {
-                    shader = shader.on_click(click_msg);
-                }
-
-                /*
-                if let Some(load_time) = loaded_at {
-                    shader = shader.with_load_time(load_time);
-                } else {
-                } */
-
-                /*
-                let should_animate = if let Some(load_time) = loaded_at {
-                    // Get animation duration
-                    let animation_duration = match image.animation {
-                        AnimationType::None => Duration::from_secs(0),
-                        AnimationType::Fade { duration } => duration,
-                        AnimationType::Flip { duration } => duration,
-                        AnimationType::EnhancedFlip { total_duration, .. } => total_duration,
-                        AnimationType::PlaceholderSunken => Duration::from_secs(0), // No animation for placeholder
-                    };
-
-                    // Check if image was loaded recently (within 2x animation duration)
-                    // This gives us a window where animations will play even if there's
-                    // a slight delay between loading and display
-                    let elapsed = load_time.elapsed();
-                    let should = elapsed <= animation_duration * 10;
-
-                    should
-                } else {
-                    false
-                }; */
-
-                //if should_animate {
-                shader = shader.with_animation(image.animation);
-                //} else {
-                //shader = shader.with_animation(AnimationType::None);
-                //}
-
-                // Set progress indicator if provided
-                if let Some(progress) = image.progress {
-                    shader = shader.progress(progress);
-
-                    let progress_color = Color::from_rgb(0.0, 0.47, 1.0); // Default blue
-
-                    shader = shader.progress_color(progress_color);
-                }
-
-                shader.into()
-            } _ => {
-                // Profile image request for loading
-                #[cfg(any(
-                    feature = "profile-with-puffin",
-                    feature = "profile-with-tracy",
-                    feature = "profile-with-tracing"
-                ))]
-                profiling::scope!("image_for::CacheMiss");
-
-                image_service.get().request_image(request);
-
-                create_loading_placeholder(bounds, image.radius, image.theme_color)
-            }}
+            }
         } else {
             // Service not initialized, show loading state
             create_loading_placeholder(bounds, image.radius, image.theme_color)

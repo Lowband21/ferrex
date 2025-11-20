@@ -2,7 +2,7 @@
 //! This module spawns MPV as a separate process and tracks playback position
 
 use iced::Task;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};

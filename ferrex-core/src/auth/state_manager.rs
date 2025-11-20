@@ -13,8 +13,8 @@ use tokio::time::{interval, timeout};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::auth::state_machine::*;
 use crate::auth::AuthError;
+use crate::auth::state_machine::*;
 use crate::error::Result;
 
 /// Boxed state machine that can hold any authentication state

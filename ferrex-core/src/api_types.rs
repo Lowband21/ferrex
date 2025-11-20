@@ -1,5 +1,5 @@
-use crate::{types::media::*, LibraryReference};
 use crate::{LibraryID, LibraryType, MediaID};
+use crate::{LibraryReference, types::media::*};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

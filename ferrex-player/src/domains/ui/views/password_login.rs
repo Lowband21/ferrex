@@ -1,10 +1,10 @@
 use crate::{
     domains::auth::messages::Message,
-    domains::ui::theme::{button_style, container_style, FerrexTheme, TextInput},
+    domains::ui::theme::{FerrexTheme, TextInput, button_style, container_style},
 };
 use iced::{
-    widget::{button, column, container, row, text, text_input, Space},
     Alignment, Element, Length, Theme,
+    widget::{Space, button, column, container, row, text, text_input},
 };
 
 /// State for password login view

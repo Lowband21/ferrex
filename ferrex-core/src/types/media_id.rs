@@ -1,4 +1,5 @@
 use crate::{
+    MediaIDLike,
     types::{
         ids::{
             ArchivedEpisodeID, ArchivedMovieID, ArchivedSeasonID, ArchivedSeriesID, EpisodeID,
@@ -10,10 +11,9 @@ use crate::{
             MovieReference, SeasonReference, SeriesReference,
         },
     },
-    MediaIDLike,
 };
 use rkyv::{
-    deserialize, rancor::Error, Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize, deserialize, rancor::Error,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

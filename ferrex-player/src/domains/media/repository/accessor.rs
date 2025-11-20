@@ -12,7 +12,7 @@ use yoke::Yoke;
 
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 
-use super::{repository::MediaRepo, LibraryYoke, MediaYoke, MovieYoke, SeriesYoke};
+use super::{LibraryYoke, MediaYoke, MovieYoke, SeriesYoke, repository::MediaRepo};
 
 /// Marker types for capability roles
 #[derive(Debug, Clone, Copy)]

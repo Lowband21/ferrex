@@ -1,7 +1,7 @@
 use crate::LibraryID;
-use crate::{query::MediaQuery, MediaError, Result};
-use redis::{aio::ConnectionManager, AsyncCommands};
-use serde::{de::DeserializeOwned, Serialize};
+use crate::{MediaError, Result, query::MediaQuery};
+use redis::{AsyncCommands, aio::ConnectionManager};
+use serde::{Serialize, de::DeserializeOwned};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;

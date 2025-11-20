@@ -6,7 +6,7 @@ use crate::{
     SeriesTitle, SeriesURL,
 };
 use rkyv::{
-    deserialize, rancor::Error, Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize, deserialize, rancor::Error,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

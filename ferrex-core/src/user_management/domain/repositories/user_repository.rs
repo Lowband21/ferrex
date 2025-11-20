@@ -35,7 +35,7 @@ pub trait UserRepository: Send + Sync {
 
     /// List all users with optional filtering
     async fn list(&self, filter: UserListFilter)
-        -> Result<Vec<UserAggregate>, UserRepositoryError>;
+    -> Result<Vec<UserAggregate>, UserRepositoryError>;
 
     /// Count users with optional filtering
     async fn count(&self, filter: UserListFilter) -> Result<u64, UserRepositoryError>;
@@ -48,7 +48,7 @@ pub trait UserRepository: Send + Sync {
 
     /// Find users by role
     async fn find_by_role(&self, role: UserRole)
-        -> Result<Vec<UserAggregate>, UserRepositoryError>;
+    -> Result<Vec<UserAggregate>, UserRepositoryError>;
 
     /// Get users who haven't logged in since the specified date
     async fn find_inactive_since(

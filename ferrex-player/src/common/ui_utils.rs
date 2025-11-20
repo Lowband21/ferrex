@@ -1,7 +1,7 @@
 //! Common UI utility functions
 
-use iced::widget::text;
 use iced::Font;
+use iced::widget::text;
 pub use lucide_icons::Icon;
 
 /// Helper function to create icon text

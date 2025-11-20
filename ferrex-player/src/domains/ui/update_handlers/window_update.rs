@@ -1,4 +1,4 @@
-use iced::{widget::scrollable, Size, Task};
+use iced::{Size, Task, widget::scrollable};
 
 use crate::{domains::ui::messages::Message, state_refactored::State};
 

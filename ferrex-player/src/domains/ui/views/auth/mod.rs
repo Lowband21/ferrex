@@ -20,7 +20,7 @@ pub use credential_entry::view_credential_entry;
 pub use loading_users::view_loading_users;
 pub use pin_setup::view_pin_setup;
 pub use user_carousel::{
-    view_user_carousel, view_user_selection_with_carousel, UserCarouselMessage, UserCarouselState,
+    UserCarouselMessage, UserCarouselState, view_user_carousel, view_user_selection_with_carousel,
 };
 pub use user_selection::view_user_selection;
 
@@ -127,7 +127,7 @@ pub fn view_first_run_setup<'a>(
 ) -> Element<'a, DomainMessage> {
     use crate::domains::auth::messages as auth;
     use crate::domains::ui::theme;
-    use iced::widget::{button, checkbox, column, container, row, text, text_input, Space};
+    use iced::widget::{Space, button, checkbox, column, container, row, text, text_input};
     use iced::{Alignment, Length};
 
     let title = text("Welcome to Ferrex Media Server").size(32);

@@ -201,28 +201,31 @@ impl UnifiedImageService {
         // Check if this is a 404 error (image doesn't exist on server)
         let is_404 = error.contains("404");
 
-        let retry_count = match self.cache.get_mut(request) { Some(mut entry) => {
-            entry.state = LoadState::Failed(error.clone());
-            // For 404 errors, immediately set to max retries to prevent further attempts
-            if is_404 {
-                entry.retry_count = MAX_RETRY_ATTEMPTS;
-            } else {
-                entry.retry_count += 1;
+        let retry_count = match self.cache.get_mut(request) {
+            Some(mut entry) => {
+                entry.state = LoadState::Failed(error.clone());
+                // For 404 errors, immediately set to max retries to prevent further attempts
+                if is_404 {
+                    entry.retry_count = MAX_RETRY_ATTEMPTS;
+                } else {
+                    entry.retry_count += 1;
+                }
+                entry.retry_count
             }
-            entry.retry_count
-        } _ => {
-            let retry_count = if is_404 { MAX_RETRY_ATTEMPTS } else { 1 };
-            self.cache.insert(
-                request.clone(),
-                ImageEntry {
-                    state: LoadState::Failed(error.clone()),
-                    last_accessed: std::time::Instant::now(),
-                    loaded_at: None,
-                    retry_count,
-                },
-            );
-            retry_count
-        }};
+            _ => {
+                let retry_count = if is_404 { MAX_RETRY_ATTEMPTS } else { 1 };
+                self.cache.insert(
+                    request.clone(),
+                    ImageEntry {
+                        state: LoadState::Failed(error.clone()),
+                        last_accessed: std::time::Instant::now(),
+                        loaded_at: None,
+                        retry_count,
+                    },
+                );
+                retry_count
+            }
+        };
 
         // Log permanent failures for metadata aggregation
         if retry_count >= MAX_RETRY_ATTEMPTS {

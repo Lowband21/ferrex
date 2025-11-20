@@ -6,7 +6,7 @@
 use crate::infrastructure::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME;
 use bytemuck::{Pod, Zeroable};
 use iced::widget::image::Handle;
-use iced_wgpu::primitive::{buffer_manager::InstanceBufferManager, PrimitiveBatchState};
+use iced_wgpu::primitive::{PrimitiveBatchState, buffer_manager::InstanceBufferManager};
 use iced_wgpu::{core::Rectangle, graphics, image, wgpu};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;

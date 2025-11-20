@@ -1,9 +1,8 @@
-use crate::domains::player::video_backend::{AudioTrack, SubtitleTrack, ToneMappingConfig, Video};
 use ferrex_core::MediaFile;
 use iced::ContentFit;
-use iced_video_player as standard_video;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
+use subwave_core::video::types::{AudioTrack, SubtitleTrack};
+use subwave_unified::video::SubwaveVideo;
 
 // Seek bar interaction constants
 pub const SEEK_BAR_VISUAL_HEIGHT: f32 = 4.0; // The visible bar height
@@ -16,11 +15,8 @@ pub struct PlayerDomainState {
     pub current_media_id: Option<ferrex_core::MediaID>,
     pub current_url: Option<url::Url>,
 
-    // Video instance
-    pub video_opt: Option<Arc<Video>>,
-    // Leaked reference for widget (to avoid leaking on every render)
-    // This is a workaround until iced supports owned videos
-    pub video_leaked: Option<&'static standard_video::Video>,
+    // Video instance (unified)
+    pub video_opt: Option<SubwaveVideo>,
 
     // Watch progress tracking
     pub last_progress_update: Option<Instant>,
@@ -88,9 +84,6 @@ pub struct PlayerDomainState {
     pub is_loading_video: bool, // Flag to prevent duplicate video loading
     pub source_duration: Option<f64>, // Original source video duration (never changes)
 
-    // Tone mapping configuration
-    pub tone_mapping_config: ToneMappingConfig,
-
     // External MPV player support
     #[cfg(feature = "external-mpv-player")]
     pub external_mpv_handle: Option<Box<super::external_mpv::ExternalMpvHandle>>,
@@ -111,7 +104,6 @@ impl Default for PlayerDomainState {
             current_media_id: None,
             current_url: None,
             video_opt: None,
-            video_leaked: None,
             last_progress_update: None,
             last_progress_sent: 0.0,
             pending_resume_position: None,
@@ -150,7 +142,6 @@ impl Default for PlayerDomainState {
             is_hdr_content: false,
             is_loading_video: false,
             source_duration: None,
-            tone_mapping_config: ToneMappingConfig::default(),
             #[cfg(feature = "external-mpv-player")]
             external_mpv_handle: None,
             #[cfg(feature = "external-mpv-player")]
@@ -173,7 +164,6 @@ impl PlayerDomainState {
         self.current_media_id = None;
         self.current_url = None;
         self.video_opt = None;
-        self.video_leaked = None;
         self.last_progress_update = None;
         self.last_progress_sent = 0.0;
         self.pending_resume_position = None;

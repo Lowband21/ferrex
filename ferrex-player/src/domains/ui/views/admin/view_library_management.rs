@@ -13,12 +13,12 @@ use crate::{
     state_refactored::State,
 };
 use ferrex_core::{
-    types::library::{ArchivedLibrary, Library},
     ArchivedLibraryType, LibraryID,
+    types::library::{ArchivedLibrary, Library},
 };
 use iced::{
-    widget::{button, column, container, row, scrollable, text, Space},
     Element, Length,
+    widget::{Space, button, column, container, row, scrollable, text},
 };
 use lucide_icons::Icon;
 use rkyv::{deserialize, rancor::Error, util::AlignedVec};

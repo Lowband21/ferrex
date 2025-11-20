@@ -6,8 +6,8 @@ use crate::{domains::ui::theme, state_refactored::State};
 
 use ferrex_core::{ArchivedCastMember, ImageSize, ImageType};
 use iced::{
-    widget::{button, column, container, row, scrollable, text, Space},
     Element, Length,
+    widget::{Space, button, column, container, row, scrollable, text},
 };
 use lucide_icons::Icon;
 use rkyv::deserialize;
@@ -21,7 +21,10 @@ use rkyv::rancor::Error;
     ),
     profiling::function
 )]
-pub fn create_cast_scrollable(cast: &[ArchivedCastMember]) -> Element<'static, Message> {
+pub fn create_cast_scrollable(
+    cast: &[ArchivedCastMember],
+    image_type: ImageType,
+) -> Element<'static, Message> {
     if cast.is_empty() {
         return Space::new(0, 0).into();
     }
@@ -35,7 +38,7 @@ pub fn create_cast_scrollable(cast: &[ArchivedCastMember]) -> Element<'static, M
     let mut cast_row = row![].spacing(15);
 
     for actor in cast.iter().take(15) {
-        let cast_card = create_cast_card(actor);
+        let cast_card = create_cast_card(actor, image_type);
         cast_row = cast_row.push(cast_card);
     }
 
@@ -57,7 +60,10 @@ pub fn create_cast_scrollable(cast: &[ArchivedCastMember]) -> Element<'static, M
     ),
     profiling::function
 )]
-fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, Message> {
+fn create_cast_card(
+    actor: &ArchivedCastMember,
+    image_type: ImageType,
+) -> Element<'static, Message> {
     let card_width = 120.0;
     let image_height = 180.0;
 
@@ -76,7 +82,7 @@ fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, Message> {
     // Use image_for widget with rounded_image_shader
     let profile_image = image_for(person_uuid)
         .size(ImageSize::Profile)
-        .image_type(ImageType::Person)
+        .image_type(image_type)
         .width(Length::Fixed(card_width))
         .height(Length::Fixed(image_height))
         .radius(CORNER_RADIUS)

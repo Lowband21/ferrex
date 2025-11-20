@@ -139,12 +139,15 @@ impl CacheManager {
         for entry in &entries {
             if let Ok(age) = now.duration_since(entry.modified) {
                 if age > max_age {
-                    match self.remove_entry(&entry.path).await { Err(e) => {
-                        warn!("Failed to remove old cache entry: {}", e);
-                    } _ => {
-                        removed_count += 1;
-                        removed_size += entry.size;
-                    }}
+                    match self.remove_entry(&entry.path).await {
+                        Err(e) => {
+                            warn!("Failed to remove old cache entry: {}", e);
+                        }
+                        _ => {
+                            removed_count += 1;
+                            removed_size += entry.size;
+                        }
+                    }
                 }
             }
         }
@@ -166,13 +169,16 @@ impl CacheManager {
                     continue;
                 }
 
-                match self.remove_entry(&entry.path).await { Err(e) => {
-                    warn!("Failed to remove cache entry: {}", e);
-                } _ => {
-                    removed_count += 1;
-                    removed_size += entry.size;
-                    current_size -= entry.size;
-                }}
+                match self.remove_entry(&entry.path).await {
+                    Err(e) => {
+                        warn!("Failed to remove cache entry: {}", e);
+                    }
+                    _ => {
+                        removed_count += 1;
+                        removed_size += entry.size;
+                        current_size -= entry.size;
+                    }
+                }
             }
         }
 

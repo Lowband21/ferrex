@@ -4,8 +4,8 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
-use ferrex_core::{database::traits::MediaFilters, ParsedMediaInfo};
-use serde_json::{json, Value};
+use ferrex_core::{ParsedMediaInfo, database::traits::MediaFilters};
+use serde_json::{Value, json};
 use tracing::{info, warn};
 use uuid::Uuid;
 

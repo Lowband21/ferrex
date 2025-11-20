@@ -1,13 +1,13 @@
 use crate::{
-    database::traits::{FileWatchEvent, FileWatchEventType},
     LibraryID, LibraryReference, MediaDatabase, Result,
+    database::traits::{FileWatchEvent, FileWatchEventType},
 };
 use chrono::Utc;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
@@ -116,7 +116,7 @@ impl FileWatcher {
                 Err(mpsc::error::TryRecvError::Disconnected) => {
                     return Err(crate::MediaError::Internal(
                         "File watcher channel disconnected".to_string(),
-                    ))
+                    ));
                 }
             }
         }

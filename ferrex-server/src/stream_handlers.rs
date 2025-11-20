@@ -1,10 +1,10 @@
 use axum::{
-    extract::{Path, State},
-    http::{header, HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
     Extension, Json,
+    extract::{Path, State},
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Response},
 };
-use ferrex_core::{watch_status::UpdateProgressRequest, MediaType, User};
+use ferrex_core::{MediaType, User, watch_status::UpdateProgressRequest};
 use serde::Deserialize;
 use tokio::fs::File;
 use tokio_util::io::ReaderStream;

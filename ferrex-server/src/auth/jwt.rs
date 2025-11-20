@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{Duration, Utc};
 use ferrex_core::user::Claims;
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use sqlx::PgPool;
 use std::env;
 use std::sync::{Arc, RwLock};

@@ -8,8 +8,8 @@ use crate::{
     domains::ui::theme, state_refactored::State,
 };
 use iced::{
-    widget::{button, column, container, row, text, Space},
     Element, Length,
+    widget::{Space, button, column, container, row, text},
 };
 use lucide_icons::Icon;
 

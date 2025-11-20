@@ -306,9 +306,11 @@ async fn test_folder_inventory_crud_operations() -> Result<(), sqlx::Error> {
         "completed"
     );
     assert_eq!(update_result.get::<i32, _>("processed_files"), 10);
-    assert!(update_result
-        .get::<Option<DateTime<Utc>>, _>("last_processed_at")
-        .is_some());
+    assert!(
+        update_result
+            .get::<Option<DateTime<Utc>>, _>("last_processed_at")
+            .is_some()
+    );
 
     // Test DELETE
     sqlx::query("DELETE FROM folder_inventory WHERE id = $1")

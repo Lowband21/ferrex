@@ -15,21 +15,7 @@ description = "Cross-platform desktop player for Ferrex with a focus on performa
 [dependencies]
 ferrex-core = { path = "../ferrex-core", default-features = false }
 
-# Local iced fork testing
-#iced = { path = "../../iced_ferrex", default-features = false, features = [
-#    "tokio",
-#    "debug",
-#    "image",
-#    "canvas",
-#    "advanced",
-#    "wgpu",
-#    "prefer_10bit",
-#    "high-refresh-rate",
-#    "batch",
-#    "hot"
-#] } # Core GUI framework
-#iced_wgpu = { path = "../../iced_ferrex/wgpu", features = ["image", "batch"] }
-
+# Iced
 iced = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", default-features = false, features = [
     "tokio",
     "debug",
@@ -38,25 +24,19 @@ iced = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature
     "advanced",
     "wgpu",
     "prefer_10bit",
+    "web-colors",
     "high-refresh-rate",
     "batch",
     "hot"
-] } # Core GUI framework
+] }
 iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", features = ["image", "batch"] }
 
 # Icons
 lucide-icons = { path = "../../../lucide_icons_iced_0.14", features = ["iced"] }
 
-# Video playback
-#iced_video_player = { git = "https://github.com/Lowband21/iced_video_player", branch = "http-seeking-pitch-correction", rev = "c8f47a8" }
-#iced_video_player = { git = "https://github.com/Lowband21/iced_video_player", rev = "c8f47a8" }
-iced_video_player = { path = "../../../iced_video_player" }
-iced_video_player_wayland = { path = "../../../subwave" }
-gstreamer = "^0.24.1"
-gstreamer-app = "^0.24"
-# Might be useful for ahead-of-time media discovery
-#gstreamer-pbutils = "0.24"
-glib = "^0.21.1"
+# Unified video abstraction based on subwave
+subwave_unified = { path = "../../../subwave/subwave_unified" }
+subwave_core = { path = "../../../subwave/subwave_core" }
 
 # Async runtime
 tokio.workspace = true

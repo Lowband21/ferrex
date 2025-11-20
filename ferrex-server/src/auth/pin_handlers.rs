@@ -1,9 +1,9 @@
 //! PIN authentication handlers with admin session verification
 
 use axum::{
+    Extension, Json,
     extract::{Path, State},
     http::StatusCode,
-    Extension, Json,
 };
 use ferrex_core::{
     api_types::ApiResponse,
@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    errors::{AppError, AppResult},
     AppState,
+    errors::{AppError, AppResult},
 };
 
 /// Request to authenticate using PIN

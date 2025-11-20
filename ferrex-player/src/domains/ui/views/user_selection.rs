@@ -1,11 +1,11 @@
 use crate::{
     domains::auth::messages::Message,
-    domains::ui::theme::{button_style, container_style, FerrexTheme},
+    domains::ui::theme::{FerrexTheme, button_style, container_style},
 };
 use ferrex_core::user::User;
 use iced::{
-    widget::{button, column, container, row, scrollable, text, Space},
     Alignment, Element, Length, Task, Theme,
+    widget::{Space, button, column, container, row, scrollable, text},
 };
 
 /// State for user selection view

@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rayon::iter::{IntoParallelIterator, ParallelExtend, ParallelIterator};
 use serde_json::{self, json};
-use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -2505,7 +2505,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                     return Err(MediaError::Internal(format!(
                         "Unknown scan type: {}",
                         row.scan_type
-                    )))
+                    )));
                 }
             };
 
@@ -2520,7 +2520,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                     return Err(MediaError::Internal(format!(
                         "Unknown scan status: {}",
                         row.status
-                    )))
+                    )));
                 }
             };
 
@@ -2672,7 +2672,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                     return Err(MediaError::Internal(format!(
                         "Unknown scan status: {}",
                         row.status
-                    )))
+                    )));
                 }
             };
 
@@ -2859,7 +2859,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 return Err(MediaError::InvalidMedia(format!(
                     "Unknown status type: {}",
                     status_type
-                )))
+                )));
             }
         };
 

@@ -1,4 +1,4 @@
-use crate::{watch_status::WatchStatusFilter, LibraryID};
+use crate::{LibraryID, watch_status::WatchStatusFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;

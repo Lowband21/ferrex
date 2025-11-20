@@ -14,11 +14,11 @@ use crate::domains::ui::views::movies::view_movie_detail;
 use crate::domains::ui::views::settings::view_user_settings;
 use crate::domains::ui::views::tv::{view_episode_detail, view_season_detail, view_tv_show_detail};
 use crate::domains::ui::views::{view_loading_video, view_video_error};
-use crate::domains::ui::widgets::{background_shader, BackgroundEffect};
+use crate::domains::ui::widgets::{BackgroundEffect, background_shader};
 use crate::domains::{player, ui};
 use crate::state_refactored::State;
 use ferrex_core::{ImageSize, ImageType, MediaIDLike};
-use iced::widget::{column, container, scrollable, Space, Stack};
+use iced::widget::{Space, Stack, column, container, scrollable};
 use iced::{Element, Font, Length};
 
 #[cfg_attr(
@@ -64,7 +64,7 @@ pub fn view(state: &State) -> Element<DomainMessage> {
         ViewState::MovieDetail { movie_id, .. } => {
             view_movie_detail(state, *movie_id).map(DomainMessage::from)
         }
-        ViewState::TvShowDetail { series_id, .. } => {
+        ViewState::SeriesDetail { series_id, .. } => {
             view_tv_show_detail(state, *series_id).map(DomainMessage::from)
         }
         ViewState::SeasonDetail {
@@ -104,7 +104,7 @@ pub fn view(state: &State) -> Element<DomainMessage> {
         // Check if this is a detail view that needs scrollable content
         let scrollable_content = match &state.domains.ui.state.view {
             ViewState::MovieDetail { .. }
-            | ViewState::TvShowDetail { .. }
+            | ViewState::SeriesDetail { .. }
             | ViewState::SeasonDetail { .. }
             | ViewState::EpisodeDetail { .. } => {
                 // Wrap content in scrollable for detail views
@@ -183,7 +183,7 @@ pub fn view(state: &State) -> Element<DomainMessage> {
         if matches!(
             &state.domains.ui.state.view,
             ViewState::MovieDetail { .. }
-                | ViewState::TvShowDetail { .. }
+                | ViewState::SeriesDetail { .. }
                 | ViewState::SeasonDetail { .. }
                 | ViewState::EpisodeDetail { .. }
         ) {
@@ -198,7 +198,7 @@ pub fn view(state: &State) -> Element<DomainMessage> {
                     ImageRequest::new(movie_id.to_uuid(), ImageSize::Backdrop, ImageType::Backdrop);
                 state.image_service.get(&request)
             }
-            ViewState::TvShowDetail { series_id, .. } => {
+            ViewState::SeriesDetail { series_id, .. } => {
                 let request = ImageRequest::new(
                     series_id.to_uuid(),
                     ImageSize::Backdrop,
@@ -277,18 +277,20 @@ pub fn view(state: &State) -> Element<DomainMessage> {
     if state.domains.search.state.mode == crate::domains::search::types::SearchMode::FullScreen {
         // Show full-screen search view
         crate::domains::ui::views::components::view_search_fullscreen(state)
-    } else { match crate::domains::ui::views::components::view_search_dropdown(state)
-    { Some(search_dropdown) => {
-        // Wrap the main content in a stack with the search dropdown overlay
-        Stack::new()
-            .push(result)
-            .push(search_dropdown)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-    } _ => {
-        result
-    }}}
+    } else {
+        match crate::domains::ui::views::components::view_search_dropdown(state) {
+            Some(search_dropdown) => {
+                // Wrap the main content in a stack with the search dropdown overlay
+                Stack::new()
+                    .push(result)
+                    .push(search_dropdown)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+            }
+            _ => result,
+        }
+    }
 }
 
 #[cfg_attr(

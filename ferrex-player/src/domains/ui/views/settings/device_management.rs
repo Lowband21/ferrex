@@ -5,7 +5,7 @@
 use crate::domains::ui::messages::Message;
 use crate::domains::ui::theme;
 use crate::state_refactored::State;
-use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Border, Element, Length, Theme};
 use lucide_icons::Icon;
 
@@ -158,16 +158,18 @@ pub fn view_device_management<'a>(state: &'a State) -> Element<'a, Message> {
 /// Create loading view
 fn create_loading_view<'a>() -> Element<'a, Message> {
     container(
-        column![row![
-            icon_text(Icon::Loader)
-                .size(24)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            Space::with_width(10),
-            text("Loading devices...")
-                .size(16)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        column![
+            row![
+                icon_text(Icon::Loader)
+                    .size(24)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                Space::with_width(10),
+                text("Loading devices...")
+                    .size(16)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            ]
+            .align_y(iced::Alignment::Center),
         ]
-        .align_y(iced::Alignment::Center),]
         .padding(40)
         .align_x(iced::Alignment::Center),
     )

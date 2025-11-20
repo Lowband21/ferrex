@@ -1,7 +1,7 @@
 use iced::widget::image::Handle;
 use iced::widget::shader::{Primitive, Program, Storage};
-use iced::{mouse, Rectangle};
 use iced::{Element, Length};
+use iced::{Rectangle, mouse};
 use iced_wgpu::image as wgpu_image;
 use iced_wgpu::wgpu;
 

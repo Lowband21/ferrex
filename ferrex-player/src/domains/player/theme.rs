@@ -1,6 +1,6 @@
 use iced::{
-    widget::{button, container, pick_list, slider, text, toggler},
     Background, Border, Color, Shadow, Vector,
+    widget::{button, container, pick_list, slider, text, toggler},
 };
 
 // Container styles

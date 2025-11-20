@@ -20,7 +20,7 @@
 //!
 //! These endpoints handle the initial setup flow when no admin user exists.
 
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use chrono::{DateTime, Duration, Utc};
 use ferrex_core::{api_types::ApiResponse, user::AuthToken};
 use serde::{Deserialize, Serialize};
@@ -34,12 +34,12 @@ use axum::extract::ConnectInfo;
 use std::net::SocketAddr;
 
 use crate::{
+    AppState,
     errors::{AppError, AppResult},
     services::{
-        user_service::{CreateUserParams, PasswordRequirements},
         UserService,
+        user_service::{CreateUserParams, PasswordRequirements},
     },
-    AppState,
 };
 
 /// Simple in-memory rate limiter for setup endpoints

@@ -148,17 +148,18 @@ where
 
         // Check if we have a valid cached result
         let use_cache = {
-            match self.cache.read() { Ok(cache) => {
-                if let Some(ref cached_state) = cache.last_sort {
-                    cached_state.items_hash == items_hash
-                        && cached_state.timestamp.elapsed() < cached_state.ttl
-                        && cached_state.sorted_indices.len() == items.len()
-                } else {
-                    false
+            match self.cache.read() {
+                Ok(cache) => {
+                    if let Some(ref cached_state) = cache.last_sort {
+                        cached_state.items_hash == items_hash
+                            && cached_state.timestamp.elapsed() < cached_state.ttl
+                            && cached_state.sorted_indices.len() == items.len()
+                    } else {
+                        false
+                    }
                 }
-            } _ => {
-                false
-            }}
+                _ => false,
+            }
         };
 
         if use_cache {

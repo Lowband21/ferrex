@@ -2,8 +2,8 @@
 
 // Iced GUI framework imports
 pub use iced::{
-    widget::{scrollable, stack, text},
     Font,
+    widget::{scrollable, stack, text},
 };
 
 // Icons

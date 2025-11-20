@@ -84,23 +84,23 @@ pub mod watch_status_handlers;
 pub mod websocket;
 
 use axum::{
+    Router,
     body::Body,
     extract::{Path, Request, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{Json, Response},
     routing::{get, post},
-    Router,
 };
 use clap::Parser;
 use config::Config;
 use ferrex_core::{
-    auth::domain::services::{create_authentication_service, AuthenticationService},
+    MediaDatabase, ScanRequest,
+    auth::domain::services::{AuthenticationService, create_authentication_service},
     database::PostgresDatabase,
     scanner::FolderMonitor,
-    MediaDatabase, ScanRequest,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -412,11 +412,14 @@ async fn main() -> anyhow::Result<()> {
         ));
 
         // Start the folder monitor background task
-        match monitor.clone().start().await { Err(e) => {
-            warn!("Failed to start FolderMonitor background task: {}", e);
-        } _ => {
-            info!("FolderMonitor background task started with 60-second scan interval");
-        }}
+        match monitor.clone().start().await {
+            Err(e) => {
+                warn!("Failed to start FolderMonitor background task: {}", e);
+            }
+            _ => {
+                info!("FolderMonitor background task started with 60-second scan interval");
+            }
+        }
 
         monitor
     };
@@ -489,7 +492,9 @@ async fn main() -> anyhow::Result<()> {
                 "Starting Ferrex Media Server (HTTP) on {}:{}",
                 config.server_host, config.server_port
             );
-            warn!("TLS is not configured. For production use, set TLS_CERT_PATH and TLS_KEY_PATH environment variables.");
+            warn!(
+                "TLS is not configured. For production use, set TLS_CERT_PATH and TLS_KEY_PATH environment variables."
+            );
 
             let listener = tokio::net::TcpListener::bind(addr).await?;
 
@@ -865,7 +870,7 @@ fn create_compatibility_routes(state: AppState) -> Router<AppState> {
         // User redirects: /api/users/* -> /api/v1/users/*
         .route("/api/users/me", get(redirect_to_v1))
         .route("/api/users", get(redirect_to_v1))
-.route("/api/users/{id}", get(redirect_to_v1))
+        .route("/api/users/{id}", get(redirect_to_v1))
         // Media redirects: /api/media/* -> /api/v1/media/*
         .route("/api/media/query", post(redirect_to_v1))
         // Watch status redirects: /api/watch/* -> /api/v1/watch/*
@@ -1677,29 +1682,32 @@ async fn delete_by_title_handler(
         if media.filename.to_lowercase().contains(&title_lower) {
             info!("Deleting media: {} (ID: {})", media.filename, media.id);
 
-            match state.db.backend().delete_media(&media.id.to_string()).await { Err(e) => {
-                errors.push(format!("Failed to delete {}: {}", media.filename, e));
-            } _ => {
-                deleted_count += 1;
+            match state.db.backend().delete_media(&media.id.to_string()).await {
+                Err(e) => {
+                    errors.push(format!("Failed to delete {}: {}", media.filename, e));
+                }
+                _ => {
+                    deleted_count += 1;
 
-                // Clean up thumbnail
-                let thumbnail_path = state
-                    .thumbnail_service
-                    .get_thumbnail_path(media.id.as_ref());
-                if thumbnail_path.exists() {
-                    if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
-                        warn!("Failed to delete thumbnail: {}", e);
+                    // Clean up thumbnail
+                    let thumbnail_path = state
+                        .thumbnail_service
+                        .get_thumbnail_path(media.id.as_ref());
+                    if thumbnail_path.exists() {
+                        if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
+                            warn!("Failed to delete thumbnail: {}", e);
+                        }
+                    }
+
+                    // Clean up poster
+                    let poster_path = state.metadata_service.get_poster_path(media.id.as_ref());
+                    if poster_path.exists() {
+                        if let Err(e) = tokio::fs::remove_file(&poster_path).await {
+                            warn!("Failed to delete poster: {}", e);
+                        }
                     }
                 }
-
-                // Clean up poster
-                let poster_path = state.metadata_service.get_poster_path(media.id.as_ref());
-                if poster_path.exists() {
-                    if let Err(e) = tokio::fs::remove_file(&poster_path).await {
-                        warn!("Failed to delete poster: {}", e);
-                    }
-                }
-            }}
+            }
         }
     }
 
@@ -1734,44 +1742,47 @@ async fn clear_database_handler(State(state): State<AppState>) -> Result<Json<Va
     for media in all_media {
         info!("Deleting media: {} (ID: {})", media.filename, media.id);
 
-        match state.db.backend().delete_media(&media.id.to_string()).await { Err(e) => {
-            errors.push(format!("Failed to delete {}: {}", media.filename, e));
-        } _ => {
-            deleted_count += 1;
+        match state.db.backend().delete_media(&media.id.to_string()).await {
+            Err(e) => {
+                errors.push(format!("Failed to delete {}: {}", media.filename, e));
+            }
+            _ => {
+                deleted_count += 1;
 
-            let media_id_str = media.id.to_string();
+                let media_id_str = media.id.to_string();
 
-            // Clean up thumbnail
-            let thumbnail_path = state.thumbnail_service.get_thumbnail_path(&media.id);
-            if thumbnail_path.exists() {
-                if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
-                    warn!("Failed to delete thumbnail: {}", e);
+                // Clean up thumbnail
+                let thumbnail_path = state.thumbnail_service.get_thumbnail_path(&media.id);
+                if thumbnail_path.exists() {
+                    if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
+                        warn!("Failed to delete thumbnail: {}", e);
+                    }
+                }
+
+                // Clean up poster (try both PNG and JPG)
+                let png_poster_path = state
+                    .config
+                    .cache_dir
+                    .join("posters")
+                    .join(format!("{}_poster.png", media_id_str));
+                if png_poster_path.exists() {
+                    if let Err(e) = tokio::fs::remove_file(&png_poster_path).await {
+                        warn!("Failed to delete PNG poster: {}", e);
+                    }
+                }
+
+                let jpg_poster_path = state
+                    .config
+                    .cache_dir
+                    .join("posters")
+                    .join(format!("{}_poster.jpg", media_id_str));
+                if jpg_poster_path.exists() {
+                    if let Err(e) = tokio::fs::remove_file(&jpg_poster_path).await {
+                        warn!("Failed to delete JPG poster: {}", e);
+                    }
                 }
             }
-
-            // Clean up poster (try both PNG and JPG)
-            let png_poster_path = state
-                .config
-                .cache_dir
-                .join("posters")
-                .join(format!("{}_poster.png", media_id_str));
-            if png_poster_path.exists() {
-                if let Err(e) = tokio::fs::remove_file(&png_poster_path).await {
-                    warn!("Failed to delete PNG poster: {}", e);
-                }
-            }
-
-            let jpg_poster_path = state
-                .config
-                .cache_dir
-                .join("posters")
-                .join(format!("{}_poster.jpg", media_id_str));
-            if jpg_poster_path.exists() {
-                if let Err(e) = tokio::fs::remove_file(&jpg_poster_path).await {
-                    warn!("Failed to delete JPG poster: {}", e);
-                }
-            }
-        }}
+        }
     }
 
     // Clear the entire poster cache directory as a final cleanup

@@ -2,7 +2,7 @@ use anyhow::Result;
 use ferrex_core::sync_session::SyncMessage;
 use ferrex_core::user::User;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use uuid::Uuid;
 
 #[derive(Clone)]

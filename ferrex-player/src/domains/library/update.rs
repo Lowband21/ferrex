@@ -273,7 +273,9 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
                 // This ensures content is visible on startup with poster placeholders
                 state.tab_manager.refresh_active_tab();
                 //state.all_view_model.refresh_from_store();
-                log::info!("Refreshed All tab after loading media references - UI should display immediately");
+                log::info!(
+                    "Refreshed All tab after loading media references - UI should display immediately"
+                );
 
                 /*
                 // If items need metadata, emit batch metadata fetch event

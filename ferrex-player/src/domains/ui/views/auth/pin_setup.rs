@@ -9,8 +9,8 @@ use crate::domains::auth::messages as auth;
 use crate::domains::auth::security::secure_credential::SecureCredential;
 use ferrex_core::user::User;
 use iced::{
-    widget::{button, column, container, row, text, Space},
     Alignment, Element, Length, Theme,
+    widget::{Space, button, column, container, row, text},
 };
 
 #[cfg_attr(

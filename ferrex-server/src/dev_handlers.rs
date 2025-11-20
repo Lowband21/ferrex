@@ -4,17 +4,17 @@
 //! including database reset functionality. Reset functionality requires
 //! admin permissions to prevent accidental data loss.
 
-use axum::{extract::State, Extension, Json};
+use axum::{Extension, Json, extract::State};
 use ferrex_core::types::library::Library;
-use ferrex_core::{api_types::ApiResponse, user::User};
 use ferrex_core::{LibraryID, LibraryType};
+use ferrex_core::{api_types::ApiResponse, user::User};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::{info, warn};
 
 use crate::{
-    errors::{AppError, AppResult},
     AppState,
+    errors::{AppError, AppResult},
 };
 
 /// Response for reset check endpoint
@@ -207,7 +207,9 @@ pub async fn reset_database(
 
         // This would require implementing media deletion methods
         // For now, deleting libraries should cascade to media entries
-        warn!("Direct media deletion not yet implemented. Media will be deleted when libraries are deleted.");
+        warn!(
+            "Direct media deletion not yet implemented. Media will be deleted when libraries are deleted."
+        );
     }
 
     info!("Database reset completed successfully");
@@ -263,7 +265,7 @@ pub async fn seed_database(
 
     // Create test users
     if request.user_count > 0 {
-        use crate::services::{user_service::CreateUserParams, UserService};
+        use crate::services::{UserService, user_service::CreateUserParams};
         use uuid::Uuid;
 
         let user_service = UserService::new(&state);

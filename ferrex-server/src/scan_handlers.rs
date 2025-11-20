@@ -1,11 +1,11 @@
-use crate::{scan_manager, AppState};
+use crate::{AppState, scan_manager};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{Json, Sse},
 };
 use ferrex_core::{LibraryID, ScanRequest};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{error, info, warn};

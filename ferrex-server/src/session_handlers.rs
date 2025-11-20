@@ -1,12 +1,12 @@
 use axum::{
+    Extension, Json,
     extract::{Path, State},
     http::StatusCode,
-    Extension, Json,
 };
 use ferrex_core::user::{User, UserSession};
 use uuid::Uuid;
 
-use crate::{errors::AppResult, AppState};
+use crate::{AppState, errors::AppResult};
 
 /// Get all active sessions for the current user
 pub async fn get_user_sessions_handler(

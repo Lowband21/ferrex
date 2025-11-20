@@ -3,8 +3,8 @@
 
 use iced::widget::container::Style;
 use iced::{
-    widget::{column, container, row, text},
     Color, Element, Length,
+    widget::{column, container, row, text},
 };
 use std::time::Duration;
 

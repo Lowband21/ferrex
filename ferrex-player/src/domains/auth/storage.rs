@@ -10,12 +10,12 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use aes_gcm::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
     Aes256Gcm, Key, Nonce,
+    aead::{Aead, AeadCore, KeyInit, OsRng},
 };
 use argon2::password_hash::SaltString;
 use argon2::{Argon2, Params};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 use ferrex_core::rbac::UserPermissions;
 use ferrex_core::user::{AuthToken, User};

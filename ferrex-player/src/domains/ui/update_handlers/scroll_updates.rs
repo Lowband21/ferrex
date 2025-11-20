@@ -6,7 +6,7 @@ use crate::{
     state_refactored::State,
 };
 use ferrex_core::{MediaID, MediaIDLike};
-use iced::{widget::scrollable::Viewport, Task};
+use iced::{Task, widget::scrollable::Viewport};
 
 #[cfg_attr(
     any(

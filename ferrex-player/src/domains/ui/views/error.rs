@@ -1,7 +1,7 @@
 use crate::{domains::ui::messages::Message, domains::ui::theme};
 use iced::{
-    widget::{button, column, container, row, text, Space},
     Element, Length,
+    widget::{Space, button, column, container, row, text},
 };
 use lucide_icons::Icon;
 

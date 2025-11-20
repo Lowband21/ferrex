@@ -1,6 +1,6 @@
+use crate::domains::library::LibraryDomainState;
 use crate::domains::library::messages::Message;
 use crate::domains::library::server::{start_library_scan, start_media_scan};
-use crate::domains::library::LibraryDomainState;
 use crate::state_refactored::State;
 use ferrex_core::{LibraryID, ScanProgress, ScanStatus};
 use iced::Task;

@@ -158,8 +158,11 @@ impl UIDomain {
             }
             CrossDomainEvent::RequestViewModelRefresh => {
                 // Refresh all ViewModels when media has been loaded
-                log::info!("UI domain received RequestViewModelRefresh event - display_mode: {:?}, current_library_id: {:?}",
-                    self.state.display_mode, self.state.current_library_id);
+                log::info!(
+                    "UI domain received RequestViewModelRefresh event - display_mode: {:?}, current_library_id: {:?}",
+                    self.state.display_mode,
+                    self.state.current_library_id
+                );
 
                 // Ensure we're in a valid display mode
                 if matches!(self.state.display_mode, DisplayMode::Curated) {

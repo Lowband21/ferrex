@@ -6,14 +6,15 @@
 
 use std::time::{Duration, Instant};
 
+// TODO: Move to constants
 /// Duration for color transitions
-pub const COLOR_TRANSITION_DURATION: Duration = Duration::from_millis(2000);
+pub const COLOR_TRANSITION_DURATION: Duration = Duration::from_millis(5000);
 
 /// Duration for backdrop fade/slide transitions
-pub const BACKDROP_TRANSITION_DURATION: Duration = Duration::from_millis(1500);
+pub const BACKDROP_TRANSITION_DURATION: Duration = Duration::from_millis(5000);
 
 /// Duration for gradient center movement transitions
-pub const GRADIENT_TRANSITION_DURATION: Duration = Duration::from_millis(3000);
+pub const GRADIENT_TRANSITION_DURATION: Duration = Duration::from_millis(5000);
 
 /// Easing function types for transitions
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -364,12 +365,14 @@ impl GradientTransitionState {
     }
 }
 
-/// Generate a random gradient center position
-/// Returns normalized coordinates between 0.3 and 0.7 to avoid edges
+// Non-functional
 pub fn generate_random_gradient_center() -> (f32, f32) {
     use rand::Rng;
     let mut rng = rand::thread_rng();
-    (0.3 + rng.r#gen::<f32>() * 0.4, 0.3 + rng.r#gen::<f32>() * 0.4)
+    (
+        0.01 + rng.r#gen::<f32>() * 0.99,
+        0.01 + rng.r#gen::<f32>() * 0.9,
+    )
 }
 
 #[cfg(test)]

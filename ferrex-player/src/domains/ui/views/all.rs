@@ -7,8 +7,8 @@ use crate::infrastructure::LibraryType;
 use crate::state_refactored::State;
 use ferrex_core::{MovieID, SeriesID};
 use iced::{
-    widget::{column, container, scrollable, text},
     Element, Length,
+    widget::{column, container, scrollable, text},
 };
 
 // Helper function for carousel view used in All mode

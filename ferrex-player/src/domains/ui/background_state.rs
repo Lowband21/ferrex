@@ -1,8 +1,8 @@
 //! Background shader state management
 
 use super::transitions::{
-    generate_random_gradient_center, BackdropTransitionState, ColorTransitionState,
-    GradientTransitionState,
+    BackdropTransitionState, ColorTransitionState, GradientTransitionState,
+    generate_random_gradient_center,
 };
 pub use super::types::BackdropAspectMode;
 use super::widgets::background_shader::{BackgroundEffect, DepthLayout};
@@ -173,7 +173,7 @@ impl BackgroundShaderState {
                 );
             }
             ViewState::MovieDetail { .. }
-            | ViewState::TvShowDetail { .. }
+            | ViewState::SeriesDetail { .. }
             | ViewState::SeasonDetail { .. }
             | ViewState::EpisodeDetail { .. } => {
                 // Account for scroll offset

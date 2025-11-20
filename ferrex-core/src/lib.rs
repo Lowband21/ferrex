@@ -50,8 +50,9 @@
 //! }
 //! ```
 
+// TODO: Document properly
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 
 /// Common API types used across the Ferrex ecosystem
 pub mod api_types;

@@ -3,12 +3,12 @@
 //! This module provides views for user settings management
 
 use iced::{
-    widget::{button, column, container, row, scrollable, text, toggler, Space},
     Element, Length,
+    widget::{Space, button, column, container, row, scrollable, text, toggler},
 };
 
 use crate::{
-    common::ui_utils::{icon_text, Icon},
+    common::ui_utils::{Icon, icon_text},
     domains::{
         settings::state::SettingsView,
         ui::{theme, widgets::background_shader::Message},
@@ -122,46 +122,50 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
         ),
         // Theme section (inline toggle)
         container(
-            column![row![
-                text("🎨").size(24),
-                Space::with_width(15),
-                column![
-                    text("Dark Mode")
-                        .size(18)
-                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                    text("Toggle between light and dark themes")
-                        .size(14)
-                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            column![
+                row![
+                    text("🎨").size(24),
+                    Space::with_width(15),
+                    column![
+                        text("Dark Mode")
+                            .size(18)
+                            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                        text("Toggle between light and dark themes")
+                            .size(14)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    ]
+                    .spacing(5),
+                    Space::with_width(Length::Fill),
+                    toggler(false) // TODO: Connect to actual theme state
+                        .on_toggle(|_| Message::NoOp), // TODO: Implement theme toggle
                 ]
-                .spacing(5),
-                Space::with_width(Length::Fill),
-                toggler(false) // TODO: Connect to actual theme state
-                    .on_toggle(|_| Message::NoOp), // TODO: Implement theme toggle
+                .align_y(iced::Alignment::Center),
             ]
-            .align_y(iced::Alignment::Center),]
             .padding(20),
         )
         .style(theme::Container::Card.style())
         .width(Length::Fill),
         // Auto-login section (inline toggle)
         container(
-            column![row![
-                text("🔓").size(24),
-                Space::with_width(15),
-                column![
-                    text("Auto-login")
-                        .size(18)
-                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                    text("Automatically log in on this device")
-                        .size(14)
-                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            column![
+                row![
+                    text("🔓").size(24),
+                    Space::with_width(15),
+                    column![
+                        text("Auto-login")
+                            .size(18)
+                            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                        text("Automatically log in on this device")
+                            .size(14)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    ]
+                    .spacing(5),
+                    Space::with_width(Length::Fill),
+                    toggler(state.domains.settings.preferences.auto_login_enabled)
+                        .on_toggle(Message::ToggleAutoLogin),
                 ]
-                .spacing(5),
-                Space::with_width(Length::Fill),
-                toggler(state.domains.settings.preferences.auto_login_enabled)
-                    .on_toggle(Message::ToggleAutoLogin),
+                .align_y(iced::Alignment::Center),
             ]
-            .align_y(iced::Alignment::Center),]
             .padding(20),
         )
         .style(theme::Container::Card.style())

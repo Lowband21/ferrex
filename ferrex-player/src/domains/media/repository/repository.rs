@@ -6,7 +6,7 @@ use ferrex_core::{
     ArchivedLibrary, ArchivedLibraryExt, ArchivedLibraryID, ArchivedMedia, ArchivedMediaID,
     LibraryID, Media, MediaID, MediaIDLike, MediaLike, MediaType, SeriesID,
 };
-use rkyv::{deserialize, rancor::Error, util::AlignedVec, vec::ArchivedVec, Archived};
+use rkyv::{Archived, deserialize, rancor::Error, util::AlignedVec, vec::ArchivedVec};
 use uuid::Uuid;
 use yoke::Yoke;
 

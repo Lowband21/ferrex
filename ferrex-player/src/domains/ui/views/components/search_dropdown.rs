@@ -1,7 +1,7 @@
 //! Search dropdown overlay component
 
-use iced::widget::{button, column, container, row, scrollable, text, Space};
-use iced::{alignment, Alignment, Color, Element, Length, Padding, Theme};
+use iced::widget::{Space, button, column, container, row, scrollable, text};
+use iced::{Alignment, Color, Element, Length, Padding, Theme, alignment};
 
 use crate::common::messages::DomainMessage;
 use crate::domains::search::types::{SearchMode, SearchResult, SearchState};

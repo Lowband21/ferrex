@@ -1,10 +1,10 @@
 use axum::{
     body::Body,
     extract::FromRequestParts,
-    http::{request::Parts, HeaderMap, Request, Response, StatusCode},
+    http::{HeaderMap, Request, Response, StatusCode, request::Parts},
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use rand::{thread_rng, RngCore};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use rand::{RngCore, thread_rng};
 use sha2::{Digest, Sha256};
 
 /// Generates a cryptographically secure 32-byte CSRF token
@@ -94,7 +94,8 @@ where
     fn from_request_parts(
         _parts: &mut Parts,
         _state: &S,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self, Self::Rejection>> + Send>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self, Self::Rejection>> + Send>>
+    {
         Box::pin(async move { Ok(ValidateCsrf) })
     }
 }

@@ -5,9 +5,9 @@ use axum::{
     response::Json,
 };
 use ferrex_core::{
-    api_types::{ApiResponse, BatchMediaRequest, BatchMediaResponse},
     EpisodeID, Media, MediaDetailsOption, MediaError, MediaID, MediaIDLike, MovieID, SeasonID,
     SeriesID, TmdbDetails,
+    api_types::{ApiResponse, BatchMediaRequest, BatchMediaResponse},
 };
 use tracing::{error, info, warn};
 use uuid::Uuid;

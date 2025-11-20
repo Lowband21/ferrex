@@ -1,7 +1,7 @@
-use crate::domains::ui::{messages::Message, theme, SortOrder};
+use crate::domains::ui::{SortOrder, messages::Message, theme};
 use iced::{
-    widget::{button, container, text},
     Element, Length,
+    widget::{button, container, text},
 };
 use lucide_icons::Icon;
 

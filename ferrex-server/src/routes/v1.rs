@@ -1,5 +1,5 @@
 use crate::{
-    admin_handlers,
+    AppState, admin_handlers,
     api::user_management,
     auth, dev_handlers, handlers, image_handlers,
     library_handlers_v2::{
@@ -9,12 +9,11 @@ use crate::{
     media_reference_handlers, query_handlers, role_handlers,
     scan_handlers::{media_events_sse_handler, scan_library_handler},
     session_handlers, stream_handlers, sync_handlers, user_handlers, watch_status_handlers,
-    websocket, AppState,
+    websocket,
 };
 use axum::{
-    middleware,
+    Router, middleware,
     routing::{get, post, put},
-    Router,
 };
 
 /// Create all v1 API routes
@@ -192,7 +191,10 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
             "/sync/sessions/{id}/state",
             get(sync_handlers::get_sync_session_state_handler),
         )
-        .route("/sync/ws", axum::routing::any(websocket::handler::websocket_handler))
+        .route(
+            "/sync/ws",
+            axum::routing::any(websocket::handler::websocket_handler),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,
@@ -208,7 +210,10 @@ fn create_libraries_routes(state: AppState) -> Router<AppState> {
             get(get_libraries_with_media_handler).post(create_library_handler),
         )
         .route("/libraries/{id}", get(get_library_handler))
-        .route("/libraries/{id}", axum::routing::put(update_library_handler))
+        .route(
+            "/libraries/{id}",
+            axum::routing::put(update_library_handler),
+        )
         .route(
             "/libraries/{id}",
             axum::routing::delete(delete_library_handler),

@@ -3,8 +3,8 @@
 use crate::domains::ui::messages::Message;
 use crate::domains::ui::theme;
 use iced::{
-    widget::{button, column, container, row, scrollable, text, Space},
     Element, Length,
+    widget::{Space, button, column, container, row, scrollable, text},
 };
 use lucide_icons::Icon;
 
@@ -93,13 +93,17 @@ where
 
     // Only create cards for visible items
     for idx in state.visible_start..state.visible_end {
-        match create_card(idx) { Some(card) => {
-            item_row = item_row.push(card);
-        } _ => {
-            // Add placeholder for missing items
-            item_row = item_row
-                .push(container(Space::new(200.0, 370.0)).style(theme::Container::Default.style()));
-        }}
+        match create_card(idx) {
+            Some(card) => {
+                item_row = item_row.push(card);
+            }
+            _ => {
+                // Add placeholder for missing items
+                item_row = item_row.push(
+                    container(Space::new(200.0, 370.0)).style(theme::Container::Default.style()),
+                );
+            }
+        }
     }
 
     // Add spacer for items after visible range

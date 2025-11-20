@@ -9,8 +9,8 @@ use ferrex_core::{
     EpisodeID, ImageSize, ImageType, MediaIDLike, SeasonID, SeriesDetailsLike, SeriesID, SeriesLike,
 };
 use iced::{
-    widget::{column, container, row, text, Space, Stack},
     Element, Length,
+    widget::{Space, Stack, column, container, row, text},
 };
 use lucide_icons::Icon;
 
@@ -40,54 +40,55 @@ pub fn view_tv_show_detail<'a>(state: &'a State, series_id: SeriesID) -> Element
         .state
         .series_yoke_cache
         .peek_ref(&series_uuid)
-    { Some(arc) => {
-        arc
-    } _ => {
-        match state
-            .domains
-            .ui
-            .state
-            .repo_accessor
-            .get_series_yoke(&ferrex_core::MediaID::Series(series_id))
-        {
-            Ok(yoke) => {
-                let arc = std::sync::Arc::new(yoke);
-                state
-                    .domains
-                    .ui
-                    .state
-                    .series_yoke_cache
-                    .insert(series_uuid, arc.clone());
-                arc
-            }
-            Err(e) => {
-                log::warn!(
-                    "[TV] Failed to fetch series yoke for {}: {:?}",
-                    series_uuid,
-                    e
-                );
-                // Render minimal error content
-                return container(
-                    column![
-                        text("Media Not Found")
-                            .size(24)
-                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                        Space::with_height(10),
-                        text("Repository error:")
-                            .size(16)
-                            .color(theme::MediaServerTheme::TEXT_SUBDUED),
-                    ]
-                    .spacing(10)
-                    .align_x(iced::Alignment::Center),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center_x(Length::Fill)
-                .center_y(Length::Fill)
-                .into();
+    {
+        Some(arc) => arc,
+        _ => {
+            match state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get_series_yoke(&ferrex_core::MediaID::Series(series_id))
+            {
+                Ok(yoke) => {
+                    let arc = std::sync::Arc::new(yoke);
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .series_yoke_cache
+                        .insert(series_uuid, arc.clone());
+                    arc
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[TV] Failed to fetch series yoke for {}: {:?}",
+                        series_uuid,
+                        e
+                    );
+                    // Render minimal error content
+                    return container(
+                        column![
+                            text("Media Not Found")
+                                .size(24)
+                                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                            Space::with_height(10),
+                            text("Repository error:")
+                                .size(16)
+                                .color(theme::MediaServerTheme::TEXT_SUBDUED),
+                        ]
+                        .spacing(10)
+                        .align_x(iced::Alignment::Center),
+                    )
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill)
+                    .into();
+                }
             }
         }
-    }};
+    };
     let series = series_yoke_arc.get();
     //let season = season.get();
     let media_id = series_id.to_media_id();

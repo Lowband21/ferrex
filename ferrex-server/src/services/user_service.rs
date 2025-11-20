@@ -4,21 +4,21 @@
 //! code duplication and maintain consistency across the application.
 
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
     Argon2,
+    password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
 };
 use chrono::Utc;
 use ferrex_core::{
-    user::{AuthToken, User},
     MediaError,
+    user::{AuthToken, User},
 };
 use tracing::info;
 use uuid::Uuid;
 
 use crate::{
+    AppState,
     auth::jwt::{generate_access_token, generate_refresh_token},
     errors::{AppError, AppResult},
-    AppState,
 };
 
 /// User creation parameters

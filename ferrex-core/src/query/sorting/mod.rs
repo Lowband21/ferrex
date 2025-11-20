@@ -9,7 +9,6 @@
 pub mod impls;
 pub mod utils;
 
-
 pub mod fallback;
 pub mod fields;
 pub mod fieldsets;
@@ -17,7 +16,6 @@ pub mod keys;
 pub mod performance;
 pub mod strategy;
 pub mod traits;
-
 
 pub use fallback::*;
 pub use fields::*;

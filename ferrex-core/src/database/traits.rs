@@ -551,10 +551,10 @@ pub trait MediaDatabaseTrait: Send + Sync {
     // Sync session methods
     async fn create_sync_session(&self, session: &crate::SyncSession) -> Result<()>;
     async fn get_sync_session_by_code(&self, room_code: &str)
-        -> Result<Option<crate::SyncSession>>;
+    -> Result<Option<crate::SyncSession>>;
     async fn get_sync_session(&self, id: Uuid) -> Result<Option<crate::SyncSession>>;
     async fn update_sync_session_state(&self, id: Uuid, state: &crate::PlaybackState)
-        -> Result<()>;
+    -> Result<()>;
     async fn update_sync_session(&self, id: Uuid, session: &crate::SyncSession) -> Result<()>;
     async fn add_sync_participant(
         &self,
@@ -613,7 +613,7 @@ pub trait MediaDatabaseTrait: Send + Sync {
 
     /// Update PIN for device-user
     async fn update_device_pin(&self, user_id: Uuid, device_id: Uuid, pin_hash: &str)
-        -> Result<()>;
+    -> Result<()>;
 
     /// Update failed login attempts
     async fn update_device_failed_attempts(

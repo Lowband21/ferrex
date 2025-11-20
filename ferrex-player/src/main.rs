@@ -14,9 +14,9 @@ use state_refactored::State;
 fn init_logger() {
     Builder::new()
         .target(Target::Stdout)
-        .filter_level(LevelFilter::Warn)  // Warn level for dependencies
+        .filter_level(LevelFilter::Warn) // Warn level for dependencies
         .filter_module("ferrex-player", LevelFilter::Debug)
-        //.filter_module("iced", log::LevelFilter::Info)  // Dependency level override
+        .filter_module("subwave_unified", LevelFilter::Debug)
         .init();
 }
 
@@ -45,7 +45,9 @@ fn main() -> iced::Result {
     log::info!("Profiling system initialized");
 
     #[cfg(feature = "profile-with-puffin")]
-    log::info!("Puffin server listening on 127.0.0.1:8585 - connect with: puffin_viewer --url 127.0.0.1:8585");
+    log::info!(
+        "Puffin server listening on 127.0.0.1:8585 - connect with: puffin_viewer --url 127.0.0.1:8585"
+    );
 
     #[cfg(feature = "profile-with-tracy")]
     tracy_client::Client::start();

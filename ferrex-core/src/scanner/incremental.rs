@@ -1,7 +1,7 @@
 use crate::{
+    LibraryReference, MediaDatabase, Result, StreamingScannerConfig, StreamingScannerV2,
     database::traits::{MediaProcessingStatus, ScanState},
     providers::TmdbApiProvider,
-    LibraryReference, MediaDatabase, Result, StreamingScannerConfig, StreamingScannerV2,
 };
 use chrono::Utc;
 use std::sync::Arc;

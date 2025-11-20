@@ -2,8 +2,8 @@
 
 use crate::common::messages::DomainMessage;
 use iced::{
-    widget::{button, container, text, Button, Container, Space},
     Alignment, Element, Length, Theme,
+    widget::{Button, Container, Space, button, container, text},
 };
 
 #[cfg_attr(

@@ -1,7 +1,7 @@
-use axum::{extract::State, Extension, Json};
-use ferrex_core::{query::MediaQuery, user::User, MediaWithStatus};
+use axum::{Extension, Json, extract::State};
+use ferrex_core::{MediaWithStatus, query::MediaQuery, user::User};
 
-use crate::{errors::AppResult, AppState};
+use crate::{AppState, errors::AppResult};
 
 /// Execute a media query
 pub async fn query_media_handler(

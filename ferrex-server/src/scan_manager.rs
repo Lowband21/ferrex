@@ -1,9 +1,9 @@
 use crate::MediaDatabase;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use ferrex_core::{
-    providers::TmdbApiProvider, LibraryReference, LibraryType, MediaEvent, MediaID, MediaIDLike,
-    MediaLike, MediaOps, ScanOutput, ScanProgress, ScanStatus, StreamingScannerConfig,
-    StreamingScannerV2,
+    LibraryReference, LibraryType, MediaEvent, MediaID, MediaIDLike, MediaLike, MediaOps,
+    ScanOutput, ScanProgress, ScanStatus, StreamingScannerConfig, StreamingScannerV2,
+    providers::TmdbApiProvider,
 };
 use futures::stream::{self};
 use futures_util::stream::Stream;
@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{
-    mpsc::{self},
     Mutex, RwLock,
+    mpsc::{self},
 };
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -298,23 +298,27 @@ impl ScanManager {
                         let series_id_str = episode.series_id.as_str(&mut buff2);
 
                         // Store episode in database
-                        match db_2.backend().store_episode_reference(&episode).await { Err(e) => {
-                            error!("Failed to store episode reference: {}. Episode: {} S{}E{} for series {}",
-                                  e,
-                                  episode_id_str,
-                                  episode.season_number.value(),
-                                  episode.episode_number.value(),
-                                  series_id_str
-                            );
-                        } _ => {
-                            info!(
-                                "Stored episode {} S{}E{} for series {}",
-                                episode_id_str,
-                                episode.season_number.value(),
-                                episode.episode_number.value(),
-                                series_id_str
-                            );
-                        }}
+                        match db_2.backend().store_episode_reference(&episode).await {
+                            Err(e) => {
+                                error!(
+                                    "Failed to store episode reference: {}. Episode: {} S{}E{} for series {}",
+                                    e,
+                                    episode_id_str,
+                                    episode.season_number.value(),
+                                    episode.episode_number.value(),
+                                    series_id_str
+                                );
+                            }
+                            _ => {
+                                info!(
+                                    "Stored episode {} S{}E{} for series {}",
+                                    episode_id_str,
+                                    episode.season_number.value(),
+                                    episode.episode_number.value(),
+                                    series_id_str
+                                );
+                            }
+                        }
 
                         scan_manager_2
                             .update_progress(&scan_id_clone_2, |p| {
@@ -419,98 +423,100 @@ impl ScanManager {
                 );
 
                 // Determine the MediaID based on library type before deletion
-                let media_id = match self.db.backend().get_library(&media_file.library_id).await
-                { Ok(Some(library)) => {
-                    match library.library_type {
-                        ferrex_core::LibraryType::Movies => {
-                            // Query for movie reference with this file_id
-                            match self
-                                .db
-                                .backend()
-                                .get_library_media_references(
-                                    media_file.library_id,
-                                    LibraryType::Movies,
-                                )
-                                .await
-                            { Ok(movies) => {
-                                movies
-                                    .iter()
-                                    .find(|m| (*m).as_movie().unwrap().file.id == media_file.id)
-                                    .map(|m| m.media_id())
-                            } _ => {
-                                None
-                            }}
-                        }
-                        ferrex_core::LibraryType::Series => {
-                            // For TV shows, find the episode with this file
-                            let mut found_episode = None;
-                            if let Ok(series_list) = self
-                                .db
-                                .backend()
-                                .get_library_media_references(
-                                    media_file.library_id,
-                                    LibraryType::Series,
-                                )
-                                .await
-                            {
-                                for series in series_list {
-                                    if let Ok(seasons) = self
-                                        .db
-                                        .backend()
-                                        .get_series_seasons(&series.as_series().unwrap().id)
-                                        .await
-                                    {
-                                        for season in seasons {
-                                            if let Ok(episodes) = self
-                                                .db
-                                                .backend()
-                                                .get_season_episodes(&season.id)
-                                                .await
-                                            {
-                                                if let Some(episode) = episodes
-                                                    .iter()
-                                                    .find(|e| e.file.id == media_file.id)
-                                                    .as_ref()
+                let media_id = match self.db.backend().get_library(&media_file.library_id).await {
+                    Ok(Some(library)) => {
+                        match library.library_type {
+                            ferrex_core::LibraryType::Movies => {
+                                // Query for movie reference with this file_id
+                                match self
+                                    .db
+                                    .backend()
+                                    .get_library_media_references(
+                                        media_file.library_id,
+                                        LibraryType::Movies,
+                                    )
+                                    .await
+                                {
+                                    Ok(movies) => movies
+                                        .iter()
+                                        .find(|m| (*m).as_movie().unwrap().file.id == media_file.id)
+                                        .map(|m| m.media_id()),
+                                    _ => None,
+                                }
+                            }
+                            ferrex_core::LibraryType::Series => {
+                                // For TV shows, find the episode with this file
+                                let mut found_episode = None;
+                                if let Ok(series_list) = self
+                                    .db
+                                    .backend()
+                                    .get_library_media_references(
+                                        media_file.library_id,
+                                        LibraryType::Series,
+                                    )
+                                    .await
+                                {
+                                    for series in series_list {
+                                        if let Ok(seasons) = self
+                                            .db
+                                            .backend()
+                                            .get_series_seasons(&series.as_series().unwrap().id)
+                                            .await
+                                        {
+                                            for season in seasons {
+                                                if let Ok(episodes) = self
+                                                    .db
+                                                    .backend()
+                                                    .get_season_episodes(&season.id)
+                                                    .await
                                                 {
-                                                    found_episode =
-                                                        Some(MediaID::Episode(episode.id));
-                                                    break;
+                                                    if let Some(episode) = episodes
+                                                        .iter()
+                                                        .find(|e| e.file.id == media_file.id)
+                                                        .as_ref()
+                                                    {
+                                                        found_episode =
+                                                            Some(MediaID::Episode(episode.id));
+                                                        break;
+                                                    }
                                                 }
                                             }
-                                        }
-                                        if found_episode.is_some() {
-                                            break;
+                                            if found_episode.is_some() {
+                                                break;
+                                            }
                                         }
                                     }
                                 }
+                                found_episode
                             }
-                            found_episode
                         }
                     }
-                } _ => {
-                    None
-                }};
+                    _ => None,
+                };
 
                 match self
                     .db
                     .backend()
                     .delete_media(&media_file.id.to_string())
                     .await
-                { Err(e) => {
-                    warn!("Failed to delete media {}: {}", media_file.id, e);
-                } _ => {
-                    deleted_count += 1;
-                    // Send media deleted event if we found the MediaID
-                    if let Some(id) = media_id {
-                        self.send_media_event(MediaEvent::MediaDeleted { id: id })
-                            .await;
-                    } else {
-                        warn!(
-                            "Could not determine MediaID for deleted file: {:?}",
-                            media_file.path
-                        );
+                {
+                    Err(e) => {
+                        warn!("Failed to delete media {}: {}", media_file.id, e);
                     }
-                }}
+                    _ => {
+                        deleted_count += 1;
+                        // Send media deleted event if we found the MediaID
+                        if let Some(id) = media_id {
+                            self.send_media_event(MediaEvent::MediaDeleted { id: id })
+                                .await;
+                        } else {
+                            warn!(
+                                "Could not determine MediaID for deleted file: {:?}",
+                                media_file.path
+                            );
+                        }
+                    }
+                }
             }
         }
 

@@ -85,7 +85,7 @@ impl ViewIdentifier for ViewState {
                 library_id,
                 Some(movie_id.as_uuid()),
             ),
-            ViewState::TvShowDetail { series_id, .. } => ScrollPositionManager::generate_key(
+            ViewState::SeriesDetail { series_id, .. } => ScrollPositionManager::generate_key(
                 "tv_show_detail",
                 library_id,
                 Some(series_id.as_uuid()),

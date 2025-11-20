@@ -77,8 +77,8 @@ pub use ferrex_core::types::library::Library;
 
 pub use ferrex_core::LibraryType;
 
-pub use ferrex_core::watch_status::{UserWatchState, WatchProgress};
 use ferrex_core::MediaIDLike;
+pub use ferrex_core::watch_status::{UserWatchState, WatchProgress};
 
 /// Helper to check if we need to fetch full details
 pub fn needs_details_fetch(details: &MediaDetailsOption) -> bool {

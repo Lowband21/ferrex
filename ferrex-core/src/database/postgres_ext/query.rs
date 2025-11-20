@@ -1,8 +1,8 @@
 use crate::{
+    LibraryID, MediaID, Result,
     database::{postgres::PostgresDatabase, traits::MediaDatabaseTrait},
     query::*,
     types::media::*,
-    LibraryID, MediaID, Result,
 };
 
 impl PostgresDatabase {

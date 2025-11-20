@@ -13,9 +13,9 @@ use ferrex_core::MediaIDLike;
 use ferrex_core::ParsedMediaInfo;
 use ferrex_core::TmdbDetails;
 use ferrex_core::{
-    database::traits::MediaFilters, ApiResponse, CreateLibraryRequest, EnhancedMovieDetails,
-    EnhancedSeriesDetails, FetchMediaRequest, Library, LibraryID, LibraryMediaResponse,
-    LibraryReference, MediaID, UpdateLibraryRequest,
+    ApiResponse, CreateLibraryRequest, EnhancedMovieDetails, EnhancedSeriesDetails,
+    FetchMediaRequest, Library, LibraryID, LibraryMediaResponse, LibraryReference, MediaID,
+    UpdateLibraryRequest, database::traits::MediaFilters,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -229,10 +229,16 @@ pub async fn fetch_media_handler(
 
                                                             let mut buff = Uuid::encode_buffer();
 
-                                                            info!("Successfully fetched and stored TMDB metadata for movie {}", id.as_str(&mut buff));
+                                                            info!(
+                                                                "Successfully fetched and stored TMDB metadata for movie {}",
+                                                                id.as_str(&mut buff)
+                                                            );
                                                         }
                                                         Err(e) => {
-                                                            warn!("Failed to get movie details from TMDB: {}", e);
+                                                            warn!(
+                                                                "Failed to get movie details from TMDB: {}",
+                                                                e
+                                                            );
                                                         }
                                                     }
                                                 }
@@ -338,10 +344,16 @@ pub async fn fetch_media_handler(
 
                                                                 let mut buff =
                                                                     Uuid::encode_buffer();
-                                                                info!("Successfully fetched and stored TMDB metadata for series {}", id.as_str(&mut buff));
+                                                                info!(
+                                                                    "Successfully fetched and stored TMDB metadata for series {}",
+                                                                    id.as_str(&mut buff)
+                                                                );
                                                             }
                                                             Err(e) => {
-                                                                warn!("Failed to get series details from TMDB: {}", e);
+                                                                warn!(
+                                                                    "Failed to get series details from TMDB: {}",
+                                                                    e
+                                                                );
                                                             }
                                                         }
                                                     }
@@ -554,34 +566,37 @@ pub async fn create_library_handler(
                 .folder_monitor
                 .discover_library_folders_immediate(&library.id)
                 .await
-            { Err(e) => {
-                warn!(
-                    "Failed to trigger immediate folder discovery for library {}: {}",
-                    id, e
-                );
-                // Continue anyway - folder discovery will happen in the next scheduled cycle
-            } _ => {
-                info!("Immediate folder discovery triggered for library {}", id);
+            {
+                Err(e) => {
+                    warn!(
+                        "Failed to trigger immediate folder discovery for library {}: {}",
+                        id, e
+                    );
+                    // Continue anyway - folder discovery will happen in the next scheduled cycle
+                }
+                _ => {
+                    info!("Immediate folder discovery triggered for library {}", id);
 
-                // Trigger an immediate scan for the newly created library after folder discovery
-                info!("Triggering immediate scan for newly created library {}", id);
-                match state
-                    .scan_manager
-                    .start_library_scan(Arc::new(library.clone()), false)
-                    .await
-                {
-                    Ok(scan_id) => {
-                        info!(
-                            "Immediate scan started for library {} with scan ID: {}",
-                            id, scan_id
-                        );
-                    }
-                    Err(e) => {
-                        warn!("Failed to trigger immediate scan for library {}: {}", id, e);
-                        // Continue anyway - scan can be triggered manually or will happen on schedule
+                    // Trigger an immediate scan for the newly created library after folder discovery
+                    info!("Triggering immediate scan for newly created library {}", id);
+                    match state
+                        .scan_manager
+                        .start_library_scan(Arc::new(library.clone()), false)
+                        .await
+                    {
+                        Ok(scan_id) => {
+                            info!(
+                                "Immediate scan started for library {} with scan ID: {}",
+                                id, scan_id
+                            );
+                        }
+                        Err(e) => {
+                            warn!("Failed to trigger immediate scan for library {}: {}", id, e);
+                            // Continue anyway - scan can be triggered manually or will happen on schedule
+                        }
                     }
                 }
-            }}
+            }
 
             Ok(Json(ApiResponse::success(id)))
         }

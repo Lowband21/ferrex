@@ -43,14 +43,16 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         // For Wayland video, avoid per-frame wakeups unless overlay is visible.
         // When overlay is hidden, keep a light 10s heartbeat to refresh state minimally.
         let is_playing = state.domains.player.state.is_playing();
-        let is_wayland = state
-            .domains
-            .player
-            .state
-            .video_opt
-            .as_ref()
-            .map(|v| v.is_wayland_video())
-            .unwrap_or(false);
+        // TODO: Reenable wayland optimization?
+        let is_wayland = false;
+        //let is_wayland = state
+        //    .domains
+        //    .player
+        //    .state
+        //    .video_opt
+        //    .as_ref()
+        //    .map(|v| v.is_wayland_video())
+        //    .unwrap_or(false);
         let overlay_active = {
             let ps = &state.domains.player.state;
             ps.controls
@@ -81,7 +83,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
 /// Creates keyboard shortcut subscription for player controls
 fn keyboard_shortcuts() -> Subscription<DomainMessage> {
     iced::keyboard::on_key_press(|key, modifiers| {
-        use iced::keyboard::{key::Named, Key};
+        use iced::keyboard::{Key, key::Named};
 
         let msg = match key {
             Key::Named(Named::Space) => Some(Message::PlayPause),
@@ -173,7 +175,6 @@ fn watch_progress_subscription(state: &State) -> Subscription<DomainMessage> {
                 .as_ref()
                 .unwrap()
                 .duration()
-                .unwrap_or(Duration::ZERO)
                 .as_secs_f64(),
         ) {
             (Some(media_id), position, duration) => {

@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod ui_widgets_tests {
     use ferrex_player::domains::ui::widgets::{filter_button, sort_dropdown, sort_order_toggle};
-    use ferrex_player::domains::ui::{messages::Message, SortBy, SortOrder};
+    use ferrex_player::domains::ui::{SortBy, SortOrder, messages::Message};
     use iced::Element;
 
     #[test]

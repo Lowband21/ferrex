@@ -138,7 +138,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         }
         ui::Message::ViewTvShow(series_id) => {
             let task =
-                super::update_handlers::navigation_updates::handle_view_tv_show(state, series_id);
+                super::update_handlers::navigation_updates::handle_view_series(state, series_id);
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
         ui::Message::ViewSeason(series_id, season_id) => {
@@ -402,167 +402,172 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             } else {
                 None
             };
-            match state.domains.ui.state.navigation_history.pop() { Some(previous_view) => {
-                state.domains.ui.state.view = previous_view.clone();
+            match state.domains.ui.state.navigation_history.pop() {
+                Some(previous_view) => {
+                    state.domains.ui.state.view = previous_view.clone();
 
-                // Restore scroll state when returning to views
-                match &previous_view {
-                    ViewState::Library => {
-                        // Determine library context based on display mode
-                        let library_id = match state.domains.ui.state.display_mode {
-                            DisplayMode::Library => state.domains.library.state.current_library_id,
-                            DisplayMode::Curated => None, // All libraries
-                            _ => None,
-                        };
-
-                        // Restore scroll state through TabManager with ScrollPositionManager
-                        let tab_id = if let Some(lib_id) = library_id {
-                            crate::domains::ui::tabs::TabId::Library(lib_id)
-                        } else {
-                            crate::domains::ui::tabs::TabId::All
-                        };
-
-                        // Use the scroll-aware tab switching which automatically restores position
-                        state.tab_manager.set_active_tab_with_scroll(
-                            tab_id,
-                            &mut state.domains.ui.state.scroll_manager,
-                            state.window_size.width,
-                        );
-
-                        state.tab_manager.refresh_active_tab();
-
-                        // Explicitly restore scroll position after tab switch
-                        let scroll_task = if let Some(tab) = state.tab_manager.get_tab(tab_id) {
-                            if let Some(grid_state) = tab.grid_state() {
-                                let scroll_position = grid_state.scroll_position;
-                                let scrollable_id = grid_state.scrollable_id.clone();
-                                log::debug!(
-                                    "NavigateBack: Restoring scroll position {} for tab {:?}",
-                                    scroll_position,
-                                    tab_id
-                                );
-                                iced::widget::scrollable::scroll_to::<DomainMessage>(
-                                    scrollable_id,
-                                    iced::widget::scrollable::AbsoluteOffset {
-                                        x: 0.0,
-                                        y: scroll_position,
-                                    },
-                                )
-                            } else {
-                                Task::none()
-                            }
-                        } else {
-                            Task::none()
-                        };
-
-                        log::debug!(
-                            "NavigateBack: Restored tab state for library {:?}",
-                            library_id
-                        );
-
-                        // Reset colors and update depth regions for library view
-                        state
-                            .domains
-                            .ui
-                            .state
-                            .background_shader_state
-                            .reset_to_view_colors(&previous_view);
-
-                        let library_id =
-                            if let Some(id) = state.domains.library.state.current_library_id {
-                                Some(id.as_uuid())
-                            } else {
-                                None
+                    // Restore scroll state when returning to views
+                    match &previous_view {
+                        ViewState::Library => {
+                            // Determine library context based on display mode
+                            let library_id = match state.domains.ui.state.display_mode {
+                                DisplayMode::Library => {
+                                    state.domains.library.state.current_library_id
+                                }
+                                DisplayMode::Curated => None, // All libraries
+                                _ => None,
                             };
 
-                        state
-                            .domains
-                            .ui
-                            .state
-                            .background_shader_state
-                            .update_depth_lines(
-                                &state.domains.ui.state.view,
+                            // Restore scroll state through TabManager with ScrollPositionManager
+                            let tab_id = if let Some(lib_id) = library_id {
+                                crate::domains::ui::tabs::TabId::Library(lib_id)
+                            } else {
+                                crate::domains::ui::tabs::TabId::All
+                            };
+
+                            // Use the scroll-aware tab switching which automatically restores position
+                            state.tab_manager.set_active_tab_with_scroll(
+                                tab_id,
+                                &mut state.domains.ui.state.scroll_manager,
                                 state.window_size.width,
-                                state.window_size.height,
-                                library_id,
                             );
 
-                        return DomainUpdateResult::task(scroll_task);
+                            state.tab_manager.refresh_active_tab();
+
+                            // Explicitly restore scroll position after tab switch
+                            let scroll_task = if let Some(tab) = state.tab_manager.get_tab(tab_id) {
+                                if let Some(grid_state) = tab.grid_state() {
+                                    let scroll_position = grid_state.scroll_position;
+                                    let scrollable_id = grid_state.scrollable_id.clone();
+                                    log::debug!(
+                                        "NavigateBack: Restoring scroll position {} for tab {:?}",
+                                        scroll_position,
+                                        tab_id
+                                    );
+                                    iced::widget::scrollable::scroll_to::<DomainMessage>(
+                                        scrollable_id,
+                                        iced::widget::scrollable::AbsoluteOffset {
+                                            x: 0.0,
+                                            y: scroll_position,
+                                        },
+                                    )
+                                } else {
+                                    Task::none()
+                                }
+                            } else {
+                                Task::none()
+                            };
+
+                            log::debug!(
+                                "NavigateBack: Restored tab state for library {:?}",
+                                library_id
+                            );
+
+                            // Reset colors and update depth regions for library view
+                            state
+                                .domains
+                                .ui
+                                .state
+                                .background_shader_state
+                                .reset_to_view_colors(&previous_view);
+
+                            let library_id =
+                                if let Some(id) = state.domains.library.state.current_library_id {
+                                    Some(id.as_uuid())
+                                } else {
+                                    None
+                                };
+
+                            state
+                                .domains
+                                .ui
+                                .state
+                                .background_shader_state
+                                .update_depth_lines(
+                                    &state.domains.ui.state.view,
+                                    state.window_size.width,
+                                    state.window_size.height,
+                                    library_id,
+                                );
+
+                            return DomainUpdateResult::task(scroll_task);
+                        }
+                        _ => {
+                            // Detail views don't have scrollable content in current implementation
+                            log::debug!("Navigated back to view: {:?}", previous_view);
+                        }
                     }
-                    _ => {
-                        // Detail views don't have scrollable content in current implementation
-                        log::debug!("Navigated back to view: {:?}", previous_view);
-                    }
+
+                    // Reset colors if returning to a non-detail view
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .background_shader_state
+                        .reset_to_view_colors(&previous_view);
+
+                    // Update background shader depth regions for the restored view
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .background_shader_state
+                        .update_depth_lines(
+                            &state.domains.ui.state.view,
+                            state.window_size.width,
+                            state.window_size.height,
+                            library_id,
+                        );
+
+                    DomainUpdateResult::task(Task::none())
                 }
+                _ => {
+                    // No history - return to library view preserving current display mode
+                    // This handles the case where a user plays a video directly from a library grid
+                    // and then exits - we want to return to that library grid, not the home carousel
+                    state.domains.ui.state.view = ViewState::Library;
 
-                // Reset colors if returning to a non-detail view
-                state
-                    .domains
-                    .ui
-                    .state
-                    .background_shader_state
-                    .reset_to_view_colors(&previous_view);
+                    // Preserve the current display mode and library context
+                    let library_id = match state.domains.ui.state.display_mode {
+                        DisplayMode::Library => state.domains.library.state.current_library_id,
+                        DisplayMode::Curated => None,
+                        _ => None,
+                    };
 
-                // Update background shader depth regions for the restored view
-                state
-                    .domains
-                    .ui
-                    .state
-                    .background_shader_state
-                    .update_depth_lines(
-                        &state.domains.ui.state.view,
-                        state.window_size.width,
-                        state.window_size.height,
-                        library_id,
+                    log::debug!(
+                        "NavigateBack with no history: preserving display mode {:?}",
+                        state.domains.ui.state.display_mode
                     );
 
-                DomainUpdateResult::task(Task::none())
-            } _ => {
-                // No history - return to library view preserving current display mode
-                // This handles the case where a user plays a video directly from a library grid
-                // and then exits - we want to return to that library grid, not the home carousel
-                state.domains.ui.state.view = ViewState::Library;
+                    // Reset colors and update depth regions for library view
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .background_shader_state
+                        .reset_to_library_colors();
 
-                // Preserve the current display mode and library context
-                let library_id = match state.domains.ui.state.display_mode {
-                    DisplayMode::Library => state.domains.library.state.current_library_id,
-                    DisplayMode::Curated => None,
-                    _ => None,
-                };
+                    let library_id = if let Some(id) = library_id {
+                        Some(id.as_uuid())
+                    } else {
+                        None
+                    };
 
-                log::debug!(
-                    "NavigateBack with no history: preserving display mode {:?}",
-                    state.domains.ui.state.display_mode
-                );
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .background_shader_state
+                        .update_depth_lines(
+                            &state.domains.ui.state.view,
+                            state.window_size.width,
+                            state.window_size.height,
+                            library_id,
+                        );
 
-                // Reset colors and update depth regions for library view
-                state
-                    .domains
-                    .ui
-                    .state
-                    .background_shader_state
-                    .reset_to_library_colors();
-
-                let library_id = if let Some(id) = library_id {
-                    Some(id.as_uuid())
-                } else {
-                    None
-                };
-
-                state
-                    .domains
-                    .ui
-                    .state
-                    .background_shader_state
-                    .update_depth_lines(
-                        &state.domains.ui.state.view,
-                        state.window_size.width,
-                        state.window_size.height,
-                        library_id,
-                    );
-
-                DomainUpdateResult::task(Task::none())
-            }}
+                    DomainUpdateResult::task(Task::none())
+                }
+            }
         }
         ui::Message::UpdateSearchQuery(query) => {
             // Update local UI state so the text input shows the current value
@@ -915,7 +920,9 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         }
         ui::Message::RefreshViewModels => {
             // Refresh view models - pull latest data from MediaStore
-            log::info!("[MediaStoreNotifier] RefreshViewModels triggered - updating view models with latest MediaStore data");
+            log::info!(
+                "[MediaStoreNotifier] RefreshViewModels triggered - updating view models with latest MediaStore data"
+            );
 
             // Update library filters based on current display mode
             let library_filter = match state.domains.ui.state.display_mode {
@@ -964,8 +971,13 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 _ => None,
             };
 
-            log::info!("UI: UpdateViewModelFilters called - library_filter = {:?}, display_mode = {:?}, ui.current_library_id = {:?}, library.current_library_id = {:?}",
-                library_filter, state.domains.ui.state.display_mode, state.domains.ui.state.current_library_id, state.domains.library.state.current_library_id);
+            log::info!(
+                "UI: UpdateViewModelFilters called - library_filter = {:?}, display_mode = {:?}, ui.current_library_id = {:?}, library.current_library_id = {:?}",
+                library_filter,
+                state.domains.ui.state.display_mode,
+                state.domains.ui.state.current_library_id,
+                state.domains.library.state.current_library_id
+            );
 
             //// Always update AllViewModel as it handles both types
             //state.all_view_model.set_library_filter(library_filter);

@@ -5,8 +5,8 @@
 //! trust expiration without relying on local storage.
 
 use axum::{
-    extract::{Query, State},
     Extension, Json,
+    extract::{Query, State},
 };
 use chrono::Utc;
 use ferrex_core::{api_types::ApiResponse, user::User};
@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::{errors::AppResult, AppState};
+use crate::{AppState, errors::AppResult};
 use ferrex_core::database::postgres::PostgresDatabase;
 
 /// Device trust validation query parameters

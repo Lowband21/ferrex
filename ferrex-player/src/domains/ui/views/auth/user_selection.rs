@@ -5,8 +5,8 @@ use crate::common::messages::DomainMessage;
 use crate::domains::auth::dto::UserListItemDto;
 use crate::domains::auth::messages as auth;
 use iced::{
-    widget::{button, column, container, row, scrollable, text, Space},
     Alignment, Element, Length, Theme,
+    widget::{Space, button, column, container, row, scrollable, text},
 };
 
 #[cfg_attr(

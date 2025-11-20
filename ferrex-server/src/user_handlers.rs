@@ -1,8 +1,8 @@
 use axum::{
+    Extension, Json,
     extract::{Path, State},
     http::HeaderMap,
     http::StatusCode,
-    Extension, Json,
 };
 use ferrex_core::{
     api_types::ApiResponse,
@@ -14,10 +14,10 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::{
+    AppState,
     errors::AppError,
     errors::AppResult,
-    services::{user_service::UpdateUserParams, UserService},
-    AppState,
+    services::{UserService, user_service::UpdateUserParams},
 };
 
 /// Helper function to get the database pool
@@ -159,12 +159,14 @@ pub async fn list_users_authenticated_handler(
         state.database.backend().get_all_users().await?
     } else {
         // Regular users only see themselves
-        vec![state
-            .database
-            .backend()
-            .get_user_by_id(user.id)
-            .await?
-            .ok_or_else(|| AppError::not_found("User not found".to_string()))?]
+        vec![
+            state
+                .database
+                .backend()
+                .get_user_by_id(user.id)
+                .await?
+                .ok_or_else(|| AppError::not_found("User not found".to_string()))?,
+        ]
     };
 
     // Get device information for PIN status - already extracted as Extension
@@ -269,8 +271,8 @@ pub async fn update_user_handler(
         // Verify current password first
         if let Some(current_password) = request.current_password {
             use argon2::{
-                password_hash::{PasswordHash, PasswordVerifier},
                 Argon2,
+                password_hash::{PasswordHash, PasswordVerifier},
             };
 
             // Get password hash from credentials table

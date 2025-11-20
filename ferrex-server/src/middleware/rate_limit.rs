@@ -13,11 +13,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ferrex_core::auth::rate_limit::{
-    backoff, EndpointLimits, RateLimitDecision, RateLimitError, RateLimitKey, RateLimitResult,
-    RateLimitRule, RateLimiter, TrustedSources,
+    EndpointLimits, RateLimitDecision, RateLimitError, RateLimitKey, RateLimitResult,
+    RateLimitRule, RateLimiter, TrustedSources, backoff,
 };
-use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
+use redis::aio::ConnectionManager;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -26,7 +26,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    sync::{broadcast, RwLock},
+    sync::{RwLock, broadcast},
     time::interval,
 };
 use tracing::{debug, error, info, warn};
@@ -268,7 +268,8 @@ impl RedisRateLimiter {
                     metrics_guard.allowed_requests,
                     metrics_guard.denied_requests,
                     if metrics_guard.total_requests > 0 {
-                        (metrics_guard.cache_hits as f64 / metrics_guard.total_requests as f64) * 100.0
+                        (metrics_guard.cache_hits as f64 / metrics_guard.total_requests as f64)
+                            * 100.0
                     } else {
                         0.0
                     }

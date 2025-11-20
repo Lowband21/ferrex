@@ -9,7 +9,7 @@
 use axum::{
     body::Body,
     extract::Request,
-    http::{header, Response, StatusCode, Uri},
+    http::{Response, StatusCode, Uri, header},
 };
 use std::{
     future::Future,

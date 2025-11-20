@@ -1,6 +1,6 @@
 use rkyv::{
-    option::ArchivedOption, vec::ArchivedVec, Archive, Deserialize as RkyvDeserialize,
-    Serialize as RkyvSerialize,
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize, option::ArchivedOption,
+    vec::ArchivedVec,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

@@ -5,7 +5,7 @@
 use crate::domains::ui::messages::Message;
 use crate::domains::ui::theme;
 use crate::state_refactored::State;
-use iced::widget::{button, column, container, row, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, text, text_input};
 use iced::{Element, Length};
 
 #[cfg_attr(

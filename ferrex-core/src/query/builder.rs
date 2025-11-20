@@ -1,5 +1,5 @@
 use super::types::*;
-use crate::{watch_status::WatchStatusFilter, LibraryID};
+use crate::{LibraryID, watch_status::WatchStatusFilter};
 use uuid::Uuid;
 
 /// Fluent API for building media queries

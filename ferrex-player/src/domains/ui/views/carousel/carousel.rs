@@ -2,8 +2,8 @@ use crate::domains::ui::messages::Message;
 use crate::domains::ui::theme;
 use crate::domains::ui::views::carousel::state::CarouselState;
 use iced::{
-    widget::{button, column, container, row, scrollable, text, Space},
     Element, Length,
+    widget::{Space, button, column, container, row, scrollable, text},
 };
 use lucide_icons::Icon;
 

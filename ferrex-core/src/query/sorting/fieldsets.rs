@@ -73,7 +73,7 @@ impl SortFieldSet for BasicMediaFieldSet {}
 // Only fields available from file system
 impl HasField<TitleField> for BasicMediaFieldSet {} // From filename
 impl HasField<DateAddedField> for BasicMediaFieldSet {} // File creation/scan time
-                                                        // Note: Does NOT implement HasField for TMDB-dependent fields like Rating, Popularity, etc.
+// Note: Does NOT implement HasField for TMDB-dependent fields like Rating, Popularity, etc.
 
 /// Field set for mixed media collections
 ///

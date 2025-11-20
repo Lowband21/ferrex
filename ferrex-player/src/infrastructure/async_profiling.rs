@@ -88,9 +88,7 @@ where
 /// ```
 #[macro_export]
 macro_rules! profile_async_block {
-    ($scope_name:expr_2021, $block:expr_2021) => {{
-        $crate::infrastructure::async_profiling::profile_async($scope_name, $block).await
-    }};
+    ($scope_name:expr_2021, $block:expr_2021) => {{ $crate::infrastructure::async_profiling::profile_async($scope_name, $block).await }};
 }
 
 // =============================================================================

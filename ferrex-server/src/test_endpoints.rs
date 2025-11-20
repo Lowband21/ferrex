@@ -8,8 +8,8 @@ use serde_json::json;
 use std::path::PathBuf;
 
 use crate::{
-    transcoding::{job::JobPriority, profiles::TranscodingProfile},
     AppState,
+    transcoding::{job::JobPriority, profiles::TranscodingProfile},
 };
 use uuid;
 
@@ -219,7 +219,7 @@ pub async fn test_hls_streaming(
         Err(e) => {
             return Ok(Json(json!({
             "error": format!("Failed to add media to database: {}", e)
-            })))
+            })));
         }
         Ok(id) => id,
     };

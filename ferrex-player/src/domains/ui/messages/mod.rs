@@ -1,9 +1,9 @@
 pub mod subscriptions;
 
-use crate::domains::ui::{views::carousel::CarouselMessage, DisplayMode, SortBy};
+use crate::domains::ui::{DisplayMode, SortBy, views::carousel::CarouselMessage};
 use ferrex_core::{LibraryID, MediaFile, MediaID, MediaIDLike, MovieID, MovieLike, MovieReference};
-use iced::widget::scrollable;
 use iced::Size;
+use iced::widget::scrollable;
 use uuid::Uuid;
 
 #[derive(Clone)]

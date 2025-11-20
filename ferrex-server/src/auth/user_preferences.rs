@@ -1,9 +1,9 @@
 use crate::{
-    errors::{AppError, AppResult},
     AppState,
+    errors::{AppError, AppResult},
 };
-use axum::{extract::State, Extension, Json};
-use ferrex_core::{user::User, ApiResponse};
+use axum::{Extension, Json, extract::State};
+use ferrex_core::{ApiResponse, user::User};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

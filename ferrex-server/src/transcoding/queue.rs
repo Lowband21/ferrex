@@ -2,7 +2,7 @@ use super::job::{JobMessage, JobPriority, JobResponse, TranscodingJob, Transcodi
 use anyhow::Result;
 use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::{RwLock, mpsc, oneshot};
 use tracing::{debug, info};
 
 /// Priority queue item wrapper

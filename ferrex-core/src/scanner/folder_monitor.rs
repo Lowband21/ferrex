@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tokio::time::{interval, MissedTickBehavior};
+use tokio::time::{MissedTickBehavior, interval};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -157,17 +157,20 @@ impl FolderMonitor {
                 library.name, library.id, library.library_type
             );
 
-            match self.update_library_inventory(&library).await { Err(e) => {
-                error!(
-                    "Failed to update inventory for library {} (ID: {}): {}",
-                    library.name, library.id, e
-                );
-            } _ => {
-                info!(
-                    "Successfully updated inventory for library: {} (ID: {})",
-                    library.name, library.id
-                );
-            }}
+            match self.update_library_inventory(&library).await {
+                Err(e) => {
+                    error!(
+                        "Failed to update inventory for library {} (ID: {}): {}",
+                        library.name, library.id, e
+                    );
+                }
+                _ => {
+                    info!(
+                        "Successfully updated inventory for library: {} (ID: {})",
+                        library.name, library.id
+                    );
+                }
+            }
 
             // Process folders needing scan
             if let Err(e) = self.process_pending_folders(&library).await {
@@ -241,19 +244,19 @@ impl FolderMonitor {
                 continue;
             }
 
-            let traverse_folder = match self.database.get_folder_by_path(library.id, path).await
-            { Ok(Some(mut folder)) => {
-                folder.last_seen_at = Utc::now();
+            let traverse_folder = match self.database.get_folder_by_path(library.id, path).await {
+                Ok(Some(mut folder)) => {
+                    folder.last_seen_at = Utc::now();
 
-                if let Some(_next_retry_at) = folder.next_retry_at {
-                    true
-                } else {
-                    self.database.upsert_folder(&folder).await?;
-                    false
+                    if let Some(_next_retry_at) = folder.next_retry_at {
+                        true
+                    } else {
+                        self.database.upsert_folder(&folder).await?;
+                        false
+                    }
                 }
-            } _ => {
-                true
-            }};
+                _ => true,
+            };
 
             if traverse_folder {
                 // Traverse and inventory movie folders (root folder will be created by traverse)

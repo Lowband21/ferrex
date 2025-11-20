@@ -1,8 +1,8 @@
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
-use axum::{extract::State, http::StatusCode, Extension, Json};
+use axum::{Extension, Json, extract::State, http::StatusCode};
 use chrono::Utc;
 use ferrex_core::{
     api_types::ApiResponse,
@@ -19,8 +19,8 @@ use uuid::Uuid;
 
 use super::jwt::{generate_access_token, generate_refresh_token};
 use crate::{
-    errors::{AppError, AppResult},
     AppState,
+    errors::{AppError, AppResult},
 };
 
 pub async fn register(

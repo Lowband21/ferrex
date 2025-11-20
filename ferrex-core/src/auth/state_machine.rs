@@ -4,10 +4,10 @@
 //! only valid state transitions can be compiled. It uses phantom types to encode
 //! states at the type level and const generics for configuration.
 
+use crate::AuthToken;
 use crate::auth::device::DeviceRegistration;
 use crate::rbac::UserPermissions;
 use crate::user::User;
-use crate::AuthToken;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::marker::PhantomData;

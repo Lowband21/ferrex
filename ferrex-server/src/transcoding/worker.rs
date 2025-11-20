@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::{RwLock, mpsc, oneshot};
 use tokio::time::timeout;
 use tracing::{debug, error, info, trace, warn};
 
@@ -969,7 +969,7 @@ async fn update_job_status(queue: &JobQueue, job: TranscodingJob) {
 async fn kill_process(pid: u32) -> Result<()> {
     #[cfg(unix)]
     {
-        use nix::sys::signal::{kill, Signal};
+        use nix::sys::signal::{Signal, kill};
         use nix::unistd::Pid;
 
         kill(Pid::from_raw(pid as i32), Signal::SIGTERM).context("Failed to kill process")?;

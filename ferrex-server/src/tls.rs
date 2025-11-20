@@ -21,7 +21,7 @@ use tokio::{
     fs::File,
     io::AsyncReadExt,
     sync::RwLock,
-    time::{interval, MissedTickBehavior},
+    time::{MissedTickBehavior, interval},
 };
 use tracing::{error, info};
 

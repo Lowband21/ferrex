@@ -23,8 +23,9 @@ pub use infrastructure::*;
 pub use pin::*;
 // Re-export session types with explicit naming to avoid conflicts
 pub use session::{
-    generate_session_token, CreateSessionRequest, CreateSessionResponse, ListSessionsRequest,
-    RevokeSessionRequest, SessionActivity, SessionConfig, SessionSummary, SessionValidationResult,
+    CreateSessionRequest, CreateSessionResponse, ListSessionsRequest, RevokeSessionRequest,
+    SessionActivity, SessionConfig, SessionSummary, SessionValidationResult,
+    generate_session_token,
 };
 // Export session DeviceSession with alias to avoid conflict with domain DeviceSession
 pub use session::DeviceSession as SessionDeviceSession;

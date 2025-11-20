@@ -167,7 +167,7 @@ pub enum DeviceCheckResult {
 /// Generate a cryptographically secure trust token
 pub fn generate_trust_token() -> String {
     use rand::distr::Alphanumeric;
-    use rand::{thread_rng, Rng};
+    use rand::{Rng, thread_rng};
 
     thread_rng()
         .sample_iter(&Alphanumeric)

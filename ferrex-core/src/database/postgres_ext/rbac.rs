@@ -1,7 +1,7 @@
 use crate::{
+    Result,
     database::PostgresDatabase,
     rbac::{Permission, Role, UserPermissions},
-    Result,
 };
 use std::collections::HashMap;
 use uuid::Uuid;

@@ -1,7 +1,7 @@
 use crate::domains::metadata::{image_types::ImageRequest, messages::Message};
 use crate::state_refactored::State;
 use ferrex_core::ImageSize;
-use iced::{widget::image::Handle, Task};
+use iced::{Task, widget::image::Handle};
 
 /// Handle successful image load from the unified image service
 pub fn handle_unified_image_loaded(

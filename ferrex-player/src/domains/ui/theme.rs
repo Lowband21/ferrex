@@ -1,7 +1,6 @@
 use iced::{
-    theme,
+    Background, Border, Color, Shadow, Theme, theme,
     widget::{button, container, scrollable, slider, text_input},
-    Background, Border, Color, Shadow, Theme,
 };
 
 /// Pure black theme with high contrast electric blue accents

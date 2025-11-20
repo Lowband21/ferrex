@@ -1,6 +1,6 @@
 use crate::{
-    database::traits::{ScanState, ScanStatus, ScanType},
     LibraryID, LibraryReference, MediaDatabase, Result,
+    database::traits::{ScanState, ScanStatus, ScanType},
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};

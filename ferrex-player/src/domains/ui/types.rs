@@ -21,7 +21,7 @@ pub enum ViewState {
         movie_id: MovieID, // Store full reference for efficient access
         backdrop_handle: Option<iced::widget::image::Handle>, // Cached backdrop handle
     },
-    TvShowDetail {
+    SeriesDetail {
         series_id: SeriesID, // Keep as string for now, will convert to SeriesID later
         backdrop_handle: Option<iced::widget::image::Handle>, // Cached backdrop handle
     },
@@ -55,7 +55,7 @@ impl ViewState {
                 | ViewState::AdminDashboard
                 | ViewState::UserSettings
                 | ViewState::MovieDetail { .. }
-                | ViewState::TvShowDetail { .. }
+                | ViewState::SeriesDetail { .. }
                 | ViewState::SeasonDetail { .. }
                 | ViewState::EpisodeDetail { .. }
         )
@@ -78,7 +78,7 @@ impl ViewState {
                     Some(crate::infrastructure::constants::layout::header::HEIGHT)
                 } // Main library header
                 ViewState::MovieDetail { .. }
-                | ViewState::TvShowDetail { .. }
+                | ViewState::SeriesDetail { .. }
                 | ViewState::SeasonDetail { .. }
                 | ViewState::EpisodeDetail { .. } => {
                     Some(crate::infrastructure::constants::layout::header::HEIGHT)

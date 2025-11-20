@@ -1,12 +1,12 @@
 use axum::{
+    Extension, Json,
     extract::{Path, Query, State},
     http::StatusCode,
-    Extension, Json,
 };
 use ferrex_core::{
+    MediaType, User,
     api_types::ApiResponse,
     watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
-    MediaType, User,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

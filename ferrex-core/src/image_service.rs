@@ -1,5 +1,5 @@
-use crate::database::traits::{ImageLookupParams, ImageRecord, ImageVariant};
 use crate::database::MediaDatabase;
+use crate::database::traits::{ImageLookupParams, ImageRecord, ImageVariant};
 use crate::{MediaError, Result};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -473,8 +473,10 @@ impl ImageService {
         &self,
         params: &ImageLookupParams,
     ) -> Result<Option<PathBuf>> {
-        debug!("get_or_download_variant called with params: type={}, id={}, image_type={}, index={}, variant={:?}",
-              params.media_type, params.media_id, params.image_type, params.index, params.variant);
+        debug!(
+            "get_or_download_variant called with params: type={}, id={}, image_type={}, index={}, variant={:?}",
+            params.media_type, params.media_id, params.image_type, params.index, params.variant
+        );
 
         // Look up the image in database
         if let Some((image_record, existing_variant)) =

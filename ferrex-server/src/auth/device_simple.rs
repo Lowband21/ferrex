@@ -4,10 +4,10 @@
 //! to support the full device authentication schema.
 
 use argon2::{
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
 };
-use axum::{extract::State, Extension, Json};
+use axum::{Extension, Json, extract::State};
 use chrono::{Duration, Utc};
 use ferrex_core::{
     api_types::ApiResponse,
@@ -19,8 +19,8 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
-    errors::{AppError, AppResult},
     AppState,
+    errors::{AppError, AppResult},
 };
 
 /// Enhanced login request with device info
@@ -145,7 +145,7 @@ pub async fn set_pin_simple(
     Json(request): Json<SetPinRequest>,
 ) -> AppResult<Json<ApiResponse<SetPinResponse>>> {
     // Validate PIN
-    use ferrex_core::auth::pin::{validate_pin, PinPolicy};
+    use ferrex_core::auth::pin::{PinPolicy, validate_pin};
     let policy = PinPolicy {
         min_length: 4,
         max_length: 8,
@@ -216,7 +216,7 @@ pub async fn check_device_status(
 /// Helper to hash a PIN (for future use)
 #[allow(dead_code)]
 fn hash_pin_with_device_salt(pin: &str, device_id: &Uuid) -> Result<String, ()> {
-    use base64::{engine::general_purpose, Engine as _};
+    use base64::{Engine as _, engine::general_purpose};
 
     // Create device-specific salt
     let mut hasher = Sha256::new();

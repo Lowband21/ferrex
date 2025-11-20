@@ -1,13 +1,13 @@
 use axum::{
+    Extension, Json,
     extract::{Path, Query, State},
     http::StatusCode,
-    Extension, Json,
 };
 use ferrex_core::{api_types::ApiResponse, user::User};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{errors::AppResult, AppState};
+use crate::{AppState, errors::AppResult};
 
 /// Request to assign roles to a user
 #[derive(Debug, Deserialize)]

@@ -92,7 +92,7 @@ impl Default for SessionConfig {
 /// Generate a cryptographically secure session token
 pub fn generate_session_token() -> String {
     use rand::distr::Alphanumeric;
-    use rand::{thread_rng, Rng};
+    use rand::{Rng, thread_rng};
 
     thread_rng()
         .sample_iter(&Alphanumeric)

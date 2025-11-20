@@ -1,7 +1,7 @@
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
-    domains::streaming::messages::Message,
     domains::streaming::StreamingDomainState,
+    domains::streaming::messages::Message,
     domains::ui::types::ViewState,
     state_refactored::State,
 };
@@ -307,7 +307,9 @@ pub fn handle_transcoding_status_update(
 
             // Special handling for "Job not found" - the job might have completed or expired
             if e.contains("Job not found") || e.contains("not found") {
-                log::info!("Transcoding job not found - this could mean the job completed or the master playlist is ready");
+                log::info!(
+                    "Transcoding job not found - this could mean the job completed or the master playlist is ready"
+                );
 
                 // For adaptive streaming, check if the master playlist exists
                 if state.domains.streaming.state.using_hls

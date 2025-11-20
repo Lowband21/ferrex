@@ -1,8 +1,8 @@
-use crate::{websocket::Connection, AppState};
+use crate::{AppState, websocket::Connection};
 use axum::{
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Extension, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::Response,
 };
@@ -259,11 +259,10 @@ async fn handle_sync_message(
 /// Handle user disconnect
 async fn handle_disconnect(state: &AppState, conn_id: Uuid, user: &User) {
     // Get room code before removing connection
-    let room_code = match state.websocket_manager.get_connection(&conn_id) { Some(conn) => {
-        conn.get_room_code().await
-    } _ => {
-        None
-    }};
+    let room_code = match state.websocket_manager.get_connection(&conn_id) {
+        Some(conn) => conn.get_room_code().await,
+        _ => None,
+    };
 
     // Remove connection
     state.websocket_manager.remove_connection(conn_id);

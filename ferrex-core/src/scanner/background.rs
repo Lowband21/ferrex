@@ -1,7 +1,7 @@
 use crate::{
+    LibraryLike, LibraryReference, MediaDatabase, Result, ScanOutput,
     database::traits::{FileWatchEventType, ScanType},
     providers::TmdbApiProvider,
-    LibraryLike, LibraryReference, MediaDatabase, Result, ScanOutput,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -171,7 +171,10 @@ impl BackgroundScanner {
                                                 .scan_media_folder(&library, &event.file_path)
                                                 .await
                                             {
-                                                error!("Failed to scan media folder for moved file {}: {}", event.file_path, e);
+                                                error!(
+                                                    "Failed to scan media folder for moved file {}: {}",
+                                                    event.file_path, e
+                                                );
                                             }
                                         }
                                     }

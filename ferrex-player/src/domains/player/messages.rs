@@ -61,26 +61,11 @@ pub enum Message {
     ToggleSubtitles,
     ToggleSubtitleMenu,
     ToggleQualityMenu,
+    ToggleAppsinkBackend,
     CycleAudioTrack,
     CycleSubtitleTrack,
     CycleSubtitleSimple, // Simple subtitle cycling for left-click
     TracksLoaded,
-
-    // Tone mapping controls
-    ToggleToneMapping(bool),
-    SetToneMappingPreset(iced_video_player::ToneMappingPreset),
-    SetToneMappingAlgorithm(iced_video_player::ToneMappingAlgorithm),
-    SetToneMappingWhitePoint(f32),
-    SetToneMappingExposure(f32),
-    SetToneMappingSaturation(f32),
-    SetHableShoulderStrength(f32),
-    SetHableLinearStrength(f32),
-    SetHableLinearAngle(f32),
-    SetHableToeStrength(f32),
-    SetMonitorBrightness(f32),
-    SetToneMappingBrightness(f32),
-    SetToneMappingContrast(f32),
-    SetToneMappingSaturationBoost(f32),
 
     // External MPV player messages
     #[cfg(feature = "external-mpv-player")]
@@ -160,40 +145,11 @@ impl fmt::Debug for Message {
             Message::ToggleSubtitles => write!(f, "ToggleSubtitles"),
             Message::ToggleSubtitleMenu => write!(f, "ToggleSubtitleMenu"),
             Message::ToggleQualityMenu => write!(f, "ToggleQualityMenu"),
+            Message::ToggleAppsinkBackend => write!(f, "ToggleAppsinkBackend"),
             Message::CycleAudioTrack => write!(f, "CycleAudioTrack"),
             Message::CycleSubtitleTrack => write!(f, "CycleSubtitleTrack"),
             Message::CycleSubtitleSimple => write!(f, "CycleSubtitleSimple"),
             Message::TracksLoaded => write!(f, "TracksLoaded"),
-
-            // Tone mapping controls
-            Message::ToggleToneMapping(enabled) => write!(f, "ToggleToneMapping({})", enabled),
-            Message::SetToneMappingPreset(preset) => {
-                write!(f, "SetToneMappingPreset({:?})", preset)
-            }
-            Message::SetToneMappingAlgorithm(algo) => {
-                write!(f, "SetToneMappingAlgorithm({:?})", algo)
-            }
-            Message::SetToneMappingWhitePoint(val) => {
-                write!(f, "SetToneMappingWhitePoint({})", val)
-            }
-            Message::SetToneMappingExposure(val) => write!(f, "SetToneMappingExposure({})", val),
-            Message::SetToneMappingSaturation(val) => {
-                write!(f, "SetToneMappingSaturation({})", val)
-            }
-            Message::SetHableShoulderStrength(val) => {
-                write!(f, "SetHableShoulderStrength({})", val)
-            }
-            Message::SetHableLinearStrength(val) => write!(f, "SetHableLinearStrength({})", val),
-            Message::SetHableLinearAngle(val) => write!(f, "SetHableLinearAngle({})", val),
-            Message::SetHableToeStrength(val) => write!(f, "SetHableToeStrength({})", val),
-            Message::SetMonitorBrightness(val) => write!(f, "SetMonitorBrightness({})", val),
-            Message::SetToneMappingBrightness(val) => {
-                write!(f, "SetToneMappingBrightness({})", val)
-            }
-            Message::SetToneMappingContrast(val) => write!(f, "SetToneMappingContrast({})", val),
-            Message::SetToneMappingSaturationBoost(val) => {
-                write!(f, "SetToneMappingSaturationBoost({})", val)
-            }
 
             // External MPV player messages
             #[cfg(feature = "external-mpv-player")]

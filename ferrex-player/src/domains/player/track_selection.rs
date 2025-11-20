@@ -1,5 +1,5 @@
 use super::state::PlayerDomainState;
-use crate::domains::player::video_backend::{AudioTrack, SubtitleTrack};
+use subwave_core::video::types::{AudioTrack, SubtitleTrack};
 
 impl PlayerDomainState {
     /// Query and update available tracks from the video
@@ -28,7 +28,8 @@ impl PlayerDomainState {
     /// Select an audio track by index
     pub fn select_audio_track(&mut self, index: i32) -> Result<(), String> {
         if let Some(video) = &mut self.video_opt {
-            video.set_audio_track(index);
+            // TODO: Reenable audio track selection
+            //video.set_audio_track(index);
             self.current_audio_track = index;
 
             // Show notification
@@ -59,7 +60,8 @@ impl PlayerDomainState {
                 }
             }
 
-            video.set_subtitle_track(index);
+            // TODO: Reenable subtitle track selection
+            //video.set_subtitle_track(index);
             self.current_subtitle_track = index;
 
             // Update subtitle enabled state based on selection

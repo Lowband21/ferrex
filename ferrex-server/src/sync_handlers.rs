@@ -1,18 +1,18 @@
 use crate::{
-    errors::{AppError, AppResult},
     AppState,
+    errors::{AppError, AppResult},
 };
 use axum::{
-    extract::{Extension, Path, State},
     Json,
+    extract::{Extension, Path, State},
 };
 use ferrex_core::{
+    MediaIDLike,
     sync_session::{
         CreateSyncSessionRequest, CreateSyncSessionResponse, JoinSyncSessionResponse, Participant,
         PlaybackState, SyncSession, SyncSessionError,
     },
     user::User,
-    MediaIDLike,
 };
 use uuid::Uuid;
 

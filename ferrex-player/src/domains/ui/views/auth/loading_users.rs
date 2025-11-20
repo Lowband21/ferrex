@@ -3,8 +3,8 @@
 use super::components::{auth_card, auth_container};
 use crate::common::messages::DomainMessage;
 use iced::{
-    widget::{column, container, text, Space},
     Element, Length,
+    widget::{Space, column, container, text},
 };
 
 /// Shows a loading screen while fetching users

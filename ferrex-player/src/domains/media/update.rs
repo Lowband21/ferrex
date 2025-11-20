@@ -115,58 +115,6 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
             }
         }
 
-        Message::VideoCreated(result) => {
-            match result {
-                Ok(video_arc) => {
-                    log::info!("Video object created successfully");
-
-                    // Get duration from the video
-                    let duration = video_arc.duration().unwrap_or(Duration::ZERO).as_secs_f64();
-                    if duration > 0.0 {
-                        log::info!("Video duration: {:.1}s", duration);
-                        state.domains.player.state.duration = duration;
-                    } else {
-                        log::warn!("Video duration not available yet");
-                    }
-
-                    // Check for resume position and seek if needed
-                    if let Some(resume_pos) = state.domains.player.state.pending_resume_position {
-                        log::info!("Resuming playback at position: {:.1}s", resume_pos);
-                        // Convert to Duration for seeking
-                        let resume_duration = std::time::Duration::from_secs_f32(resume_pos);
-                        video_arc.seek(resume_duration, false);
-                        // Clear the pending resume position
-                        state.domains.player.state.pending_resume_position = None;
-                    }
-
-                    // Store the video Arc
-                    state.domains.player.state.video_opt = Some(video_arc);
-
-                    // Notify that video is loaded
-                    state.domains.ui.state.view = crate::domains::ui::types::ViewState::Player;
-
-                    // Start playing immediately
-                    if let Some(video) = &state.domains.player.state.video_opt {
-                        video.set_paused(false);
-                        if video.position() != Duration::from_secs(0) {
-                            state.domains.player.state.is_loading_video = false;
-                        }
-                    }
-
-                    DomainUpdateResult::task(Task::done(DomainMessage::Media(
-                        Message::VideoLoaded(true),
-                    )))
-                }
-                Err(error) => {
-                    log::error!("Failed to create video: {}", error);
-                    state.domains.ui.state.error_message = Some(error.clone());
-                    state.domains.ui.state.view =
-                        crate::domains::ui::types::ViewState::VideoError { message: error };
-                    DomainUpdateResult::task(Task::none())
-                }
-            }
-        }
-
         Message::_LoadVideo => {
             let load_video_task = DomainUpdateResult::task(
                 crate::domains::player::video::load_video(state).map(DomainMessage::Media),
@@ -333,7 +281,9 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                         if let Some(item) = watch_state.in_progress.get(media_id.as_uuid()) {
                             log::debug!(
                                 "Watch state verification - MediaID {:?} has position: {:.1}s, duration: {:.1}s",
-                                media_id, item.position, item.duration
+                                media_id,
+                                item.position,
+                                item.duration
                             );
                         } else if watch_state.completed.contains(media_id.as_uuid()) {
                             log::debug!(

@@ -15,10 +15,10 @@ use crate::AppState;
 pub fn require_permission(
     permission: &'static str,
 ) -> impl Fn(Request, Next) -> Pin<Box<dyn Future<Output = Response> + Send>>
-       + Clone
-       + Send
-       + Sync
-       + 'static {
++ Clone
++ Send
++ Sync
++ 'static {
     move |request: Request, next: Next| Box::pin(check_permission_async(request, next, permission))
 }
 
@@ -71,10 +71,10 @@ async fn check_permission_async(request: Request, next: Next, permission: &str) 
 pub fn require_any_permission(
     permissions: &'static [&'static str],
 ) -> impl Fn(Request, Next) -> Pin<Box<dyn Future<Output = Response> + Send>>
-       + Clone
-       + Send
-       + Sync
-       + 'static {
++ Clone
++ Send
++ Sync
++ 'static {
     move |request: Request, next: Next| {
         Box::pin(check_any_permission_async(request, next, permissions))
     }
@@ -191,9 +191,9 @@ pub async fn require_permission_async(
 pub fn permission_layer(
     permission: &'static str,
 ) -> impl Fn(Request, Next) -> Pin<Box<dyn Future<Output = Response> + Send>>
-       + Clone
-       + Send
-       + Sync
-       + 'static {
++ Clone
++ Send
++ Sync
++ 'static {
     require_permission(permission)
 }

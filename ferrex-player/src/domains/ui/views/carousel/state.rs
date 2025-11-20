@@ -110,7 +110,11 @@ impl CarouselState {
 
         log::debug!(
             "Carousel visible range updated: {}..{} (current_index={}, items_per_page={}, total={})",
-            start, end, self.current_index, self.items_per_page, self.total_items
+            start,
+            end,
+            self.current_index,
+            self.items_per_page,
+            self.total_items
         );
     }
 

@@ -360,8 +360,15 @@ fn extract_frame_at_percentage(
                             0.0
                         };
 
-                        tracing::info!("Successfully decoded frame {} at {}x{}, format: {:?}, pts: {}, time: {:.2}s",
-                            frame_count, decoded_frame.width(), decoded_frame.height(), decoded_frame.format(), pts, time_seconds);
+                        tracing::info!(
+                            "Successfully decoded frame {} at {}x{}, format: {:?}, pts: {}, time: {:.2}s",
+                            frame_count,
+                            decoded_frame.width(),
+                            decoded_frame.height(),
+                            decoded_frame.format(),
+                            pts,
+                            time_seconds
+                        );
 
                         // Skip frames only if seek failed and we're trying to avoid black frames at the start
                         if !seek_succeeded && frame_count < 10 {

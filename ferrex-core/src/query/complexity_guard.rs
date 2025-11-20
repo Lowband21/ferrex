@@ -1,9 +1,9 @@
 use crate::{
-    query::{
-        decision_engine::{QueryComplexity, QueryComplexityAnalyzer},
-        MediaQuery,
-    },
     MediaError, Result,
+    query::{
+        MediaQuery,
+        decision_engine::{QueryComplexity, QueryComplexityAnalyzer},
+    },
 };
 use tracing::{debug, warn};
 
@@ -366,8 +366,10 @@ mod tests {
         assert!(!suggestions.is_empty());
         assert!(suggestions.iter().any(|s| s.contains("fewer genres")));
         assert!(suggestions.iter().any(|s| s.contains("primary sort")));
-        assert!(suggestions
-            .iter()
-            .any(|s| s.contains("cursor-based pagination")));
+        assert!(
+            suggestions
+                .iter()
+                .any(|s| s.contains("cursor-based pagination"))
+        );
     }
 }

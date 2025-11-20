@@ -1,9 +1,9 @@
 pub use self::sort_option::SortOption;
 
-use crate::domains::ui::{messages::Message, theme::MediaServerTheme, SortBy};
+use crate::domains::ui::{SortBy, messages::Message, theme::MediaServerTheme};
 use iced::{
-    widget::{container, pick_list, Container},
     Background, Border, Color, Element, Length,
+    widget::{Container, container, pick_list},
 };
 
 mod sort_option {

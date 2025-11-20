@@ -682,8 +682,13 @@ impl TranscodingService {
             } else {
                 0.0
             };
-            info!("Master job aggregation: {} active variant jobs (out of {}), total_progress={}, avg={}",
-                active_jobs, variant_job_ids.len(), total_progress, avg_progress);
+            info!(
+                "Master job aggregation: {} active variant jobs (out of {}), total_progress={}, avg={}",
+                active_jobs,
+                variant_job_ids.len(),
+                total_progress,
+                avg_progress
+            );
             TranscodingStatus::Processing {
                 progress: avg_progress,
             }

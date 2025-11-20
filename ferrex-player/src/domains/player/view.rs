@@ -1,11 +1,10 @@
 use super::messages::Message;
 use super::state::{PlayerDomainState, TrackNotification};
 use super::theme;
-use crate::domains::player::video_backend::{self, VideoInner, VideoPlayer};
 use iced::Theme;
 use iced::{
-    widget::{column, container, mouse_area, row, stack, text, Space},
     ContentFit, Element, Length, Padding,
+    widget::{Space, column, container, mouse_area, row, stack, text},
 };
 use std::sync::Arc;
 
@@ -21,8 +20,13 @@ impl PlayerDomainState {
     /// Build the main player view
     /// Note: Returns wgpu renderer elements since video playback requires GPU acceleration
     pub fn view(&self) -> iced::Element<Message, Theme> {
-        log::trace!("PlayerState::view() called - position: {:.2}s, duration: {:.2}s, source_duration: {:?}, controls: {}",
-            self.position, self.duration, self.source_duration, self.controls);
+        log::trace!(
+            "PlayerState::view() called - position: {:.2}s, duration: {:.2}s, source_duration: {:?}, controls: {}",
+            self.position,
+            self.duration,
+            self.source_duration,
+            self.controls
+        );
 
         // Check if external MPV is active
         #[cfg(feature = "external-mpv-player")]
@@ -153,9 +157,11 @@ impl PlayerDomainState {
         } else {
             // No video loaded and not loading - show minimal view
             container(
-                column![text("No video loaded")
-                    .size(24)
-                    .color(iced::Color::from_rgb(0.7, 0.7, 0.7)),]
+                column![
+                    text("No video loaded")
+                        .size(24)
+                        .color(iced::Color::from_rgb(0.7, 0.7, 0.7)),
+                ]
                 .align_x(iced::Alignment::Center)
                 .spacing(10),
             )
@@ -171,7 +177,7 @@ impl PlayerDomainState {
     /// Build the video player view
     fn video_view<'a>(
         &self,
-        video: &'a crate::domains::player::video_backend::Video,
+        video: &'a subwave_unified::video::SubwaveVideo,
     ) -> Element<'a, Message> {
         // Create the appropriate video player widget based on the backend
         // Determine if overlay is active (controls or menus visible)
@@ -181,29 +187,13 @@ impl PlayerDomainState {
             || self.show_quality_menu
             || self.track_notification.is_some();
 
-        let player: iced::Element<Message, Theme, iced_wgpu::Renderer> = match video.inner() {
-            VideoInner::Wayland(wayland_video_arc) => {
-                let mut vp = iced_video_player_wayland::VideoPlayer::new(wayland_video_arc)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .content_fit(self.content_fit);
-                if overlay_active {
-                    vp = vp.on_new_frame(Message::NewFrame);
-                }
-                vp.into()
-            }
-            VideoInner::Standard(std_video) => {
-                // For standard video, we need to leak the reference (temporary solution)
-                // TODO: Fix this memory leak by properly managing lifetime
-                let owned_video = std_video.clone();
-                let leaked: &'static iced_video_player::Video = Box::leak(Box::new(owned_video));
-                iced_video_player::VideoPlayer::<Message, Theme, iced_wgpu::Renderer>::new(leaked)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .content_fit(self.content_fit)
-                    .on_new_frame(Message::NewFrame) // Ensure standard player also has this
-                    .into()
-            }
+        let player: iced::Element<Message, Theme, iced_wgpu::Renderer> = {
+            let on_new_frame = if overlay_active {
+                Some(Message::NewFrame)
+            } else {
+                None
+            };
+            video.widget(self.content_fit, on_new_frame)
         };
 
         // Wrap in a black background container first, then a mouse area to handle clicks
@@ -288,11 +278,9 @@ impl PlayerDomainState {
     /// Build a minimal player view for embedding (e.g., in library view)
     pub fn minimal_view(&self) -> Option<Element<Message>> {
         self.video_opt.as_ref().map(|video| {
-            let player = video_backend::video_player(video)
-                .width(Length::Fill)
-                .height(Length::Fixed(200.0))
-                .on_new_frame(Message::NewFrame)
-                .on_seek_done(Message::SeekDone);
+            let player = video
+                .widget(self.content_fit, Some(Message::NewFrame))
+                .map(|m| m);
 
             container(player)
                 .width(Length::Fill)

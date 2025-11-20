@@ -1,11 +1,6 @@
-use std::sync::Arc;
 use std::time::Instant;
 
 use iced::{Point, Task};
-
-use crate::domains::player::video_backend::Video;
-
-use gstreamer as gst;
 
 use super::messages::Message;
 use crate::domains::ui::types::ViewState;
@@ -218,12 +213,6 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Me
     } */
 
     // Check GStreamer version
-    log::info!(
-        "GStreamer version: {}.{}.{}",
-        gst::version().0,
-        gst::version().1,
-        gst::version().2
-    );
 
     // Validate URL is valid UTF-8 before using
     let url_string = url.as_str();
@@ -251,61 +240,40 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Me
 
     state.domains.ui.state.view = ViewState::Player;
 
-    // Create the loading task
-    let video_url = url.to_string();
-
-    Task::perform(
-        async move {
-            log::info!("Starting async video creation");
-
-            // Use spawn_blocking since Video::new might block
-            let result = tokio::task::spawn_blocking(move || {
-                log::info!("Creating video for URL: {}", video_url);
-
-                //// Get tone mapping config from state (passed via the closure context)
-                //let tone_mapping_config = tone_mapping_config_final.clone();
-
-                //if use_hdr_pipeline_final {
-                //    log::info!("Attempting HDR pipeline with tone mapping config");
-                //    match Video::new_with_config(&url, tone_mapping_config) {
-                //        Ok(video) => {
-                //            log::info!("HDR pipeline created successfully");
-                //            Ok(video)
-                //        }
-                //        Err(e) => {
-                //            log::error!("HDR pipeline failed: {:?}", e);
-                //            log::warn!("Falling back to standard pipeline");
-                //            // Try standard pipeline as fallback
-                //            Video::new_with_config(&url, tone_mapping_config)
-                //        }
-                //    }
-                //} else {
-                //    Video::new_with_config(&url, tone_mapping_config)
-                //}
-                Video::new(&url)
-            })
-            .await;
-
-            match result {
-                Ok(video_arc) => {
-                    // Video::new already returns Result<Arc<Video>, VideoError>
-                    video_arc
-                }
-                Err(e) => {
-                    // Convert JoinError to VideoError
-                    Err(crate::domains::player::video_backend::VideoError::Standard(
-                        format!("Task error: {:?}", e),
-                    ))
-                }
+    // Create video synchronously on the UI thread and update state immediately
+    match subwave_unified::video::SubwaveVideo::new(&url) {
+        Ok(mut video) => {
+            // Update duration if available
+            let duration = video.duration().as_secs_f64();
+            if duration > 0.0 {
+                state.domains.player.state.duration = duration;
             }
-        },
-        |result| {
-            // Convert to media domain message with video object
-            // Convert VideoError to String for the message
-            let result_string = result.map_err(|e| format!("{:?}", e));
-            crate::domains::media::messages::Message::VideoCreated(result_string)
-        },
-    )
+
+            // Resume position if any
+            if let Some(resume_pos) = state.domains.player.state.pending_resume_position {
+                let _ = video.seek(std::time::Duration::from_secs_f32(resume_pos), false);
+                state.domains.player.state.pending_resume_position = None;
+            }
+
+            // Store and start playback
+            state.domains.player.state.video_opt = Some(video);
+            if let Some(video) = &mut state.domains.player.state.video_opt {
+                video.set_paused(false);
+            }
+            state.domains.player.state.is_loading_video = false;
+            state.domains.ui.state.view = ViewState::Player;
+
+            Task::done(crate::domains::media::messages::Message::VideoLoaded(true))
+        }
+        Err(e) => {
+            log::error!("Failed to create video: {}", e);
+            state.domains.ui.state.view = ViewState::VideoError {
+                message: format!("{}", e),
+            };
+            state.domains.player.state.is_loading_video = false;
+            Task::done(crate::domains::media::messages::Message::VideoLoaded(false))
+        }
+    }
 }
 
 fn update_controls(state: &mut State, show: bool) {

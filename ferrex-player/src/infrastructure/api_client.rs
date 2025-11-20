@@ -1,12 +1,12 @@
 use anyhow::Result;
+use ferrex_core::MediaID;
 use ferrex_core::api_types::ApiResponse;
 use ferrex_core::user::AuthToken;
 use ferrex_core::watch_status::{UpdateProgressRequest, UserWatchState};
-use ferrex_core::MediaID;
 use log::{info, warn};
 use reqwest::{Client, RequestBuilder, Response, StatusCode};
 use rkyv::util::AlignedVec;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
@@ -82,7 +82,7 @@ impl ApiClient {
 
     /// Build a versioned API URL
     pub fn build_url(&self, path: impl AsRef<str>, legacy: bool) -> String {
-        if legacy {
+        if path.as_ref().contains("api/v1/") {
             let path = path.as_ref().trim_start_matches('/');
             format!("{}/{}", self.base_url, path)
         } else {

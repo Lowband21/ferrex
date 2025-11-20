@@ -4,8 +4,8 @@
 //! in the RBAC system.
 
 use axum::{
-    extract::{Path, State},
     Extension, Json,
+    extract::{Path, State},
 };
 use ferrex_core::{
     api_types::ApiResponse,
@@ -15,7 +15,7 @@ use ferrex_core::{
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::{errors::AppResult, AppState};
+use crate::{AppState, errors::AppResult};
 
 /// Response containing all roles in the system
 #[derive(Debug, Serialize)]

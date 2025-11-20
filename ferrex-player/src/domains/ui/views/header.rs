@@ -8,8 +8,8 @@ use crate::{
 use ferrex_core::LibraryID;
 use iced::widget::text_input::Id;
 use iced::{
-    widget::{button, container, row, text, text_input, Space, Stack},
     Element, Length,
+    widget::{Space, Stack, button, container, row, text, text_input},
 };
 use lucide_icons::Icon;
 use rkyv::deserialize;
@@ -205,7 +205,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 .into()
         }
         ViewState::MovieDetail { .. }
-        | ViewState::TvShowDetail { .. }
+        | ViewState::SeriesDetail { .. }
         | ViewState::SeasonDetail { .. }
         | ViewState::EpisodeDetail { .. } => {
             // Simplified header for detail views
@@ -528,7 +528,7 @@ fn get_detail_title(state: &State) -> String {
     let mut buff = Uuid::encode_buffer();
     match &state.domains.ui.state.view {
         ViewState::MovieDetail { movie_id, .. } => "Placeholder".to_string(), //movie,
-        ViewState::TvShowDetail { series_id, .. } => {
+        ViewState::SeriesDetail { series_id, .. } => {
             /*
             // Use MediaQueryService (clean architecture)
             state

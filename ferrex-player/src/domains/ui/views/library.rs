@@ -1,5 +1,6 @@
 use crate::{
     domains::ui::{
+        DisplayMode,
         messages::Message,
         theme,
         views::{
@@ -8,14 +9,13 @@ use crate::{
             scanning::overlay::create_scan_progress_overlay,
         },
         widgets::{collect_cached_handles_for_media, texture_preloader},
-        DisplayMode,
     },
     state_refactored::State,
 };
 use ferrex_core::{ImageSize, ImageType};
 use iced::{
-    widget::{button, column, container, row, text, Container, Row, Space},
     Element, Length,
+    widget::{Container, Row, Space, button, column, container, row, text},
 };
 
 #[cfg_attr(

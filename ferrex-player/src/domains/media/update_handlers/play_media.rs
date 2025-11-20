@@ -91,7 +91,7 @@ pub fn handle_play_media(state: &mut State, media: MediaFile) -> DomainUpdateRes
 
     let video_url = {
         let encoded_media_id = urlencoding::encode(&media_id);
-        let video_url = format!("{}/stream/{}", state.server_url, encoded_media_id);
+        let video_url = format!("{}/api/v1/stream/{}", state.server_url, encoded_media_id);
 
         video_url
     };

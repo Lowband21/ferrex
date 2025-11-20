@@ -5,8 +5,8 @@
 
 use crate::{domains::auth::messages::Message, domains::ui::theme, state_refactored::State};
 use iced::{
-    widget::{button, column, container, row, text, text_input, Space},
     Alignment, Element, Length,
+    widget::{Space, button, column, container, row, text, text_input},
 };
 
 /// State for the first-run setup view

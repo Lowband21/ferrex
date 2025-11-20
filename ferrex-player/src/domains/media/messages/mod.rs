@@ -1,5 +1,3 @@
-use crate::domains::player::video_backend::{ToneMappingAlgorithm, ToneMappingPreset};
-
 use crate::infrastructure::MediaID;
 use ferrex_core::MediaFile;
 
@@ -44,7 +42,6 @@ pub enum Message {
 
     // Video state
     VideoLoaded(bool), // Success flag
-    VideoCreated(Result<std::sync::Arc<crate::domains::player::video_backend::Video>, String>),
     MediaAvailabilityChecked(MediaFile),
     MediaUnavailable(String, String), // reason, message
 
@@ -75,22 +72,6 @@ pub enum Message {
     VideoClicked,
     VideoDoubleClicked,
 
-    // Tone mapping controls
-    ToggleToneMapping(bool),
-    SetToneMappingPreset(ToneMappingPreset),
-    SetToneMappingAlgorithm(ToneMappingAlgorithm),
-    SetToneMappingWhitePoint(f32),
-    SetToneMappingExposure(f32),
-    SetToneMappingSaturation(f32),
-    SetHableShoulderStrength(f32),
-    SetHableLinearStrength(f32),
-    SetHableLinearAngle(f32),
-    SetHableToeStrength(f32),
-    SetMonitorBrightness(f32),
-    SetToneMappingBrightness(f32),
-    SetToneMappingContrast(f32),
-    SetToneMappingSaturationBoost(f32),
-
     // Internal messages for cross-domain coordination
     #[doc(hidden)]
     _LoadVideo, // Internal message to trigger video loading from cross-domain events
@@ -105,11 +86,6 @@ pub enum Message {
 impl std::fmt::Debug for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            // For VideoCreated, don't debug the entire Video object
-            Self::VideoCreated(result) => match result {
-                Ok(_) => write!(f, "Message::VideoCreated(Ok(<Video>))"),
-                Err(e) => write!(f, "Message::VideoCreated(Err({:?}))", e),
-            },
             // For variants with MediaFile, provide concise debug output
             Self::PlayMedia(media) => write!(f, "Message::PlayMedia({})", media.filename),
             Self::PlayMediaWithId(media, id) => {
@@ -199,40 +175,6 @@ impl std::fmt::Debug for Message {
             Self::VideoClicked => write!(f, "Message::VideoClicked"),
             Self::VideoDoubleClicked => write!(f, "Message::VideoDoubleClicked"),
 
-            // Tone mapping - simplified output
-            Self::ToggleToneMapping(enabled) => {
-                write!(f, "Message::ToggleToneMapping({})", enabled)
-            }
-            Self::SetToneMappingPreset(_) => write!(f, "Message::SetToneMappingPreset"),
-            Self::SetToneMappingAlgorithm(_) => write!(f, "Message::SetToneMappingAlgorithm"),
-            Self::SetToneMappingWhitePoint(val) => {
-                write!(f, "Message::SetToneMappingWhitePoint({})", val)
-            }
-            Self::SetToneMappingExposure(val) => {
-                write!(f, "Message::SetToneMappingExposure({})", val)
-            }
-            Self::SetToneMappingSaturation(val) => {
-                write!(f, "Message::SetToneMappingSaturation({})", val)
-            }
-            Self::SetHableShoulderStrength(val) => {
-                write!(f, "Message::SetHableShoulderStrength({})", val)
-            }
-            Self::SetHableLinearStrength(val) => {
-                write!(f, "Message::SetHableLinearStrength({})", val)
-            }
-            Self::SetHableLinearAngle(val) => write!(f, "Message::SetHableLinearAngle({})", val),
-            Self::SetHableToeStrength(val) => write!(f, "Message::SetHableToeStrength({})", val),
-            Self::SetMonitorBrightness(val) => write!(f, "Message::SetMonitorBrightness({})", val),
-            Self::SetToneMappingBrightness(val) => {
-                write!(f, "Message::SetToneMappingBrightness({})", val)
-            }
-            Self::SetToneMappingContrast(val) => {
-                write!(f, "Message::SetToneMappingContrast({})", val)
-            }
-            Self::SetToneMappingSaturationBoost(val) => {
-                write!(f, "Message::SetToneMappingSaturationBoost({})", val)
-            }
-
             // Internal
             Self::_LoadVideo => write!(f, "Message::_LoadVideo"),
             Self::Noop => write!(f, "Message::Noop"),
@@ -282,7 +224,6 @@ impl Message {
 
             // Video state
             Self::VideoLoaded(_) => "Media::VideoLoaded",
-            Self::VideoCreated(_) => "Media::VideoCreated",
             Self::MediaAvailabilityChecked(_) => "Media::MediaAvailabilityChecked",
             Self::MediaUnavailable(_, _) => "Media::MediaUnavailable",
 
@@ -312,22 +253,6 @@ impl Message {
             Self::MouseMoved => "Media::MouseMoved",
             Self::VideoClicked => "Media::VideoClicked",
             Self::VideoDoubleClicked => "Media::VideoDoubleClicked",
-
-            // Tone mapping controls
-            Self::ToggleToneMapping(_) => "Media::ToggleToneMapping",
-            Self::SetToneMappingPreset(_) => "Media::SetToneMappingPreset",
-            Self::SetToneMappingAlgorithm(_) => "Media::SetToneMappingAlgorithm",
-            Self::SetToneMappingWhitePoint(_) => "Media::SetToneMappingWhitePoint",
-            Self::SetToneMappingExposure(_) => "Media::SetToneMappingExposure",
-            Self::SetToneMappingSaturation(_) => "Media::SetToneMappingSaturation",
-            Self::SetHableShoulderStrength(_) => "Media::SetHableShoulderStrength",
-            Self::SetHableLinearStrength(_) => "Media::SetHableLinearStrength",
-            Self::SetHableLinearAngle(_) => "Media::SetHableLinearAngle",
-            Self::SetHableToeStrength(_) => "Media::SetHableToeStrength",
-            Self::SetMonitorBrightness(_) => "Media::SetMonitorBrightness",
-            Self::SetToneMappingBrightness(_) => "Media::SetToneMappingBrightness",
-            Self::SetToneMappingContrast(_) => "Media::SetToneMappingContrast",
-            Self::SetToneMappingSaturationBoost(_) => "Media::SetToneMappingSaturationBoost",
 
             // Internal
             Self::_LoadVideo => "Media::_LoadVideo",

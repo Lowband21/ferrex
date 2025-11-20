@@ -9,8 +9,8 @@
 //! - Frame timing statistics
 //! - Memory usage tracking
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "profiling-stats")]

@@ -1,6 +1,6 @@
 use argon2::{
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
 };
 use ring::constant_time;
 use serde::{Deserialize, Serialize};

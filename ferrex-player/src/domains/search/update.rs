@@ -139,10 +139,10 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
 
                 // Keep focus on search input when results arrive
                 use iced::widget::text_input;
-                DomainUpdateResult::task(Task::batch(vec![text_input::focus::<DomainMessage>(
-                    text_input::Id::new("search-input"),
-                )
-                .map(|_| DomainMessage::NoOp)]))
+                DomainUpdateResult::task(Task::batch(vec![
+                    text_input::focus::<DomainMessage>(text_input::Id::new("search-input"))
+                        .map(|_| DomainMessage::NoOp),
+                ]))
             } else {
                 DomainUpdateResult::task(Task::none())
             }

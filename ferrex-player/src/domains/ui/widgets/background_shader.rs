@@ -9,7 +9,7 @@ use bytemuck::{Pod, Zeroable};
 use iced::advanced::graphics::Viewport;
 use iced::advanced::image::Id as ImageId;
 use iced::widget::shader::{self, Primitive, Program, Storage};
-use iced::{mouse, wgpu, Color, Element, Length, Point, Rectangle, Size, Vector};
+use iced::{Color, Element, Length, Point, Rectangle, Size, Vector, mouse, wgpu};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;

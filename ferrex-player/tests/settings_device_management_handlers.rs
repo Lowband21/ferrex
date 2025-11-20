@@ -60,12 +60,14 @@ fn new_state_with_service(service: Option<Arc<dyn SettingsService>>) -> State {
 #[test]
 fn handle_load_devices_without_service_is_noop() {
     let mut state = new_state_with_service(None);
-    assert!(state
-        .domains
-        .settings
-        .device_management_state
-        .devices
-        .is_empty());
+    assert!(
+        state
+            .domains
+            .settings
+            .device_management_state
+            .devices
+            .is_empty()
+    );
 
     let result = ferrex_player::domains::settings::update::device_management::handle_load_devices(
         &mut state,
@@ -74,12 +76,14 @@ fn handle_load_devices_without_service_is_noop() {
 
     // We cannot easily inspect the Task, but we can assert state toggles were set
     assert!(state.domains.settings.device_management_state.loading);
-    assert!(state
-        .domains
-        .settings
-        .device_management_state
-        .error_message
-        .is_none());
+    assert!(
+        state
+            .domains
+            .settings
+            .device_management_state
+            .error_message
+            .is_none()
+    );
 
     // Simulate completion with an error and ensure reducer updates state
     let result: Result<Vec<UserDevice>, String> = Err("No service".to_string());
@@ -87,12 +91,14 @@ fn handle_load_devices_without_service_is_noop() {
         &mut state, result,
     );
     assert!(!state.domains.settings.device_management_state.loading);
-    assert!(state
-        .domains
-        .settings
-        .device_management_state
-        .error_message
-        .is_some());
+    assert!(
+        state
+            .domains
+            .settings
+            .device_management_state
+            .error_message
+            .is_some()
+    );
 }
 
 #[test]
@@ -115,12 +121,14 @@ fn handle_devices_loaded_success_updates_state() {
         state.domains.settings.device_management_state.devices.len(),
         1
     );
-    assert!(state
-        .domains
-        .settings
-        .device_management_state
-        .error_message
-        .is_none());
+    assert!(
+        state
+            .domains
+            .settings
+            .device_management_state
+            .error_message
+            .is_none()
+    );
 }
 
 #[test]
@@ -131,10 +139,12 @@ fn handle_revoke_device_invalid_id_is_noop() {
         "not-a-uuid".into(),
     );
     // Ensure no panic and no changes to devices list
-    assert!(state
-        .domains
-        .settings
-        .device_management_state
-        .devices
-        .is_empty());
+    assert!(
+        state
+            .domains
+            .settings
+            .device_management_state
+            .devices
+            .is_empty()
+    );
 }

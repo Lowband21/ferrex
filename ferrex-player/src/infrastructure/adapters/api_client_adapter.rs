@@ -10,17 +10,17 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::infrastructure::ApiClient;
 use crate::infrastructure::api_client::SetupStatus;
 use crate::infrastructure::constants::routes;
 use crate::infrastructure::constants::routes::utils::replace_param;
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::api::ApiService;
-use crate::infrastructure::ApiClient;
+use ferrex_core::Media;
 use ferrex_core::auth::device::AuthenticatedDevice;
 use ferrex_core::types::library::Library;
 use ferrex_core::user::{AuthToken, User};
 use ferrex_core::watch_status::{UpdateProgressRequest, UserWatchState};
-use ferrex_core::Media;
 
 /// Adapter that implements ApiService using the existing ApiClient
 #[derive(Debug, Clone)]

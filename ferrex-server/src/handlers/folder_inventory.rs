@@ -8,8 +8,8 @@ use axum::{
 use chrono::{DateTime, Utc};
 use ferrex_core::User;
 use ferrex_core::{
-    database::traits::{FolderInventory, FolderProcessingStatus, MediaDatabaseTrait},
     LibraryID,
+    database::traits::{FolderInventory, FolderProcessingStatus, MediaDatabaseTrait},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

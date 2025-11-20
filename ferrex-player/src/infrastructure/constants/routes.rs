@@ -252,7 +252,7 @@ pub mod images {
     /// Serve image (requires type, id, category, index parameters)
     /// Types: movie, series, season, episode, person
     /// Categories: poster, backdrop, logo, still, profile
-    pub const GET_IMAGE: &str = "/images/:type/:id/:category/:index";
+    pub const GET_IMAGE: &str = "images/:type/:id/:category/:index";
 }
 
 /// Setup endpoints (first-run configuration)

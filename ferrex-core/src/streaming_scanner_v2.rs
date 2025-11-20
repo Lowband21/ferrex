@@ -1,22 +1,22 @@
 use crate::providers::TmdbApiProvider;
 use crate::types::media::*;
 use crate::{
-    types::media, ImageService, LibraryType, MediaDatabase, MediaError, MediaFile,
-    MetadataExtractor, Result, TvParser,
-};
-use crate::{
     CastMember, CrewMember, EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeID,
     EpisodeNumber, EpisodeURL, ExternalIds, ImageMetadata, ImageWithMetadata, LibraryID,
     LibraryReference, MediaDetailsOption, MediaIDLike, MediaImages, MovieID, MovieTitle, MovieURL,
     ParsedMovieInfo, SeasonDetails, SeasonID, SeasonNumber, SeasonURL, SeriesID, SeriesTitle,
     SeriesURL, TmdbDetails, UrlLike,
 };
+use crate::{
+    ImageService, LibraryType, MediaDatabase, MediaError, MediaFile, MetadataExtractor, Result,
+    TvParser, types::media,
+};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
 use tracing::warn;
 use tracing::{debug, error, info};
@@ -229,8 +229,10 @@ impl StreamingScannerV2 {
                 break;
             }
 
-            info!("Processing batch {} with {} movie folders for library: {} (total processed so far: {})",
-                  batch_number, batch_size, library.name, total_folders_processed);
+            info!(
+                "Processing batch {} with {} movie folders for library: {} (total processed so far: {})",
+                batch_number, batch_size, library.name, total_folders_processed
+            );
 
             // Create work channel
             let (folder_tx, folder_rx) = mpsc::channel(100);
@@ -303,11 +305,14 @@ impl StreamingScannerV2 {
             .backend()
             .update_library_last_scan(&library.id.to_string())
             .await
-        { Err(e) => {
-            error!("Failed to update library last_scan timestamp: {}", e);
-        } _ => {
-            info!("Updated last_scan timestamp for library: {}", library.name);
-        }}
+        {
+            Err(e) => {
+                error!("Failed to update library last_scan timestamp: {}", e);
+            }
+            _ => {
+                info!("Updated last_scan timestamp for library: {}", library.name);
+            }
+        }
 
         Ok(())
     }
@@ -376,8 +381,10 @@ impl StreamingScannerV2 {
                 break;
             }
 
-            info!("Processing batch {} with {} TV series folders for library: {} (total processed so far: {})",
-                  batch_number, batch_size, library.name, total_folders_processed);
+            info!(
+                "Processing batch {} with {} TV series folders for library: {} (total processed so far: {})",
+                batch_number, batch_size, library.name, total_folders_processed
+            );
 
             // Process each series folder in this batch
             for (idx, folder_info) in folders_to_scan.into_iter().enumerate() {
@@ -480,11 +487,14 @@ impl StreamingScannerV2 {
             .backend()
             .update_library_last_scan(&library.id.to_string())
             .await
-        { Err(e) => {
-            error!("Failed to update library last_scan timestamp: {}", e);
-        } _ => {
-            info!("Updated last_scan timestamp for library: {}", library.name);
-        }}
+        {
+            Err(e) => {
+                error!("Failed to update library last_scan timestamp: {}", e);
+            }
+            _ => {
+                info!("Updated last_scan timestamp for library: {}", library.name);
+            }
+        }
 
         Ok(())
     }
@@ -1631,7 +1641,8 @@ impl StreamingScannerV2 {
         let mut buff = Uuid::encode_buffer();
         info!(
             "SCAN: Creating NEW series for '{}' with generated ID: {} (confirmed: no existing series found)",
-            series_name, series_id.as_str(&mut buff)
+            series_name,
+            series_id.as_str(&mut buff)
         );
 
         // Use match or create placeholder
@@ -1900,7 +1911,10 @@ impl StreamingScannerV2 {
                             cast_member.name, cast_member.id, endpoint
                         );
                     } else {
-                        warn!("Failed to cache profile image for TV cast member {} ({}) with path: {}", cast_member.name, cast_member.id, profile_path);
+                        warn!(
+                            "Failed to cache profile image for TV cast member {} ({}) with path: {}",
+                            cast_member.name, cast_member.id, profile_path
+                        );
                     }
                 } else {
                     debug!(
@@ -1935,7 +1949,10 @@ impl StreamingScannerV2 {
                             crew_member.name, crew_member.id, endpoint
                         );
                     } else {
-                        warn!("Failed to cache profile image for TV crew member {} ({}) with path: {}", crew_member.name, crew_member.id, profile_path);
+                        warn!(
+                            "Failed to cache profile image for TV crew member {} ({}) with path: {}",
+                            crew_member.name, crew_member.id, profile_path
+                        );
                     }
                 } else {
                     debug!(

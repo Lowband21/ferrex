@@ -58,7 +58,7 @@ pub fn update_player(
                     crate::domains::media::messages::Message::SendProgressUpdateWithData(
                         state.current_media_id.unwrap(),
                         video.position().as_secs_f64(),
-                        video.duration().unwrap_or(Duration::ZERO).as_secs_f64(),
+                        video.duration().as_secs_f64(),
                     ),
                 )))
             } else {
@@ -73,7 +73,7 @@ pub fn update_player(
                     crate::domains::media::messages::Message::SendProgressUpdateWithData(
                         state.current_media_id.unwrap(),
                         video.position().as_secs_f64(),
-                        video.duration().unwrap_or(Duration::ZERO).as_secs_f64(),
+                        video.duration().as_secs_f64(),
                     ),
                 )))
             } else {
@@ -89,7 +89,7 @@ pub fn update_player(
                     crate::domains::media::messages::Message::SendProgressUpdateWithData(
                         state.current_media_id.unwrap(),
                         video.position().as_secs_f64(),
-                        video.duration().unwrap_or(Duration::ZERO).as_secs_f64(),
+                        video.duration().as_secs_f64(),
                     ),
                 )))
             } else {
@@ -342,6 +342,9 @@ pub fn update_player(
 
         Message::NewFrame => {
             if let Some(video) = &mut state.video_opt {
+                if state.is_loading_video {
+                    state.is_loading_video = false;
+                }
                 // Check for seek timeout (500ms)
                 if state.seeking {
                     if let Some(start_time) = state.seek_started_time {
@@ -355,12 +358,10 @@ pub fn update_player(
 
                 // Update duration if it wasn't available during load
                 if state.duration <= 0.0 {
-                    if let Some(new_duration) = video.duration() {
-                        let new_duration = new_duration.as_secs_f64();
-                        if new_duration > 0.0 {
-                            log::info!("Duration now available: {} seconds", new_duration);
-                            state.duration = new_duration;
-                        }
+                    let new_duration = video.duration().as_secs_f64();
+                    if new_duration > 0.0 {
+                        log::info!("Duration now available: {} seconds", new_duration);
+                        state.duration = new_duration;
                     } else {
                         log::debug!("NewFrame: Duration still not available from video");
                     }
@@ -378,8 +379,13 @@ pub fn update_player(
 
                         // Log significant position changes
                         if (new_position - old_position).abs() > 0.5 {
-                            log::debug!("NewFrame: Position updated from {:.2}s to {:.2}s (duration: {:.2}s, source_duration: {:?})",
-                                    old_position, new_position, state.duration, state.source_duration);
+                            log::debug!(
+                                "NewFrame: Position updated from {:.2}s to {:.2}s (duration: {:.2}s, source_duration: {:?})",
+                                old_position,
+                                new_position,
+                                state.duration,
+                                state.source_duration
+                            );
                         }
                     } else {
                         log::trace!(
@@ -591,6 +597,33 @@ pub fn update_player(
             DomainUpdateResult::task(Task::none())
         }
 
+        Message::ToggleAppsinkBackend => {
+            if let Some(video) = state.video_opt.as_mut() {
+                if std::env::var("WAYLAND_DISPLAY").is_ok() {
+                    let current = video.backend();
+                    let target = match current {
+                        subwave_unified::video::BackendPreference::ForceAppsink => {
+                            subwave_unified::video::BackendPreference::ForceWayland
+                        }
+                        _ => subwave_unified::video::BackendPreference::ForceAppsink,
+                    };
+                    if let Err(e) = video.set_preference(target) {
+                        log::error!("Failed to switch backend: {}", e);
+                    } else {
+                        log::info!("Switched backend to {:?}", target);
+                    }
+                } else {
+                    // Not on Wayland; ensure Appsink
+                    if let Err(e) = video
+                        .set_preference(subwave_unified::video::BackendPreference::ForceAppsink)
+                    {
+                        log::error!("Failed to switch backend: {}", e);
+                    }
+                }
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+
         Message::CycleAudioTrack => {
             if let Err(e) = state.cycle_audio_track() {
                 log::error!("{}", e);
@@ -615,199 +648,6 @@ pub fn update_player(
         Message::TracksLoaded => {
             // Tracks have been loaded, update notification
             state.update_track_notification();
-            DomainUpdateResult::task(Task::none())
-        }
-
-        // Tone mapping controls
-        Message::ToggleToneMapping(enabled) => {
-            state.tone_mapping_config.enabled = enabled;
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SetToneMappingPreset(preset) => {
-            state.tone_mapping_config.apply_preset(preset);
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SetToneMappingAlgorithm(algorithm) => {
-            state.tone_mapping_config.algorithm = algorithm;
-            state.tone_mapping_config.preset =
-                crate::domains::player::video_backend::ToneMappingPreset::Custom;
-            // Update algorithm params based on the selected algorithm
-            use crate::domains::player::video_backend::{AlgorithmParams, ToneMappingAlgorithm};
-            state.tone_mapping_config.algorithm_params = match algorithm {
-                ToneMappingAlgorithm::ReinhardExtended => AlgorithmParams::ReinhardExtended {
-                    white_point: 4.0,
-                    exposure: 1.5,
-                    saturation_boost: 1.2,
-                },
-                ToneMappingAlgorithm::Hable => AlgorithmParams::Hable {
-                    shoulder_strength: 0.15,
-                    linear_strength: 0.5,
-                    linear_angle: 0.01,
-                    toe_strength: 0.2,
-                },
-                _ => AlgorithmParams::None,
-            };
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SetToneMappingWhitePoint(value) => {
-            if let iced_video_player::AlgorithmParams::ReinhardExtended {
-                white_point,
-                ..
-            } = &mut state.tone_mapping_config.algorithm_params
-            {
-                *white_point = value;
-            }
-            state.tone_mapping_config.preset =
-                crate::domains::player::video_backend::ToneMappingPreset::Custom;
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SetToneMappingExposure(value) => {
-            if let iced_video_player::AlgorithmParams::ReinhardExtended {
-                exposure, ..
-            } = &mut state.tone_mapping_config.algorithm_params
-            {
-                *exposure = value;
-            }
-            state.tone_mapping_config.exposure_adjustment = value;
-            state.tone_mapping_config.preset =
-                crate::domains::player::video_backend::ToneMappingPreset::Custom;
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SetToneMappingSaturation(value) => {
-            state.tone_mapping_config.saturation_adjustment = value;
-            state.tone_mapping_config.preset =
-                crate::domains::player::video_backend::ToneMappingPreset::Custom;
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SetToneMappingSaturationBoost(value) => {
-            if let iced_video_player::AlgorithmParams::ReinhardExtended {
-                saturation_boost,
-                ..
-            } = &mut state.tone_mapping_config.algorithm_params
-            {
-                *saturation_boost = value;
-            }
-            state.tone_mapping_config.preset =
-                crate::domains::player::video_backend::ToneMappingPreset::Custom;
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SetHableShoulderStrength(value) => {
-            if let iced_video_player::AlgorithmParams::Hable {
-                shoulder_strength,
-                ..
-            } = &mut state.tone_mapping_config.algorithm_params
-            {
-                *shoulder_strength = value;
-            }
-            state.tone_mapping_config.preset =
-                crate::domains::player::video_backend::ToneMappingPreset::Custom;
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SetHableLinearStrength(value) => {
-            if let iced_video_player::AlgorithmParams::Hable {
-                linear_strength,
-                ..
-            } = &mut state.tone_mapping_config.algorithm_params
-            {
-                *linear_strength = value;
-            }
-            state.tone_mapping_config.preset =
-                crate::domains::player::video_backend::ToneMappingPreset::Custom;
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SetHableLinearAngle(value) => {
-            if let iced_video_player::AlgorithmParams::Hable {
-                linear_angle,
-                ..
-            } = &mut state.tone_mapping_config.algorithm_params
-            {
-                *linear_angle = value;
-            }
-            state.tone_mapping_config.preset =
-                crate::domains::player::video_backend::ToneMappingPreset::Custom;
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SetHableToeStrength(value) => {
-            if let iced_video_player::AlgorithmParams::Hable {
-                toe_strength,
-                ..
-            } = &mut state.tone_mapping_config.algorithm_params
-            {
-                *toe_strength = value;
-            }
-            state.tone_mapping_config.preset =
-                crate::domains::player::video_backend::ToneMappingPreset::Custom;
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SetMonitorBrightness(value) => {
-            state.tone_mapping_config.monitor_brightness = value;
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SetToneMappingBrightness(value) => {
-            state.tone_mapping_config.brightness_adjustment = value;
-            state.tone_mapping_config.preset =
-                crate::domains::player::video_backend::ToneMappingPreset::Custom;
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SetToneMappingContrast(value) => {
-            state.tone_mapping_config.contrast_adjustment = value;
-            state.tone_mapping_config.preset =
-                crate::domains::player::video_backend::ToneMappingPreset::Custom;
-            if let Some(video) = &mut state.video_opt {
-                video.set_tone_mapping_config(state.tone_mapping_config.clone());
-            }
             DomainUpdateResult::task(Task::none())
         }
 
@@ -904,67 +744,67 @@ pub fn update_player(
         Message::PollExternalMpv => {
             use iced::window;
 
-            match (state.external_mpv_handle.take(), state.current_media_id)
-            { (Some(mut handle), Some(media_id)) => {
-                // Check if MPV is still alive
-                if !handle.is_alive() {
-                    log::info!("External MPV process has ended");
+            match (state.external_mpv_handle.take(), state.current_media_id) {
+                (Some(mut handle), Some(media_id)) => {
+                    // Check if MPV is still alive
+                    if !handle.is_alive() {
+                        log::info!("External MPV process has ended");
 
-                    // Get final state before dropping the handle
-                    let (position, duration) = handle.poll_position();
-                    let final_fullscreen = handle.get_final_fullscreen();
+                        // Get final state before dropping the handle
+                        let (position, duration) = handle.poll_position();
+                        let final_fullscreen = handle.get_final_fullscreen();
 
-                    log::info!("position: {:?}, duration: {:?}", position, duration);
+                        log::info!("position: {:?}, duration: {:?}", position, duration);
 
-                    state.position = position;
-                    state.is_fullscreen = final_fullscreen;
+                        state.position = position;
+                        state.is_fullscreen = final_fullscreen;
 
-                    // Clear external MPV state
-                    state.external_mpv_active = false;
+                        // Clear external MPV state
+                        state.external_mpv_active = false;
 
-                    // Send final progress update
-                    let end_playback_task =
-                        Task::done(crate::common::messages::DomainMessage::Player(
-                            Message::ExternalPlaybackEnded,
-                        ));
-                    let progress_task = Task::done(crate::common::messages::DomainMessage::Media(
+                        // Send final progress update
+                        let end_playback_task =
+                            Task::done(crate::common::messages::DomainMessage::Player(
+                                Message::ExternalPlaybackEnded,
+                            ));
+                        let progress_task = Task::done(crate::common::messages::DomainMessage::Media(
                         crate::domains::media::messages::Message::SendProgressUpdateWithData(
                             media_id, position, duration,
                         ),
                     ));
 
-                    // Navigate back to previous view
-                    let nav_task =
-                        Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack));
+                        // Navigate back to previous view
+                        let nav_task =
+                            Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack));
 
-                    // Emit RestoreWindow event and return tasks
-                    DomainUpdateResult::with_events(
-                        end_playback_task.chain(progress_task).chain(nav_task),
-                        vec![crate::common::messages::CrossDomainEvent::RestoreWindow(
-                            final_fullscreen,
-                        )],
-                    )
-                } else {
-                    // Poll for position updates
-                    let (position, duration) = handle.poll_position();
-
-                    // Put the handle back
-                    state.external_mpv_handle = Some(handle);
-
-                    // Update state if we got valid data
-                    if position >= 0.0 && duration > 0.0 {
-                        update_player(
-                            state,
-                            Message::ExternalPlaybackUpdate { position, duration },
-                            window_size,
+                        // Emit RestoreWindow event and return tasks
+                        DomainUpdateResult::with_events(
+                            end_playback_task.chain(progress_task).chain(nav_task),
+                            vec![crate::common::messages::CrossDomainEvent::RestoreWindow(
+                                final_fullscreen,
+                            )],
                         )
                     } else {
-                        DomainUpdateResult::task(Task::none())
+                        // Poll for position updates
+                        let (position, duration) = handle.poll_position();
+
+                        // Put the handle back
+                        state.external_mpv_handle = Some(handle);
+
+                        // Update state if we got valid data
+                        if position >= 0.0 && duration > 0.0 {
+                            update_player(
+                                state,
+                                Message::ExternalPlaybackUpdate { position, duration },
+                                window_size,
+                            )
+                        } else {
+                            DomainUpdateResult::task(Task::none())
+                        }
                     }
                 }
-            } _ => {
-                DomainUpdateResult::task(Task::none())
-            }}
+                _ => DomainUpdateResult::task(Task::none()),
+            }
         }
     }
 }

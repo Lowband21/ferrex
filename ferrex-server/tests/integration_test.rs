@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -139,10 +139,12 @@ async fn test_library_validation() {
     assert_eq!(response.status(), 200);
     let json: Value = response.json().await.unwrap();
     assert_eq!(json["status"], "error");
-    assert!(json["error"]
-        .as_str()
-        .unwrap()
-        .contains("Invalid library type"));
+    assert!(
+        json["error"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid library type")
+    );
 
     // Test non-existent path
     let create_request = json!({
@@ -163,10 +165,12 @@ async fn test_library_validation() {
     assert_eq!(response.status(), 200);
     let json: Value = response.json().await.unwrap();
     assert_eq!(json["status"], "error");
-    assert!(json["error"]
-        .as_str()
-        .unwrap()
-        .contains("Path does not exist"));
+    assert!(
+        json["error"]
+            .as_str()
+            .unwrap()
+            .contains("Path does not exist")
+    );
 }
 
 #[tokio::test]

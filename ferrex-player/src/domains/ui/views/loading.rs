@@ -1,8 +1,8 @@
 use crate::{domains::ui::messages::Message, domains::ui::theme, state_refactored::State};
 use ferrex_core::TranscodingStatus;
 use iced::{
-    widget::{button, column, container, progress_bar, row, text, Space},
     Element, Length,
+    widget::{Space, button, column, container, progress_bar, row, text},
 };
 use lucide_icons::Icon;
 

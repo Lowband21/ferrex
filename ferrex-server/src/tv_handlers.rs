@@ -5,7 +5,7 @@ use axum::{
     response::Json,
 };
 use ferrex_core::{SeasonID, SeriesID};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::{info, warn};
 use uuid::Uuid;
 

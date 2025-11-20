@@ -1,10 +1,10 @@
 use crate::{
-    common::{icon_text, Icon},
+    common::{Icon, icon_text},
     domains::ui::theme,
 };
 use iced::{
-    widget::{button, column, container, row, text, Space},
     Element, Length,
+    widget::{Space, button, column, container, row, text},
 };
 
 use crate::domains::ui::messages::Message;

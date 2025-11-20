@@ -1,10 +1,10 @@
-use crate::types::ArchivedMediaID;
-use crate::types::Media;
 use crate::ArchivedEpisodeReference;
 use crate::ArchivedMedia;
 use crate::ArchivedMovieReference;
 use crate::ArchivedSeasonReference;
 use crate::ArchivedSeriesReference;
+use crate::types::ArchivedMediaID;
+use crate::types::Media;
 use crate::{
     ArchivedEpisodeID, ArchivedMediaDetailsOption, ArchivedMovieID, ArchivedSeasonID,
     ArchivedSeriesID, ArchivedTmdbDetails, EpisodeID, EpisodeReference, LibraryID,

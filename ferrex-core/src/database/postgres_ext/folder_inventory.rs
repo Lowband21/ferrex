@@ -1,9 +1,9 @@
 use std::path::Path;
 
+use crate::database::PostgresDatabase;
 use crate::database::traits::{
     FolderDiscoverySource, FolderInventory, FolderProcessingStatus, FolderScanFilters, FolderType,
 };
-use crate::database::PostgresDatabase;
 use crate::{LibraryID, MediaError, Result};
 use chrono::{DateTime, Utc};
 use tracing::{error, info};

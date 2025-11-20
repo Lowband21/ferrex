@@ -378,7 +378,7 @@ impl UserAuthentication {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
+    use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
     use ring::rand::{SecureRandom, SystemRandom};
 
     fn hash_password(password: &str) -> String {

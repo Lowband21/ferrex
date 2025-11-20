@@ -503,40 +503,43 @@ pub fn handle_setup_status_checked(state: &mut State, needs_setup: bool) -> Task
                 log::info!("[Auth] Checking for cached auth and auto-login");
 
                 // Check if we have cached auth
-                match svc.load_from_keychain().await { Ok(Some(stored_auth)) => {
-                    // Check if auto-login is enabled for this user
-                    let device_auto_login = svc
-                        .is_auto_login_enabled(&stored_auth.user.id)
-                        .await
-                        .unwrap_or(false);
+                match svc.load_from_keychain().await {
+                    Ok(Some(stored_auth)) => {
+                        // Check if auto-login is enabled for this user
+                        let device_auto_login = svc
+                            .is_auto_login_enabled(&stored_auth.user.id)
+                            .await
+                            .unwrap_or(false);
 
-                    let auto_login_enabled =
-                        stored_auth.user.preferences.auto_login_enabled && device_auto_login;
+                        let auto_login_enabled =
+                            stored_auth.user.preferences.auto_login_enabled && device_auto_login;
 
-                    log::info!(
-                        "[Auth] Auto-login check - Server: {}, Device: {}, Combined: {}",
-                        stored_auth.user.preferences.auto_login_enabled,
-                        device_auto_login,
-                        auto_login_enabled
-                    );
+                        log::info!(
+                            "[Auth] Auto-login check - Server: {}, Device: {}, Combined: {}",
+                            stored_auth.user.preferences.auto_login_enabled,
+                            device_auto_login,
+                            auto_login_enabled
+                        );
 
-                    if auto_login_enabled {
-                        // Try to apply the stored auth
-                        match svc.apply_stored_auth(stored_auth.clone()).await {
-                            Ok(_) => {
-                                log::info!("[Auth] Auto-login successful");
-                                return auth::Message::AutoLoginSuccessful(stored_auth.user);
+                        if auto_login_enabled {
+                            // Try to apply the stored auth
+                            match svc.apply_stored_auth(stored_auth.clone()).await {
+                                Ok(_) => {
+                                    log::info!("[Auth] Auto-login successful");
+                                    return auth::Message::AutoLoginSuccessful(stored_auth.user);
+                                }
+                                Err(e) => {
+                                    log::error!("[Auth] Auto-login failed: {}", e);
+                                }
                             }
-                            Err(e) => {
-                                log::error!("[Auth] Auto-login failed: {}", e);
-                            }
+                        } else {
+                            log::info!("[Auth] Auto-login disabled, proceeding to user selection");
                         }
-                    } else {
-                        log::info!("[Auth] Auto-login disabled, proceeding to user selection");
                     }
-                } _ => {
-                    log::info!("[Auth] No cached auth found");
-                }}
+                    _ => {
+                        log::info!("[Auth] No cached auth found");
+                    }
+                }
 
                 // If we get here, auto-login didn't work, load users
                 auth::Message::AutoLoginCheckComplete
@@ -1036,9 +1039,8 @@ pub fn handle_submit_setup(state: &mut State) -> Task<auth::Message> {
         }
 
         // Set loading state
-        if let AuthenticationFlow::FirstRunSetup {
-            loading: l, ..
-        } = &mut state.domains.auth.state.auth_flow
+        if let AuthenticationFlow::FirstRunSetup { loading: l, .. } =
+            &mut state.domains.auth.state.auth_flow
         {
             *l = true;
         }

@@ -5,15 +5,15 @@
 //! with proper authentication, authorization, and validation.
 
 use axum::{
+    Extension, Json,
     extract::{Path, Query, State},
     http::StatusCode,
-    Extension, Json,
 };
 use ferrex_core::{api_types::ApiResponse, user::User};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{errors::AppResult, AppState};
+use crate::{AppState, errors::AppResult};
 
 /// Query parameters for user listing
 #[derive(Debug, Deserialize)]

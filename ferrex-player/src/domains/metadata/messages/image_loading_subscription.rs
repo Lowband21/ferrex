@@ -95,12 +95,11 @@ fn image_loader_stream(
                         mut receiver,
                     } => {
                         // Try to pull a request from the queue first
-                        let request = match crate::infrastructure::service_registry::get_image_service()
-                        { Some(image_service) => {
-                            image_service.get().get_next_request()
-                        } _ => {
-                            None
-                        }};
+                        let request =
+                            match crate::infrastructure::service_registry::get_image_service() {
+                                Some(image_service) => image_service.get().get_next_request(),
+                                _ => None,
+                            };
 
                         if let Some(request) = request {
                             // Mark the image as loading in the service

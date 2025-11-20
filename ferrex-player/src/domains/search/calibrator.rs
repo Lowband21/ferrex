@@ -1,7 +1,7 @@
 use super::service::SearchService;
 use super::types::SearchStrategy;
-use ferrex_core::query::types::SearchField;
 use ferrex_core::Media;
+use ferrex_core::query::types::SearchField;
 use std::time::{Duration, Instant};
 
 /// Lightweight calibration results

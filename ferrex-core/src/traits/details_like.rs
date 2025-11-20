@@ -1,14 +1,14 @@
 use rkyv::{
-    option::ArchivedOption, Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize, option::ArchivedOption,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::{
-    types::LibraryID, ArchivedCastMember, ArchivedCrewMember, ArchivedEnhancedSeriesDetails,
-    ArchivedExternalIds, ArchivedSeasonDetails, CastMember, CrewMember, EnhancedMovieDetails,
-    EnhancedSeriesDetails, EpisodeDetails, ExternalIds, SeasonDetails, TmdbDetails,
+    ArchivedCastMember, ArchivedCrewMember, ArchivedEnhancedSeriesDetails, ArchivedExternalIds,
+    ArchivedSeasonDetails, CastMember, CrewMember, EnhancedMovieDetails, EnhancedSeriesDetails,
+    EpisodeDetails, ExternalIds, SeasonDetails, TmdbDetails, types::LibraryID,
 };
 
 pub trait MediaDetails {

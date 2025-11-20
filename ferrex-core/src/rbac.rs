@@ -136,11 +136,7 @@ impl UserPermissions {
             .iter()
             .filter_map(
                 |(name, &granted)| {
-                    if granted {
-                        Some(name.as_str())
-                    } else {
-                        None
-                    }
+                    if granted { Some(name.as_str()) } else { None }
                 },
             )
             .collect()

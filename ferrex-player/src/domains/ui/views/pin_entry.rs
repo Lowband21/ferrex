@@ -1,10 +1,10 @@
 use crate::{
     domains::auth::messages::Message,
-    domains::ui::theme::{button_style, container_style, FerrexTheme},
+    domains::ui::theme::{FerrexTheme, button_style, container_style},
 };
 use iced::{
-    widget::{button, column, container, row, text, Space},
     Alignment, Element, Length, Theme,
+    widget::{Space, button, column, container, row, text},
 };
 
 /// State for PIN entry view

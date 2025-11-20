@@ -6,8 +6,8 @@
 
 use crate::domains::media::repository::MaybeYoked;
 use ferrex_core::{ImageSize, ImageType, MediaOps, MovieID, MovieLike, SeriesID};
-use iced::widget::{button, container, mouse_area, text};
 use iced::Length;
+use iced::widget::{button, container, mouse_area, text};
 // Module organization
 use crate::domains::ui::messages::Message;
 use crate::domains::ui::views::grid::macros::parse_hex_color;
@@ -15,7 +15,7 @@ use crate::domains::ui::widgets::image_for;
 use crate::infrastructure::api_types::WatchProgress;
 use crate::infrastructure::constants::poster::CORNER_RADIUS;
 use ferrex_core::SeriesLike;
-use iced::{widget::column, Element};
+use iced::{Element, widget::column};
 use uuid::Uuid;
 
 use crate::domains::metadata::image_types::{self};
@@ -100,70 +100,71 @@ pub fn movie_reference_card_with_state<'a>(
     // Try from UI yoke cache first
     let uuid = movie_id.to_uuid();
     let yoke_arc: Arc<crate::domains::media::repository::MovieYoke> =
-        match state.domains.ui.state.movie_yoke_cache.peek_ref(&uuid) { Some(arc) => {
-            arc.clone()
-        } _ => {
-            // Lazily fetch from repo and insert into cache
-            match state
-                .domains
-                .ui
-                .state
-                .repo_accessor
-                .get_movie_yoke(&ferrex_core::MediaID::Movie(movie_id))
-            {
-                Ok(yoke) => {
-                    let arc = Arc::new(yoke);
-                    state
-                        .domains
-                        .ui
-                        .state
-                        .movie_yoke_cache
-                        .insert(uuid, arc.clone());
-                    arc
-                }
-                Err(e) => {
-                    log::warn!("Failed to fetch movie yoke for {}: {:?}", uuid, e);
-                    let placeholder_img: Element<'_, Message> = image_for(movie_id.to_uuid())
-                        .size(ImageSize::Poster)
-                        .image_type(ImageType::Movie)
-                        .radius(CORNER_RADIUS)
-                        .width(Length::Fixed(200.0))
-                        .height(Length::Fixed(300.0))
-                        .animation(state.domains.ui.state.default_widget_animation)
-                        .placeholder(lucide_icons::Icon::Film)
-                        .priority(if is_hovered || is_visible {
-                            image_types::Priority::Visible
-                        } else {
-                            image_types::Priority::Preload
-                        })
-                        .is_hovered(is_hovered)
-                        .into();
-                    let image_with_hover = mouse_area(placeholder_img)
-                        .on_enter(Message::MediaHovered(uuid))
-                        .on_exit(Message::MediaUnhovered(uuid));
-                    let poster_element = button(image_with_hover)
-                        .on_press(Message::ViewMovieDetails(movie_id))
-                        .padding(0)
-                        .style(theme::Button::MediaCard.style());
-                    let text_content = column![
-                        text("...").size(14),
-                        text(" ")
-                            .size(12)
-                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                    ]
-                    .spacing(2);
-                    return column![
-                        poster_element,
-                        container(text_content)
-                            .padding(5)
+        match state.domains.ui.state.movie_yoke_cache.peek_ref(&uuid) {
+            Some(arc) => arc.clone(),
+            _ => {
+                // Lazily fetch from repo and insert into cache
+                match state
+                    .domains
+                    .ui
+                    .state
+                    .repo_accessor
+                    .get_movie_yoke(&ferrex_core::MediaID::Movie(movie_id))
+                {
+                    Ok(yoke) => {
+                        let arc = Arc::new(yoke);
+                        state
+                            .domains
+                            .ui
+                            .state
+                            .movie_yoke_cache
+                            .insert(uuid, arc.clone());
+                        arc
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to fetch movie yoke for {}: {:?}", uuid, e);
+                        let placeholder_img: Element<'_, Message> = image_for(movie_id.to_uuid())
+                            .size(ImageSize::Poster)
+                            .image_type(ImageType::Movie)
+                            .radius(CORNER_RADIUS)
                             .width(Length::Fixed(200.0))
-                            .height(Length::Fixed(60.0))
-                    ]
-                    .spacing(5)
-                    .into();
+                            .height(Length::Fixed(300.0))
+                            .animation(state.domains.ui.state.default_widget_animation)
+                            .placeholder(lucide_icons::Icon::Film)
+                            .priority(if is_hovered || is_visible {
+                                image_types::Priority::Visible
+                            } else {
+                                image_types::Priority::Preload
+                            })
+                            .is_hovered(is_hovered)
+                            .into();
+                        let image_with_hover = mouse_area(placeholder_img)
+                            .on_enter(Message::MediaHovered(uuid))
+                            .on_exit(Message::MediaUnhovered(uuid));
+                        let poster_element = button(image_with_hover)
+                            .on_press(Message::ViewMovieDetails(movie_id))
+                            .padding(0)
+                            .style(theme::Button::MediaCard.style());
+                        let text_content = column![
+                            text("...").size(14),
+                            text(" ")
+                                .size(12)
+                                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                        ]
+                        .spacing(2);
+                        return column![
+                            poster_element,
+                            container(text_content)
+                                .padding(5)
+                                .width(Length::Fixed(200.0))
+                                .height(Length::Fixed(60.0))
+                        ]
+                        .spacing(5)
+                        .into();
+                    }
                 }
             }
-        }};
+        };
     let movie = yoke_arc.get();
 
     let media_id = movie.media_id();
@@ -289,71 +290,72 @@ pub fn series_reference_card_with_state<'a>(
     // Try from UI yoke cache first
     let uuid = series_id.to_uuid();
     let yoke_arc: Arc<crate::domains::media::repository::SeriesYoke> =
-        match state.domains.ui.state.series_yoke_cache.peek_ref(&uuid) { Some(arc) => {
-            arc.clone()
-        } _ => {
-            // Lazily fetch from repo and insert into cache (do not remove handlers or legacy comments)
-            match state
-                .domains
-                .ui
-                .state
-                .repo_accessor
-                .get_series_yoke(&ferrex_core::MediaID::Series(series_id))
-            {
-                Ok(yoke) => {
-                    let arc = Arc::new(yoke);
-                    state
-                        .domains
-                        .ui
-                        .state
-                        .series_yoke_cache
-                        .insert(uuid, arc.clone());
-                    arc
-                }
-                Err(e) => {
-                    log::warn!("Failed to fetch series yoke for {}: {:?}", uuid, e);
-                    // Fallback placeholder card preserving mouse handlers
-                    let placeholder_img: Element<'_, Message> = image_for(series_id.to_uuid())
-                        .size(ImageSize::Poster)
-                        .image_type(ImageType::Series)
-                        .radius(CORNER_RADIUS)
-                        .width(Length::Fixed(200.0))
-                        .height(Length::Fixed(300.0))
-                        .animation(state.domains.ui.state.default_widget_animation)
-                        .placeholder(lucide_icons::Icon::Tv)
-                        .priority(if is_hovered || is_visible {
-                            image_types::Priority::Visible
-                        } else {
-                            image_types::Priority::Preload
-                        })
-                        .is_hovered(is_hovered)
-                        .into();
-                    let image_with_hover = mouse_area(placeholder_img)
-                        .on_enter(Message::MediaHovered(uuid))
-                        .on_exit(Message::MediaUnhovered(uuid));
-                    let poster_element = button(image_with_hover)
-                        .on_press(Message::ViewTvShow(series_id))
-                        .padding(0)
-                        .style(theme::Button::MediaCard.style());
-                    let text_content = column![
-                        text("...").size(14),
-                        text(" ")
-                            .size(12)
-                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                    ]
-                    .spacing(2);
-                    return column![
-                        poster_element,
-                        container(text_content)
-                            .padding(5)
+        match state.domains.ui.state.series_yoke_cache.peek_ref(&uuid) {
+            Some(arc) => arc.clone(),
+            _ => {
+                // Lazily fetch from repo and insert into cache (do not remove handlers or legacy comments)
+                match state
+                    .domains
+                    .ui
+                    .state
+                    .repo_accessor
+                    .get_series_yoke(&ferrex_core::MediaID::Series(series_id))
+                {
+                    Ok(yoke) => {
+                        let arc = Arc::new(yoke);
+                        state
+                            .domains
+                            .ui
+                            .state
+                            .series_yoke_cache
+                            .insert(uuid, arc.clone());
+                        arc
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to fetch series yoke for {}: {:?}", uuid, e);
+                        // Fallback placeholder card preserving mouse handlers
+                        let placeholder_img: Element<'_, Message> = image_for(series_id.to_uuid())
+                            .size(ImageSize::Poster)
+                            .image_type(ImageType::Series)
+                            .radius(CORNER_RADIUS)
                             .width(Length::Fixed(200.0))
-                            .height(Length::Fixed(60.0))
-                    ]
-                    .spacing(5)
-                    .into();
+                            .height(Length::Fixed(300.0))
+                            .animation(state.domains.ui.state.default_widget_animation)
+                            .placeholder(lucide_icons::Icon::Tv)
+                            .priority(if is_hovered || is_visible {
+                                image_types::Priority::Visible
+                            } else {
+                                image_types::Priority::Preload
+                            })
+                            .is_hovered(is_hovered)
+                            .into();
+                        let image_with_hover = mouse_area(placeholder_img)
+                            .on_enter(Message::MediaHovered(uuid))
+                            .on_exit(Message::MediaUnhovered(uuid));
+                        let poster_element = button(image_with_hover)
+                            .on_press(Message::ViewTvShow(series_id))
+                            .padding(0)
+                            .style(theme::Button::MediaCard.style());
+                        let text_content = column![
+                            text("...").size(14),
+                            text(" ")
+                                .size(12)
+                                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                        ]
+                        .spacing(2);
+                        return column![
+                            poster_element,
+                            container(text_content)
+                                .padding(5)
+                                .width(Length::Fixed(200.0))
+                                .height(Length::Fixed(60.0))
+                        ]
+                        .spacing(5)
+                        .into();
+                    }
                 }
             }
-        }};
+        };
     let series = yoke_arc.get();
 
     let media_id = series.media_id();
@@ -412,21 +414,17 @@ pub fn series_reference_card_with_state<'a>(
         }
     }
 
-    // Create the full card manually to match media_card! structure
     let image_element: Element<'_, Message> = img.into();
 
-    // Wrap with hover detection
     let image_with_hover = mouse_area(image_element)
         .on_enter(Message::MediaHovered(series_id.to_uuid()))
         .on_exit(Message::MediaUnhovered(series_id.to_uuid()));
 
-    // Create poster button
     let poster_element = button(image_with_hover)
         .on_press(Message::ViewTvShow(series_id))
         .padding(0)
         .style(theme::Button::MediaCard.style());
 
-    // Create text content
     let text_content = column![
         text(series.title().to_string()).size(14),
         text("year")
@@ -435,7 +433,6 @@ pub fn series_reference_card_with_state<'a>(
     ]
     .spacing(2);
 
-    // Final card layout
     column![
         poster_element,
         container(text_content)

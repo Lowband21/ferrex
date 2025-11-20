@@ -5,11 +5,11 @@
 
 use crate::infrastructure::repository::RepositoryResult;
 use async_trait::async_trait;
+use ferrex_core::Media;
 use ferrex_core::auth::device::AuthenticatedDevice;
 use ferrex_core::types::library::Library;
 use ferrex_core::user::AuthToken;
 use ferrex_core::watch_status::{UpdateProgressRequest, UserWatchState};
-use ferrex_core::Media;
 use rkyv::util::AlignedVec;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -28,7 +28,7 @@ pub trait ApiService: Send + Sync {
 
     /// Make a GET request that returns raw bytes (for images and binary content)
     async fn get_bytes(&self, path: &str, query: Option<(&str, &str)>)
-        -> RepositoryResult<Vec<u8>>;
+    -> RepositoryResult<Vec<u8>>;
 
     /// Make a POST request to the API
     async fn post<T: for<'de> Deserialize<'de>, B: Serialize + Send + Sync>(

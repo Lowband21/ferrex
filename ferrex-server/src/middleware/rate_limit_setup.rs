@@ -4,11 +4,11 @@
 //! endpoint categories to prevent abuse and ensure fair usage.
 
 use axum::{
+    Router,
     body::Body,
     http::{Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
-    Router,
 };
 use ferrex_core::auth::rate_limit::RateLimitRule;
 use std::pin::Pin;
@@ -86,9 +86,9 @@ pub fn apply_api_rate_limits(
 fn rate_limit_middleware(
     limits: RateLimitRule,
 ) -> impl Fn(Request<Body>, Next) -> Pin<Box<dyn std::future::Future<Output = Response> + Send>>
-       + Clone
-       + Send
-       + 'static {
++ Clone
++ Send
++ 'static {
     move |req: Request<Body>, next: Next| {
         let limits = limits.clone();
         Box::pin(async move {

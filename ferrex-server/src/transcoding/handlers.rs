@@ -1,11 +1,11 @@
 use axum::{
     body::Body,
     extract::{Path, Query, State},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{Json, Response},
 };
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::process::Stdio;
 use tokio_util::io::ReaderStream;
@@ -13,8 +13,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::{
-    transcoding::{self, profiles, TranscodingService},
     AppState,
+    transcoding::{self, TranscodingService, profiles},
 };
 
 // HLS Streaming handlers

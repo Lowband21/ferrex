@@ -1,13 +1,20 @@
 use iced::Task;
+use rkyv::option::ArchivedOption;
 use uuid::Uuid;
 
 use super::super::views::carousel::CarouselState;
 use crate::{
-    domains::ui::{messages::Message, types, ViewState},
+    domains::{
+        metadata::image_types::ImageRequest,
+        ui::{ViewState, messages::Message, types, views::grid::macros},
+    },
     infrastructure::api_types::{Media, MovieReference},
     state_refactored::State,
 };
-use ferrex_core::{EpisodeID, MediaFile, MediaID, MediaIDLike, MovieID, SeasonID, SeriesID};
+use ferrex_core::{
+    EpisodeID, ImageSize, ImageType, MediaFile, MediaID, MediaIDLike, MovieID, MovieLike, SeasonID,
+    SeriesID, SeriesLike,
+};
 
 /// Updates background shader depth regions when transitioning to a detail view
 /// This ensures smooth animation from current regions to new regions
@@ -140,6 +147,82 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
         .repo_accessor
         .get_movie_yoke(&MediaID::Movie(movie_id))
     {
+        let movie = *yoke.get();
+
+        // Save current scroll position before navigating away
+        save_current_scroll_state(state);
+
+        let new_view = ViewState::MovieDetail {
+            movie_id: movie_id,
+            backdrop_handle: None,
+        };
+
+        // FIRST: Set up depth regions for the transition (this enables the fade animation)
+        prepare_depth_regions_for_transition(state, &new_view);
+
+        // THEN: Transition to new theme colors
+        if let ArchivedOption::Some(hex) = &movie.theme_color {
+            if let Ok(color) = macros::parse_hex_color(hex) {
+                let r = color.r * 0.2;
+                let g = color.g * 0.2;
+                let b = color.b * 0.2;
+                let primary_dark = iced::Color::from_rgb(r, g, b);
+
+                // Secondary color is much lighter for stronger gradient
+                let secondary = iced::Color::from_rgb(
+                    (color.r * 0.8).min(1.0), // 4x primary
+                    (color.g * 0.8).min(1.0),
+                    (color.b * 0.8).min(1.0),
+                );
+
+                // Start color transition
+                state
+                    .domains
+                    .ui
+                    .state
+                    .background_shader_state
+                    .color_transitions
+                    .transition_to(primary_dark, secondary);
+            }
+        }
+
+        // Non-functional
+        //let new_center = crate::domains::ui::transitions::generate_random_gradient_center();
+        //state
+        //    .domains
+        //    .ui
+        //    .state
+        //    .background_shader_state
+        //    .gradient_transitions
+        //    .transition_to(new_center);
+
+        // Queue request if not in cache
+        if let Some(movie_details) = movie.details() {
+            if movie_details.backdrop_path.is_some() {
+                let request =
+                    ImageRequest::new(movie.id.to_uuid(), ImageSize::Backdrop, ImageType::Movie);
+                if state.image_service.get(&request).is_none() {
+                    state.image_service.request_image(request);
+                }
+            } else {
+                log::warn!("Cannot find path for movie backdrop");
+            }
+        } else {
+            log::warn!("Movie {} has no details", movie.title());
+        }
+
+        //// Start backdrop transition animation (Broken)
+        //state
+        //    .domains
+        //    .ui
+        //    .state
+        //    .background_shader_state
+        //    .backdrop_transitions
+        //    .start_fade_slide(50.0); // 50px slide
+
+        // Finally change the view state
+        state.domains.ui.state.view = new_view;
+
         state
             .domains
             .ui
@@ -147,136 +230,6 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
             .movie_yoke_cache
             .insert(movie_uuid, std::sync::Arc::new(yoke));
     }
-
-    // Switch to the detail view using the provided reference
-    state.domains.ui.state.view = ViewState::MovieDetail {
-        movie_id: movie_id,
-        backdrop_handle: None,
-    };
-
-    /*
-    // CRITICAL FIX: Get the latest version from MediaStore, not the stale UI reference
-    let movie = if let Ok(store) = state.domains.media.state.media_store.read() {
-        if let Some(Media::Movie(fresh_movie)) =
-            store.get(&ferrex_core::MediaID::Movie(movie.id.clone()))
-        {
-            log::info!(
-                "Got fresh movie from MediaStore with details: {}",
-                !crate::infrastructure::api_types::needs_details_fetch(&fresh_movie.details)
-            );
-            fresh_movie.clone()
-        } else {
-            log::warn!("Movie not found in MediaStore, using stale reference");
-            movie
-        }
-    } else {
-        log::error!("Failed to read MediaStore, using stale reference");
-        movie
-    };
-
-    log::info!(
-        "Using movie with details type: {:?}",
-        match &movie.details {
-            crate::infrastructure::api_types::MediaDetailsOption::Endpoint(_) => "Endpoint",
-            crate::infrastructure::api_types::MediaDetailsOption::Details(_) => "Details",
-        }
-    );
-
-    // Save current scroll position before navigating away
-    save_current_scroll_state(state);
-
-    // Check if we need to fetch details on-demand
-    let fetch_task = if let Some(library_id) = state.domains.library.state.current_library_id {
-        let movie_media_id = ferrex_core::MediaID::Movie(movie.id.clone());
-        state
-            .domains
-            .metadata
-            .state
-            .fetch_media_details_on_demand(library_id, movie_media_id)
-    } else {
-        Task::none()
-    };
-
-    // Create the new view state first (needed for depth region calculation)
-    let new_view = ViewState::MovieDetail {
-        movie: movie.clone(),
-        backdrop_handle: None, // Deprecated - kept for compatibility, will be removed
-    };
-
-    // FIRST: Set up depth regions for the transition (this enables the fade animation)
-    prepare_depth_regions_for_transition(state, &new_view);
-
-    // THEN: Transition to new theme colors
-    if let Some(hex) = &movie.theme_color {
-        if let Ok(color) = crate::domains::ui::views::macros::parse_hex_color(hex) {
-            // Apply stronger contrast for detail views
-            let r = color.r * 0.2; // Very dark primary
-            let g = color.g * 0.2;
-            let b = color.b * 0.2;
-            let primary_dark = iced::Color::from_rgb(r, g, b);
-
-            // Secondary color is much lighter for strong gradient
-            let secondary = iced::Color::from_rgb(
-                (color.r * 0.8).min(1.0), // 4x brighter than primary
-                (color.g * 0.8).min(1.0),
-                (color.b * 0.8).min(1.0),
-            );
-
-            // Start color transition
-            state
-                .domains
-                .ui
-                .state
-                .background_shader_state
-                .color_transitions
-                .transition_to(primary_dark, secondary);
-        }
-    }
-
-    // Animate gradient center to new position
-    let new_center = crate::domains::ui::transitions::generate_random_gradient_center();
-    state
-        .domains
-        .ui
-        .state
-        .background_shader_state
-        .gradient_transitions
-        .transition_to(new_center);
-
-    // Request backdrop if available but don't store it - view will pull reactively
-    if let crate::infrastructure::api_types::MediaDetailsOption::Details(
-        crate::infrastructure::api_types::TmdbDetails::Movie(movie_details),
-    ) = &movie.details
-    {
-        if movie_details.backdrop_path.is_some() {
-            let request = crate::domains::metadata::image_types::ImageRequest::new(
-                ferrex_core::MediaID::Movie(movie.id.clone()),
-                crate::domains::metadata::image_types::ImageSize::Backdrop,
-            );
-            // Just request the image if not in cache - view will pull it when ready
-            if state.image_service.get(&request).is_none() {
-                state.image_service.request_image(request);
-            }
-        }
-    }
-
-    // Start backdrop transition animation (view will detect backdrop presence)
-    state
-        .domains
-        .ui
-        .state
-        .background_shader_state
-        .backdrop_transitions
-        .start_fade_slide(50.0); // 50px slide
-
-    // Keep gradient effect active, just update the backdrop handle
-    // The shader will overlay the backdrop on top of the gradient
-
-    // Finally change the view state (after all transitions are set up)
-    state.domains.ui.state.view = new_view;
-    */
-    // Convert DomainMessage task to ui::Message task
-    //fetch_task.map(|_| Message::NoOp)
     Task::none()
 }
 
@@ -288,8 +241,8 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
     ),
     profiling::function
 )]
-pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Message> {
-    log::info!("Viewing TV show: {:?}", series_id);
+pub fn handle_view_series(state: &mut State, series_id: SeriesID) -> Task<Message> {
+    log::info!("Viewing series: {:?}", series_id);
 
     // Save current view to navigation history
     state
@@ -299,320 +252,78 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
         .navigation_history
         .push(state.domains.ui.state.view.clone());
 
-    // Save current scroll position before navigating away
-    save_current_scroll_state(state);
+    // Ensure yoke is in the UI cache for detail view borrowing
+    let series_uuid = series_id.to_uuid();
+    if let Ok(yoke) = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_series_yoke(&MediaID::Series(series_id))
+    {
+        let series = *yoke.get();
 
-    // No need to clear show details - using MediaStore as single source of truth
+        // Save current scroll position before navigating away
+        save_current_scroll_state(state);
 
-    // NEW ARCHITECTURE: Get seasons from MediaStore
-    /*
-    if let Ok(store) = state.domains.media.state.media_store.read() {
-        // TODO: Media state reference outside of media domain
-        let seasons = store.get_seasons(series_id.as_ref());
-        if !seasons.is_empty() {
-            state.domains.ui.state.show_seasons_carousel =
-                Some(CarouselState::new_with_dimensions(
-                    seasons.len(),
-                    200.0, // Season card width (Medium size)
-                    15.0,  // Spacing
-                ));
-            if let Some(carousel) = &mut state.domains.ui.state.show_seasons_carousel {
-                let available_width = state.window_size.width - 80.0;
-                carousel.update_items_per_page(available_width);
-            }
-        }
-    }
-
-    // Save current scroll position before navigating away
-    save_current_scroll_state(state);
-
-    // NEW ARCHITECTURE: Get series from MediaStore
-    let series_media_id = ferrex_core::MediaID::Series(series_id.clone());
-
-    // Check if we need to fetch details on-demand
-    let fetch_task = if let Some(library_id) = state.domains.library.state.current_library_id {
-        state
-            .domains
-            .metadata
-            .state
-            .fetch_media_details_on_demand(library_id, series_media_id.clone())
-            .map(|_| Message::NoOp)
-    } else {
-        Task::none()
-    }; */
-    /*
-
-    // Create the new view state first (needed for depth region calculation)
-    let new_view = ViewState::TvShowDetail {
-        series_id: series_id.clone(),
-        backdrop_handle: None, // Deprecated - kept for compatibility, will be removed
-    };
-
-    // FIRST: Set up depth regions for the transition (this enables the fade animation)
-    prepare_depth_regions_for_transition(state, &new_view);
-
-    // THEN: Apply transitions if we have the series data
-    if let Ok(store) = state.domains.media.state.media_store.read() {
-        // TODO: Media state reference outside of media domain
-        if let Some(Media::Series(series)) = store.get(&series_media_id) {
-            // Transition to new theme colors
-            if let Some(hex) = &series.theme_color {
-                if let Ok(color) = super::super::views::macros::parse_hex_color(hex) {
-                    // Apply stronger contrast for detail views
-                    let r = color.r * 0.2; // Very dark primary
-                    let g = color.g * 0.2;
-                    let b = color.b * 0.2;
-                    let primary_dark = iced::Color::from_rgb(r, g, b);
-
-                    // Secondary color is much lighter for strong gradient
-                    let secondary = iced::Color::from_rgb(
-                        (color.r * 0.8).min(1.0), // 4x brighter than primary
-                        (color.g * 0.8).min(1.0),
-                        (color.b * 0.8).min(1.0),
-                    );
-
-                    // Start color transition
-                    state
-                        .domains
-                        .ui
-                        .state
-                        .background_shader_state
-                        .color_transitions
-                        .transition_to(primary_dark, secondary);
-                }
-            }
-
-            // Animate gradient center to new position
-            let new_center = super::super::transitions::generate_random_gradient_center();
-            state
-                .domains
-                .ui
-                .state
-                .background_shader_state
-                .gradient_transitions
-                .transition_to(new_center);
-
-            // Request backdrop if available but don't store it - view will pull reactively
-            if let crate::infrastructure::api_types::MediaDetailsOption::Details(
-                crate::infrastructure::api_types::TmdbDetails::Series(series_details),
-            ) = &series.details
-            {
-                if series_details.backdrop_path.is_some() {
-                    let request = crate::domains::metadata::image_types::ImageRequest::new(
-                        ferrex_core::MediaID::Series(series.id.clone()),
-                        crate::domains::metadata::image_types::ImageSize::Backdrop,
-                    );
-                    // Just request the image if not in cache - view will pull it when ready
-                    if state.image_service.get(&request).is_none() {
-                        state.image_service.request_image(request);
-                    }
-                }
-            }
-
-            // Start backdrop transition animation (view will detect backdrop presence)
-            state
-                .domains
-                .ui
-                .state
-                .background_shader_state
-                .backdrop_transitions
-                .start_fade_slide(50.0); // 50px slide
-        }
-    }
-
-    // Finally change the view state (after all transitions are set up)
-    state.domains.ui.state.view = new_view;
-
-    // Load show details using the unified API
-    let server_url = state.server_url.clone();
-    let series_id_str = series_id.as_str().to_string();
-
-    // NEW ARCHITECTURE: Extract season and episode data from MediaStore
-    let (series_seasons, episode_refs) =
-        if let Ok(store) = state.domains.media.state.media_store.read() {
-            // TODO: Media state reference outside of media domain
-            let seasons = store.get_seasons_owned(series_id.as_ref());
-
-            log::info!(
-                "Navigation: Found {} seasons for series {} in MediaStore",
-                seasons.len(),
-                series_id.as_str()
-            );
-
-            // Debug: Log all seasons in the store
-            if seasons.is_empty() {
-                log::warn!(
-                    "No seasons found for series {}. Checking what's in MediaStore...",
-                    series_id.as_str()
-                );
-                // Check if there are ANY seasons in the store
-                log::warn!(
-                    "No seasons found for series {} - check if server is sending them",
-                    series_id.as_str()
-                );
-            } else {
-                for season in &seasons {
-                    log::info!(
-                        "  - Season {} (ID: {}, Series: {})",
-                        season.season_number.value(),
-                        season.id.as_str(),
-                        season.series_id.as_str()
-                    );
-                }
-            }
-
-            // Build episode map for all seasons
-            let mut episodes_map = std::collections::HashMap::new();
-            for season in &seasons {
-                let episodes = store.get_episodes(season.id.as_ref());
-                if !episodes.is_empty() {
-                    episodes_map.insert(
-                        season.id.as_uuid(),
-                        episodes.into_iter().cloned().collect::<Vec<_>>(),
-                    );
-                }
-            }
-
-            (Some(seasons), episodes_map)
-        } else {
-            log::error!("Failed to get read lock on MediaStore!");
-            (None, std::collections::HashMap::new())
+        let new_view = ViewState::SeriesDetail {
+            series_id,
+            backdrop_handle: None,
         };
 
-    // REMOVED: No longer storing seasons in duplicate state field
-    // Seasons are now accessed directly from MediaStore to maintain single source of truth
-    if let Some(seasons) = series_seasons.clone() {
-        log::info!("Found {} seasons in MediaStore for series", seasons.len());
-    } else {
-        log::warn!("No seasons found in MediaStore for series");
-    }
+        // FIRST: Set up depth regions for the transition (this enables the fade animation)
+        prepare_depth_regions_for_transition(state, &new_view);
 
-    // The existing fetch_media_details call is still needed for loading the TvShowDetails
-    // But we'll also return the fetch_task to ensure details are fetched if needed
-    let existing_task = if let Some(library_id) = state.domains.library.state.current_library_id {
-        let media_id = ferrex_core::MediaID::Series(series_id.clone());
-        Task::perform(
-            crate::domains::media::library::fetch_media_details(server_url, library_id, media_id),
-            move |result| match result {
-                Ok(Media::Series(series_ref)) => {
-                    // Debug: Log the series we're loading
-                    log::info!(
-                        "Loading details for series: {} (ID: {})",
-                        series_ref.title.as_str(),
-                        series_ref.id.as_str()
-                    );
+        // THEN: Transition to new theme colors
+        if let ArchivedOption::Some(hex) = &series.theme_color {
+            if let Ok(color) = macros::parse_hex_color(hex) {
+                let r = color.r * 0.2;
+                let g = color.g * 0.2;
+                let b = color.b * 0.2;
+                let primary_dark = iced::Color::from_rgb(r, g, b);
 
-                    // Extract full details from SeriesReference
-                    let (
-                        description,
-                        poster_url,
-                        backdrop_url,
-                        tmdb_id,
-                        genres,
-                        rating,
-                        total_episodes,
-                    ) = match &series_ref.details {
-                        crate::infrastructure::api_types::MediaDetailsOption::Details(
-                            crate::infrastructure::api_types::TmdbDetails::Series(series_details),
-                        ) => {
-                            log::info!(
-                                "Series {} has overview: {:?}",
-                                series_ref.title.as_str(),
-                                series_details.overview.as_ref().map(|o| {
-                                    crate::domains::ui::views::macros::truncate_text(o, 50)
-                                })
-                            );
-                            (
-                                series_details.overview.clone(),
-                                series_details.poster_path.clone(),
-                                series_details.backdrop_path.clone(),
-                                Some(series_details.id),
-                                series_details.genres.clone(),
-                                series_details.vote_average.map(|v| v as f32),
-                                series_details.number_of_episodes,
-                            )
-                        }
-                        _ => {
-                            log::warn!("Series {} has no TMDB details", series_ref.title.as_str());
-                            (
-                                None,
-                                None,
-                                None,
-                                Some(series_ref.tmdb_id),
-                                vec![],
-                                None,
-                                None,
-                            )
-                        }
-                    };
+                // Secondary color is much lighter for stronger gradient
+                let secondary = iced::Color::from_rgb(
+                    (color.r * 0.8).min(1.0), // 4x primary
+                    (color.g * 0.8).min(1.0),
+                    (color.b * 0.8).min(1.0),
+                );
 
-                    // Convert season references to SeasonSummary format
-                    let seasons = if let Some(season_refs) = series_seasons {
-                        season_refs
-                            .iter()
-                            .map(|season| {
-                                // Extract season details
-                                let (name, poster_url) = match &season.details {
-                                    crate::infrastructure::api_types::MediaDetailsOption::Details(
-                                        crate::infrastructure::api_types::TmdbDetails::Season(details),
-                                    ) => (
-                                        if details.name.is_empty() {
-                                            None
-                                        } else {
-                                            Some(details.name.clone())
-                                        },
-                                        details.poster_path.clone(),
-                                    ),
-                                    _ => (None, None),
-                                };
+                // Start color transition
+                state
+                    .domains
+                    .ui
+                    .state
+                    .background_shader_state
+                    .color_transitions
+                    .transition_to(primary_dark, secondary);
+            }
+        }
 
-                                // Get episode count from episode_references
-                                let episode_count = episode_refs
-                                    .get(season.id.as_ref())
-                                    .map(|episodes| episodes.len())
-                                    .unwrap_or(0);
-
-                                crate::domains::media::models::SeasonSummary {
-                                    number: season.season_number.value() as u32,
-                                    episode_count,
-                                    poster_url,
-                                    name,
-                                }
-                            })
-                            .collect()
-                    } else {
-                        vec![]
-                    };
-
-                    // Convert SeriesReference to TvShowDetails for backward compatibility
-                    let details = crate::domains::media::models::TvShowDetails {
-                        name: series_ref.title.as_str().to_string(),
-                        tmdb_id,
-                        poster_url,
-                        backdrop_url,
-                        description,
-                        seasons,
-                        genres,
-                        rating,
-                        total_episodes,
-                    };
-                    Message::TvShowLoaded(series_id_str.clone(), Ok(details))
+        // Queue request if not in cache
+        if let Some(details) = series.details() {
+            if details.backdrop_path.is_some() {
+                let request =
+                    ImageRequest::new(series.id.to_uuid(), ImageSize::Backdrop, ImageType::Series);
+                if state.image_service.get(&request).is_none() {
+                    state.image_service.request_image(request);
                 }
-                Ok(_) => Message::TvShowLoaded(
-                    series_id_str.clone(),
-                    Err("Unexpected media type returned".to_string()),
-                ),
-                Err(e) => Message::TvShowLoaded(series_id_str.clone(), Err(e.to_string())),
-            },
-        )
-    } else {
-        // No library selected
-        Task::none()
-    };
-    */
+            } else {
+                log::warn!("Cannot find path for series backdrop");
+            }
+        } else {
+            log::warn!("Series {} has no details", series.title());
+        }
+        // Finally change the view state
+        state.domains.ui.state.view = new_view;
 
-    // Batch both tasks together
-    //Task::batch([fetch_task, existing_task])
+        state
+            .domains
+            .ui
+            .state
+            .series_yoke_cache
+            .insert(series_uuid, std::sync::Arc::new(yoke));
+    }
     Task::none()
 }
 
@@ -644,41 +355,6 @@ pub fn handle_view_season(
 
     // Clear previous season details
     state.domains.media.state.current_season_details = None;
-
-    /*
-    // Check if we need to fetch season details on-demand
-    let fetch_task = if let Some(library_id) = state.domains.library.state.current_library_id {
-        let season_media_id = ferrex_core::MediaID::Season(season_id.clone());
-        state
-            .domains
-            .metadata
-            .state
-            .fetch_media_details_on_demand(library_id, season_media_id)
-    } else {
-        Task::none()
-    };
-
-    // NEW ARCHITECTURE: Get episodes from MediaStore
-    if let Ok(store) = state.domains.media.state.media_store.read() {
-        // Media state reference ouside of media domain
-        let episodes = store.get_episodes(season_id.as_ref());
-        if !episodes.is_empty() {
-            // REMOVED: No longer storing episodes in duplicate state field
-            // Episodes are now accessed directly from MediaStore to maintain single source of truth
-            log::info!("Found {} episodes in MediaStore for season", episodes.len());
-
-            state.domains.ui.state.season_episodes_carousel =
-                Some(CarouselState::new_with_dimensions(
-                    episodes.len(),
-                    250.0, // Episode thumbnail width
-                    15.0,  // Spacing
-                ));
-            if let Some(carousel) = &mut state.domains.ui.state.season_episodes_carousel {
-                let available_width = state.window_size.width - 80.0;
-                carousel.update_items_per_page(available_width);
-            }
-        }
-    }*/
 
     // Save current scroll position if navigating from library view
     if matches!(state.domains.ui.state.view, ViewState::Library) {}
@@ -724,19 +400,6 @@ pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Mes
 
     // Save current scroll position before navigating away
     save_current_scroll_state(state);
-
-    /*
-    // Check if we need to fetch episode details on-demand
-    let fetch_task = if let Some(library_id) = state.domains.library.state.current_library_id {
-        let episode_media_id = ferrex_core::MediaID::Episode(episode_id.clone());
-        state
-            .domains
-            .metadata
-            .state
-            .fetch_media_details_on_demand(library_id, episode_media_id)
-    } else {
-        Task::none()
-    };*/
 
     // Create the new view state
     let new_view = ViewState::EpisodeDetail {

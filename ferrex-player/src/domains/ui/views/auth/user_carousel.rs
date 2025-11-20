@@ -6,8 +6,8 @@ use crate::domains::auth::messages as auth;
 use crate::domains::ui::views::carousel::CarouselState;
 
 use iced::{
-    widget::{button, column, container, row, scrollable, text, Space},
     Alignment, Element, Length, Theme,
+    widget::{Space, button, column, container, row, scrollable, text},
 };
 use lucide_icons::Icon;
 

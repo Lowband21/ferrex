@@ -3,32 +3,32 @@
 //! This new State structure delegates domain-specific state to the DomainRegistry,
 //! keeping only the view models and cross-cutting concerns at the top level.
 
+use crate::domains::DomainRegistry;
 use crate::domains::auth::AuthDomainState;
 use crate::domains::auth::AuthManager;
 use crate::domains::library::LibraryDomainState;
+use crate::domains::media::MediaDomainState;
 use crate::domains::media::repository::{
     accessor::{Accessor, ReadOnly, ReadWrite},
     repository::MediaRepo,
 };
-use crate::domains::media::MediaDomainState;
-use crate::domains::metadata::image_service::UnifiedImageService;
 use crate::domains::metadata::MetadataDomainState;
+use crate::domains::metadata::image_service::UnifiedImageService;
 use crate::domains::player::PlayerDomain;
 use crate::domains::search::SearchDomain;
 use crate::domains::settings::SettingsDomainState;
 use crate::domains::streaming::StreamingDomainState;
+use crate::domains::ui::UIDomainState;
 use crate::domains::ui::tabs::{TabId, TabManager};
 use crate::domains::ui::views::carousel::CarouselState;
-use crate::domains::ui::UIDomainState;
 use crate::domains::user_management::UserManagementDomainState;
-use crate::domains::DomainRegistry;
+use crate::infrastructure::ServiceBuilder;
 use crate::infrastructure::adapters::ApiClientAdapter;
 use crate::infrastructure::adapters::AuthManagerAdapter;
 use crate::infrastructure::api_client::ApiClient;
 use crate::infrastructure::services::settings::SettingsApiAdapter;
 use crate::infrastructure::services::streaming::StreamingApiAdapter;
 use crate::infrastructure::services::user_management::UserAdminApiAdapter;
-use crate::infrastructure::ServiceBuilder;
 use ferrex_core::LibraryID;
 use parking_lot::RwLock as StdRwLock;
 use std::sync::Arc;
@@ -111,7 +111,7 @@ impl State {
             default_widget_animation: {
                 use crate::domains::ui::widgets::AnimationType as WidgetAnim;
                 use crate::infrastructure::constants::animation::{
-                    PosterAnimationKind, DEFAULT_DURATION_MS, DEFAULT_POSTER_ANIMATION,
+                    DEFAULT_DURATION_MS, DEFAULT_POSTER_ANIMATION, PosterAnimationKind,
                 };
                 match DEFAULT_POSTER_ANIMATION {
                     PosterAnimationKind::None => WidgetAnim::None,

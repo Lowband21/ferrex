@@ -4,8 +4,8 @@ use crate::infrastructure::{
     constants::routes::API_BASE,
 };
 use ferrex_core::{MediaEvent, MediaIDLike};
-use futures::stream;
 use futures::StreamExt;
+use futures::stream;
 use iced::Subscription;
 use tokio::sync::mpsc;
 use uuid::Uuid;

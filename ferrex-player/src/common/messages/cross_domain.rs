@@ -309,7 +309,9 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
 
             log::info!(
                 "[CrossDomain] Batch contains: {} movies with details, {} series with details, {} still need fetch",
-                movies_with_details, series_with_details, still_need_fetch
+                movies_with_details,
+                series_with_details,
+                still_need_fetch
             );
 
             // Update MediaStore directly - don't create a task that can be re-executed
