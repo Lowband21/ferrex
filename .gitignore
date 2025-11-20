@@ -76,3 +76,7 @@ scripts/
 node_modules/
 
 */.archive/
+
+# Postgres
+pg_hba.conf
+pgsock/

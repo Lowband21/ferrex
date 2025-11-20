@@ -5,9 +5,8 @@ pub mod profile;
 pub mod security;
 
 use super::messages::Message;
-use crate::common::messages::{DomainMessage, DomainUpdateResult};
+use crate::common::messages::DomainUpdateResult;
 use crate::state_refactored::State;
-use iced::Task;
 
 /// Main settings update handler
 /// Returns a DomainUpdateResult containing both the task and any events to emit

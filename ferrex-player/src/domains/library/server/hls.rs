@@ -258,9 +258,9 @@ impl HlsClient {
         while i < lines.len() {
             let line = lines[i].trim();
 
-            if line.starts_with("#EXT-X-STREAM-INF:") {
+            if let Some(info) = line.strip_prefix("#EXT-X-STREAM-INF:") {
                 // Parse stream info
-                let info = &line[18..]; // Skip "#EXT-X-STREAM-INF:"
+                // Skip "#EXT-X-STREAM-INF:"
                 let mut bandwidth = 0;
                 let mut resolution = None;
 
@@ -274,12 +274,11 @@ impl HlsClient {
                             }
                             "RESOLUTION" => {
                                 let res_parts: Vec<&str> = parts[1].split('x').collect();
-                                if res_parts.len() == 2 {
-                                    if let (Ok(w), Ok(h)) =
+                                if res_parts.len() == 2
+                                    && let (Ok(w), Ok(h)) =
                                         (res_parts[0].parse::<u32>(), res_parts[1].parse::<u32>())
-                                    {
-                                        resolution = Some((w, h));
-                                    }
+                                {
+                                    resolution = Some((w, h));
                                 }
                             }
                             _ => {}
@@ -349,7 +348,7 @@ impl HlsClient {
             .variants
             .iter()
             .filter(|v| v.bandwidth <= target_bandwidth)
-            .last()
+            .next_back()
             .unwrap_or(&master_playlist.variants[0]); // Fallback to lowest quality
 
         log::info!(
@@ -408,9 +407,8 @@ impl HlsClient {
                 target_duration = line[22..].parse().unwrap_or(4.0);
             } else if line.starts_with("#EXT-X-MEDIA-SEQUENCE:") {
                 media_sequence = line[22..].parse().unwrap_or(0);
-            } else if line.starts_with("#EXTINF:") {
+            } else if let Some(duration_str) = line.strip_prefix("#EXTINF:") {
                 // Parse segment duration
-                let duration_str = &line[8..];
                 let duration = duration_str
                     .split(',')
                     .next()

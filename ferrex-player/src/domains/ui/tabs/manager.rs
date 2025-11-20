@@ -1,17 +1,11 @@
 //! Tab manager for coordinating multiple independent tab states
 
-use ferrex_core::rkyv_wrappers::UuidWrapper;
-use ferrex_core::{ArchivedLibraryType, LibraryID};
-use ferrex_core::{ArchivedMedia, ArchivedMediaID};
-use rkyv::deserialize;
-use rkyv::rancor::Error;
+use ferrex_core::ArchivedMediaID;
+use ferrex_core::{LibraryID, SortBy, SortOrder};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use uuid::Uuid;
 
-use super::{AllTabState, LibraryTabState, TabId, TabState};
-use crate::domains::ui::view_models::ViewModel;
-use crate::infrastructure::api_types::{Library, LibraryType};
+use super::{TabId, TabState};
+use crate::infrastructure::api_types::LibraryType;
 use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
 
 /// Manages all tab states in the application
@@ -64,13 +58,13 @@ impl TabManager {
     pub fn update_libraries(&mut self) {
         self.library_info.clear(); // Clear BEFORE populating, not after
 
-        if self.repo_accessor.is_initialized() {
-            if let Ok(libraries) = self.repo_accessor.get_libraries() {
-                for library in libraries {
-                    if library.enabled {
-                        self.library_info.insert(library.id, library.library_type);
-                        self.register_library(library.id, library.library_type);
-                    }
+        if self.repo_accessor.is_initialized()
+            && let Ok(libraries) = self.repo_accessor.get_libraries()
+        {
+            for library in libraries {
+                if library.enabled {
+                    self.library_info.insert(library.id, library.library_type);
+                    self.register_library(library.id, library.library_type);
                 }
             }
         }
@@ -81,7 +75,7 @@ impl TabManager {
             .keys()
             .filter(|tab_id| match tab_id {
                 TabId::All => true,
-                TabId::Library(id) => self.library_info.contains_key(&id),
+                TabId::Library(id) => self.library_info.contains_key(id),
             })
             .cloned()
             .collect();
@@ -142,20 +136,25 @@ impl TabManager {
         let tab = self.get_or_create_tab(tab_id);
 
         // If this is a newly created tab, restore its scroll position
-        if is_new_tab {
-            if let Some(scroll_state) = scroll_manager.get_tab_scroll(&tab_id) {
-                if let Some(grid_state) = tab.grid_state_mut() {
-                    grid_state.scroll_position = scroll_state.position;
-                    log::info!(
-                        "Restored scroll position for newly created tab {:?}: {}",
-                        tab_id,
-                        scroll_state.position
-                    );
-                }
-            }
+        if is_new_tab
+            && let Some(scroll_state) = scroll_manager.get_tab_scroll(&tab_id)
+            && let Some(grid_state) = tab.grid_state_mut()
+        {
+            grid_state.scroll_position = scroll_state.position;
+            log::info!(
+                "Restored scroll position for newly created tab {:?}: {}",
+                tab_id,
+                scroll_state.position
+            );
         }
 
         self.tabs.get_mut(&tab_id).unwrap()
+    }
+
+    pub fn set_active_sort(&mut self, sort_by: SortBy, sort_order: SortOrder) {
+        if let Some(tab) = self.tabs.get_mut(&self.active_tab) {
+            tab.set_sort(sort_by, sort_order);
+        }
     }
 
     /// Get the currently active tab
@@ -229,20 +228,20 @@ impl TabManager {
 
         if success {
             // Ensure the tab's grid has the correct column count for the current window width
-            if let Some(tab) = self.get_tab_mut(tab_id) {
-                if let Some(grid_state) = tab.grid_state_mut() {
-                    // Update columns based on current window width
-                    grid_state.resize(window_width);
+            if let Some(tab) = self.get_tab_mut(tab_id)
+                && let Some(grid_state) = tab.grid_state_mut()
+            {
+                // Update columns based on current window width
+                grid_state.resize(window_width);
 
-                    // Restore the tab's scroll position from ScrollPositionManager
-                    if let Some(scroll_state) = scroll_manager.get_tab_scroll(&tab_id) {
-                        grid_state.scroll_position = scroll_state.position;
-                        log::info!(
-                            "Restored scroll position for tab {:?}: {}",
-                            tab_id,
-                            scroll_state.position
-                        );
-                    }
+                // Restore the tab's scroll position from ScrollPositionManager
+                if let Some(scroll_state) = scroll_manager.get_tab_scroll(&tab_id) {
+                    grid_state.scroll_position = scroll_state.position;
+                    log::info!(
+                        "Restored scroll position for tab {:?}: {}",
+                        tab_id,
+                        scroll_state.position
+                    );
                 }
             }
         }

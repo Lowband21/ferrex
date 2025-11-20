@@ -18,7 +18,7 @@ pub trait MediaIDLike {
     fn to_media_id(self) -> Self::MediaId;
 
     fn as_str<'a>(&self, buffer: &'a mut [u8; 45]) -> &'a str;
-    fn to_string_buf<'a>(&self, buffer: &'a mut [u8; 45]) -> String {
+    fn to_string_buf(&self, buffer: &mut [u8; 45]) -> String {
         String::from(self.as_str(buffer))
     }
 
@@ -34,7 +34,7 @@ impl MediaIDLike for MediaID {
     type MediaId = MediaID;
 
     fn as_ref(&self) -> &Self {
-        &self
+        self
     }
 
     fn to_media_id(self) -> Self::MediaId {
@@ -86,7 +86,7 @@ impl MediaIDLike for ArchivedMediaID {
     type MediaId = ArchivedMediaID;
 
     fn as_ref(&self) -> &Self {
-        &self
+        self
     }
 
     fn to_media_id(self) -> Self::MediaId {
@@ -138,7 +138,7 @@ impl MediaIDLike for MovieID {
     type MediaId = MediaID;
 
     fn as_ref(&self) -> &Self {
-        &self
+        self
     }
 
     fn to_media_id(self) -> Self::MediaId {
@@ -170,7 +170,7 @@ impl MediaIDLike for ArchivedMovieID {
     type MediaId = ArchivedMediaID;
 
     fn as_ref(&self) -> &Self {
-        &self
+        self
     }
 
     fn to_media_id(self) -> Self::MediaId {
@@ -182,11 +182,11 @@ impl MediaIDLike for ArchivedMovieID {
     }
 
     fn as_uuid(&self) -> &Uuid {
-        Uuid::from_bytes_ref(&self.0)
+        &self.0
     }
 
     fn to_uuid(self) -> Uuid {
-        Uuid::from_bytes(self.0)
+        self.0
     }
 
     fn sub_eq(&self, other: &impl MediaIDLike) -> bool {
@@ -202,7 +202,7 @@ impl MediaIDLike for SeriesID {
     type MediaId = MediaID;
 
     fn as_ref(&self) -> &Self {
-        &self
+        self
     }
 
     fn to_media_id(self) -> Self::MediaId {
@@ -234,7 +234,7 @@ impl MediaIDLike for ArchivedSeriesID {
     type MediaId = ArchivedMediaID;
 
     fn as_ref(&self) -> &Self {
-        &self
+        self
     }
 
     fn to_media_id(self) -> Self::MediaId {
@@ -246,11 +246,11 @@ impl MediaIDLike for ArchivedSeriesID {
     }
 
     fn as_uuid(&self) -> &Uuid {
-        Uuid::from_bytes_ref(&self.0)
+        &self.0
     }
 
     fn to_uuid(self) -> Uuid {
-        Uuid::from_bytes(self.0)
+        self.0
     }
 
     fn sub_eq(&self, other: &impl MediaIDLike) -> bool {
@@ -266,7 +266,7 @@ impl MediaIDLike for SeasonID {
     type MediaId = MediaID;
 
     fn as_ref(&self) -> &Self {
-        &self
+        self
     }
 
     fn to_media_id(self) -> Self::MediaId {
@@ -298,7 +298,7 @@ impl MediaIDLike for ArchivedSeasonID {
     type MediaId = ArchivedMediaID;
 
     fn as_ref(&self) -> &Self {
-        &self
+        self
     }
 
     fn to_media_id(self) -> Self::MediaId {
@@ -310,11 +310,11 @@ impl MediaIDLike for ArchivedSeasonID {
     }
 
     fn as_uuid(&self) -> &Uuid {
-        Uuid::from_bytes_ref(&self.0)
+        &self.0
     }
 
     fn to_uuid(self) -> Uuid {
-        Uuid::from_bytes(self.0)
+        self.0
     }
 
     fn sub_eq(&self, other: &impl MediaIDLike) -> bool {
@@ -330,7 +330,7 @@ impl MediaIDLike for EpisodeID {
     type MediaId = MediaID;
 
     fn as_ref(&self) -> &Self {
-        &self
+        self
     }
 
     fn to_media_id(self) -> Self::MediaId {
@@ -362,7 +362,7 @@ impl MediaIDLike for ArchivedEpisodeID {
     type MediaId = ArchivedMediaID;
 
     fn as_ref(&self) -> &Self {
-        &self
+        self
     }
 
     fn to_media_id(self) -> Self::MediaId {
@@ -374,11 +374,11 @@ impl MediaIDLike for ArchivedEpisodeID {
     }
 
     fn as_uuid(&self) -> &Uuid {
-        Uuid::from_bytes_ref(&self.0)
+        &self.0
     }
 
     fn to_uuid(self) -> Uuid {
-        Uuid::from_bytes(self.0)
+        self.0
     }
 
     fn sub_eq(&self, other: &impl MediaIDLike) -> bool {

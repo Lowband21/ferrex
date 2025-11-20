@@ -74,10 +74,10 @@ pub async fn list_all_users(
         let role_names: Vec<String> = permissions.roles.into_iter().map(|r| r.name).collect();
 
         // Apply role filter if specified
-        if let Some(ref role_filter) = filters.role {
-            if !role_names.contains(role_filter) {
-                continue;
-            }
+        if let Some(ref role_filter) = filters.role
+            && !role_names.contains(role_filter)
+        {
+            continue;
         }
 
         admin_users.push(AdminUserInfo {

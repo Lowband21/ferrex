@@ -4,8 +4,7 @@
 //! together so the REST server can enqueue work, observe progress, and drive
 //! follow-up automation using the same runtime that production nodes execute.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, fmt, sync::Arc};
 
 use ferrex_core::QueueService;
 use ferrex_core::image_service::ImageService;
@@ -29,7 +28,7 @@ use ferrex_core::{
         correlation::CorrelationCache,
         dispatcher::{DefaultJobDispatcher, DispatcherActors, JobDispatcher},
         events::{DomainEvent, JobEvent, JobEventPayload, JobEventPublisher, stable_path_key},
-        job::{EnqueueRequest, JobHandle, JobKind, JobPayload, JobPriority, JobValidator},
+        job::{EnqueueRequest, JobHandle, JobKind, JobPriority, JobValidator},
         lease::{DequeueRequest, JobLease},
         runtime::{
             InProcJobEventBus, LibraryActorHandle, OrchestratorRuntime, OrchestratorRuntimeBuilder,
@@ -49,6 +48,12 @@ pub struct ScanOrchestrator {
     events: Arc<InProcJobEventBus>,
     watchers: Arc<FsWatchService>,
     correlations: CorrelationCache,
+}
+
+impl fmt::Debug for ScanOrchestrator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ScanOrchestrator").finish_non_exhaustive()
+    }
 }
 
 impl ScanOrchestrator {
@@ -384,6 +389,12 @@ pub struct ActorSystem {
     image_actor: Arc<dyn ImageFetchActor>,
     events: Arc<InProcJobEventBus>,
     correlations: CorrelationCache,
+}
+
+impl fmt::Debug for ActorSystem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ActorSystem").finish_non_exhaustive()
+    }
 }
 
 impl ActorSystem {

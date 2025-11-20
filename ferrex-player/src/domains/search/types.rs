@@ -1,13 +1,11 @@
 //! Search domain types and state management
 
 use ferrex_core::LibraryID;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use uuid::Uuid;
 
 use crate::infrastructure::api_types::Media;
-use ferrex_core::query::types::{SearchField, SearchQuery};
+use ferrex_core::query::types::SearchField;
 
 /// Search UI mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -329,23 +327,23 @@ impl SearchDecisionEngine {
             // Use calibration if available
             if let Some(ref calibration) = self.calibration {
                 // If calibration strongly prefers one strategy, use it
-                if let Some(client_ms) = calibration.client_baseline_ms {
-                    if let Some(server_ms) = calibration.server_baseline_ms {
-                        // Strong preference based on 3x performance difference
-                        if client_ms * 3 < server_ms {
-                            return SearchStrategy::Client;
-                        } else if server_ms * 3 < client_ms {
-                            return SearchStrategy::Server;
-                        }
+                if let Some(client_ms) = calibration.client_baseline_ms
+                    && let Some(server_ms) = calibration.server_baseline_ms
+                {
+                    // Strong preference based on 3x performance difference
+                    if client_ms * 3 < server_ms {
+                        return SearchStrategy::Client;
+                    } else if server_ms * 3 < client_ms {
+                        return SearchStrategy::Server;
                     }
                 }
             }
 
             // Check network quality
-            if let Some(ref monitor) = self.network_monitor {
-                if monitor.should_prefer_client() {
-                    return SearchStrategy::Client;
-                }
+            if let Some(ref monitor) = self.network_monitor
+                && monitor.should_prefer_client()
+            {
+                return SearchStrategy::Client;
             }
 
             // Use historical performance data

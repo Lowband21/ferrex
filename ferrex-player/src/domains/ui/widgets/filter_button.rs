@@ -1,4 +1,7 @@
-use crate::domains::ui::{messages::Message, theme};
+use crate::{
+    common::ui_utils::icon_text_with_size,
+    domains::ui::{messages::Message, theme},
+};
 use iced::{
     Element, Length,
     widget::{Space, button, container, row, text},
@@ -11,7 +14,7 @@ pub fn filter_button<'a>(active_filter_count: usize, is_open: bool) -> Element<'
 
     let button_content = if active_filter_count > 0 {
         row![
-            icon_text(icon),
+            icon_text_with_size(icon, 16.0),
             Space::with_width(6),
             text(active_filter_count.to_string())
                 .size(14)
@@ -19,7 +22,7 @@ pub fn filter_button<'a>(active_filter_count: usize, is_open: bool) -> Element<'
         ]
         .align_y(iced::Alignment::Center)
     } else {
-        row![icon_text(icon)].align_y(iced::Alignment::Center)
+        row![icon_text_with_size(icon, 16.0)].align_y(iced::Alignment::Center)
     };
 
     let button_style = if is_open || active_filter_count > 0 {
@@ -41,14 +44,4 @@ pub fn filter_button<'a>(active_filter_count: usize, is_open: bool) -> Element<'
     .height(Length::Fixed(36.0))
     .align_y(iced::alignment::Vertical::Center)
     .into()
-}
-
-/// Helper function to create icon text with consistent font
-fn icon_text(icon: Icon) -> text::Text<'static> {
-    text(icon.unicode()).font(lucide_font()).size(16)
-}
-
-/// Get the lucide font
-fn lucide_font() -> iced::Font {
-    iced::Font::with_name("lucide")
 }

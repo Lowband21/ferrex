@@ -1,12 +1,11 @@
 //! Minimal external MPV player management for HDR passthrough
 //! This module spawns MPV as a separate process and tracks playback position
 
-use iced::Task;
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
@@ -201,14 +200,14 @@ impl ExternalMpvHandle {
                                         }
                                     }
                                     Some("eof-reached") => {
-                                        if let Some(eof) = msg["data"].as_bool() {
-                                            if eof {
-                                                log::info!("MPV reached end of file");
-                                                // When EOF is reached, set position to duration
-                                                let duration = *self.last_duration.lock().unwrap();
-                                                if duration > 0.0 {
-                                                    *self.last_position.lock().unwrap() = duration;
-                                                }
+                                        if let Some(eof) = msg["data"].as_bool()
+                                            && eof
+                                        {
+                                            log::info!("MPV reached end of file");
+                                            // When EOF is reached, set position to duration
+                                            let duration = *self.last_duration.lock().unwrap();
+                                            if duration > 0.0 {
+                                                *self.last_position.lock().unwrap() = duration;
                                             }
                                         }
                                     }

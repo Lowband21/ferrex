@@ -735,12 +735,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // Render watch status corner indicator if progress is valid and animation is complete
-    if input.progress >= 0.0 && input.animation_progress >= 0.99 {
+    // Render watch status corner indicator for unwatched and in-progress items once animation completes
+    if input.progress >= 0.0 && input.progress < 0.95 && input.animation_progress >= 0.99 {
         let aspect_ratio = 2.0 / 3.0;
 
         // Create a triangular indicator shaped like a folded corner
-        let fold_size_x = input.corner_radius_normalized * 2.5;
+        let fold_size_x = input.corner_radius_normalized * 3.0;
         let fold_size_y = fold_size_x * aspect_ratio;
 
         // Top-right corner origin
@@ -767,7 +767,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             let triangle_alpha = smoothstep(-edge_softness, edge_softness, diagonal_dist);
 
             var indicator_opacity = select(0.85, 0.6, input.progress > 0.0);
-            indicator_opacity = select(indicator_opacity, 0.2, input.progress >= 0.95);
 
             let ia = indicator_opacity * triangle_alpha;
             let indicator_pm = vec4<f32>(input.progress_color * ia, ia);

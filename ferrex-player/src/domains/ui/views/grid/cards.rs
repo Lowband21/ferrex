@@ -5,9 +5,12 @@
 //! and loading states.
 
 use crate::infrastructure::repository::MaybeYoked;
-use ferrex_core::{ImageSize, ImageType, MediaOps, MovieID, MovieLike, SeriesID};
-use iced::Length;
+use ferrex_core::{
+    ImageSize, ImageType, MediaDetailsOptionLike, MediaOps, MovieID, MovieLike, SeriesID,
+};
+use iced::widget::text::Wrapping;
 use iced::widget::{button, container, mouse_area, text};
+use iced::{Alignment, Length};
 // Module organization
 use crate::domains::ui::messages::Message;
 use crate::domains::ui::views::grid::macros::parse_hex_color;
@@ -207,7 +210,7 @@ pub fn movie_reference_card_with_state<'a>(
             .cloned();
         let color_opt = if let Some(c) = cached {
             Some(c)
-        } else if let Ok(color) = parse_hex_color(&theme_color_str) {
+        } else if let Ok(color) = parse_hex_color(theme_color_str) {
             // Insert parsed color into cache
             state
                 .domains
@@ -246,25 +249,28 @@ pub fn movie_reference_card_with_state<'a>(
         .padding(0)
         .style(theme::Button::MediaCard.style());
 
+    let title = truncate(&mut movie.title().to_string());
+
     // Create text content
     let text_content = column![
-        // TODO: We need to get title and year without creating temporary values
-        text(movie.title().to_string()).size(14),
-        text(if let Some(year) = movie.release_year() {
-            year.to_string()
-        } else {
-            "".to_string()
-        })
-        .size(12)
-        .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        text(title)
+            .align_x(Alignment::Center)
+            .width(Length::Fixed(330.0))
+            .size(13)
+            .wrapping(Wrapping::None),
+        text(movie.release_year().unwrap_or("932").to_string())
+            .align_x(Alignment::Center)
+            .width(Length::Fixed(330.0))
+            .size(12)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
     ]
     .spacing(2);
 
     column![
         poster_element,
         container(text_content)
-            .padding(5)
-            .width(Length::Fixed(200.0))
+            .padding([5, 0])
+            .width(Length::Fixed(330.0))
             .height(Length::Fixed(60.0))
     ]
     .spacing(5)
@@ -357,10 +363,11 @@ pub fn series_reference_card_with_state<'a>(
         };
     let series = yoke_arc.get();
 
-    let media_id = series.media_id();
+    let _media_id = series.media_id();
     let series_id = series.id();
-    let num_seasons = series.num_seasons();
+    let _num_seasons = series.num_seasons();
     let theme_color = series.theme_color();
+    let details_opt = &series.details;
 
     // Determine priority based on visibility and hover state
     let priority = if is_hovered || is_visible {
@@ -425,8 +432,11 @@ pub fn series_reference_card_with_state<'a>(
         .style(theme::Button::MediaCard.style());
 
     let text_content = column![
-        text(series.title().to_string()).size(14),
-        text("year")
+        text(series.title().to_string())
+            .align_x(Alignment::Center)
+            .wrapping(Wrapping::None)
+            .size(14),
+        text(details_opt.get_release_year().unwrap_or(932))
             .size(12)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
     ]
@@ -688,3 +698,34 @@ pub fn episode_reference_card_with_state<'a, Episode: MediaOps + EpisodeLike>(
     .into()
 }
 */
+
+// Take str instead?
+fn truncate(text: &mut String) -> String {
+    const LIMIT: usize = 28;
+
+    let text_len = text.len();
+
+    if text_len >= LIMIT {
+        // Byte index at the LIMIT-th char boundary.
+        let limit_idx = text
+            .char_indices()
+            .nth(LIMIT)
+            .map(|(i, _)| i)
+            .unwrap_or_else(|| text.len());
+
+        // Last whitespace before or at the limit.
+        let cut_at = text[..limit_idx]
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| c.is_whitespace())
+            .map(|(i, _)| i)
+            .unwrap_or(limit_idx);
+
+        // Trim any trailing spaces before adding ellipsis.
+        let cut_at = text[..cut_at].trim_end().len();
+
+        text.truncate(cut_at);
+        text.push_str("...");
+    }
+    text.to_owned()
+}

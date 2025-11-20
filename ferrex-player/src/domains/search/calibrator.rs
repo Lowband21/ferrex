@@ -1,6 +1,5 @@
 use super::service::SearchService;
 use super::types::SearchStrategy;
-use ferrex_core::Media;
 use ferrex_core::query::types::SearchField;
 use std::time::{Duration, Instant};
 
@@ -81,12 +80,11 @@ impl SearchCalibrator {
                     Some((server_duration.as_millis() / test_queries.len() as u128) as u64);
 
                 // Estimate network latency (rough approximation)
-                if let Some(client_ms) = results.client_baseline_ms {
-                    if let Some(server_ms) = results.server_baseline_ms {
-                        if server_ms > client_ms {
-                            results.network_latency_ms = Some(server_ms - client_ms);
-                        }
-                    }
+                if let Some(client_ms) = results.client_baseline_ms
+                    && let Some(server_ms) = results.server_baseline_ms
+                    && server_ms > client_ms
+                {
+                    results.network_latency_ms = Some(server_ms - client_ms);
                 }
             }
         }

@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use std::fmt;
 use tokio::sync::broadcast;
 
 use crate::Result;
@@ -12,6 +13,19 @@ use crate::orchestration::events::{
 pub struct InProcJobEventBus {
     sender: broadcast::Sender<JobEvent>,
     domain_sender: broadcast::Sender<DomainEvent>,
+    job_channel_capacity: usize,
+    domain_channel_capacity: usize,
+}
+
+impl fmt::Debug for InProcJobEventBus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InProcJobEventBus")
+            .field("job_channel_capacity", &self.job_channel_capacity)
+            .field("job_subscribers", &self.sender.receiver_count())
+            .field("domain_channel_capacity", &self.domain_channel_capacity)
+            .field("domain_subscribers", &self.domain_sender.receiver_count())
+            .finish()
+    }
 }
 
 impl InProcJobEventBus {
@@ -21,6 +35,8 @@ impl InProcJobEventBus {
         Self {
             sender,
             domain_sender,
+            job_channel_capacity: capacity,
+            domain_channel_capacity: capacity,
         }
     }
 

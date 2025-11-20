@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM movie_translations WHERE movie_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5accb1f4b7dc2c9919809d898cc0c367ff08454488c7305ff236f112f9dc349f"
+}

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use ferrex_core::sync_session::SyncMessage;
 use ferrex_core::user::User;
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 use tokio::sync::{RwLock, mpsc};
 use uuid::Uuid;
 
@@ -17,6 +17,26 @@ pub struct Connection {
     sender: mpsc::Sender<SyncMessage>,
     /// Last ping timestamp for connection health
     pub last_ping: Arc<RwLock<i64>>,
+}
+
+impl fmt::Debug for Connection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let room_code = self
+            .room_code
+            .try_read()
+            .ok()
+            .and_then(|guard| guard.clone());
+        let last_ping = self.last_ping.try_read().ok().map(|guard| *guard);
+
+        f.debug_struct("Connection")
+            .field("id", &self.id)
+            .field("user_id", &self.user.id)
+            .field("username", &self.user.username)
+            .field("room_code", &room_code)
+            .field("channel_closed", &self.sender.is_closed())
+            .field("last_ping", &last_ping)
+            .finish()
+    }
 }
 
 impl Connection {

@@ -94,7 +94,7 @@ impl<'a> PermissionChecker<'a> {
 /// Extension trait for State to easily check permissions
 pub trait StatePermissionExt {
     /// Get a permission checker for the current user
-    fn permission_checker(&self) -> PermissionChecker;
+    fn permission_checker(&self) -> PermissionChecker<'_>;
 
     /// Quick check if user has a specific permission
     fn has_permission(&self, permission: &str) -> bool;
@@ -104,7 +104,7 @@ pub trait StatePermissionExt {
 }
 
 impl StatePermissionExt for crate::state_refactored::State {
-    fn permission_checker(&self) -> PermissionChecker {
+    fn permission_checker(&self) -> PermissionChecker<'_> {
         PermissionChecker::new(self.domains.auth.state.user_permissions.as_ref())
     }
 

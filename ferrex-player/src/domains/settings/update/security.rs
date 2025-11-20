@@ -79,7 +79,7 @@ pub fn handle_submit_password_change(state: &mut State) -> DomainUpdateResult {
     // Check password complexity
     let has_upper = password_new.as_str().chars().any(|c| c.is_uppercase());
     let has_lower = password_new.as_str().chars().any(|c| c.is_lowercase());
-    let has_digit = password_new.as_str().chars().any(|c| c.is_digit(10));
+    let has_digit = password_new.as_str().chars().any(|c| c.is_ascii_digit());
 
     if !has_upper || !has_lower || !has_digit {
         state.domains.settings.security.password_error =
@@ -192,7 +192,11 @@ pub fn handle_show_change_pin(state: &mut State) -> DomainUpdateResult {
 /// Handle update current PIN
 pub fn handle_update_pin_current(state: &mut State, value: String) -> DomainUpdateResult {
     // Only allow digits and limit to 4 characters
-    let filtered: String = value.chars().filter(|c| c.is_digit(10)).take(4).collect();
+    let filtered: String = value
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .take(4)
+        .collect();
     state.domains.settings.security.pin_current = SecureCredential::from(filtered);
     state.domains.settings.security.pin_error = None;
     DomainUpdateResult::task(Task::none())
@@ -201,7 +205,11 @@ pub fn handle_update_pin_current(state: &mut State, value: String) -> DomainUpda
 /// Handle update new PIN
 pub fn handle_update_pin_new(state: &mut State, value: String) -> DomainUpdateResult {
     // Only allow digits and limit to 4 characters
-    let filtered: String = value.chars().filter(|c| c.is_digit(10)).take(4).collect();
+    let filtered: String = value
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .take(4)
+        .collect();
     state.domains.settings.security.pin_new = SecureCredential::from(filtered);
     state.domains.settings.security.pin_error = None;
     DomainUpdateResult::task(Task::none())
@@ -210,7 +218,11 @@ pub fn handle_update_pin_new(state: &mut State, value: String) -> DomainUpdateRe
 /// Handle update confirm PIN
 pub fn handle_update_pin_confirm(state: &mut State, value: String) -> DomainUpdateResult {
     // Only allow digits and limit to 4 characters
-    let filtered: String = value.chars().filter(|c| c.is_digit(10)).take(4).collect();
+    let filtered: String = value
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .take(4)
+        .collect();
     state.domains.settings.security.pin_confirm = SecureCredential::from(filtered);
     state.domains.settings.security.pin_error = None;
     DomainUpdateResult::task(Task::none())
@@ -238,7 +250,7 @@ pub fn handle_submit_pin_change(state: &mut State) -> DomainUpdateResult {
             Some("PIN must be exactly 4 digits".to_string());
         return DomainUpdateResult::task(Task::none());
     }
-    if !pin_new.as_str().chars().all(|c| c.is_digit(10)) {
+    if !pin_new.as_str().chars().all(|c| c.is_ascii_digit()) {
         state.domains.settings.security.pin_error =
             Some("PIN must contain only digits".to_string());
         return DomainUpdateResult::task(Task::none());

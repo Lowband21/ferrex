@@ -12,10 +12,10 @@ use crate::domains::ui::views::movies::view_movie_detail;
 use crate::domains::ui::views::settings::view_user_settings;
 use crate::domains::ui::views::tv::{view_episode_detail, view_season_detail, view_series_detail};
 use crate::domains::ui::views::{view_loading_video, view_video_error};
-use crate::domains::ui::widgets::{BackgroundEffect, background_shader};
+use crate::domains::ui::widgets::BackgroundEffect;
 use crate::domains::{player, ui};
 use crate::state_refactored::State;
-use ferrex_core::{ImageRequest, ImageSize, ImageType, MediaIDLike};
+use ferrex_core::{BackdropKind, BackdropSize, ImageRequest, MediaIDLike};
 use iced::widget::{Space, Stack, column, container, scrollable};
 use iced::{Element, Font, Length};
 
@@ -27,7 +27,7 @@ use iced::{Element, Font, Length};
     ),
     profiling::function
 )]
-pub fn view(state: &State) -> Element<DomainMessage> {
+pub fn view(state: &State) -> Element<'_, DomainMessage> {
     let view = iced::debug::time("ferrex-player::view");
     // Check for first-run setup
     // Check authentication state
@@ -47,8 +47,8 @@ pub fn view(state: &State) -> Element<DomainMessage> {
         ViewState::LibraryManagement => view_library_management(state).map(DomainMessage::from),
         ViewState::AdminDashboard => view_admin_dashboard(state).map(DomainMessage::from),
         ViewState::Player => view_player(state).map(DomainMessage::Player),
-        ViewState::LoadingVideo { url } => view_loading_video(state, &url).map(DomainMessage::from),
-        ViewState::VideoError { message } => view_video_error(&message).map(DomainMessage::from),
+        ViewState::LoadingVideo { url } => view_loading_video(state, url).map(DomainMessage::from),
+        ViewState::VideoError { message } => view_video_error(message).map(DomainMessage::from),
         ViewState::MovieDetail { movie_id, .. } => {
             view_movie_detail(state, *movie_id).map(DomainMessage::from)
         }
@@ -59,9 +59,9 @@ pub fn view(state: &State) -> Element<DomainMessage> {
             series_id,
             season_id,
             ..
-        } => view_season_detail(state, &series_id, &season_id).map(DomainMessage::from),
+        } => view_season_detail(state, series_id, season_id).map(DomainMessage::from),
         ViewState::EpisodeDetail { episode_id, .. } => {
-            view_episode_detail(state, &episode_id).map(DomainMessage::from)
+            view_episode_detail(state, episode_id).map(DomainMessage::from)
         }
         ViewState::UserSettings => view_user_settings(state).map(DomainMessage::from),
     };
@@ -147,58 +147,43 @@ pub fn view(state: &State) -> Element<DomainMessage> {
         // when view changes occur, updating state.background_shader_state
 
         // Create background shader from persistent state
-        let mut bg_shader = background_shader()
-            .colors(
-                state.domains.ui.state.background_shader_state.primary_color,
-                state
-                    .domains
-                    .ui
-                    .state
-                    .background_shader_state
-                    .secondary_color,
-            )
-            .scroll_offset(state.domains.ui.state.background_shader_state.scroll_offset)
-            .gradient_center(
-                state
-                    .domains
-                    .ui
-                    .state
-                    .background_shader_state
-                    .gradient_center,
-            );
-
-        // For detail views, tell shader to offset backdrop by header height
-        if matches!(
-            &state.domains.ui.state.view,
-            ViewState::MovieDetail { .. }
-                | ViewState::SeriesDetail { .. }
-                | ViewState::SeasonDetail { .. }
-                | ViewState::EpisodeDetail { .. }
-        ) {
-            bg_shader =
-                bg_shader.header_offset(crate::infrastructure::constants::layout::header::HEIGHT);
-        }
+        let mut bg_shader = state
+            .domains
+            .ui
+            .state
+            .background_shader_state
+            .build_shader(&state.domains.ui.state.view);
 
         // Get backdrop from image service based on current view (reactive approach)
+        let (fade_start, fade_end) = state
+            .domains
+            .ui
+            .state
+            .background_shader_state
+            .backdrop_fade();
+
         let backdrop_handle = match &state.domains.ui.state.view {
             ViewState::MovieDetail { movie_id, .. } => {
-                let request =
-                    ImageRequest::new(movie_id.to_uuid(), ImageSize::Backdrop, ImageType::Backdrop);
+                let request = ImageRequest::backdrop(
+                    movie_id.to_uuid(),
+                    BackdropKind::Movie,
+                    BackdropSize::Quality,
+                );
                 state.image_service.get(&request)
             }
             ViewState::SeriesDetail { series_id, .. } => {
-                let request = ImageRequest::new(
+                let request = ImageRequest::backdrop(
                     series_id.to_uuid(),
-                    ImageSize::Backdrop,
-                    ImageType::Backdrop,
+                    BackdropKind::Series,
+                    BackdropSize::Quality,
                 );
                 state.image_service.get(&request)
             }
             ViewState::SeasonDetail { season_id, .. } => {
-                let request = ImageRequest::new(
+                let request = ImageRequest::backdrop(
                     season_id.to_uuid(),
-                    ImageSize::Backdrop,
-                    ImageType::Backdrop,
+                    BackdropKind::Season,
+                    BackdropSize::Quality,
                 );
                 state.image_service.get(&request)
             }
@@ -207,9 +192,9 @@ pub fn view(state: &State) -> Element<DomainMessage> {
 
         // Add backdrop if available
         if let Some(handle) = backdrop_handle {
-            // Use BackdropGradient effect with dummy fade values (shader calculates them dynamically)
+            // Use BackdropGradient effect with configured fade window from persistent state
             bg_shader = bg_shader
-                .backdrop_with_fade(handle, 0.75, 1.0) // Values ignored by shader
+                .backdrop_with_fade(handle, fade_start, fade_end)
                 .backdrop_aspect_mode(
                     state
                         .domains
@@ -222,28 +207,6 @@ pub fn view(state: &State) -> Element<DomainMessage> {
             // No backdrop, use gradient effect
             bg_shader = bg_shader.effect(BackgroundEffect::Gradient);
         }
-
-        // Add depth layout from state
-        if !state
-            .domains
-            .ui
-            .state
-            .background_shader_state
-            .depth_layout
-            .regions
-            .is_empty()
-        {
-            bg_shader = bg_shader.with_depth_layout(
-                state
-                    .domains
-                    .ui
-                    .state
-                    .background_shader_state
-                    .depth_layout
-                    .clone(),
-            );
-        }
-
         // Create a stack with background as base layer
         // Convert bg_shader to Element first, then map from ui::Message to DomainMessage
         let bg_shader_element: Element<ui::messages::Message> = bg_shader.into();
@@ -289,7 +252,7 @@ pub fn view(state: &State) -> Element<DomainMessage> {
     ),
     profiling::function
 )]
-fn view_player(state: &State) -> Element<player::messages::Message> {
+fn view_player(state: &State) -> Element<'_, player::messages::Message> {
     state.domains.player.state.view()
 }
 

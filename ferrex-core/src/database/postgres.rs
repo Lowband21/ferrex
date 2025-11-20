@@ -1,25 +1,24 @@
 use super::traits::*;
 use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
 use crate::{
-    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeNumber, EpisodeReference,
-    EpisodeURL, LibraryReference, MediaDetailsOption, MediaIDLike, MovieReference, MovieTitle,
-    MovieURL, SeasonDetails, SeasonNumber, SeasonReference, SeasonURL, SeriesReference,
-    SeriesTitle, SeriesURL, TmdbDetails, UrlLike,
+    EnhancedMovieDetails, EpisodeReference, LibraryReference, MediaDetailsOption, MediaIDLike,
+    MovieReference, MovieTitle, MovieURL, SeasonReference, SeriesReference, SeriesTitle, SeriesURL,
+    TmdbDetails, UrlLike, database::postgres_ext::processing_status::ProcessingStatusRepository,
     database::postgres_ext::tmdb_metadata::TmdbMetadataRepository,
 };
 use crate::{
     EpisodeID, Library, LibraryID, LibraryType, Media, MediaError, MediaFile, MediaFileMetadata,
-    MediaID, MovieID, Result, SeasonID, SeriesID,
+    MovieID, Result, SeasonID, SeriesID,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rayon::iter::{IntoParallelIterator, ParallelExtend, ParallelIterator};
-use serde_json::{self, json};
+use serde_json::{self};
 use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 /// Statistics about the connection pool
@@ -96,7 +95,7 @@ impl PostgresDatabase {
     /// Get connection pool statistics for monitoring
     pub fn pool_stats(&self) -> PoolStats {
         PoolStats {
-            size: self.pool.size() as u32,
+            size: self.pool.size(),
             idle: self.pool.num_idle() as u32,
             max_size: self.max_connections,
             min_idle: self.min_connections,
@@ -131,7 +130,7 @@ impl PostgresDatabase {
         let technical_metadata = media_file
             .media_file_metadata
             .as_ref()
-            .map(|m| serde_json::to_value(m))
+            .map(serde_json::to_value)
             .transpose()
             .map_err(|e| {
                 MediaError::InvalidMedia(format!("Failed to serialize metadata: {}", e))
@@ -257,7 +256,7 @@ impl PostgresDatabase {
             let technical_metadata: Option<serde_json::Value> =
                 row.try_get("technical_metadata").ok();
             let media_file_metadata = technical_metadata
-                .map(|tm| serde_json::from_value(tm))
+                .map(serde_json::from_value)
                 .transpose()
                 .map_err(|e| {
                     MediaError::Internal(format!("Failed to deserialize metadata: {}", e))
@@ -384,7 +383,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let media_file_metadata = row
             .technical_metadata
-            .map(|tm| serde_json::from_value(tm))
+            .map(serde_json::from_value)
             .transpose()
             .map_err(|e| MediaError::Internal(format!("Failed to deserialize metadata: {}", e)))?;
 
@@ -418,7 +417,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let media_file_metadata = row
             .technical_metadata
-            .map(|tm| serde_json::from_value(tm))
+            .map(serde_json::from_value)
             .transpose()
             .map_err(|e| MediaError::Internal(format!("Failed to deserialize metadata: {}", e)))?;
 
@@ -438,7 +437,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let mut conditions = Vec::new();
         let mut bind_count = 0;
 
-        if let Some(library_id) = filters.library_id {
+        if filters.library_id.is_some() {
             bind_count += 1;
             conditions.push(format!("library_id = ${}", bind_count));
         }
@@ -449,7 +448,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         query.push_str(" ORDER BY created_at DESC");
 
-        if let Some(limit) = filters.limit {
+        if filters.limit.is_some() {
             bind_count += 1;
             query.push_str(&format!(" LIMIT ${}", bind_count));
         }
@@ -474,7 +473,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             let technical_metadata: Option<serde_json::Value> =
                 row.try_get("technical_metadata").ok();
             let media_file_metadata = technical_metadata
-                .map(|tm| serde_json::from_value(tm))
+                .map(serde_json::from_value)
                 .transpose()
                 .map_err(|e| {
                     MediaError::Internal(format!("Failed to deserialize metadata: {}", e))
@@ -802,52 +801,34 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_all_movie_references(&self) -> Result<Vec<MovieReference>> {
-        let rows = sqlx::query!(
+        let repository = TmdbMetadataRepository::new(self);
+
+        let rows = sqlx::query(
             r#"
             SELECT
-                mr.id, mr.tmdb_id, mr.title, mr.theme_color,
-                mf.id as file_id, mf.file_path, mf.filename, mf.file_size,
-                mf.created_at as file_created_at, mf.technical_metadata, mf.library_id
+                mr.id,
+                mr.tmdb_id,
+                mr.title,
+                mr.theme_color,
+                mf.id AS file_id,
+                mf.file_path,
+                mf.filename,
+                mf.file_size,
+                mf.created_at AS file_created_at,
+                mf.technical_metadata,
+                mf.library_id
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             ORDER BY mr.title
-            "#
+            "#,
         )
-        .fetch_all(&self.pool)
+        .fetch_all(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
 
-        let mut movies = Vec::new();
+        let mut movies = Vec::with_capacity(rows.len());
         for row in rows {
-            let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
-            let media_file_metadata = technical_metadata
-                .map(|tm| serde_json::from_value(tm))
-                .transpose()
-                .map_err(|e| {
-                    MediaError::Internal(format!("Failed to deserialize metadata: {}", e))
-                })?;
-
-            let media_file = MediaFile {
-                id: row.file_id,
-                path: PathBuf::from(row.file_path),
-                filename: row.filename,
-                size: row.file_size as u64,
-                created_at: row.file_created_at,
-                media_file_metadata,
-                library_id: LibraryID(row.library_id),
-            };
-
-            let movie_ref = MovieReference {
-                id: MovieID(row.id),
-                library_id: LibraryID(row.library_id),
-                tmdb_id: row.tmdb_id as u64,
-                title: MovieTitle::new(row.title)?,
-                details: MediaDetailsOption::Endpoint(format!("/movie/{}", row.id)),
-                endpoint: MovieURL::from_string(format!("/stream/{}", row.file_id)),
-                file: media_file,
-                theme_color: row.theme_color,
-            };
-
+            let movie_ref = repository.load_movie_reference(row).await?;
             movies.push(movie_ref);
         }
 
@@ -2278,102 +2259,18 @@ impl MediaDatabaseTrait for PostgresDatabase {
         &self,
         status: &MediaProcessingStatus,
     ) -> Result<()> {
-        let error_details_json = status
-            .error_details
-            .as_ref()
-            .map(|d| serde_json::to_value(d))
-            .transpose()
-            .map_err(|e| {
-                MediaError::Internal(format!("Failed to serialize error details: {}", e))
-            })?;
-
-        sqlx::query!(
-            r#"
-            INSERT INTO media_processing_status (
-                media_file_id, metadata_extracted, metadata_extracted_at,
-                tmdb_matched, tmdb_matched_at, images_cached, images_cached_at,
-                file_analyzed, file_analyzed_at, last_error, error_details,
-                retry_count, next_retry_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            ON CONFLICT (media_file_id) DO UPDATE SET
-                metadata_extracted = EXCLUDED.metadata_extracted,
-                metadata_extracted_at = EXCLUDED.metadata_extracted_at,
-                tmdb_matched = EXCLUDED.tmdb_matched,
-                tmdb_matched_at = EXCLUDED.tmdb_matched_at,
-                images_cached = EXCLUDED.images_cached,
-                images_cached_at = EXCLUDED.images_cached_at,
-                file_analyzed = EXCLUDED.file_analyzed,
-                file_analyzed_at = EXCLUDED.file_analyzed_at,
-                last_error = EXCLUDED.last_error,
-                error_details = EXCLUDED.error_details,
-                retry_count = EXCLUDED.retry_count,
-                next_retry_at = EXCLUDED.next_retry_at,
-                updated_at = NOW()
-            "#,
-            status.media_file_id,
-            status.metadata_extracted,
-            status.metadata_extracted_at,
-            status.tmdb_matched,
-            status.tmdb_matched_at,
-            status.images_cached,
-            status.images_cached_at,
-            status.file_analyzed,
-            status.file_analyzed_at,
-            status.last_error,
-            error_details_json,
-            status.retry_count,
-            status.next_retry_at
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|e| {
-            MediaError::Internal(format!("Failed to create/update processing status: {}", e))
-        })?;
-
-        Ok(())
+        ProcessingStatusRepository::new(self)
+            .create_or_update(status)
+            .await
     }
 
     async fn get_processing_status(
         &self,
         media_file_id: Uuid,
     ) -> Result<Option<MediaProcessingStatus>> {
-        let row = sqlx::query!(
-            r#"
-            SELECT media_file_id, metadata_extracted, metadata_extracted_at,
-                   tmdb_matched, tmdb_matched_at, images_cached, images_cached_at,
-                   file_analyzed, file_analyzed_at, last_error, error_details,
-                   retry_count, next_retry_at, created_at, updated_at
-            FROM media_processing_status
-            WHERE media_file_id = $1
-            "#,
-            media_file_id
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get processing status: {}", e)))?;
-
-        if let Some(row) = row {
-            Ok(Some(MediaProcessingStatus {
-                media_file_id: row.media_file_id,
-                metadata_extracted: row.metadata_extracted,
-                metadata_extracted_at: row.metadata_extracted_at,
-                tmdb_matched: row.tmdb_matched,
-                tmdb_matched_at: row.tmdb_matched_at,
-                images_cached: row.images_cached,
-                images_cached_at: row.images_cached_at,
-                file_analyzed: row.file_analyzed,
-                file_analyzed_at: row.file_analyzed_at,
-                last_error: row.last_error,
-                error_details: row.error_details,
-                retry_count: row.retry_count,
-                next_retry_at: row.next_retry_at,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
-            }))
-        } else {
-            Ok(None)
-        }
+        ProcessingStatusRepository::new(self)
+            .get(media_file_id)
+            .await
     }
 
     async fn get_unprocessed_files(
@@ -2382,85 +2279,9 @@ impl MediaDatabaseTrait for PostgresDatabase {
         status_type: &str,
         limit: i32,
     ) -> Result<Vec<MediaFile>> {
-        // Build the query dynamically based on status type
-        let sql = match status_type {
-            "metadata" => {
-                r#"
-                SELECT f.id, f.library_id, f.file_path, f.filename, f.file_size,
-                       f.technical_metadata, f.parsed_info, f.created_at, f.updated_at
-                FROM media_files f
-                LEFT JOIN media_processing_status p ON f.id = p.media_file_id
-                WHERE f.library_id = $1 AND (p.metadata_extracted IS NULL OR p.metadata_extracted = false)
-                LIMIT $2
-            "#
-            }
-            "tmdb" => {
-                r#"
-                SELECT f.id, f.library_id, f.file_path, f.filename, f.file_size,
-                       f.technical_metadata, f.parsed_info, f.created_at, f.updated_at
-                FROM media_files f
-                LEFT JOIN media_processing_status p ON f.id = p.media_file_id
-                WHERE f.library_id = $1 AND (p.tmdb_matched IS NULL OR p.tmdb_matched = false)
-                LIMIT $2
-            "#
-            }
-            "images" => {
-                r#"
-                SELECT f.id, f.library_id, f.file_path, f.filename, f.file_size,
-                       f.technical_metadata, f.parsed_info, f.created_at, f.updated_at
-                FROM media_files f
-                LEFT JOIN media_processing_status p ON f.id = p.media_file_id
-                WHERE f.library_id = $1 AND (p.images_cached IS NULL OR p.images_cached = false)
-                LIMIT $2
-            "#
-            }
-            "analyze" => {
-                r#"
-                SELECT f.id, f.library_id, f.file_path, f.filename, f.file_size,
-                       f.technical_metadata, f.parsed_info, f.created_at, f.updated_at
-                FROM media_files f
-                LEFT JOIN media_processing_status p ON f.id = p.media_file_id
-                WHERE f.library_id = $1 AND (p.file_analyzed IS NULL OR p.file_analyzed = false)
-                LIMIT $2
-            "#
-            }
-            _ => {
-                return Err(MediaError::InvalidMedia(format!(
-                    "Unknown status type: {}",
-                    status_type
-                )));
-            }
-        };
-
-        let rows = sqlx::query(sql)
-            .bind(library_id.as_uuid())
-            .bind(limit as i64)
-            .fetch_all(&self.pool)
+        ProcessingStatusRepository::new(self)
+            .fetch_unprocessed(library_id, status_type, limit)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to get unprocessed files: {}", e)))?;
-
-        let mut files = Vec::new();
-        for row in rows {
-            let metadata: Option<MediaFileMetadata> = if let Some(meta_json) =
-                row.try_get::<Option<serde_json::Value>, _>("technical_metadata")?
-            {
-                serde_json::from_value(meta_json).ok()
-            } else {
-                None
-            };
-
-            files.push(MediaFile {
-                id: row.try_get("id")?,
-                library_id: LibraryID(row.try_get("library_id")?),
-                path: PathBuf::from(row.try_get::<String, _>("file_path")?),
-                filename: row.try_get("filename")?,
-                size: row.try_get::<i64, _>("file_size")? as u64,
-                created_at: row.try_get("created_at")?,
-                media_file_metadata: metadata,
-            });
-        }
-
-        Ok(files)
     }
 
     async fn get_failed_files(
@@ -2468,58 +2289,15 @@ impl MediaDatabaseTrait for PostgresDatabase {
         library_id: LibraryID,
         max_retries: i32,
     ) -> Result<Vec<MediaFile>> {
-        let rows = sqlx::query!(
-            r#"
-            SELECT f.id, f.library_id, f.file_path, f.filename, f.file_size,
-                   f.technical_metadata, f.parsed_info, f.created_at, f.updated_at
-            FROM media_files f
-            JOIN media_processing_status p ON f.id = p.media_file_id
-            WHERE f.library_id = $1
-              AND p.retry_count > 0
-              AND p.retry_count <= $2
-              AND (p.next_retry_at IS NULL OR p.next_retry_at <= NOW())
-            "#,
-            library_id.as_uuid(),
-            max_retries
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get failed files: {}", e)))?;
-
-        let mut files = Vec::new();
-        for row in rows {
-            let metadata = if let Some(meta_json) = row.technical_metadata {
-                serde_json::from_value(meta_json).ok()
-            } else {
-                None
-            };
-
-            files.push(MediaFile {
-                id: row.id,
-                library_id: LibraryID(row.library_id),
-                path: PathBuf::from(&row.file_path),
-                filename: row.filename,
-                size: row.file_size as u64,
-                created_at: row.created_at,
-                media_file_metadata: metadata,
-            });
-        }
-
-        Ok(files)
+        ProcessingStatusRepository::new(self)
+            .fetch_failed(library_id, max_retries)
+            .await
     }
 
     async fn reset_processing_status(&self, media_file_id: Uuid) -> Result<()> {
-        sqlx::query!(
-            r#"
-            DELETE FROM media_processing_status WHERE media_file_id = $1
-            "#,
-            media_file_id
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Failed to reset processing status: {}", e)))?;
-
-        Ok(())
+        ProcessingStatusRepository::new(self)
+            .reset(media_file_id)
+            .await
     }
 
     // File watch event methods
@@ -2635,7 +2413,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     // ==================== User Management Methods ====================
 
-    async fn create_user(&self, user: &crate::User) -> Result<()> {
+    async fn create_user(&self, _user: &crate::User) -> Result<()> {
         // The trait method doesn't include password_hash, so we can't create a user through this interface
         // Users should be created through the authentication system which has access to the password
         Err(MediaError::Internal(
@@ -3427,25 +3205,13 @@ impl MediaDatabaseTrait for PostgresDatabase {
                     self.get_library_episodes(&library_id)
                 );
                 if let Ok(series) = series_result {
-                    media.par_extend(
-                        series
-                            .into_par_iter()
-                            .map(|series_ref| Media::Series(series_ref)),
-                    );
+                    media.par_extend(series.into_par_iter().map(Media::Series));
                 }
                 if let Ok(seasons) = seasons_result {
-                    media.par_extend(
-                        seasons
-                            .into_par_iter()
-                            .map(|season_ref| Media::Season(season_ref)),
-                    );
+                    media.par_extend(seasons.into_par_iter().map(Media::Season));
                 }
                 if let Ok(episodes) = episodes_result {
-                    media.par_extend(
-                        episodes
-                            .into_par_iter()
-                            .map(|episode_ref| Media::Episode(episode_ref)),
-                    );
+                    media.par_extend(episodes.into_par_iter().map(Media::Episode));
                 }
             }
         }

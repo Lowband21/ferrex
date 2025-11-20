@@ -1,5 +1,4 @@
 use crate::{
-    LibraryID,
     api_types::{RatingValue, ScalarRange},
     watch_status::WatchStatusFilter,
 };

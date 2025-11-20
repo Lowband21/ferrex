@@ -53,6 +53,12 @@ pub struct AuthService {
     time_offset: Arc<RwLock<chrono::Duration>>,
 }
 
+impl Default for AuthService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthService {
     pub fn new() -> Self {
         Self {
@@ -472,7 +478,7 @@ impl AuthService {
             reg.user_id == user_id
                 && reg.device_name == device_id
                 && !reg.revoked
-                && reg.expires_at.map_or(true, |exp| exp > now) // Check expiry against virtual time
+                && reg.expires_at.is_none_or(|exp| exp > now) // Check expiry against virtual time
         })
     }
 
@@ -730,7 +736,7 @@ impl AuthService {
             .find(|a| a.user_id == user_id)
             .map(|a| {
                 // Check if account is locked and lockout hasn't expired
-                a.locked_until.map_or(false, |until| until > now)
+                a.locked_until.is_some_and(|until| until > now)
             })
             .unwrap_or(false)
     }

@@ -1,5 +1,6 @@
 use crate::common::ui_utils::{Icon, icon_text};
 use crate::domains::ui::views::grid::macros::parse_hex_color;
+use crate::domains::ui::widgets::AnimationType;
 use crate::infrastructure::api_types::{MediaDetailsOption, TmdbDetails};
 use crate::{
     domains::ui::components, domains::ui::messages::Message, domains::ui::theme,
@@ -7,8 +8,8 @@ use crate::{
 };
 
 use ferrex_core::{
-    ArchivedMediaDetailsOption, ArchivedTmdbDetails, ImageSize, ImageType, MediaFile, MediaIDLike,
-    MovieID, Priority,
+    ArchivedMediaDetailsOption, ArchivedTmdbDetails, ImageSize, ImageType, MediaIDLike, MovieID,
+    Priority,
 };
 use iced::{
     Element, Length,
@@ -49,23 +50,20 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 .background_shader_state
                 .calculate_content_offset_with_height(window_width, window_height);
             content = content.push(Space::with_height(Length::Fixed(content_offset)));
-            let poster_element = image_for(media_id.to_uuid())
+
+            let mut poster_element = image_for(media_id.to_uuid())
                 .size(ImageSize::Full)
                 .image_type(ImageType::Movie)
                 .width(Length::Fixed(300.0))
                 .height(Length::Fixed(450.0))
-                .priority(Priority::Visible);
+                .priority(Priority::Visible)
+                .animation(AnimationType::flip());
 
-            let poster_element: Element<Message> = if let Some(hex_color) = theme_color {
-                if let Ok(color) = parse_hex_color(&hex_color) {
-                    // Content row with poster using unified image system
-                    poster_element.theme_color(color).into()
-                } else {
-                    poster_element.into()
-                }
-            } else {
-                poster_element.into()
-            };
+            if let Some(hex) = theme_color
+                && let Ok(color) = parse_hex_color(&hex)
+            {
+                poster_element = poster_element.theme_color(color);
+            }
 
             // Details column
             let mut details = column![]
@@ -90,7 +88,7 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 {
                     log::debug!(
                         "[MovieDetail] Movie '{}' has full TMDB details with overview",
-                        movie.title.to_string()
+                        movie.title
                     );
                     Some(movie_details)
                 } else {
@@ -98,14 +96,14 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                         ArchivedMediaDetailsOption::Endpoint(endpoint) => {
                             log::warn!(
                                 "[MovieDetail] Movie '{}' only has Endpoint: {}, NOT Details!",
-                                movie.title.to_string(),
+                                movie.title,
                                 endpoint
                             );
                         }
                         _ => {
                             log::warn!(
                                 "[MovieDetail] Movie '{}' has unexpected details variant",
-                                movie.title.to_string()
+                                movie.title
                             );
                         }
                     }
@@ -134,12 +132,11 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
             let mut info_parts = vec![];
 
             // Year
-            if let Some(ref movie_details) = movie_details_opt {
-                if let Some(release_date) = &movie_details.release_date {
-                    if let Some(year) = release_date.split('-').next() {
-                        info_parts.push(year.to_string());
-                    }
-                }
+            if let Some(ref movie_details) = movie_details_opt
+                && let Some(release_date) = &movie_details.release_date
+                && let Some(year) = release_date.split('-').next()
+            {
+                info_parts.push(year.to_string());
             }
 
             // Duration - prefer TMDB runtime over file metadata
@@ -153,16 +150,16 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                         info_parts.push(format!("{}m", minutes));
                     }
                 }
-            } else if let ArchivedOption::Some(metadata) = &movie.file.media_file_metadata {
-                if let ArchivedOption::Some(duration) = metadata.duration {
-                    // TODO: Is to_native necessary here?
-                    let hours = (duration.to_native() / 3600.0) as u32;
-                    let minutes = ((duration.to_native() % 3600.0) / 60.0) as u32;
-                    if hours > 0 {
-                        info_parts.push(format!("{}h {}m", hours, minutes));
-                    } else {
-                        info_parts.push(format!("{}m", minutes));
-                    }
+            } else if let ArchivedOption::Some(metadata) = &movie.file.media_file_metadata
+                && let ArchivedOption::Some(duration) = metadata.duration
+            {
+                // TODO: Is to_native necessary here?
+                let hours = (duration.to_native() / 3600.0) as u32;
+                let minutes = ((duration.to_native() % 3600.0) / 60.0) as u32;
+                if hours > 0 {
+                    info_parts.push(format!("{}h {}m", hours, minutes));
+                } else {
+                    info_parts.push(format!("{}m", minutes));
                 }
             }
 
@@ -282,18 +279,18 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 let mut tech_row = row![Space::with_width(20)].spacing(8); // Start padding and tighter spacing
 
                 // Resolution
-                if let ArchivedOption::Some(width) = metadata.width {
-                    if let ArchivedOption::Some(height) = metadata.height {
-                        let resolution_card = container(
-                            text(format!("{}×{}", width, height))
-                                .size(14)
-                                .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                        )
-                        .padding(10)
-                        .style(theme::Container::TechDetail.style());
+                if let ArchivedOption::Some(width) = metadata.width
+                    && let ArchivedOption::Some(height) = metadata.height
+                {
+                    let resolution_card = container(
+                        text(format!("{}×{}", width, height))
+                            .size(14)
+                            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                    )
+                    .padding(10)
+                    .style(theme::Container::TechDetail.style());
 
-                        tech_row = tech_row.push(resolution_card);
-                    }
+                    tech_row = tech_row.push(resolution_card);
                 }
 
                 // Video codec

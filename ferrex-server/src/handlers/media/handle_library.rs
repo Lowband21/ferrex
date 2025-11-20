@@ -6,11 +6,8 @@ use axum::{
 };
 use ferrex_core::LibraryActorConfig;
 use ferrex_core::LibraryType;
-use ferrex_core::ManualMatchRequest;
 use ferrex_core::Media;
 use ferrex_core::MediaDetailsOption;
-use ferrex_core::MediaEvent;
-use ferrex_core::MediaIDLike;
 use ferrex_core::indices::IndexManager;
 use ferrex_core::query::{
     filtering::hash_filter_spec,
@@ -19,7 +16,7 @@ use ferrex_core::query::{
 use ferrex_core::user::User;
 use ferrex_core::{
     ApiResponse, CreateLibraryRequest, FetchMediaRequest, Library, LibraryID, LibraryMediaResponse,
-    LibraryReference, MediaID, UpdateLibraryRequest, database::traits::MediaFilters,
+    LibraryReference, MediaID, UpdateLibraryRequest,
 };
 use ferrex_core::{FilterIndicesRequest, IndicesResponse};
 use rkyv::rancor::Error as RkyvError;
@@ -27,7 +24,6 @@ use serde::Deserialize;
 use sqlx::Row;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 use uuid::Uuid;

@@ -6,6 +6,7 @@
 
 pub mod actors;
 pub mod budget;
+pub mod classification;
 pub mod config;
 pub mod correlation;
 pub mod dispatcher;
@@ -17,9 +18,11 @@ pub mod queue;
 pub mod runtime;
 pub mod scan_cursor;
 pub mod scheduler;
+pub mod series;
 
 pub use actors::*;
 pub use budget::*;
+pub use classification::*;
 pub use config::*;
 pub use correlation::*;
 pub use dispatcher::*;
@@ -31,3 +34,4 @@ pub use queue::*;
 pub use runtime::*;
 pub use scan_cursor::*;
 pub use scheduler::*;
+pub use series::*;

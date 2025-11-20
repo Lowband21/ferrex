@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tokio::fs;
 use uuid::Uuid;
 
+#[derive(Debug)]
 pub struct ThumbnailService {
     cache_dir: PathBuf,
     db: Arc<MediaDatabase>,

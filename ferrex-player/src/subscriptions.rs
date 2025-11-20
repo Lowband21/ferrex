@@ -21,7 +21,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     ))]
     profiling::scope!("Subscription::Composition");
 
-    let mut subscriptions = vec![
+    let subscriptions = vec![
         // Auth domain subscriptions
         crate::domains::auth::messages::subscriptions::subscription(state),
         // Player domain subscriptions

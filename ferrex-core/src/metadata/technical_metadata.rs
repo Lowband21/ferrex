@@ -148,10 +148,10 @@ impl TechnicalMetadataExtractor {
         }
 
         // Extract metadata from the best audio stream
-        if let Some(audio) = best_audio_stream {
-            if let Some(codec) = audio.codec() {
-                technical.audio_codec = Some(codec.name().to_string());
-            }
+        if let Some(audio) = best_audio_stream
+            && let Some(codec) = audio.codec()
+        {
+            technical.audio_codec = Some(codec.name().to_string());
         }
 
         debug!("Technical metadata extracted: {:?}", technical);

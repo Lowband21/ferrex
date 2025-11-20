@@ -2,6 +2,7 @@ use crate::{
     LibraryID, MediaDetailsOption, MovieID, MovieReference, MovieTitle, MovieURL, SeriesID,
     SeriesReference, SeriesTitle, SeriesURL,
 };
+use std::collections::HashSet;
 use std::fmt;
 
 #[derive(Debug, thiserror::Error)]
@@ -50,7 +51,6 @@ use tmdb_api::{
         details::TVShowDetails,
         episode::details::TVShowEpisodeDetails,
         images::{TVShowImages, TVShowImagesResult},
-        keywords::{TVShowKeywords, TVShowKeywordsResult},
         popular::TVShowPopular,
         search::TVShowSearch,
         season::details::TVShowSeasonDetails,
@@ -121,6 +121,12 @@ impl fmt::Debug for TmdbApiProvider {
     }
 }
 
+impl Default for TmdbApiProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TmdbApiProvider {
     pub fn new() -> Self {
         let api_key = std::env::var("TMDB_API_KEY").unwrap_or_else(|_| String::new());
@@ -178,7 +184,7 @@ impl TmdbApiProvider {
             .map(|r| MovieReference {
                 id: MovieID::new_uuid(),
                 library_id: LibraryID(uuid::Uuid::nil()), // Search results aren't tied to a library yet
-                tmdb_id: r.inner.id as u64,
+                tmdb_id: r.inner.id,
                 title: MovieTitle::new(r.inner.title).unwrap(),
                 details: MediaDetailsOption::Endpoint(format!("/movie/{}", r.inner.id)),
                 endpoint: MovieURL::from(format!("/stream/movie/{}", r.inner.id)),
@@ -189,27 +195,75 @@ impl TmdbApiProvider {
     }
 
     /// Search for TV series and return lightweight references
-    pub async fn search_series(&self, query: &str) -> Result<Vec<SeriesReference>, ProviderError> {
-        let search_cmd = TVShowSearch::new(query.to_string());
+    pub async fn search_series(
+        &self,
+        query: &str,
+        year: Option<u16>,
+        region: Option<&str>,
+    ) -> Result<Vec<SeriesReference>, ProviderError> {
+        let mut search_cmd = TVShowSearch::new(query.to_string());
+        if year.is_some() {
+            search_cmd = search_cmd.with_first_air_date_year(year);
+        }
+
         let results = search_cmd
             .execute(&self.client)
             .await
             .map_err(|e| ProviderError::ApiError(e.to_string()))?;
 
-        Ok(results
-            .results
-            .into_iter()
-            .map(|r| SeriesReference {
+        let mut prioritized = Vec::new();
+        let mut others = Vec::new();
+        let mut seen = HashSet::new();
+        let region = region.map(|raw| raw.trim().to_ascii_uppercase());
+
+        for item in results.results {
+            if !seen.insert(item.inner.id) {
+                continue;
+            }
+
+            let title = SeriesTitle::new(item.inner.name.clone())
+                .map_err(|e| ProviderError::ParseError(e.to_string()))?;
+
+            let reference = SeriesReference {
                 id: SeriesID::new_uuid(),
-                library_id: LibraryID(uuid::Uuid::nil()), // Search results aren't tied to a library yet
-                tmdb_id: r.inner.id as u64,
-                title: SeriesTitle::new(r.inner.name).unwrap(),
-                details: MediaDetailsOption::Endpoint(format!("/series/{}", r.inner.id)),
-                endpoint: SeriesURL::from_string(format!("/series/{}", r.inner.id)),
-                created_at: chrono::Utc::now(), // New results use current time
+                library_id: LibraryID(uuid::Uuid::nil()),
+                tmdb_id: item.inner.id,
+                title,
+                details: MediaDetailsOption::Endpoint(format!("/series/{}", item.inner.id)),
+                endpoint: SeriesURL::from_string(format!("/series/{}", item.inner.id)),
+                created_at: chrono::Utc::now(),
                 theme_color: None,
-            })
-            .collect())
+            };
+
+            let mut origin_countries = item
+                .inner
+                .origin_country
+                .iter()
+                .map(|country| country.trim().to_ascii_uppercase())
+                .filter(|country| !country.is_empty())
+                .collect::<Vec<_>>();
+
+            origin_countries.sort();
+            origin_countries.dedup();
+
+            let matches_region = region
+                .as_ref()
+                .map(|target| origin_countries.iter().any(|c| c == target))
+                .unwrap_or(false);
+
+            if matches_region {
+                prioritized.push(reference);
+            } else {
+                others.push(reference);
+            }
+        }
+
+        if prioritized.is_empty() {
+            Ok(others)
+        } else {
+            prioritized.extend(others);
+            Ok(prioritized)
+        }
     }
 
     /// Get full movie details - returns TMDB type directly

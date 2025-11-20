@@ -110,9 +110,7 @@ impl RoundedImageBatchState {
         if cached {
             // Check AnimationType not None
             if instance.scale_shadow_glow_type[3] as u32 != 0 {
-                if !self.loaded_times.contains_key(&id) {
-                    self.loaded_times.insert(id, Instant::now());
-                }
+                self.loaded_times.entry(id).or_insert_with(Instant::now);
             }
         }
 

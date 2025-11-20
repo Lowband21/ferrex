@@ -11,8 +11,7 @@ use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use ferrex_core::LibraryID;
 use iced::Task;
-use std::sync::{Arc, RwLock as StdRwLock};
-use uuid::Uuid;
+use std::sync::Arc;
 
 use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
 

@@ -127,6 +127,14 @@ pub enum AuthTransitionError {
 }
 
 // Initial state constructor
+impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64> Default
+    for AuthStateMachine<Unauthenticated, MAX_ATTEMPTS, TIMEOUT_SECS>
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     AuthStateMachine<Unauthenticated, MAX_ATTEMPTS, TIMEOUT_SECS>
 {
@@ -232,7 +240,7 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
 
     /// Attempt password authentication
     pub fn verify_password(
-        mut self,
+        self,
         user: User,
         token: AuthToken,
         permissions: UserPermissions,

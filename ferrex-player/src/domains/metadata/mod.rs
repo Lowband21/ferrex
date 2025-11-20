@@ -11,15 +11,11 @@ pub mod update_handlers;
 use self::image_service::UnifiedImageService;
 use self::messages::Message as MetadataMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::infrastructure::{adapters::api_client_adapter::ApiClientAdapter, api_types::Media};
-use ferrex_core::ImageRequest;
-use ferrex_core::MediaID;
-use ferrex_core::permissions::SERVER_MANAGE_TASKS;
+use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use iced::Task;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, RwLock as StdRwLock};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use uuid::Uuid;
 
 /// Metadata domain state - moved from monolithic State
 #[derive(Debug)]

@@ -1,6 +1,7 @@
 use crate::domains::ui::components;
 use crate::domains::ui::views::grid::macros::parse_hex_color;
 use crate::{
+    common::ui_utils::{icon_text, lucide_font},
     domains::ui::{
         messages::Message, theme, views::grid::macros::ThemeColorAccess,
         widgets::image_for::image_for,
@@ -9,23 +10,14 @@ use crate::{
     state_refactored::State,
 };
 use ferrex_core::{
-    ArchivedMediaDetailsOption, EpisodeID, EpisodeLike, ImageSize, ImageType, MediaID, MediaIDLike,
-    Priority, SeasonID, SeasonLike, SeriesDetailsLike, SeriesID, SeriesLike,
+    EpisodeID, EpisodeLike, ImageSize, ImageType, MediaID, MediaIDLike, Priority, SeasonID,
+    SeasonLike, SeriesDetailsLike, SeriesID, SeriesLike,
 };
 use iced::{
     Element, Length,
     widget::{Space, Stack, column, container, row, text},
 };
 use lucide_icons::Icon;
-
-// Helper functions for icons
-fn icon_text(icon: Icon) -> text::Text<'static> {
-    text(icon.unicode()).font(lucide_font()).size(20)
-}
-
-fn lucide_font() -> iced::Font {
-    iced::Font::with_name("lucide")
-}
 
 #[cfg_attr(
     any(
@@ -112,14 +104,6 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
         .calculate_content_offset_with_height(window_width, window_height);
     content = content.push(Space::with_height(Length::Fixed(content_offset)));
 
-    let poster_element: Element<Message> = image_for(media_id.to_uuid())
-        .size(ImageSize::Full)
-        .image_type(ImageType::Series)
-        .width(Length::Fixed(300.0))
-        .height(Length::Fixed(450.0))
-        .priority(Priority::Visible)
-        .into();
-
     // Details column
     let mut details = column![].spacing(15).padding(20).width(Length::Fill);
 
@@ -137,10 +121,11 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
         .width(Length::Fixed(300.0))
         .height(Length::Fixed(450.0))
         .priority(Priority::Visible);
-    if let Some(hex) = series.theme_color() {
-        if let Ok(color) = parse_hex_color(hex) {
-            poster = poster.theme_color(color);
-        }
+
+    if let Some(hex) = series.theme_color()
+        && let Ok(color) = parse_hex_color(hex)
+    {
+        poster = poster.theme_color(color);
     }
     let poster_element: Element<Message> = poster.into();
 
@@ -184,7 +169,7 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
                 series_details.number_of_episodes.as_ref(),
             )
         } else {
-            log::warn!("Series {} has no TMDB details", series.title.to_string());
+            log::warn!("Series {} has no TMDB details", series.title);
             (None, None, None, None)
         };
 
@@ -413,14 +398,14 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
     }
 
     // Genres
-    if let Some(ref series_details) = series_details {
-        if !series_details.genres().is_empty() {
-            details = details.push(
-                text(format!("Genres: {}", series_details.genres().join(", ")))
-                    .size(14)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            );
-        }
+    if let Some(series_details) = series_details
+        && !series_details.genres().is_empty()
+    {
+        details = details.push(
+            text(format!("Genres: {}", series_details.genres().join(", ")))
+                .size(14)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        );
     }
 
     // Content row with poster and details
@@ -601,10 +586,10 @@ pub fn view_season_detail<'a>(
         .width(Length::Fixed(300.0))
         .height(Length::Fixed(450.0))
         .priority(Priority::Visible);
-    if let Some(hex) = season.theme_color() {
-        if let Ok(color) = parse_hex_color(hex) {
-            poster = poster.theme_color(color);
-        }
+    if let Some(hex) = season.theme_color()
+        && let Ok(color) = parse_hex_color(hex)
+    {
+        poster = poster.theme_color(color);
     }
     let poster_element: Element<Message> = poster.into();
 
@@ -632,19 +617,19 @@ pub fn view_season_detail<'a>(
     );
 
     // Overview
-    if let Some(season_details) = season.details() {
-        if let Some(desc) = season_details.overview.as_ref() {
-            details = details.push(Space::with_height(10));
-            details = details.push(
-                container(
-                    text(desc.to_string())
-                        .size(14)
-                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                )
-                .width(Length::Fill)
-                .padding(10),
-            );
-        }
+    if let Some(season_details) = season.details()
+        && let Some(desc) = season_details.overview.as_ref()
+    {
+        details = details.push(Space::with_height(10));
+        details = details.push(
+            container(
+                text(desc.to_string())
+                    .size(14)
+                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            )
+            .width(Length::Fill)
+            .padding(10),
+        );
     }
 
     // Content row with poster and details
@@ -679,7 +664,7 @@ pub fn view_season_detail<'a>(
                         let subtitle_str = e
                             .details()
                             .map(|d| d.name.as_str())
-                            .unwrap(); // TODO: unwrap
+                            .unwrap_or("Episode title unavailable");
 
                         media_card! {
                             type: Episode,

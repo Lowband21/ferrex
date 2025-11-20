@@ -6,7 +6,7 @@
 use crate::infrastructure::repository::RepositoryResult;
 use async_trait::async_trait;
 use ferrex_core::{EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, SeasonDetails};
-use ferrex_core::{EpisodeReference, MovieReference, SeasonReference, SeriesReference};
+use ferrex_core::{MovieReference, SeriesReference};
 
 /// Search result from metadata provider
 #[derive(Debug, Clone)]

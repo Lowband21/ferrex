@@ -2,12 +2,11 @@ use rkyv::{deserialize, option::ArchivedOption, rancor::Error};
 
 use crate::{
     ArchivedEnhancedMovieDetails, ArchivedEnhancedSeriesDetails, ArchivedEpisodeDetails,
-    ArchivedEpisodeReference, ArchivedMediaDetailsOption, ArchivedMediaFile,
-    ArchivedMovieReference, ArchivedSeasonDetails, ArchivedSeasonReference,
-    ArchivedSeriesReference, ArchivedTmdbDetails, EnhancedMovieDetails, EnhancedSeriesDetails,
-    EpisodeDetails, EpisodeReference, MediaDetails, MediaDetailsOption, MediaFile, MediaOps,
-    MovieReference, SeasonDetails, SeasonDetailsLike, SeasonReference, SeriesDetailsLike,
-    SeriesReference, TmdbDetails,
+    ArchivedEpisodeReference, ArchivedMediaDetailsOption, ArchivedMovieReference,
+    ArchivedSeasonDetails, ArchivedSeasonReference, ArchivedSeriesReference, ArchivedTmdbDetails,
+    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeReference, MediaDetails,
+    MediaDetailsOption, MediaFile, MediaOps, MovieReference, SeasonDetails, SeasonDetailsLike,
+    SeasonReference, SeriesDetailsLike, SeriesReference, TmdbDetails,
 };
 
 pub trait MovieLike: MediaOps {
@@ -50,7 +49,7 @@ impl MovieLike for MovieReference {
     fn details(&self) -> Option<&EnhancedMovieDetails> {
         if let MediaDetailsOption::Details(details) = &self.details {
             match details {
-                TmdbDetails::Movie(enhanced_movie_details) => Some(&enhanced_movie_details),
+                TmdbDetails::Movie(enhanced_movie_details) => Some(enhanced_movie_details),
                 _ => None,
             }
         } else {
@@ -86,7 +85,7 @@ impl MovieLike for ArchivedMovieReference {
     fn details(&self) -> Option<&ArchivedEnhancedMovieDetails> {
         if let ArchivedMediaDetailsOption::Details(details) = &self.details {
             match details {
-                ArchivedTmdbDetails::Movie(enhanced_movie_details) => Some(&enhanced_movie_details),
+                ArchivedTmdbDetails::Movie(enhanced_movie_details) => Some(enhanced_movie_details),
                 _ => None,
             }
         } else {
@@ -143,7 +142,7 @@ impl SeriesLike for ArchivedSeriesReference {
     fn details(&self) -> Option<&ArchivedEnhancedSeriesDetails> {
         if let ArchivedMediaDetailsOption::Details(details) = &self.details {
             match details {
-                ArchivedTmdbDetails::Series(series_details) => Some(&series_details),
+                ArchivedTmdbDetails::Series(series_details) => Some(series_details),
                 _ => None,
             }
         } else {
@@ -174,7 +173,7 @@ impl SeasonLike for SeasonReference {
     fn details(&self) -> Option<&SeasonDetails> {
         if let MediaDetailsOption::Details(details) = &self.details {
             match details {
-                TmdbDetails::Season(season_details) => Some(&season_details),
+                TmdbDetails::Season(season_details) => Some(season_details),
                 _ => None,
             }
         } else {
@@ -190,7 +189,7 @@ impl SeasonLike for ArchivedSeasonReference {
     fn details(&self) -> Option<&ArchivedSeasonDetails> {
         if let ArchivedMediaDetailsOption::Details(details) = &self.details {
             match details {
-                ArchivedTmdbDetails::Season(season_details) => Some(&season_details),
+                ArchivedTmdbDetails::Season(season_details) => Some(season_details),
                 _ => None,
             }
         } else {
@@ -219,7 +218,7 @@ impl EpisodeLike for EpisodeReference {
     fn details(&self) -> Option<&EpisodeDetails> {
         if let MediaDetailsOption::Details(details) = &self.details {
             match details {
-                TmdbDetails::Episode(episode_details) => Some(&episode_details),
+                TmdbDetails::Episode(episode_details) => Some(episode_details),
                 _ => None,
             }
         } else {
@@ -239,7 +238,7 @@ impl EpisodeLike for ArchivedEpisodeReference {
     fn details(&self) -> Option<&ArchivedEpisodeDetails> {
         if let ArchivedMediaDetailsOption::Details(details) = &self.details {
             match details {
-                ArchivedTmdbDetails::Episode(episode_details) => Some(&episode_details),
+                ArchivedTmdbDetails::Episode(episode_details) => Some(episode_details),
                 _ => None,
             }
         } else {

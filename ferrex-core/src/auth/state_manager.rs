@@ -199,7 +199,7 @@ impl AuthStateManager {
 
         // Extract state info for broadcasting
         let state_type = std::any::type_name::<S>().to_string();
-        let user_id = self.extract_user_id::<S>(&states, device_id);
+        let user_id = self.extract_user_id(&states, device_id);
 
         // Send persistence command
         let _ = self
@@ -313,7 +313,7 @@ impl AuthStateManager {
     }
 
     /// Extract user ID from state (helper)
-    fn extract_user_id<S: AuthState>(
+    fn extract_user_id(
         &self,
         states: &HashMap<Uuid, BoxedStateMachine>,
         device_id: Uuid,
@@ -335,7 +335,7 @@ async fn persist_batch(
         let states_guard = states.read().unwrap();
 
         let mut result = Vec::new();
-        for (device_id, _) in pending {
+        for device_id in pending.keys() {
             if let Some(state) = states_guard.get(device_id) {
                 let serialized = serialize_state_machine(state.as_ref())?;
                 result.push((*device_id, serde_json::to_value(&serialized)?));
@@ -381,7 +381,7 @@ fn cleanup_expired_states(
     states: &Arc<RwLock<HashMap<Uuid, BoxedStateMachine>>>,
     expiry_duration: Duration,
 ) {
-    let mut states_guard = states.write().unwrap();
+    let states_guard = states.write().unwrap();
     let now = Instant::now();
 
     // This would need access to timestamps in the state machines

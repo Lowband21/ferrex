@@ -19,7 +19,6 @@ use crate::domains::ui::tabs::{TabId, TabManager};
 use crate::domains::ui::types::DisplayMode;
 use crate::domains::ui::views::carousel::CarouselState;
 use crate::domains::ui::widgets::AnimationType;
-use crate::domains::ui::yoke_cache::YokeCache;
 use crate::domains::user_management::UserManagementDomainState;
 use crate::infrastructure::ServiceBuilder;
 use crate::infrastructure::adapters::ApiClientAdapter;

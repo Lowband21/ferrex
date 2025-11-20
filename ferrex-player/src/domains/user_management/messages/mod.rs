@@ -1,4 +1,4 @@
-use ferrex_core::{rbac::UserPermissions, user::User};
+use ferrex_core::user::User;
 use uuid::Uuid;
 
 #[derive(Clone)]

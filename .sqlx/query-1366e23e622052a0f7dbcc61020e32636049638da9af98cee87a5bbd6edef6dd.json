@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO media_images (media_type, media_id, image_id, image_type, order_index, is_primary)\n            VALUES ($1, $2, $3, $4, $5, $6)\n            ON CONFLICT (media_type, media_id, image_type, order_index) DO UPDATE SET\n                image_id = EXCLUDED.image_id,\n                is_primary = EXCLUDED.is_primary\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Int4",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1366e23e622052a0f7dbcc61020e32636049638da9af98cee87a5bbd6edef6dd"
+}

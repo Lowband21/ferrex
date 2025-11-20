@@ -4,11 +4,13 @@ use crate::infrastructure::{
     api_types::{Media, MediaID},
     services::api::ApiService,
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use ferrex_core::api_routes::v1;
 use ferrex_core::{MediaEvent, MediaIDLike, MediaSseEventType};
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 use iced::Subscription;
+use rkyv::{from_bytes, rancor::Error as RkyvError};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -56,12 +58,7 @@ fn build_media_subscription_stream(id: &MediaEventsId) -> BoxStream<'static, Mes
     let api = Arc::clone(&id.api);
     Box::pin(stream::unfold(
         MediaEventState::new(server_url.to_owned(), api),
-        |mut state| async move {
-            match state.next_event().await {
-                Some(message) => Some((message, state)),
-                None => None,
-            }
-        },
+        |mut state| async move { state.next_event().await.map(|message| (message, state)) },
     ))
 }
 
@@ -214,27 +211,8 @@ impl MediaEventState {
             return None;
         }
 
-        match MediaSseEventType::from_str(msg.event.as_str()) {
-            Ok(event_type) => {
-                log::debug!(
-                    "Received media event '{}' with data: {}",
-                    event_type.event_name(),
-                    msg.data
-                );
-
-                match serde_json::from_str::<MediaEvent>(&msg.data) {
-                    Ok(event) => self.convert_media_event(event),
-                    Err(e) => {
-                        log::error!(
-                            "Failed to parse media event: {} - Data: {}",
-                            e,
-                            msg.data
-                        );
-                        // Continue listening for valid messages
-                        None
-                    }
-                }
-            }
+        let declared_event = match MediaSseEventType::from_str(msg.event.as_str()) {
+            Ok(event_type) => event_type,
             Err(err) => {
                 log::debug!(
                     "Unknown media event type: {} with data: {} ({})",
@@ -242,6 +220,30 @@ impl MediaEventState {
                     msg.data,
                     err
                 );
+                return None;
+            }
+        };
+
+        log::debug!(
+            "Received media event '{}' with payload of {} bytes",
+            declared_event.event_name(),
+            msg.data.len()
+        );
+
+        match decode_media_event(&msg.data) {
+            Ok(event) => {
+                let actual_type = event.sse_event_type();
+                if actual_type != declared_event {
+                    log::warn!(
+                        "Media event type mismatch: declared {:?}, payload {:?}",
+                        declared_event,
+                        actual_type
+                    );
+                }
+                self.convert_media_event(event)
+            }
+            Err(err) => {
+                log::error!("Failed to decode media event {}: {}", msg.event, err);
                 None
             }
         }
@@ -349,6 +351,60 @@ impl MediaEventState {
                 None
             }
         }
+    }
+}
+
+fn decode_media_event(payload: &str) -> Result<MediaEvent, String> {
+    if payload.trim().is_empty() {
+        return Err("empty payload".to_string());
+    }
+
+    if let Ok(bytes) = BASE64_STANDARD.decode(payload.as_bytes()) {
+        match from_bytes::<MediaEvent, RkyvError>(&bytes) {
+            Ok(event) => return Ok(event),
+            Err(err) => {
+                log::warn!(
+                    "Failed to decode media event from rkyv bytes: {}. Falling back to JSON",
+                    err
+                );
+            }
+        }
+    }
+
+    serde_json::from_str::<MediaEvent>(payload).map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+    use ferrex_core::{MediaID, MovieID};
+    use rkyv::rancor::Error as RkyvError;
+    use rkyv::to_bytes;
+
+    fn sample_event() -> MediaEvent {
+        MediaEvent::MediaDeleted {
+            id: MediaID::Movie(MovieID::new()),
+        }
+    }
+
+    #[test]
+    fn decode_media_event_rkyv_roundtrip() {
+        let event = sample_event();
+        let bytes = to_bytes::<RkyvError>(&event).expect("serialize rkyv");
+        let encoded = BASE64_STANDARD.encode(bytes.as_slice());
+
+        let decoded = decode_media_event(&encoded).expect("decode rkyv");
+        assert_eq!(decoded, event);
+    }
+
+    #[test]
+    fn decode_media_event_json_fallback() {
+        let event = sample_event();
+        let json = serde_json::to_string(&event).expect("json encode");
+
+        let decoded = decode_media_event(&json).expect("decode json");
+        assert_eq!(decoded, event);
     }
 }
 

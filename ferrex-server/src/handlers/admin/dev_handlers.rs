@@ -313,32 +313,32 @@ pub async fn seed_database(
     }
 
     // Create test library
-    if request.create_library {
-        if let Some(path) = request.library_path {
-            let library = Library {
-                id: LibraryID::new(),
-                name: "Test Library".to_string(),
-                library_type: LibraryType::Movies,
-                paths: vec![PathBuf::from(path.clone())],
-                scan_interval_minutes: 60,
-                last_scan: None,
-                enabled: true,
-                auto_scan: true,
-                watch_for_changes: false,
-                analyze_on_scan: true,
-                max_retry_attempts: 3,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-                media: None,
-            };
+    if request.create_library
+        && let Some(path) = request.library_path
+    {
+        let library = Library {
+            id: LibraryID::new(),
+            name: "Test Library".to_string(),
+            library_type: LibraryType::Movies,
+            paths: vec![PathBuf::from(path.clone())],
+            scan_interval_minutes: 60,
+            last_scan: None,
+            enabled: true,
+            auto_scan: true,
+            watch_for_changes: false,
+            analyze_on_scan: true,
+            max_retry_attempts: 3,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            media: None,
+        };
 
-            match state.db.backend().create_library(library).await {
-                Ok(_) => {
-                    result.libraries_created = 1;
-                    info!("Created test library at path: {}", path);
-                }
-                Err(e) => warn!("Failed to create test library: {}", e),
+        match state.db.backend().create_library(library).await {
+            Ok(_) => {
+                result.libraries_created = 1;
+                info!("Created test library at path: {}", path);
             }
+            Err(e) => warn!("Failed to create test library: {}", e),
         }
     }
 

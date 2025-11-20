@@ -5,10 +5,11 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use ferrex_core::database::traits::ImageLookupParams;
+use ferrex_core::{TmdbImageSize, database::traits::ImageLookupParams};
 use httpdate::{fmt_http_date, parse_http_date};
 use serde::Deserialize;
-use std::path::{Path as FsPath, PathBuf};
+use std::io::ErrorKind;
+use std::path::{Component, Path as FsPath, PathBuf};
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Deserialize)]
@@ -33,14 +34,15 @@ pub async fn serve_image_handler(
     headers: HeaderMap,
 ) -> impl IntoResponse {
     info!(
-        "Image request: type={}, id={}, category={}, index={}, size={:?}, w={:?}, fmt={:?}",
+        "Image request: type={}, id={}, category={}, index={}, size={:?}, w={:?}, fmt={:?}, quality={:?}",
         media_type,
         media_id,
         category,
         index,
         query.size,
         query.w.or(query.max_width),
-        query.fmt
+        query.fmt,
+        query.quality
     );
 
     // Validate media type
@@ -55,40 +57,60 @@ pub async fn serve_image_handler(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // Determine desired variant name (TMDB size) from w/maxWidth or legacy size
-    let requested_w = query.w.or(query.max_width);
-    let desired_variant = if let Some(w) = requested_w {
-        Some(map_width_to_tmdb_variant(&category, w).to_string())
-    } else {
-        query.size.clone().or_else(|| Some("w500".to_string()))
-    };
+    let plan = determine_variant_plan(&category, &query);
+    debug!("Variant plan: {:?}", plan);
+    let requested_header_value = plan
+        .requested_header
+        .clone()
+        .or_else(|| plan.lookup_variant.clone())
+        .unwrap_or_else(|| "auto".to_string());
 
-    // Create lookup parameters (using desired variant string)
     let params = ImageLookupParams {
         media_type: media_type.clone(),
         media_id: media_id.clone(),
         image_type: category.clone(),
         index,
-        variant: desired_variant.clone(),
+        variant: plan.lookup_variant.clone(),
     };
 
-    // Try to ensure the desired variant asynchronously
-    let ready_path = match state.image_service.ensure_variant_async(&params).await {
-        Ok(p) => p,
-        Err(e) => {
-            error!("ensure_variant_async failed: {}", e);
-            None
+    let mut ready_path: Option<PathBuf> = None;
+    let mut served_variant: Option<String> = None;
+
+    for variant in plan.ensure_variants.iter() {
+        let mut attempt_params = params.clone();
+        attempt_params.variant = Some(variant.clone());
+        match state
+            .image_service
+            .ensure_variant_async(&attempt_params)
+            .await
+        {
+            Ok(Some(path)) => {
+                ready_path = Some(path);
+                served_variant = Some(variant.clone());
+                break;
+            }
+            Ok(None) => continue,
+            Err(e) => {
+                error!("ensure_variant_async failed for variant {}: {}", variant, e);
+            }
         }
-    };
+    }
 
-    // If ready, stream it; else fall back to best available
-    let (image_path, served_variant) = if let Some(path) = ready_path {
+    let (mut image_path, served_variant) = if let Some(path) = ready_path {
         (
             path,
-            params.variant.clone().unwrap_or_else(|| "w500".to_string()),
+            served_variant.unwrap_or_else(|| {
+                plan.lookup_variant
+                    .clone()
+                    .unwrap_or_else(|| "w500".to_string())
+            }),
         )
     } else {
-        match state.image_service.pick_best_available(&params).await {
+        match state
+            .image_service
+            .pick_best_available(&params, plan.target_width)
+            .await
+        {
             Ok(Some((fallback_path, fallback_variant))) => (fallback_path, fallback_variant),
             Ok(None) => {
                 warn!(
@@ -104,8 +126,44 @@ pub async fn serve_image_handler(
         }
     };
 
-    // Normalize path to respect configured CACHE_DIR if DB stored relative paths
-    let resolved_path = normalize_image_path(&image_path, state.config.cache_dir.as_path());
+    let mut fetch_attempted = false;
+    let (meta, data, resolved_path) = loop {
+        let normalized = normalize_image_path(&image_path, state.config.cache_dir.as_path());
+
+        match tokio::fs::metadata(&normalized).await {
+            Ok(meta) => match tokio::fs::read(&normalized).await {
+                Ok(bytes) => break (meta, bytes, normalized),
+                Err(e) if e.kind() == ErrorKind::NotFound && !fetch_attempted => {
+                    fetch_attempted = true;
+                    match redownload_variant(&state, &params, &served_variant).await {
+                        Ok(new_path) => {
+                            image_path = new_path;
+                            continue;
+                        }
+                        Err(status) => return Err(status),
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to read image file {:?}: {}", normalized, e);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                }
+            },
+            Err(e) if e.kind() == ErrorKind::NotFound && !fetch_attempted => {
+                fetch_attempted = true;
+                match redownload_variant(&state, &params, &served_variant).await {
+                    Ok(new_path) => {
+                        image_path = new_path;
+                        continue;
+                    }
+                    Err(status) => return Err(status),
+                }
+            }
+            Err(e) => {
+                error!("Failed to stat image file {:?}: {}", normalized, e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        }
+    };
 
     // Determine content type based on file extension or metadata
     let content_type = match resolved_path
@@ -119,15 +177,6 @@ pub async fn serve_image_handler(
         Some("webp") => "image/webp",
         Some("avif") => "image/avif",
         _ => "image/jpeg",
-    };
-
-    // Get file metadata for caching headers
-    let meta = match tokio::fs::metadata(&resolved_path).await {
-        Ok(m) => m,
-        Err(e) => {
-            error!("Failed to stat image file {:?}: {}", resolved_path, e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
     };
 
     let file_size = meta.len();
@@ -151,82 +200,268 @@ pub async fn serve_image_handler(
     if let Some(if_none_match) = headers
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
+        && if_none_match.split(',').any(|t| t.trim() == etag_value)
     {
-        if if_none_match.split(',').any(|t| t.trim() == etag_value) {
-            return Ok::<_, StatusCode>(
-                Response::builder()
-                    .status(StatusCode::NOT_MODIFIED)
-                    .header(header::ETAG, etag_value)
-                    .header(header::LAST_MODIFIED, last_modified)
-                    .header(header::CACHE_CONTROL, "public, max-age=86400")
-                    .header(
-                        "X-Variant-Requested",
-                        desired_variant.unwrap_or_else(|| "w500".to_string()),
-                    )
-                    .header("X-Variant-Served", served_variant)
-                    .body(Body::empty())
-                    .unwrap(),
-            );
-        }
+        return Ok::<_, StatusCode>(
+            Response::builder()
+                .status(StatusCode::NOT_MODIFIED)
+                .header(header::ETAG, etag_value)
+                .header(header::LAST_MODIFIED, last_modified)
+                .header(header::CACHE_CONTROL, "public, max-age=86400")
+                .header("X-Variant-Requested", requested_header_value.as_str())
+                .header("X-Variant-Served", served_variant.as_str())
+                .body(Body::empty())
+                .unwrap(),
+        );
     }
 
     if let Some(if_modified_since) = headers
         .get(header::IF_MODIFIED_SINCE)
         .and_then(|v| v.to_str().ok())
+        && let Ok(since_time) = parse_http_date(if_modified_since)
+        && modified <= since_time
     {
-        if let Ok(since_time) = parse_http_date(if_modified_since) {
-            if modified <= since_time {
-                return Ok::<_, StatusCode>(
-                    Response::builder()
-                        .status(StatusCode::NOT_MODIFIED)
-                        .header(header::ETAG, etag_value)
-                        .header(header::LAST_MODIFIED, last_modified)
-                        .header(header::CACHE_CONTROL, "public, max-age=86400")
-                        .header(
-                            "X-Variant-Requested",
-                            desired_variant.unwrap_or_else(|| "w500".to_string()),
-                        )
-                        .header("X-Variant-Served", served_variant)
-                        .body(Body::empty())
-                        .unwrap(),
-                );
-            }
-        }
+        return Ok::<_, StatusCode>(
+            Response::builder()
+                .status(StatusCode::NOT_MODIFIED)
+                .header(header::ETAG, etag_value)
+                .header(header::LAST_MODIFIED, last_modified)
+                .header(header::CACHE_CONTROL, "public, max-age=86400")
+                .header("X-Variant-Requested", requested_header_value.as_str())
+                .header("X-Variant-Served", served_variant.as_str())
+                .body(Body::empty())
+                .unwrap(),
+        );
     }
 
-    // Read entire file and send as single buffer (faster for small/medium images)
-    let data = match tokio::fs::read(&resolved_path).await {
-        Ok(d) => d,
-        Err(e) => {
-            error!("Failed to read image file {:?}: {}", resolved_path, e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-
-    let mut resp = Response::builder()
+    let resp = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, content_type)
         .header(header::CONTENT_LENGTH, data.len().to_string())
         .header(header::ETAG, etag_value)
         .header(header::LAST_MODIFIED, last_modified)
         .header(header::CACHE_CONTROL, "public, max-age=86400")
-        .header("X-Variant-Served", served_variant);
-
-    if let Some(req) = desired_variant {
-        resp = resp.header("X-Variant-Requested", req);
-    }
+        .header("X-Variant-Served", served_variant)
+        .header("X-Variant-Requested", requested_header_value.as_str());
 
     Ok::<_, StatusCode>(resp.body(Body::from(data)).unwrap())
 }
 
-/// Normalize a stored image path to the current configured cache root.
-/// This handles older DB entries that stored relative paths like "./cache/images/...".
+async fn redownload_variant(
+    state: &AppState,
+    params: &ImageLookupParams,
+    served_variant: &str,
+) -> Result<PathBuf, StatusCode> {
+    let mut lookup = params.clone();
+    lookup.variant = Some(served_variant.to_string());
+
+    match state.image_service.get_or_download_variant(&lookup).await {
+        Ok(Some(path)) => {
+            info!(
+                "Fetched missing image variant on-demand: {}/{}/{}/{} variant {}",
+                params.media_type, params.media_id, params.image_type, params.index, served_variant
+            );
+            Ok(path)
+        }
+        Ok(None) => {
+            warn!(
+                "Unable to download image variant on-demand; variant record missing: {}/{}/{}/{} variant {}",
+                params.media_type, params.media_id, params.image_type, params.index, served_variant
+            );
+            Err(StatusCode::NOT_FOUND)
+        }
+        Err(e) => {
+            error!(
+                "On-demand image download failed: {}/{}/{}/{} variant {}: {}",
+                params.media_type,
+                params.media_id,
+                params.image_type,
+                params.index,
+                served_variant,
+                e
+            );
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// Normalize a stored image path against the (already canonicalized) cache root.
+///
+/// Scanner instances historically persisted relative paths such as
+/// `./cache/images/...`. The server only canonicalizes the cache directory once
+/// during startup, so this helper must avoid re-normalizing the base and simply
+/// map legacy relative variants into that absolute root.
 fn normalize_image_path(original: &FsPath, cache_root: &FsPath) -> PathBuf {
     if original.is_absolute() {
         return original.to_path_buf();
     }
 
-    cache_root.join(original)
+    debug_assert!(
+        cache_root.is_absolute(),
+        "cache_dir should have been canonicalized during startup"
+    );
+
+    let cache_basename = cache_root.file_name();
+    let mut components = original.components().peekable();
+
+    // Drop any leading `./` segments that were persisted by older scanners.
+    while matches!(components.peek(), Some(Component::CurDir)) {
+        components.next();
+    }
+
+    // Skip the first segment if it matches the cache directory name to avoid
+    // producing `.../cache/cache/...` when we join below.
+    if let Some(basename) = cache_basename {
+        let drop_prefix =
+            matches!(components.peek(), Some(Component::Normal(first)) if *first == basename);
+        if drop_prefix {
+            components.next();
+        }
+    }
+
+    let mut relative = PathBuf::new();
+    for component in components {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                // Stay within the cache root boundary.
+                relative.pop();
+            }
+            Component::Normal(part) => relative.push(part),
+            // Other component types (Prefix, RootDir) should not appear for
+            // non-absolute inputs. If they do, fall back to returning the
+            // cache root so we at least stay within a known-good directory.
+            Component::Prefix(_) | Component::RootDir => return cache_root.to_path_buf(),
+        }
+    }
+
+    if relative.as_os_str().is_empty() {
+        cache_root.to_path_buf()
+    } else {
+        cache_root.join(relative)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct VariantPlan {
+    requested_header: Option<String>,
+    lookup_variant: Option<String>,
+    ensure_variants: Vec<String>,
+    target_width: Option<u32>,
+}
+
+fn determine_variant_plan(category: &str, query: &ImageQuery) -> VariantPlan {
+    if let Some(w) = query.w.or(query.max_width) {
+        let variant = map_width_to_tmdb_variant(category, w).to_string();
+        return variant_plan_exact(variant, None);
+    }
+
+    if let Some(size_value) = query.size.as_ref().filter(|s| !s.is_empty()) {
+        let trimmed = size_value.trim();
+        let normalized = trimmed.to_ascii_lowercase();
+
+        match normalized.as_str() {
+            "quality" => return auto_plan_for_category(category, Some("quality")),
+            "any" if category == "cast" => {
+                return auto_plan_for_category(category, Some("any"));
+            }
+            _ => {
+                if is_recognized_tmdb_variant(&normalized) {
+                    return variant_plan_exact(normalized, Some(trimmed.to_string()));
+                }
+            }
+        }
+    }
+
+    auto_plan_for_category(category, None)
+}
+
+fn variant_plan_exact(variant: String, header: Option<String>) -> VariantPlan {
+    let requested = header.unwrap_or_else(|| variant.clone());
+    let normalized = variant.to_ascii_lowercase();
+
+    VariantPlan {
+        requested_header: Some(requested),
+        lookup_variant: Some(normalized.clone()),
+        ensure_variants: vec![normalized.clone()],
+        target_width: variant_width_hint(&normalized),
+    }
+}
+
+fn auto_plan_for_category(category: &str, label: Option<&str>) -> VariantPlan {
+    match category {
+        "poster" => build_variant_plan(
+            label,
+            Some("w500"),
+            &["w500", "w342", "w780", "original", "w185", "w154", "w92"],
+            Some(500),
+        ),
+        "backdrop" => build_variant_plan(
+            label,
+            Some("w1280"),
+            &["w780", "w1280", "original"],
+            Some(1280),
+        ),
+        "thumbnail" => {
+            build_variant_plan(label, Some("w300"), &["w300", "w500", "w185"], Some(300))
+        }
+        "logo" => build_variant_plan(label, Some("original"), &["original"], None),
+        "cast" => build_variant_plan(
+            label,
+            Some("w185"),
+            &["w185", "h632", "w45", "original"],
+            Some(300),
+        ),
+        _ => build_variant_plan(label, Some("w500"), &["w500", "original"], Some(500)),
+    }
+}
+
+fn build_variant_plan(
+    label: Option<&str>,
+    fallback: Option<&str>,
+    ensures: &[&str],
+    explicit_target: Option<u32>,
+) -> VariantPlan {
+    let fallback_norm = fallback.map(|s| s.to_ascii_lowercase());
+    let mut ensure_variants: Vec<String> = Vec::new();
+
+    if let Some(ref fallback_variant) = fallback_norm {
+        push_unique(&mut ensure_variants, fallback_variant);
+    }
+
+    for candidate in ensures {
+        let normalized = candidate.to_ascii_lowercase();
+        push_unique(&mut ensure_variants, &normalized);
+    }
+
+    let target_width =
+        explicit_target.or_else(|| fallback_norm.as_deref().and_then(variant_width_hint));
+
+    VariantPlan {
+        requested_header: label.map(|s| s.to_string()),
+        lookup_variant: fallback_norm,
+        ensure_variants,
+        target_width,
+    }
+}
+
+fn push_unique(vec: &mut Vec<String>, candidate: &str) {
+    if !vec.iter().any(|existing| existing == candidate) {
+        vec.push(candidate.to_string());
+    }
+}
+
+fn is_recognized_tmdb_variant(value: &str) -> bool {
+    TmdbImageSize::from_str(value).is_some()
+}
+
+fn variant_width_hint(variant: &str) -> Option<u32> {
+    if variant.eq_ignore_ascii_case("original") {
+        return Some(10_000);
+    }
+    variant
+        .strip_prefix('w')
+        .and_then(|digits| digits.parse::<u32>().ok())
 }
 
 /// Map desired width to a TMDB variant string for a given category

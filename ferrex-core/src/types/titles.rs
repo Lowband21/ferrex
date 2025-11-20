@@ -56,7 +56,7 @@ impl AsRef<str> for MovieTitle {
 
 impl AsRef<str> for ArchivedMovieTitle {
     fn as_ref(&self) -> &str {
-        &self.0.as_str()
+        self.0.as_str()
     }
 }
 
@@ -130,7 +130,7 @@ impl AsRef<str> for SeriesTitle {
 }
 impl AsRef<str> for ArchivedSeriesTitle {
     fn as_ref(&self) -> &str {
-        &self.0.as_str()
+        self.0.as_str()
     }
 }
 
@@ -204,7 +204,7 @@ impl AsRef<str> for EpisodeTitle {
 }
 impl AsRef<str> for ArchivedEpisodeTitle {
     fn as_ref(&self) -> &str {
-        &self.0.as_str()
+        self.0.as_str()
     }
 }
 

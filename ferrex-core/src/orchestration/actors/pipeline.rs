@@ -112,7 +112,14 @@ pub trait ImageFetchActor: Send + Sync {
     async fn fetch(&self, command: ImageFetchCommand) -> Result<()>;
 }
 
+#[derive(Debug)]
 pub struct DefaultMediaAnalyzeActor;
+
+impl Default for DefaultMediaAnalyzeActor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl DefaultMediaAnalyzeActor {
     pub fn new() -> Self {
@@ -193,7 +200,14 @@ impl MediaAnalyzeActor for DefaultMediaAnalyzeActor {
     }
 }
 
+#[derive(Debug)]
 pub struct DefaultMetadataActor;
+
+impl Default for DefaultMetadataActor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl DefaultMetadataActor {
     pub fn new() -> Self {
@@ -215,6 +229,7 @@ impl MetadataActor for DefaultMetadataActor {
     }
 }
 
+#[derive(Debug)]
 pub struct DefaultIndexerActor {
     db: Arc<MediaDatabase>,
 }

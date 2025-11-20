@@ -3,7 +3,6 @@
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::settings::messages as settings;
 use crate::domains::ui::views::settings::device_management::UserDevice;
-use crate::infrastructure::services::api::ApiService;
 use crate::state_refactored::State;
 use iced::Task;
 use log::{error, info};
@@ -78,7 +77,7 @@ pub fn handle_load_devices(state: &mut State) -> DomainUpdateResult {
                 Err(e) => Err(format!("Failed to load devices: {}", e)),
             }
         },
-        |result| settings::Message::DevicesLoaded(result),
+        settings::Message::DevicesLoaded,
     );
     DomainUpdateResult::task(task.map(DomainMessage::Settings))
 }
@@ -134,7 +133,7 @@ pub fn handle_revoke_device(state: &mut State, device_id: String) -> DomainUpdat
                 Err(e) => Err(format!("Failed to revoke device: {}", e)),
             }
         },
-        |result| settings::Message::DeviceRevoked(result),
+        settings::Message::DeviceRevoked,
     );
     DomainUpdateResult::task(task.map(DomainMessage::Settings))
 }

@@ -44,7 +44,7 @@ macro_rules! virtual_reference_grid {
                 log::trace!("First item in grid");
             } */
 
-            use $crate::infrastructure::constants::{grid, poster, layout::header};
+            use $crate::infrastructure::constants::{grid, poster};
 
             // Don't add spacing here since ROW_HEIGHT already includes spacing
             let mut content = column![].spacing(0).width(Length::Fill);
@@ -111,7 +111,7 @@ macro_rules! virtual_reference_grid {
                         );
 
                         // Use container dimensions that account for animation padding
-                        let (container_width, container_height) =
+                        let (container_width, _container_height) =
                             $crate::infrastructure::constants::calculations::get_container_dimensions(1.0);
 
                         // Debug logging to verify container dimensions

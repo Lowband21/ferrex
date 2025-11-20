@@ -34,7 +34,7 @@
 //! - Events from DomainUpdateResult are batched
 //! - Profiling tracks message processing time
 
-use crate::common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult};
+use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::auth::update::update_auth;
 use crate::domains::library::update::update_library;
 use crate::domains::media::update::update_media;

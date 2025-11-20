@@ -457,6 +457,10 @@ pub struct CastMember {
     pub external_ids: PersonExternalIds,
     #[serde(default)]
     pub image_slot: u32,
+    #[serde(default)]
+    pub profile_media_id: Option<Uuid>,
+    #[serde(default)]
+    pub profile_image_index: Option<u32>,
 }
 
 #[derive(
@@ -569,6 +573,11 @@ impl MediaDetailsOptionLike for ArchivedMediaDetailsOption {
             ArchivedMediaDetailsOption::Details(details) => match details {
                 ArchivedTmdbDetails::Movie(movie) => movie
                     .release_date
+                    .as_ref()
+                    .and_then(|date| date.split("-").next())
+                    .and_then(|year| year.parse().ok()),
+                ArchivedTmdbDetails::Series(series) => series
+                    .first_air_date
                     .as_ref()
                     .and_then(|date| date.split("-").next())
                     .and_then(|year| year.parse().ok()),

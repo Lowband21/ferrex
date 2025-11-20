@@ -8,8 +8,8 @@ use crate::domains::ui::types::BackdropAspectMode;
 use bytemuck::{Pod, Zeroable};
 use iced::advanced::graphics::Viewport;
 use iced::advanced::image::Id as ImageId;
-use iced::widget::shader::{self, Primitive, Program, Storage};
-use iced::{Color, Element, Length, Point, Rectangle, Size, Vector, mouse, wgpu};
+use iced::widget::shader::{Primitive, Program, Storage};
+use iced::{Color, Element, Length, Rectangle, Vector, mouse, wgpu};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -190,6 +190,8 @@ pub struct BackgroundShaderProgram {
     pub header_offset: f32,
     /// Backdrop aspect ratio mode
     pub backdrop_aspect_mode: BackdropAspectMode,
+    /// Optional fallback aspect ratio for the backdrop texture
+    pub backdrop_aspect_ratio: Option<f32>,
 }
 
 // Global counter for generating unique IDs
@@ -236,6 +238,7 @@ impl<Message> Program<Message> for BackgroundShaderProgram {
             depth_layout: self.depth_layout.clone(),
             header_offset: self.header_offset,
             backdrop_aspect_mode: self.backdrop_aspect_mode,
+            backdrop_aspect_ratio: self.backdrop_aspect_ratio,
         }
     }
 }
@@ -271,6 +274,8 @@ pub struct BackgroundPrimitive {
     pub header_offset: f32,
     /// Backdrop aspect ratio mode
     pub backdrop_aspect_mode: BackdropAspectMode,
+    /// Optional fallback aspect ratio for the backdrop texture
+    pub backdrop_aspect_ratio: Option<f32>,
 }
 
 /// Global uniform data
@@ -355,6 +360,7 @@ struct TextureInfo {
 }
 
 /// Shared state
+#[derive(Default)]
 struct State {
     globals_buffer: Option<wgpu::Buffer>,
     globals_bind_group: Option<wgpu::BindGroup>,
@@ -367,20 +373,6 @@ struct State {
     prepared_primitives: HashSet<usize>,
     // Track if default texture has been initialized
     default_texture_initialized: bool,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            globals_buffer: None,
-            globals_bind_group: None,
-            texture_cache: HashMap::new(),
-            texture_bind_groups: HashMap::new(),
-            primitive_data: HashMap::new(),
-            prepared_primitives: HashSet::new(),
-            default_texture_initialized: false,
-        }
-    }
 }
 
 impl State {
@@ -763,16 +755,16 @@ impl Primitive for BackgroundPrimitive {
             let image_id = handle.id();
 
             // Load texture if not cached
-            if !state.texture_cache.contains_key(&image_id) {
-                if let Some((texture, aspect_ratio)) = load_texture(device, queue, handle) {
-                    state.texture_cache.insert(
-                        image_id,
-                        TextureInfo {
-                            texture,
-                            aspect_ratio,
-                        },
-                    );
-                }
+            if !state.texture_cache.contains_key(&image_id)
+                && let Some((texture, aspect_ratio)) = load_texture(device, queue, handle)
+            {
+                state.texture_cache.insert(
+                    image_id,
+                    TextureInfo {
+                        texture,
+                        aspect_ratio,
+                    },
+                );
             }
 
             // Create texture bind group if texture is available
@@ -813,7 +805,7 @@ impl Primitive for BackgroundPrimitive {
             BackgroundEffect::SubtleNoise { .. } => 2.0,
             BackgroundEffect::FloatingParticles { .. } => 3.0,
             BackgroundEffect::WaveRipple { .. } => 4.0,
-            BackgroundEffect::BackdropGradient { image_handle, .. } => 5.0,
+            BackgroundEffect::BackdropGradient { .. } => 5.0,
         };
 
         // Extract effect parameters
@@ -848,8 +840,8 @@ impl Primitive for BackgroundPrimitive {
             time_and_resolution: [
                 time,
                 0.0,
-                viewport.logical_size().width as f32,
-                viewport.logical_size().height as f32,
+                viewport.logical_size().width,
+                viewport.logical_size().height,
             ],
             scale_and_effect: [
                 viewport.scale_factor() as f32,
@@ -870,7 +862,7 @@ impl Primitive for BackgroundPrimitive {
                 self.secondary_color.a,
             ],
             texture_params: [
-                1.0, // Default texture aspect ratio, will be updated below
+                self.backdrop_aspect_ratio.unwrap_or(1.0),
                 self.scroll_offset,
                 self.header_offset,
                 match self.backdrop_aspect_mode {
@@ -1131,6 +1123,7 @@ pub struct BackgroundShader {
     gradient_center: (f32, f32),
     backdrop_aspect_mode: BackdropAspectMode,
     backdrop_handle: Option<iced::widget::image::Handle>,
+    backdrop_aspect_ratio: Option<f32>,
     // Depth layout for visual hierarchy
     depth_layout: DepthLayout,
     // Header offset for detail views
@@ -1171,6 +1164,7 @@ impl BackgroundShader {
             backdrop_scale: 1.0,
             gradient_center: generate_random_gradient_center(),
             backdrop_handle: None,
+            backdrop_aspect_ratio: None,
             depth_layout: DepthLayout {
                 regions: Vec::new(),
                 ambient_light_direction: iced::Vector::new(0.707, 0.707), // Light from bottom-right
@@ -1229,6 +1223,12 @@ impl BackgroundShader {
     /// Set backdrop image with gradient fade
     pub fn backdrop(mut self, handle: iced::widget::image::Handle) -> Self {
         self.backdrop_handle = Some(handle);
+        self
+    }
+
+    /// Provide a fallback aspect ratio for the backdrop when precise metadata isn’t available yet.
+    pub fn backdrop_aspect_ratio(mut self, ratio: Option<f32>) -> Self {
+        self.backdrop_aspect_ratio = ratio;
         self
     }
 
@@ -1321,6 +1321,7 @@ impl<'a> From<BackgroundShader> for Element<'a, Message> {
             depth_layout: background.depth_layout,
             header_offset: background.header_offset,
             backdrop_aspect_mode: background.backdrop_aspect_mode,
+            backdrop_aspect_ratio: background.backdrop_aspect_ratio,
             id,
         })
         .width(Length::Fill)

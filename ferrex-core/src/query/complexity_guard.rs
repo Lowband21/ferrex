@@ -1,10 +1,6 @@
 use crate::{
     MediaError, Result,
-    api_types::ScalarRange,
-    query::{
-        MediaQuery,
-        decision_engine::{QueryComplexity, QueryComplexityAnalyzer},
-    },
+    query::{MediaQuery, decision_engine::QueryComplexityAnalyzer},
 };
 use tracing::{debug, warn};
 
@@ -100,12 +96,13 @@ impl QueryComplexityGuard {
         }
 
         // Additional checks for specific expensive operations
-        if let Some(search) = &query.search {
-            if search.fuzzy && search.text.len() < 3 {
-                return Err(MediaError::InvalidMedia(
-                    "Fuzzy search requires at least 3 characters".to_string(),
-                ));
-            }
+        if let Some(search) = &query.search
+            && search.fuzzy
+            && search.text.len() < 3
+        {
+            return Err(MediaError::InvalidMedia(
+                "Fuzzy search requires at least 3 characters".to_string(),
+            ));
         }
 
         Ok(())

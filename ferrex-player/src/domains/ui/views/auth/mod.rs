@@ -12,7 +12,6 @@ mod user_selection;
 
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::types::AuthenticationFlow;
-use crate::state_refactored::State;
 use iced::Element;
 
 pub use components::*;
@@ -127,7 +126,7 @@ pub fn view_first_run_setup<'a>(
 ) -> Element<'a, DomainMessage> {
     use crate::domains::auth::messages as auth;
     use crate::domains::ui::theme;
-    use iced::widget::{Space, button, checkbox, column, container, row, text, text_input};
+    use iced::widget::{Space, button, checkbox, column, container, text, text_input};
     use iced::{Alignment, Length};
 
     let title = text("Welcome to Ferrex Media Server").size(32);

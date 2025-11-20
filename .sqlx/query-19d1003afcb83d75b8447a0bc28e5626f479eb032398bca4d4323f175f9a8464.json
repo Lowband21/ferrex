@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    UPDATE orchestrator_jobs\n                    SET\n                        state = 'dead_letter',\n                        lease_owner = NULL,\n                        lease_id = NULL,\n                        lease_expires_at = NULL,\n                        updated_at = NOW(),\n                        last_error = COALESCE(last_error, 'lease expired (max attempts)')\n                    WHERE id = $1 AND state = 'leased'\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "19d1003afcb83d75b8447a0bc28e5626f479eb032398bca4d4323f175f9a8464"
+}

@@ -96,16 +96,11 @@ pub enum UserSortBy {
 }
 
 /// Sort direction
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum SortDirection {
+    #[default]
     Ascending,
     Descending,
-}
-
-impl Default for SortDirection {
-    fn default() -> Self {
-        SortDirection::Ascending
-    }
 }
 
 /// Errors that can occur during repository operations

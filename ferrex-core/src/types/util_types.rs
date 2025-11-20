@@ -63,7 +63,6 @@ pub enum ImageType {
     Season = 2,
     Episode = 3,
     Person = 4,
-    Backdrop = 5,
 }
 
 impl Display for ImageType {
@@ -74,7 +73,6 @@ impl Display for ImageType {
             ImageType::Season => write!(f, "Season"),
             ImageType::Episode => write!(f, "Episode"),
             ImageType::Person => write!(f, "Person"),
-            ImageType::Backdrop => write!(f, "Backdrop"),
         }
     }
 }
@@ -98,7 +96,7 @@ pub enum ImageSize {
     Thumbnail, // Small size for grids
     Poster,    // Standard poster size
     Backdrop,  // Wide backdrop/banner
-    Full,      // Original size
+    Full,      // Hero poster (w500 equivalent)
     Profile,   // Person profile image (2:3 aspect ratio)
 }
 

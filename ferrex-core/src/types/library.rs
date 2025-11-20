@@ -4,7 +4,6 @@ use rkyv::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use uuid::Uuid;
 
 use crate::types::Media;
 
@@ -68,13 +67,13 @@ pub struct Library {
 }
 
 pub trait ArchivedLibraryExt {
-    fn media<'a>(&'a self) -> Option<&'a ArchivedVec<ArchivedMedia>>;
+    fn media(&self) -> Option<&ArchivedVec<ArchivedMedia>>;
     fn media_as_slice(&self) -> &[ArchivedMedia];
     fn get_movie_refs(&self) -> impl Iterator<Item = &ArchivedMovieReference>;
 }
 
 impl ArchivedLibraryExt for ArchivedLibrary {
-    fn media<'a>(&'a self) -> Option<&'a ArchivedVec<ArchivedMedia>> {
+    fn media(&self) -> Option<&ArchivedVec<ArchivedMedia>> {
         match &self.media {
             ArchivedOption::Some(media) => Some(media),
             ArchivedOption::None => None,

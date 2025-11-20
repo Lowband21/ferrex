@@ -1,4 +1,7 @@
-use crate::domains::ui::{SortOrder, messages::Message, theme};
+use crate::{
+    common::ui_utils::icon_text_with_size,
+    domains::ui::{SortOrder, messages::Message, theme},
+};
 use iced::{
     Element, Length,
     widget::{button, container, text},
@@ -19,7 +22,7 @@ pub fn sort_order_toggle<'a>(current_order: SortOrder) -> Element<'a, Message> {
 
     container(
         button(
-            container(icon_text(icon))
+            container(icon_text_with_size(icon, 16.0))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .center_x(Length::Fill)
@@ -33,14 +36,4 @@ pub fn sort_order_toggle<'a>(current_order: SortOrder) -> Element<'a, Message> {
     .height(Length::Fixed(36.0))
     .align_y(iced::alignment::Vertical::Center)
     .into()
-}
-
-/// Helper function to create icon text with consistent font
-fn icon_text(icon: Icon) -> text::Text<'static> {
-    text(icon.unicode()).font(lucide_font()).size(16)
-}
-
-/// Get the lucide font
-fn lucide_font() -> iced::Font {
-    iced::Font::with_name("lucide")
 }

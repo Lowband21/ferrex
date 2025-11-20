@@ -1,4 +1,4 @@
-use iced::{Size, Task, widget::scrollable};
+use iced::{Size, Task};
 
 use crate::{domains::ui::messages::Message, state_refactored::State};
 
@@ -20,21 +20,22 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<Message> {
     // Update all tab grids with new window width
     // This only updates column count - the scrollable widget will report actual viewport dimensions
     for tab_id in state.tab_manager.tab_ids() {
-        if let Some(tab) = state.tab_manager.get_tab_mut(tab_id) {
-            if let Some(grid_state) = tab.grid_state_mut() {
-                // Use resize() which only updates columns based on width
-                // The scrollable widget will report actual viewport dimensions via TabGridScrolled
-                grid_state.resize(size.width);
-            }
+        if let Some(tab) = state.tab_manager.get_tab_mut(tab_id)
+            && let Some(grid_state) = tab.grid_state_mut()
+        {
+            // Use resize() which only updates columns based on width
+            // The scrollable widget will report actual viewport dimensions via TabGridScrolled
+            grid_state.resize(size.width);
         }
     }
 
     // TODO: This is cumbersome, fix it
-    let uuid = if let Some(library_id) = state.domains.library.state.current_library_id {
-        Some(library_id.as_uuid())
-    } else {
-        None
-    };
+    let uuid = state
+        .domains
+        .library
+        .state
+        .current_library_id
+        .map(|library_id| library_id.as_uuid());
 
     // Update depth regions for the current view with new window size
     state

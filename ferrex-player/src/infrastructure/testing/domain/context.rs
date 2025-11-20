@@ -309,7 +309,6 @@ macro_rules! impl_domain_test_context {
 mod tests {
     use super::*;
     use crate::infrastructure::testing::time::VirtualTimeProvider;
-    use std::time::Duration;
 
     #[tokio::test]
     async fn test_simple_context() {

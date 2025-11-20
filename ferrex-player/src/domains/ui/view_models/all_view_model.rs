@@ -1,7 +1,6 @@
 //! ViewModel for the "All" view that shows carousels
 
 use ferrex_core::{Media, MovieID, SeriesID};
-use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 use super::{ViewModel, VisibleItems};
@@ -49,7 +48,10 @@ pub struct AllViewModel {
 impl AllViewModel {
     /// Create a new AllViewModel
     pub fn new(accessor: Accessor<ReadOnly>) -> Self {
-        let mut vm = Self {
+        // Initial load from store
+        //vm.refresh_from_repo();
+
+        Self {
             accessor,
             library_id: None,
             sorted_movie_ids: Vec::new(),
@@ -58,12 +60,7 @@ impl AllViewModel {
             cached_series: Vec::new(),
             movies_carousel: CarouselState::new(0),
             tv_carousel: CarouselState::new(0),
-        };
-
-        // Initial load from store
-        //vm.refresh_from_repo();
-
-        vm
+        }
     }
 
     /// Set the library filter
@@ -130,7 +127,11 @@ impl ViewModel for AllViewModel {
                             let num_movies = media.len();
                             let library_id = library.id.as_uuid();
                             if self.sorted_movie_ids.len() != num_movies {
-                                self.sorted_movie_ids = self.accessor.get_sorted_index_by_library(&library.id)
+                                self.sorted_movie_ids = self.accessor.get_sorted_index_by_library(
+                                    &library.id,
+                                    SortBy::Title,
+                                    SortOrder::Ascending,
+                                )
 
                             }
                             // Filter to only movies
@@ -245,27 +246,27 @@ impl ViewModel for AllViewModel {
         let series_range = self.tv_carousel.get_visible_range();
 
         // Extract visible items
-        let visible_movies: Vec<Media> = match self.accessor.get_batch(
-            movie_range
-                .filter_map(|idx| self.sorted_movie_ids.get(idx))
-                .map(|id| MediaID::Movie(MovieID(*id)))
-                .collect::<Vec<_>>()
-                .as_slice(),
-        ) {
-            Ok(items) => items,
-            Err(_) => Vec::new(),
-        };
+        let visible_movies: Vec<Media> = self
+            .accessor
+            .get_batch(
+                movie_range
+                    .filter_map(|idx| self.sorted_movie_ids.get(idx))
+                    .map(|id| MediaID::Movie(MovieID(*id)))
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            )
+            .unwrap_or_default();
 
-        let visible_series: Vec<Media> = match self.accessor.get_batch(
-            series_range
-                .filter_map(|idx| self.sorted_series_ids.get(idx))
-                .map(|id| MediaID::Series(SeriesID(*id)))
-                .collect::<Vec<_>>()
-                .as_slice(),
-        ) {
-            Ok(items) => items,
-            Err(_) => Vec::new(),
-        };
+        let visible_series: Vec<Media> = self
+            .accessor
+            .get_batch(
+                series_range
+                    .filter_map(|idx| self.sorted_series_ids.get(idx))
+                    .map(|id| MediaID::Series(SeriesID(*id)))
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            )
+            .unwrap_or_default();
 
         VisibleItems {
             movies: visible_movies,

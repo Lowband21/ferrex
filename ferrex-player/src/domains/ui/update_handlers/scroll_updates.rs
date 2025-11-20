@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::{
-    domains::ui::{messages::Message, scroll_manager::ScrollStateExt, tabs::TabState},
+    domains::ui::{messages::Message, tabs::TabState},
     infrastructure::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS,
     state_refactored::State,
 };
@@ -26,11 +26,12 @@ pub fn handle_detail_view_scrolled(state: &mut State, viewport: Viewport) -> Tas
     state.domains.ui.state.background_shader_state.scroll_offset = scroll_offset;
 
     // TODO: This is cumbersome, fix it
-    let uuid = if let Some(library_id) = state.domains.library.state.current_library_id {
-        Some(library_id.as_uuid())
-    } else {
-        None
-    };
+    let uuid = state
+        .domains
+        .library
+        .state
+        .current_library_id
+        .map(|library_id| library_id.as_uuid());
 
     // Update depth lines to move with the scrolled content
     state

@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 /// JWT key manager for handling multiple keys during rotation
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct JwtKeyManager {
     keys: Arc<RwLock<Vec<String>>>,
 }

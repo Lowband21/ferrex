@@ -53,10 +53,10 @@ impl HardwareInfo {
 
         info.total_memory = sys.total_memory();
 
-        if let Some(hostname) = System::host_name() {
-            if !hostname.is_empty() {
-                info.hostname = Some(hostname);
-            }
+        if let Some(hostname) = System::host_name()
+            && !hostname.is_empty()
+        {
+            info.hostname = Some(hostname);
         }
 
         info.disk_serials = Self::collect_disk_serials()?;
@@ -96,11 +96,11 @@ impl HardwareInfo {
         let disks = Disks::new_with_refreshed_list();
 
         for disk in disks.list() {
-            if let Some(mount_point) = disk.mount_point().to_str() {
-                if !is_virtual_filesystem(mount_point, disk.file_system().as_encoded_bytes()) {
-                    let identifier = format!("{}:{}", mount_point, disk.total_space());
-                    serials.insert(identifier);
-                }
+            if let Some(mount_point) = disk.mount_point().to_str()
+                && !is_virtual_filesystem(mount_point, disk.file_system().as_encoded_bytes())
+            {
+                let identifier = format!("{}:{}", mount_point, disk.total_space());
+                serials.insert(identifier);
             }
         }
 

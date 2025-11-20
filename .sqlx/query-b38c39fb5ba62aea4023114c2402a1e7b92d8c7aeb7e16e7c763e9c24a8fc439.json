@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT device_id, state_data, updated_at\n            FROM auth_device_states\n            WHERE updated_at > NOW() - INTERVAL '1 hour'\n            ORDER BY updated_at DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "device_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "state_data",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b38c39fb5ba62aea4023114c2402a1e7b92d8c7aeb7e16e7c763e9c24a8fc439"
+}

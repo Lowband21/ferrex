@@ -1,14 +1,9 @@
-use rkyv::{
-    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize, option::ArchivedOption,
-};
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use uuid::Uuid;
+use rkyv::option::ArchivedOption;
 
 use crate::{
     ArchivedCastMember, ArchivedCrewMember, ArchivedEnhancedSeriesDetails, ArchivedExternalIds,
     ArchivedSeasonDetails, CastMember, CrewMember, EnhancedMovieDetails, EnhancedSeriesDetails,
-    EpisodeDetails, ExternalIds, SeasonDetails, TmdbDetails, types::LibraryID,
+    EpisodeDetails, ExternalIds, SeasonDetails, TmdbDetails,
 };
 
 pub trait MediaDetails {
@@ -129,10 +124,10 @@ impl SeriesDetailsLike for EnhancedSeriesDetails {
             .collect()
     }
     fn cast(&self) -> Vec<&Self::Cast> {
-        self.cast.iter().map(|cast| cast).collect()
+        self.cast.iter().collect()
     }
     fn crew(&self) -> Vec<&Self::Crew> {
-        self.crew.iter().map(|crew| crew).collect()
+        self.crew.iter().collect()
     }
     fn keywords(&self) -> Vec<&str> {
         self.keywords
@@ -213,10 +208,10 @@ impl SeriesDetailsLike for ArchivedEnhancedSeriesDetails {
             .collect()
     }
     fn cast(&self) -> Vec<&Self::Cast> {
-        self.cast.iter().map(|cast| cast).collect()
+        self.cast.iter().collect()
     }
     fn crew(&self) -> Vec<&Self::Crew> {
-        self.crew.iter().map(|crew| crew).collect()
+        self.crew.iter().collect()
     }
     fn keywords(&self) -> Vec<&str> {
         self.keywords

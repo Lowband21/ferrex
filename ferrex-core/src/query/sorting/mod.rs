@@ -7,6 +7,7 @@
 //! - Strategy pattern for composable sorting
 //!
 pub mod impls;
+pub mod simple;
 pub mod utils;
 
 pub mod fallback;
@@ -22,5 +23,6 @@ pub use fields::*;
 pub use fieldsets::*;
 pub use keys::*;
 pub use performance::*;
+pub use simple::*;
 pub use strategy::*;
 pub use traits::*;

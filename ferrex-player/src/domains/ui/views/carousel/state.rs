@@ -173,7 +173,7 @@ impl CarouselState {
         if self.can_go_right() {
             // Scroll by roughly one page worth (items * (width + spacing))
             let scroll_amount = self.items_per_page as f32 * (self.item_width + self.item_spacing);
-            self.scroll_position = self.scroll_position + scroll_amount;
+            self.scroll_position += scroll_amount;
             self.update_visible_range_from_scroll();
         }
     }

@@ -4,7 +4,7 @@ use iced::Task;
 use std::time::Instant;
 
 use super::messages::Message;
-use super::types::{SearchDecisionEngine, SearchMode, SearchStrategy};
+use super::types::{SearchMode, SearchStrategy};
 use crate::common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult};
 use crate::state_refactored::State;
 

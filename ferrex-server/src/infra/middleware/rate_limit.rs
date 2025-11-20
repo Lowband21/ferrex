@@ -21,6 +21,7 @@ use redis::aio::ConnectionManager;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    fmt,
     net::SocketAddr,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -117,6 +118,12 @@ pub struct RedisRateLimiter {
 
     /// Channel for configuration updates
     update_tx: broadcast::Sender<ConfigUpdate>,
+}
+
+impl fmt::Debug for RedisRateLimiter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RedisRateLimiter").finish()
+    }
 }
 
 /// Cached rate limit decision
@@ -230,6 +237,9 @@ impl RedisRateLimiter {
     fn start_background_tasks(&self) {
         let cache = Arc::clone(&self.cache);
         let metrics = Arc::clone(&self.metrics);
+        let config_updates = Arc::clone(&self.config);
+        let cache_for_updates = Arc::clone(&self.cache);
+        let mut update_rx = self.update_tx.subscribe();
 
         // Cache cleanup task
         tokio::spawn(async move {
@@ -283,8 +293,31 @@ impl RedisRateLimiter {
                 }
             }
         });
-    }
 
+        // Configuration update task
+        tokio::spawn(async move {
+            while let Ok(update) = update_rx.recv().await {
+                debug!(?update, "Applying rate limiter configuration update");
+                {
+                    let mut guard = config_updates.write().await;
+                    match update {
+                        ConfigUpdate::EndpointLimits(limits) => {
+                            guard.endpoint_limits = limits;
+                        }
+                        ConfigUpdate::TrustedSources(sources) => {
+                            guard.trusted_sources = sources;
+                        }
+                        ConfigUpdate::DynamicRule { endpoint, rule } => {
+                            apply_dynamic_rule(&mut guard.endpoint_limits, &endpoint, rule);
+                        }
+                    }
+                }
+
+                // Drop cached decisions so future checks pick up new configuration
+                cache_for_updates.write().await.clear();
+            }
+        });
+    }
     /// Get cache key with namespace
     fn get_cache_key(&self, key: &RateLimitKey, rule: &RateLimitRule) -> String {
         format!(
@@ -299,12 +332,12 @@ impl RedisRateLimiter {
     async fn check_cache(&self, cache_key: &str) -> Option<RateLimitDecision> {
         let cache_guard = self.cache.read().await;
 
-        if let Some(cached) = cache_guard.get(cache_key) {
-            if cached.expires_at > SystemTime::now() {
-                let mut metrics = self.metrics.write().await;
-                metrics.cache_hits += 1;
-                return Some(cached.decision.clone());
-            }
+        if let Some(cached) = cache_guard.get(cache_key)
+            && cached.expires_at > SystemTime::now()
+        {
+            let mut metrics = self.metrics.write().await;
+            metrics.cache_hits += 1;
+            return Some(cached.decision.clone());
         }
 
         let mut metrics = self.metrics.write().await;
@@ -661,6 +694,18 @@ impl RateLimiter for RedisRateLimiter {
     }
 }
 
+fn apply_dynamic_rule(limits: &mut EndpointLimits, endpoint: &str, rule: RateLimitRule) {
+    match endpoint {
+        "login" => limits.login = rule,
+        "register" => limits.register = rule,
+        "password_reset" => limits.password_reset = rule,
+        "pin_auth" => limits.pin_auth = rule,
+        "device_register" => limits.device_register = rule,
+        "token_refresh" => limits.token_refresh = rule,
+        other => warn!("Unknown rate limit endpoint '{other}'"),
+    }
+}
+
 // Rate limit layer is now inlined in main.rs due to type inference issues with axum 0.7
 
 /// Extract rate limit key from request
@@ -690,10 +735,9 @@ fn extract_rate_limit_key(request: &Request<Body>) -> RateLimitKey {
         .headers()
         .get("X-Forwarded-For")
         .and_then(|v| v.to_str().ok())
+        && let Some(ip) = forwarded.split(',').next()
     {
-        if let Some(ip) = forwarded.split(',').next() {
-            return RateLimitKey::IpAddress(ip.trim().to_string());
-        }
+        return RateLimitKey::IpAddress(ip.trim().to_string());
     }
 
     // Default to unknown

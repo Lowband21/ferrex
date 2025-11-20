@@ -29,9 +29,7 @@ pub fn view_library_controls_bar<'a>(
     selected_library: Option<Uuid>,
 ) -> Option<Element<'a, Message>> {
     // Only show controls for specific libraries, not the "All" view
-    if selected_library.is_none() {
-        return None;
-    }
+    selected_library?;
 
     // Get current sort settings from state
     let ui_state = &state.domains.ui.state;

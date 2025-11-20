@@ -40,15 +40,15 @@ pub async fn optional_auth_middleware(
     mut request: Request,
     next: Next,
 ) -> Response {
-    if let Ok(token) = extract_bearer_token(&request) {
-        if let Ok((user, device_id)) = validate_and_get_user(&state, &token).await {
-            // Also load permissions when user is authenticated
-            if let Ok(permissions) = state.db.backend().get_user_permissions(user.id).await {
-                request.extensions_mut().insert(permissions);
-            }
-            request.extensions_mut().insert(user);
-            request.extensions_mut().insert(device_id); // Add device_id as Option<Uuid>
+    if let Ok(token) = extract_bearer_token(&request)
+        && let Ok((user, device_id)) = validate_and_get_user(&state, &token).await
+    {
+        // Also load permissions when user is authenticated
+        if let Ok(permissions) = state.db.backend().get_user_permissions(user.id).await {
+            request.extensions_mut().insert(permissions);
         }
+        request.extensions_mut().insert(user);
+        request.extensions_mut().insert(device_id); // Add device_id as Option<Uuid>
     }
 
     next.run(request).await

@@ -2,10 +2,7 @@ pub mod media_events_subscription;
 pub mod scan_subscription;
 pub mod subscriptions;
 
-use crate::infrastructure::{
-    api_types::{Library, Media, MediaID},
-    repository::RepositoryError,
-};
+use crate::infrastructure::api_types::{Library, Media, MediaID};
 use ferrex_core::api_scan::{ScanConfig, ScanMetrics};
 use ferrex_core::{
     LibraryID, MediaFile, MediaIDLike,

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM movie_production_companies WHERE movie_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "408d90b8fcec02c0f371536b7b04e92c08ced460c27d92691147501f2b26e822"
+}

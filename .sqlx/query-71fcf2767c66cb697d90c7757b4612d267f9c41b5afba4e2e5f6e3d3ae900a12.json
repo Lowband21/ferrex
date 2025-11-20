@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        SELECT id, priority, available_at, state\n                        FROM orchestrator_jobs\n                        WHERE dedupe_key = $1\n                          AND state IN ('ready','deferred','leased')\n                        ORDER BY created_at ASC\n                        LIMIT 1\n                        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "priority",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "available_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "state",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "71fcf2767c66cb697d90c7757b4612d267f9c41b5afba4e2e5f6e3d3ae900a12"
+}

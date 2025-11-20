@@ -12,6 +12,12 @@ use super::config::PriorityWeights;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct JobId(pub Uuid);
 
+impl Default for JobId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JobId {
     pub fn new() -> Self {
         Self(Uuid::now_v7())

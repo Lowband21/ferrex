@@ -10,7 +10,6 @@ use super::LibraryID;
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct MediaFile {
-    #[rkyv(with = crate::rkyv_wrappers::UuidWrapper)]
     pub id: Uuid,
     #[rkyv(with = crate::rkyv_wrappers::PathBufWrapper)]
     pub path: PathBuf,
@@ -187,10 +186,10 @@ impl MediaFile {
     pub fn is_video_file(&self) -> bool {
         let video_extensions = ["mp4", "mkv", "avi", "mov", "webm", "flv", "wmv"];
 
-        if let Some(extension) = self.path.extension() {
-            if let Some(ext_str) = extension.to_str() {
-                return video_extensions.contains(&ext_str.to_lowercase().as_str());
-            }
+        if let Some(extension) = self.path.extension()
+            && let Some(ext_str) = extension.to_str()
+        {
+            return video_extensions.contains(&ext_str.to_lowercase().as_str());
         }
 
         false

@@ -137,6 +137,16 @@ impl Default for AnimationConfig {
     }
 }
 
+impl AnimationConfig {
+    /// Configuration for emphasising freshly added content with a single flip.
+    pub fn flip_once() -> Self {
+        Self {
+            animation_type: AnimationType::Flip,
+            ..Default::default()
+        }
+    }
+}
+
 /// Types of animations supported
 #[derive(Debug, Clone, Copy)]
 pub enum AnimationType {

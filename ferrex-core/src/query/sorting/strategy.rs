@@ -86,7 +86,7 @@ where
         let mut keys: Vec<_> = items
             .iter()
             .enumerate()
-            .map(|(i, item)| (i, item.extract_key(self.field.clone())))
+            .map(|(i, item)| (i, item.extract_key(self.field)))
             .collect();
 
         // Sort by keys
@@ -102,7 +102,7 @@ where
         // If it requires fetch and we don't have the data, this returns false
         if F::REQUIRES_FETCH {
             // Extract the key and check if it's missing
-            let key = sample.extract_key(self.field.clone());
+            let key = sample.extract_key(self.field);
             !key.is_missing()
         } else {
             // Field doesn't require fetch, always available
@@ -129,6 +129,12 @@ impl<T> fmt::Debug for ChainedSort<T> {
         f.debug_struct("ChainedSort")
             .field("strategy_count", &self.strategies.len())
             .finish()
+    }
+}
+
+impl<T> Default for ChainedSort<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -276,7 +282,7 @@ where
         let mut keys: Vec<_> = items
             .iter()
             .enumerate()
-            .map(|(i, item)| (i, item.extract_key(self.field.clone())))
+            .map(|(i, item)| (i, item.extract_key(self.field)))
             .collect();
 
         keys.sort_by(|a, b| a.1.compare_with_order(&b.1, REVERSE));
@@ -287,7 +293,7 @@ where
 
     fn can_apply(&self, sample: &T) -> bool {
         if F::REQUIRES_FETCH {
-            let key = sample.extract_key(self.field.clone());
+            let key = sample.extract_key(self.field);
             !key.is_missing()
         } else {
             true

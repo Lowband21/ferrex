@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO season_videos (\n                season_id, video_key, site, name, video_type, official,\n                iso_639_1, iso_3166_1, published_at, size\n            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aad74b246031d3187a31ccf4b2ecce88c2c90d9970b9f871b0b5f74db6188be1"
+}

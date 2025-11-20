@@ -170,17 +170,17 @@ impl ExtrasParser {
         let mut current_path = path.parent();
 
         while let Some(parent) = current_path {
-            if let Some(folder_name) = parent.file_name() {
-                if let Some(folder_str) = folder_name.to_str() {
-                    // Check against all extras folder patterns
-                    for (_name, pattern, extra_type) in Self::extras_folder_patterns() {
-                        if pattern.is_match(folder_str) {
-                            debug!(
-                                "Detected extras folder '{}' as {:?}",
-                                folder_str, extra_type
-                            );
-                            return Some(extra_type);
-                        }
+            if let Some(folder_name) = parent.file_name()
+                && let Some(folder_str) = folder_name.to_str()
+            {
+                // Check against all extras folder patterns
+                for (_name, pattern, extra_type) in Self::extras_folder_patterns() {
+                    if pattern.is_match(folder_str) {
+                        debug!(
+                            "Detected extras folder '{}' as {:?}",
+                            folder_str, extra_type
+                        );
+                        return Some(extra_type);
                     }
                 }
             }
@@ -229,27 +229,27 @@ impl ExtrasParser {
     pub fn extract_parent_title(path: &Path) -> Option<String> {
         // First check if this is a filename-based extra and extract from filename
         // E.g., "The Matrix - Behind the Scenes.mkv" -> "The Matrix"
-        if let Some(filename) = path.file_stem() {
-            if let Some(name_str) = filename.to_str() {
-                // Look for patterns like "MovieTitle - ExtraType"
-                for (_name, pattern, _extra_type) in Self::extras_filename_patterns() {
-                    if pattern.is_match(name_str) {
-                        // Try to extract the title before the extra type
-                        if let Some(dash_pos) = name_str.find(" - ") {
-                            let potential_title = &name_str[..dash_pos];
-                            // Check if the part after dash contains extra keywords
-                            let after_dash = &name_str[dash_pos + 3..];
-                            if pattern.is_match(after_dash) {
-                                debug!(
-                                    "Extracted parent title '{}' from filename for extra: {}",
-                                    potential_title,
-                                    path.display()
-                                );
-                                return Some(potential_title.to_string());
-                            }
+        if let Some(filename) = path.file_stem()
+            && let Some(name_str) = filename.to_str()
+        {
+            // Look for patterns like "MovieTitle - ExtraType"
+            for (_name, pattern, _extra_type) in Self::extras_filename_patterns() {
+                if pattern.is_match(name_str) {
+                    // Try to extract the title before the extra type
+                    if let Some(dash_pos) = name_str.find(" - ") {
+                        let potential_title = &name_str[..dash_pos];
+                        // Check if the part after dash contains extra keywords
+                        let after_dash = &name_str[dash_pos + 3..];
+                        if pattern.is_match(after_dash) {
+                            debug!(
+                                "Extracted parent title '{}' from filename for extra: {}",
+                                potential_title,
+                                path.display()
+                            );
+                            return Some(potential_title.to_string());
                         }
-                        break;
                     }
+                    break;
                 }
             }
         }
@@ -258,26 +258,26 @@ impl ExtrasParser {
         let mut current_path = path.parent();
 
         while let Some(parent) = current_path {
-            if let Some(folder_name) = parent.file_name() {
-                if let Some(folder_str) = folder_name.to_str() {
-                    // Check if this folder is an extras folder
-                    let is_extras_folder = Self::extras_folder_patterns()
-                        .iter()
-                        .any(|(_, pattern, _)| pattern.is_match(folder_str));
+            if let Some(folder_name) = parent.file_name()
+                && let Some(folder_str) = folder_name.to_str()
+            {
+                // Check if this folder is an extras folder
+                let is_extras_folder = Self::extras_folder_patterns()
+                    .iter()
+                    .any(|(_, pattern, _)| pattern.is_match(folder_str));
 
-                    if is_extras_folder {
-                        // Look at the parent of the extras folder
-                        if let Some(grandparent) = parent.parent() {
-                            if let Some(show_folder) = grandparent.file_name() {
-                                let title = show_folder.to_str()?.to_string();
-                                debug!(
-                                    "Extracted parent title '{}' for extra: {}",
-                                    title,
-                                    path.display()
-                                );
-                                return Some(title);
-                            }
-                        }
+                if is_extras_folder {
+                    // Look at the parent of the extras folder
+                    if let Some(grandparent) = parent.parent()
+                        && let Some(show_folder) = grandparent.file_name()
+                    {
+                        let title = show_folder.to_str()?.to_string();
+                        debug!(
+                            "Extracted parent title '{}' for extra: {}",
+                            title,
+                            path.display()
+                        );
+                        return Some(title);
                     }
                 }
             }
@@ -286,18 +286,17 @@ impl ExtrasParser {
 
         // If not in a dedicated extras folder, try to infer from path structure
         // For files like "/Movies/The Matrix (1999)/The Matrix - Behind the Scenes.mkv"
-        if let Some(parent) = path.parent() {
-            if let Some(movie_folder) = parent.file_name() {
-                if let Some(title) = movie_folder.to_str() {
-                    // Skip common extras folder names
-                    let is_extras_folder = Self::extras_folder_patterns()
-                        .iter()
-                        .any(|(_, pattern, _)| pattern.is_match(title));
+        if let Some(parent) = path.parent()
+            && let Some(movie_folder) = parent.file_name()
+            && let Some(title) = movie_folder.to_str()
+        {
+            // Skip common extras folder names
+            let is_extras_folder = Self::extras_folder_patterns()
+                .iter()
+                .any(|(_, pattern, _)| pattern.is_match(title));
 
-                    if !is_extras_folder {
-                        return Some(title.to_string());
-                    }
-                }
+            if !is_extras_folder {
+                return Some(title.to_string());
             }
         }
 

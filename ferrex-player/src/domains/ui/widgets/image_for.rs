@@ -3,10 +3,11 @@
 //! This widget provides a simple, declarative API for displaying media images
 //! with automatic loading, caching, and animation support.
 
+use crate::domains::metadata::image_service::FirstDisplayHint;
 use crate::domains::ui::widgets::rounded_image_shader::AnimatedPosterBounds;
 use crate::{
     domains::ui::messages::Message,
-    domains::ui::widgets::{AnimationType, rounded_image_shader},
+    domains::ui::widgets::{AnimationBehavior, AnimationType, rounded_image_shader},
     infrastructure::api_types::{
         EpisodeReference, MovieReference, SeasonReference, SeriesReference,
     },
@@ -38,7 +39,7 @@ pub struct ImageFor {
     placeholder_text: Option<String>,
     priority: Priority,
     image_index: u32,
-    animation: AnimationType,
+    animation: AnimationBehavior,
     theme_color: Option<Color>,
     is_hovered: bool,
     on_play: Option<Message>,
@@ -73,7 +74,7 @@ impl ImageFor {
             priority: Priority::Preload,
             image_index: 0,
             // Default; callers (views) should set from UI state
-            animation: AnimationType::None,
+            animation: AnimationBehavior::constant(AnimationType::flip()),
             theme_color: None,
             is_hovered: false,
             on_play: None,
@@ -158,15 +159,22 @@ impl ImageFor {
         self
     }
 
-    /// Set the animation type
+    /// Set the animation behavior using a single animation intent.
+    /// Flip animations automatically degrade to a fade once the image is cached.
     pub fn animation(mut self, animation: AnimationType) -> Self {
-        self.animation = animation;
+        self.animation = AnimationBehavior::from_primary(animation);
+        self
+    }
+
+    /// Set a custom animation behavior.
+    pub fn animation_behavior(mut self, behavior: AnimationBehavior) -> Self {
+        self.animation = behavior;
         self
     }
 
     /// Disable animation
     pub fn no_animation(mut self) -> Self {
-        self.animation = AnimationType::None;
+        self.animation = AnimationBehavior::constant(AnimationType::None);
         self
     }
 
@@ -216,7 +224,7 @@ pub fn image_for(media_id: Uuid) -> ImageFor {
 
 // Thread-local cache for the image service to avoid repeated lookups
 thread_local! {
-    static CACHED_IMAGE_SERVICE: std::cell::RefCell<Option<crate::infrastructure::service_registry::ImageServiceHandle>> = std::cell::RefCell::new(None);
+    static CACHED_IMAGE_SERVICE: std::cell::RefCell<Option<crate::infrastructure::service_registry::ImageServiceHandle>> = const { std::cell::RefCell::new(None) };
 }
 
 impl<'a> From<ImageFor> for Element<'a, Message> {
@@ -250,25 +258,26 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
         };
 
         // Fast path: Check if we have cached data and it's still valid
-        if let Some(cached) = &image.cached_data {
-            if cached.request_hash == request_hash {
-                // Profile cache reuse (fast path)
-                #[cfg(any(
-                    feature = "profile-with-puffin",
-                    feature = "profile-with-tracy",
-                    feature = "profile-with-tracing"
-                ))]
-                profiling::scope!("UI::Poster::CacheReuse::FastPath");
+        if let Some(cached) = &image.cached_data
+            && cached.request_hash == request_hash
+        {
+            // Profile cache reuse (fast path)
+            #[cfg(any(
+                feature = "profile-with-puffin",
+                feature = "profile-with-tracy",
+                feature = "profile-with-tracing"
+            ))]
+            profiling::scope!("UI::Poster::CacheReuse::FastPath");
 
-                // Reuse cached data without service lookup or DashMap access
-                return create_shader_from_cached(
-                    cached.handle.clone(),
-                    request_hash,
-                    cached.loaded_at,
-                    &image,
-                    bounds,
-                );
-            }
+            // Reuse cached data without service lookup or DashMap access
+            return create_shader_from_cached(
+                cached.handle.clone(),
+                request_hash,
+                cached.loaded_at,
+                image.animation,
+                &image,
+                bounds,
+            );
         }
 
         // Slow path: Get or cache the image service (thread-local optimization)
@@ -283,8 +292,8 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
         // Check if we have access to the image service
         if let Some(image_service) = image_service {
             // Check the cache first
-            match image_service.get().get_with_load_time(&request) {
-                Some((handle, loaded_at)) => {
+            match image_service.get().take_loaded_entry(&request) {
+                Some((handle, loaded_at, hint)) => {
                     #[cfg(any(
                         feature = "profile-with-puffin",
                         feature = "profile-with-tracy",
@@ -297,6 +306,11 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                         loaded_at,
                         request_hash,
                     });
+
+                    let animation_behavior = match hint {
+                        Some(FirstDisplayHint::FlipOnce) => AnimationBehavior::flip_then_fade(),
+                        None => image.animation,
+                    };
 
                     let mut shader: rounded_image_shader::RoundedImage =
                         rounded_image_shader(handle, Some(request_hash))
@@ -316,39 +330,18 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                         shader = shader.on_click(click_msg);
                     }
 
-                    /*
-                    if let Some(load_time) = loaded_at {
+                    let (selected_animation, load_time_opt) = match loaded_at {
+                        Some(load_time) => {
+                            (animation_behavior.select(Some(load_time)), Some(load_time))
+                        }
+                        None => (AnimationType::None, None),
+                    };
+
+                    if let Some(load_time) = load_time_opt {
                         shader = shader.with_load_time(load_time);
-                    } else {
-                    } */
+                    }
 
-                    /*
-                    let should_animate = if let Some(load_time) = loaded_at {
-                        // Get animation duration
-                        let animation_duration = match image.animation {
-                            AnimationType::None => Duration::from_secs(0),
-                            AnimationType::Fade { duration } => duration,
-                            AnimationType::Flip { duration } => duration,
-                            AnimationType::EnhancedFlip { total_duration, .. } => total_duration,
-                            AnimationType::PlaceholderSunken => Duration::from_secs(0), // No animation for placeholder
-                        };
-
-                        // Check if image was loaded recently (within 2x animation duration)
-                        // This gives us a window where animations will play even if there's
-                        // a slight delay between loading and display
-                        let elapsed = load_time.elapsed();
-                        let should = elapsed <= animation_duration * 10;
-
-                        should
-                    } else {
-                        false
-                    }; */
-
-                    //if should_animate {
-                    shader = shader.with_animation(image.animation);
-                    //} else {
-                    //shader = shader.with_animation(AnimationType::None);
-                    //}
+                    shader = shader.with_animation(selected_animation);
 
                     // Set progress indicator if provided
                     if let Some(progress) = image.progress {
@@ -394,6 +387,7 @@ fn create_shader_from_cached<'a>(
     handle: Handle,
     request_hash: u64,
     loaded_at: Option<std::time::Instant>,
+    animation: AnimationBehavior,
     image: &ImageFor,
     bounds: AnimatedPosterBounds,
 ) -> Element<'a, Message> {
@@ -416,31 +410,17 @@ fn create_shader_from_cached<'a>(
         shader = shader.on_click(click_msg);
     }
 
-    // Set load time if available
-    /*
-    if let Some(load_time) = loaded_at {
+    // Apply load-time aware animation selection
+    let (selected_animation, load_time_opt) = match loaded_at {
+        Some(load_time) => (animation.select(Some(load_time)), Some(load_time)),
+        None => (AnimationType::None, None),
+    };
+
+    if let Some(load_time) = load_time_opt {
         shader = shader.with_load_time(load_time);
     }
 
-    // Determine animation based on load time
-    let should_animate = if let Some(load_time) = loaded_at {
-        let animation_duration = match image.animation {
-            AnimationType::None => Duration::from_secs(0),
-            AnimationType::Fade { duration } => duration,
-            AnimationType::Flip { duration } => duration,
-            AnimationType::EnhancedFlip { total_duration, .. } => total_duration,
-            AnimationType::PlaceholderSunken => Duration::from_secs(0),
-        };
-        load_time.elapsed() <= animation_duration * 2
-    } else {
-        false
-    };*/
-
-    //if should_animate {
-    shader = shader.with_animation(image.animation);
-    //} else {
-    //shader = shader.with_animation(AnimationType::None);
-    //}
+    shader = shader.with_animation(selected_animation);
 
     // Set progress indicator if provided
     if let Some(progress) = image.progress {

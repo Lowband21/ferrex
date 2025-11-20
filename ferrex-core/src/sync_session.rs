@@ -1,4 +1,4 @@
-use crate::{ImageType, MediaID, MediaType};
+use crate::{MediaID, MediaType};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -117,9 +117,9 @@ impl SyncSession {
         // Use alphanumeric without confusing chars (0, O, I, 1)
         const CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         (0..6)
-            .map(|_| CHARS[rng.gen_range(0..CHARS.len())] as char)
+            .map(|_| CHARS[rng.random_range(0..CHARS.len())] as char)
             .collect()
     }
 

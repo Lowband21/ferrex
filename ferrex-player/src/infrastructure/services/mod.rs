@@ -55,6 +55,12 @@ pub struct ServiceBuilder {
     toggles: CompatToggles,
 }
 
+impl Default for ServiceBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ServiceBuilder {
     pub fn new() -> Self {
         Self {

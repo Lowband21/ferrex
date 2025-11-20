@@ -270,7 +270,7 @@ impl FileWatcher {
         if event.paths.len() == 2 {
             // Likely a rename/move
             event_type = FileWatchEventType::Moved;
-            old_path = event.paths.get(0).map(|p| p.to_string_lossy().to_string());
+            old_path = event.paths.first().map(|p| p.to_string_lossy().to_string());
         }
 
         // Video file filtering (allow deletions regardless)
@@ -318,10 +318,10 @@ impl FileWatcher {
             "mp4", "mkv", "avi", "mov", "webm", "flv", "wmv", "m4v", "mpg", "mpeg",
         ];
 
-        if let Some(extension) = path.extension() {
-            if let Some(ext_str) = extension.to_str() {
-                return video_extensions.contains(&ext_str.to_lowercase().as_str());
-            }
+        if let Some(extension) = path.extension()
+            && let Some(ext_str) = extension.to_str()
+        {
+            return video_extensions.contains(&ext_str.to_lowercase().as_str());
         }
         false
     }

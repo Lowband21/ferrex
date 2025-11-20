@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use reqwest::{Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

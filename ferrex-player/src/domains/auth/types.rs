@@ -21,9 +21,10 @@ pub enum AuthenticationMode {
 }
 
 /// Authentication flow state
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum AuthenticationFlow {
     /// Initial state, checking if server needs setup
+    #[default]
     CheckingSetup,
 
     /// First-run admin setup
@@ -78,12 +79,6 @@ pub enum AuthenticationFlow {
         user: User,
         mode: AuthenticationMode,
     },
-}
-
-impl Default for AuthenticationFlow {
-    fn default() -> Self {
-        AuthenticationFlow::CheckingSetup
-    }
 }
 
 /// Legacy compatibility - will be removed

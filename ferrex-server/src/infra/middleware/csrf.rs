@@ -45,10 +45,13 @@ pub fn extract_csrf_from_cookies(headers: &HeaderMap) -> Option<String> {
         })
 }
 
-use std::task::{Context, Poll};
+use std::{
+    fmt,
+    task::{Context, Poll},
+};
 use tower::Layer;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CsrfLayer;
 
 impl<S> Layer<S> for CsrfLayer {
@@ -62,6 +65,12 @@ impl<S> Layer<S> for CsrfLayer {
 #[derive(Clone)]
 pub struct CsrfMiddleware<S> {
     inner: S,
+}
+
+impl<S> fmt::Debug for CsrfMiddleware<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CsrfMiddleware").finish()
+    }
 }
 
 impl<S> tower::Service<Request<Body>> for CsrfMiddleware<S>
@@ -83,6 +92,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct ValidateCsrf;
 
 impl<S> FromRequestParts<S> for ValidateCsrf

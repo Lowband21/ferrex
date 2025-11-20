@@ -58,10 +58,10 @@ impl<S> HttpsRedirectMiddleware<S> {
         }
 
         // Check X-Forwarded-Proto header for reverse proxies
-        if let Some(proto) = req.headers().get("x-forwarded-proto") {
-            if let Ok(proto_str) = proto.to_str() {
-                return proto_str.eq_ignore_ascii_case("https");
-            }
+        if let Some(proto) = req.headers().get("x-forwarded-proto")
+            && let Ok(proto_str) = proto.to_str()
+        {
+            return proto_str.eq_ignore_ascii_case("https");
         }
 
         false

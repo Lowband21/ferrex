@@ -101,6 +101,7 @@ pub trait ActorObserver: Send + Sync {
     }
 }
 
+#[derive(Debug)]
 pub struct NoopActorObserver;
 
 impl ActorObserver for NoopActorObserver {}
@@ -124,4 +125,10 @@ pub struct ParentDescriptors {
     pub episode_id: Option<EpisodeID>,
     pub resolved_type: Option<LibraryType>,
     pub extra_tag: Option<String>,
+    #[serde(default)]
+    pub series_slug: Option<String>,
+    #[serde(default)]
+    pub series_title_hint: Option<String>,
+    #[serde(default)]
+    pub season_number: Option<u32>,
 }

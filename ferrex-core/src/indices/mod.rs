@@ -1,6 +1,5 @@
 use crate::{
     LibraryID, Media, MediaDatabase, MediaDetailsOption, Result, TmdbDetails,
-    database::traits::MediaDatabaseTrait,
     query::{SortBy, SortOrder},
 };
 use std::{collections::HashMap, fmt, sync::Arc};
@@ -155,7 +154,6 @@ impl IndexManager {
                         std::cmp::Ordering::Equal
                     }
                 }
-                _ => std::cmp::Ordering::Equal,
             };
             if sort_order == SortOrder::Descending {
                 cmp.reverse()

@@ -1,0 +1,96 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE media_image_variants\n            SET\n                cached = true,\n                width = COALESCE($5, width),\n                height = COALESCE($6, height),\n                content_hash = COALESCE($7, content_hash),\n                theme_color = COALESCE($8, theme_color),\n                cached_at = NOW()\n            WHERE media_type = $1\n              AND media_id = $2\n              AND image_type = $3\n              AND order_index = $4\n              AND variant = $9\n            RETURNING\n                media_type,\n                media_id,\n                image_type,\n                order_index,\n                variant,\n                cached,\n                width,\n                height,\n                content_hash,\n                theme_color,\n                requested_at,\n                cached_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "image_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "order_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "variant",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "cached",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "width",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "height",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "content_hash",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "theme_color",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "requested_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "cached_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Varchar",
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "c8fc7ca227d5e110e58b700475b38298d8c511effb32a8f9f7146f6fd75ab2c7"
+}

@@ -147,37 +147,33 @@ impl FilenameParser {
     /// Force parse as movie (used when we know from folder structure)
     fn parse_as_movie(&self, filename: &str, file_path: &Path) -> Option<ParsedMediaInfo> {
         // First, try to parse the parent folder name
-        if let Some(parent) = file_path.parent() {
-            if let Some(folder_name) = parent.file_name() {
-                if let Some(folder_str) = folder_name.to_str() {
-                    info!("Trying to parse movie from folder name: {}", folder_str);
+        if let Some(parent) = file_path.parent()
+            && let Some(folder_name) = parent.file_name()
+            && let Some(folder_str) = folder_name.to_str()
+        {
+            info!("Trying to parse movie from folder name: {}", folder_str);
 
-                    // Try to match "movie_name (year)" pattern in folder name
-                    let folder_regex = Regex::new(r"^(.+?)\s*\((\d{4})\)\s*$").ok();
-                    if let Some(regex) = folder_regex {
-                        if let Some(captures) = regex.captures(folder_str) {
-                            if let (Some(title_match), Some(year_match)) =
-                                (captures.get(1), captures.get(2))
-                            {
-                                let title = title_match.as_str().trim().to_string();
-                                if let Ok(year) = year_match.as_str().parse::<u16>() {
-                                    if (1900..=2100).contains(&year) {
-                                        info!(
-                                            "Successfully parsed movie from folder: {} ({})",
-                                            title, year
-                                        );
-                                        return Some(ParsedMediaInfo::Movie(ParsedMovieInfo {
-                                            title,
-                                            year: Some(year),
-                                            resolution: self.extract_resolution(filename),
-                                            source: self.extract_source(filename),
-                                            release_group: self.extract_release_group(filename),
-                                        }));
-                                    }
-                                }
-                            }
-                        }
-                    }
+            // Try to match "movie_name (year)" pattern in folder name
+            let folder_regex = Regex::new(r"^(.+?)\s*\((\d{4})\)\s*$").ok();
+            if let Some(regex) = folder_regex
+                && let Some(captures) = regex.captures(folder_str)
+                && let (Some(title_match), Some(year_match)) = (captures.get(1), captures.get(2))
+            {
+                let title = title_match.as_str().trim().to_string();
+                if let Ok(year) = year_match.as_str().parse::<u16>()
+                    && (1900..=2100).contains(&year)
+                {
+                    info!(
+                        "Successfully parsed movie from folder: {} ({})",
+                        title, year
+                    );
+                    return Some(ParsedMediaInfo::Movie(ParsedMovieInfo {
+                        title,
+                        year: Some(year),
+                        resolution: self.extract_resolution(filename),
+                        source: self.extract_source(filename),
+                        release_group: self.extract_release_group(filename),
+                    }));
                 }
             }
         }
@@ -307,14 +303,13 @@ impl FilenameParser {
         // Look for 4-digit years between 1900-2100, surrounded by non-digit characters
         let year_regex = Regex::new(r"(?:^|[^\d])(19\d{2}|20\d{2})(?:[^\d]|$)").ok()?;
 
-        if let Some(captures) = year_regex.captures(filename) {
-            if let Some(year_match) = captures.get(1) {
-                if let Ok(year) = year_match.as_str().parse::<u16>() {
-                    // Validate the year is reasonable
-                    if (1900..=2100).contains(&year) {
-                        return Some(year);
-                    }
-                }
+        if let Some(captures) = year_regex.captures(filename)
+            && let Some(year_match) = captures.get(1)
+            && let Ok(year) = year_match.as_str().parse::<u16>()
+        {
+            // Validate the year is reasonable
+            if (1900..=2100).contains(&year) {
+                return Some(year);
             }
         }
 
@@ -357,10 +352,10 @@ impl FilenameParser {
         // Look for pattern like "-GROUP" at the end of filename (before extension)
         let group_regex = Regex::new(r"-(\w+)(?:\.\w+)?$").ok()?;
 
-        if let Some(captures) = group_regex.captures(filename) {
-            if let Some(group_match) = captures.get(1) {
-                return Some(group_match.as_str().to_string());
-            }
+        if let Some(captures) = group_regex.captures(filename)
+            && let Some(group_match) = captures.get(1)
+        {
+            return Some(group_match.as_str().to_string());
         }
 
         None

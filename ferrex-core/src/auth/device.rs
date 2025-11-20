@@ -112,10 +112,10 @@ impl DeviceRegistration {
             return false;
         }
 
-        if let Some(expires_at) = self.expires_at {
-            if expires_at < Utc::now() {
-                return false;
-            }
+        if let Some(expires_at) = self.expires_at
+            && expires_at < Utc::now()
+        {
+            return false;
         }
 
         true

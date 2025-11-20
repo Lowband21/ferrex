@@ -1,6 +1,5 @@
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
-    domains::streaming::StreamingDomainState,
     domains::streaming::messages::Message,
     domains::ui::types::ViewState,
     state_refactored::State,
@@ -200,7 +199,7 @@ pub fn handle_transcoding_status_update(
             };
 
             let mut tasks: Vec<Task<DomainMessage>> = Vec::new();
-            let mut events: Vec<CrossDomainEvent> = Vec::new();
+            let events: Vec<CrossDomainEvent> = Vec::new();
 
             if should_continue_checking {
                 // Continue checking every 2 seconds
@@ -224,7 +223,7 @@ pub fn handle_transcoding_status_update(
                     {
                         if let Some(client) = &state.domains.streaming.state.hls_client {
                             let client_clone = client.clone();
-                            let media_id = media.id.clone();
+                            let media_id = media.id;
 
                             Some(Task::perform(
                                 async move {
@@ -331,7 +330,7 @@ pub fn handle_transcoding_status_update(
                             &state.domains.streaming.state.hls_client
                         {
                             let client_clone = client.clone();
-                            let media_id = media.id.clone();
+                            let media_id = media.id;
 
                             Some(Task::perform(
                                 async move {

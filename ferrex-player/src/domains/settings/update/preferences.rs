@@ -2,8 +2,6 @@ use super::super::messages::Message;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::auth::errors::{AuthError, NetworkError};
 use crate::domains::auth::manager::AutoLoginScope;
-use crate::infrastructure::services::api::ApiService;
-use crate::infrastructure::services::auth::AuthService;
 use crate::state_refactored::State;
 use iced::Task;
 

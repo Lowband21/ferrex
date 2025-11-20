@@ -41,10 +41,10 @@ impl PostgresDatabase {
         .execute(&mut *tx)
         .await
         .map_err(|e| {
-            if let Some(db_err) = e.as_database_error() {
-                if db_err.constraint() == Some("sync_sessions_room_code_key") {
-                    return MediaError::Conflict("Room code already in use".to_string());
-                }
+            if let Some(db_err) = e.as_database_error()
+                && db_err.constraint() == Some("sync_sessions_room_code_key")
+            {
+                return MediaError::Conflict("Room code already in use".to_string());
             }
             MediaError::Internal(format!("Failed to create sync session: {}", e))
         })?;

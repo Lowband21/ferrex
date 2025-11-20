@@ -1654,12 +1654,7 @@ async fn scan_progress_sse_streams_progress_until_completion(pool: PgPool) -> an
             .iter()
             .any(|name| *name == ScanSseEventType::Quiescing.event_name())
     );
-    assert!(
-        event_names
-            .last()
-            .copied()
-            == Some(ScanSseEventType::Completed.event_name())
-    );
+    assert!(event_names.last().copied() == Some(ScanSseEventType::Completed.event_name()));
     assert!(seen_quiescing, "expected quiescing frame before completion");
 
     let history: Vec<ScanHistoryEntry> = scan_control.history(1).await;

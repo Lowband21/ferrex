@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE folder_inventory\n            SET total_files = $1,\n                processed_files = $2,\n                total_size_bytes = $3,\n                file_types = $4,\n                updated_at = NOW()\n            WHERE id = $5\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int8",
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c19f1095a2fd0d7c585a21f1c4a383d693480103e2695a578383ee24e9d45ec2"
+}

@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO movie_metadata (\n            movie_id, tmdb_id, title, original_title, overview, release_date, runtime,\n            vote_average, vote_count, popularity, primary_certification, homepage, status,\n            tagline, budget, revenue, poster_path, backdrop_path, logo_path, collection_id,\n            collection_name, collection_poster_path, collection_backdrop_path,\n            imdb_id, facebook_id, instagram_id, twitter_id, wikidata_id, tiktok_id, youtube_id\n        )\n        VALUES (\n            $1, $2, $3, $4, $5, $6, $7,\n            $8, $9, $10, $11, $12, $13,\n            $14, $15, $16, $17, $18, $19, $20,\n            $21, $22, $23,\n            $24, $25, $26, $27, $28, $29, $30\n        )\n        ON CONFLICT (movie_id) DO UPDATE SET\n            tmdb_id = EXCLUDED.tmdb_id,\n            title = EXCLUDED.title,\n            original_title = EXCLUDED.original_title,\n            overview = EXCLUDED.overview,\n            release_date = EXCLUDED.release_date,\n            runtime = EXCLUDED.runtime,\n            vote_average = EXCLUDED.vote_average,\n            vote_count = EXCLUDED.vote_count,\n            popularity = EXCLUDED.popularity,\n            primary_certification = EXCLUDED.primary_certification,\n            homepage = EXCLUDED.homepage,\n            status = EXCLUDED.status,\n            tagline = EXCLUDED.tagline,\n            budget = EXCLUDED.budget,\n            revenue = EXCLUDED.revenue,\n            poster_path = EXCLUDED.poster_path,\n            backdrop_path = EXCLUDED.backdrop_path,\n            logo_path = EXCLUDED.logo_path,\n            collection_id = EXCLUDED.collection_id,\n            collection_name = EXCLUDED.collection_name,\n            collection_poster_path = EXCLUDED.collection_poster_path,\n            collection_backdrop_path = EXCLUDED.collection_backdrop_path,\n            imdb_id = EXCLUDED.imdb_id,\n            facebook_id = EXCLUDED.facebook_id,\n            instagram_id = EXCLUDED.instagram_id,\n            twitter_id = EXCLUDED.twitter_id,\n            wikidata_id = EXCLUDED.wikidata_id,\n            tiktok_id = EXCLUDED.tiktok_id,\n            youtube_id = EXCLUDED.youtube_id,\n            updated_at = NOW()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Date",
+        "Int4",
+        "Float4",
+        "Int4",
+        "Float4",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "04f2cdd2714213637d460c81cb116330333a1d172156b6ae0fb0da08cc78d037"
+}

@@ -25,7 +25,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                     service
                         .get_token()
                         .await
-                        .and_then(|token| Some(format!("Bearer {}", token.access_token)))
+                        .map(|token| format!("Bearer {}", token.access_token))
                 })
             })
         });

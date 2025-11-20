@@ -2,12 +2,15 @@
 
 use crate::domains::ui::view_models::AllViewModel;
 use crate::domains::ui::views::grid::VirtualGridState;
-use crate::infrastructure::api_types::LibraryType;
+use crate::infrastructure::api_types::{LibraryType, Media};
 use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
+use ferrex_core::query::sorting::compare_media;
 use ferrex_core::{
     ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedMovieReference,
-    ArchivedSeriesReference, LibraryID, MediaOps,
+    ArchivedSeriesReference, LibraryID, MediaID, MediaIDLike, MediaOps, MovieID, SeriesID, SortBy,
+    SortOrder,
 };
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -79,6 +82,12 @@ impl TabState {
             _ => None,
         }
     }
+
+    pub fn set_sort(&mut self, sort_by: SortBy, sort_order: SortOrder) {
+        if let TabState::Library(state) = self {
+            state.set_sort(sort_by, sort_order);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -128,8 +137,8 @@ mod tests {
 impl LibraryTabState {
     fn extract_media_uuid(media: &ArchivedMedia) -> Option<Uuid> {
         match media {
-            ArchivedMedia::Movie(movie) => Some(Uuid::from_bytes(movie.id.0)),
-            ArchivedMedia::Series(series) => Some(Uuid::from_bytes(series.id.0)),
+            ArchivedMedia::Movie(movie) => Some(movie.id.0),
+            ArchivedMedia::Series(series) => Some(series.id.0),
             _ => None,
         }
     }
@@ -193,6 +202,12 @@ pub struct LibraryTabState {
 
     /// Reference to the media repo accessor for data access
     accessor: Accessor<ReadOnly>,
+
+    /// Current sort field for this tab
+    sort_by: SortBy,
+
+    /// Current sort order for this tab
+    sort_order: SortOrder,
 }
 
 /// Cached media items for a library tab - using archived references for zero-copy access
@@ -251,6 +266,8 @@ impl LibraryTabState {
             needs_refresh: true,
             navigation_history: Vec::new(),
             accessor,
+            sort_by: SortBy::Title,
+            sort_order: SortOrder::Ascending,
         };
 
         state.refresh_from_repo();
@@ -295,7 +312,7 @@ impl LibraryTabState {
 
         let authoritative_set = self
             .accessor
-            .get_sorted_index_by_library(&self.library_id)
+            .get_sorted_index_by_library(&self.library_id, self.sort_by, self.sort_order)
             .ok()
             .and_then(|ids| {
                 if ids.is_empty() {
@@ -307,11 +324,7 @@ impl LibraryTabState {
 
         let (filtered_indices, ids) = Self::reconcile_positions(
             positions,
-            |idx| {
-                slice
-                    .get(idx)
-                    .and_then(|media| Self::extract_media_uuid(media))
-            },
+            |idx| slice.get(idx).and_then(Self::extract_media_uuid),
             authoritative_set.as_ref(),
         );
 
@@ -335,11 +348,11 @@ impl LibraryTabState {
 
         for &pos in positions {
             let idx = pos as usize;
-            if let Some(uuid) = fetch_uuid(idx) {
-                if allowed.map_or(true, |set| set.contains(&uuid)) {
-                    filtered_indices.push(idx);
-                    ids.push(uuid);
-                }
+            if let Some(uuid) = fetch_uuid(idx)
+                && allowed.is_none_or(|set| set.contains(&uuid))
+            {
+                filtered_indices.push(idx);
+                ids.push(uuid);
             }
         }
 
@@ -356,7 +369,11 @@ impl LibraryTabState {
         self.filtered_indices = None;
 
         if self.accessor.is_initialized() {
-            match self.accessor.get_sorted_index_by_library(&self.library_id) {
+            match self.accessor.get_sorted_index_by_library(
+                &self.library_id,
+                self.sort_by,
+                self.sort_order,
+            ) {
                 Ok(ids) => {
                     self.cached_index_ids = ids;
                     self.grid_state.total_items = self.cached_index_ids.len();
@@ -381,6 +398,87 @@ impl LibraryTabState {
         }
 
         self.needs_refresh = false;
+    }
+
+    /// Insert a newly discovered media item into the cached ordering based on the
+    /// current sort configuration. Returns true if the media was inserted.
+    pub fn insert_media_reference(&mut self, media: &Media) -> bool {
+        if !self.matches_library_media(media) {
+            return false;
+        }
+
+        let media_uuid = media.media_id().to_uuid();
+
+        if self.cached_index_ids.contains(&media_uuid) {
+            return false;
+        }
+
+        let compare_with_fallback = |a: &Media, a_id: &Uuid, b: &Media, b_id: &Uuid| {
+            compare_media(a, b, self.sort_by, self.sort_order)
+                .unwrap_or_else(|| {
+                    compare_media(a, b, SortBy::Title, SortOrder::Ascending)
+                        .unwrap_or_else(|| a_id.cmp(b_id))
+                })
+                .then_with(|| a_id.cmp(b_id))
+        };
+
+        let mut insert_at = None;
+
+        for (idx, existing_id) in self.cached_index_ids.iter().enumerate() {
+            let Some(existing_media) = self.fetch_media_by_uuid(*existing_id) else {
+                continue;
+            };
+
+            let ordering = compare_with_fallback(media, &media_uuid, &existing_media, existing_id);
+            if ordering != Ordering::Greater {
+                insert_at = Some(idx);
+                break;
+            }
+        }
+
+        match insert_at {
+            Some(position) => self.cached_index_ids.insert(position, media_uuid),
+            None => self.cached_index_ids.push(media_uuid),
+        }
+
+        self.grid_state.total_items = self.cached_index_ids.len();
+        self.grid_state.calculate_visible_range();
+
+        true
+    }
+
+    fn matches_library_media(&self, media: &Media) -> bool {
+        matches!(
+            (self.library_type, media),
+            (LibraryType::Movies, Media::Movie(_)) | (LibraryType::Series, Media::Series(_))
+        )
+    }
+
+    fn fetch_media_by_uuid(&self, id: Uuid) -> Option<Media> {
+        let lookup_id = match self.library_type {
+            LibraryType::Movies => MediaID::Movie(MovieID(id)),
+            LibraryType::Series => MediaID::Series(SeriesID(id)),
+        };
+
+        match self.accessor.get(&lookup_id) {
+            Ok(media) => Some(media),
+            Err(err) => {
+                log::warn!(
+                    "Failed to fetch media {} while inserting SSE addition: {}",
+                    lookup_id,
+                    err
+                );
+                None
+            }
+        }
+    }
+
+    pub fn set_sort(&mut self, sort_by: SortBy, sort_order: SortOrder) {
+        if self.sort_by != sort_by || self.sort_order != sort_order {
+            self.sort_by = sort_by;
+            self.sort_order = sort_order;
+            self.mark_needs_refresh();
+        }
     }
 
     /// Mark this tab as needing refresh
@@ -439,15 +537,15 @@ impl LibraryTabState {
         let slice = lib.media_as_slice();
 
         // If we have server-provided positions (movies Phase 1), use them to compute visible IDs
-        if matches!(self.library_type, LibraryType::Movies) {
-            if let Some(indices) = &self.filtered_indices {
-                let visible = indices.get(range.clone()).unwrap_or(&[]);
-                return visible
-                    .iter()
-                    .filter_map(|idx| slice.get(*idx))
-                    .map(|m| m.id())
-                    .collect();
-            }
+        if matches!(self.library_type, LibraryType::Movies)
+            && let Some(indices) = &self.filtered_indices
+        {
+            let visible = indices.get(range.clone()).unwrap_or(&[]);
+            return visible
+                .iter()
+                .filter_map(|idx| slice.get(*idx))
+                .map(|m| m.id())
+                .collect();
         }
 
         // Fallback: filter top-level media according to library type and slice by visible range

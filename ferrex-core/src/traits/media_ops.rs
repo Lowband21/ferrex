@@ -6,17 +6,11 @@ use crate::ArchivedSeriesReference;
 use crate::types::ArchivedMediaID;
 use crate::types::Media;
 use crate::{
-    ArchivedEpisodeID, ArchivedMediaDetailsOption, ArchivedMovieID, ArchivedSeasonID,
-    ArchivedSeriesID, ArchivedTmdbDetails, EpisodeID, EpisodeReference, LibraryID,
-    MediaDetailsOption, MediaDetailsOptionLike, MediaFile, MediaID, MediaIDLike, MovieID,
-    MovieReference, SeasonID, SeasonReference, SeriesID, SeriesReference, TmdbDetails, UrlLike,
-};
-use rkyv::{
-    deserialize, option::ArchivedOption, rancor, rend::f32_le, string::ArchivedString,
-    vec::ArchivedVec,
+    EpisodeID, EpisodeReference, LibraryID, MediaDetailsOption, MediaDetailsOptionLike, MediaFile,
+    MediaID, MediaIDLike, MovieID, MovieReference, SeasonID, SeasonReference, SeriesID,
+    SeriesReference, TmdbDetails, UrlLike,
 };
 use std::time::Duration;
-use uuid::Uuid;
 
 // ===== Media Trait System =====
 //
@@ -51,7 +45,7 @@ pub trait Playable: MediaOps {
             .media_file_metadata
             .as_ref()
             .and_then(|meta| meta.duration)
-            .map(|secs| Duration::from_secs_f64(secs))
+            .map(Duration::from_secs_f64)
     }
 
     /// Check if the media can be transcoded
@@ -140,16 +134,10 @@ impl MediaOps for ArchivedMedia {
 
     fn media_id(&self) -> MediaID {
         match &self {
-            ArchivedMedia::Movie(movie) => MediaID::Movie(MovieID(Uuid::from_bytes(movie.id.0))),
-            ArchivedMedia::Series(series) => {
-                MediaID::Series(SeriesID(Uuid::from_bytes(series.id.0)))
-            }
-            ArchivedMedia::Season(season) => {
-                MediaID::Season(SeasonID(Uuid::from_bytes(season.id.0)))
-            }
-            ArchivedMedia::Episode(episode) => {
-                MediaID::Episode(EpisodeID(Uuid::from_bytes(episode.id.0)))
-            }
+            ArchivedMedia::Movie(movie) => MediaID::Movie(MovieID(movie.id.0)),
+            ArchivedMedia::Series(series) => MediaID::Series(SeriesID(series.id.0)),
+            ArchivedMedia::Season(season) => MediaID::Season(SeasonID(season.id.0)),
+            ArchivedMedia::Episode(episode) => MediaID::Episode(EpisodeID(episode.id.0)),
         }
     }
 
@@ -180,7 +168,7 @@ impl MediaOps for MovieReference {
     }
 
     fn media_id(&self) -> MediaID {
-        MediaID::Movie(self.id.clone())
+        MediaID::Movie(self.id)
     }
 
     fn theme_color(&self) -> Option<&str> {
@@ -272,7 +260,7 @@ impl MediaOps for SeriesReference {
     }
 
     fn media_id(&self) -> MediaID {
-        MediaID::Series(self.id.clone())
+        MediaID::Series(self.id)
     }
 
     fn theme_color(&self) -> Option<&str> {
@@ -364,7 +352,7 @@ impl MediaOps for SeasonReference {
     }
 
     fn media_id(&self) -> MediaID {
-        MediaID::Season(self.id.clone())
+        MediaID::Season(self.id)
     }
 
     fn theme_color(&self) -> Option<&str> {
@@ -452,7 +440,7 @@ impl MediaOps for EpisodeReference {
     }
 
     fn media_id(&self) -> MediaID {
-        MediaID::Episode(self.id.clone())
+        MediaID::Episode(self.id)
     }
 
     fn theme_color(&self) -> Option<&str> {
@@ -536,7 +524,7 @@ impl MediaOps for ArchivedMovieReference {
     type Id = MovieID;
 
     fn id(&self) -> Self::Id {
-        MovieID(Uuid::from_bytes(self.id.0))
+        MovieID(self.id.0)
     }
 
     fn media_id(&self) -> MediaID {
@@ -559,7 +547,7 @@ impl MediaOps for ArchivedSeriesReference {
     type Id = SeriesID;
 
     fn id(&self) -> Self::Id {
-        SeriesID(Uuid::from_bytes(self.id.0))
+        SeriesID(self.id.0)
     }
     fn media_id(&self) -> MediaID {
         MediaID::from(self.id)
@@ -582,7 +570,7 @@ impl MediaOps for ArchivedSeasonReference {
     type Id = SeasonID;
 
     fn id(&self) -> Self::Id {
-        SeasonID(Uuid::from_bytes(self.id.0))
+        SeasonID(self.id.0)
     }
     fn media_id(&self) -> MediaID {
         MediaID::from(self.id)
@@ -605,7 +593,7 @@ impl MediaOps for ArchivedEpisodeReference {
     type Id = EpisodeID;
 
     fn id(&self) -> Self::Id {
-        EpisodeID(Uuid::from_bytes(self.id.0))
+        EpisodeID(self.id.0)
     }
 
     fn media_id(&self) -> MediaID {

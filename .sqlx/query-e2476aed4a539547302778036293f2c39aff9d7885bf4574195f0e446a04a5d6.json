@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO auth_device_states (device_id, state_data, updated_at)\n            VALUES ($1, $2, NOW())\n            ON CONFLICT (device_id) DO UPDATE\n            SET state_data = EXCLUDED.state_data,\n                updated_at = EXCLUDED.updated_at\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e2476aed4a539547302778036293f2c39aff9d7885bf4574195f0e446a04a5d6"
+}

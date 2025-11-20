@@ -6,6 +6,7 @@ use ferrex_core::{
     watch_status::WatchStatusFilter,
 };
 use sqlx::{Postgres, QueryBuilder, types::BigDecimal};
+use std::fmt;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -47,16 +48,29 @@ pub struct FilteredMovieIndexBuilder<'a> {
     needs_watch_completed: bool,
 }
 
+impl<'a> fmt::Debug for FilteredMovieIndexBuilder<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FilteredMovieIndexBuilder")
+            .field("spec_ptr", &(self.spec as *const FilterIndicesRequest))
+            .field("sort", &self.sort)
+            .field("order", &self.order)
+            .field("user_id", &self.user_id)
+            .field("needs_watch_progress", &self.needs_watch_progress)
+            .field("needs_watch_completed", &self.needs_watch_completed)
+            .finish()
+    }
+}
+
 impl<'a> FilteredMovieIndexBuilder<'a> {
     pub fn new(
         library_id: Uuid,
         spec: &'a FilterIndicesRequest,
         user_id: Option<Uuid>,
     ) -> Result<Self, FilterQueryError> {
-        if let Some(media_type) = spec.media_type {
-            if media_type != MediaTypeFilter::Movie {
-                return Err(FilterQueryError::UnsupportedMediaType(media_type));
-            }
+        if let Some(media_type) = spec.media_type
+            && media_type != MediaTypeFilter::Movie
+        {
+            return Err(FilterQueryError::UnsupportedMediaType(media_type));
         }
 
         let sort = spec.sort.unwrap_or(SortBy::Title);
@@ -294,7 +308,7 @@ pub fn build_filtered_movie_query(
     library_id: Uuid,
     spec: &FilterIndicesRequest,
     user_id: Option<Uuid>,
-) -> Result<QueryBuilder<Postgres>, FilterQueryError> {
+) -> Result<QueryBuilder<'_, Postgres>, FilterQueryError> {
     FilteredMovieIndexBuilder::new(library_id, spec, user_id)?.build()
 }
 

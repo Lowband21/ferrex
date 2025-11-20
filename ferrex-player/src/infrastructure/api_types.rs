@@ -61,18 +61,8 @@ pub fn extract_poster_url_from_details(details: &MediaDetailsOption) -> Option<S
                     path.clone()
                 })
             }
-            TmdbDetails::Series(series) => {
-                series.poster_path.as_ref().map(|path| {
-                    // Return the path as-is - it could be a server endpoint or TMDB path
-                    path.clone()
-                })
-            }
-            TmdbDetails::Season(season) => {
-                season.poster_path.as_ref().map(|path| {
-                    // Return the path as-is - it could be a server endpoint or TMDB path
-                    path.clone()
-                })
-            }
+            TmdbDetails::Series(series) => series.poster_path.clone(),
+            TmdbDetails::Season(season) => season.poster_path.clone(),
             TmdbDetails::Episode(_) => None, // Episodes don't have posters
         },
         MediaDetailsOption::Endpoint(_) => None, // No poster URL without details

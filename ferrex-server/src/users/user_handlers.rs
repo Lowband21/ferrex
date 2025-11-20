@@ -264,7 +264,7 @@ pub async fn update_user_handler(
     }
 
     // Update password if provided
-    if let Some(ref new_password) = request.new_password {
+    if request.new_password.is_some() {
         // Verify current password first
         if let Some(current_password) = request.current_password {
             use argon2::{

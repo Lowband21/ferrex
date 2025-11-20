@@ -1,9 +1,4 @@
-use crate::{
-    LibraryID, MediaID, Result,
-    database::{postgres::PostgresDatabase, traits::MediaDatabaseTrait},
-    query::*,
-    types::media::*,
-};
+use crate::{Result, database::postgres::PostgresDatabase, query::*};
 
 impl PostgresDatabase {
     /// Execute a media query - delegates to optimized implementation

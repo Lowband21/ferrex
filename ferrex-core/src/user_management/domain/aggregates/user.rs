@@ -83,10 +83,10 @@ impl UserAggregate {
         }
 
         // Basic email validation if provided
-        if let Some(ref email_str) = email {
-            if !email_str.contains('@') || email_str.len() > 254 {
-                return Err(UserAggregateError::InvalidEmail);
-            }
+        if let Some(ref email_str) = email
+            && (!email_str.contains('@') || email_str.len() > 254)
+        {
+            return Err(UserAggregateError::InvalidEmail);
         }
 
         self.email = email;

@@ -4,11 +4,11 @@
 //! from media references based on available data.
 
 use super::{
-    DateAddedField, HasField, MovieFieldSet, OptionalDateKey, OptionalFloatKey, OptionalU32Key,
-    OptionalU64Key, SeriesFieldSet, SortFieldMarker, SortKey, SortableEntity, StringKey,
+    HasField, MovieFieldSet, OptionalDateKey, OptionalFloatKey, OptionalU32Key, OptionalU64Key,
+    SeriesFieldSet, SortFieldMarker, SortKey, SortableEntity, StringKey,
 };
 
-use crate::{Media, MediaDetailsOption, MovieReference, SeriesReference, TmdbDetails};
+use crate::{MediaDetailsOption, MovieReference, SeriesReference, TmdbDetails};
 
 /// Implementation of SortableEntity for MovieReference
 impl SortableEntity for MovieReference {
@@ -80,7 +80,7 @@ impl SortableEntity for MovieReference {
             // Runtime requires TMDB details
             let runtime = match &self.details {
                 MediaDetailsOption::Details(TmdbDetails::Movie(movie_details)) => {
-                    movie_details.runtime.map(|r| r as u32)
+                    movie_details.runtime.map(|r| r)
                 }
                 _ => None,
             };
@@ -210,14 +210,18 @@ mod tests {
     use crate::query::sorting::fields::{
         DateAddedField, PopularityField, RatingField, ReleaseDateField, RuntimeField, TitleField,
     };
-    use crate::query::sorting::strategy::FieldSort;
-    use crate::{EnhancedMovieDetails, LibraryID, MovieID, MovieTitle, MovieURL, UrlLike};
+    use crate::query::sorting::strategy::{FieldSort, SortStrategy};
+    use crate::{
+        EnhancedMovieDetails, ExternalIds, LibraryID, MediaImages, MovieID, MovieTitle, MovieURL,
+        SpokenLanguage, UrlLike,
+    };
     use uuid::Uuid;
 
     fn create_test_movie_with_details() -> MovieReference {
         let mut details = EnhancedMovieDetails {
             id: 12345,
             title: "Test Movie".to_string(),
+            original_title: None,
             overview: Some("A test movie".to_string()),
             release_date: Some("2023-01-15".to_string()),
             runtime: Some(120),
@@ -225,15 +229,36 @@ mod tests {
             vote_count: Some(1000),
             popularity: Some(85.3f32),
             content_rating: Some("PG-13".to_string()),
-            ..Default::default()
+            content_ratings: Vec::new(),
+            release_dates: Vec::new(),
+            genres: Vec::new(),
+            spoken_languages: Vec::new(),
+            production_companies: Vec::new(),
+            production_countries: Vec::new(),
+            homepage: None,
+            status: None,
+            tagline: None,
+            budget: None,
+            revenue: None,
+            poster_path: None,
+            backdrop_path: None,
+            logo_path: None,
+            images: MediaImages::default(),
+            cast: Vec::new(),
+            crew: Vec::new(),
+            videos: Vec::new(),
+            keywords: Vec::new(),
+            external_ids: ExternalIds::default(),
+            alternative_titles: Vec::new(),
+            translations: Vec::new(),
+            collection: None,
+            recommendations: Vec::new(),
+            similar: Vec::new(),
         };
-        details
-            .spoken_languages
-            .push(crate::types::details::SpokenLanguage {
-                iso_639_1: Some("en".to_string()),
-                name: "English".to_string(),
-                english_name: Some("English".to_string()),
-            });
+        details.spoken_languages.push(SpokenLanguage {
+            iso_639_1: Some("en".to_string()),
+            name: "English".to_string(),
+        });
 
         MovieReference {
             id: MovieID::new(),

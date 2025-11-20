@@ -10,10 +10,7 @@ use crate::{
     },
     state_refactored::State,
 };
-use ferrex_core::{
-    EpisodeLike, ImageSize, ImageType, Media, MediaIDLike, MediaLike, MediaType, MovieLike, SortBy,
-    SortOrder,
-};
+use ferrex_core::{EpisodeLike, Media, MediaIDLike, MediaLike, MediaType, MovieLike, SortOrder};
 use iced::Task;
 use std::time::Instant;
 
@@ -39,6 +36,10 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                         &mut state.domains.ui.state.scroll_manager,
                         state.window_size.width,
                     );
+                    state.tab_manager.set_active_sort(
+                        state.domains.ui.state.sort_by,
+                        state.domains.ui.state.sort_order,
+                    );
                     log::info!("Tab activated: All (Curated mode)");
 
                     // Note: All tab uses carousel view, not scrollable grid, so no scroll restoration needed
@@ -59,6 +60,10 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                             crate::domains::ui::tabs::TabId::Library(lib_id),
                             &mut state.domains.ui.state.scroll_manager,
                             state.window_size.width,
+                        );
+                        state.tab_manager.set_active_sort(
+                            state.domains.ui.state.sort_by,
+                            state.domains.ui.state.sort_order,
                         );
                         log::info!("Tab activated: Library({}) (Library mode)", lib_id);
                     }
@@ -86,6 +91,10 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 crate::domains::ui::tabs::TabId::Library(library_id),
                 &mut state.domains.ui.state.scroll_manager,
                 state.window_size.width,
+            );
+            state.tab_manager.set_active_sort(
+                state.domains.ui.state.sort_by,
+                state.domains.ui.state.sort_order,
             );
             log::info!("Tab activated: Library({})", library_id);
 
@@ -156,6 +165,9 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         }
         ui::Message::SetSortBy(sort_by) => {
             state.domains.ui.state.sort_by = sort_by;
+            state
+                .tab_manager
+                .set_active_sort(sort_by, state.domains.ui.state.sort_order);
             DomainUpdateResult::task(Task::done(DomainMessage::Ui(
                 ui::Message::RequestFilteredPositions,
             )))
@@ -165,6 +177,10 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 SortOrder::Ascending => SortOrder::Descending,
                 SortOrder::Descending => SortOrder::Ascending,
             };
+            state.tab_manager.set_active_sort(
+                state.domains.ui.state.sort_by,
+                state.domains.ui.state.sort_order,
+            );
             DomainUpdateResult::task(Task::done(DomainMessage::Ui(
                 ui::Message::RequestFilteredPositions,
             )))
@@ -173,10 +189,9 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             if let Some(tab) = state
                 .tab_manager
                 .get_tab_mut(crate::domains::ui::tabs::TabId::Library(library_id))
+                && let crate::domains::ui::tabs::TabState::Library(lib_state) = tab
             {
-                if let crate::domains::ui::tabs::TabState::Library(lib_state) = tab {
-                    lib_state.apply_sorted_positions(&positions);
-                }
+                lib_state.apply_sorted_positions(&positions);
             }
             state.tab_manager.refresh_active_tab();
             DomainUpdateResult::task(Task::none())
@@ -197,10 +212,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 ) {
                     // Use core sort directly
                     let core_sort = state.domains.ui.state.sort_by;
-                    let core_order = match state.domains.ui.state.sort_order {
-                        SortOrder::Ascending => SortOrder::Ascending,
-                        SortOrder::Descending => SortOrder::Descending,
-                    };
+                    let core_order = state.domains.ui.state.sort_order;
                     let genre_names: Vec<String> = state
                         .domains
                         .ui
@@ -240,7 +252,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                                 Err(e) => ui::Message::SortedIndexFailed(e.to_string()),
                             }
                         },
-                        |msg| DomainMessage::Ui(msg),
+                        DomainMessage::Ui,
                     );
                     DomainUpdateResult::task(task)
                 } else {
@@ -313,20 +325,19 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             if let Some(tab) = state
                 .tab_manager
                 .get_tab_mut(crate::domains::ui::tabs::TabId::Library(library_id))
+                && let crate::domains::ui::tabs::TabState::Library(lib_state) = tab
             {
-                if let crate::domains::ui::tabs::TabState::Library(lib_state) = tab {
-                    let count = positions.len();
-                    let first = positions.get(0).copied();
-                    let last = positions.last().copied();
-                    log::debug!(
-                        "ApplySortedPositions: library {} received {} positions (first={:?}, last={:?})",
-                        library_id,
-                        count,
-                        first,
-                        last
-                    );
-                    lib_state.apply_sorted_positions(&positions);
-                }
+                let count = positions.len();
+                let first = positions.first().copied();
+                let last = positions.last().copied();
+                log::debug!(
+                    "ApplySortedPositions: library {} received {} positions (first={:?}, last={:?})",
+                    library_id,
+                    count,
+                    first,
+                    last
+                );
+                lib_state.apply_sorted_positions(&positions);
             }
             state.tab_manager.refresh_active_tab();
             DomainUpdateResult::task(Task::none())
@@ -399,7 +410,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
         ui::Message::CheckScrollStopped => {
-            use ferrex_core::{ImageRequest, Priority};
+            use ferrex_core::{EpisodeStillSize, ImageRequest, PosterKind, PosterSize, Priority};
             // Check if scrolling has actually stopped
             if let Some(last_time) = state.domains.ui.state.last_scroll_time {
                 let elapsed = last_time.elapsed();
@@ -431,15 +442,20 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                         let media_type = id.media_type();
                         let uuid = id.to_uuid();
 
-                        let request = ImageRequest::new(
-                            uuid,
-                            ImageSize::Poster,
-                            match media_type {
-                                MediaType::Movie => ImageType::Movie,
-                                MediaType::Series => ImageType::Series,
-                                _ => ImageType::Movie,
-                            },
-                        )
+                        let request = match media_type {
+                            MediaType::Movie => {
+                                ImageRequest::poster(uuid, PosterKind::Movie, PosterSize::Standard)
+                            }
+                            MediaType::Series => {
+                                ImageRequest::poster(uuid, PosterKind::Series, PosterSize::Standard)
+                            }
+                            MediaType::Season => {
+                                ImageRequest::poster(uuid, PosterKind::Season, PosterSize::Standard)
+                            }
+                            MediaType::Episode => {
+                                ImageRequest::episode_still(uuid, EpisodeStillSize::Standard)
+                            }
+                        }
                         .with_priority(priority);
                         image_service.get().request_image(request);
                     }
@@ -476,11 +492,12 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             DomainUpdateResult::task(Task::none())
         }
         ui::Message::NavigateHome => {
-            let library_id = if let Some(id) = state.domains.library.state.current_library_id {
-                Some(id.as_uuid())
-            } else {
-                None
-            };
+            let library_id = state
+                .domains
+                .library
+                .state
+                .current_library_id
+                .map(|id| id.as_uuid());
             state.domains.ui.state.view = ViewState::Library;
             state.domains.ui.state.display_mode = DisplayMode::Curated;
 
@@ -492,6 +509,10 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 crate::domains::ui::tabs::TabId::All,
                 &mut state.domains.ui.state.scroll_manager,
                 state.window_size.width,
+            );
+            state.tab_manager.set_active_sort(
+                state.domains.ui.state.sort_by,
+                state.domains.ui.state.sort_order,
             );
             state.tab_manager.refresh_active_tab();
             log::debug!("NavigateHome: Activated All tab for curated view");
@@ -524,11 +545,12 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         }
         ui::Message::NavigateBack => {
             // Navigate to the previous view in history
-            let library_id = if let Some(id) = state.domains.library.state.current_library_id {
-                Some(id.as_uuid())
-            } else {
-                None
-            };
+            let library_id = state
+                .domains
+                .library
+                .state
+                .current_library_id
+                .map(|id| id.as_uuid());
             match state.domains.ui.state.navigation_history.pop() {
                 Some(previous_view) => {
                     state.domains.ui.state.view = previous_view.clone();
@@ -557,6 +579,10 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                                 tab_id,
                                 &mut state.domains.ui.state.scroll_manager,
                                 state.window_size.width,
+                            );
+                            state.tab_manager.set_active_sort(
+                                state.domains.ui.state.sort_by,
+                                state.domains.ui.state.sort_order,
                             );
 
                             state.tab_manager.refresh_active_tab();
@@ -598,12 +624,12 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                                 .background_shader_state
                                 .reset_to_view_colors(&previous_view);
 
-                            let library_id =
-                                if let Some(id) = state.domains.library.state.current_library_id {
-                                    Some(id.as_uuid())
-                                } else {
-                                    None
-                                };
+                            let library_id = state
+                                .domains
+                                .library
+                                .state
+                                .current_library_id
+                                .map(|id| id.as_uuid());
 
                             state
                                 .domains
@@ -674,11 +700,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                         .background_shader_state
                         .reset_to_library_colors();
 
-                    let library_id = if let Some(id) = library_id {
-                        Some(id.as_uuid())
-                    } else {
-                        None
-                    };
+                    let library_id = library_id.map(|id| id.as_uuid());
 
                     state
                         .domains

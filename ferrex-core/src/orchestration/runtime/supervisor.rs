@@ -1,10 +1,12 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{
+    any::{type_name, type_name_of_val},
+    collections::HashMap,
+    fmt,
+    sync::Arc,
+};
 
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
-
-use uuid::Uuid;
 
 use crate::orchestration::{
     actors::LibraryActor,
@@ -21,7 +23,7 @@ use crate::orchestration::{
 use crate::{LibraryID, MediaError, Result};
 
 use crate::orchestration::actors::LibraryActorCommand;
-use crate::orchestration::runtime::{DomainEventStream, JobEventStream};
+use crate::orchestration::runtime::JobEventStream;
 
 pub type LibraryActorHandle = Arc<Mutex<Box<dyn LibraryActor>>>;
 
@@ -46,6 +48,49 @@ where
     // Runtime supervision
     shutdown_token: CancellationToken,
     worker_handles: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+}
+
+impl<Q, E, B> fmt::Debug for OrchestratorRuntime<Q, E, B>
+where
+    Q: QueueService + LeaseExpiryScanner + 'static,
+    E: EventBus + JobEventStream + crate::orchestration::runtime::DomainEventStream + 'static,
+    B: WorkloadBudget + 'static,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let queue_type = type_name::<Q>();
+        let events_type = type_name::<E>();
+        let budget_type = type_name::<B>();
+        let dispatcher_type = type_name_of_val(self.dispatcher.as_ref());
+
+        let library_actor_count = self
+            .library_actors
+            .try_read()
+            .map(|guard| guard.len())
+            .unwrap_or_default();
+        let worker_handle_count = self
+            .worker_handles
+            .try_lock()
+            .map(|handles| handles.len())
+            .unwrap_or_default();
+        let mailbox_ready = self
+            .mailbox_tx
+            .try_lock()
+            .map(|guard| guard.is_some())
+            .unwrap_or(false);
+
+        f.debug_struct("OrchestratorRuntime")
+            .field("config", &self.config)
+            .field("queue_type", &queue_type)
+            .field("events_type", &events_type)
+            .field("budget_type", &budget_type)
+            .field("dispatcher_type", &dispatcher_type)
+            .field("scheduler", &self.scheduler)
+            .field("library_actor_count", &library_actor_count)
+            .field("worker_handle_count", &worker_handle_count)
+            .field("mailbox_ready", &mailbox_ready)
+            .field("shutdown_cancelled", &self.shutdown_token.is_cancelled())
+            .finish()
+    }
 }
 
 impl<Q, E, B> OrchestratorRuntime<Q, E, B>
@@ -122,7 +167,6 @@ where
         guard.get(&library_id).cloned()
     }
 
-    #[allow(dead_code)]
     pub async fn library_ids(&self) -> Vec<LibraryID> {
         let guard = self.library_actors.read().await;
         guard.keys().cloned().collect()
@@ -293,29 +337,26 @@ where
                                     // Batch EnqueueFolderScan events for transactional enqueue
                                     let mut batch: Vec<(JobPayload, EnqueueRequest)> = Vec::new();
                                     for evt in events {
-                                        match evt {
-                                            crate::orchestration::actors::LibraryActorEvent::EnqueueFolderScan { folder_path, priority, reason, parent, correlation_id } => {
-                                                let encoded_parent = match serde_json::to_string(&parent) {
-                                                    Ok(s) => s,
-                                                    Err(err) => {
-                                                        tracing::warn!(target: "scan::mailbox", error = %err, folder = %folder_path, "skipping enqueue due to parent encode error");
-                                                        continue;
-                                                    }
-                                                };
-                                                let job = FolderScanJob {
-                                                    library_id,
-                                                    folder_path_norm: folder_path.clone(),
-                                                    parent_context: Some(encoded_parent),
-                                                    scan_reason: reason.clone(),
-                                                    enqueue_time: chrono::Utc::now(),
-                                                    device_id: None,
-                                                };
-                                                let payload = JobPayload::FolderScan(job);
-                                                let mut request = EnqueueRequest::new(priority, payload.clone());
-                                                request.correlation_id = correlation_id;
-                                                batch.push((payload, request));
-                                            }
-                                            _ => {}
+                                        if let crate::orchestration::actors::LibraryActorEvent::EnqueueFolderScan { folder_path, priority, reason, parent, correlation_id } = evt {
+                                            let encoded_parent = match serde_json::to_string(&parent) {
+                                                Ok(s) => s,
+                                                Err(err) => {
+                                                    tracing::warn!(target: "scan::mailbox", error = %err, folder = %folder_path, "skipping enqueue due to parent encode error");
+                                                    continue;
+                                                }
+                                            };
+                                            let job = FolderScanJob {
+                                                library_id,
+                                                folder_path_norm: folder_path.clone(),
+                                                parent_context: Some(encoded_parent),
+                                                scan_reason: reason.clone(),
+                                                enqueue_time: chrono::Utc::now(),
+                                                device_id: None,
+                                            };
+                                            let payload = JobPayload::FolderScan(job);
+                                            let mut request = EnqueueRequest::new(priority, payload.clone());
+                                            request.correlation_id = correlation_id;
+                                            batch.push((payload, request));
                                         }
                                     }
 
@@ -545,7 +586,7 @@ where
                             let job_priority = lease.job.priority;
                             let lease_id = lease.lease_id;
                             let library_id = lease.job.payload.library_id();
-                            let mut current_expires_at = lease.expires_at;
+                            let current_expires_at = lease.expires_at;
 
                             let correlation_id = correlation_cache.fetch_or_generate(job_id).await;
 
@@ -670,9 +711,7 @@ where
 
                             let dedupe_key: DedupeKey = lease.job.payload.dedupe_key();
                             let library_id = lease.job.payload.library_id();
-                            let mut notify_command: Option<LibraryActorCommand> = None;
-
-                            match dispatch_status {
+                            let notify_command = match dispatch_status {
                                 DispatchStatus::Success => {
                                     if let Err(err) = q.complete(lease_id).await {
                                         tracing::error!("queue complete error: {err}");
@@ -694,10 +733,10 @@ where
                                         tracing::error!("publish complete event failed: {err}");
                                     }
                                     scheduler.record_completed(library_id).await;
-                                    notify_command = Some(LibraryActorCommand::JobCompleted {
+                                    Some(LibraryActorCommand::JobCompleted {
                                         job_id,
                                         dedupe_key: dedupe_key.clone(),
-                                    });
+                                    })
                                 }
                                 DispatchStatus::Retry { error } => {
                                     if let Err(err) =
@@ -724,12 +763,12 @@ where
                                     }
                                     scheduler.release(library_id).await;
                                     scheduler.record_enqueued(library_id, job_priority).await;
-                                    notify_command = Some(LibraryActorCommand::JobFailed {
+                                    Some(LibraryActorCommand::JobFailed {
                                         job_id,
                                         dedupe_key: dedupe_key.clone(),
                                         retryable: true,
                                         error: Some(error),
-                                    });
+                                    })
                                 }
                                 DispatchStatus::DeadLetter { error } => {
                                     if let Err(err) =
@@ -754,32 +793,31 @@ where
                                         tracing::error!("publish dead-letter event failed: {err}");
                                     }
                                     scheduler.record_completed(library_id).await;
-                                    notify_command = Some(LibraryActorCommand::JobFailed {
+                                    Some(LibraryActorCommand::JobFailed {
                                         job_id,
                                         dedupe_key: dedupe_key.clone(),
                                         retryable: false,
                                         error: Some(error),
-                                    });
+                                    })
                                 }
-                            }
+                            };
 
                             if let Some(command) = notify_command {
                                 let sender_opt = {
                                     let guard = mailbox_tx.lock().await;
                                     guard.clone()
                                 };
-                                if let Some(sender) = sender_opt {
-                                    if let Err(err) = sender
+                                if let Some(sender) = sender_opt
+                                    && let Err(err) = sender
                                         .send(OrchestratorCommand::Library {
                                             library_id,
                                             command,
                                         })
                                         .await
-                                    {
-                                        tracing::warn!(
-                                            "failed to send library actor notification: {err}"
-                                        );
-                                    }
+                                {
+                                    tracing::warn!(
+                                        "failed to send library actor notification: {err}"
+                                    );
                                 }
                             }
 
@@ -874,10 +912,7 @@ where
         }
 
         // Shutdown library actors
-        let actors = {
-            let guard = self.library_actors.read().await;
-            guard.keys().cloned().collect::<Vec<_>>()
-        };
+        let actors = self.library_ids().await;
 
         for library_id in actors {
             if let Some(actor) = self.library_actor(library_id).await {
@@ -924,6 +959,20 @@ pub struct OrchestratorRuntimeHandle {
     library_actors: Arc<RwLock<HashMap<LibraryID, LibraryActorHandle>>>,
 }
 
+impl fmt::Debug for OrchestratorRuntimeHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let library_actor_count = self
+            .library_actors
+            .try_read()
+            .map(|guard| guard.len())
+            .unwrap_or_default();
+
+        f.debug_struct("OrchestratorRuntimeHandle")
+            .field("library_actor_count", &library_actor_count)
+            .finish()
+    }
+}
+
 /// Helper for constructing a runtime with explicit dependencies.
 pub struct OrchestratorRuntimeBuilder<Q, E, B>
 where
@@ -937,6 +986,35 @@ where
     budget: Option<Arc<B>>,
     dispatcher: Option<Arc<dyn JobDispatcher>>,
     correlations: Option<CorrelationCache>,
+}
+
+impl<Q, E, B> fmt::Debug for OrchestratorRuntimeBuilder<Q, E, B>
+where
+    Q: QueueService + LeaseExpiryScanner + 'static,
+    E: EventBus + JobEventStream + crate::orchestration::runtime::DomainEventStream + 'static,
+    B: WorkloadBudget + 'static,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("OrchestratorRuntimeBuilder");
+        debug.field("config", &self.config);
+        debug.field("queue_set", &self.queue.is_some());
+        debug.field("events_set", &self.events.is_some());
+        debug.field("budget_set", &self.budget.is_some());
+        debug.field("dispatcher_set", &self.dispatcher.is_some());
+        debug.field("correlations_set", &self.correlations.is_some());
+
+        if self.queue.is_some() {
+            debug.field("queue_type", &type_name::<Q>());
+        }
+        if self.events.is_some() {
+            debug.field("events_type", &type_name::<E>());
+        }
+        if self.budget.is_some() {
+            debug.field("budget_type", &type_name::<B>());
+        }
+
+        debug.finish()
+    }
 }
 
 impl<Q, E, B> OrchestratorRuntimeBuilder<Q, E, B>

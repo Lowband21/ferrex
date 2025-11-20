@@ -1,10 +1,9 @@
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{any::type_name, fmt, path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
-use tracing::{debug, info_span, instrument, warn};
+use tracing::{debug, debug_span, warn};
 use uuid::Uuid;
 
 use crate::orchestration::actors::folder::{FolderScanActor, FolderScanCommand, FolderScanContext};
@@ -18,13 +17,13 @@ use crate::orchestration::events::{
     DomainEvent, EventBus, JobEvent, JobEventPayload, stable_path_key,
 };
 use crate::orchestration::job::{
-    EnqueueRequest, FolderScanJob, ImageFetchJob, IndexUpsertJob, JobHandle, JobKind, JobPayload,
+    EnqueueRequest, FolderScanJob, ImageFetchJob, IndexUpsertJob, JobHandle, JobPayload,
     JobPriority, MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob, ScanReason,
 };
 use crate::orchestration::lease::JobLease;
 use crate::orchestration::queue::QueueService;
 use crate::orchestration::scan_cursor::{ScanCursor, ScanCursorId, ScanCursorRepository};
-use crate::{LibraryID, MediaError, Result};
+use crate::{MediaError, Result};
 
 fn priority_for_reason(reason: &ScanReason) -> JobPriority {
     match reason {
@@ -81,6 +80,18 @@ impl DispatcherActors {
     }
 }
 
+impl fmt::Debug for DispatcherActors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DispatcherActors")
+            .field("folder", &"FolderScanActor")
+            .field("analyze", &"MediaAnalyzeActor")
+            .field("metadata", &"MetadataActor")
+            .field("indexer", &"IndexerActor")
+            .field("image", &"ImageFetchActor")
+            .finish()
+    }
+}
+
 pub struct DefaultJobDispatcher<Q, E, C>
 where
     Q: QueueService + Send + Sync + 'static,
@@ -92,6 +103,23 @@ where
     cursors: Arc<C>,
     actors: DispatcherActors,
     correlations: CorrelationCache,
+}
+
+impl<Q, E, C> fmt::Debug for DefaultJobDispatcher<Q, E, C>
+where
+    Q: QueueService + Send + Sync + 'static,
+    E: EventBus + Send + Sync + 'static,
+    C: ScanCursorRepository + Send + Sync + 'static,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DefaultJobDispatcher")
+            .field("queue", &type_name::<Q>())
+            .field("events", &type_name::<E>())
+            .field("cursors", &type_name::<C>())
+            .field("actors", &self.actors)
+            .field("correlations", &self.correlations)
+            .finish()
+    }
 }
 
 impl<Q, E, C> DefaultJobDispatcher<Q, E, C>
@@ -272,8 +300,8 @@ where
             context: context.clone(),
         };
 
-        let span = info_span!(
-            "folder_scan",
+        let span = debug_span!(
+            "\nfolder_scan",
             job_id = %lease.job.id.0,
             library = %job.library_id,
             path = %job.folder_path_norm

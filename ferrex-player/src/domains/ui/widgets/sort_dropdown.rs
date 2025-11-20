@@ -4,13 +4,11 @@ use crate::domains::ui::{messages::Message, theme::MediaServerTheme};
 use ferrex_core::SortBy;
 use iced::{
     Background, Border, Color, Element, Length,
-    widget::{Container, container, pick_list},
+    widget::{container, pick_list},
 };
 
 mod sort_option {
     use ferrex_core::SortBy;
-
-    use super::*;
 
     /// Display labels for sort options
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

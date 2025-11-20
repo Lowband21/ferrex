@@ -45,7 +45,7 @@ pub struct FilterRequestParams<'a> {
 
 impl<'a> FilterRequestParams<'a> {
     pub fn into_request(self) -> FilterIndicesRequest {
-        let mut genres: Vec<String> = self.genres.iter().cloned().collect();
+        let mut genres: Vec<String> = self.genres.to_vec();
         // Deduplicate to keep SQL arrays small
         genres.sort_unstable();
         genres.dedup();

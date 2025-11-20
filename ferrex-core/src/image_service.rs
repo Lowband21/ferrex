@@ -24,6 +24,7 @@ pub enum TmdbImageSize {
     PosterW92,
     PosterW154,
     PosterW185,
+    PosterW300,
     PosterW342,
     PosterW500,
     PosterW780,
@@ -50,6 +51,7 @@ impl TmdbImageSize {
             TmdbImageSize::PosterW92 => "w92",
             TmdbImageSize::PosterW154 => "w154",
             TmdbImageSize::PosterW185 => "w185",
+            TmdbImageSize::PosterW300 => "w300",
             TmdbImageSize::PosterW342 => "w342",
             TmdbImageSize::PosterW500 => "w500",
             TmdbImageSize::PosterW780 => "w780",
@@ -72,10 +74,10 @@ impl TmdbImageSize {
             "w92" => Some(TmdbImageSize::PosterW92),
             "w154" => Some(TmdbImageSize::PosterW154),
             "w185" => Some(TmdbImageSize::PosterW185),
+            "w300" => Some(TmdbImageSize::PosterW300),
             "w342" => Some(TmdbImageSize::PosterW342),
             "w500" => Some(TmdbImageSize::PosterW500),
             "w780" => Some(TmdbImageSize::PosterW780),
-            "w300" => Some(TmdbImageSize::BackdropW300),
             "w1280" => Some(TmdbImageSize::BackdropW1280),
             "h632" => Some(TmdbImageSize::ProfileH632),
             "w45" => Some(TmdbImageSize::ProfileW45),
@@ -90,11 +92,15 @@ impl TmdbImageSize {
             // Prioritize ~300w poster (w342) first for fast above-the-fold loads,
             // then a larger fallback for high-DPI/detail, followed by a small thumb.
             "poster" => vec![
-                TmdbImageSize::PosterW342,
+                TmdbImageSize::PosterW300,
                 TmdbImageSize::PosterW500,
                 TmdbImageSize::PosterW185,
             ],
-            "backdrop" => vec![TmdbImageSize::BackdropW780, TmdbImageSize::BackdropW1280],
+            "backdrop" => vec![
+                TmdbImageSize::Original,
+                TmdbImageSize::BackdropW780,
+                TmdbImageSize::BackdropW1280,
+            ],
             "logo" => vec![TmdbImageSize::Original], // SVG logos should use original
             "still" | "thumbnail" => vec![TmdbImageSize::StillW300, TmdbImageSize::StillW500],
             "profile" | "cast" => vec![TmdbImageSize::ProfileW185],
@@ -449,11 +455,11 @@ impl ImageService {
 
                 if let Ok(bytes) = tokio::fs::read(&existing_path).await {
                     content_hash = Some(self.calculate_hash(&bytes));
-                    if width.is_none() || height.is_none() {
-                        if let Ok((w, h)) = self.get_image_dimensions(&bytes) {
-                            width = Some(w as i32);
-                            height = Some(h as i32);
-                        }
+                    if (width.is_none() || height.is_none())
+                        && let Ok((w, h)) = self.get_image_dimensions(&bytes)
+                    {
+                        width = Some(w as i32);
+                        height = Some(h as i32);
                     }
                 }
 
@@ -658,55 +664,55 @@ impl ImageService {
             }
 
             // Missing: spawn background download for requested size if it maps to TMDB size
-            if let Some(size_str) = requested_variant {
-                if let Some(size) = TmdbImageSize::from_str(size_str) {
-                    let key = self.variant_key(params);
-                    let mut guard = self.in_flight.lock().await;
-                    if !guard.contains(&key) {
-                        guard.insert(key.clone());
-                        drop(guard);
+            if let Some(size_str) = requested_variant
+                && let Some(size) = TmdbImageSize::from_str(size_str)
+            {
+                let key = self.variant_key(params);
+                let mut guard = self.in_flight.lock().await;
+                if !guard.contains(&key) {
+                    guard.insert(key.clone());
+                    drop(guard);
 
-                        if let Some(ref key_struct) = variant_key_struct {
-                            let record = MediaImageVariantRecord {
-                                requested_at: Utc::now(),
-                                cached_at: None,
-                                cached: false,
-                                width: None,
-                                height: None,
-                                content_hash: None,
-                                theme_color: None,
-                                key: key_struct.clone(),
-                            };
-                            self.db
-                                .backend()
-                                .upsert_media_image_variant(&record)
-                                .await?;
-                        }
-
-                        let this = self.clone();
-                        let tmdb_path = image_record.tmdb_path.clone();
-                        let permits = self.permits.clone();
-                        let key_struct = variant_key_struct.clone();
-                        tokio::spawn(async move {
-                            let _permit = permits.acquire().await.expect("semaphore");
-                            if let Err(e) = this
-                                .download_variant(&tmdb_path, size, key_struct.clone())
-                                .await
-                            {
-                                warn!(
-                                    "Background variant download failed for {} {}: {}",
-                                    tmdb_path,
-                                    size.as_str(),
-                                    e
-                                );
-                            }
-                            let mut g = this.in_flight.lock().await;
-                            g.remove(&key);
-                        });
-                    } else {
-                        drop(guard);
-                        debug!("Variant generation already in-flight for key: {}", key);
+                    if let Some(ref key_struct) = variant_key_struct {
+                        let record = MediaImageVariantRecord {
+                            requested_at: Utc::now(),
+                            cached_at: None,
+                            cached: false,
+                            width: None,
+                            height: None,
+                            content_hash: None,
+                            theme_color: None,
+                            key: key_struct.clone(),
+                        };
+                        self.db
+                            .backend()
+                            .upsert_media_image_variant(&record)
+                            .await?;
                     }
+
+                    let this = self.clone();
+                    let tmdb_path = image_record.tmdb_path.clone();
+                    let permits = self.permits.clone();
+                    let key_struct = variant_key_struct.clone();
+                    tokio::spawn(async move {
+                        let _permit = permits.acquire().await.expect("semaphore");
+                        if let Err(e) = this
+                            .download_variant(&tmdb_path, size, key_struct.clone())
+                            .await
+                        {
+                            warn!(
+                                "Background variant download failed for {} {}: {}",
+                                tmdb_path,
+                                size.as_str(),
+                                e
+                            );
+                        }
+                        let mut g = this.in_flight.lock().await;
+                        g.remove(&key);
+                    });
+                } else {
+                    drop(guard);
+                    debug!("Variant generation already in-flight for key: {}", key);
                 }
             }
 
@@ -722,6 +728,7 @@ impl ImageService {
     pub async fn pick_best_available(
         &self,
         params: &ImageLookupParams,
+        target_width: Option<u32>,
     ) -> Result<Option<(PathBuf, String)>> {
         if let Some((image_record, _)) = self.db.backend().lookup_image_variant(params).await? {
             let mut variants = self
@@ -733,8 +740,14 @@ impl ImageService {
                 return Ok(None);
             }
             // Try to pick the closest by width relative to requested variant name, if present
-            let target = params.variant.as_deref().unwrap_or("w500");
-            let target_w = tmdb_variant_to_width_hint(target).unwrap_or(500);
+            let target_w = target_width
+                .or_else(|| {
+                    params
+                        .variant
+                        .as_deref()
+                        .and_then(tmdb_variant_to_width_hint)
+                })
+                .unwrap_or(500);
 
             variants
                 .sort_by_key(|v| tmdb_variant_to_width_hint(&v.variant).unwrap_or(i32::MAX as u32));
@@ -743,11 +756,11 @@ impl ImageService {
             let mut best: Option<&ImageVariant> = None;
             for v in variants.iter().rev() {
                 // high to low
-                if let Some(w) = tmdb_variant_to_width_hint(&v.variant) {
-                    if w <= target_w {
-                        best = Some(v);
-                        break;
-                    }
+                if let Some(w) = tmdb_variant_to_width_hint(&v.variant)
+                    && w <= target_w
+                {
+                    best = Some(v);
+                    break;
                 }
             }
             if best.is_none() {
@@ -796,14 +809,14 @@ impl ImageService {
 
         // Look up the image in database
         if let Some((image_record, _)) = self.db.backend().lookup_image_variant(params).await? {
-            if let Some(size_str) = &params.variant {
-                if let Some(size) = TmdbImageSize::from_str(size_str) {
-                    let key_struct = build_variant_key(params, size_str);
-                    let path = self
-                        .download_variant(&image_record.tmdb_path, size, key_struct)
-                        .await?;
-                    return Ok(Some(path));
-                }
+            if let Some(size_str) = &params.variant
+                && let Some(size) = TmdbImageSize::from_str(size_str)
+            {
+                let key_struct = build_variant_key(params, size_str);
+                let path = self
+                    .download_variant(&image_record.tmdb_path, size, key_struct)
+                    .await?;
+                return Ok(Some(path));
             }
 
             let variants = self
@@ -911,7 +924,7 @@ impl ImageService {
 
             // Skip near-black and near-white colors
             let brightness = (r as u32 + g as u32 + b as u32) / 3;
-            if brightness < 30 || brightness > 225 {
+            if !(30..=225).contains(&brightness) {
                 continue;
             }
 
@@ -1123,7 +1136,7 @@ fn extract_frame_at_percentage(
 
     buffer
         .save(output_path)
-        .map_err(|e| MediaError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))
+        .map_err(|e| MediaError::Io(std::io::Error::other(e)))
 }
 
 #[cfg(not(feature = "ffmpeg"))]

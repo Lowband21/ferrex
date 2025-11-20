@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                media_type,\n                media_id,\n                image_type,\n                order_index,\n                variant,\n                cached,\n                width,\n                height,\n                content_hash,\n                theme_color,\n                requested_at,\n                cached_at\n            FROM media_image_variants\n            WHERE media_type = $1 AND media_id = $2\n            ORDER BY image_type, order_index, variant\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "image_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "order_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "variant",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "cached",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "width",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "height",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "content_hash",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "theme_color",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "requested_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "cached_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "e650b51556c3d78191467a693177da73d05af58b2ca5d63f6e9e29d2e3350c21"
+}

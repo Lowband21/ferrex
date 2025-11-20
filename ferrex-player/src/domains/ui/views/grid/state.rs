@@ -102,7 +102,7 @@ impl VirtualGridState {
             return self.visible_range.clone();
         }
 
-        let total_rows = (self.total_items + self.columns - 1) / self.columns;
+        let total_rows = self.total_items.div_ceil(self.columns);
         let first_visible_row = (self.scroll_position / self.row_height).floor() as usize;
         let visible_rows = (self.viewport_height / self.row_height).ceil() as usize;
         let last_visible_row = (first_visible_row + visible_rows).min(total_rows);

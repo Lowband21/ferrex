@@ -3,7 +3,6 @@ use crate::domains::library::server;
 use crate::infrastructure::services::api::ApiService;
 use crate::state_refactored::State;
 use ferrex_core::LibraryID;
-use ferrex_core::api_scan::{ScanConfig, ScanMetrics};
 use ferrex_core::api_types::{ScanProgressEvent, ScanSnapshotDto};
 use iced::Task;
 use uuid::Uuid;

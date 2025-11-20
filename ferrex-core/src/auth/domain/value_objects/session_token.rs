@@ -48,7 +48,7 @@ impl SessionToken {
         rng.fill(&mut token_bytes)
             .map_err(|_| SessionTokenError::GenerationFailed)?;
 
-        let value = URL_SAFE_NO_PAD.encode(&token_bytes);
+        let value = URL_SAFE_NO_PAD.encode(token_bytes);
         let created_at = Utc::now();
         let expires_at = created_at + lifetime;
 

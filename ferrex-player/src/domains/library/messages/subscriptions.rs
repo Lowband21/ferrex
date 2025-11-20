@@ -1,5 +1,4 @@
 use crate::common::messages::DomainMessage;
-use crate::infrastructure::adapters::ApiClientAdapter;
 use crate::state_refactored::State;
 use iced::Subscription;
 use std::collections::HashSet;

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fmt, sync::Arc};
 
 use anyhow::anyhow;
 use chrono::{DateTime, Duration, Utc};
@@ -13,10 +13,6 @@ use crate::media::prep::thumbnail_service::ThumbnailService;
 use ferrex_core::ImageService;
 use ferrex_core::MediaDatabase;
 use ferrex_core::auth::domain::services::AuthenticationService;
-use ferrex_core::orchestration::{
-    budget::InMemoryBudget,
-    persistence::{PostgresCursorRepository, PostgresQueueService},
-};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -30,6 +26,12 @@ pub struct AppState {
     pub auth_service: Arc<AuthenticationService>,
     /// Track admin sessions per device for PIN authentication eligibility
     pub admin_sessions: Arc<Mutex<HashMap<Uuid, AdminSessionInfo>>>,
+}
+
+impl fmt::Debug for AppState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AppState").finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone)]

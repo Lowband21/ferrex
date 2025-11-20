@@ -1,8 +1,8 @@
 use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
 use crate::{
     EpisodeID, EpisodeReference, Library, LibraryID, LibraryReference, LibraryType, Media,
-    MediaFile, MediaFileMetadata, MediaID, MovieID, MovieReference, Result, SeasonID,
-    SeasonReference, SeriesID, SeriesReference, User, UserSession,
+    MediaFile, MediaFileMetadata, MovieID, MovieReference, Result, SeasonID, SeasonReference,
+    SeriesID, SeriesReference,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -145,7 +145,6 @@ pub struct EpisodeInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ImageRecord {
-    #[rkyv(with = crate::rkyv_wrappers::UuidWrapper)]
     pub id: Uuid,
     pub tmdb_path: String,
     pub file_hash: Option<String>,
@@ -159,9 +158,7 @@ pub struct ImageRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ImageVariant {
-    #[rkyv(with = crate::rkyv_wrappers::UuidWrapper)]
     pub id: Uuid,
-    #[rkyv(with = crate::rkyv_wrappers::UuidWrapper)]
     pub image_id: Uuid,
     pub variant: String,
     pub file_path: String,

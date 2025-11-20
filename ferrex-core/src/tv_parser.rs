@@ -222,92 +222,68 @@ impl TvParser {
                     "absolute_3digit" | "absolute_2digit" => {
                         // Only use absolute numbering if no other pattern matched
                         // and we're in an anime-like structure
-                        if Self::is_likely_anime(path) {
-                            if let Ok(abs_ep) = captures[1].parse::<u32>() {
-                                if abs_ep > 0 && abs_ep < 10000 {
-                                    debug!("Parsed absolute episode: {} from {}", abs_ep, filename);
-                                    return Some(EpisodeInfo {
-                                        season: 1,
-                                        episode: abs_ep,
-                                        end_episode: None,
-                                        year: None,
-                                        month: None,
-                                        day: None,
-                                        absolute_episode: Some(abs_ep),
-                                        is_special: false,
-                                    });
-                                }
-                            }
+                        if Self::is_likely_anime(path)
+                            && let Ok(abs_ep) = captures[1].parse::<u32>()
+                            && abs_ep > 0
+                            && abs_ep < 10000
+                        {
+                            debug!("Parsed absolute episode: {} from {}", abs_ep, filename);
+                            return Some(EpisodeInfo {
+                                season: 1,
+                                episode: abs_ep,
+                                end_episode: None,
+                                year: None,
+                                month: None,
+                                day: None,
+                                absolute_episode: Some(abs_ep),
+                                is_special: false,
+                            });
                         }
                     }
                     "ep000" | "e00" => {
-                        if captures.len() >= 2 {
-                            if let Ok(episode) = captures[1].parse::<u32>() {
-                                // If we're in a season folder, use that season
-                                let season = if let Some(parent) = path.parent() {
-                                    if let Some(parent_name) = parent.file_name() {
-                                        if let Some(parent_str) = parent_name.to_str() {
-                                            Self::parse_season_folder(parent_str).unwrap_or(1)
-                                        } else {
-                                            1
-                                        }
-                                    } else {
-                                        1
-                                    }
-                                } else {
-                                    1
-                                };
+                        if captures.len() >= 2
+                            && let Ok(episode) = captures[1].parse::<u32>()
+                        {
+                            // If we're in a season folder, use that season
+                            let season = Self::parse_season_from_path(path).unwrap_or(1);
 
-                                debug!(
-                                    "Parsed episode: S{:02}E{:02} from {}",
-                                    season, episode, filename
-                                );
-                                return Some(EpisodeInfo {
-                                    season,
-                                    episode,
-                                    end_episode: None,
-                                    year: None,
-                                    month: None,
-                                    day: None,
-                                    absolute_episode: None,
-                                    is_special: season == 0,
-                                });
-                            }
+                            debug!(
+                                "Parsed episode: S{:02}E{:02} from {}",
+                                season, episode, filename
+                            );
+                            return Some(EpisodeInfo {
+                                season,
+                                episode,
+                                end_episode: None,
+                                year: None,
+                                month: None,
+                                day: None,
+                                absolute_episode: None,
+                                is_special: season == 0,
+                            });
                         }
                     }
                     "part" | "chapter" => {
-                        if captures.len() >= 2 {
-                            if let Ok(episode) = captures[1].parse::<u32>() {
-                                // For parts/chapters, assume season 1 unless in season folder
-                                let season = if let Some(parent) = path.parent() {
-                                    if let Some(parent_name) = parent.file_name() {
-                                        if let Some(parent_str) = parent_name.to_str() {
-                                            Self::parse_season_folder(parent_str).unwrap_or(1)
-                                        } else {
-                                            1
-                                        }
-                                    } else {
-                                        1
-                                    }
-                                } else {
-                                    1
-                                };
+                        if captures.len() >= 2
+                            && let Ok(episode) = captures[1].parse::<u32>()
+                        {
+                            // For parts/chapters, assume season 1 unless in season folder
+                            let season = Self::parse_season_from_path(path).unwrap_or(1);
 
-                                debug!(
-                                    "Parsed part/chapter as episode: S{:02}E{:02} from {}",
-                                    season, episode, filename
-                                );
-                                return Some(EpisodeInfo {
-                                    season,
-                                    episode,
-                                    end_episode: None,
-                                    year: None,
-                                    month: None,
-                                    day: None,
-                                    absolute_episode: None,
-                                    is_special: season == 0,
-                                });
-                            }
+                            debug!(
+                                "Parsed part/chapter as episode: S{:02}E{:02} from {}",
+                                season, episode, filename
+                            );
+                            return Some(EpisodeInfo {
+                                season,
+                                episode,
+                                end_episode: None,
+                                year: None,
+                                month: None,
+                                day: None,
+                                absolute_episode: None,
+                                is_special: season == 0,
+                            });
                         }
                     }
                     _ => {
@@ -343,44 +319,105 @@ impl TvParser {
         Self::parse_episode_info(path).map(|info| (info.season, info.episode))
     }
 
+    fn normalize_series_hint(value: &str) -> String {
+        value
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric())
+            .map(|ch| ch.to_ascii_lowercase())
+            .collect()
+    }
+
+    fn parse_series_child_season_number(series_name: &str, child_name: &str) -> Option<u32> {
+        let series_norm = Self::normalize_series_hint(series_name);
+        let child_norm = Self::normalize_series_hint(child_name);
+
+        if series_norm.is_empty() || child_norm.len() <= series_norm.len() {
+            return None;
+        }
+
+        if !child_norm.starts_with(&series_norm) {
+            return None;
+        }
+
+        let remainder = &child_norm[series_norm.len()..];
+        Self::parse_season_suffix(remainder)
+    }
+
+    fn parse_season_suffix(remainder: &str) -> Option<u32> {
+        if remainder.is_empty() {
+            return None;
+        }
+
+        let mut slice = remainder;
+
+        if slice.starts_with("season") {
+            slice = &slice["season".len()..];
+        } else if slice.starts_with("series") {
+            slice = &slice["series".len()..];
+        } else if slice.starts_with('s') {
+            slice = &slice[1..];
+        }
+
+        if slice.is_empty() {
+            return None;
+        }
+
+        if slice.chars().all(|c| c.is_ascii_digit()) {
+            return slice.parse().ok();
+        }
+
+        None
+    }
+
+    fn parse_season_from_parent(parent: &Path) -> Option<u32> {
+        let parent_name = parent.file_name()?.to_str()?;
+        let series_name = parent
+            .parent()
+            .and_then(|gp| gp.file_name())
+            .and_then(|name| name.to_str());
+        Self::parse_season_folder_with_series(parent_name, series_name)
+    }
+
+    fn parse_season_from_path(path: &Path) -> Option<u32> {
+        path.parent().and_then(Self::parse_season_from_parent)
+    }
+
     /// Parse episode info from folder structure
     fn parse_from_folder_structure(path: &Path) -> Option<EpisodeInfo> {
         let filename = path.file_stem()?.to_str()?;
 
-        if let Some(parent) = path.parent() {
-            if let Some(parent_name) = parent.file_name() {
-                if let Some(season) = Self::parse_season_folder(parent_name.to_str()?) {
-                    // Look for just episode number in filename
-                    let ep_patterns = vec![
-                        // Episode patterns with various formats
-                        Regex::new(r"(?i)(?:e|ep|episode)(?:\s|\.)*(\d{1,3})").unwrap(),
-                        Regex::new(r"^\s*(\d{1,3})\s*[-_.]").unwrap(),
-                        Regex::new(r"^(\d{1,3})\s").unwrap(), // "01 Title"
-                        Regex::new(r"^(\d{1,3})$").unwrap(),  // Just "01" or "05"
-                        // Extract from common naming patterns
-                        Regex::new(r"^(?:[^0-9]*?)(\d{1,3})(?:[^0-9]|$)").unwrap(),
-                    ];
+        if let Some(parent) = path.parent()
+            && let Some(season) = Self::parse_season_from_parent(parent)
+        {
+            // Look for just episode number in filename
+            let ep_patterns = vec![
+                // Episode patterns with various formats
+                Regex::new(r"(?i)(?:e|ep|episode)(?:\s|\.)*(\d{1,3})").unwrap(),
+                Regex::new(r"^\s*(\d{1,3})\s*[-_.]").unwrap(),
+                Regex::new(r"^(\d{1,3})\s").unwrap(), // "01 Title"
+                Regex::new(r"^(\d{1,3})$").unwrap(),  // Just "01" or "05"
+                // Extract from common naming patterns
+                Regex::new(r"^(?:[^0-9]*?)(\d{1,3})(?:[^0-9]|$)").unwrap(),
+            ];
 
-                    for pattern in ep_patterns {
-                        if let Some(captures) = pattern.captures(filename) {
-                            if let Ok(episode) = captures[1].parse::<u32>() {
-                                debug!(
-                                    "Parsed episode: S{:02}E{:02} from folder+filename",
-                                    season, episode
-                                );
-                                return Some(EpisodeInfo {
-                                    season,
-                                    episode,
-                                    end_episode: None,
-                                    year: None,
-                                    month: None,
-                                    day: None,
-                                    absolute_episode: None,
-                                    is_special: season == 0,
-                                });
-                            }
-                        }
-                    }
+            for pattern in ep_patterns {
+                if let Some(captures) = pattern.captures(filename)
+                    && let Ok(episode) = captures[1].parse::<u32>()
+                {
+                    debug!(
+                        "Parsed episode: S{:02}E{:02} from folder+filename",
+                        season, episode
+                    );
+                    return Some(EpisodeInfo {
+                        season,
+                        episode,
+                        end_episode: None,
+                        year: None,
+                        month: None,
+                        day: None,
+                        absolute_episode: None,
+                        is_special: season == 0,
+                    });
                 }
             }
         }
@@ -396,36 +433,48 @@ impl TvParser {
         }
 
         for pattern in Self::season_folder_patterns() {
-            if let Some(captures) = pattern.captures(folder_name) {
-                if captures.len() >= 2 {
-                    if let Ok(season) = captures[1].parse::<u32>() {
-                        return Some(season);
-                    }
-                }
+            if let Some(captures) = pattern.captures(folder_name)
+                && captures.len() >= 2
+                && let Ok(season) = captures[1].parse::<u32>()
+            {
+                return Some(season);
             }
         }
         None
+    }
+
+    pub fn parse_season_folder_with_series(
+        folder_name: &str,
+        series_name: Option<&str>,
+    ) -> Option<u32> {
+        if let Some(season) = Self::parse_season_folder(folder_name) {
+            return Some(season);
+        }
+
+        series_name.and_then(|series| Self::parse_series_child_season_number(series, folder_name))
     }
 
     /// Extract series name from path
     /// Looks for the show folder (parent of season folder or grandparent of episode file)
     pub fn extract_series_name(path: &Path) -> Option<String> {
         // First, check if this is in a season folder
-        if let Some(parent) = path.parent() {
-            if let Some(parent_name) = parent.file_name() {
-                if let Some(parent_str) = parent_name.to_str() {
-                    // If parent is a season folder, get grandparent
-                    if Self::parse_season_folder(parent_str).is_some() {
-                        if let Some(grandparent) = parent.parent() {
-                            if let Some(show_name) = grandparent.file_name() {
-                                return show_name.to_str().map(|s| s.to_string());
-                            }
-                        }
-                    } else {
-                        // Parent might be the show folder directly
-                        return Some(parent_str.to_string());
-                    }
+        if let Some(parent) = path.parent()
+            && let Some(parent_name) = parent.file_name()
+            && let Some(parent_str) = parent_name.to_str()
+        {
+            let series_name = parent
+                .parent()
+                .and_then(|gp| gp.file_name())
+                .and_then(|name| name.to_str());
+
+            if Self::parse_season_folder_with_series(parent_str, series_name).is_some() {
+                if let Some(grandparent) = parent.parent()
+                    && let Some(show_name) = grandparent.file_name()
+                {
+                    return show_name.to_str().map(|s| s.to_string());
                 }
+            } else {
+                return Some(parent_str.to_string());
             }
         }
         None
@@ -435,43 +484,32 @@ impl TvParser {
     pub fn is_in_tv_structure(path: &Path) -> bool {
         // Check parent for season folder
         if let Some(parent) = path.parent() {
-            if let Some(parent_name) = parent.file_name() {
-                if let Some(parent_str) = parent_name.to_str() {
-                    if Self::parse_season_folder(parent_str).is_some() {
-                        return true;
-                    }
-                }
+            if Self::parse_season_from_parent(parent).is_some() {
+                return true;
             }
 
             // Check grandparent path
-            if let Some(grandparent) = parent.parent() {
-                if let Some(_grandparent_name) = grandparent.file_name() {
-                    // If grandparent exists and parent is a season folder
-                    if let Some(parent_name) = parent.file_name() {
-                        if let Some(parent_str) = parent_name.to_str() {
-                            if Self::parse_season_folder(parent_str).is_some() {
-                                return true;
-                            }
-                        }
-                    }
-                }
+            if let Some(grandparent) = parent.parent()
+                && Self::parse_season_from_parent(grandparent).is_some()
+            {
+                return true;
             }
         }
 
         // Check filename for episode patterns
-        if let Some(filename) = path.file_stem() {
-            if let Some(name_str) = filename.to_str() {
-                // Quick check for common episode indicators
-                let lower = name_str.to_lowercase();
-                if lower.contains("s0")
-                    || lower.contains("s1")
-                    || lower.contains("e0")
-                    || lower.contains("e1")
-                    || lower.contains("x0")
-                    || lower.contains("x1")
-                {
-                    return true;
-                }
+        if let Some(filename) = path.file_stem()
+            && let Some(name_str) = filename.to_str()
+        {
+            // Quick check for common episode indicators
+            let lower = name_str.to_lowercase();
+            if lower.contains("s0")
+                || lower.contains("s1")
+                || lower.contains("e0")
+                || lower.contains("e1")
+                || lower.contains("x0")
+                || lower.contains("x1")
+            {
+                return true;
             }
         }
 
@@ -495,12 +533,12 @@ impl TvParser {
         }
 
         // Check for fansub group tags [GroupName]
-        if let Some(filename) = path.file_stem() {
-            if let Some(name) = filename.to_str() {
-                if name.starts_with('[') && name.contains(']') {
-                    return true;
-                }
-            }
+        if let Some(filename) = path.file_stem()
+            && let Some(name) = filename.to_str()
+            && name.starts_with('[')
+            && name.contains(']')
+        {
+            return true;
         }
 
         false
@@ -523,18 +561,17 @@ impl TvParser {
         ];
 
         for pattern in title_patterns {
-            if let Some(captures) = pattern.captures(filename) {
-                if let Some(title) = captures.get(1) {
-                    let cleaned = title
-                        .as_str()
-                        .trim()
-                        .trim_end_matches(|c: char| c == '.' || c == '_' || c == '-')
-                        .replace('_', " ")
-                        .replace('.', " ");
+            if let Some(captures) = pattern.captures(filename)
+                && let Some(title) = captures.get(1)
+            {
+                let cleaned = title
+                    .as_str()
+                    .trim()
+                    .trim_end_matches(['.', '_', '-'])
+                    .replace(['_', '.'], " ");
 
-                    if !cleaned.is_empty() {
-                        return Some(cleaned);
-                    }
+                if !cleaned.is_empty() {
+                    return Some(cleaned);
                 }
             }
         }
@@ -622,6 +659,35 @@ mod tests {
         assert_eq!(TvParser::parse_season_folder("Specials"), Some(0));
         assert_eq!(TvParser::parse_season_folder("Series 2"), Some(2));
         assert_eq!(TvParser::parse_season_folder("Random Folder"), None);
+    }
+
+    #[test]
+    fn test_parse_season_folder_with_series_variants() {
+        assert_eq!(
+            TvParser::parse_season_folder_with_series("The Office Season 02", Some("The Office")),
+            Some(2)
+        );
+        assert_eq!(
+            TvParser::parse_season_folder_with_series("The Office S03", Some("The Office")),
+            Some(3)
+        );
+        assert_eq!(
+            TvParser::parse_season_folder_with_series("The Office 4", Some("The Office")),
+            Some(4)
+        );
+        assert_eq!(
+            TvParser::parse_season_folder_with_series("The Office Extras", Some("The Office")),
+            None
+        );
+    }
+
+    #[test]
+    fn test_extract_series_name_with_prefixed_season_folder() {
+        let path = PathBuf::from("/media/The Office/The Office S02/Episode.mkv");
+        assert_eq!(
+            TvParser::extract_series_name(&path),
+            Some("The Office".to_string())
+        );
     }
 
     #[test]

@@ -147,10 +147,10 @@ impl InMemoryFs {
                 self.ensure_parent_link(parent);
             }
             // Link child into parent
-            if let Some(Node::Dir { children }) = self.nodes.get_mut(parent) {
-                if !children.iter().any(|p| p.as_path() == path) {
-                    children.push(path.to_path_buf());
-                }
+            if let Some(Node::Dir { children }) = self.nodes.get_mut(parent)
+                && !children.iter().any(|p| p.as_path() == path)
+            {
+                children.push(path.to_path_buf());
             }
         }
     }

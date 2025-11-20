@@ -2,7 +2,7 @@ use axum::{
     Extension, Json,
     extract::{Path, State},
     http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use ferrex_core::{MediaType, User, watch_status::UpdateProgressRequest};
 use serde::Deserialize;
@@ -52,15 +52,15 @@ pub async fn stream_with_progress_handler(
     if !media_file.path.exists() {
         warn!("Media file not found on disk: {:?}", media_file.path);
 
-        if let Some(media_root) = &state.config.media_root {
-            if !media_root.exists() {
-                warn!("Media library root is offline: {:?}", media_root);
-                return Ok(Response::builder()
-                    .status(StatusCode::SERVICE_UNAVAILABLE)
-                    .header("X-Media-Error", "library-offline")
-                    .body(axum::body::Body::empty())
-                    .expect("failed to build SERVICE_UNAVAILABLE response"));
-            }
+        if let Some(media_root) = &state.config.media_root
+            && !media_root.exists()
+        {
+            warn!("Media library root is offline: {:?}", media_root);
+            return Ok(Response::builder()
+                .status(StatusCode::SERVICE_UNAVAILABLE)
+                .header("X-Media-Error", "library-offline")
+                .body(axum::body::Body::empty())
+                .expect("failed to build SERVICE_UNAVAILABLE response"));
         }
 
         return Ok(Response::builder()
@@ -98,45 +98,44 @@ pub async fn stream_with_progress_handler(
         )
     })?;
 
-    if let Some(range_header) = headers.get(header::RANGE) {
-        if let Ok(range_str) = range_header.to_str() {
-            if let Some(range) = parse_range_header(range_str, file_size) {
-                use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    if let Some(range_header) = headers.get(header::RANGE)
+        && let Ok(range_str) = range_header.to_str()
+        && let Some(range) = parse_range_header(range_str, file_size)
+    {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-                debug!("Range request: {}-{}/{}", range.start, range.end, file_size);
-                let mut file = file;
-                if let Err(e) = file.seek(std::io::SeekFrom::Start(range.start)).await {
-                    warn!("Failed to seek in file: {}", e);
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Failed to seek in media file".to_string(),
-                    ));
-                }
-
-                let content_length = range.end - range.start + 1;
-                info!(
-                    "Serving range {}-{} ({} bytes) for media {}",
-                    range.start, range.end, content_length, media_id
-                );
-
-                let limited_file = file.take(content_length);
-                let stream = ReaderStream::new(limited_file);
-
-                return Ok(Response::builder()
-                    .status(StatusCode::PARTIAL_CONTENT)
-                    .header(header::CONTENT_TYPE, content_type)
-                    .header(header::CONTENT_LENGTH, content_length.to_string())
-                    .header(
-                        header::CONTENT_RANGE,
-                        format!("bytes {}-{}/{}", range.start, range.end, file_size),
-                    )
-                    .header(header::ACCEPT_RANGES, "bytes")
-                    .header("Cache-Control", "public, max-age=3600")
-                    .header("Connection", "keep-alive")
-                    .body(axum::body::Body::from_stream(stream))
-                    .expect("failed to build PARTIAL_CONTENT response"));
-            }
+        debug!("Range request: {}-{}/{}", range.start, range.end, file_size);
+        let mut file = file;
+        if let Err(e) = file.seek(std::io::SeekFrom::Start(range.start)).await {
+            warn!("Failed to seek in file: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to seek in media file".to_string(),
+            ));
         }
+
+        let content_length = range.end - range.start + 1;
+        info!(
+            "Serving range {}-{} ({} bytes) for media {}",
+            range.start, range.end, content_length, media_id
+        );
+
+        let limited_file = file.take(content_length);
+        let stream = ReaderStream::new(limited_file);
+
+        return Ok(Response::builder()
+            .status(StatusCode::PARTIAL_CONTENT)
+            .header(header::CONTENT_TYPE, content_type)
+            .header(header::CONTENT_LENGTH, content_length.to_string())
+            .header(
+                header::CONTENT_RANGE,
+                format!("bytes {}-{}/{}", range.start, range.end, file_size),
+            )
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header("Cache-Control", "public, max-age=3600")
+            .header("Connection", "keep-alive")
+            .body(axum::body::Body::from_stream(stream))
+            .expect("failed to build PARTIAL_CONTENT response"));
     }
 
     info!(

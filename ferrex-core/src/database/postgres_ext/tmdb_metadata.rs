@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
 
 use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
 use uuid::Uuid;
@@ -19,6 +22,18 @@ use super::super::postgres::PostgresDatabase;
 /// Primary entrypoint for TMDB metadata persistence.
 pub struct TmdbMetadataRepository<'a> {
     db: &'a PostgresDatabase,
+}
+
+impl<'a> fmt::Debug for TmdbMetadataRepository<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let stats = self.db.pool_stats();
+        f.debug_struct("TmdbMetadataRepository")
+            .field("pool_size", &stats.size)
+            .field("pool_idle", &stats.idle)
+            .field("pool_max", &stats.max_size)
+            .field("pool_min_idle", &stats.min_idle)
+            .finish()
+    }
 }
 
 impl<'a> TmdbMetadataRepository<'a> {
@@ -1926,7 +1941,7 @@ async fn store_media_file(
     let technical_metadata = media_file
         .media_file_metadata
         .as_ref()
-        .map(|m| serde_json::to_value(m))
+        .map(serde_json::to_value)
         .transpose()
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to serialize metadata: {}", e)))?;
 
@@ -3058,6 +3073,15 @@ async fn load_episode_details(
     .map_err(|e| MediaError::Internal(format!("Failed to load episode cast: {}", e)))?;
 
     for record in primary_cast {
+        let image_slot = record.order_index.unwrap_or_default() as u32;
+        let profile_available = record.profile_path.as_ref().is_some();
+        let profile_media_id = profile_available.then(|| {
+            Uuid::new_v5(
+                &Uuid::NAMESPACE_OID,
+                format!("person-{}", record.person_tmdb_id).as_bytes(),
+            )
+        });
+
         let member = CastMember {
             id: record.person_tmdb_id as u64,
             credit_id: record.credit_id,
@@ -3066,7 +3090,7 @@ async fn load_episode_details(
             original_name: record.original_name,
             character: record.character,
             profile_path: record.profile_path.clone(),
-            order: record.order_index.unwrap_or_default() as u32,
+            order: image_slot,
             gender: record.gender.map(|g| g as u8),
             known_for_department: record.known_for_department.clone(),
             adult: record.adult,
@@ -3081,7 +3105,9 @@ async fn load_episode_details(
                 record.tiktok_id,
                 record.youtube_id,
             ),
-            image_slot: record.order_index.unwrap_or_default() as u32,
+            image_slot,
+            profile_media_id,
+            profile_image_index: profile_available.then_some(image_slot),
         };
         guest_map.insert(member.id, member);
     }
@@ -3123,6 +3149,15 @@ async fn load_episode_details(
     .map_err(|e| MediaError::Internal(format!("Failed to load episode guest stars: {}", e)))?;
 
     for record in guest_rows {
+        let image_slot = record.order_index.unwrap_or_default() as u32;
+        let profile_available = record.profile_path.as_ref().is_some();
+        let profile_media_id = profile_available.then(|| {
+            Uuid::new_v5(
+                &Uuid::NAMESPACE_OID,
+                format!("person-{}", record.person_tmdb_id).as_bytes(),
+            )
+        });
+
         let member = CastMember {
             id: record.person_tmdb_id as u64,
             credit_id: record.credit_id,
@@ -3131,7 +3166,7 @@ async fn load_episode_details(
             original_name: record.original_name,
             character: record.character,
             profile_path: record.profile_path.clone(),
-            order: record.order_index.unwrap_or_default() as u32,
+            order: image_slot,
             gender: record.gender.map(|g| g as u8),
             known_for_department: record.known_for_department.clone(),
             adult: record.adult,
@@ -3146,7 +3181,9 @@ async fn load_episode_details(
                 record.tiktok_id,
                 record.youtube_id,
             ),
-            image_slot: record.order_index.unwrap_or_default() as u32,
+            image_slot,
+            profile_media_id,
+            profile_image_index: profile_available.then_some(image_slot),
         };
         guest_map.entry(member.id).or_insert(member);
     }
@@ -3306,15 +3343,14 @@ fn build_movie_content_ratings(
     if let Some(cert) = primary_certification
         .as_ref()
         .filter(|c| !c.trim().is_empty())
+        && !seen_countries.contains("US")
     {
-        if !seen_countries.contains("US") {
-            ratings.push(ContentRating {
-                iso_3166_1: "US".to_string(),
-                rating: Some(cert.clone()),
-                rating_system: None,
-                descriptors: Vec::new(),
-            });
-        }
+        ratings.push(ContentRating {
+            iso_3166_1: "US".to_string(),
+            rating: Some(cert.clone()),
+            rating_system: None,
+            descriptors: Vec::new(),
+        });
     }
 
     ratings
@@ -3380,30 +3416,43 @@ async fn load_cast(db: &PostgresDatabase, movie_id: Uuid) -> Result<Vec<CastMemb
 
     Ok(cast_rows
         .into_iter()
-        .map(|record| CastMember {
-            id: record.person_tmdb_id as u64,
-            credit_id: record.credit_id,
-            cast_id: record.cast_id.map(|c| c as u64),
-            name: record.name.clone(),
-            original_name: record.original_name,
-            character: record.character,
-            profile_path: record.profile_path.clone(),
-            order: record.order_index.unwrap_or_default() as u32,
-            gender: record.gender.map(|g| g as u8),
-            known_for_department: record.known_for_department.clone(),
-            adult: record.adult,
-            popularity: record.popularity,
-            also_known_as: record.aliases,
-            external_ids: build_person_external_ids(
-                record.imdb_id,
-                record.facebook_id,
-                record.instagram_id,
-                record.twitter_id,
-                record.wikidata_id,
-                record.tiktok_id,
-                record.youtube_id,
-            ),
-            image_slot: record.order_index.unwrap_or_default() as u32,
+        .map(|record| {
+            let image_slot = record.order_index.unwrap_or_default() as u32;
+            let profile_available = record.profile_path.as_ref().is_some();
+            let profile_media_id = profile_available.then(|| {
+                Uuid::new_v5(
+                    &Uuid::NAMESPACE_OID,
+                    format!("person-{}", record.person_tmdb_id).as_bytes(),
+                )
+            });
+
+            CastMember {
+                id: record.person_tmdb_id as u64,
+                credit_id: record.credit_id,
+                cast_id: record.cast_id.map(|c| c as u64),
+                name: record.name.clone(),
+                original_name: record.original_name,
+                character: record.character,
+                profile_path: record.profile_path.clone(),
+                order: image_slot,
+                gender: record.gender.map(|g| g as u8),
+                known_for_department: record.known_for_department.clone(),
+                adult: record.adult,
+                popularity: record.popularity,
+                also_known_as: record.aliases,
+                external_ids: build_person_external_ids(
+                    record.imdb_id,
+                    record.facebook_id,
+                    record.instagram_id,
+                    record.twitter_id,
+                    record.wikidata_id,
+                    record.tiktok_id,
+                    record.youtube_id,
+                ),
+                image_slot,
+                profile_media_id,
+                profile_image_index: profile_available.then_some(image_slot),
+            }
         })
         .collect())
 }
@@ -3512,30 +3561,43 @@ async fn load_series_cast(db: &PostgresDatabase, series_id: Uuid) -> Result<Vec<
 
     Ok(cast_rows
         .into_iter()
-        .map(|record| CastMember {
-            id: record.person_tmdb_id as u64,
-            credit_id: record.credit_id,
-            cast_id: None,
-            name: record.name.clone(),
-            original_name: record.original_name,
-            character: record.character,
-            profile_path: record.profile_path.clone(),
-            order: record.order_index.unwrap_or_default() as u32,
-            gender: record.gender.map(|g| g as u8),
-            known_for_department: record.known_for_department.clone(),
-            adult: record.adult,
-            popularity: record.popularity,
-            also_known_as: record.aliases,
-            external_ids: build_person_external_ids(
-                record.imdb_id,
-                record.facebook_id,
-                record.instagram_id,
-                record.twitter_id,
-                record.wikidata_id,
-                record.tiktok_id,
-                record.youtube_id,
-            ),
-            image_slot: record.order_index.unwrap_or_default() as u32,
+        .map(|record| {
+            let image_slot = record.order_index.unwrap_or_default() as u32;
+            let profile_available = record.profile_path.as_ref().is_some();
+            let profile_media_id = profile_available.then(|| {
+                Uuid::new_v5(
+                    &Uuid::NAMESPACE_OID,
+                    format!("person-{}", record.person_tmdb_id).as_bytes(),
+                )
+            });
+
+            CastMember {
+                id: record.person_tmdb_id as u64,
+                credit_id: record.credit_id,
+                cast_id: None,
+                name: record.name.clone(),
+                original_name: record.original_name,
+                character: record.character,
+                profile_path: record.profile_path.clone(),
+                order: image_slot,
+                gender: record.gender.map(|g| g as u8),
+                known_for_department: record.known_for_department.clone(),
+                adult: record.adult,
+                popularity: record.popularity,
+                also_known_as: record.aliases,
+                external_ids: build_person_external_ids(
+                    record.imdb_id,
+                    record.facebook_id,
+                    record.instagram_id,
+                    record.twitter_id,
+                    record.wikidata_id,
+                    record.tiktok_id,
+                    record.youtube_id,
+                ),
+                image_slot,
+                profile_media_id,
+                profile_image_index: profile_available.then_some(image_slot),
+            }
         })
         .collect())
 }

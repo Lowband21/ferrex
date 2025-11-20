@@ -1,11 +1,11 @@
 //! Search dropdown overlay component
 
 use iced::widget::{Space, button, column, container, row, scrollable, text};
-use iced::{Alignment, Color, Element, Length, Padding, Theme, alignment};
+use iced::{Alignment, Color, Element, Length, Padding, Theme};
 
 use crate::common::messages::DomainMessage;
-use crate::domains::search::types::{SearchMode, SearchResult, SearchState};
-use crate::domains::ui::theme::{self as app_theme, Button as ButtonStyle};
+use crate::domains::search::types::{SearchMode, SearchResult};
+use crate::domains::ui::theme::Button as ButtonStyle;
 use crate::infrastructure::api_types::Media;
 use crate::state_refactored::State;
 
@@ -19,7 +19,7 @@ type Message = DomainMessage;
     ),
     profiling::function
 )]
-pub fn view_search_dropdown(state: &State) -> Option<Element<Message>> {
+pub fn view_search_dropdown(state: &State) -> Option<Element<'_, Message>> {
     let search_state = &state.domains.search.state;
 
     // Only show dropdown if we're in dropdown mode and have a query or results
@@ -188,7 +188,7 @@ pub fn view_search_dropdown(state: &State) -> Option<Element<Message>> {
 }
 
 /// Render an individual search result item
-fn view_search_result(result: &SearchResult, is_selected: bool) -> Element<Message> {
+fn view_search_result(result: &SearchResult, is_selected: bool) -> Element<'_, Message> {
     let background_color = if is_selected {
         Color::from_rgba(0.3, 0.3, 0.3, 0.8)
     } else {
@@ -258,7 +258,7 @@ fn get_media_icon(media_ref: &Media) -> &'static str {
     ),
     profiling::function
 )]
-pub fn view_search_fullscreen(state: &State) -> Element<Message> {
+pub fn view_search_fullscreen(state: &State) -> Element<'_, Message> {
     let search_state = &state.domains.search.state;
 
     // Header with back button
@@ -347,7 +347,7 @@ pub fn view_search_fullscreen(state: &State) -> Element<Message> {
     ),
     profiling::function
 )]
-fn view_search_result_fullscreen(result: &SearchResult) -> Element<Message> {
+fn view_search_result_fullscreen(result: &SearchResult) -> Element<'_, Message> {
     let mut content_row = row![].spacing(16).align_y(Alignment::Center);
 
     // Larger icon/poster area

@@ -5,7 +5,6 @@
 use async_trait::async_trait;
 use rkyv::rancor::Error;
 use rkyv::util::AlignedVec;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -250,7 +249,7 @@ impl ApiService for ApiClientAdapter {
 
         // Build URL for the library media endpoint
         let url = self.client.build_url(
-            &replace_param(v1::libraries::MEDIA, "{id}", library_id.to_string()),
+            replace_param(v1::libraries::MEDIA, "{id}", library_id.to_string()),
             false,
         );
         log::info!("Fetching library media from {}", url);

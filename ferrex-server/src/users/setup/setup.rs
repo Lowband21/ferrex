@@ -46,7 +46,7 @@ use crate::{
 
 /// Simple in-memory rate limiter for setup endpoints
 /// Tracks setup attempts by IP address to prevent brute force attacks
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SetupRateLimiter {
     attempts: Arc<RwLock<HashMap<String, Vec<DateTime<Utc>>>>>,
     max_attempts: usize,
@@ -214,31 +214,31 @@ pub async fn create_initial_admin(
     get_rate_limiter().check_rate_limit(&client_ip).await?;
 
     // Check setup token if configured
-    if let Ok(expected_token) = std::env::var("FERREX_SETUP_TOKEN") {
-        if !expected_token.is_empty() {
-            // Token is required
-            let provided_token = request
-                .setup_token
-                .as_ref()
-                .ok_or_else(|| AppError::unauthorized("Setup token required"))?;
+    if let Ok(expected_token) = std::env::var("FERREX_SETUP_TOKEN")
+        && !expected_token.is_empty()
+    {
+        // Token is required
+        let provided_token = request
+            .setup_token
+            .as_ref()
+            .ok_or_else(|| AppError::unauthorized("Setup token required"))?;
 
-            // Constant-time comparison to prevent timing attacks
-            if provided_token.len() != expected_token.len() {
-                return Err(AppError::unauthorized("Invalid setup token"));
-            }
+        // Constant-time comparison to prevent timing attacks
+        if provided_token.len() != expected_token.len() {
+            return Err(AppError::unauthorized("Invalid setup token"));
+        }
 
-            let mut matches = true;
-            for (a, b) in provided_token.bytes().zip(expected_token.bytes()) {
-                matches &= a == b;
-            }
+        let mut matches = true;
+        for (a, b) in provided_token.bytes().zip(expected_token.bytes()) {
+            matches &= a == b;
+        }
 
-            if !matches {
-                warn!(
-                    "Failed setup attempt with invalid token from IP: {}",
-                    client_ip
-                );
-                return Err(AppError::unauthorized("Invalid setup token"));
-            }
+        if !matches {
+            warn!(
+                "Failed setup attempt with invalid token from IP: {}",
+                client_ip
+            );
+            return Err(AppError::unauthorized("Invalid setup token"));
         }
     }
     // Validate request

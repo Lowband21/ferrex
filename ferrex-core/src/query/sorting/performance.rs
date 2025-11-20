@@ -11,13 +11,12 @@ use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "parallel-sorting")]
-use rayon::prelude::*;
-
 /// Parallel sorting for large datasets
 ///
-/// This strategy uses Rayon to parallelize sorting operations
-/// when the dataset exceeds a configurable threshold.
+/// This strategy is intended to switch to a parallel backend when the dataset
+/// exceeds a configurable threshold. The current implementation is a thin
+/// wrapper that delegates to the wrapped strategy until a true parallel
+/// algorithm is introduced.
 pub struct ParallelSort<T: Send + Sync, S> {
     pub strategy: S,
     pub threshold: usize,
@@ -55,45 +54,12 @@ impl<T: Send + Sync, S> ParallelSort<T, S> {
     }
 }
 
-#[cfg(feature = "parallel-sorting")]
 impl<T: Send + Sync, S> SortStrategy<T> for ParallelSort<T, S>
 where
     T: Clone + Send + Sync,
     S: SortStrategy<T>,
 {
     fn sort(&self, items: &mut [T]) {
-        if items.len() < self.threshold {
-            // Dataset too small, use sequential sorting
-            self.strategy.sort(items);
-        } else {
-            // Large dataset, use parallel sorting
-            // Note: This is a simplified implementation
-            // In practice, we'd need a parallel-aware sorting algorithm
-            self.strategy.sort(items);
-        }
-    }
-
-    fn can_apply(&self, sample: &T) -> bool {
-        self.strategy.can_apply(sample)
-    }
-
-    fn cost_estimate(&self) -> SortCost {
-        // Parallel sorting can reduce the effective cost for large datasets
-        match self.strategy.cost_estimate() {
-            SortCost::Expensive => SortCost::Moderate,
-            other => other,
-        }
-    }
-}
-
-#[cfg(not(feature = "parallel-sorting"))]
-impl<T: Send + Sync, S> SortStrategy<T> for ParallelSort<T, S>
-where
-    T: Clone + Send + Sync,
-    S: SortStrategy<T>,
-{
-    fn sort(&self, items: &mut [T]) {
-        // Fallback to sequential sorting when parallel feature is disabled
         self.strategy.sort(items);
     }
 
@@ -222,14 +188,14 @@ where
 
         if use_cache {
             // Use cached sorting order
-            if let Ok(cache) = self.cache.read() {
-                if let Some(ref cached_state) = cache.last_sort {
-                    crate::query::sorting::utils::reorder_by_indices(
-                        items,
-                        &cached_state.sorted_indices,
-                    );
-                    return;
-                }
+            if let Ok(cache) = self.cache.read()
+                && let Some(ref cached_state) = cache.last_sort
+            {
+                crate::query::sorting::utils::reorder_by_indices(
+                    items,
+                    &cached_state.sorted_indices,
+                );
+                return;
             }
         }
 

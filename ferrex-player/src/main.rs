@@ -1,14 +1,13 @@
 #![feature(type_alias_impl_trait)]
 use ferrex_player::*;
 
-use env_logger::{Builder, Env, Target};
-use iced::{Task, Theme};
+use env_logger::{Builder, Target};
+use iced::{Font, Task, Theme};
 use log::LevelFilter;
 use lucide_icons::lucide_font_bytes;
 
 use common::messages::DomainMessage;
 use domains::ui::theme;
-use iced::Program;
 use state_refactored::State;
 
 fn init_logger() {
@@ -152,15 +151,23 @@ fn main() -> iced::Result {
         (state, auth_task)
     };
 
+    let mut settings = iced::Settings::default();
+    settings.id = Some("ferrex-player".to_string()); // pick the same name as your .desktop file
+    settings.antialiasing = true;
+    settings.default_font = Font::MONOSPACE;
+    // TODO: Load some custom fonts
+    //settings.fonts
+
     iced::application::<State, DomainMessage, Theme, iced_wgpu::Renderer>(
         init,
         update::update,
         view::view,
     )
+    .settings(settings)
+    .title("Ferrex Player")
     .subscription(subscriptions::subscription)
     .font(lucide_font_bytes())
     .theme(|_| theme::MediaServerTheme::theme())
-    // Keep swapchain active but let wgpu throttle frames when idle
     .window(iced::window::Settings {
         size: iced::Size::new(1280.0, 720.0),
         resizable: true,

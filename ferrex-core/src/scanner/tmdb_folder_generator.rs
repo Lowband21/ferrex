@@ -193,7 +193,7 @@ impl TmdbFolderGenerator {
             plan.push_dir(folder_path.clone());
 
             // Make a plausible video file size between 700MB and 2.5GB
-            let size = rand::thread_rng().gen_range(700_u64..=2500_u64) * 1024 * 1024;
+            let size = rand::rng().random_range(700_u64..=2500_u64) * 1024 * 1024;
             let file_name = self.naming.movie_file_name(&title, year, &self.video_ext);
             plan.push_file(folder_path.join(file_name), size);
         }
@@ -236,7 +236,7 @@ impl TmdbFolderGenerator {
             page += 1;
         }
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         for title in collected.into_iter().take(count) {
             let series_folder = self.naming.series_folder_name(&title);
             let series_path = root.join(series_folder);
@@ -245,7 +245,7 @@ impl TmdbFolderGenerator {
             let seasons = if seasons_range.start() == seasons_range.end() {
                 *seasons_range.start()
             } else {
-                rng.gen_range(seasons_range.clone())
+                rng.random_range(seasons_range.clone())
             };
 
             for season_idx in 1..=seasons {
@@ -257,14 +257,14 @@ impl TmdbFolderGenerator {
                     if episodes_per_season_range.start() == episodes_per_season_range.end() {
                         *episodes_per_season_range.start()
                     } else {
-                        rng.gen_range(episodes_per_season_range.clone())
+                        rng.random_range(episodes_per_season_range.clone())
                     };
 
                 for ep_idx in 1..=episodes {
                     let fname =
                         self.naming
                             .episode_file_name(&title, season_idx, ep_idx, &self.video_ext);
-                    let size = rng.gen_range(300_u64..=1600_u64) * 1024 * 1024; // 300MB - 1.6GB
+                    let size = rng.random_range(300_u64..=1600_u64) * 1024 * 1024; // 300MB - 1.6GB
                     plan.push_file(season_path.join(fname), size);
                 }
             }

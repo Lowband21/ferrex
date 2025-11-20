@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
@@ -135,12 +136,12 @@ impl SchedulerState {
             if total_weight == 0 {
                 return None;
             }
-            if let Some(state) = self.libraries.get_mut(&library_id) {
-                if let Some(priority_state) = state.priority_state(priority) {
-                    priority_state.current_weight -= total_weight;
-                    priority_state.ready = priority_state.ready.saturating_sub(1);
-                    state.pending += 1;
-                }
+            if let Some(state) = self.libraries.get_mut(&library_id)
+                && let Some(priority_state) = state.priority_state(priority)
+            {
+                priority_state.current_weight -= total_weight;
+                priority_state.ready = priority_state.ready.saturating_sub(1);
+                state.pending += 1;
             }
             Some((library_id, total_weight))
         } else {
@@ -174,6 +175,31 @@ pub struct WeightedFairScheduler {
     defaults: Arc<QueueDefaults>,
     priority_ring: Arc<Vec<JobPriority>>,
     state: Arc<Mutex<SchedulerState>>,
+}
+
+impl fmt::Debug for WeightedFairScheduler {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("WeightedFairScheduler");
+        debug
+            .field("default_cap", &self.defaults.default_cap)
+            .field("default_weight", &self.defaults.default_weight)
+            .field("override_count", &self.defaults.overrides.len())
+            .field("priority_ring_len", &self.priority_ring.len());
+
+        match self.state.try_lock() {
+            Ok(state) => {
+                debug
+                    .field("library_count", &state.libraries.len())
+                    .field("reservation_count", &state.reservations.len())
+                    .field("next_priority_index", &state.next_priority_index);
+            }
+            Err(_) => {
+                debug.field("state", &"<locked>");
+            }
+        }
+
+        debug.finish()
+    }
 }
 
 /// Bulk ready counts used to prime the scheduler without emitting one event per job.
@@ -267,13 +293,13 @@ impl WeightedFairScheduler {
 
     pub async fn cancel(&self, reservation_id: Uuid) {
         let mut state = self.state.lock().await;
-        if let Some(reservation) = state.reservations.remove(&reservation_id) {
-            if let Some(library) = state.libraries.get_mut(&reservation.library_id) {
-                library.pending = library.pending.saturating_sub(1);
-                if let Some(priority_state) = library.priority_state(reservation.priority) {
-                    priority_state.ready += 1;
-                    priority_state.current_weight += reservation.weight_debt;
-                }
+        if let Some(reservation) = state.reservations.remove(&reservation_id)
+            && let Some(library) = state.libraries.get_mut(&reservation.library_id)
+        {
+            library.pending = library.pending.saturating_sub(1);
+            if let Some(priority_state) = library.priority_state(reservation.priority) {
+                priority_state.ready += 1;
+                priority_state.current_weight += reservation.weight_debt;
             }
         }
     }

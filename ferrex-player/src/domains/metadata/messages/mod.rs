@@ -4,8 +4,7 @@ pub mod subscription;
 pub mod subscriptions;
 
 use crate::infrastructure::api_types::{Media, SeriesReference};
-use ferrex_core::{EpisodeID, ImageRequest, MediaFile, MediaID, SeasonID, SeriesID};
-use std::collections::HashMap;
+use ferrex_core::{EpisodeID, ImageRequest, MediaID, SeasonID, SeriesID};
 
 #[derive(Clone)]
 pub enum Message {

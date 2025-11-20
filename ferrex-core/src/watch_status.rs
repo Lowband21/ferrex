@@ -36,7 +36,7 @@
 //! watch_state.update_progress(request.media_id, request.position, request.duration);
 //! ```
 
-use crate::{MediaID, MediaType, User};
+use crate::MediaType;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     collections::{HashMap, HashSet},
@@ -98,7 +98,7 @@ impl<'de> Deserialize<'de> for UserWatchState {
 
         let mut in_progress_map = HashMap::new();
         for item in helper.in_progress {
-            in_progress_map.insert(item.media_id.clone(), item);
+            in_progress_map.insert(item.media_id, item);
         }
 
         Ok(UserWatchState {
@@ -112,9 +112,10 @@ impl UserWatchState {
     pub fn get_watch_progress(&self, media_id: &Uuid) -> Option<WatchProgress> {
         if self.completed.contains(media_id) {
             Some(WatchProgress::new(1.0))
+        } else if let Some(item) = self.get_by_media_id(media_id) {
+            Some(item.to_watch_progress())
         } else {
-            self.get_by_media_id(media_id)
-                .map(|item| item.to_watch_progress())
+            Some(WatchProgress::new(0.0))
         }
     }
 
@@ -295,7 +296,7 @@ impl UserWatchState {
     }
 
     /// Get continue watching items (sorted by last watched)
-    pub fn get_continue_watching(self, limit: usize) -> HashMap<Uuid, InProgressItem> {
+    pub fn get_continue_watching(self, _limit: usize) -> HashMap<Uuid, InProgressItem> {
         self.in_progress
         //let mut items: Vec<InProgressItem> = self.in_progress.values().cloned().collect();
         //items.sort_by(|a, b| b.last_watched.cmp(&a.last_watched));

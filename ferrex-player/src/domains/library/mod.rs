@@ -8,19 +8,16 @@ pub mod types;
 pub mod update;
 pub mod update_handlers;
 
-use self::messages::Message as LibraryMessage;
 use self::types::LibraryFormData;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use crate::infrastructure::repository::accessor::{Accessor, ReadWrite};
+use ferrex_core::LibraryID;
 use ferrex_core::api_scan::{ScanConfig, ScanMetrics};
 use ferrex_core::api_types::{LibraryMediaCache, ScanProgressEvent, ScanSnapshotDto};
-use ferrex_core::types::library::Library;
-use ferrex_core::{ArchivedLibrary, LibraryID};
 use iced::Task;
-use rkyv::vec::ArchivedVec;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock as StdRwLock};
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug)]

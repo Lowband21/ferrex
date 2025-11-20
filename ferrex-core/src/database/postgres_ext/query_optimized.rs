@@ -1,6 +1,6 @@
 use crate::{
     EpisodeID, EpisodeNumber, EpisodeURL, LibraryID, MediaDetailsOption, MediaError, MediaFile,
-    MediaID, MediaIDLike, MovieID, MovieTitle, MovieURL, Result, SeasonID, SeasonNumber, SeasonURL,
+    MediaIDLike, MovieID, MovieTitle, MovieURL, Result, SeasonID, SeasonNumber, SeasonURL,
     SeriesID, SeriesTitle, SeriesURL, TmdbDetails, UrlLike,
     api_types::{RATING_DECIMAL_SCALE, RatingValue},
     database::{postgres::PostgresDatabase, traits::MediaDatabaseTrait},
@@ -10,7 +10,6 @@ use crate::{
 };
 use sqlx::types::BigDecimal;
 use sqlx::{Postgres, QueryBuilder, Row};
-use std::str::FromStr;
 use uuid::Uuid;
 
 impl PostgresDatabase {
@@ -351,9 +350,9 @@ impl PostgresDatabase {
 
             let watch_status = InProgressItem {
                 media_id: media_uuid,
-                position: position,
-                duration: duration,
-                last_watched: last_watched,
+                position,
+                duration,
+                last_watched,
             };
 
             results.push(MediaWithStatus {
@@ -426,8 +425,8 @@ impl PostgresDatabase {
 
     async fn query_unwatched_media(
         &self,
-        user_id: Uuid,
-        query: &MediaQuery,
+        _user_id: Uuid,
+        _query: &MediaQuery,
     ) -> Result<Vec<MediaWithStatus>> {
         // Query media that doesn't have watch progress or completion records
         // This is more complex as it requires exclusion joins
@@ -436,9 +435,9 @@ impl PostgresDatabase {
 
     async fn query_recently_watched_media(
         &self,
-        user_id: Uuid,
-        days: u32,
-        query: &MediaQuery,
+        _user_id: Uuid,
+        _recent_days: u32,
+        _query: &MediaQuery,
     ) -> Result<Vec<MediaWithStatus>> {
         // Query media watched within the specified number of days
         todo!("Implement recently watched media query")
@@ -762,13 +761,12 @@ impl PostgresDatabase {
                     // For now, maintain original order
                     return std::cmp::Ordering::Equal;
                 }
-                _ => ("", ""),
             };
 
             // For string comparisons (Title)
             match sort.order {
-                SortOrder::Ascending => a_value.cmp(&b_value),
-                SortOrder::Descending => b_value.cmp(&a_value),
+                SortOrder::Ascending => a_value.cmp(b_value),
+                SortOrder::Descending => b_value.cmp(a_value),
             }
         });
 
@@ -903,7 +901,7 @@ impl PostgresDatabase {
 
         let technical_metadata: Option<serde_json::Value> = row.try_get("technical_metadata").ok();
         let media_file_metadata = technical_metadata
-            .map(|tm| serde_json::from_value(tm))
+            .map(serde_json::from_value)
             .transpose()
             .map_err(|e| MediaError::Internal(format!("Failed to deserialize metadata: {}", e)))?;
 
@@ -948,7 +946,7 @@ impl PostgresDatabase {
             let library_id = LibraryID(row.get("series_library_id"));
 
             // Create or get series reference
-            if !series_map.contains_key(&series_id) {
+            if let std::collections::hash_map::Entry::Vacant(e) = series_map.entry(series_id) {
                 let series_ref = SeriesReference {
                     id: SeriesID(series_id),
                     library_id,
@@ -964,7 +962,7 @@ impl PostgresDatabase {
                         .unwrap_or(None),
                 };
 
-                series_map.insert(series_id, series_ref.clone());
+                e.insert(series_ref.clone());
 
                 // Add series to results
                 results.push(MediaWithStatus {
@@ -979,7 +977,7 @@ impl PostgresDatabase {
                 let season_number: i16 = row.get("season_number");
                 let key = (series_id, season_number);
 
-                if !season_map.contains_key(&key) {
+                if let std::collections::hash_map::Entry::Vacant(e) = season_map.entry(key) {
                     let season_ref = SeasonReference {
                         id: SeasonID(season_id),
                         series_id: SeriesID(series_id),
@@ -1000,7 +998,7 @@ impl PostgresDatabase {
                         theme_color: None,
                     };
 
-                    season_map.insert(key, season_ref.clone());
+                    e.insert(season_ref.clone());
 
                     // Add season to results
                     results.push(MediaWithStatus {
@@ -1088,8 +1086,8 @@ impl PostgresDatabase {
         if let Some(row) = progress {
             let watch_status = InProgressItem {
                 media_id: movie_id.to_uuid(),
-                position: row.position as f32,
-                duration: row.duration as f32,
+                position: row.position,
+                duration: row.duration,
                 last_watched: row.last_watched,
             };
 
@@ -1139,8 +1137,8 @@ impl PostgresDatabase {
         if let Some(row) = progress {
             let watch_status = InProgressItem {
                 media_id: episode_id.to_uuid(),
-                position: row.position as f32,
-                duration: row.duration as f32,
+                position: row.position,
+                duration: row.duration,
                 last_watched: row.last_watched,
             };
 

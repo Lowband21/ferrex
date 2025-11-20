@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                            INSERT INTO orchestrator_jobs (\n                                id, library_id, kind, payload, priority, state,\n                                attempts, available_at, lease_owner, lease_id, lease_expires_at,\n                                dedupe_key, last_error, created_at, updated_at\n                            )\n                            VALUES ($1, $2, $3, $4, $5, 'ready', 0, NOW(), NULL, NULL, NULL, $6, NULL, NOW(), NOW())\n                            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Jsonb",
+        "Int2",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e1b789e98e86a823b8cd87ce99514580cddbf3c79c8bc234ca3d0d5674ac0346"
+}

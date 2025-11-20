@@ -11,6 +11,12 @@ use crate::LibraryID;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct LeaseId(pub Uuid);
 
+impl Default for LeaseId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LeaseId {
     pub fn new() -> Self {
         Self(Uuid::now_v7())

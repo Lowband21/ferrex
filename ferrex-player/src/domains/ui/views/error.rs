@@ -1,21 +1,11 @@
-use crate::{domains::ui::messages::Message, domains::ui::theme};
+use crate::{common::ui_utils::icon_text, domains::ui::messages::Message, domains::ui::theme};
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, text},
 };
 use lucide_icons::Icon;
 
-// Helper function to create icon text
-fn icon_text(icon: Icon) -> text::Text<'static> {
-    text(icon.unicode()).font(lucide_font()).size(20)
-}
-
-// Get the lucide font
-fn lucide_font() -> iced::Font {
-    iced::Font::with_name("lucide")
-}
-
-pub fn view_video_error(error_message: &str) -> Element<Message> {
+pub fn view_video_error(error_message: &str) -> Element<'_, Message> {
     let mut content = column![].spacing(20).align_x(iced::Alignment::Center);
 
     // Back button

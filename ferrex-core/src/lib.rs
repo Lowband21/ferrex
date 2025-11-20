@@ -67,11 +67,6 @@ pub mod api_types;
 #[cfg_attr(docsrs, doc(cfg(feature = "database")))]
 pub mod database;
 
-/// Database abstraction layer and implementations
-#[cfg(feature = "database")]
-#[cfg_attr(docsrs, doc(cfg(feature = "database")))]
-pub mod persistence;
-
 #[cfg(feature = "database")]
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
@@ -152,7 +147,6 @@ pub mod watch_status;
 
 pub use api_scan::*;
 pub use api_types::*;
-pub use auth::*;
 #[cfg(feature = "database")]
 pub use database::*;
 pub use error::*;
@@ -164,7 +158,17 @@ pub use image_service::{ImageService, TmdbImageSize};
 #[cfg(feature = "ffmpeg")]
 pub use metadata::*;
 #[cfg(feature = "database")]
-pub use orchestration::*;
+pub use orchestration::events::stable_path_key;
+#[cfg(feature = "database")]
+pub use orchestration::events::{
+    DomainEvent, DomainEventPublisher, EventBus, EventMeta, JobEvent, JobEventPayload,
+    JobEventPublisher, ManualEnqueueRequest, ManualEnqueueResponse,
+};
+#[cfg(feature = "database")]
+pub use orchestration::{
+    actors::*, budget::*, classification::*, config::*, correlation::*, dispatcher::*, job::*,
+    lease::*, persistence::*, queue::*, runtime::*, scan_cursor::*, scheduler::*, series::*,
+};
 pub use providers::{ProviderError, TmdbApiProvider};
 pub use query::*;
 pub use rbac::*;
@@ -175,9 +179,41 @@ pub use types::transcoding::{
     TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,
 };
 
+// Authentication exports
+pub use auth::AuthError as DeviceAuthError;
+pub use auth::device::*;
+#[cfg(feature = "database")]
+pub use auth::infrastructure::*;
+#[cfg(feature = "database")]
+pub use auth::pin::*;
+pub use auth::rate_limit::*;
+pub use auth::session::{
+    CreateSessionRequest, CreateSessionResponse, DeviceSession as SessionDeviceSession,
+    ListSessionsRequest, RevokeSessionRequest, SessionActivity, SessionConfig, SessionSummary,
+    SessionValidationResult, generate_session_token,
+};
+pub use auth::state::{
+    AuthEvent as DeviceAuthEvent, AuthState as DeviceAuthState,
+    TransitionResult as DeviceAuthTransitionResult,
+};
+pub use auth::state_machine::AuthState as AuthStateTrait;
+pub use auth::state_machine::TransitionResult as AuthStateMachineResult;
+pub use auth::state_machine::{
+    AuthConfig, AuthStateMachine, AuthTransitionError, Authenticated, AwaitingPassword,
+    AwaitingPin, Refreshing, SerializedAuthState, SettingUpPin, Unauthenticated, UserSelected,
+};
+#[cfg(feature = "database")]
+pub use auth::state_manager::*;
+pub use auth::{AuthContext, AuthEvent, AuthEventType, AuthResult, AuthenticationMethod};
+
 // Core exports
 pub use traits::*;
 pub use types::*;
-pub use user::*;
+pub use user::AuthError as UserAuthError;
+pub use user::{
+    AuthToken, Claims, GridSize, LoginRequest, PlaybackPreferences, PlaybackQuality,
+    RegisterRequest, ResumeBehavior, SubtitlePreferences, ThemePreference, UiPreferences, User,
+    UserPreferences, UserSession, UserUpdateRequest, ValidationError,
+};
 pub use watch_status::*;
 // user_management is available as a module but not re-exported to avoid conflicts

@@ -12,6 +12,7 @@ use ferrex_core::{
     MediaError,
     user::{AuthToken, User},
 };
+use std::fmt;
 use tracing::info;
 use uuid::Uuid;
 
@@ -85,6 +86,15 @@ impl PasswordRequirements {
 /// Centralized service for user operations
 pub struct UserService<'a> {
     state: &'a AppState,
+}
+
+impl<'a> fmt::Debug for UserService<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let state_ptr = self.state as *const AppState;
+        f.debug_struct("UserService")
+            .field("state_ptr", &state_ptr)
+            .finish()
+    }
 }
 
 impl<'a> UserService<'a> {
@@ -437,10 +447,10 @@ impl<'a> UserService<'a> {
             .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
 
         for user in users {
-            if let Ok(perms) = self.state.db.backend().get_user_permissions(user.id).await {
-                if perms.has_role("admin") {
-                    return Ok(false);
-                }
+            if let Ok(perms) = self.state.db.backend().get_user_permissions(user.id).await
+                && perms.has_role("admin")
+            {
+                return Ok(false);
             }
         }
 

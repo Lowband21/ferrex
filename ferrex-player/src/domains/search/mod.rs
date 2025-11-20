@@ -9,7 +9,7 @@ pub mod update;
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use iced::Task;
-use std::sync::{Arc, RwLock as StdRwLock};
+use std::sync::Arc;
 
 pub use self::messages::{Message, SearchEvent};
 pub use self::service::SearchService;

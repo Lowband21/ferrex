@@ -137,7 +137,6 @@ pub enum ScanLifecycleStatus {
 )]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct ScanSnapshotDto {
-    #[rkyv(with = crate::rkyv_wrappers::UuidWrapper)]
     pub scan_id: uuid::Uuid,
     pub library_id: LibraryID,
     pub status: ScanLifecycleStatus,
@@ -145,7 +144,6 @@ pub struct ScanSnapshotDto {
     pub total_items: u64,
     pub retrying_items: u64,
     pub dead_lettered_items: u64,
-    #[rkyv(with = crate::rkyv_wrappers::UuidWrapper)]
     pub correlation_id: uuid::Uuid,
     pub idempotency_key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -190,99 +188,9 @@ pub struct ScanCommandAcceptedResponse {
 
 // ===== Media Event Types for SSE =====
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct ScanStageLatencySummary {
-    pub scan: u64,
-    pub analyze: u64,
-    pub index: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScanProgressEvent {
-    pub version: String,
-    pub scan_id: Uuid,
-    pub library_id: LibraryID,
-    pub status: String,
-    pub completed_items: u64,
-    pub total_items: u64,
-    pub sequence: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path_key: Option<String>,
-    pub p95_stage_latencies_ms: ScanStageLatencySummary,
-    pub correlation_id: Uuid,
-    pub idempotency_key: String,
-    pub emitted_at: DateTime<Utc>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retrying_items: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dead_lettered_items: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScanEventMetadata {
-    pub version: String,
-    pub correlation_id: Uuid,
-    pub idempotency_key: String,
-    pub library_id: LibraryID,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum MediaEvent {
-    // New reference-based events
-    MovieAdded {
-        movie: MovieReference,
-    },
-    SeriesAdded {
-        series: SeriesReference,
-    },
-    SeasonAdded {
-        season: SeasonReference,
-    },
-    EpisodeAdded {
-        episode: EpisodeReference,
-    },
-
-    // Update events
-    MovieUpdated {
-        movie: MovieReference,
-    },
-    SeriesUpdated {
-        series: SeriesReference,
-    },
-    SeasonUpdated {
-        season: SeasonReference,
-    },
-    EpisodeUpdated {
-        episode: EpisodeReference,
-    },
-
-    // Delete events
-    MediaDeleted {
-        id: MediaID,
-    },
-
-    // Scan events
-    ScanStarted {
-        scan_id: Uuid,
-        metadata: ScanEventMetadata,
-    },
-    ScanProgress {
-        scan_id: Uuid,
-        progress: ScanProgressEvent,
-    },
-    ScanCompleted {
-        scan_id: Uuid,
-        metadata: ScanEventMetadata,
-    },
-    ScanFailed {
-        scan_id: Uuid,
-        error: String,
-        metadata: ScanEventMetadata,
-    },
-}
+pub use crate::types::media_events::{
+    MediaEvent, ScanEventMetadata, ScanProgressEvent, ScanStageLatencySummary,
+};
 
 // ===== Filter Types =====
 

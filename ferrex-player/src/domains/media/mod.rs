@@ -74,7 +74,7 @@ impl MediaDomainState {
         }
     }
 
-    pub fn update_cached_watched(self, id: MediaID, progress: f32) {
+    pub fn update_cached_watched(self, id: MediaID, _: f32) {
         if let Some(mut state) = self.user_watch_state {
             state.completed.insert(id.to_uuid());
         }
@@ -85,10 +85,10 @@ impl MediaDomainState {
     pub fn get_media_progress(&self, media_id: &MediaID) -> Option<f32> {
         if let Some(ref watch_state) = self.user_watch_state {
             // Check if it's in progress
-            if let Some(in_progress) = watch_state.in_progress.get(media_id.as_uuid()) {
-                if in_progress.duration > 0.0 {
-                    return Some((in_progress.position / in_progress.duration).clamp(0.0, 1.0));
-                }
+            if let Some(in_progress) = watch_state.in_progress.get(media_id.as_uuid())
+                && in_progress.duration > 0.0
+            {
+                return Some((in_progress.position / in_progress.duration).clamp(0.0, 1.0));
             }
 
             // Check if it's completed

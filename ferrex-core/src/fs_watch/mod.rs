@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::env;
+use std::fmt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
@@ -69,11 +70,44 @@ impl FsWatchObserver for NoopFsWatchObserver {
     fn on_error(&self, _library_id: LibraryID, _error: &str) {}
 }
 
+impl fmt::Debug for NoopFsWatchObserver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("NoopFsWatchObserver")
+    }
+}
+
 /// Dispatches debounced filesystem notifications to library actors.
 pub struct FsWatchService<O: FsWatchObserver = NoopFsWatchObserver> {
     config: FsWatchConfig,
     observer: Arc<O>,
     libraries: Arc<RwLock<HashMap<LibraryID, LibraryWatch>>>,
+}
+
+impl<O: FsWatchObserver + 'static> fmt::Debug for FsWatchService<O> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("FsWatchService");
+        debug
+            .field("config", &self.config)
+            .field("observer_type", &std::any::type_name::<O>());
+
+        match self.libraries.try_read() {
+            Ok(guard) => {
+                let library_count = guard.len();
+                let active_watchers = guard
+                    .values()
+                    .filter(|entry| entry.watchers.is_some())
+                    .count();
+                debug
+                    .field("library_count", &library_count)
+                    .field("active_watchers", &active_watchers);
+            }
+            Err(_) => {
+                debug.field("libraries", &"<locked>");
+            }
+        }
+
+        debug.finish()
+    }
 }
 
 impl<O: FsWatchObserver + 'static> FsWatchService<O> {
@@ -225,14 +259,9 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
                 match timeout(config.debounce_window, rx.recv()).await {
                     Ok(msg) => msg,
                     Err(_) => {
-                        if let Err(err) = flush_pending(
-                            Arc::clone(&observer),
-                            library_id,
-                            &mut pending,
-                            &roots,
-                            &actor,
-                        )
-                        .await
+                        if let Err(err) =
+                            flush_pending(Arc::clone(&observer), library_id, &mut pending, &actor)
+                                .await
                         {
                             observer.on_error(library_id, &err.to_string());
                         }
@@ -242,14 +271,8 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
             };
 
             let Some(msg) = msg else {
-                if let Err(err) = flush_pending(
-                    Arc::clone(&observer),
-                    library_id,
-                    &mut pending,
-                    &roots,
-                    &actor,
-                )
-                .await
+                if let Err(err) =
+                    flush_pending(Arc::clone(&observer), library_id, &mut pending, &actor).await
                 {
                     observer.on_error(library_id, &err.to_string());
                 }
@@ -277,7 +300,7 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
                         let entry = pending.entry(root_id).or_default();
                         entry.push(fs_event);
                         if entry.len() >= config.max_batch_events {
-                            let events = entry.drain(..).collect::<Vec<_>>();
+                            let events = std::mem::take(entry);
                             if let Err(err) = dispatch_events(
                                 Arc::clone(&observer),
                                 library_id,
@@ -318,7 +341,6 @@ async fn flush_pending<O: FsWatchObserver + 'static>(
     observer: Arc<O>,
     library_id: LibraryID,
     pending: &mut HashMap<LibraryRootsId, Vec<FileSystemEvent>>,
-    roots: &[(LibraryRootsId, PathBuf)],
     actor: &LibraryActorHandle,
 ) -> Result<()> {
     let mut batches = Vec::new();
@@ -326,7 +348,7 @@ async fn flush_pending<O: FsWatchObserver + 'static>(
         if events.is_empty() {
             continue;
         }
-        let drained = events.drain(..).collect::<Vec<_>>();
+        let drained = std::mem::take(events);
         batches.push((*root_id, drained));
     }
 

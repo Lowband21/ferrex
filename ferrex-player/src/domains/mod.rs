@@ -15,7 +15,7 @@ pub mod streaming;
 pub mod ui;
 pub mod user_management;
 
-use crate::common::messages::{CrossDomainEvent, DomainMessage, DomainUpdate, DomainUpdateResult};
+use crate::common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult};
 use iced::Task;
 
 /// Domain trait that all domains must implement

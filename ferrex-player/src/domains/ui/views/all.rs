@@ -50,7 +50,11 @@ pub fn view_all_content<'a>(state: &'a State) -> Element<'a, Message> {
                     .ui
                     .state
                     .repo_accessor
-                    .get_sorted_index_by_library(library_id);
+                    .get_sorted_index_by_library(
+                        library_id,
+                        state.domains.ui.state.sort_by,
+                        state.domains.ui.state.sort_order,
+                    );
                 if let Ok(movies_ids) = movies_ids {
                     log::debug!(
                         "All view: Found {} movies for library {}",
@@ -95,7 +99,11 @@ pub fn view_all_content<'a>(state: &'a State) -> Element<'a, Message> {
                     .ui
                     .state
                     .repo_accessor
-                    .get_sorted_index_by_library(library_id);
+                    .get_sorted_index_by_library(
+                        library_id,
+                        state.domains.ui.state.sort_by,
+                        state.domains.ui.state.sort_order,
+                    );
                 if let Ok(series_ids) = series_ids_result {
                     log::debug!(
                         "All view: Found {} series for library {}",
@@ -115,7 +123,7 @@ pub fn view_all_content<'a>(state: &'a State) -> Element<'a, Message> {
 
                                 let item_watch_progress = if let Some(watch_state) = watch_state_opt
                                 {
-                                    watch_state.get_watch_progress(&uuid)
+                                    watch_state.get_watch_progress(uuid)
                                 } else {
                                     None
                                 };

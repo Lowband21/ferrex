@@ -95,6 +95,17 @@ impl Config {
         std::fs::create_dir_all(&self.thumbnail_cache_dir)?;
         Ok(())
     }
+
+    /// Canonicalize cache-related directories so downstream services work with
+    /// absolute paths. The server calls this once during startup immediately
+    /// after `ensure_directories`, so handlers can safely assume the cache root
+    /// never needs further normalization.
+    pub fn normalize_paths(&mut self) -> anyhow::Result<()> {
+        self.cache_dir = std::fs::canonicalize(&self.cache_dir)?;
+        self.transcode_cache_dir = std::fs::canonicalize(&self.transcode_cache_dir)?;
+        self.thumbnail_cache_dir = std::fs::canonicalize(&self.thumbnail_cache_dir)?;
+        Ok(())
+    }
 }
 
 /// Top-level scanner settings. Use these to tune how quickly new folders are
@@ -129,7 +140,7 @@ impl Default for ScannerConfig {
             orchestrator,
             // Should make this num_cpus?
             library_actor_max_outstanding_jobs: 32,
-            quiescence_window_ms: 3_000,
+            quiescence_window_ms: 5_000,
         }
     }
 }

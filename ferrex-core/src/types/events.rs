@@ -141,12 +141,10 @@ impl FromStr for MediaSseEventType {
             "media.season_updated" => Ok(Self::SeasonUpdated),
             "media.episode_updated" => Ok(Self::EpisodeUpdated),
             "media.deleted" => Ok(Self::MediaDeleted),
-            other => {
-                match ScanSseEventType::from_str(other) {
-                    Ok(kind) => Ok(Self::Scan(kind)),
-                    Err(_) => Err(ParseMediaSseEventTypeError::new(other)),
-                }
-            }
+            other => match ScanSseEventType::from_str(other) {
+                Ok(kind) => Ok(Self::Scan(kind)),
+                Err(_) => Err(ParseMediaSseEventTypeError::new(other)),
+            },
         }
     }
 }
@@ -165,7 +163,9 @@ impl MediaEvent {
             MediaEvent::MediaDeleted { .. } => MediaSseEventType::MediaDeleted,
             MediaEvent::ScanStarted { .. } => MediaSseEventType::Scan(ScanSseEventType::Started),
             MediaEvent::ScanProgress { .. } => MediaSseEventType::Scan(ScanSseEventType::Progress),
-            MediaEvent::ScanCompleted { .. } => MediaSseEventType::Scan(ScanSseEventType::Completed),
+            MediaEvent::ScanCompleted { .. } => {
+                MediaSseEventType::Scan(ScanSseEventType::Completed)
+            }
             MediaEvent::ScanFailed { .. } => MediaSseEventType::Scan(ScanSseEventType::Failed),
         }
     }
@@ -202,11 +202,26 @@ mod tests {
             ("media.season_updated", MediaSseEventType::SeasonUpdated),
             ("media.episode_updated", MediaSseEventType::EpisodeUpdated),
             ("media.deleted", MediaSseEventType::MediaDeleted),
-            ("scan.started", MediaSseEventType::Scan(ScanSseEventType::Started)),
-            ("scan.progress", MediaSseEventType::Scan(ScanSseEventType::Progress)),
-            ("scan.quiescing", MediaSseEventType::Scan(ScanSseEventType::Quiescing)),
-            ("scan.completed", MediaSseEventType::Scan(ScanSseEventType::Completed)),
-            ("scan.failed", MediaSseEventType::Scan(ScanSseEventType::Failed)),
+            (
+                "scan.started",
+                MediaSseEventType::Scan(ScanSseEventType::Started),
+            ),
+            (
+                "scan.progress",
+                MediaSseEventType::Scan(ScanSseEventType::Progress),
+            ),
+            (
+                "scan.quiescing",
+                MediaSseEventType::Scan(ScanSseEventType::Quiescing),
+            ),
+            (
+                "scan.completed",
+                MediaSseEventType::Scan(ScanSseEventType::Completed),
+            ),
+            (
+                "scan.failed",
+                MediaSseEventType::Scan(ScanSseEventType::Failed),
+            ),
         ] {
             assert_eq!(value.event_name(), name);
             assert_eq!(MediaSseEventType::from_str(name).unwrap(), value);

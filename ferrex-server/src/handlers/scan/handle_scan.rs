@@ -4,6 +4,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json, Sse},
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use ferrex_core::{
     LibraryID, MediaEvent, ScanProgressEvent,
     api_types::{
@@ -11,6 +12,7 @@ use ferrex_core::{
         ScanCommandRequest, ScanSnapshotDto, StartScanRequest,
     },
 };
+use rkyv::{rancor::Error as RkyvError, to_bytes};
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
@@ -19,8 +21,7 @@ use uuid::Uuid;
 
 use crate::infra::app_state::AppState;
 use crate::infra::scan::scan_manager::{
-    ScanBroadcastFrame, ScanCommandAccepted, ScanControlError, ScanControlPlane, ScanEventKind,
-    ScanHistoryEntry, ScanSnapshot,
+    ScanBroadcastFrame, ScanControlError, ScanControlPlane, ScanHistoryEntry,
 };
 use ferrex_core::api_scan::{
     BudgetConfigView, BulkModeView, LeaseConfigView, MetadataLimitsView, OrchestratorConfigView,
@@ -29,6 +30,7 @@ use ferrex_core::api_scan::{
 
 const LAST_EVENT_ID_HEADER: &str = "last-event-id";
 
+#[derive(Debug)]
 pub struct ScanHttpError {
     status: StatusCode,
     message: String,
@@ -283,7 +285,7 @@ pub async fn build_scan_progress_stream(
                 .unwrap_or(true)
         })
         .filter_map(scan_frame_to_event)
-        .map(|event| Ok::<Event, Infallible>(event))
+        .map(Ok::<Event, Infallible>)
         .collect::<Vec<_>>();
     let history_stream = tokio_stream::iter(history_events);
 
@@ -333,29 +335,37 @@ pub async fn media_events_sse_handler(
 fn scan_frame_to_event(frame: ScanBroadcastFrame) -> Option<Event> {
     let name = frame.event.as_sse_event_type().event_name();
 
-    match serde_json::to_string(&frame.payload) {
-        Ok(json) => {
-            let mut event = Event::default().event(name).data(json);
-            event = event.id(frame.payload.sequence.to_string());
-            Some(event)
-        }
-        Err(err) => {
-            warn!("failed to serialize scan progress payload: {err}");
-            None
-        }
-    }
+    encode_scan_progress(&frame.payload).map(|data| {
+        let mut event = Event::default().event(name).data(data);
+        event = event.id(frame.payload.sequence.to_string());
+        event
+    })
 }
 
 fn media_event_to_sse(event: MediaEvent) -> Option<Event> {
     let name = event.sse_event_type().event_name();
 
-    match serde_json::to_string(&event) {
-        Ok(json) => Some(Event::default().event(name).data(json)),
-        Err(err) => {
-            warn!("failed to serialize media event: {err}");
-            None
-        }
-    }
+    encode_media_event(&event).map(|data| Event::default().event(name).data(data))
+}
+
+fn encode_media_event(event: &MediaEvent) -> Option<String> {
+    to_bytes::<RkyvError>(event)
+        .map(|bytes| BASE64_STANDARD.encode(bytes.as_slice()))
+        .map_err(|err| {
+            warn!("failed to serialize media event with rkyv: {err}");
+            err
+        })
+        .ok()
+}
+
+fn encode_scan_progress(payload: &ScanProgressEvent) -> Option<String> {
+    to_bytes::<RkyvError>(payload)
+        .map(|bytes| BASE64_STANDARD.encode(bytes.as_slice()))
+        .map_err(|err| {
+            warn!("failed to serialize scan progress payload with rkyv: {err}");
+            err
+        })
+        .ok()
 }
 
 fn default_keep_alive() -> KeepAlive {

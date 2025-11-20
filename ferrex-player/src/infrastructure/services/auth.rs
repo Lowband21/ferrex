@@ -5,7 +5,7 @@
 
 use crate::domains::auth::manager::AutoLoginScope;
 use crate::domains::auth::storage::StoredAuth;
-use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
+use crate::infrastructure::repository::RepositoryResult;
 use async_trait::async_trait;
 use ferrex_core::rbac::UserPermissions;
 use ferrex_core::user::{AuthToken, User};
@@ -124,7 +124,7 @@ pub trait AuthService: Send + Sync {
 pub mod mock {
     use super::*;
     use crate::domains::auth::storage::StoredAuth;
-    use chrono::{DateTime, Utc};
+    use crate::infrastructure::repository::RepositoryError;
     use std::collections::HashMap;
     use std::sync::Arc;
     use tokio::sync::RwLock;

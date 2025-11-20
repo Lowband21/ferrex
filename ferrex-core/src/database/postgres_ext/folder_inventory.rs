@@ -6,7 +6,8 @@ use crate::database::traits::{
 };
 use crate::{LibraryID, MediaError, Result};
 use chrono::{DateTime, Utc};
-use tracing::{error, info};
+use sqlx::{Postgres, QueryBuilder};
+use tracing::info;
 use uuid::Uuid;
 
 /// Folder inventory management extensions for PostgresDatabase
@@ -16,7 +17,7 @@ impl PostgresDatabase {
         &self,
         filters: &FolderScanFilters,
     ) -> Result<Vec<FolderInventory>> {
-        let mut query = String::from(
+        let mut builder = QueryBuilder::<Postgres>::new(
             r#"
             SELECT
                 id, library_id, folder_path, folder_type, parent_folder_id,
@@ -31,69 +32,71 @@ impl PostgresDatabase {
             "#,
         );
 
-        // Build dynamic WHERE clause based on filters
-        let mut conditions = Vec::new();
-
         if let Some(library_id) = filters.library_id {
-            conditions.push(format!("library_id = '{}'", library_id));
+            builder.push(" AND library_id = ");
+            builder.push_bind(library_id.as_uuid());
         }
 
         if let Some(status) = filters.processing_status {
-            conditions.push(format!(
-                "processing_status = '{}'",
-                serde_json::to_string(&status).unwrap().trim_matches('"')
-            ));
+            let status_str = serde_json::to_string(&status)
+                .unwrap()
+                .trim_matches('"')
+                .to_string();
+            builder.push(" AND processing_status = ");
+            builder.push_bind(status_str);
         }
 
         if let Some(folder_type) = filters.folder_type {
-            conditions.push(format!(
-                "folder_type = '{}'",
-                serde_json::to_string(&folder_type)
-                    .unwrap()
-                    .trim_matches('"')
-            ));
+            let type_str = serde_json::to_string(&folder_type)
+                .unwrap()
+                .trim_matches('"')
+                .to_string();
+            builder.push(" AND folder_type = ");
+            builder.push_bind(type_str);
         }
 
         if let Some(max_attempts) = filters.max_attempts {
-            conditions.push(format!("processing_attempts < {}", max_attempts));
+            builder.push(" AND processing_attempts < ");
+            builder.push_bind(max_attempts);
         }
 
         if let Some(stale_hours) = filters.stale_after_hours {
-            conditions.push(format!(
-                "last_seen_at < NOW() - INTERVAL '{} hours'",
-                stale_hours
-            ));
+            builder.push(" AND last_seen_at < NOW() - ");
+            builder.push_bind(format!("{} hours", stale_hours));
+            builder.push("::interval");
         }
 
         // Add retry condition - only get folders that are ready for retry
-        conditions.push("(next_retry_at IS NULL OR next_retry_at <= NOW())".to_string());
-
-        for condition in conditions {
-            query.push_str(&format!(" AND {}", condition));
-        }
+        builder.push(" AND (next_retry_at IS NULL OR next_retry_at <= NOW())");
 
         // Add prioritized ordering:
         // 1. Pending (unscanned) folders first
         // 2. Failed folders with retry attempts remaining
         // 3. Everything else by oldest scan time
         let retry_threshold = filters.error_retry_threshold.unwrap_or(3);
-        query.push_str(&format!(
-            r#" ORDER BY
+        builder.push(
+            r#"
+            ORDER BY
                 CASE
                     WHEN processing_status = 'pending' THEN 1
-                    WHEN processing_status = 'failed' AND processing_attempts < {} THEN 2
+                    WHEN processing_status = 'failed' AND processing_attempts < "#,
+        );
+        builder.push_bind(retry_threshold);
+        builder.push(
+            r#" THEN 2
                     ELSE 3
                 END,
                 processing_attempts ASC,
                 last_seen_at ASC"#,
-            retry_threshold
-        ));
+        );
 
         // Apply batch size limit if specified
         let limit = filters.max_batch_size.or(filters.limit).unwrap_or(100);
-        query.push_str(&format!(" LIMIT {}", limit));
+        builder.push(" LIMIT ");
+        builder.push_bind(limit);
 
-        let rows = sqlx::query_as::<_, FolderInventoryRow>(&query)
+        let rows = builder
+            .build_query_as::<FolderInventoryRow>()
             .fetch_all(self.pool())
             .await
             .map_err(|e| {

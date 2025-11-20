@@ -69,14 +69,14 @@ pub fn view_user_selection_with_admin_state<'a>(
     } else {
         let mut user_items: Vec<Element<'a, DomainMessage>> = users
             .iter()
-            .map(|user| user_button_with_auth_method(user, admin_pin_unlock_enabled).into())
+            .map(|user| user_button_with_auth_method(user, admin_pin_unlock_enabled))
             .collect();
 
         // Add "Add User" button for admins
-        if let Some(permissions) = user_permissions {
-            if permissions.has_role("admin") || permissions.has_permission("users:create") {
-                user_items.push(add_user_button().into());
-            }
+        if let Some(permissions) = user_permissions
+            && (permissions.has_role("admin") || permissions.has_permission("users:create"))
+        {
+            user_items.push(add_user_button());
         }
 
         let user_list = scrollable(column(user_items).spacing(8))

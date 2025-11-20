@@ -6,13 +6,9 @@ use crate::{
     common::ui_utils::icon_text,
     domains::{
         auth::permissions::{self, StatePermissionExt},
-        library::messages as library,
         ui::{messages::Message, theme, views::admin::view_library_form},
     },
-    infrastructure::{
-        api_types::LibraryType,
-        repository::accessor::{Accessor, ReadOnly, ReadWrite},
-    },
+    infrastructure::repository::accessor::{Accessor, ReadOnly},
     state_refactored::State,
 };
 use ferrex_core::{
@@ -37,7 +33,7 @@ use yoke::Yoke;
     ),
     profiling::function
 )]
-pub fn view_library_management(state: &State) -> Element<Message> {
+pub fn view_library_management(state: &State) -> Element<'_, Message> {
     let permissions = state.permission_checker();
 
     // Check if user has permission to view libraries
@@ -192,9 +188,7 @@ fn create_library_card<'a>(
     //library: &'a LibraryYoke,
     permissions: &permissions::PermissionChecker,
 ) -> Element<'a, Message> {
-    let library_opt = repo_accessor
-        .get_archived_library_yoke(&library_id)
-        .unwrap(); // This should be safe but I should handle it anyway
+    let library_opt = repo_accessor.get_archived_library_yoke(library_id).unwrap(); // This should be safe but I should handle it anyway
 
     if let Some(library_yoke) = library_opt {
         let library = *library_yoke.get();
@@ -308,7 +302,7 @@ fn create_library_card<'a>(
     }
 }
 
-fn active_scans_panel(state: &State) -> Element<Message> {
+fn active_scans_panel(state: &State) -> Element<'_, Message> {
     let mut scans: Vec<ScanSnapshotDto> = state
         .domains
         .library

@@ -1,7 +1,7 @@
 use crate::infra::websocket::connection::Connection;
 use dashmap::DashMap;
 use ferrex_core::sync_session::SyncMessage;
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -13,6 +13,16 @@ pub struct ConnectionManager {
     rooms: Arc<DashMap<String, Vec<Uuid>>>,
     /// Broadcast channel for sync messages
     broadcast: Arc<broadcast::Sender<(String, SyncMessage)>>,
+}
+
+impl fmt::Debug for ConnectionManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConnectionManager")
+            .field("connection_count", &self.connections.len())
+            .field("room_count", &self.rooms.len())
+            .field("broadcast_receivers", &self.broadcast.receiver_count())
+            .finish()
+    }
 }
 
 impl ConnectionManager {
@@ -57,10 +67,10 @@ impl ConnectionManager {
         }
 
         // Clean up empty room
-        if let Some(room) = self.rooms.get(room_code) {
-            if room.is_empty() {
-                self.rooms.remove(room_code);
-            }
+        if let Some(room) = self.rooms.get(room_code)
+            && room.is_empty()
+        {
+            self.rooms.remove(room_code);
         }
     }
 

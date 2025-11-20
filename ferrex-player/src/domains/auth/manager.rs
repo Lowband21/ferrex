@@ -456,10 +456,10 @@ impl AuthManager {
                 self.api_client.set_token(None).await;
                 self.auth_state.logout();
 
-                if matches!(&err, AuthError::Network(NetworkError::InvalidCredentials)) {
-                    if let Err(clear_err) = self.clear_keychain().await {
-                        warn!("Failed to clear invalid auth cache: {}", clear_err);
-                    }
+                if matches!(&err, AuthError::Network(NetworkError::InvalidCredentials))
+                    && let Err(clear_err) = self.clear_keychain().await
+                {
+                    warn!("Failed to clear invalid auth cache: {}", clear_err);
                 }
 
                 Err(err)
@@ -496,10 +496,10 @@ impl AuthManager {
                 self.api_client.set_token(None).await;
                 self.auth_state.logout();
 
-                if matches!(&err, AuthError::Network(NetworkError::InvalidCredentials)) {
-                    if let Err(clear_err) = self.clear_keychain().await {
-                        warn!("Failed to clear invalid auth cache: {}", clear_err);
-                    }
+                if matches!(&err, AuthError::Network(NetworkError::InvalidCredentials))
+                    && let Err(clear_err) = self.clear_keychain().await
+                {
+                    warn!("Failed to clear invalid auth cache: {}", clear_err);
                 }
 
                 Err(err)
@@ -572,10 +572,10 @@ impl AuthManager {
             .save_auth(auth, &hardware_fingerprint)
             .await
             .map_err(|e| {
-                AuthError::Storage(StorageError::WriteFailed(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to save auth: {}", e),
-                )))
+                AuthError::Storage(StorageError::WriteFailed(std::io::Error::other(format!(
+                    "Failed to save auth: {}",
+                    e
+                ))))
             })?;
 
         info!("Saved authentication to encrypted storage");
@@ -699,10 +699,10 @@ impl AuthManager {
     /// Clear stored authentication from encrypted storage
     pub async fn clear_keychain(&self) -> AuthResult<()> {
         self.auth_storage.clear_auth().await.map_err(|e| {
-            AuthError::Storage(StorageError::WriteFailed(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to clear auth: {}", e),
-            )))
+            AuthError::Storage(StorageError::WriteFailed(std::io::Error::other(format!(
+                "Failed to clear auth: {}",
+                e
+            ))))
         })?;
 
         info!("Cleared authentication from storage");
@@ -965,12 +965,12 @@ impl AuthManager {
             u32::try_from(secs).ok()
         });
 
-        if expires_in.is_none() {
-            if let Some(expiry) = trust_expires_at {
-                let seconds = (expiry - now).num_seconds().max(0);
-                if seconds > 0 {
-                    expires_in = u32::try_from(seconds).ok();
-                }
+        if expires_in.is_none()
+            && let Some(expiry) = trust_expires_at
+        {
+            let seconds = (expiry - now).num_seconds().max(0);
+            if seconds > 0 {
+                expires_in = u32::try_from(seconds).ok();
             }
         }
 
@@ -1123,10 +1123,10 @@ impl AuthManager {
             .set_auto_login(&user.id, enabled)
             .await
             .map_err(|e| {
-                AuthError::Storage(StorageError::WriteFailed(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to set auto-login: {}", e),
-                )))
+                AuthError::Storage(StorageError::WriteFailed(std::io::Error::other(format!(
+                    "Failed to set auto-login: {}",
+                    e
+                ))))
             })?;
 
         if !enabled {
@@ -1303,7 +1303,7 @@ impl AuthManager {
         self.handle_auth_result(result.clone()).await?;
 
         // Get user and permissions
-        let mut user: User = self
+        let user: User = self
             .api_client
             .get(v1::users::CURRENT)
             .await

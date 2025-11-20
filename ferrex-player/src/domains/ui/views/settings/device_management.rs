@@ -2,9 +2,10 @@
 //!
 //! Allows users to view and manage their authenticated devices
 
-use crate::domains::ui::messages::Message;
-use crate::domains::ui::theme;
-use crate::state_refactored::State;
+use crate::{
+    common::ui_utils::icon_text, domains::ui::messages::Message, domains::ui::theme,
+    state_refactored::State,
+};
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Border, Element, Length, Theme};
 use lucide_icons::Icon;
@@ -62,16 +63,6 @@ impl DeviceManagementState {
     pub fn device_count(&self) -> usize {
         self.devices.len()
     }
-}
-
-/// Helper function to create icon text
-pub fn icon_text(icon: lucide_icons::Icon) -> text::Text<'static> {
-    text(icon.unicode()).font(lucide_font()).size(20)
-}
-
-/// Get the lucide font
-fn lucide_font() -> iced::Font {
-    iced::Font::with_name("lucide")
 }
 
 #[cfg_attr(

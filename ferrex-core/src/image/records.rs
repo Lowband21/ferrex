@@ -1,4 +1,4 @@
-use crate::rkyv_wrappers::{DateTimeWrapper, OptionDateTime, UuidWrapper};
+use crate::rkyv_wrappers::{DateTimeWrapper, OptionDateTime};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -7,7 +7,6 @@ use uuid::Uuid;
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct MediaImageVariantKey {
     pub media_type: String,
-    #[rkyv(with = UuidWrapper)]
     pub media_id: Uuid,
     pub image_type: String,
     pub order_index: i32,

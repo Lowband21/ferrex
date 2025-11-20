@@ -1,6 +1,8 @@
 use super::Message;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use ferrex_core::api_types::ScanProgressEvent;
 use iced::Subscription;
+use rkyv::{from_bytes, rancor::Error as RkyvError};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -58,12 +60,7 @@ fn build_scan_subscription_stream(id: &ScanProgressId) -> BoxStream<'static, Mes
     let api = Arc::clone(&id.api);
     Box::pin(futures::stream::unfold(
         ScanState::new(server_url, scan_id, api),
-        |mut state| async move {
-            match state.next_event().await {
-                Some(message) => Some((message, state)),
-                None => None,
-            }
-        },
+        |mut state| async move { state.next_event().await.map(|message| (message, state)) },
     ))
 }
 
@@ -185,11 +182,11 @@ impl ScanState {
     }
 
     fn handle_sse_message(&mut self, msg: eventsource_stream::Event) -> Option<Message> {
-        if msg.data.is_empty() || msg.data == "keep-alive" {
+        if matches!(msg.data.as_str(), "keepalive" | "keep-alive") || msg.data.is_empty() {
             return None;
         }
 
-        match serde_json::from_str::<ScanProgressEvent>(&msg.data) {
+        match decode_scan_progress_event(&msg.data, self.scan_id) {
             Ok(event) => {
                 log::debug!(
                     "SSE progress event: scan={}, seq={}, status={}, completed={}/{}",
@@ -203,7 +200,7 @@ impl ScanState {
             }
             Err(err) => {
                 log::error!(
-                    "Failed to parse scan progress event for {}: {} (payload={})",
+                    "Failed to decode scan progress event for {}: {} (payload={})",
                     self.scan_id,
                     err,
                     msg.data
@@ -211,5 +208,95 @@ impl ScanState {
                 None
             }
         }
+    }
+}
+
+fn decode_scan_progress_event(payload: &str, scan_id: Uuid) -> Result<ScanProgressEvent, String> {
+    if payload.trim().is_empty() {
+        return Err("empty payload".to_string());
+    }
+
+    if let Ok(bytes) = BASE64_STANDARD.decode(payload.as_bytes()) {
+        match from_bytes::<ScanProgressEvent, RkyvError>(&bytes) {
+            Ok(event) => return Ok(event),
+            Err(err) => {
+                log::warn!(
+                    "Failed to decode rkyv scan progress for {}: {}. Falling back to JSON parsing",
+                    scan_id,
+                    err
+                );
+            }
+        }
+    }
+
+    serde_json::from_str::<ScanProgressEvent>(payload).map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+    use chrono::Utc;
+    use ferrex_core::LibraryID;
+    use ferrex_core::api_types::ScanStageLatencySummary;
+    use rkyv::rancor::Error as RkyvError;
+    use rkyv::to_bytes;
+
+    fn sample_progress_event() -> ScanProgressEvent {
+        ScanProgressEvent {
+            version: "1.0".to_string(),
+            scan_id: Uuid::new_v4(),
+            library_id: LibraryID::new(),
+            status: "running".to_string(),
+            completed_items: 10,
+            total_items: 100,
+            sequence: 42,
+            current_path: Some("/path".to_string()),
+            path_key: Some("key".to_string()),
+            p95_stage_latencies_ms: ScanStageLatencySummary {
+                scan: 1,
+                analyze: 2,
+                index: 3,
+            },
+            correlation_id: Uuid::new_v4(),
+            idempotency_key: "idem".to_string(),
+            emitted_at: Utc::now(),
+            retrying_items: Some(1),
+            dead_lettered_items: Some(2),
+        }
+    }
+
+    #[test]
+    fn decode_scan_progress_rkyv_roundtrip() {
+        let event = sample_progress_event();
+        let bytes = to_bytes::<RkyvError>(&event).expect("serialize rkyv");
+        let encoded = BASE64_STANDARD.encode(bytes.as_slice());
+
+        let decoded =
+            decode_scan_progress_event(&encoded, event.scan_id).expect("decode rkyv event");
+        assert_eq!(decoded.version, event.version);
+        assert_eq!(decoded.scan_id, event.scan_id);
+        assert_eq!(decoded.library_id, event.library_id);
+        assert_eq!(decoded.status, event.status);
+        assert_eq!(decoded.completed_items, event.completed_items);
+        assert_eq!(decoded.total_items, event.total_items);
+        assert_eq!(decoded.sequence, event.sequence);
+        assert_eq!(decoded.current_path, event.current_path);
+        assert_eq!(decoded.path_key, event.path_key);
+        assert_eq!(decoded.p95_stage_latencies_ms, event.p95_stage_latencies_ms);
+        assert_eq!(decoded.correlation_id, event.correlation_id);
+        assert_eq!(decoded.idempotency_key, event.idempotency_key);
+        assert_eq!(decoded.retrying_items, event.retrying_items);
+        assert_eq!(decoded.dead_lettered_items, event.dead_lettered_items);
+        assert_eq!(decoded.emitted_at.timestamp(), event.emitted_at.timestamp());
+    }
+
+    #[test]
+    fn decode_scan_progress_json_fallback() {
+        let event = sample_progress_event();
+        let json = serde_json::to_string(&event).expect("json encode");
+
+        let decoded = decode_scan_progress_event(&json, event.scan_id).expect("decode json event");
+        assert_eq!(decoded, event);
     }
 }

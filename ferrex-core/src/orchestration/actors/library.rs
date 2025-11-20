@@ -1,11 +1,13 @@
+use std::any::type_name;
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::{LibraryReference, Result};
@@ -14,11 +16,8 @@ use super::folder::is_media_file_path;
 use super::messages::{ActorObserver, IssuedJobRecord, ParentDescriptors};
 use crate::orchestration::{
     correlation::CorrelationCache,
-    events::{JobEvent, JobEventPayload, JobEventPublisher, stable_path_key},
-    job::{
-        DedupeKey, EnqueueRequest, FolderScanJob, JobHandle, JobId, JobPayload, JobPriority,
-        ScanReason,
-    },
+    events::JobEventPublisher,
+    job::{DedupeKey, JobHandle, JobId, JobPriority, ScanReason},
     queue::QueueService,
     scan_cursor::normalize_path,
 };
@@ -234,6 +233,26 @@ where
     correlations: CorrelationCache,
 }
 
+impl<Q, O, E> fmt::Debug for DefaultLibraryActor<Q, O, E>
+where
+    Q: QueueService + Send + Sync,
+    O: ActorObserver,
+    E: JobEventPublisher,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DefaultLibraryActor")
+            .field("library_id", &self.config.library.id)
+            .field("library_name", &self.config.library.name)
+            .field("queue_type", &type_name::<Q>())
+            .field("observer_type", &type_name::<O>())
+            .field("event_bus_type", &type_name::<E>())
+            .field("outstanding_jobs", &self.state.outstanding_jobs.len())
+            .field("active_scans", &self.state.active_folder_scans.len())
+            .field("is_paused", &self.state.is_paused)
+            .finish()
+    }
+}
+
 impl<Q, O, E> DefaultLibraryActor<Q, O, E>
 where
     Q: QueueService + Send + Sync,
@@ -296,7 +315,7 @@ where
         });
         self.state.mark_scan_active(&folder_path);
         let queued_total = self.state.outstanding_jobs.len();
-        info!(
+        debug!(
             target: "scan::queue",
             library_id = %library_id,
             folder = %folder_path,
@@ -441,10 +460,10 @@ where
                 }
             }
 
-            if targets.is_empty() {
-                if let Some(root_path) = self.config.root_path(root) {
-                    targets.insert(normalize_path(&root_path));
-                }
+            if targets.is_empty()
+                && let Some(root_path) = self.config.root_path(root)
+            {
+                targets.insert(normalize_path(&root_path));
             }
 
             for folder in targets {

@@ -90,11 +90,7 @@ impl ViewIdentifier for ViewState {
                 library_id,
                 Some(series_id.as_uuid()),
             ),
-            ViewState::SeasonDetail {
-                series_id,
-                season_id,
-                ..
-            } => ScrollPositionManager::generate_key(
+            ViewState::SeasonDetail { season_id, .. } => ScrollPositionManager::generate_key(
                 "season_detail",
                 library_id,
                 Some(season_id.as_uuid()),

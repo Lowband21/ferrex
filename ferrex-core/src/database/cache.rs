@@ -167,8 +167,16 @@ impl CacheKeys {
 
     /// Generate a cache key for a media query
     /// The key includes all fields that affect query results
-    pub fn media_query(query: &MediaQuery, user_id: Option<Uuid>) -> String {
+    pub fn media_query(
+        query: &MediaQuery,
+        library_scope: Option<LibraryID>,
+        user_id: Option<Uuid>,
+    ) -> String {
         let mut hasher = DefaultHasher::new();
+
+        if let Some(library_id) = library_scope {
+            library_id.hash(&mut hasher);
+        }
 
         // Hash all filter fields
         query.filters.library_ids.hash(&mut hasher);
@@ -216,7 +224,11 @@ impl CacheKeys {
         }
 
         let hash = hasher.finish();
-        format!("query:media:v1:{:x}", hash)
+        let library_segment = library_scope
+            .map(|library_id| library_id.to_string())
+            .unwrap_or_else(|| "global".to_string());
+
+        format!("query:media:v1:{}:{:x}", library_segment, hash)
     }
 
     /// Generate a pattern to match all query cache keys
@@ -226,8 +238,6 @@ impl CacheKeys {
 
     /// Generate cache keys for invalidation based on library
     pub fn media_query_by_library_pattern(library_id: LibraryID) -> String {
-        // Since we can't reverse engineer which queries include a library,
-        // we need to invalidate all queries when a library is updated
-        Self::media_query_pattern()
+        format!("query:media:v1:{}:*", library_id)
     }
 }

@@ -7,7 +7,6 @@ use ferrex_core::{
     JobEvent, LibraryActorCommand, LibraryID, Media, MediaDatabase, MediaError, MediaEvent,
     PostgresCursorRepository, ScanEventMetadata, ScanProgressEvent, ScanSseEventType,
     ScanStageLatencySummary, StartMode,
-    database::traits::MediaDatabaseTrait,
     orchestration::{
         events::{DomainEvent, JobEventPayload},
         job::{JobId, JobKind},
@@ -48,6 +47,24 @@ const STALLED_SCAN_TIMEOUT_MULTIPLIER: u32 = 5;
 #[derive(Clone)]
 pub struct ScanControlPlane {
     inner: Arc<ScanControlPlaneInner>,
+}
+
+impl fmt::Debug for ScanControlPlane {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let active = self.inner.active.try_read().ok().map(|guard| guard.len());
+        let history = self.inner.history.try_read().ok().map(|guard| guard.len());
+        let receiver_count = self.inner.media_tx.receiver_count();
+        let db_ptr = Arc::as_ptr(&self.inner.db);
+        let orchestrator_ptr = Arc::as_ptr(&self.inner.orchestrator);
+
+        f.debug_struct("ScanControlPlane")
+            .field("active_scans", &active)
+            .field("history_len", &history)
+            .field("subscriber_count", &receiver_count)
+            .field("db_ptr", &db_ptr)
+            .field("orchestrator_ptr", &orchestrator_ptr)
+            .finish()
+    }
 }
 
 struct ScanControlPlaneInner {
@@ -233,10 +250,7 @@ impl ScanControlPlane {
         let run = guard.get(scan_id).cloned();
         drop(guard);
         if let Some(run) = run {
-            match run.snapshot().await {
-                Ok(snapshot) => Some(snapshot),
-                Err(_) => None,
-            }
+            (run.snapshot().await).ok()
         } else {
             None
         }
@@ -569,16 +583,16 @@ impl ScanRun {
     }
 
     async fn persist_completed_cursor(&self, path_norm: &str, event_time: DateTime<Utc>) {
-        if let Some(cursor) = self.make_cursor(path_norm, event_time) {
-            if let Err(err) = self.cursor_repository.upsert(cursor).await {
-                warn!(
-                    library = %self.library_id,
-                    scan = %self.scan_id,
-                    path = %path_norm,
-                    error = %err,
-                    "failed to persist completed cursor"
-                );
-            }
+        if let Some(cursor) = self.make_cursor(path_norm, event_time)
+            && let Err(err) = self.cursor_repository.upsert(cursor).await
+        {
+            warn!(
+                library = %self.library_id,
+                scan = %self.scan_id,
+                path = %path_norm,
+                error = %err,
+                "failed to persist completed cursor"
+            );
         }
     }
 
@@ -801,12 +815,11 @@ impl ScanRun {
                         payload: progress,
                     });
 
-                    if state.can_enter_quiescing() {
-                        if let Some(frame) =
+                    if state.can_enter_quiescing()
+                        && let Some(frame) =
                             state.handle_state_event(ScanStateEvent::AllItemsProcessed, event_time)
-                        {
-                            frames.push(frame);
-                        }
+                    {
+                        frames.push(frame);
                     }
                 }
                 let persist = if changed { path.clone() } else { None };
@@ -836,11 +849,11 @@ impl ScanRun {
             if item.is_terminal() && item.last_job_id == Some(job_id) {
                 return;
             }
-            if let Some(last) = item.last_job_id {
-                if last != job_id {
-                    // Ignore renewals from a stale job
-                    return;
-                }
+            if let Some(last) = item.last_job_id
+                && last != job_id
+            {
+                // Ignore renewals from a stale job
+                return;
             }
             tracing::debug!(
                 target: "scan::state",
@@ -915,12 +928,12 @@ impl ScanRun {
                         payload: progress,
                     });
 
-                    if !retryable && state.can_enter_quiescing() {
-                        if let Some(frame) =
+                    if !retryable
+                        && state.can_enter_quiescing()
+                        && let Some(frame) =
                             state.handle_state_event(ScanStateEvent::AllItemsProcessed, event_time)
-                        {
-                            frames.push(frame);
-                        }
+                    {
+                        frames.push(frame);
                     }
                 }
                 frames
@@ -972,12 +985,11 @@ impl ScanRun {
                         payload: progress,
                     });
 
-                    if state.can_enter_quiescing() {
-                        if let Some(frame) =
+                    if state.can_enter_quiescing()
+                        && let Some(frame) =
                             state.handle_state_event(ScanStateEvent::AllItemsProcessed, event_time)
-                        {
-                            frames.push(frame);
-                        }
+                    {
+                        frames.push(frame);
                     }
                 }
                 frames
@@ -1173,7 +1185,7 @@ impl ScanRun {
                 completed_items: state.completed_items,
                 total_items: state.total_items,
                 started_at: state.started_at,
-                terminal_at: state.terminal_at.unwrap_or_else(|| Utc::now()),
+                terminal_at: state.terminal_at.unwrap_or_else(Utc::now),
             }
         };
 
@@ -1638,7 +1650,7 @@ impl ScanRunState {
 
         let mut saw_active = false;
         for item in self.item_states.values() {
-            if !item.status.is_active() {
+            if !item.is_active() {
                 continue;
             }
             if matches!(item.status, ScanItemStatus::Retrying) {
@@ -1868,26 +1880,23 @@ impl ScanRunAggregatorInner {
     }
 
     async fn handle_domain_event(&self, event: DomainEvent) {
-        match event {
-            DomainEvent::Indexed(outcome) => {
-                if let Err(err) = self.handle_indexed_outcome(outcome).await {
-                    warn!("failed to process indexed outcome: {err}");
-                }
+        if let DomainEvent::Indexed(outcome) = event {
+            if let Err(err) = self.handle_indexed_outcome(outcome).await {
+                warn!("failed to process indexed outcome: {err}");
             }
-            _ => {}
         }
     }
 
-    async fn handle_indexed_outcome(&self, mut outcome: IndexingOutcome) -> Result<(), String> {
+    async fn handle_indexed_outcome(&self, outcome: IndexingOutcome) -> Result<(), String> {
         let mut media = outcome.media.clone();
-        let mut media_id = outcome
+        let media_id = outcome
             .media_id
             .or_else(|| media.as_ref().map(Self::media_uuid));
 
-        if media.is_none() {
-            if let Some(candidate) = media_id {
-                media = self.load_media(candidate).await;
-            }
+        if media.is_none()
+            && let Some(candidate) = media_id
+        {
+            media = self.load_media(candidate).await;
         }
 
         let media = match media {

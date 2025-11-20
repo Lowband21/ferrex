@@ -9,10 +9,9 @@ use chrono::{DateTime, Utc};
 use ferrex_core::User;
 use ferrex_core::{
     LibraryID,
-    database::traits::{FolderInventory, FolderProcessingStatus, MediaDatabaseTrait},
+    database::traits::{FolderInventory, FolderProcessingStatus},
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use uuid::Uuid;
 
 use axum::Extension;

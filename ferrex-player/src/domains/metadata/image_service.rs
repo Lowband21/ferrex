@@ -9,6 +9,11 @@ use tokio::sync::mpsc;
 // Maximum number of retry attempts for failed images
 const MAX_RETRY_ATTEMPTS: u8 = 5;
 
+#[derive(Debug, Clone, Copy)]
+pub enum FirstDisplayHint {
+    FlipOnce,
+}
+
 #[derive(Debug, Clone)]
 pub enum LoadState {
     Loading,
@@ -22,6 +27,8 @@ pub struct ImageEntry {
     pub last_accessed: Instant,
     pub loaded_at: Option<Instant>,
     pub retry_count: u8,
+    pub last_failure: Option<Instant>,
+    pub first_display_hint: Option<FirstDisplayHint>,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +48,9 @@ pub struct UnifiedImageService {
     // Maximum concurrent loads
     max_concurrent: usize,
 }
+
+// Minimum delay between retry attempts for transient (e.g., 404) failures
+const RETRY_THROTTLE: std::time::Duration = std::time::Duration::from_millis(750);
 
 #[cfg_attr(
     any(
@@ -95,6 +105,22 @@ impl UnifiedImageService {
             })
     }
 
+    /// Get image with load time and consume any first-display hint.
+    pub fn take_loaded_entry(
+        &self,
+        request: &ImageRequest,
+    ) -> Option<(Handle, Option<std::time::Instant>, Option<FirstDisplayHint>)> {
+        let mut entry = self.cache.get_mut(request)?;
+        let handle = match &entry.state {
+            LoadState::Loaded(handle) => handle.clone(),
+            _ => return None,
+        };
+
+        entry.last_accessed = Instant::now();
+        let hint = entry.first_display_hint.take();
+        Some((handle, entry.loaded_at, hint))
+    }
+
     pub fn request_image(&self, request: ImageRequest) {
         #[cfg(any(
             feature = "profile-with-puffin",
@@ -106,17 +132,21 @@ impl UnifiedImageService {
         //log::info!("Requesting image with request: {:#?}", request);
         // Check if already cached
         if let Some(mut entry) = self.cache.get_mut(&request) {
-            entry.last_accessed = std::time::Instant::now();
+            let now = std::time::Instant::now();
 
             // Don't retry if already loaded
             if matches!(entry.state, LoadState::Loaded(_)) {
+                entry.last_accessed = now;
                 return;
             }
 
-            // Don't retry if failed too many times
-            if matches!(entry.state, LoadState::Failed(_))
-                && entry.retry_count >= MAX_RETRY_ATTEMPTS
-            {
+            let is_failed = matches!(entry.state, LoadState::Failed(_));
+            let is_failed_404 =
+                matches!(entry.state, LoadState::Failed(ref err) if err.contains("404"));
+
+            // For non-404 errors respect the max retry limit
+            if is_failed && !is_failed_404 && entry.retry_count >= MAX_RETRY_ATTEMPTS {
+                entry.last_accessed = now;
                 log::debug!(
                     "Skipping image request for {:?} - exceeded max retries ({}/{})",
                     request.media_id,
@@ -125,6 +155,17 @@ impl UnifiedImageService {
                 );
                 return;
             }
+
+            // Throttle repeated retries for transient 404 responses
+            if is_failed
+                && let Some(last_failure) = entry.last_failure
+                && now.duration_since(last_failure) < RETRY_THROTTLE
+            {
+                entry.last_accessed = now;
+                return;
+            }
+
+            entry.last_accessed = now;
         }
 
         // Check if already loading
@@ -166,6 +207,11 @@ impl UnifiedImageService {
     pub fn mark_loading(&self, request: &ImageRequest) {
         self.loading
             .insert(request.clone(), std::time::Instant::now());
+        let existing_hint = self
+            .cache
+            .get(request)
+            .map(|entry| entry.first_display_hint)
+            .unwrap_or(None);
         self.cache.insert(
             request.clone(),
             ImageEntry {
@@ -173,6 +219,8 @@ impl UnifiedImageService {
                 last_accessed: std::time::Instant::now(),
                 loaded_at: None,
                 retry_count: 0,
+                last_failure: None,
+                first_display_hint: existing_hint,
             },
         );
     }
@@ -180,6 +228,12 @@ impl UnifiedImageService {
     pub fn mark_loaded(&self, request: &ImageRequest, handle: Handle) {
         self.loading.remove(request);
         let now = std::time::Instant::now();
+
+        let existing_hint = self
+            .cache
+            .get(request)
+            .map(|entry| entry.first_display_hint)
+            .unwrap_or(None);
 
         //log::debug!("mark_loaded called for {:?}", request.media_id);
         //log::debug!("  - Setting loaded_at to: {:?}", now);
@@ -191,6 +245,8 @@ impl UnifiedImageService {
                 last_accessed: now,
                 loaded_at: Some(now),
                 retry_count: 0,
+                last_failure: None,
+                first_display_hint: existing_hint,
             },
         );
     }
@@ -201,10 +257,12 @@ impl UnifiedImageService {
         // Check if this is a 404 error (image doesn't exist on server)
         let is_404 = error.contains("404");
 
+        let now = std::time::Instant::now();
         let retry_count = match self.cache.get_mut(request) {
             Some(mut entry) => {
                 entry.state = LoadState::Failed(error.clone());
                 entry.retry_count = entry.retry_count.saturating_add(1);
+                entry.last_failure = Some(now);
                 entry.retry_count
             }
             _ => {
@@ -213,9 +271,11 @@ impl UnifiedImageService {
                     request.clone(),
                     ImageEntry {
                         state: LoadState::Failed(error.clone()),
-                        last_accessed: std::time::Instant::now(),
+                        last_accessed: now,
                         loaded_at: None,
                         retry_count,
+                        last_failure: Some(now),
+                        first_display_hint: None,
                     },
                 );
                 retry_count
@@ -223,7 +283,7 @@ impl UnifiedImageService {
         };
 
         // Log permanent failures for metadata aggregation
-        if retry_count >= MAX_RETRY_ATTEMPTS {
+        if retry_count >= MAX_RETRY_ATTEMPTS && !is_404 {
             log::warn!(
                 "Image permanently failed after {} attempts: {:?} - {}{}",
                 retry_count,
@@ -232,6 +292,12 @@ impl UnifiedImageService {
                 if is_404 { " [404]" } else { "" }
             );
             // TODO: Could aggregate these failures for missing metadata reporting
+        } else if is_404 {
+            log::debug!(
+                "Image temporarily unavailable ({} attempts so far): {:?}",
+                retry_count,
+                request.media_id
+            );
         } else {
             log::debug!(
                 "Image failed (attempt {}/{}): {:?} - {}{}",
@@ -244,6 +310,25 @@ impl UnifiedImageService {
         }
     }
 
+    pub fn flag_flip_once(&self, request: &ImageRequest) {
+        if let Some(mut entry) = self.cache.get_mut(request) {
+            entry.first_display_hint = Some(FirstDisplayHint::FlipOnce);
+            return;
+        }
+
+        self.cache.insert(
+            request.clone(),
+            ImageEntry {
+                state: LoadState::Loading,
+                last_accessed: Instant::now(),
+                loaded_at: None,
+                retry_count: 0,
+                last_failure: None,
+                first_display_hint: Some(FirstDisplayHint::FlipOnce),
+            },
+        );
+    }
+
     pub fn get_next_request(&self) -> Option<ImageRequest> {
         let mut queue = self.queue.lock().ok()?;
 
@@ -253,7 +338,7 @@ impl UnifiedImageService {
 
         if let Some((request, _priority)) = queue.pop() {
             if !self.loading.contains_key(&request) {
-                return Some(request);
+                Some(request)
             } else {
                 None
             }
@@ -267,15 +352,14 @@ impl UnifiedImageService {
         let mut to_remove = Vec::new();
 
         for entry in self.cache.iter() {
-            if now.duration_since(entry.last_accessed) > max_age {
-                if matches!(entry.state, LoadState::Failed(_))
+            if now.duration_since(entry.last_accessed) > max_age
+                && (matches!(entry.state, LoadState::Failed(_))
                     || (matches!(entry.state, LoadState::Loading)
-                        && self.loading.get(entry.key()).map_or(true, |start| {
+                        && self.loading.get(entry.key()).is_none_or(|start| {
                             now.duration_since(*start) > std::time::Duration::from_secs(30)
-                        }))
-                {
-                    to_remove.push(entry.key().clone());
-                }
+                        })))
+            {
+                to_remove.push(entry.key().clone());
             }
         }
 

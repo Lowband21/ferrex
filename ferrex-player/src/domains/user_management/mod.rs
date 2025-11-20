@@ -12,6 +12,7 @@ use ferrex_core::rbac::UserPermissions;
 use iced::Task;
 
 /// User management domain state
+#[derive(Default)]
 pub struct UserManagementDomainState {
     // References needed by user management domain
     pub api_service: Option<std::sync::Arc<ApiClientAdapter>>,
@@ -19,16 +20,6 @@ pub struct UserManagementDomainState {
     pub user_admin_service: Option<
         std::sync::Arc<dyn crate::infrastructure::services::user_management::UserAdminService>,
     >,
-}
-
-impl Default for UserManagementDomainState {
-    fn default() -> Self {
-        Self {
-            api_service: None,
-            user_permissions: None,
-            user_admin_service: None,
-        }
-    }
 }
 
 impl std::fmt::Debug for UserManagementDomainState {

@@ -81,7 +81,7 @@ impl MediaDatabase {
         }
 
         // Generate cache key based on query parameters
-        let cache_key = CacheKeys::media_query(query, query.user_context);
+        let cache_key = CacheKeys::media_query(query, Some(library_id), query.user_context);
         debug!("Query cache key: {}", cache_key);
 
         // Try to get from cache
@@ -217,8 +217,6 @@ impl MediaDatabase {
         &self,
         movie: &crate::types::media::MovieReference,
     ) -> Result<()> {
-        use crate::database::traits::MediaDatabaseTrait;
-
         // Store the movie
         self.backend.store_movie_reference(movie).await?;
 

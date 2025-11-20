@@ -138,10 +138,10 @@ pub fn view_user_selection_with_carousel<'a>(
     });
 
     // Update carousel state if user count changed
-    if let Ok(mut state) = carousel_state.lock() {
-        if state.total_items != users.len() {
-            state.set_total_items(users.len());
-        }
+    if let Ok(mut state) = carousel_state.lock()
+        && state.total_items != users.len()
+    {
+        state.set_total_items(users.len());
     }
 
     let mut content = column![title("Select User"), spacing(),];
@@ -226,7 +226,7 @@ fn create_user_carousel<'a>(
     };
 
     // Create user items row
-    let mut user_row = row![].spacing(carousel_state.item_spacing as f32);
+    let mut user_row = row![].spacing(carousel_state.item_spacing);
 
     // Get visible range for virtualization
     let visible_range = carousel_state.get_visible_range();
@@ -235,15 +235,15 @@ fn create_user_carousel<'a>(
     for (index, user) in state.users.iter().enumerate() {
         if visible_range.contains(&index) {
             let is_selected = state.selected_index == Some(index);
-            user_row = user_row.push(create_user_avatar(user, index, is_selected));
+            user_row = user_row.push(create_user_avatar(user, is_selected));
         }
     }
 
     // Add "Add User" button for admins
-    if let Some(permissions) = user_permissions {
-        if permissions.has_role("admin") || permissions.has_permission("users:create") {
-            user_row = user_row.push(create_add_user_button());
-        }
+    if let Some(permissions) = user_permissions
+        && (permissions.has_role("admin") || permissions.has_permission("users:create"))
+    {
+        user_row = user_row.push(create_add_user_button());
     }
 
     // Create scrollable carousel
@@ -288,15 +288,15 @@ fn create_user_carousel_from_data<'a>(
     let mut user_row = row![].spacing(20.0);
 
     // Add all user items (no virtualization for simplicity)
-    for (index, user) in users.iter().enumerate() {
-        user_row = user_row.push(create_user_avatar(user, index, false));
+    for user in users.iter() {
+        user_row = user_row.push(create_user_avatar(user, false));
     }
 
     // Add "Add User" button for admins
-    if let Some(permissions) = user_permissions {
-        if permissions.has_role("admin") || permissions.has_permission("users:create") {
-            user_row = user_row.push(create_add_user_button());
-        }
+    if let Some(permissions) = user_permissions
+        && (permissions.has_role("admin") || permissions.has_permission("users:create"))
+    {
+        user_row = user_row.push(create_add_user_button());
     }
 
     // Create scrollable carousel
@@ -317,7 +317,6 @@ fn create_user_carousel_from_data<'a>(
 /// Create a user avatar item for the carousel
 fn create_user_avatar<'a>(
     user: &'a crate::domains::auth::dto::UserListItemDto,
-    index: usize,
     is_selected: bool,
 ) -> Element<'a, DomainMessage> {
     let avatar_content = column![

@@ -44,6 +44,12 @@ impl<T> fmt::Debug for FallbackRule<T> {
     }
 }
 
+impl<T> Default for SmartFallbackSort<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> SmartFallbackSort<T> {
     /// Create a new smart fallback sort
     pub fn new() -> Self {
@@ -121,6 +127,12 @@ impl<T> fmt::Debug for FallbackSortBuilder<T> {
         f.debug_struct("FallbackSortBuilder")
             .field("pending_rules", &self.fallback.rules.len())
             .finish()
+    }
+}
+
+impl<T> Default for FallbackSortBuilder<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

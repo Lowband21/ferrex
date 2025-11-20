@@ -51,7 +51,7 @@ pub use profiling_scopes::{PerformanceTargets, analyze_performance, scopes};
 )))]
 pub mod profiling {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::AtomicBool;
 
     pub struct Profiler {
         enabled: AtomicBool,

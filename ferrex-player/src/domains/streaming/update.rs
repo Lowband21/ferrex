@@ -1,4 +1,3 @@
-use super::StreamingDomainState;
 use super::messages::Message;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::state_refactored::State;

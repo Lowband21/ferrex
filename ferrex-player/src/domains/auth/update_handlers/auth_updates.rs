@@ -562,7 +562,7 @@ pub fn handle_auto_login_successful(state: &mut State, user: User) -> Task<auth:
     let auth_service = &state.domains.auth.state.auth_service;
     let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
     let user_clone = user.clone();
-    return Task::perform(
+    Task::perform(
         async move {
             (
                 user_clone,
@@ -585,7 +585,7 @@ pub fn handle_auto_login_successful(state: &mut State, user: User) -> Task<auth:
                 )
             }
         },
-    );
+    )
 }
 
 /// Handle watch status loaded
@@ -666,7 +666,7 @@ pub fn handle_auth_flow_submit_credential(state: &mut State) -> Task<auth::Messa
                         .await
                         .map_err(|e| e.to_string())
                     },
-                    |result| auth::Message::AuthResult(result),
+                    auth::Message::AuthResult,
                 );
             }
             CredentialType::Pin { .. } => {
@@ -676,7 +676,7 @@ pub fn handle_auth_flow_submit_credential(state: &mut State) -> Task<auth::Messa
                             .await
                             .map_err(|e| e.to_string())
                     },
-                    |result| auth::Message::AuthResult(result),
+                    auth::Message::AuthResult,
                 );
             }
         }
@@ -715,17 +715,16 @@ pub fn handle_auth_flow_auth_result(
                 remember_device: true,
                 ..
             } = &state.domains.auth.state.auth_flow
+                && !auth_result.device_has_pin
             {
-                if !auth_result.device_has_pin {
-                    // Need to set up PIN
-                    state.domains.auth.state.auth_flow = AuthenticationFlow::SettingUpPin {
-                        user: auth_result.user.clone(),
-                        pin: SecureCredential::new(String::new()),
-                        confirm_pin: SecureCredential::new(String::new()),
-                        error: None,
-                    };
-                    return Task::none();
-                }
+                // Need to set up PIN
+                state.domains.auth.state.auth_flow = AuthenticationFlow::SettingUpPin {
+                    user: auth_result.user.clone(),
+                    pin: SecureCredential::new(String::new()),
+                    confirm_pin: SecureCredential::new(String::new()),
+                    error: None,
+                };
+                return Task::none();
             }
 
             // Successfully authenticated
@@ -764,10 +763,8 @@ pub fn handle_auth_flow_auth_result(
                 *loading = false;
 
                 // Update attempts remaining if it's a lockout error
-                if is_lockout {
-                    if let Some(remaining) = attempts_remaining {
-                        *remaining = remaining.saturating_sub(1);
-                    }
+                if is_lockout && let Some(remaining) = attempts_remaining {
+                    *remaining = remaining.saturating_sub(1);
                 }
                 state.domains.auth.state.auth_flow = auth_flow;
             }
@@ -807,7 +804,7 @@ pub fn handle_auth_flow_submit_pin(state: &mut State) -> Task<auth::Message> {
                     .await
                     .map_err(|e| e.to_string())
             },
-            |result| auth::Message::PinSet(result),
+            auth::Message::PinSet,
         );
     }
     Task::none()
@@ -1117,7 +1114,7 @@ pub fn handle_setup_complete(
         expires_in: 900, // 15 minutes default
     };
 
-    return Task::perform(
+    Task::perform(
         async move {
             // Set the token on the API service
             api_service.set_token(Some(auth_token.clone())).await;
@@ -1174,7 +1171,7 @@ pub fn handle_setup_complete(
                 }
             }
         },
-    );
+    )
 }
 
 pub fn handle_setup_error(state: &mut State, error: String) -> Task<auth::Message> {

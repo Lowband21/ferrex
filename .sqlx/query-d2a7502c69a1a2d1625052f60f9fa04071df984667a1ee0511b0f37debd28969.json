@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE folder_inventory\n            SET processing_status = $1,\n                processing_error = $2,\n                last_processed_at = $3,\n                updated_at = NOW()\n            WHERE id = $4\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Text",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d2a7502c69a1a2d1625052f60f9fa04071df984667a1ee0511b0f37debd28969"
+}

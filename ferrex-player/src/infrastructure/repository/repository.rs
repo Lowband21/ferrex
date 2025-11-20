@@ -1,13 +1,11 @@
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use ferrex_core::{
-    ArchivedLibrary, ArchivedLibraryExt, ArchivedLibraryID, ArchivedMedia, ArchivedMediaID,
-    EpisodeReference, LibraryID, Media, MediaID, MediaIDLike, MediaLike, MediaType, SeasonID,
-    SeasonReference, SeriesID, SortBy, SortOrder,
+    ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, EpisodeReference, LibraryID, Media,
+    MediaIDLike, MediaLike, MediaType, SeasonID, SeasonReference, SeriesID, SortBy, SortOrder,
 };
-use rkyv::{Archived, deserialize, rancor::Error, util::AlignedVec, vec::ArchivedVec};
+use rkyv::{deserialize, rancor::Error, to_bytes, util::AlignedVec, vec::ArchivedVec};
 use uuid::Uuid;
 use yoke::Yoke;
 
@@ -15,34 +13,91 @@ use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 
 use super::{EpisodeYoke, LibraryYoke, MediaYoke, MovieYoke, SeasonYoke, SeriesYoke};
 
+/// Archived runtime media entry backed by an `AlignedVec` to enable zero-copy access.
+#[derive(Debug, Clone)]
+pub(super) struct RuntimeMediaEntry {
+    buffer: Arc<AlignedVec>,
+}
+
+impl RuntimeMediaEntry {
+    fn new(buffer: AlignedVec) -> Self {
+        Self {
+            buffer: Arc::new(buffer),
+        }
+    }
+
+    pub(super) fn from_media(media: &Media) -> Result<Self, RepositoryError> {
+        let bytes = to_bytes::<Error>(media)
+            .map_err(|e| RepositoryError::SerializationError(e.to_string()))?;
+        Ok(Self::new(bytes))
+    }
+
+    #[inline]
+    fn cart(&self) -> Arc<AlignedVec> {
+        Arc::clone(&self.buffer)
+    }
+
+    #[inline]
+    fn with_archived<T>(&self, f: impl FnOnce(&ArchivedMedia) -> T) -> T {
+        // SAFETY: The aligned buffer is owned by an Arc, so it lives for the duration of the closure
+        let archived = unsafe { rkyv::access_unchecked::<ArchivedMedia>(&self.buffer) };
+        f(archived)
+    }
+
+    pub(super) fn media_type(&self) -> MediaType {
+        self.with_archived(|arch| arch.media_type())
+    }
+
+    pub(super) fn deserialize(&self) -> RepositoryResult<Media> {
+        self.with_archived(deserialize::<Media, Error>)
+            .map_err(|e| RepositoryError::DeserializationError(e.to_string()))
+    }
+}
+
 /// Runtime modifications layer for managing changes during application runtime
 /// Resets on application restart
 #[derive(Default, Debug)]
 pub(super) struct RuntimeModifications {
-    /// Added media items during runtime (uuid -> reference)
-    pub(super) added: HashMap<Uuid, Media>,
+    /// Added media items during runtime (uuid -> archived reference)
+    pub(super) added: HashMap<Uuid, RuntimeMediaEntry>,
     /// Added items, mapped by owning library UUID (library_uuid -> set of media uuids)
     pub(super) added_by_library: HashMap<Uuid, HashSet<Uuid>>,
     /// Deleted media IDs during runtime
     pub(super) deleted: HashSet<Uuid>,
     /// Modified media items during runtime (for archived items)
-    pub(super) modified: HashMap<Uuid, Media>,
+    pub(super) modified: HashMap<Uuid, RuntimeMediaEntry>,
+    /// IDs that only exist in the runtime overlay (not in the archived snapshot)
+    runtime_only_ids: HashSet<Uuid>,
 }
 
 impl RuntimeModifications {
-    pub(super) fn clear(&mut self) {
+    pub(super) fn clear(&mut self) -> HashSet<Uuid> {
+        let runtime_ids = std::mem::take(&mut self.runtime_only_ids);
         self.added.clear();
         self.added_by_library.clear();
         self.deleted.clear();
         self.modified.clear();
+        runtime_ids
     }
 
     pub(super) fn is_deleted(&self, id: &Uuid) -> bool {
         self.deleted.contains(id)
     }
 
-    pub(super) fn get_modified(&self, id: &Uuid) -> Option<&Media> {
+    pub(super) fn get_entry(&self, id: &Uuid) -> Option<&RuntimeMediaEntry> {
         self.modified.get(id).or_else(|| self.added.get(id))
+    }
+
+    pub(super) fn mark_runtime_only(&mut self, id: Uuid) {
+        self.runtime_only_ids.insert(id);
+    }
+
+    pub(super) fn unmark_runtime_only(&mut self, id: &Uuid) {
+        self.runtime_only_ids.remove(id);
+    }
+
+    pub(super) fn is_runtime_only(&self, id: &Uuid) -> bool {
+        self.runtime_only_ids.contains(id)
     }
 }
 
@@ -114,7 +169,7 @@ impl MediaRepo {
     pub fn clear(&mut self) {
         self.libraries_index.clear();
         self.media_id_index.clear();
-        self.modifications.clear();
+        let _ = self.modifications.clear();
         //self.pending_events.clear();
     }
 
@@ -124,7 +179,7 @@ impl MediaRepo {
         let mut buf = Uuid::encode_buffer();
 
         // Check if deleted in runtime
-        if self.modifications.is_deleted(&uuid) {
+        if self.modifications.is_deleted(uuid) {
             return Err(RepositoryError::NotFound {
                 entity_type: "media".to_string(),
                 id: id.to_string_buf(&mut buf),
@@ -132,12 +187,12 @@ impl MediaRepo {
         }
 
         // Check runtime modifications first
-        if let Some(modified) = self.modifications.get_modified(&uuid) {
-            return Ok(modified.clone());
+        if let Some(modified) = self.modifications.get_entry(uuid) {
+            return modified.deserialize();
         }
 
         // Look up in archived data using index
-        if let Some(&library_id) = self.media_id_index.get(&uuid) {
+        if let Some(&library_id) = self.media_id_index.get(uuid) {
             // Access archived data on demand
             let archived_libraries = unsafe {
                 // SAFETY: We hold the buffer through Arc, it won't be dropped while we're using it
@@ -178,29 +233,36 @@ impl MediaRepo {
         let uuid = id.as_uuid();
 
         // Check if deleted in runtime
-        if self.modifications.is_deleted(&uuid) {
+        if self.modifications.is_deleted(uuid) {
             return Err(RepositoryError::NotFound {
                 entity_type: "media".to_string(),
                 id: uuid.to_string(),
             });
         }
 
-        // Check runtime modifications first
-        /* TODO: Probably need to change the MaybeArchived type to hold a MediaYoke
-        if let Some(modified) = self.modifications.get_modified(&uuid) {
-            return MediaYoke::attach_to_cart(Arc::clone(&self), |_| {
+        // Check runtime overlay first
+        if let Some(entry) = self.modifications.get_entry(uuid) {
+            let cart = entry.cart();
+            let expected_type = id.media_type();
+            return Ok(MediaYoke::attach_to_cart(
+                cart,
+                move |data: &AlignedVec| unsafe {
+                    let archived = rkyv::access_unchecked::<ArchivedMedia>(data);
+                    debug_assert_eq!(archived.media_type(), expected_type);
+                    archived
+                },
+            ));
+        }
 
-            })
-        } */
         // Look up in archived data using index
-        if let Some(&library_id) = self.media_id_index.get(&uuid) {
+        if let Some(&library_id) = self.media_id_index.get(uuid) {
             let media_type = id.media_type();
 
-            return Ok(MediaYoke::attach_to_cart(
+            Ok(MediaYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
                 |data: &AlignedVec| unsafe {
                     let archived_libraries =
-                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&data);
+                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(data);
                     archived_libraries
                         .iter()
                         .find(|l| l.get_id().as_uuid() == library_id)
@@ -212,12 +274,12 @@ impl MediaRepo {
                         .find(|m| m.archived_media_id().as_uuid() == uuid)
                         .unwrap()
                 },
-            ));
+            ))
         } else {
-            return Err(RepositoryError::NotFound {
+            Err(RepositoryError::NotFound {
                 entity_type: "media".to_string(),
                 id: uuid.to_string(),
-            });
+            })
         }
     }
 
@@ -228,22 +290,35 @@ impl MediaRepo {
     ) -> RepositoryResult<MovieYoke> {
         let uuid = id.as_uuid();
         // Check if deleted in runtime
-        if self.modifications.is_deleted(&uuid) {
+        if self.modifications.is_deleted(uuid) {
             return Err(RepositoryError::NotFound {
                 entity_type: "media".to_string(),
                 id: uuid.to_string(),
             });
         }
 
+        if let Some(entry) = self.modifications.get_entry(uuid) {
+            let cart = entry.cart();
+            return Ok(MovieYoke::attach_to_cart(
+                cart,
+                |data: &AlignedVec| unsafe {
+                    match rkyv::access_unchecked::<ArchivedMedia>(data) {
+                        ArchivedMedia::Movie(movie) => movie,
+                        _ => unreachable!("Overlay entry variant mismatch"),
+                    }
+                },
+            ));
+        }
+
         // Look up in archived data using index
-        if let Some(&library_id) = self.media_id_index.get(&uuid) {
+        if let Some(&library_id) = self.media_id_index.get(uuid) {
             let media_type = id.media_type();
 
-            return Ok(MovieYoke::attach_to_cart(
+            Ok(MovieYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
                 |data: &AlignedVec| unsafe {
                     let archived_libraries =
-                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&data);
+                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(data);
                     match archived_libraries
                         .iter()
                         .find(|l| l.get_id().as_uuid() == library_id)
@@ -263,12 +338,12 @@ impl MediaRepo {
                         }
                     }
                 },
-            ));
+            ))
         } else {
-            return Err(RepositoryError::NotFound {
+            Err(RepositoryError::NotFound {
                 entity_type: "media".to_string(),
                 id: uuid.to_string(),
-            });
+            })
         }
     }
 
@@ -279,29 +354,35 @@ impl MediaRepo {
     ) -> RepositoryResult<SeriesYoke> {
         let uuid = id.as_uuid();
         // Check if deleted in runtime
-        if self.modifications.is_deleted(&uuid) {
+        if self.modifications.is_deleted(uuid) {
             return Err(RepositoryError::NotFound {
                 entity_type: "media".to_string(),
                 id: uuid.to_string(),
             });
         }
 
-        // Check runtime modifications first
-        /* TODO: Probably need to change the MaybeArchived type to hold a MediaYoke
-        if let Some(modified) = self.modifications.get_modified(&uuid) {
-            return MediaYoke::attach_to_cart(Arc::clone(&self), |_| {
+        if let Some(entry) = self.modifications.get_entry(uuid) {
+            let cart = entry.cart();
+            return Ok(SeriesYoke::attach_to_cart(
+                cart,
+                |data: &AlignedVec| unsafe {
+                    match rkyv::access_unchecked::<ArchivedMedia>(data) {
+                        ArchivedMedia::Series(series) => series,
+                        _ => unreachable!("Overlay entry variant mismatch"),
+                    }
+                },
+            ));
+        }
 
-            })
-        } */
         // Look up in archived data using index
-        if let Some(&library_id) = self.media_id_index.get(&uuid) {
+        if let Some(&library_id) = self.media_id_index.get(uuid) {
             let media_type = id.media_type();
 
-            return Ok(SeriesYoke::attach_to_cart(
+            Ok(SeriesYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
                 |data: &AlignedVec| unsafe {
                     let archived_libraries =
-                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&data);
+                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(data);
                     match archived_libraries
                         .iter()
                         .find(|l| l.get_id().as_uuid() == library_id)
@@ -321,12 +402,12 @@ impl MediaRepo {
                         }
                     }
                 },
-            ));
+            ))
         } else {
-            return Err(RepositoryError::NotFound {
+            Err(RepositoryError::NotFound {
                 entity_type: "media".to_string(),
                 id: uuid.to_string(),
-            });
+            })
         }
     }
 
@@ -335,20 +416,33 @@ impl MediaRepo {
         id: &impl MediaIDLike,
     ) -> RepositoryResult<SeasonYoke> {
         let uuid = id.as_uuid();
-        if self.modifications.is_deleted(&uuid) {
+        if self.modifications.is_deleted(uuid) {
             return Err(RepositoryError::NotFound {
                 entity_type: "media".to_string(),
                 id: uuid.to_string(),
             });
         }
 
-        if let Some(&library_id) = self.media_id_index.get(&uuid) {
+        if let Some(entry) = self.modifications.get_entry(uuid) {
+            let cart = entry.cart();
+            return Ok(SeasonYoke::attach_to_cart(
+                cart,
+                |data: &AlignedVec| unsafe {
+                    match rkyv::access_unchecked::<ArchivedMedia>(data) {
+                        ArchivedMedia::Season(season) => season,
+                        _ => unreachable!("Overlay entry variant mismatch"),
+                    }
+                },
+            ));
+        }
+
+        if let Some(&library_id) = self.media_id_index.get(uuid) {
             let media_type = id.media_type();
             return Ok(SeasonYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
                 |data: &AlignedVec| unsafe {
                     let archived_libraries =
-                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&data);
+                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(data);
                     match archived_libraries
                         .iter()
                         .find(|l| l.get_id().as_uuid() == library_id)
@@ -378,20 +472,33 @@ impl MediaRepo {
         id: &impl MediaIDLike,
     ) -> RepositoryResult<EpisodeYoke> {
         let uuid = id.as_uuid();
-        if self.modifications.is_deleted(&uuid) {
+        if self.modifications.is_deleted(uuid) {
             return Err(RepositoryError::NotFound {
                 entity_type: "media".to_string(),
                 id: uuid.to_string(),
             });
         }
 
-        if let Some(&library_id) = self.media_id_index.get(&uuid) {
+        if let Some(entry) = self.modifications.get_entry(uuid) {
+            let cart = entry.cart();
+            return Ok(EpisodeYoke::attach_to_cart(
+                cart,
+                |data: &AlignedVec| unsafe {
+                    match rkyv::access_unchecked::<ArchivedMedia>(data) {
+                        ArchivedMedia::Episode(episode) => episode,
+                        _ => unreachable!("Overlay entry variant mismatch"),
+                    }
+                },
+            ));
+        }
+
+        if let Some(&library_id) = self.media_id_index.get(uuid) {
             let media_type = id.media_type();
             return Ok(EpisodeYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
                 |data: &AlignedVec| unsafe {
                     let archived_libraries =
-                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&data);
+                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(data);
                     match archived_libraries
                         .iter()
                         .find(|l| l.get_id().as_uuid() == library_id)
@@ -442,8 +549,8 @@ impl MediaRepo {
                         }
 
                         // Use modified version if available
-                        if let Some(modified) = self.modifications.get_modified(&media_id) {
-                            results.push(modified.clone());
+                        if let Some(modified) = self.modifications.get_entry(&media_id) {
+                            results.push(modified.deserialize()?);
                         } else {
                             // Deserialize archived version
                             let owned = deserialize::<Media, Error>(media_ref).map_err(|e| {
@@ -462,7 +569,7 @@ impl MediaRepo {
         if let Some(ids) = self.modifications.added_by_library.get(&lib_uuid) {
             for media_id in ids {
                 if let Some(media) = self.modifications.added.get(media_id) {
-                    results.push(media.clone());
+                    results.push(media.deserialize()?);
                 }
             }
         }
@@ -587,7 +694,7 @@ impl MediaRepo {
                 Yoke::<&'static ArchivedLibrary, Arc<AlignedVec>>::attach_to_cart(
                     Arc::clone(&self.libraries_buffer),
                     |data: &AlignedVec| unsafe {
-                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&data)
+                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(data)
                             .get(index)
                             .unwrap()
                     },
@@ -628,13 +735,13 @@ impl MediaRepo {
         &self,
         library_id: &Uuid,
     ) -> Option<LibraryYoke> {
-        if !self.libraries_index.contains(&library_id) {
+        if !self.libraries_index.contains(library_id) {
             return None;
         }
         Some(LibraryYoke::attach_to_cart(
             Arc::clone(&self.libraries_buffer),
             |data: &AlignedVec| unsafe {
-                rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&data)
+                rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(data)
                     .iter()
                     .find(|library| &library.get_id().as_uuid() == library_id)
                     .unwrap()
@@ -662,8 +769,10 @@ impl MediaRepo {
                     }
 
                     // Use modified version if available
-                    if let Some(modified) = self.modifications.get_modified(&media_id) {
-                        results.push(modified.clone());
+                    if let Some(modified) = self.modifications.get_entry(&media_id) {
+                        if let Ok(deser) = modified.deserialize() {
+                            results.push(deser);
+                        }
                     } else {
                         // Deserialize archived version
                         if let Ok(owned) = deserialize::<Media, Error>(media_ref) {
@@ -676,7 +785,9 @@ impl MediaRepo {
 
         // Add runtime additions (from all libraries)
         for media in self.modifications.added.values() {
-            results.push(media.clone());
+            if let Ok(deser) = media.deserialize() {
+                results.push(deser);
+            }
         }
 
         results
@@ -708,37 +819,31 @@ impl MediaRepo {
         if let Some(library) = archived_libraries
             .iter()
             .find(|l| l.get_id().as_uuid() == library_id)
+            && let Some(media_list) = library.media()
         {
-            if let Some(media_list) = library.media() {
-                for media_ref in media_list.iter() {
-                    // Skip if deleted via runtime overlay
-                    let media_uuid = media_ref.archived_media_id().to_uuid();
-                    if self.modifications.is_deleted(&media_uuid) {
-                        continue;
-                    }
+            for media_ref in media_list.iter() {
+                // Skip if deleted via runtime overlay
+                let media_uuid = media_ref.archived_media_id().to_uuid();
+                if self.modifications.is_deleted(&media_uuid) {
+                    continue;
+                }
 
-                    match media_ref {
-                        ArchivedMedia::Season(season) => {
-                            // Match parent series
-                            if season.series_id.as_uuid() == series_uuid {
-                                // Prefer runtime modified version if present
-                                if let Some(modified) = self.modifications.get_modified(&media_uuid)
-                                {
-                                    if let Some(s) = modified.clone().to_season() {
-                                        results.push(s);
-                                    } else if let Ok(Media::Season(s)) =
-                                        deserialize::<Media, Error>(media_ref)
-                                    {
-                                        results.push(s);
-                                    }
-                                } else if let Ok(Media::Season(s)) =
-                                    deserialize::<Media, Error>(media_ref)
-                                {
-                                    results.push(s);
-                                }
+                if let ArchivedMedia::Season(season) = media_ref {
+                    // Match parent series
+                    if season.series_id.as_uuid() == series_uuid {
+                        // Prefer runtime modified version if present
+                        if let Some(modified) = self.modifications.get_entry(&media_uuid) {
+                            if let Some(season) = modified.deserialize()?.to_season() {
+                                results.push(season);
+                            } else if let Ok(Media::Season(s)) =
+                                deserialize::<Media, Error>(media_ref)
+                            {
+                                results.push(s);
                             }
+                        } else if let Ok(Media::Season(s)) = deserialize::<Media, Error>(media_ref)
+                        {
+                            results.push(s);
                         }
-                        _ => {}
                     }
                 }
             }
@@ -747,12 +852,11 @@ impl MediaRepo {
         // Include runtime-added media in this library that match the series
         if let Some(ids) = self.modifications.added_by_library.get(&library_id) {
             for id in ids {
-                if let Some(media) = self.modifications.added.get(id) {
-                    if let Some(season) = media.clone().to_season() {
-                        if &season.series_id == series_id {
-                            results.push(season);
-                        }
-                    }
+                if let Some(media) = self.modifications.added.get(id)
+                    && let Some(season) = media.deserialize()?.to_season()
+                    && &season.series_id == series_id
+                {
+                    results.push(season);
                 }
             }
         }
@@ -789,35 +893,27 @@ impl MediaRepo {
         if let Some(library) = archived_libraries
             .iter()
             .find(|l| l.get_id().as_uuid() == library_id)
+            && let Some(media_list) = library.media()
         {
-            if let Some(media_list) = library.media() {
-                for media_ref in media_list.iter() {
-                    // Skip if deleted via runtime overlay
-                    let media_uuid = media_ref.archived_media_id().to_uuid();
-                    if self.modifications.is_deleted(&media_uuid) {
-                        continue;
-                    }
+            for media_ref in media_list.iter() {
+                // Skip if deleted via runtime overlay
+                let media_uuid = media_ref.archived_media_id().to_uuid();
+                if self.modifications.is_deleted(&media_uuid) {
+                    continue;
+                }
 
-                    match media_ref {
-                        ArchivedMedia::Episode(ep) => {
-                            if ep.season_id.as_uuid() == season_uuid {
-                                if let Some(modified) = self.modifications.get_modified(&media_uuid)
-                                {
-                                    if let Some(e) = modified.clone().to_episode() {
-                                        results.push(e);
-                                    } else if let Ok(Media::Episode(e)) =
-                                        deserialize::<Media, Error>(media_ref)
-                                    {
-                                        results.push(e);
-                                    }
-                                } else if let Ok(Media::Episode(e)) =
-                                    deserialize::<Media, Error>(media_ref)
-                                {
-                                    results.push(e);
-                                }
-                            }
+                if let ArchivedMedia::Episode(ep) = media_ref
+                    && ep.season_id.as_uuid() == season_uuid
+                {
+                    if let Some(modified) = self.modifications.get_entry(&media_uuid) {
+                        if let Some(ep) = modified.deserialize()?.to_episode() {
+                            results.push(ep);
+                        } else if let Ok(Media::Episode(e)) = deserialize::<Media, Error>(media_ref)
+                        {
+                            results.push(e);
                         }
-                        _ => {}
+                    } else if let Ok(Media::Episode(e)) = deserialize::<Media, Error>(media_ref) {
+                        results.push(e);
                     }
                 }
             }
@@ -826,12 +922,11 @@ impl MediaRepo {
         // Include runtime-added media in this library that match the season
         if let Some(ids) = self.modifications.added_by_library.get(&library_id) {
             for id in ids {
-                if let Some(media) = self.modifications.added.get(id) {
-                    if let Some(ep) = media.clone().to_episode() {
-                        if &ep.season_id == season_id {
-                            results.push(ep);
-                        }
-                    }
+                if let Some(media) = self.modifications.added.get(id)
+                    && let Some(ep) = media.deserialize()?.to_episode()
+                    && &ep.season_id == season_id
+                {
+                    results.push(ep);
                 }
             }
         }

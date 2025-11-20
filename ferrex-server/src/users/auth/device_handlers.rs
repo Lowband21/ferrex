@@ -195,33 +195,32 @@ pub async fn device_login(
                     // Get the other user and disable their auto-login
                     if let Ok(Some(mut other_user)) =
                         state.db.backend().get_user_by_id(session.user_id).await
+                        && other_user.preferences.auto_login_enabled
                     {
-                        if other_user.preferences.auto_login_enabled {
-                            other_user.preferences.auto_login_enabled = false;
-                            other_user.updated_at = Utc::now();
-                            let _ = state.db.backend().update_user(&other_user).await;
+                        other_user.preferences.auto_login_enabled = false;
+                        other_user.updated_at = Utc::now();
+                        let _ = state.db.backend().update_user(&other_user).await;
 
-                            // Also check and update device credential if it exists
-                            if let Ok(Some(mut credential)) = state
+                        // Also check and update device credential if it exists
+                        if let Ok(Some(mut credential)) = state
+                            .db
+                            .backend()
+                            .get_device_credential(session.user_id, device.id)
+                            .await
+                        {
+                            credential.auto_login_enabled = false;
+                            credential.updated_at = Utc::now();
+                            let _ = state
                                 .db
                                 .backend()
-                                .get_device_credential(session.user_id, device.id)
-                                .await
-                            {
-                                credential.auto_login_enabled = false;
-                                credential.updated_at = Utc::now();
-                                let _ = state
-                                    .db
-                                    .backend()
-                                    .upsert_device_credential(&credential)
-                                    .await;
-                            }
-
-                            info!(
-                                "Disabled auto-login for user {} due to user switch on device {}",
-                                other_user.username, device.id
-                            );
+                                .upsert_device_credential(&credential)
+                                .await;
                         }
+
+                        info!(
+                            "Disabled auto-login for user {} due to user switch on device {}",
+                            other_user.username, device.id
+                        );
                     }
                 }
             }
@@ -411,15 +410,15 @@ pub async fn pin_login(
     }
 
     // Check if locked
-    if let Some(locked_until) = credential.locked_until {
-        if locked_until > Utc::now() {
-            return Err(AppError::unauthorized(
-                AuthError::TooManyAttempts {
-                    locked_until: locked_until.timestamp(),
-                }
-                .to_string(),
-            ));
-        }
+    if let Some(locked_until) = credential.locked_until
+        && locked_until > Utc::now()
+    {
+        return Err(AppError::unauthorized(
+            AuthError::TooManyAttempts {
+                locked_until: locked_until.timestamp(),
+            }
+            .to_string(),
+        ));
     }
 
     // Verify PIN
@@ -684,14 +683,18 @@ fn hash_token(token: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-/// Hash PIN with device-specific salt
-fn hash_pin_with_device_salt(pin: &str, user_id: Uuid, device_id: Uuid) -> String {
+fn derive_device_salt(user_id: Uuid, device_id: Uuid) -> String {
     // Create device-specific salt
     let salt_input = format!("{}-{}", user_id, device_id);
     let mut hasher = Sha256::new();
     hasher.update(salt_input.as_bytes());
     let salt_bytes = hasher.finalize();
-    let salt_b64 = base64::encode(&salt_bytes[..16]); // Use first 16 bytes
+    base64::encode(&salt_bytes[..16])
+}
+
+/// Hash PIN with device-specific salt
+fn hash_pin_with_device_salt(pin: &str, user_id: Uuid, device_id: Uuid) -> String {
+    let salt_b64 = derive_device_salt(user_id, device_id);
 
     // Hash PIN
     let argon2 = Argon2::default();
@@ -712,6 +715,21 @@ fn verify_pin_with_device_salt(pin: &str, hash: &str, user_id: Uuid, device_id: 
         Ok(h) => h,
         Err(_) => return false,
     };
+
+    // Validate the hash salt matches the expected device-specific salt
+    if let Some(stored_salt) = parsed_hash.salt {
+        let expected_salt = derive_device_salt(user_id, device_id);
+        if constant_time::verify_slices_are_equal(
+            stored_salt.as_str().as_bytes(),
+            expected_salt.as_bytes(),
+        )
+        .is_err()
+        {
+            return false;
+        }
+    } else {
+        return false;
+    }
 
     let argon2 = Argon2::default();
 

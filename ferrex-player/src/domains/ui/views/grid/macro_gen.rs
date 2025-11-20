@@ -1,5 +1,4 @@
 use crate::domains::ui::views::grid::{create_movie_card, create_series_card};
-use ferrex_core::{ArchivedMovieReference, ArchivedSeriesReference};
 use iced::widget::{column, row};
 use uuid::Uuid;
 

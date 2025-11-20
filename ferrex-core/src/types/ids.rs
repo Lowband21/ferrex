@@ -20,7 +20,13 @@ use uuid::Uuid;
     RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy))]
-pub struct LibraryID(#[rkyv(with = crate::rkyv_wrappers::UuidWrapper)] pub Uuid);
+pub struct LibraryID(pub Uuid);
+
+impl Default for LibraryID {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl LibraryID {
     pub fn new() -> Self {
@@ -47,11 +53,11 @@ impl LibraryID {
 
 impl ArchivedLibraryID {
     pub fn as_str(&self) -> String {
-        Uuid::from_bytes(self.0).to_string()
+        self.0.to_string()
     }
 
     pub fn as_uuid(&self) -> Uuid {
-        Uuid::from_bytes(self.0)
+        self.0
     }
 }
 
@@ -76,7 +82,13 @@ impl std::fmt::Display for LibraryID {
     RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, Clone, PartialEq, Eq, Hash, Copy))]
-pub struct MovieID(#[rkyv(with = crate::rkyv_wrappers::UuidWrapper)] pub Uuid);
+pub struct MovieID(pub Uuid);
+
+impl Default for MovieID {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl MovieID {
     pub fn new() -> Self {
@@ -134,7 +146,13 @@ impl std::fmt::Display for MovieID {
     RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, Clone, PartialEq, Eq, Hash, Copy))]
-pub struct SeriesID(#[rkyv(with = crate::rkyv_wrappers::UuidWrapper)] pub Uuid);
+pub struct SeriesID(pub Uuid);
+
+impl Default for SeriesID {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl SeriesID {
     pub fn new() -> Self {
@@ -188,7 +206,13 @@ impl std::fmt::Display for SeriesID {
     RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, Clone, PartialEq, Eq, Hash, Copy))]
-pub struct SeasonID(#[rkyv(with = crate::rkyv_wrappers::UuidWrapper)] pub Uuid);
+pub struct SeasonID(pub Uuid);
+
+impl Default for SeasonID {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl SeasonID {
     pub fn new() -> Self {
@@ -245,7 +269,13 @@ impl std::fmt::Display for SeasonID {
     RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, Clone, PartialEq, Eq, Hash, Copy))]
-pub struct EpisodeID(#[rkyv(with = crate::rkyv_wrappers::UuidWrapper)] pub Uuid);
+pub struct EpisodeID(pub Uuid);
+
+impl Default for EpisodeID {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl EpisodeID {
     pub fn new() -> Self {
@@ -301,7 +331,7 @@ impl std::fmt::Display for EpisodeID {
     RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, Clone, PartialEq, Eq, Hash, Copy))]
-pub struct PersonID(#[rkyv(with = crate::rkyv_wrappers::UuidWrapper)] pub Uuid);
+pub struct PersonID(pub Uuid);
 
 impl PersonID {
     pub fn new(id: String) -> Result<Self, MediaError> {

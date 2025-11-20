@@ -36,16 +36,16 @@ pub mod animation {
         // The extra width needed is: (width * 1.05 - width) = width * 0.05
         // This needs to be split between left and right, so each side needs: width * 0.05 / 2 = width * 0.025
         let scale_expansion = width * (HOVER_SCALE - 1.0);
-        let padding_per_side = scale_expansion / 2.0 + EFFECT_PADDING;
-        padding_per_side
+
+        scale_expansion / 2.0 + EFFECT_PADDING
     }
 
     /// Calculate vertical animation padding for a given height
     pub fn calculate_vertical_padding(height: f32) -> f32 {
         // Same calculation as horizontal but using height
         let scale_expansion = height * (HOVER_SCALE - 1.0);
-        let padding_per_side = scale_expansion / 2.0 + EFFECT_PADDING;
-        padding_per_side
+
+        scale_expansion / 2.0 + EFFECT_PADDING
     }
 
     /// Default animation duration in milliseconds
@@ -184,6 +184,20 @@ pub mod backdrop {
     /// 0.05 means take only 5% of the crop from top, 95% from bottom
     /// This shows mostly the top portion of the image (titles, logos, sky)
     pub const CROP_BIAS_TOP_ULTRAWIDE: f32 = 0.05;
+}
+
+/// Detail view layout constants
+pub mod detail {
+    /// Width of the primary poster in detail views
+    pub const POSTER_WIDTH: f32 = 300.0;
+    /// Height of the primary poster in detail views
+    pub const POSTER_HEIGHT: f32 = 450.0;
+    /// Vertical padding below the poster for shadow/border spacing
+    pub const POSTER_PADDING: f32 = 10.0;
+    /// Additional horizontal spacing reserved for metadata columns
+    pub const POSTER_METADATA_GAP: f32 = 37.5;
+    /// Vertical offset applied to metadata blocks relative to poster bottom
+    pub const METADATA_OFFSET: f32 = 150.0;
 }
 
 /// Header constants

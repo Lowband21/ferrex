@@ -100,16 +100,16 @@ impl UserAuthentication {
         }
 
         // Check if account is locked
-        if self.is_locked {
-            if let Some(until) = self.locked_until {
-                if Utc::now() < until {
-                    return Err(UserAuthenticationError::AccountLocked);
-                } else {
-                    // Unlock expired lock
-                    self.is_locked = false;
-                    self.locked_until = None;
-                    self.failed_login_attempts = 0;
-                }
+        if self.is_locked
+            && let Some(until) = self.locked_until
+        {
+            if Utc::now() < until {
+                return Err(UserAuthenticationError::AccountLocked);
+            } else {
+                // Unlock expired lock
+                self.is_locked = false;
+                self.locked_until = None;
+                self.failed_login_attempts = 0;
             }
         }
 

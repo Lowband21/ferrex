@@ -1,8 +1,8 @@
 use crate::{
-    common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
+    common::messages::{DomainMessage, DomainUpdateResult},
     domains::{
         library::update_handlers::fetch_libraries,
-        ui::{tabs::TabId, types::ViewState, view_models::ViewModel},
+        ui::tabs::{TabId, TabState},
     },
     infrastructure::api_types::Media,
     state_refactored::State,
@@ -10,9 +10,9 @@ use crate::{
 
 use super::messages::Message;
 use iced::Task;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use ferrex_core::{LibraryID, MediaIDLike, MediaOps};
+use ferrex_core::{ImageRequest, ImageSize, ImageType, LibraryID, MediaIDLike, MediaOps, Priority};
 
 #[cfg_attr(
     any(
@@ -444,11 +444,26 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
             }
 
             let mut touched_libraries: HashSet<LibraryID> = HashSet::new();
+            let mut inline_additions: HashMap<LibraryID, Vec<Media>> = HashMap::new();
 
             for media in references {
                 let Some(library_id) = media_library_id(&media) else {
                     log::warn!("Discovered media missing library id; skipping");
                     continue;
+                };
+
+                if let Some(request) = image_request_for_media(&media) {
+                    state
+                        .domains
+                        .metadata
+                        .state
+                        .image_service
+                        .flag_flip_once(&request);
+                }
+
+                let inline_candidate = match &media {
+                    Media::Movie(_) | Media::Series(_) => Some(media.clone()),
+                    _ => None,
                 };
 
                 let media_uuid = media.media_id().to_uuid();
@@ -462,6 +477,12 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
                 {
                     Ok(()) => {
                         touched_libraries.insert(library_id);
+                        if let Some(candidate) = inline_candidate {
+                            inline_additions
+                                .entry(library_id)
+                                .or_default()
+                                .push(candidate);
+                        }
                     }
                     Err(err) => {
                         log::error!(
@@ -474,7 +495,8 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
                 }
             }
 
-            refresh_tabs_for_libraries(state, &touched_libraries);
+            let inline_updated = apply_discovered_media_to_tabs(state, &inline_additions);
+            mark_tabs_after_media_changes(state, &touched_libraries, &inline_updated);
 
             DomainUpdateResult::task(Task::none())
         }
@@ -585,6 +607,35 @@ fn media_library_id(media: &Media) -> Option<LibraryID> {
     }
 }
 
+fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
+    match media {
+        Media::Movie(movie) => Some(
+            ImageRequest::new(movie.id.to_uuid(), ImageSize::Poster, ImageType::Movie)
+                .with_priority(Priority::Visible)
+                .with_index(0),
+        ),
+        Media::Series(series) => Some(
+            ImageRequest::new(series.id.to_uuid(), ImageSize::Poster, ImageType::Series)
+                .with_priority(Priority::Visible)
+                .with_index(0),
+        ),
+        Media::Season(season) => Some(
+            ImageRequest::new(season.id.to_uuid(), ImageSize::Poster, ImageType::Season)
+                .with_priority(Priority::Visible)
+                .with_index(0),
+        ),
+        Media::Episode(episode) => Some(
+            ImageRequest::new(
+                *episode.id.as_uuid(),
+                ImageSize::Thumbnail,
+                ImageType::Episode,
+            )
+            .with_priority(Priority::Visible)
+            .with_index(0),
+        ),
+    }
+}
+
 fn refresh_tabs_for_libraries(state: &mut State, libraries: &HashSet<LibraryID>) {
     if libraries.is_empty() {
         return;
@@ -595,6 +646,70 @@ fn refresh_tabs_for_libraries(state: &mut State, libraries: &HashSet<LibraryID>)
 
     for library_id in libraries {
         let tab_id = TabId::Library(*library_id);
+        state.tab_manager.mark_tab_needs_refresh(tab_id);
+        if active_tab == tab_id {
+            active_needs_refresh = true;
+        }
+    }
+
+    if active_needs_refresh {
+        state.tab_manager.refresh_active_tab();
+    }
+}
+
+fn apply_discovered_media_to_tabs(
+    state: &mut State,
+    additions: &HashMap<LibraryID, Vec<Media>>,
+) -> HashSet<LibraryID> {
+    if additions.is_empty() {
+        return HashSet::new();
+    }
+
+    let active_tab = state.tab_manager.active_tab_id();
+    let mut inline_updated: HashSet<LibraryID> = HashSet::new();
+
+    for (library_id, media_items) in additions {
+        let tab_id = TabId::Library(*library_id);
+        if tab_id != active_tab {
+            continue;
+        }
+
+        if let Some(TabState::Library(tab_state)) = state.tab_manager.get_tab_mut(tab_id) {
+            let mut inserted_any = false;
+            for media in media_items {
+                if tab_state.insert_media_reference(media) {
+                    inserted_any = true;
+                }
+            }
+            if inserted_any {
+                inline_updated.insert(*library_id);
+            }
+        }
+    }
+
+    inline_updated
+}
+
+fn mark_tabs_after_media_changes(
+    state: &mut State,
+    libraries: &HashSet<LibraryID>,
+    inline_updated: &HashSet<LibraryID>,
+) {
+    if libraries.is_empty() {
+        return;
+    }
+
+    let active_tab = state.tab_manager.active_tab_id();
+    let mut active_needs_refresh = false;
+
+    for library_id in libraries {
+        let tab_id = TabId::Library(*library_id);
+        let skip_active_refresh = inline_updated.contains(library_id) && active_tab == tab_id;
+
+        if skip_active_refresh {
+            continue;
+        }
+
         state.tab_manager.mark_tab_needs_refresh(tab_id);
         if active_tab == tab_id {
             active_needs_refresh = true;

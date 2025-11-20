@@ -6,7 +6,7 @@
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::domains::ui::scroll_manager::ScrollStateExt;
-use crate::domains::{auth, library, media, player, ui};
+use crate::domains::{auth, library, player, ui};
 use crate::state_refactored::State;
 use iced::Task;
 
@@ -85,10 +85,9 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
 
         // Library refresh requested
         CrossDomainEvent::RequestLibraryRefresh => {
-            let library_tasks = handle_library_refresh_request(state);
             // Also notify UI to refresh ViewModels
             // [MediaStoreNotifier] RefreshViewModels no longer needed here
-            library_tasks
+            handle_library_refresh_request(state)
         }
 
         // User authenticated - store in state
@@ -184,6 +183,42 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         // Play media with ID
         CrossDomainEvent::MediaPlayWithId(media_file, media_id) => {
             log::info!("[CrossDomain] Play media with ID: {:?}", media_id);
+
+            // Derive resume position from media domain watch state (resume-at-last-position by default)
+            let mut resume_opt: Option<f32> = None;
+            let mut watch_duration_hint: Option<f64> = None;
+            if let Some(watch_state) = &state.domains.media.state.user_watch_state
+                && let Some(item) = watch_state.get_by_media_id(media_id.as_uuid())
+            {
+                // Use the last known position from watch state
+                if item.position > 0.0 && item.duration > 0.0 {
+                    resume_opt = Some(item.position);
+                }
+
+                if item.duration > 0.0 {
+                    watch_duration_hint = Some(item.duration as f64);
+                }
+            }
+
+            // Prefer metadata duration when available, fall back to watch cache hint
+            let metadata_duration_hint = media_file
+                .media_file_metadata
+                .as_ref()
+                .and_then(|meta| meta.duration)
+                .filter(|d| *d > 0.0);
+
+            let duration_hint = watch_duration_hint.or(metadata_duration_hint);
+
+            // Seed player state with progress hints so UI can update immediately
+            state.domains.player.state.last_valid_position =
+                resume_opt.map(|pos| pos as f64).unwrap_or(0.0);
+            state.domains.player.state.last_valid_duration = duration_hint.unwrap_or(0.0);
+
+            // Store resume position so the player picks it up during PlayMediaWithId
+            state.domains.media.state.pending_resume_position = resume_opt;
+            // Also prime the player domain for immediate seek during load
+            state.domains.player.state.pending_resume_position = resume_opt;
+
             Task::done(DomainMessage::Player(
                 crate::domains::player::messages::Message::PlayMediaWithId(media_file, media_id),
             ))
@@ -274,9 +309,9 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
             log::info!("[CrossDomain] Batch metadata ready: {} items", items.len());
 
             // Log details about what we received
-            let mut movies_with_details = 0;
-            let mut series_with_details = 0;
-            let mut still_need_fetch = 0;
+            let movies_with_details = 0;
+            let series_with_details = 0;
+            let still_need_fetch = 0;
 
             /*
             for item in &items {
@@ -402,14 +437,14 @@ fn handle_authentication_complete(state: &State) -> Task<DomainMessage> {
 
     // Guard against duplicate library loading
     let accessor = &state.domains.library.state.repo_accessor;
-    if let Ok(library_count) = accessor.library_count() {
-        if library_count > 0 {
-            log::info!(
-                "[CrossDomain] {} libraries already loaded, skipping duplicate load",
-                library_count
-            );
-            return Task::none();
-        }
+    if let Ok(library_count) = accessor.library_count()
+        && library_count > 0
+    {
+        log::info!(
+            "[CrossDomain] {} libraries already loaded, skipping duplicate load",
+            library_count
+        );
+        return Task::none();
     }
 
     let mut tasks = vec![];

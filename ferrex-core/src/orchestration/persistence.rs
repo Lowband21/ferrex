@@ -2,18 +2,17 @@
 //! NOTE: This file only defines function signatures and stubs (todo!()).
 //! Actual SQL implementations will be added after migrations are applied.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use chrono::Utc;
-use rand::{Rng, rngs::StdRng, thread_rng};
+use rand::Rng;
 use sqlx::PgPool;
-use tracing::{info, warn};
+use std::fmt;
+use tracing::{debug, info, warn};
 
 use crate::orchestration::{
     config::RetryConfig,
-    job::{DedupeKey, EnqueueRequest, JobHandle, JobId, JobKind, JobPayload, JobPriority},
-    lease::{CompletionOutcome, DequeueRequest, JobLease, LeaseId, LeaseRenewal},
+    job::{EnqueueRequest, JobHandle, JobId, JobKind, JobPayload, JobPriority},
+    lease::{DequeueRequest, JobLease, LeaseId, LeaseRenewal},
     queue::{ALL_JOB_KINDS, LeaseExpiryScanner, QueueInstrumentation, QueueService, QueueSnapshot},
     scan_cursor::{ScanCursor, ScanCursorId, ScanCursorRepository},
 };
@@ -24,6 +23,16 @@ use crate::{LibraryID, MediaError, Result};
 pub struct PostgresQueueService {
     pool: PgPool,
     retry_config: RetryConfig,
+}
+
+impl fmt::Debug for PostgresQueueService {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PostgresQueueService")
+            .field("pool_size", &self.pool.size())
+            .field("idle_connections", &self.pool.num_idle())
+            .field("retry_config", &self.retry_config)
+            .finish()
+    }
 }
 
 /// Aggregated ready-state counts grouped by queue dimensions.
@@ -100,7 +109,7 @@ impl PostgresQueueService {
             let attempts_before = row.attempts;
             if attempts_before < max_attempts {
                 let delay_ms = {
-                    let mut rng = thread_rng();
+                    let mut rng = rand::rng();
                     self.jittered_delay_ms((attempts_before + 1) as u16, &mut rng)
                 };
                 sqlx::query!(
@@ -175,7 +184,7 @@ impl PostgresQueueService {
         let lower = (capped as f64 - spread).max(1.0);
         let upper = (capped as f64 + spread).min(upper_cap as f64);
 
-        rng.gen_range(lower..=upper).round() as u64
+        rng.random_range(lower..=upper).round() as u64
     }
 
     fn parse_kind(kind: &str) -> Option<JobKind> {
@@ -288,8 +297,6 @@ impl QueueInstrumentation for PostgresQueueService {
 #[async_trait]
 impl QueueService for PostgresQueueService {
     async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
-        use crate::orchestration::job::JobPriority;
-
         let job_id = crate::orchestration::job::JobId::new();
         let payload_json = serde_json::to_value(&request.payload)
             .map_err(|e| MediaError::Internal(format!("failed to serialize job payload: {e}")))?;
@@ -316,7 +323,7 @@ impl QueueService for PostgresQueueService {
         .map_err(|e| MediaError::Internal(format!("enqueue precheck failed: {e}")))?
         {
             let existing_id = crate::orchestration::job::JobId(existing.id);
-            let existing_priority: i16 = existing.priority as i16;
+            let existing_priority: i16 = existing.priority;
             // Try to elevate priority if incoming is higher and the job is not leased
             if priority_val < existing_priority {
                 let _ = sqlx::query!(
@@ -394,7 +401,7 @@ impl QueueService for PostgresQueueService {
 
                     if let Some(row) = existing {
                         // Elevate priority if incoming is higher (lower numeric value)
-                        let existing_pri: i16 = row.priority as i16;
+                        let existing_pri: i16 = row.priority;
                         if priority_val < existing_pri {
                             let update = sqlx::query!(
                                 r#"
@@ -523,8 +530,6 @@ impl QueueService for PostgresQueueService {
     }
 
     async fn enqueue_many(&self, requests: Vec<EnqueueRequest>) -> Result<Vec<JobHandle>> {
-        use crate::orchestration::job::JobPriority;
-
         if requests.is_empty() {
             return Ok(Vec::new());
         }
@@ -564,7 +569,7 @@ impl QueueService for PostgresQueueService {
             .map_err(|e| MediaError::Internal(format!("enqueue_many precheck failed: {e}")))?
             {
                 let existing_id = crate::orchestration::job::JobId(existing.id);
-                let existing_priority: i16 = existing.priority as i16;
+                let existing_priority: i16 = existing.priority;
                 if priority_val < existing_priority {
                     let _ = sqlx::query!(
                         r#"
@@ -640,7 +645,7 @@ impl QueueService for PostgresQueueService {
                         })?;
 
                         if let Some(row) = existing {
-                            let existing_pri: i16 = row.priority as i16;
+                            let existing_pri: i16 = row.priority;
                             if priority_val < existing_pri {
                                 let _ = sqlx::query!(
                                     r#"
@@ -850,7 +855,7 @@ impl QueueService for PostgresQueueService {
         let payload: JobPayload = serde_json::from_value(row.payload)
             .map_err(|e| MediaError::Internal(format!("failed to deserialize job payload: {e}")))?;
 
-        let priority = match row.priority as i16 {
+        let priority = match row.priority {
             0 => JobPriority::P0,
             1 => JobPriority::P1,
             2 => JobPriority::P2,
@@ -863,7 +868,7 @@ impl QueueService for PostgresQueueService {
             payload,
             priority,
             state: JobState::Leased,
-            attempts: (row.attempts as i32).max(0) as u16,
+            attempts: row.attempts.max(0) as u16,
             available_at: row.available_at,
             lease_owner: Some(request.worker_id.clone()),
             lease_expires_at: Some(expires_at),
@@ -923,7 +928,7 @@ impl QueueService for PostgresQueueService {
         };
 
         // Perform the extension
-        let extend_ms: i64 = renewal.extend_by.num_milliseconds() as i64;
+        let extend_ms: i64 = renewal.extend_by.num_milliseconds();
         let updated = sqlx::query!(
             r#"
             UPDATE orchestrator_jobs
@@ -942,7 +947,7 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
         let payload: JobPayload = serde_json::from_value(row.payload)
             .map_err(|e| MediaError::Internal(format!("failed to deserialize job payload: {e}")))?;
 
-        let priority = match row.priority as i16 {
+        let priority = match row.priority {
             0 => JobPriority::P0,
             1 => JobPriority::P1,
             2 => JobPriority::P2,
@@ -955,7 +960,7 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
             payload,
             priority,
             state: JobState::Leased,
-            attempts: (row.attempts as i32).max(0) as u16,
+            attempts: row.attempts.max(0) as u16,
             available_at: row.available_at,
             lease_owner: row.lease_owner,
             lease_expires_at: updated.lease_expires_at,
@@ -1005,7 +1010,7 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
         .map_err(|e| MediaError::Internal(format!("complete update failed: {e}")))?;
 
         if res.rows_affected() > 0 {
-            info!("completed job with lease {:?}", lease_id.0);
+            debug!("completed job with lease {:?}", lease_id.0);
         }
         Ok(())
     }
@@ -1041,7 +1046,7 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
 
         if retryable && attempts_before < max_attempts {
             let delay_ms = {
-                let mut rng = thread_rng();
+                let mut rng = rand::rng();
                 self.jittered_delay_ms((attempts_before + 1) as u16, &mut rng)
             };
 
@@ -1175,6 +1180,15 @@ pub struct PostgresCursorRepository {
 impl PostgresCursorRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+}
+
+impl fmt::Debug for PostgresCursorRepository {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PostgresCursorRepository")
+            .field("pool_size", &self.pool.size())
+            .field("idle_connections", &self.pool.num_idle())
+            .finish()
     }
 }
 

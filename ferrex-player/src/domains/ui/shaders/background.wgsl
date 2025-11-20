@@ -651,23 +651,27 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             // Sample the backdrop texture
             let backdrop_color = textureSample(backdrop_texture, texture_sampler, texture_uv);
 
-            // Calculate fade for backdrop blending
-            // Dynamically adjust fade positions based on the backdrop aspect ratio
-            var dynamic_fade_start: f32;
-            var dynamic_fade_end: f32;
+            // Calculate fade for backdrop blending using configured fade window
+            let fade_start_param = globals.scale_and_effect.z;
+            let fade_end_param = globals.scale_and_effect.w;
 
-            if (display_aspect > 2.5) {
-                // Ultra-wide (30:9) - fade should start later since backdrop is taller
-                dynamic_fade_start = 0.85;
-                dynamic_fade_end = 1.0;
-            } else {
-                // Standard (21:9)
-                dynamic_fade_start = 0.75;
-                dynamic_fade_end = 1.0;
+            var fade_start_ratio = clamp(fade_start_param, 0.0, 1.0);
+            var fade_end_ratio = clamp(fade_end_param, 0.0, 1.0);
+
+            // Fall back to sensible defaults when parameters are unset or invalid
+            if (!(fade_end_param > fade_start_param + 0.001)) {
+                if (display_aspect > 2.5) {
+                    fade_start_ratio = 0.85;
+                } else {
+                    fade_start_ratio = 0.75;
+                }
+                fade_end_ratio = 1.0;
+            } else if (fade_end_ratio <= fade_start_ratio) {
+                fade_end_ratio = min(1.0, fade_start_ratio + 0.05);
             }
 
-            let backdrop_fade_start = dynamic_fade_start * backdrop_screen_coverage;
-            let backdrop_fade_end = dynamic_fade_end * backdrop_screen_coverage;
+            let backdrop_fade_start = fade_start_ratio * backdrop_screen_coverage;
+            let backdrop_fade_end = fade_end_ratio * backdrop_screen_coverage;
             let local_fade_factor = smoothstep(backdrop_fade_start, backdrop_fade_end, scrolled_uv_y);
 
             // Calculate backdrop blend alpha (opposite of shadow fade)

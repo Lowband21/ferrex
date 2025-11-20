@@ -4,7 +4,7 @@ use crate::{
 };
 use ferrex_core::user::User;
 use iced::{
-    Alignment, Element, Length, Task, Theme,
+    Alignment, Element, Length, Theme,
     widget::{Space, button, column, container, row, scrollable, text},
 };
 
@@ -24,6 +24,12 @@ pub struct UserSelectionView {
     ),
     profiling::all_functions
 )]
+impl Default for UserSelectionView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UserSelectionView {
     /// Create a new user selection view
     pub fn new() -> Self {
@@ -108,7 +114,7 @@ impl UserSelectionView {
                 // Show user profiles in a grid
                 let total_users = self.users.len() + 1; // +1 for "Add Profile" button
                 let users_per_row = 5;
-                let num_rows = (total_users + users_per_row - 1) / users_per_row;
+                let num_rows = total_users.div_ceil(users_per_row);
 
                 let mut rows = Vec::new();
 

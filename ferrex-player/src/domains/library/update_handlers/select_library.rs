@@ -1,10 +1,8 @@
 use crate::common::messages::{CrossDomainEvent, DomainUpdateResult};
-use crate::domains::library::messages::Message;
 
 use crate::state_refactored::State;
-use ferrex_core::{LibraryID, LibraryMediaCache, Media};
+use ferrex_core::LibraryID;
 use iced::Task;
-use uuid::Uuid;
 
 pub fn handle_select_library(
     state: &mut State,

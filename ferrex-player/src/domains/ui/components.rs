@@ -1,6 +1,6 @@
 use crate::common::ui_utils::icon_text;
 use crate::domains::ui::messages::Message;
-use crate::domains::ui::widgets::image_for;
+use crate::domains::ui::widgets::{AnimationType, image_for};
 use crate::infrastructure::constants::poster::CORNER_RADIUS;
 use crate::{domains::ui::theme, state_refactored::State};
 
@@ -11,6 +11,7 @@ use iced::{
 };
 use lucide_icons::Icon;
 use rkyv::deserialize;
+use rkyv::option::ArchivedOption;
 use rkyv::rancor::Error;
 
 #[cfg_attr(
@@ -34,7 +35,7 @@ pub fn create_cast_scrollable(cast: &[ArchivedCastMember]) -> Element<'static, M
     // Create a horizontal scrollable row for cast
     let mut cast_row = row![].spacing(15);
 
-    for actor in cast.iter().take(15) {
+    for actor in cast.iter().take(cast.len().max(15)) {
         let cast_card = create_cast_card(actor);
         cast_row = cast_row.push(cast_card);
     }
@@ -66,30 +67,33 @@ fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, Message> {
         .width(Length::Fixed(card_width))
         .align_x(iced::Alignment::Center);
 
-    // Create a deterministic PersonID from the TMDB person ID
-    // This matches the UUID generation in the scanner
-    let person_uuid = uuid::Uuid::new_v5(
-        &uuid::Uuid::NAMESPACE_OID,
-        format!("person-{}", actor.id).as_bytes(),
-    );
+    let profile_uuid = match &actor.profile_media_id {
+        ArchivedOption::Some(uuid) => Some(*uuid),
+        ArchivedOption::None => None,
+    };
 
-    let slot = actor.image_slot.to_native();
-    let profile_image: Element<'static, Message> = if slot == u32::MAX {
+    let profile_index = match &actor.profile_image_index {
+        ArchivedOption::Some(index) => index.to_native(),
+        ArchivedOption::None => 0,
+    };
+
+    let profile_image: Element<'static, Message> = if let Some(uuid) = profile_uuid {
+        image_for(uuid)
+            .size(ImageSize::Profile)
+            .image_type(ImageType::Person)
+            .animation(AnimationType::flip())
+            .width(Length::Fixed(card_width))
+            .height(Length::Fixed(image_height))
+            .radius(CORNER_RADIUS)
+            .image_index(profile_index)
+            .placeholder(Icon::User)
+            .into()
+    } else {
         container(icon_text(Icon::User))
             .width(Length::Fixed(card_width))
             .height(Length::Fixed(image_height))
             .align_x(iced::Alignment::Center)
             .align_y(iced::Alignment::Center)
-            .into()
-    } else {
-        image_for(person_uuid)
-            .size(ImageSize::Profile)
-            .image_type(ImageType::Person)
-            .width(Length::Fixed(card_width))
-            .height(Length::Fixed(image_height))
-            .radius(CORNER_RADIUS)
-            .image_index(slot)
-            .placeholder(Icon::User)
             .into()
     };
 
@@ -178,18 +182,18 @@ pub fn create_technical_details<'a>(
     let mut tech_row = row![Space::with_width(20)].spacing(8);
 
     // Resolution
-    if let Some(width) = metadata.width {
-        if let Some(height) = metadata.height {
-            let resolution_card = container(
-                text(format!("{}×{}", width, height))
-                    .size(14)
-                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            )
-            .padding(10)
-            .style(theme::Container::TechDetail.style());
+    if let Some(width) = metadata.width
+        && let Some(height) = metadata.height
+    {
+        let resolution_card = container(
+            text(format!("{}×{}", width, height))
+                .size(14)
+                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+        )
+        .padding(10)
+        .style(theme::Container::TechDetail.style());
 
-            tech_row = tech_row.push(resolution_card);
-        }
+        tech_row = tech_row.push(resolution_card);
     }
 
     // Video codec

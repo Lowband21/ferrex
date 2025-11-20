@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use crate::{LibraryID, Result};
 
@@ -78,6 +78,29 @@ pub trait WorkloadBudget: Send + Sync {
 pub struct InMemoryBudget {
     config: BudgetConfig,
     state: Arc<tokio::sync::Mutex<BudgetState>>,
+}
+
+impl fmt::Debug for InMemoryBudget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("InMemoryBudget");
+        debug.field("config", &self.config);
+
+        match self.state.try_lock() {
+            Ok(state) => {
+                debug
+                    .field("library_scans", &state.library_scans)
+                    .field("media_analyses", &state.media_analyses)
+                    .field("metadata_jobs", &state.metadata_jobs)
+                    .field("indexing_jobs", &state.indexing_jobs)
+                    .field("image_jobs", &state.image_jobs);
+            }
+            Err(_) => {
+                debug.field("state", &"<locked>");
+            }
+        }
+
+        debug.finish()
+    }
 }
 
 #[derive(Default)]

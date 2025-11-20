@@ -1,8 +1,8 @@
 use crate::domains::auth::permissions::StatePermissionExt;
-use crate::infrastructure::MediaID;
 use crate::{
-    domains::ui::messages::Message, domains::ui::theme, domains::ui::types::ViewState,
-    infrastructure::api_types::Media, infrastructure::constants::layout::header::HEIGHT,
+    common::ui_utils::icon_text_with_size,
+    domains::ui::{messages::Message, theme, types::ViewState},
+    infrastructure::constants::layout::header::HEIGHT,
     state_refactored::State,
 };
 use ferrex_core::LibraryID;
@@ -33,7 +33,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             // Home button
             left_section_items.push(
                 button(
-                    container(icon_text(Icon::House))
+                    container(icon_text_with_size(Icon::House, 16.0))
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
@@ -48,7 +48,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             if !state.domains.ui.state.navigation_history.is_empty() {
                 left_section_items.push(
                     button(
-                        container(icon_text(Icon::ChevronLeft))
+                        container(icon_text_with_size(Icon::ChevronLeft, 16.0))
                             .center_x(Length::Fill)
                             .center_y(Length::Fill),
                     )
@@ -87,7 +87,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     .height(HEIGHT)
                     .center_y(Length::Fill),
                     button(
-                        container(icon_text(Icon::Search))
+                        container(icon_text_with_size(Icon::Search, 16.0))
                             .center_x(Length::Fill)
                             .center_y(Length::Fill)
                     )
@@ -106,11 +106,14 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             let right_section = row![
                 // Fullscreen toggle
                 button(
-                    container(icon_text(if state.is_fullscreen {
-                        Icon::Minimize
-                    } else {
-                        Icon::Maximize
-                    }))
+                    container(icon_text_with_size(
+                        if state.is_fullscreen {
+                            Icon::Minimize
+                        } else {
+                            Icon::Maximize
+                        },
+                        16.0,
+                    ))
                     .center_x(Length::Fill)
                     .center_y(Length::Fill)
                 )
@@ -128,7 +131,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 right_section = right_section.push(
                     container(
                         row![
-                            icon_text(Icon::FileScan),
+                            icon_text_with_size(Icon::FileScan, 16.0),
                             text(format!(" {}", active_count))
                                 .size(14)
                                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
@@ -145,7 +148,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 let element: Element<Message> =
                     if state.permission_checker().can_view_admin_dashboard() {
                         button(
-                            container(icon_text(Icon::Settings))
+                            container(icon_text_with_size(Icon::Settings, 16.0))
                                 .center_x(Length::Fill)
                                 .center_y(Length::Fill),
                         )
@@ -162,7 +165,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
 
             right_section = right_section.push(
                 button(
-                    container(icon_text(Icon::UserPen))
+                    container(icon_text_with_size(Icon::UserPen, 16.0))
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
@@ -210,7 +213,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             // Home button
             left_section_items.push(
                 button(
-                    container(icon_text(Icon::House))
+                    container(icon_text_with_size(Icon::House, 16.0))
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
@@ -224,7 +227,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             // Back button (always shown in detail views since we came from somewhere)
             left_section_items.push(
                 button(
-                    container(icon_text(Icon::ChevronLeft))
+                    container(icon_text_with_size(Icon::ChevronLeft, 16.0))
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
@@ -241,11 +244,14 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             let right_section = row![
                 // Fullscreen toggle
                 button(
-                    container(icon_text(if state.is_fullscreen {
-                        Icon::Minimize
-                    } else {
-                        Icon::Maximize
-                    }))
+                    container(icon_text_with_size(
+                        if state.is_fullscreen {
+                            Icon::Minimize
+                        } else {
+                            Icon::Maximize
+                        },
+                        16.0,
+                    ))
                     .center_x(Length::Fill)
                     .center_y(Length::Fill)
                 )
@@ -258,7 +264,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     let admin_element: Element<'_, Message> =
                         if state.permission_checker().can_view_admin_dashboard() {
                             button(
-                                container(icon_text(Icon::Settings))
+                                container(icon_text_with_size(Icon::Settings, 16.0))
                                     .center_x(Length::Fill)
                                     .center_y(Length::Fill),
                             )
@@ -274,7 +280,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 },
                 // Profile placeholder
                 button(
-                    container(icon_text(Icon::UserPen))
+                    container(icon_text_with_size(Icon::UserPen, 16.0))
                         .center_x(Length::Fill)
                         .center_y(Length::Fill)
                 )
@@ -322,7 +328,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             // Home button
             left_section_items.push(
                 button(
-                    container(icon_text(Icon::House))
+                    container(icon_text_with_size(Icon::House, 16.0))
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
@@ -336,7 +342,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             // Back button (always shown since we came from library)
             left_section_items.push(
                 button(
-                    container(icon_text(Icon::ChevronLeft))
+                    container(icon_text_with_size(Icon::ChevronLeft, 16.0))
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
@@ -381,7 +387,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             // Home button
             left_section_items.push(
                 button(
-                    container(icon_text(Icon::House))
+                    container(icon_text_with_size(Icon::House, 16.0))
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
@@ -395,7 +401,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             // Back button (always shown since we came from somewhere)
             left_section_items.push(
                 button(
-                    container(icon_text(Icon::ChevronLeft))
+                    container(icon_text_with_size(Icon::ChevronLeft, 16.0))
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
@@ -521,10 +527,10 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
     profiling::function
 )]
 fn get_detail_title(state: &State) -> String {
-    let mut buff = Uuid::encode_buffer();
+    let buff = Uuid::encode_buffer();
     match &state.domains.ui.state.view {
-        ViewState::MovieDetail { movie_id, .. } => "Placeholder".to_string(), //movie,
-        ViewState::SeriesDetail { series_id, .. } => {
+        ViewState::MovieDetail { .. } => "Placeholder".to_string(), //movie,
+        ViewState::SeriesDetail { .. } => {
             /*
             // Use MediaQueryService (clean architecture)
             state
@@ -535,7 +541,7 @@ fn get_detail_title(state: &State) -> String {
                 .get_series_title(series_id) */
             "Null".to_string()
         }
-        ViewState::SeasonDetail { series_id, .. } => {
+        ViewState::SeasonDetail { .. } => {
             /*
             // Use MediaQueryService (clean architecture)
             state
@@ -549,14 +555,4 @@ fn get_detail_title(state: &State) -> String {
         ViewState::EpisodeDetail { .. } => "Episode".to_string(),
         _ => String::new(),
     }
-}
-
-// Helper function to create icon text
-fn icon_text(icon: Icon) -> text::Text<'static> {
-    text(icon.unicode()).font(lucide_font()).size(16)
-}
-
-// Get the lucide font
-fn lucide_font() -> iced::Font {
-    iced::Font::with_name("lucide")
 }

@@ -44,10 +44,10 @@ async fn handle_socket(socket: WebSocket, state: AppState, user: User) {
     let mut ws_sender = ws_sender;
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            if let Ok(ws_msg) = messages::sync_to_websocket(&msg) {
-                if ws_sender.send(ws_msg).await.is_err() {
-                    break;
-                }
+            if let Ok(ws_msg) = messages::sync_to_websocket(&msg)
+                && ws_sender.send(ws_msg).await.is_err()
+            {
+                break;
             }
         }
     });
@@ -56,17 +56,17 @@ async fn handle_socket(socket: WebSocket, state: AppState, user: User) {
     while let Some(msg) = ws_receiver.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                if let Ok(sync_msg) = serde_json::from_str::<SyncMessage>(text.as_str()) {
-                    if let Err(e) = handle_sync_message(sync_msg, &state, conn_id, &user).await {
-                        tracing::error!("Error handling sync message: {}", e);
-                    }
+                if let Ok(sync_msg) = serde_json::from_str::<SyncMessage>(text.as_str())
+                    && let Err(e) = handle_sync_message(sync_msg, &state, conn_id, &user).await
+                {
+                    tracing::error!("Error handling sync message: {}", e);
                 }
             }
             Ok(Message::Binary(bin)) => {
-                if let Ok(sync_msg) = serde_json::from_slice::<SyncMessage>(bin.as_ref()) {
-                    if let Err(e) = handle_sync_message(sync_msg, &state, conn_id, &user).await {
-                        tracing::error!("Error handling sync message: {}", e);
-                    }
+                if let Ok(sync_msg) = serde_json::from_slice::<SyncMessage>(bin.as_ref())
+                    && let Err(e) = handle_sync_message(sync_msg, &state, conn_id, &user).await
+                {
+                    tracing::error!("Error handling sync message: {}", e);
                 }
             }
             Ok(Message::Ping(_)) => {
@@ -101,34 +101,33 @@ async fn handle_host_command<F>(
 where
     F: FnOnce(&mut ferrex_core::sync_session::PlaybackState),
 {
-    if let Some(conn) = state.websocket_manager.get_connection(&conn_id) {
-        if let Some(room_code) = conn.get_room_code().await {
-            // Verify sender is host
-            if let Some(session) = state
+    if let Some(conn) = state.websocket_manager.get_connection(&conn_id)
+        && let Some(room_code) = conn.get_room_code().await
+    {
+        // Verify sender is host
+        if let Some(session) = state
+            .db
+            .backend()
+            .get_sync_session_by_code(&room_code)
+            .await?
+            && session.host_id == user.id
+        {
+            // Update session state
+            let mut new_state = session.state.clone();
+            update_fn(&mut new_state);
+
+            // Update database
+            state
                 .db
                 .backend()
-                .get_sync_session_by_code(&room_code)
-                .await?
-            {
-                if session.host_id == user.id {
-                    // Update session state
-                    let mut new_state = session.state.clone();
-                    update_fn(&mut new_state);
+                .update_sync_session_state(session.id, &new_state)
+                .await?;
 
-                    // Update database
-                    state
-                        .db
-                        .backend()
-                        .update_sync_session_state(session.id, &new_state)
-                        .await?;
-
-                    // Broadcast to all participants
-                    state
-                        .websocket_manager
-                        .broadcast_to_room(&room_code, msg.clone())
-                        .await;
-                }
-            }
+            // Broadcast to all participants
+            state
+                .websocket_manager
+                .broadcast_to_room(&room_code, msg.clone())
+                .await;
         }
     }
     Ok(())
@@ -180,38 +179,38 @@ async fn handle_sync_message(
 
         // Participant status updates
         Ready { .. } | NotReady { .. } => {
-            if let Some(conn) = state.websocket_manager.get_connection(&conn_id) {
-                if let Some(room_code) = conn.get_room_code().await {
-                    // Update participant ready status
-                    if let Some(mut session) = state
+            if let Some(conn) = state.websocket_manager.get_connection(&conn_id)
+                && let Some(room_code) = conn.get_room_code().await
+            {
+                // Update participant ready status
+                if let Some(mut session) = state
+                    .db
+                    .backend()
+                    .get_sync_session_by_code(&room_code)
+                    .await?
+                {
+                    for participant in &mut session.participants {
+                        if participant.user_id == user.id {
+                            participant.is_ready = matches!(msg, Ready { .. });
+                            break;
+                        }
+                    }
+
+                    // Update database
+                    state
                         .db
                         .backend()
-                        .get_sync_session_by_code(&room_code)
-                        .await?
+                        .update_sync_session(session.id, &session)
+                        .await?;
+
+                    // Notify host
+                    if let Some(host_conn) = state
+                        .websocket_manager
+                        .get_room_connections(&room_code)
+                        .into_iter()
+                        .find(|c| c.user.id == session.host_id)
                     {
-                        for participant in &mut session.participants {
-                            if participant.user_id == user.id {
-                                participant.is_ready = matches!(msg, Ready { .. });
-                                break;
-                            }
-                        }
-
-                        // Update database
-                        state
-                            .db
-                            .backend()
-                            .update_sync_session(session.id, &session)
-                            .await?;
-
-                        // Notify host
-                        if let Some(host_conn) = state
-                            .websocket_manager
-                            .get_room_connections(&room_code)
-                            .into_iter()
-                            .find(|c| c.user.id == session.host_id)
-                        {
-                            host_conn.send_message(msg).await?;
-                        }
+                        host_conn.send_message(msg).await?;
                     }
                 }
             }
@@ -219,20 +218,18 @@ async fn handle_sync_message(
 
         // Request sync - send current state
         RequestSync => {
-            if let Some(conn) = state.websocket_manager.get_connection(&conn_id) {
-                if let Some(room_code) = conn.get_room_code().await {
-                    if let Some(session) = state
-                        .db
-                        .backend()
-                        .get_sync_session_by_code(&room_code)
-                        .await?
-                    {
-                        conn.send_message(SyncState {
-                            state: session.state,
-                        })
-                        .await?;
-                    }
-                }
+            if let Some(conn) = state.websocket_manager.get_connection(&conn_id)
+                && let Some(room_code) = conn.get_room_code().await
+                && let Some(session) = state
+                    .db
+                    .backend()
+                    .get_sync_session_by_code(&room_code)
+                    .await?
+            {
+                conn.send_message(SyncState {
+                    state: session.state,
+                })
+                .await?;
             }
         }
 

@@ -1,7 +1,7 @@
 use super::Message;
 use crate::infrastructure::{adapters::ApiClientAdapter, services::api::ApiService};
 use ferrex_core::api_routes::{utils, v1};
-use ferrex_core::{ImageRequest, ImageSize, ImageType};
+use ferrex_core::{ImageSize, ImageType};
 use futures::stream;
 use iced::Subscription;
 use std::sync::{Arc, Mutex};
@@ -135,17 +135,13 @@ fn image_loader_stream(
                                     "person",
                                     request.media_id.hyphenated().encode_lower(&mut buf),
                                 ),
-                                ImageType::Backdrop => (
-                                    "backdrop",
-                                    request.media_id.hyphenated().encode_lower(&mut buf),
-                                ),
                             };
 
                             let category = match size {
                                 ImageSize::Poster => "poster",
                                 ImageSize::Backdrop => "backdrop",
                                 ImageSize::Thumbnail => "thumbnail",
-                                ImageSize::Full => "poster", // Use poster for full size too
+                                ImageSize::Full => "poster", // Hero poster variant
                                 ImageSize::Profile => "cast", // Person profile images
                             };
 
@@ -168,7 +164,7 @@ fn image_loader_stream(
                                 ImageSize::Backdrop => "original",
                                 ImageSize::Thumbnail => "w185",
                                 ImageSize::Poster => "w300",
-                                ImageSize::Full => "original",
+                                ImageSize::Full => "w500",
                                 ImageSize::Profile => "w185",
                             };
 
@@ -177,7 +173,7 @@ fn image_loader_stream(
                                 v1::images::SERVE,
                                 &[
                                     ("{type}", media_type),
-                                    ("{id}", &id),
+                                    ("{id}", id),
                                     ("{category}", category),
                                     ("{index}", index_str.as_str()),
                                 ],
@@ -212,12 +208,11 @@ fn image_loader_stream(
                         } else {
                             // No work: wait for a wake-up signal to avoid busy loop
                             // Acquire the receiver once and keep it in state
-                            if receiver.is_none() {
-                                if let Ok(mut guard) = wake_receiver_arc.lock() {
-                                    if let Some(rx) = guard.take() {
-                                        receiver = Some(rx);
-                                    }
-                                }
+                            if receiver.is_none()
+                                && let Ok(mut guard) = wake_receiver_arc.lock()
+                                && let Some(rx) = guard.take()
+                            {
+                                receiver = Some(rx);
                             }
 
                             if let Some(ref mut rx) = receiver {

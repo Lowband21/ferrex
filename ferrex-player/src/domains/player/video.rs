@@ -1,8 +1,7 @@
 use std::time::Instant;
 
-use iced::{Point, Task};
+use iced::Task;
 
-use super::messages::Message;
 use crate::domains::ui::types::ViewState;
 use crate::state_refactored::State;
 
@@ -132,8 +131,25 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::M
     // Mark that we're loading
     state.domains.player.state.is_loading_video = true;
 
+    // Preserve any resume/duration hints before closing the current pipeline
+    let pending_resume_hint = state.domains.player.state.pending_resume_position;
+    let duration_hint_before_close = state.domains.player.state.last_valid_duration;
+
     // Close existing video if any (should not happen due to guard above)
     close_video(state);
+
+    // Restore playback hints immediately so UI elements reflect intended progress
+    if let Some(resume) = pending_resume_hint {
+        state.domains.player.state.last_valid_position = resume as f64;
+        state.domains.player.state.pending_resume_position = Some(resume);
+    } else {
+        state.domains.player.state.last_valid_position = 0.0;
+        state.domains.player.state.pending_resume_position = None;
+    }
+
+    if duration_hint_before_close > 0.0 {
+        state.domains.player.state.last_valid_duration = duration_hint_before_close;
+    }
 
     let url = match &state.domains.player.state.current_url {
         Some(url) => url.clone(),
@@ -155,10 +171,10 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::M
     // Check if this is HDR content based on server metadata
     let (use_hdr_pipeline, needs_metadata_fetch) =
         if let Some(current_media) = &state.domains.player.state.current_media {
-            if let Some(metadata) = &current_media.media_file_metadata {
-                if let Some(duration) = metadata.duration {
-                    state.domains.player.state.last_valid_duration = duration;
-                }
+            if let Some(metadata) = &current_media.media_file_metadata
+                && let Some(duration) = metadata.duration
+            {
+                state.domains.player.state.last_valid_duration = duration;
             }
             // Always log metadata for debugging
             log::info!("Checking HDR status for: {}", current_media.filename);
@@ -252,8 +268,24 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::M
 
             // Resume position if any
             if let Some(resume_pos) = state.domains.player.state.pending_resume_position {
-                let _ = video.seek(std::time::Duration::from_secs_f32(resume_pos), false);
-                state.domains.player.state.pending_resume_position = None;
+                match video.seek(std::time::Duration::from_secs_f32(resume_pos), false) {
+                    Ok(_) => {
+                        state.domains.player.state.last_valid_position = resume_pos as f64;
+                        state.domains.player.state.pending_resume_position = None;
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "Failed to seek to resume position {:.3}s: {}. Will retry when player heartbeat runs.",
+                            resume_pos,
+                            e
+                        );
+                        // Keep the pending resume so a later heartbeat can retry once the pipeline is ready
+                        state.domains.player.state.last_valid_position = resume_pos as f64;
+                        state.domains.player.state.pending_resume_position = Some(resume_pos);
+                    }
+                }
+            } else {
+                state.domains.player.state.last_valid_position = 0.0;
             }
 
             // Store and start playback

@@ -16,7 +16,10 @@ use crate::image::records::MediaImageVariantKey;
 use crate::image_service::{ImageService, TmdbImageSize};
 use crate::orchestration::actors::messages::ParentDescriptors;
 use crate::orchestration::job::{ImageFetchJob, ImageFetchPriority, ImageFetchSource};
-use crate::providers::TmdbApiProvider;
+use crate::orchestration::series::{
+    SeriesFolderClues, SeriesLocator, clean_series_title, collapse_whitespace,
+};
+use crate::providers::{ProviderError, TmdbApiProvider};
 use crate::types::details::{
     AlternativeTitle, CastMember, CollectionInfo, ContentRating, CrewMember, EnhancedMovieDetails,
     EnhancedSeriesDetails, EpisodeDetails, ExternalIds, GenreInfo, Keyword, MediaDetailsOption,
@@ -41,7 +44,7 @@ use tmdb_api::{
         videos::MovieVideosResult,
     },
     tvshow::{
-        aggregate_credits::TVShowAggregateCreditsResult,
+        Season as TmdbSeason, aggregate_credits::TVShowAggregateCreditsResult,
         content_rating::ContentRatingResult as TvContentRatingResult,
     },
 };
@@ -59,9 +62,10 @@ static MOVIE_FILENAME_YEAR_PARENS_PATTERN: Lazy<Regex> = Lazy::new(|| {
 static MOVIE_FILENAME_YEAR_DOT_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^(.+?)[\.\s]+(\d{4})[\.\s]").expect("movie filename dot regex should compile")
 });
-static COLLAPSE_WHITESPACE_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\s+").expect("whitespace regex should compile"));
+const SEASON_NOT_FOUND_PREFIX: &str = "season_not_found";
+const EPISODE_NOT_FOUND_PREFIX: &str = "episode_not_found";
 
+#[derive(Debug)]
 pub struct TmdbMetadataActor {
     db: Arc<MediaDatabase>,
     tmdb: Arc<TmdbApiProvider>,
@@ -70,11 +74,11 @@ pub struct TmdbMetadataActor {
 
 #[derive(Debug, Clone)]
 struct EpisodeContextInfo {
-    show_title: String,
+    series: SeriesFolderClues,
     season_number: u32,
     episode_number: u32,
     episode_title: Option<String>,
-    year: Option<u16>,
+    episode_year: Option<u16>,
 }
 
 impl TmdbMetadataActor {
@@ -123,10 +127,10 @@ impl TmdbMetadataActor {
         metadata: Option<&MediaFileMetadata>,
         path: &Path,
     ) -> (String, Option<u16>) {
-        if let Some(meta) = metadata {
-            if let Some(ParsedMediaInfo::Movie(info)) = &meta.parsed_info {
-                return (info.title.clone(), info.year);
-            }
+        if let Some(meta) = metadata
+            && let Some(ParsedMediaInfo::Movie(info)) = &meta.parsed_info
+        {
+            return (info.title.clone(), info.year);
         }
 
         if let Some(folder_name) = path
@@ -185,53 +189,39 @@ impl TmdbMetadataActor {
         (cleaned, None)
     }
 
-    fn clean_title(title: &str) -> String {
-        let collapsed = title.replace(['.', '_', '-'], " ");
-        COLLAPSE_WHITESPACE_REGEX
-            .replace_all(collapsed.trim(), " ")
-            .to_string()
-    }
-
     fn derive_episode_info(
         metadata: Option<&MediaFileMetadata>,
         path: &Path,
     ) -> Option<EpisodeContextInfo> {
-        if let Some(meta) = metadata {
-            if let Some(ParsedMediaInfo::Episode(info)) = &meta.parsed_info {
-                return Some(EpisodeContextInfo {
-                    show_title: info.show_name.clone(),
-                    season_number: info.season,
-                    episode_number: info.episode,
-                    episode_title: info.episode_title.clone(),
-                    year: info.year,
-                });
-            }
+        let folder_clues = SeriesFolderClues::from_path(path);
+
+        if let Some(meta) = metadata
+            && let Some(ParsedMediaInfo::Episode(info)) = &meta.parsed_info
+        {
+            let clues = folder_clues
+                .clone()
+                .merge_metadata(Some(info.show_name.as_str()), info.year);
+
+            return Some(EpisodeContextInfo {
+                series: clues,
+                season_number: info.season,
+                episode_number: info.episode,
+                episode_title: info.episode_title.clone(),
+                episode_year: info.year,
+            });
         }
 
         TvParser::parse_episode_info(path).map(|info| {
-            let show_title = TvParser::extract_series_name(path)
-                .or_else(|| {
-                    path.parent().and_then(|parent| {
-                        parent
-                            .file_name()
-                            .and_then(|name| name.to_str().map(|s| s.to_string()))
-                    })
-                })
-                .or_else(|| {
-                    path.file_stem()
-                        .and_then(|stem| stem.to_str().map(|s| s.to_string()))
-                })
-                .unwrap_or_else(|| "Unknown Series".to_string());
-
+            let clues = folder_clues;
             let episode_title = TvParser::extract_episode_title(path);
-            let year = info.year.and_then(|value| u16::try_from(value).ok());
+            let episode_year = info.year.and_then(|value| u16::try_from(value).ok());
 
             EpisodeContextInfo {
-                show_title,
+                series: clues,
                 season_number: info.season,
                 episode_number: info.episode,
                 episode_title,
-                year,
+                episode_year,
             }
         })
     }
@@ -379,10 +369,10 @@ impl TmdbMetadataActor {
         for ch in title.trim().chars() {
             if ch.is_ascii_alphanumeric() {
                 slug.push(ch.to_ascii_lowercase());
-            } else if ch.is_whitespace() || matches!(ch, '.' | '_' | '-' | '/' | '\\') {
-                if !slug.ends_with('-') {
-                    slug.push('-');
-                }
+            } else if (ch.is_whitespace() || matches!(ch, '.' | '_' | '-' | '/' | '\\'))
+                && !slug.ends_with('-')
+            {
+                slug.push('-');
             }
         }
         slug.trim_matches('-').to_string()
@@ -434,7 +424,7 @@ impl TmdbMetadataActor {
             ReleaseDateKind::Premiere,
         ];
 
-        let mut pick_cert = |dates: &[tmdb_api::common::release_date::ReleaseDate]| {
+        let pick_cert = |dates: &[tmdb_api::common::release_date::ReleaseDate]| {
             for kind in preferred.iter() {
                 if let Some(cert) = dates
                     .iter()
@@ -453,10 +443,10 @@ impl TmdbMetadataActor {
         };
 
         for region in ["US", "GB", "CA", "AU", "NZ", "FR"] {
-            if let Some(entry) = data.results.iter().find(|r| r.iso_3166_1 == region) {
-                if let Some(cert) = pick_cert(&entry.release_dates) {
-                    return Some(cert);
-                }
+            if let Some(entry) = data.results.iter().find(|r| r.iso_3166_1 == region)
+                && let Some(cert) = pick_cert(&entry.release_dates)
+            {
+                return Some(cert);
             }
         }
 
@@ -494,8 +484,8 @@ impl TmdbMetadataActor {
                 entry
                     .release_dates
                     .iter()
-                    .find_map(|rd| rd.certification.as_ref().map(|c| (c, rd)))
-                    .map(|(cert, rd)| ContentRating {
+                    .find_map(|rd| rd.certification.as_ref())
+                    .map(|cert| ContentRating {
                         iso_3166_1: entry.iso_3166_1.clone(),
                         rating: Some(cert.clone()),
                         rating_system: None,
@@ -638,6 +628,7 @@ impl TmdbMetadataActor {
             .iter()
             .take(20)
             .map(|c| {
+                let person_uuid = Self::person_media_uuid(c.person.id);
                 let slot = if c.person.profile_path.is_some() {
                     let assigned = next_slot;
                     next_slot = next_slot.saturating_add(1);
@@ -647,9 +638,9 @@ impl TmdbMetadataActor {
                 };
 
                 CastMember {
-                    id: c.person.id as u64,
+                    id: c.person.id,
                     credit_id: Some(c.credit.credit_id.clone()),
-                    cast_id: Some(c.cast_id as u64),
+                    cast_id: Some(c.cast_id),
                     name: c.person.name.clone(),
                     original_name: Some(c.credit.original_name.clone()),
                     character: c.character.clone(),
@@ -662,6 +653,8 @@ impl TmdbMetadataActor {
                     also_known_as: Vec::new(),
                     external_ids: PersonExternalIds::default(),
                     image_slot: slot,
+                    profile_media_id: c.person.profile_path.as_ref().map(|_| person_uuid),
+                    profile_image_index: c.person.profile_path.as_ref().map(|_| slot),
                 }
             })
             .collect()
@@ -679,7 +672,7 @@ impl TmdbMetadataActor {
             })
             .take(10)
             .map(|c| CrewMember {
-                id: c.person.id as u64,
+                id: c.person.id,
                 credit_id: Some(c.credit.credit_id.clone()),
                 name: c.person.name.clone(),
                 job: c.job.clone(),
@@ -719,10 +712,10 @@ impl TmdbMetadataActor {
     fn extract_series_content_rating(data: &TvContentRatingResult) -> Option<String> {
         let preferred_regions = ["US", "GB", "CA", "AU", "NZ", "FR"];
         for region in preferred_regions {
-            if let Some(entry) = data.results.iter().find(|r| r.iso_3166_1 == region) {
-                if !entry.rating.trim().is_empty() {
-                    return Some(entry.rating.trim().to_string());
-                }
+            if let Some(entry) = data.results.iter().find(|r| r.iso_3166_1 == region)
+                && !entry.rating.trim().is_empty()
+            {
+                return Some(entry.rating.trim().to_string());
             }
         }
 
@@ -783,8 +776,8 @@ impl TmdbMetadataActor {
             return None;
         }
 
-        let collapsed = COLLAPSE_WHITESPACE_REGEX.replace_all(trimmed, " ");
-        let normalized = collapsed.trim();
+        let normalized_value = collapse_whitespace(trimmed);
+        let normalized = normalized_value.trim();
         if normalized.is_empty() {
             None
         } else {
@@ -801,7 +794,7 @@ impl TmdbMetadataActor {
                 continue;
             }
 
-            let collapsed = COLLAPSE_WHITESPACE_REGEX.replace_all(trimmed, " ");
+            let collapsed = collapse_whitespace(trimmed);
             let candidate = collapsed.trim().to_string();
             if candidate.is_empty() {
                 continue;
@@ -868,6 +861,7 @@ impl TmdbMetadataActor {
             .iter()
             .take(20)
             .map(|c| {
+                let person_uuid = Self::person_media_uuid(c.inner.id);
                 let slot = if c.inner.profile_path.is_some() {
                     let assigned = next_slot;
                     next_slot = next_slot.saturating_add(1);
@@ -877,7 +871,7 @@ impl TmdbMetadataActor {
                 };
 
                 CastMember {
-                    id: c.inner.id as u64,
+                    id: c.inner.id,
                     credit_id: c.roles.first().map(|role| role.credit_id.clone()),
                     cast_id: None,
                     name: c.inner.name.clone(),
@@ -905,6 +899,8 @@ impl TmdbMetadataActor {
                     also_known_as: Vec::new(),
                     external_ids: PersonExternalIds::default(),
                     image_slot: slot,
+                    profile_media_id: c.inner.profile_path.as_ref().map(|_| person_uuid),
+                    profile_image_index: c.inner.profile_path.as_ref().map(|_| slot),
                 }
             })
             .collect()
@@ -916,7 +912,7 @@ impl TmdbMetadataActor {
             .iter()
             .take(20)
             .map(|c| CrewMember {
-                id: c.inner.id as u64,
+                id: c.inner.id,
                 credit_id: c.jobs.first().map(|job| job.credit_id.clone()),
                 name: c.inner.name.clone(),
                 job: c
@@ -956,7 +952,7 @@ impl TmdbMetadataActor {
         let metadata = Self::extract_technical_metadata(&command.analyzed.context);
         let path = PathBuf::from(&command.analyzed.path_norm);
         let (title_hint, year_hint) = Self::derive_movie_info(metadata.as_ref(), &path);
-        let clean_title = Self::clean_title(&title_hint);
+        let clean_title = clean_series_title(&title_hint);
 
         let search_results = self
             .tmdb
@@ -1307,9 +1303,38 @@ impl TmdbMetadataActor {
 
         let parent = Self::parse_parent_descriptors(&command.analyzed.context);
 
-        let series_ref = self
-            .resolve_series(command.job.library_id, &info, parent.as_ref())
-            .await?;
+        let mut excluded_series = HashSet::new();
+        let (series_ref, season_ref) = loop {
+            let candidate_series = self
+                .resolve_series(
+                    command.job.library_id,
+                    &info,
+                    parent.as_ref(),
+                    &excluded_series,
+                )
+                .await?;
+
+            match self
+                .resolve_season(
+                    command.job.library_id,
+                    &candidate_series,
+                    info.season_number,
+                )
+                .await
+            {
+                Ok(season_ref) => break (candidate_series, season_ref),
+                Err(MediaError::InvalidMedia(msg)) if msg.starts_with(SEASON_NOT_FOUND_PREFIX) => {
+                    if candidate_series.tmdb_id == 0 {
+                        return Err(MediaError::InvalidMedia(msg));
+                    }
+                    if !excluded_series.insert(candidate_series.tmdb_id) {
+                        return Err(MediaError::InvalidMedia(msg));
+                    }
+                    continue;
+                }
+                Err(err) => return Err(err),
+            }
+        };
 
         if let MediaDetailsOption::Details(TmdbDetails::Series(details)) = &series_ref.details {
             self.queue_image_job(
@@ -1340,10 +1365,6 @@ impl TmdbMetadataActor {
             self.queue_person_profile_jobs(command.job.library_id, &details.cast, &mut image_jobs)
                 .await?;
         }
-
-        let season_ref = self
-            .resolve_season(command.job.library_id, &series_ref, info.season_number)
-            .await?;
 
         if let MediaDetailsOption::Details(TmdbDetails::Season(details)) = &season_ref.details {
             self.queue_image_job(
@@ -1434,40 +1455,63 @@ impl TmdbMetadataActor {
         library_id: LibraryID,
         info: &EpisodeContextInfo,
         parent: Option<&ParentDescriptors>,
+        excluded_tmdb_ids: &HashSet<u64>,
     ) -> Result<SeriesReference> {
-        if let Some(parent) = parent {
-            if let Some(series_id) = parent.series_id {
-                if let Ok(series) = self.db.backend().get_series_reference(&series_id).await {
-                    return Ok(series);
-                }
-            }
-        }
-
-        let clean_title = Self::clean_title(&info.show_title);
-
-        if let Some(existing) = self
-            .db
-            .backend()
-            .find_series_by_name(library_id, &clean_title)
+        let locator = SeriesLocator::new(self.db.backend());
+        if let Some(existing) = locator
+            .find_existing_series(library_id, parent, &info.series.normalized_title)
             .await?
+            && (existing.tmdb_id == 0 || !excluded_tmdb_ids.contains(&existing.tmdb_id))
         {
             return Ok(existing);
         }
 
         let search_results = self
             .tmdb
-            .search_series(&clean_title)
+            .search_series(
+                &info.series.normalized_title,
+                info.series.year,
+                info.series.region.as_deref(),
+            )
             .await
             .map_err(|e| MediaError::Internal(format!("TMDB series search failed: {e}")))?;
 
-        if let Some(candidate) = Self::pick_series_candidate(&clean_title, &search_results) {
+        let mut ordered_tmdb_ids = Vec::new();
+        let mut seen_ids = HashSet::new();
+
+        let clean_title = info.series.normalized_title.clone();
+
+        if let Some(primary) = Self::pick_series_candidate(
+            &clean_title,
+            info.series.region.as_deref(),
+            &search_results,
+        ) && primary.tmdb_id != 0
+            && seen_ids.insert(primary.tmdb_id)
+        {
+            ordered_tmdb_ids.push(primary.tmdb_id);
+        }
+
+        for candidate in &search_results {
             let tmdb_id = candidate.tmdb_id;
+            if tmdb_id == 0 {
+                continue;
+            }
+            if seen_ids.insert(tmdb_id) {
+                ordered_tmdb_ids.push(tmdb_id);
+            }
+        }
+
+        for tmdb_id in ordered_tmdb_ids {
+            if excluded_tmdb_ids.contains(&tmdb_id) {
+                continue;
+            }
 
             if let Some(existing) = self
                 .db
                 .backend()
                 .get_series_by_tmdb_id(library_id, tmdb_id)
                 .await?
+                && (existing.tmdb_id == 0 || !excluded_tmdb_ids.contains(&existing.tmdb_id))
             {
                 return Ok(existing);
             }
@@ -1495,14 +1539,16 @@ impl TmdbMetadataActor {
                 }
             }
 
-            return Ok(series_ref);
+            if series_ref.tmdb_id == 0 || !excluded_tmdb_ids.contains(&series_ref.tmdb_id) {
+                return Ok(series_ref);
+            }
         }
 
         debug!(
             "Falling back to stub series metadata for '{}'",
-            info.show_title
+            info.series.raw_title
         );
-        let stub = self.build_series_stub(library_id, info)?;
+        let stub = self.build_series_stub(library_id, info, parent)?;
         self.db.backend().store_series_reference(&stub).await?;
         Ok(stub)
     }
@@ -1661,12 +1707,28 @@ impl TmdbMetadataActor {
         &self,
         library_id: LibraryID,
         info: &EpisodeContextInfo,
+        parent: Option<&ParentDescriptors>,
     ) -> Result<SeriesReference> {
-        let clean_title = Self::clean_title(&info.show_title);
+        let clean_title = parent
+            .and_then(|p| p.series_title_hint.as_deref())
+            .map(clean_series_title)
+            .filter(|title| !title.is_empty())
+            .unwrap_or_else(|| info.series.normalized_title.clone());
         let title = SeriesTitle::new(clean_title.clone()).map_err(|e| {
             MediaError::Internal(format!("Invalid series title '{}' ({e})", clean_title))
         })?;
-        let slug = Self::slugify_title(&info.show_title);
+
+        let slug_source = parent
+            .and_then(|p| p.series_slug.as_deref())
+            .map(|slug| slug.replace('-', " "))
+            .unwrap_or_else(|| {
+                if info.series.raw_title.is_empty() {
+                    clean_title.clone()
+                } else {
+                    info.series.raw_title.clone()
+                }
+            });
+        let slug = Self::slugify_title(&slug_source);
         let endpoint = format!("/series/lookup/{}", slug);
 
         Ok(SeriesReference {
@@ -1702,8 +1764,32 @@ impl TmdbMetadataActor {
             MediaError::InvalidMedia(format!("Season number {} out of range", season_number))
         })?;
 
+        let season_details = if series_ref.tmdb_id > 0 {
+            match self
+                .tmdb
+                .get_season(series_ref.tmdb_id, season_number_u8)
+                .await
+            {
+                Ok(details) => Some(details),
+                Err(ProviderError::ApiError(msg)) if msg.contains("404") => {
+                    return Err(MediaError::InvalidMedia(format!(
+                        "{}:{}",
+                        SEASON_NOT_FOUND_PREFIX, season_number
+                    )));
+                }
+                Err(err) => {
+                    return Err(MediaError::Internal(format!(
+                        "Failed to fetch season {} for series {}: {err}",
+                        season_number, series_ref.tmdb_id
+                    )));
+                }
+            }
+        } else {
+            None
+        };
+
         let mut season_ref = self
-            .build_season_reference(library_id, series_ref, season_number_u8)
+            .build_season_reference(library_id, series_ref, season_number_u8, season_details)
             .await?;
 
         let actual_id = self
@@ -1724,36 +1810,31 @@ impl TmdbMetadataActor {
         library_id: LibraryID,
         series_ref: &SeriesReference,
         season_number: u8,
+        season_details: Option<TmdbSeason>,
     ) -> Result<SeasonReference> {
         let mut details_opt = None;
-        if series_ref.tmdb_id > 0 {
-            if let Ok(details) = self
-                .tmdb
-                .get_season(series_ref.tmdb_id, season_number)
-                .await
-            {
-                let name = if details.inner.name.trim().is_empty() {
-                    format!("Season {}", season_number)
-                } else {
-                    details.inner.name.clone()
-                };
+        if let Some(details) = season_details {
+            let name = if details.inner.name.trim().is_empty() {
+                format!("Season {}", season_number)
+            } else {
+                details.inner.name.clone()
+            };
 
-                details_opt = Some(SeasonDetails {
-                    id: details.inner.id as u64,
-                    season_number: details.inner.season_number as u8,
-                    name,
-                    overview: details.inner.overview.clone(),
-                    air_date: details.inner.air_date.as_ref().map(|d| d.to_string()),
-                    episode_count: details.episodes.len() as u32,
-                    poster_path: details.inner.poster_path.clone(),
-                    runtime: None,
-                    external_ids: ExternalIds::default(),
-                    images: MediaImages::default(),
-                    videos: Vec::new(),
-                    keywords: Vec::new(),
-                    translations: Vec::new(),
-                });
-            }
+            details_opt = Some(SeasonDetails {
+                id: details.inner.id,
+                season_number: details.inner.season_number as u8,
+                name,
+                overview: details.inner.overview.clone(),
+                air_date: details.inner.air_date.as_ref().map(|d| d.to_string()),
+                episode_count: details.episodes.len() as u32,
+                poster_path: details.inner.poster_path.clone(),
+                runtime: None,
+                external_ids: ExternalIds::default(),
+                images: MediaImages::default(),
+                videos: Vec::new(),
+                keywords: Vec::new(),
+                translations: Vec::new(),
+            });
         }
 
         let endpoint_path = if series_ref.tmdb_id > 0 {
@@ -1822,7 +1903,7 @@ impl TmdbMetadataActor {
             {
                 Ok(details) => {
                     let mapped = EpisodeDetails {
-                        id: details.inner.id as u64,
+                        id: details.inner.id,
                         episode_number: details.inner.episode_number as u8,
                         season_number: details.inner.season_number as u8,
                         name: details.inner.name.clone(),
@@ -1846,17 +1927,24 @@ impl TmdbMetadataActor {
                         crew: Vec::new(),
                         content_ratings: Vec::new(),
                     };
-                    (Some(mapped), Some(details.inner.id as u64))
+                    (Some(mapped), Some(details.inner.id))
                 }
-                Err(err) => {
-                    warn!(
-                        "Failed to fetch episode details for series {} S{}E{}: {}",
+                Err(ProviderError::ApiError(msg)) if msg.contains("404") => {
+                    return Err(MediaError::InvalidMedia(format!(
+                        "{}:{}:{}:{}",
+                        EPISODE_NOT_FOUND_PREFIX,
                         series_ref.tmdb_id,
                         season_ref.season_number.value(),
-                        episode_number_u8,
-                        err
-                    );
-                    (None, None)
+                        episode_number_u8
+                    )));
+                }
+                Err(err) => {
+                    return Err(MediaError::Internal(format!(
+                        "Failed to fetch episode details for series {} S{}E{}: {err}",
+                        series_ref.tmdb_id,
+                        season_ref.season_number.value(),
+                        episode_number_u8
+                    )));
                 }
             }
         } else {
@@ -1961,6 +2049,7 @@ impl TmdbMetadataActor {
 
     fn pick_series_candidate<'a>(
         query: &str,
+        _region: Option<&str>,
         results: &'a [SeriesReference],
     ) -> Option<&'a SeriesReference> {
         if results.is_empty() {

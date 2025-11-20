@@ -5,11 +5,7 @@ use crate::{
             ArchivedEpisodeID, ArchivedMovieID, ArchivedSeasonID, ArchivedSeriesID, EpisodeID,
             MovieID, SeasonID, SeriesID,
         },
-        media::{
-            ArchivedEpisodeReference, ArchivedMedia, ArchivedMovieReference,
-            ArchivedSeasonReference, ArchivedSeriesReference, EpisodeReference, Media,
-            MovieReference, SeasonReference, SeriesReference,
-        },
+        media::{ArchivedMedia, ArchivedMovieReference},
     },
 };
 use rkyv::{
@@ -17,8 +13,6 @@ use rkyv::{
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use super::MediaType;
 
 #[derive(
     Debug,
@@ -106,7 +100,7 @@ impl std::fmt::Display for MediaID {
 impl From<ArchivedMedia> for ArchivedMovieReference {
     fn from(med_ref: ArchivedMedia) -> Self {
         match med_ref {
-            ArchivedMedia::Movie(data) => ArchivedMovieReference::from(data),
+            ArchivedMedia::Movie(data) => data,
             _ => panic!("Cannot convert non-movie reference to movie reference"),
         }
     }

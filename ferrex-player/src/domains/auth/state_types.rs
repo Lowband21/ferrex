@@ -100,7 +100,7 @@ impl AuthStateStore {
     where
         F: FnOnce(&AuthState) -> R,
     {
-        f(&*self.receiver.borrow())
+        f(&self.receiver.borrow())
     }
 
     /// Subscribe to auth state changes
@@ -142,21 +142,20 @@ impl AuthStateStore {
 
     /// Complete token refresh
     pub fn complete_refresh(&self, token: AuthToken) {
-        if let AuthState::Refreshing { previous } = self.current() {
-            if let AuthState::Authenticated {
+        if let AuthState::Refreshing { previous } = self.current()
+            && let AuthState::Authenticated {
                 user,
                 permissions,
                 server_url,
                 ..
             } = *previous
-            {
-                self.set(AuthState::Authenticated {
-                    user,
-                    token,
-                    permissions,
-                    server_url,
-                });
-            }
+        {
+            self.set(AuthState::Authenticated {
+                user,
+                token,
+                permissions,
+                server_url,
+            });
         }
     }
 

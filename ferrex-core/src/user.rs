@@ -116,17 +116,12 @@ impl Default for UserPreferences {
 }
 
 /// Theme preference options
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum ThemePreference {
     Light,
     Dark,
+    #[default]
     System, // Follow system theme
-}
-
-impl Default for ThemePreference {
-    fn default() -> Self {
-        Self::System
-    }
 }
 
 /// Subtitle display preferences

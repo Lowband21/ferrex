@@ -222,6 +222,12 @@ pub struct BackdropTransitionState {
     ),
     profiling::all_functions
 )]
+impl Default for BackdropTransitionState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BackdropTransitionState {
     /// Create a new backdrop transition state
     pub fn new() -> Self {

@@ -160,6 +160,12 @@ impl SecurityState {
     ),
     profiling::all_functions
 )]
+impl Default for PasswordChangeState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PasswordChangeState {
     pub fn new() -> Self {
         Self {
@@ -193,7 +199,7 @@ impl PasswordChangeState {
         // Check password complexity
         let has_upper = self.new.chars().any(|c| c.is_uppercase());
         let has_lower = self.new.chars().any(|c| c.is_lowercase());
-        let has_digit = self.new.chars().any(|c| c.is_digit(10));
+        let has_digit = self.new.chars().any(|c| c.is_ascii_digit());
 
         if !has_upper || !has_lower || !has_digit {
             return Err("Password must contain uppercase, lowercase, and numbers".to_string());
@@ -234,7 +240,7 @@ impl PinChangeState {
         if self.new.len() != 4 {
             return Err("PIN must be exactly 4 digits".to_string());
         }
-        if !self.new.chars().all(|c| c.is_digit(10)) {
+        if !self.new.chars().all(|c| c.is_ascii_digit()) {
             return Err("PIN must contain only digits".to_string());
         }
         if self.new != self.confirm {

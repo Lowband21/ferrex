@@ -1,6 +1,5 @@
 use parking_lot::RwLock;
 use std::collections::{HashMap, VecDeque};
-use std::hash::Hash;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -73,8 +72,8 @@ impl<Y> YokeCache<Y> {
     /// Insert or update (LRU-aware)
     pub fn insert(&self, id: Uuid, yoke: Arc<Y>) {
         let mut inner = self.inner.write();
-        if inner.map.contains_key(&id) {
-            inner.map.insert(id, yoke);
+        if let std::collections::hash_map::Entry::Occupied(mut e) = inner.map.entry(id) {
+            e.insert(yoke);
             if let Some(pos) = inner.lru.iter().position(|x| x == &id) {
                 inner.lru.remove(pos);
             }
@@ -83,10 +82,10 @@ impl<Y> YokeCache<Y> {
         }
 
         // Evict if at capacity
-        if inner.map.len() >= self.cap {
-            if let Some(old) = inner.lru.pop_back() {
-                inner.map.remove(&old);
-            }
+        if inner.map.len() >= self.cap
+            && let Some(old) = inner.lru.pop_back()
+        {
+            inner.map.remove(&old);
         }
 
         inner.map.insert(id, yoke);

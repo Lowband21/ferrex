@@ -5,12 +5,12 @@ use uuid::Uuid;
 use super::super::views::carousel::CarouselState;
 use crate::{
     domains::ui::{ViewState, messages::Message, types, views::grid::macros},
-    infrastructure::api_types::{Media, MovieReference},
     state_refactored::State,
 };
 use ferrex_core::{
-    EpisodeID, ImageRequest, ImageSize, ImageType, MediaFile, MediaID, MediaIDLike, MediaOps,
-    MovieID, MovieLike, Priority, SeasonID, SeasonLike, SeriesID, SeriesLike,
+    BackdropKind, BackdropSize, EpisodeID, ImageRequest, MediaID, MediaIDLike, MediaOps, MovieID,
+    MovieLike, PosterKind, PosterSize, Priority, ProfileSize, SeasonID, SeasonLike, SeriesID,
+    SeriesLike,
 };
 
 /// Updates background shader depth regions when transitioning to a detail view
@@ -28,11 +28,12 @@ fn prepare_depth_regions_for_transition(state: &mut State, new_view: &ViewState)
     // This triggers the fade animation between different depth layouts
 
     // TODO: This is cumbersome, fix it
-    let uuid = if let Some(library_id) = state.domains.library.state.current_library_id {
-        Some(library_id.as_uuid())
-    } else {
-        None
-    };
+    let uuid = state
+        .domains
+        .library
+        .state
+        .current_library_id
+        .map(|library_id| library_id.as_uuid());
     state
         .domains
         .ui
@@ -150,7 +151,7 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
         save_current_scroll_state(state);
 
         let new_view = ViewState::MovieDetail {
-            movie_id: movie_id,
+            movie_id,
             backdrop_handle: None,
         };
 
@@ -158,29 +159,29 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
         prepare_depth_regions_for_transition(state, &new_view);
 
         // THEN: Transition to new theme colors
-        if let ArchivedOption::Some(hex) = &movie.theme_color {
-            if let Ok(color) = macros::parse_hex_color(hex) {
-                let r = color.r * 0.2;
-                let g = color.g * 0.2;
-                let b = color.b * 0.2;
-                let primary_dark = iced::Color::from_rgb(r, g, b);
+        if let ArchivedOption::Some(hex) = &movie.theme_color
+            && let Ok(color) = macros::parse_hex_color(hex)
+        {
+            let r = color.r * 0.2;
+            let g = color.g * 0.2;
+            let b = color.b * 0.2;
+            let primary_dark = iced::Color::from_rgb(r, g, b);
 
-                // Secondary color is much lighter for stronger gradient
-                let secondary = iced::Color::from_rgb(
-                    (color.r * 0.8).min(1.0), // 4x primary
-                    (color.g * 0.8).min(1.0),
-                    (color.b * 0.8).min(1.0),
-                );
+            // Secondary color is much lighter for stronger gradient
+            let secondary = iced::Color::from_rgb(
+                (color.r * 0.8).min(1.0), // 4x primary
+                (color.g * 0.8).min(1.0),
+                (color.b * 0.8).min(1.0),
+            );
 
-                // Start color transition
-                state
-                    .domains
-                    .ui
-                    .state
-                    .background_shader_state
-                    .color_transitions
-                    .transition_to(primary_dark, secondary);
-            }
+            // Start color transition
+            state
+                .domains
+                .ui
+                .state
+                .background_shader_state
+                .color_transitions
+                .transition_to(primary_dark, secondary);
         }
 
         // Non-functional
@@ -196,8 +197,11 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
         // Queue image requests if not in cache
         if let Some(movie_details) = movie.details() {
             if movie_details.backdrop_path.is_some() {
-                let request =
-                    ImageRequest::new(movie.id.to_uuid(), ImageSize::Backdrop, ImageType::Movie);
+                let request = ImageRequest::backdrop(
+                    movie.id.to_uuid(),
+                    BackdropKind::Movie,
+                    BackdropSize::Quality,
+                );
                 if state.image_service.get(&request).is_none() {
                     state.image_service.request_image(request);
                 }
@@ -207,7 +211,7 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
 
             // Ensure the hero poster is ready when the detail view renders
             let poster_request =
-                ImageRequest::new(movie.id.to_uuid(), ImageSize::Full, ImageType::Movie)
+                ImageRequest::poster(movie.id.to_uuid(), PosterKind::Movie, PosterSize::Original)
                     .with_priority(Priority::Visible);
             if state.image_service.get(&poster_request).is_none() {
                 state.image_service.request_image(poster_request);
@@ -215,18 +219,18 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
 
             // Preload primary cast portraits for the carousel
             for cast_member in movie_details.cast.iter().take(12) {
-                let slot = cast_member.image_slot.to_native();
-                if slot == u32::MAX {
-                    continue;
-                }
-                let person_uuid = Uuid::new_v5(
-                    &Uuid::NAMESPACE_OID,
-                    format!("person-{}", cast_member.id).as_bytes(),
-                );
-                let cast_request =
-                    ImageRequest::new(person_uuid, ImageSize::Profile, ImageType::Person)
-                        .with_priority(Priority::Preload)
-                        .with_index(slot.into());
+                let person_uuid = match &cast_member.profile_media_id {
+                    ArchivedOption::Some(uuid) => *uuid,
+                    ArchivedOption::None => continue,
+                };
+
+                let image_index = match &cast_member.profile_image_index {
+                    ArchivedOption::Some(index) => index.to_native(),
+                    ArchivedOption::None => 0,
+                };
+                let cast_request = ImageRequest::person_profile(person_uuid, ProfileSize::Standard)
+                    .with_priority(Priority::Preload)
+                    .with_index(image_index);
 
                 if state.image_service.get(&cast_request).is_none() {
                     state.image_service.request_image(cast_request);
@@ -300,36 +304,39 @@ pub fn handle_view_series(state: &mut State, series_id: SeriesID) -> Task<Messag
         prepare_depth_regions_for_transition(state, &new_view);
 
         // THEN: Transition to new theme colors
-        if let ArchivedOption::Some(hex) = &series.theme_color {
-            if let Ok(color) = macros::parse_hex_color(hex) {
-                let r = color.r * 0.2;
-                let g = color.g * 0.2;
-                let b = color.b * 0.2;
-                let primary_dark = iced::Color::from_rgb(r, g, b);
+        if let ArchivedOption::Some(hex) = &series.theme_color
+            && let Ok(color) = macros::parse_hex_color(hex)
+        {
+            let r = color.r * 0.2;
+            let g = color.g * 0.2;
+            let b = color.b * 0.2;
+            let primary_dark = iced::Color::from_rgb(r, g, b);
 
-                // Secondary color is much lighter for stronger gradient
-                let secondary = iced::Color::from_rgb(
-                    (color.r * 0.8).min(1.0), // 4x primary
-                    (color.g * 0.8).min(1.0),
-                    (color.b * 0.8).min(1.0),
-                );
+            // Secondary color is much lighter for stronger gradient
+            let secondary = iced::Color::from_rgb(
+                (color.r * 0.8).min(1.0), // 4x primary
+                (color.g * 0.8).min(1.0),
+                (color.b * 0.8).min(1.0),
+            );
 
-                // Start color transition
-                state
-                    .domains
-                    .ui
-                    .state
-                    .background_shader_state
-                    .color_transitions
-                    .transition_to(primary_dark, secondary);
-            }
+            // Start color transition
+            state
+                .domains
+                .ui
+                .state
+                .background_shader_state
+                .color_transitions
+                .transition_to(primary_dark, secondary);
         }
 
         // Queue request if not in cache
         if let Some(details) = series.details() {
             if details.backdrop_path.is_some() {
-                let request =
-                    ImageRequest::new(series.id.to_uuid(), ImageSize::Backdrop, ImageType::Series);
+                let request = ImageRequest::backdrop(
+                    series.id.to_uuid(),
+                    BackdropKind::Series,
+                    BackdropSize::Quality,
+                );
                 if state.image_service.get(&request).is_none() {
                     state.image_service.request_image(request);
                 }
@@ -338,27 +345,30 @@ pub fn handle_view_series(state: &mut State, series_id: SeriesID) -> Task<Messag
             }
 
             // Preload the primary series poster
-            let poster_request =
-                ImageRequest::new(series.id.to_uuid(), ImageSize::Full, ImageType::Series)
-                    .with_priority(Priority::Visible);
+            let poster_request = ImageRequest::poster(
+                series.id.to_uuid(),
+                PosterKind::Series,
+                PosterSize::Original,
+            )
+            .with_priority(Priority::Visible);
             if state.image_service.get(&poster_request).is_none() {
                 state.image_service.request_image(poster_request);
             }
 
             // Prefetch lead cast portraits for the detail view carousel
             for cast_member in details.cast.iter().take(12) {
-                let slot = cast_member.image_slot.to_native();
-                if slot == u32::MAX {
-                    continue;
-                }
-                let person_uuid = Uuid::new_v5(
-                    &Uuid::NAMESPACE_OID,
-                    format!("person-{}", cast_member.id).as_bytes(),
-                );
-                let cast_request =
-                    ImageRequest::new(person_uuid, ImageSize::Profile, ImageType::Person)
-                        .with_priority(Priority::Preload)
-                        .with_index(slot.into());
+                let person_uuid = match &cast_member.profile_media_id {
+                    ArchivedOption::Some(uuid) => *uuid,
+                    ArchivedOption::None => continue,
+                };
+
+                let image_index = match &cast_member.profile_image_index {
+                    ArchivedOption::Some(index) => index.to_native(),
+                    ArchivedOption::None => 0,
+                };
+                let cast_request = ImageRequest::person_profile(person_uuid, ProfileSize::Standard)
+                    .with_priority(Priority::Preload)
+                    .with_index(image_index);
 
                 if state.image_service.get(&cast_request).is_none() {
                     state.image_service.request_image(cast_request);
@@ -436,39 +446,39 @@ pub fn handle_view_season(
 
         prepare_depth_regions_for_transition(state, &new_view);
 
-        if let Some(hex) = season.theme_color() {
-            if let Ok(color) = macros::parse_hex_color(hex) {
-                let r = color.r * 0.2;
-                let g = color.g * 0.2;
-                let b = color.b * 0.2;
-                let primary_dark = iced::Color::from_rgb(r, g, b);
-                let secondary = iced::Color::from_rgb(
-                    (color.r * 0.8).min(1.0),
-                    (color.g * 0.8).min(1.0),
-                    (color.b * 0.8).min(1.0),
-                );
-                state
-                    .domains
-                    .ui
-                    .state
-                    .background_shader_state
-                    .color_transitions
-                    .transition_to(primary_dark, secondary);
-            }
+        if let Some(hex) = season.theme_color()
+            && let Ok(color) = macros::parse_hex_color(hex)
+        {
+            let r = color.r * 0.2;
+            let g = color.g * 0.2;
+            let b = color.b * 0.2;
+            let primary_dark = iced::Color::from_rgb(r, g, b);
+            let secondary = iced::Color::from_rgb(
+                (color.r * 0.8).min(1.0),
+                (color.g * 0.8).min(1.0),
+                (color.b * 0.8).min(1.0),
+            );
+            state
+                .domains
+                .ui
+                .state
+                .background_shader_state
+                .color_transitions
+                .transition_to(primary_dark, secondary);
         }
 
         // Queue season backdrop request if details include one
 
-        if let Some(details) = season.details() {
-            if details.poster_path.is_some() || details.name.len() > 0 {
-                let request = ImageRequest::new(
-                    season.id().to_uuid(),
-                    ImageSize::Backdrop,
-                    ImageType::Season,
-                );
-                if state.image_service.get(&request).is_none() {
-                    state.image_service.request_image(request);
-                }
+        if let Some(details) = season.details()
+            && (details.poster_path.is_some() || !details.name.is_empty())
+        {
+            let request = ImageRequest::backdrop(
+                season.id().to_uuid(),
+                BackdropKind::Season,
+                BackdropSize::Quality,
+            );
+            if state.image_service.get(&request).is_none() {
+                state.image_service.request_image(request);
             }
         }
 

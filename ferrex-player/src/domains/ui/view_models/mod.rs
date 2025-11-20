@@ -4,10 +4,8 @@ pub mod all_view_model;
 
 pub use all_view_model::AllViewModel;
 use ferrex_core::Media;
-use uuid::Uuid;
 
 //use crate::domains::metadata::service::FetchPriority;
-use crate::infrastructure::MediaID;
 
 /// Items that are visible in a view and their priority for metadata fetching
 #[derive(Debug, Clone)]

@@ -1,29 +1,19 @@
 use super::theme;
 use super::track_selection::format_subtitle_track;
-use crate::domains::player::{messages::Message, state::PlayerDomainState};
-use crate::domains::search::metrics::ConnectionQuality;
-use crate::infrastructure::constants::player::seeking::*;
+use crate::{
+    common::ui_utils::{icon_text, lucide_font},
+    domains::player::{messages::Message, state::PlayerDomainState},
+    infrastructure::constants::player::seeking::*,
+};
+use iced::ContentFit;
 use iced::Theme;
 use iced::{
+    widget::{button, column, container, mouse_area, pick_list, row, slider, stack, text, Space},
     Alignment, Element, Length,
-    widget::{
-        Space, button, checkbox, column, container, mouse_area, pick_list, row, slider, stack, text,
-    },
 };
-use iced::{ContentFit, Font};
 use lucide_icons::Icon;
 use subwave_core::video::types::{AudioTrack, SubtitleTrack};
 use subwave_unified::video::BackendPreference;
-
-/// Get the lucide font
-fn lucide_font() -> Font {
-    Font::with_name("lucide")
-}
-
-/// Helper function to create icon text
-fn icon_text(icon: Icon) -> iced::widget::Text<'static> {
-    text(icon.unicode()).font(lucide_font()).size(20)
-}
 
 /// Helper function to create a control button with icon
 fn icon_button(icon: Icon, message: Option<Message>) -> Element<'static, Message> {
@@ -41,7 +31,7 @@ fn icon_button(icon: Icon, message: Option<Message>) -> Element<'static, Message
 
 impl PlayerDomainState {
     /// Build the full controls overlay
-    pub fn build_controls(&self) -> iced::Element<Message, Theme> {
+    pub fn build_controls(&self) -> iced::Element<'_, Message, Theme> {
         let controls = column![
             // Top bar with title and buttons
             container(
@@ -122,7 +112,7 @@ impl PlayerDomainState {
     /// The seek bar has a visual height of 4px but a hit zone of 30px for easier interaction.
     /// Mouse clicks are validated to be within 7x the visual bar height (28px) vertically to prevent
     /// accidental seeks when clicking elsewhere on the screen.
-    fn build_seek_bar(&self) -> Element<Message> {
+    fn build_seek_bar(&self) -> Element<'_, Message> {
         let bar_height = super::state::SEEK_BAR_VISUAL_HEIGHT;
         let hit_area_height =
             crate::infrastructure::constants::player_controls::SEEK_BAR_HIT_ZONE_HEIGHT;
@@ -131,8 +121,7 @@ impl PlayerDomainState {
         // Use source duration if available (for HLS this is the full media duration)
         let duration = self.source_duration.unwrap_or(self.last_valid_duration);
         let played_percentage = if duration > 0.0 {
-            let percentage = (self.last_valid_position / duration).clamp(0.0, 1.0) as f64;
-            percentage
+            (self.last_valid_position / duration).clamp(0.0, 1.0)
         } else {
             log::debug!(
                 "Seek bar: No duration available (source: {:?}, duration: {})",
@@ -197,17 +186,11 @@ impl PlayerDomainState {
     }
 
     /// Build the main control buttons
-    fn build_control_buttons(&self) -> Element<Message> {
-        // Use source duration if available (for HLS this is the full media duration)
-        let duration = self.source_duration.unwrap_or(self.last_valid_duration);
-
-        //log::debug!(
-        //    "Building control buttons - position: {:.2}s, duration: {:.2}s, source_duration: {:?}",
-        //    self.position,
-        //    self.last_valid_duration,
-        //    self.source_duration
-        //);
-
+    fn build_control_buttons(&self) -> Element<'_, Message> {
+        //// Use source duration if available (for HLS this is the full media duration)
+        //let duration = self.source_duration.unwrap_or(self.last_valid_duration);
+        // HLS not currently functional
+        let duration = self.last_valid_duration;
         {
             // Build a Wayland-only backend toggle element
             let backend_toggle: Element<Message, Theme> =
@@ -360,7 +343,7 @@ impl PlayerDomainState {
     }
 
     /// Build the settings panel content
-    pub fn build_settings_panel(&self) -> iced::Element<Message, Theme> {
+    pub fn build_settings_panel(&self) -> iced::Element<'_, Message, Theme> {
         container(
             column![
                 // Header
@@ -516,7 +499,7 @@ impl PlayerDomainState {
     }
 
     /// Build audio track selector
-    fn build_audio_track_selector(&self) -> Element<Message> {
+    fn build_audio_track_selector(&self) -> Element<'_, Message> {
         if self.available_audio_tracks.is_empty() {
             text("No audio tracks available")
                 .size(14)
@@ -543,7 +526,7 @@ impl PlayerDomainState {
     }
 
     /// Build subtitle controls for settings panel
-    fn build_subtitle_controls(&self) -> Element<Message> {
+    fn build_subtitle_controls(&self) -> Element<'_, Message> {
         if self.available_subtitle_tracks.is_empty() {
             text("No subtitle tracks available")
                 .size(14)
@@ -594,8 +577,8 @@ impl PlayerDomainState {
     }
 
     /// Build the quality/tone mapping menu popup
-    pub fn build_quality_menu(&self) -> iced::Element<Message, Theme, iced_wgpu::Renderer> {
-        let mut content = column![
+    pub fn build_quality_menu(&self) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
+        let content = column![
             // Header
             row![
                 text("Video Settings").size(16).style(theme::text_bright),
@@ -617,7 +600,7 @@ impl PlayerDomainState {
     }
 
     /// Build the subtitle menu popup
-    pub fn build_subtitle_menu(&self) -> iced::Element<Message, Theme, iced_wgpu::Renderer> {
+    pub fn build_subtitle_menu(&self) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
         container(
             column![
                 // Header

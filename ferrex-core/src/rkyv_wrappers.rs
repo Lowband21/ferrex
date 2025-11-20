@@ -3,42 +3,7 @@ use rkyv::{
     rancor::Fallible,
     with::{ArchiveWith, DeserializeWith, SerializeWith},
 };
-use std::marker::PhantomData;
 use std::path::PathBuf;
-use uuid::Uuid;
-
-use crate::ArchivedMedia;
-
-// A rkyv feature for uuid exists, we should use that instead
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub struct UuidWrapper;
-
-impl ArchiveWith<Uuid> for UuidWrapper {
-    type Archived = [u8; 16];
-    type Resolver = ();
-
-    fn resolve_with(field: &Uuid, _: Self::Resolver, out: Place<Self::Archived>) {
-        out.write(*field.as_bytes());
-    }
-}
-
-impl<S: Fallible + ?Sized> SerializeWith<Uuid, S> for UuidWrapper {
-    fn serialize_with(
-        _field: &Uuid,
-        _serializer: &mut S,
-    ) -> Result<Self::Resolver, <S as Fallible>::Error> {
-        Ok(())
-    }
-}
-
-impl<D: Fallible + ?Sized> DeserializeWith<[u8; 16], Uuid, D> for UuidWrapper {
-    fn deserialize_with(
-        field: &[u8; 16],
-        _deserializer: &mut D,
-    ) -> Result<Uuid, <D as Fallible>::Error> {
-        Ok(Uuid::from_bytes(*field))
-    }
-}
 
 // Wrapper for PathBuf
 #[derive(Debug, Clone, Copy, Default)]

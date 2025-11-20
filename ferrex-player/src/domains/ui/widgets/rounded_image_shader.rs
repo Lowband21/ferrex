@@ -7,7 +7,6 @@ pub mod rounded_image_batch_state;
 
 use crate::domains::ui::messages::Message;
 
-use crate::infrastructure::constants::animation;
 use bytemuck::{Pod, Zeroable};
 use iced::advanced::graphics::Viewport;
 use iced::wgpu;
@@ -19,7 +18,7 @@ use iced_wgpu::image as wgpu_image;
 use iced_wgpu::primitive::PrimitiveBatchState;
 use rounded_image_batch_state::RoundedImageInstance;
 use std::any::TypeId;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -127,6 +126,81 @@ impl AnimationType {
             flip_end: 0.80,
         }
     }
+
+    fn effective_duration(&self) -> Duration {
+        match self {
+            AnimationType::None | AnimationType::PlaceholderSunken => Duration::ZERO,
+            AnimationType::Fade { duration } => *duration,
+            AnimationType::Flip { total_duration, .. } => *total_duration,
+        }
+    }
+}
+
+/// Describes how poster animations should behave across the first and subsequent renders.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AnimationBehavior {
+    first: AnimationType,
+    repeat: AnimationType,
+    fresh_window: Duration,
+}
+
+impl AnimationBehavior {
+    /// Always use the same animation for every render.
+    pub fn constant(animation: AnimationType) -> Self {
+        let window = (animation.effective_duration() * 2)
+            .max(Duration::from_millis(50))
+            .max(Duration::from_secs(10));
+        Self {
+            first: animation,
+            repeat: animation,
+            fresh_window: window,
+        }
+    }
+
+    /// Use `first` for freshly loaded textures, then fall back to `repeat` after the window.
+    pub fn first_then(first: AnimationType, repeat: AnimationType) -> Self {
+        let window = std::cmp::max(first.effective_duration(), repeat.effective_duration())
+            .saturating_mul(2)
+            .max(Duration::from_millis(50))
+            .max(Duration::from_secs(10));
+        Self {
+            first,
+            repeat,
+            fresh_window: window,
+        }
+    }
+
+    /// Convenience for highlighting newly added media: flip once, then fade as normal.
+    pub fn flip_then_fade() -> Self {
+        Self::first_then(
+            AnimationType::flip(),
+            AnimationType::Fade {
+                duration: Duration::from_millis(
+                    crate::infrastructure::constants::layout::animation::TEXTURE_FADE_DURATION_MS,
+                ),
+            },
+        )
+    }
+
+    /// Derive a behavior from a single animation intent.
+    ///
+    /// Flip animations degrade to flip-then-fade, other animations stay constant.
+    pub fn from_primary(animation: AnimationType) -> Self {
+        match animation {
+            AnimationType::Flip { .. } | AnimationType::Fade { .. } => Self::flip_then_fade(),
+            _ => Self::constant(animation),
+        }
+    }
+
+    /// Select which animation should run given when the texture finished loading.
+    pub fn select(&self, loaded_at: Option<Instant>) -> AnimationType {
+        if let Some(loaded_at) = loaded_at
+            && loaded_at.elapsed() <= self.fresh_window
+        {
+            return self.first;
+        }
+        self.repeat
+    }
 }
 
 /// A shader program for rendering rounded images
@@ -195,7 +269,7 @@ impl Program<Message> for RoundedImageProgram {
             load_time: self.load_time,
             opacity: self.opacity,
             theme_color: self.theme_color,
-            animated_bounds: self.bounds.clone(),
+            animated_bounds: self.bounds,
             is_hovered: self.is_hovered,
             mouse_position,
             progress: self.progress,
@@ -218,151 +292,141 @@ impl Program<Message> for RoundedImageProgram {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<iced::widget::Action<Message>> {
-        match event {
-            Event::Mouse(mouse_event) => {
-                //log::info!("Shader widget received mouse event: {:?}", mouse_event);
+        if let Event::Mouse(mouse_event) = event {
+            //log::info!("Shader widget received mouse event: {:?}", mouse_event);
 
-                match mouse_event {
-                    mouse::Event::CursorMoved { .. } => {
-                        // Check if cursor position is available
-                        if let Some(position) = cursor.position() {
-                            if bounds.contains(position) {
-                                // Convert to relative position within widget
-                                let relative_pos =
-                                    Point::new(position.x - bounds.x, position.y - bounds.y);
+            match mouse_event {
+                mouse::Event::CursorMoved { .. } => {
+                    // Check if cursor position is available
+                    if let Some(position) = cursor.position() {
+                        if bounds.contains(position) {
+                            // Convert to relative position within widget
+                            let relative_pos =
+                                Point::new(position.x - bounds.x, position.y - bounds.y);
 
-                                let was_hovered = state.is_hovered;
-                                state.mouse_position = Some(relative_pos);
-                                state.is_hovered = true;
+                            let was_hovered = state.is_hovered;
+                            state.mouse_position = Some(relative_pos);
+                            state.is_hovered = true;
 
-                                // Always request redraw when mouse state changes
-                                return Some(iced::widget::Action::request_redraw());
-                            } else {
-                                // Mouse outside widget bounds
-                                let was_hovered = state.is_hovered;
-                                state.mouse_position = None;
-                                state.is_hovered = false;
-
-                                // Request redraw if state changed
-                                if was_hovered {
-                                    return Some(iced::widget::Action::request_redraw());
-                                }
-                            }
+                            // Always request redraw when mouse state changes
+                            return Some(iced::widget::Action::request_redraw());
                         } else {
-                            // No cursor position available (cursor left window)
-                            // Clear any stale mouse state
-                            if state.is_hovered || state.mouse_position.is_some() {
-                                state.mouse_position = None;
-                                state.is_hovered = false;
+                            // Mouse outside widget bounds
+                            let was_hovered = state.is_hovered;
+                            state.mouse_position = None;
+                            state.is_hovered = false;
+
+                            // Request redraw if state changed
+                            if was_hovered {
                                 return Some(iced::widget::Action::request_redraw());
                             }
                         }
+                    } else {
+                        // No cursor position available (cursor left window)
+                        // Clear any stale mouse state
+                        if state.is_hovered || state.mouse_position.is_some() {
+                            state.mouse_position = None;
+                            state.is_hovered = false;
+                            return Some(iced::widget::Action::request_redraw());
+                        }
                     }
-                    mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                        // First verify cursor is actually within widget bounds
-                        if let Some(cursor_pos) = cursor.position() {
-                            if !bounds.contains(cursor_pos) {
-                                // Click is outside widget bounds, ignore it
-                                return None;
-                            }
-                        } else {
-                            // No cursor position available, ignore click
+                }
+                mouse::Event::ButtonPressed(mouse::Button::Left) => {
+                    // First verify cursor is actually within widget bounds
+                    if let Some(cursor_pos) = cursor.position() {
+                        if !bounds.contains(cursor_pos) {
+                            // Click is outside widget bounds, ignore it
                             return None;
                         }
+                    } else {
+                        // No cursor position available, ignore click
+                        return None;
+                    }
 
-                        // Verify state mouse position matches current cursor position
-                        // This handles cases where the app lost/regained focus
-                        if let Some(cursor_pos) = cursor.position() {
-                            let current_relative =
-                                Point::new(cursor_pos.x - bounds.x, cursor_pos.y - bounds.y);
+                    // Verify state mouse position matches current cursor position
+                    // This handles cases where the app lost/regained focus
+                    if let Some(cursor_pos) = cursor.position() {
+                        let current_relative =
+                            Point::new(cursor_pos.x - bounds.x, cursor_pos.y - bounds.y);
 
-                            // Update state if mouse position is stale
-                            if let Some(old_pos) = state.mouse_position {
-                                let delta = old_pos - current_relative;
-                                let distance = (delta.x * delta.x + delta.y * delta.y).sqrt();
-                                if distance > 1.0 {
-                                    state.mouse_position = Some(current_relative);
-                                }
-                            } else {
+                        // Update state if mouse position is stale
+                        if let Some(old_pos) = state.mouse_position {
+                            let delta = old_pos - current_relative;
+                            let distance = (delta.x * delta.x + delta.y * delta.y).sqrt();
+                            if distance > 1.0 {
                                 state.mouse_position = Some(current_relative);
                             }
-                        }
-
-                        // Handle click events based on mouse position
-                        if let Some(mouse_pos) = state.mouse_position {
-                            //log::debug!("Click in widget - cursor_pos: {:?}, widget bounds: {:?}, relative mouse_pos: {:?}",
-                            //    cursor.position(), bounds, mouse_pos);
-
-                            // Normalize mouse position to 0-1 range
-                            let norm_x = mouse_pos.x / bounds.width;
-                            let norm_y = mouse_pos.y / bounds.height;
-
-                            // Check which button was clicked
-                            // Center play button (circle with 8% radius at center)
-                            // Note: Unlike shader, we don't need aspect ratio adjustment in click detection
-                            // because norm_x and norm_y are already normalized to widget bounds
-                            let center_x = 0.5;
-                            let center_y = 0.5;
-                            let radius = 0.08;
-                            let dist_from_center =
-                                ((norm_x - center_x).powi(2) + (norm_y - center_y).powi(2)).sqrt();
-                            if dist_from_center <= radius {
-                                if let Some(on_play) = &self.on_play {
-                                    log::debug!("Play button clicked!");
-                                    return Some(iced::widget::Action::publish(on_play.clone()));
-                                }
-                            }
-                            // Top-right edit button (radius 0.06 at 0.85, 0.15)
-                            else if norm_x >= 0.79
-                                && norm_x <= 0.91
-                                && norm_y >= 0.09
-                                && norm_y <= 0.21
-                            {
-                                if let Some(on_edit) = &self.on_edit {
-                                    log::debug!("Edit button clicked!");
-                                    return Some(iced::widget::Action::publish(on_edit.clone()));
-                                }
-                            }
-                            // Bottom-right options button (radius 0.06 at 0.85, 0.85)
-                            else if norm_x >= 0.79
-                                && norm_x <= 0.91
-                                && norm_y >= 0.79
-                                && norm_y <= 0.91
-                            {
-                                if let Some(on_options) = &self.on_options {
-                                    log::debug!("Options button clicked!");
-                                    return Some(iced::widget::Action::publish(on_options.clone()));
-                                }
-                            }
-                            // Empty space - trigger on_click
-                            else if let Some(on_click) = &self.on_click {
-                                log::debug!("Empty space clicked!");
-                                return Some(iced::widget::Action::publish(on_click.clone()));
-                            }
+                        } else {
+                            state.mouse_position = Some(current_relative);
                         }
                     }
-                    mouse::Event::CursorEntered => {
-                        // Handle cursor entering the widget
-                        if let Some(position) = cursor.position() {
-                            if bounds.contains(position) {
-                                let relative_pos =
-                                    Point::new(position.x - bounds.x, position.y - bounds.y);
-                                state.mouse_position = Some(relative_pos);
-                                state.is_hovered = true;
-                                //log::debug!("Cursor entered widget at: {:?}", relative_pos);
+
+                    // Handle click events based on mouse position
+                    if let Some(mouse_pos) = state.mouse_position {
+                        //log::debug!("Click in widget - cursor_pos: {:?}, widget bounds: {:?}, relative mouse_pos: {:?}",
+                        //    cursor.position(), bounds, mouse_pos);
+
+                        // Normalize mouse position to 0-1 range
+                        let norm_x = mouse_pos.x / bounds.width;
+                        let norm_y = mouse_pos.y / bounds.height;
+
+                        // Check which button was clicked
+                        // Center play button (circle with 8% radius at center)
+                        // Note: Unlike shader, we don't need aspect ratio adjustment in click detection
+                        // because norm_x and norm_y are already normalized to widget bounds
+                        let center_x = 0.5;
+                        let center_y = 0.5;
+                        let radius = 0.08;
+                        let dist_from_center =
+                            ((norm_x - center_x).powi(2) + (norm_y - center_y).powi(2)).sqrt();
+                        if dist_from_center <= radius {
+                            if let Some(on_play) = &self.on_play {
+                                log::debug!("Play button clicked!");
+                                return Some(iced::widget::Action::publish(on_play.clone()));
                             }
                         }
+                        // Top-right edit button (radius 0.06 at 0.85, 0.15)
+                        else if (0.79..=0.91).contains(&norm_x) && (0.09..=0.21).contains(&norm_y)
+                        {
+                            if let Some(on_edit) = &self.on_edit {
+                                log::debug!("Edit button clicked!");
+                                return Some(iced::widget::Action::publish(on_edit.clone()));
+                            }
+                        }
+                        // Bottom-right options button (radius 0.06 at 0.85, 0.85)
+                        else if (0.79..=0.91).contains(&norm_x) && (0.79..=0.91).contains(&norm_y)
+                        {
+                            if let Some(on_options) = &self.on_options {
+                                log::debug!("Options button clicked!");
+                                return Some(iced::widget::Action::publish(on_options.clone()));
+                            }
+                        }
+                        // Empty space - trigger on_click
+                        else if let Some(on_click) = &self.on_click {
+                            log::debug!("Empty space clicked!");
+                            return Some(iced::widget::Action::publish(on_click.clone()));
+                        }
                     }
-                    mouse::Event::CursorLeft => {
-                        // Clear mouse position when cursor leaves
-                        state.mouse_position = None;
-                        state.is_hovered = false;
-                        log::debug!("Cursor left widget");
-                    }
-                    _ => {}
                 }
+                mouse::Event::CursorEntered => {
+                    // Handle cursor entering the widget
+                    if let Some(position) = cursor.position()
+                        && bounds.contains(position)
+                    {
+                        let relative_pos = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        state.mouse_position = Some(relative_pos);
+                        state.is_hovered = true;
+                        //log::debug!("Cursor entered widget at: {:?}", relative_pos);
+                    }
+                }
+                mouse::Event::CursorLeft => {
+                    // Clear mouse position when cursor leaves
+                    state.mouse_position = None;
+                    state.is_hovered = false;
+                    log::debug!("Cursor left widget");
+                }
+                _ => {}
             }
-            _ => {}
         }
 
         None
@@ -453,6 +517,7 @@ struct BatchedData {
 /// - Multiple prepare_batched calls accumulate instances
 /// - Single render call draws all instances at once
 /// - Instances are cleared after render for next frame
+#[derive(Default)]
 struct State {
     // Globals buffer and bind group (shared by all)
     globals_buffer: Option<wgpu::Buffer>,
@@ -463,16 +528,6 @@ struct State {
     //batch: BatchedData,
     // Track which primitives we've seen this frame
     //prepared_primitives: HashSet<usize>,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            globals_buffer: None,
-            globals_bind_group: None,
-            primitive_data: HashMap::new(),
-        }
-    }
 }
 
 impl Pipeline {
@@ -755,7 +810,7 @@ fn create_instance(
         calculate_animation_state(animation, elapsed, opacity)
     } else {
         (
-            0.7 as f32,
+            0.7_f32,
             std::f32::consts::PI,
             0.0f32,
             -10.0f32,
@@ -817,7 +872,7 @@ fn create_instance(
         let norm_x = mouse_x_relative / scaled_poster_width;
         let norm_y = mouse_y_relative / scaled_poster_height;
 
-        if norm_x >= -0.01 && norm_x <= 1.01 && norm_y >= -0.01 && norm_y <= 1.01 {
+        if (-0.01..=1.01).contains(&norm_x) && (-0.01..=1.01).contains(&norm_y) {
             [norm_x.clamp(0.0, 1.0), norm_y.clamp(0.0, 1.0)]
         } else {
             [-1.0, -1.0]
@@ -950,7 +1005,7 @@ fn create_batch_instance(
         calculate_animation_state(animation, elapsed, opacity)
     } else {
         (
-            0.7 as f32,
+            0.7_f32,
             std::f32::consts::PI,
             0.0f32,
             -10.0f32,
@@ -1012,7 +1067,7 @@ fn create_batch_instance(
         let norm_x = mouse_x_relative / scaled_poster_width;
         let norm_y = mouse_y_relative / scaled_poster_height;
 
-        if norm_x >= -0.01 && norm_x <= 1.01 && norm_y >= -0.01 && norm_y <= 1.01 {
+        if (-0.01..=1.01).contains(&norm_x) && (-0.01..=1.01).contains(&norm_y) {
             [norm_x.clamp(0.0, 1.0), norm_y.clamp(0.0, 1.0)]
         } else {
             [-1.0, -1.0]
@@ -1075,7 +1130,7 @@ fn create_placeholder_instance(
         shadow_intensity,
         border_glow,
     ) = (
-        0.7 as f32,
+        0.7_f32,
         std::f32::consts::PI,
         0.0f32,
         -10.0f32,
@@ -1257,8 +1312,9 @@ impl Primitive for RoundedImagePrimitive {
                     .as_any_mut()
                     .downcast_mut::<rounded_image_batch_state::RoundedImageBatchState>(
                 ) {
+                    let load_time_from_widget = self.load_time.as_ref();
                     let load_time = if self.animation != AnimationType::None {
-                        rounded_batch.loaded_times.get(&self.id)
+                        load_time_from_widget.or_else(|| rounded_batch.loaded_times.get(&self.id))
                     } else {
                         None
                     };

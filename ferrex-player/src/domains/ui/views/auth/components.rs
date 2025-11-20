@@ -2,7 +2,7 @@
 
 use crate::common::messages::DomainMessage;
 use iced::{
-    Alignment, Element, Length, Theme,
+    Element, Length, Theme,
     widget::{Button, Container, Space, button, container, text},
 };
 

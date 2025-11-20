@@ -7,7 +7,6 @@ use crate::{domains::library::messages::Message, infrastructure::services::api::
 use chrono::Utc;
 use ferrex_core::{LibraryID, LibraryType};
 use iced::Task;
-use uuid::Uuid;
 
 pub fn handle_create_library(
     state: &mut State,
@@ -342,7 +341,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
                 .push("At least one path is required".to_string());
         }
 
-        if let Err(_) = form_data.scan_interval_minutes.parse::<u32>() {
+        if form_data.scan_interval_minutes.parse::<u32>().is_err() {
             state
                 .domains
                 .library
@@ -373,7 +372,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
 
         let library = Library {
             id: if form_data.editing {
-                form_data.id.clone()
+                form_data.id
             } else {
                 LibraryID::new()
             },
@@ -384,7 +383,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
-                .map(|path| PathBuf::from(path))
+                .map(PathBuf::from)
                 .collect(),
             scan_interval_minutes: form_data.scan_interval_minutes.parse().unwrap_or(60),
             last_scan: None,

@@ -32,34 +32,33 @@ pub async fn update_preferences(
     let mut changed = false;
 
     // Update auto-login preference if provided
-    if let Some(auto_login) = request.auto_login_enabled {
-        if updated_user.preferences.auto_login_enabled != auto_login {
-            updated_user.preferences.auto_login_enabled = auto_login;
-            changed = true;
+    if let Some(auto_login) = request.auto_login_enabled
+        && updated_user.preferences.auto_login_enabled != auto_login
+    {
+        updated_user.preferences.auto_login_enabled = auto_login;
+        changed = true;
 
-            // Also update the device credential if we have a device_id
-            if let Some(device_id) = device_id {
-                if let Ok(Some(mut credential)) = state
-                    .db
-                    .backend()
-                    .get_device_credential(user.id, device_id)
-                    .await
-                {
-                    credential.auto_login_enabled = auto_login;
-                    credential.updated_at = chrono::Utc::now();
-                    let _ = state
-                        .db
-                        .backend()
-                        .upsert_device_credential(&credential)
-                        .await;
+        // Also update the device credential if we have a device_id
+        if let Some(device_id) = device_id
+            && let Ok(Some(mut credential)) = state
+                .db
+                .backend()
+                .get_device_credential(user.id, device_id)
+                .await
+        {
+            credential.auto_login_enabled = auto_login;
+            credential.updated_at = chrono::Utc::now();
+            let _ = state
+                .db
+                .backend()
+                .upsert_device_credential(&credential)
+                .await;
 
-                    tracing::info!(
-                        "Updated device credential auto-login for user {} on device {}",
-                        user.id,
-                        device_id
-                    );
-                }
-            }
+            tracing::info!(
+                "Updated device credential auto-login for user {} on device {}",
+                user.id,
+                device_id
+            );
         }
     }
 

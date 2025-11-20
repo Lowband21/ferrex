@@ -1,11 +1,10 @@
 use anyhow::Result;
-use ferrex_core::MediaID;
 use ferrex_core::api_routes::v1;
 use ferrex_core::api_types::ApiResponse;
 use ferrex_core::user::AuthToken;
 use ferrex_core::watch_status::{UpdateProgressRequest, UserWatchState};
 use log::{info, warn};
-use reqwest::{Client, RequestBuilder, Response, StatusCode};
+use reqwest::{Client, RequestBuilder, StatusCode};
 use rkyv::util::AlignedVec;
 use serde::{Serialize, de::DeserializeOwned};
 use std::sync::Arc;
@@ -154,22 +153,22 @@ impl ApiClient {
             }
             StatusCode::UNAUTHORIZED => {
                 // Try to refresh token if we have a callback
-                if let Some(request_retry) = request_clone {
-                    if let Some(ref callback) = *self.refresh_callback.lock().await {
-                        info!("[ApiClient] Token expired, attempting refresh");
-                        match callback().await {
-                            Ok(new_token) => {
-                                info!("[ApiClient] Token refreshed successfully, retrying request");
-                                self.set_token(Some(new_token.clone())).await;
+                if let Some(request_retry) = request_clone
+                    && let Some(ref callback) = *self.refresh_callback.lock().await
+                {
+                    info!("[ApiClient] Token expired, attempting refresh");
+                    match callback().await {
+                        Ok(new_token) => {
+                            info!("[ApiClient] Token refreshed successfully, retrying request");
+                            self.set_token(Some(new_token.clone())).await;
 
-                                // Rebuild request with new token and execute without retry
-                                let retry_request = self.build_request(request_retry).await;
-                                return self.execute_request_without_retry(retry_request).await;
-                            }
-                            Err(e) => {
-                                warn!("[ApiClient] Token refresh failed: {}", e);
-                                // Fall through to clear token and return error
-                            }
+                            // Rebuild request with new token and execute without retry
+                            let retry_request = self.build_request(request_retry).await;
+                            return self.execute_request_without_retry(retry_request).await;
+                        }
+                        Err(e) => {
+                            warn!("[ApiClient] Token refresh failed: {}", e);
+                            // Fall through to clear token and return error
                         }
                     }
                 }
@@ -326,35 +325,35 @@ impl ApiClient {
             StatusCode::OK | StatusCode::NO_CONTENT => Ok(()),
             StatusCode::UNAUTHORIZED => {
                 // Try to refresh token if we have a callback
-                if let Some(request_retry) = request_clone {
-                    if let Some(ref callback) = *self.refresh_callback.lock().await {
-                        info!("[ApiClient] Token expired, attempting refresh");
-                        match callback().await {
-                            Ok(new_token) => {
-                                info!("[ApiClient] Token refreshed successfully, retrying request");
-                                self.set_token(Some(new_token.clone())).await;
+                if let Some(request_retry) = request_clone
+                    && let Some(ref callback) = *self.refresh_callback.lock().await
+                {
+                    info!("[ApiClient] Token expired, attempting refresh");
+                    match callback().await {
+                        Ok(new_token) => {
+                            info!("[ApiClient] Token refreshed successfully, retrying request");
+                            self.set_token(Some(new_token.clone())).await;
 
-                                // Rebuild request with new token and retry
-                                let retry_request = self.build_request(request_retry).await;
-                                let retry_response = retry_request.send().await?;
+                            // Rebuild request with new token and retry
+                            let retry_request = self.build_request(request_retry).await;
+                            let retry_response = retry_request.send().await?;
 
-                                match retry_response.status() {
-                                    StatusCode::OK | StatusCode::NO_CONTENT => return Ok(()),
-                                    _ => {
-                                        let error_text = retry_response
-                                            .text()
-                                            .await
-                                            .unwrap_or_else(|_| "Unknown error".to_string());
-                                        return Err(anyhow::anyhow!(
-                                            "Request failed after retry: {}",
-                                            error_text
-                                        ));
-                                    }
+                            match retry_response.status() {
+                                StatusCode::OK | StatusCode::NO_CONTENT => return Ok(()),
+                                _ => {
+                                    let error_text = retry_response
+                                        .text()
+                                        .await
+                                        .unwrap_or_else(|_| "Unknown error".to_string());
+                                    return Err(anyhow::anyhow!(
+                                        "Request failed after retry: {}",
+                                        error_text
+                                    ));
                                 }
                             }
-                            Err(e) => {
-                                warn!("[ApiClient] Token refresh failed: {}", e);
-                            }
+                        }
+                        Err(e) => {
+                            warn!("[ApiClient] Token refresh failed: {}", e);
                         }
                     }
                 }

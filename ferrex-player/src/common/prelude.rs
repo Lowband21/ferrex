@@ -25,11 +25,4 @@ pub fn icon_char(icon: Icon) -> String {
     icon.unicode().to_string()
 }
 
-pub fn icon_text(icon: Icon) -> text::Text<'static> {
-    text(icon.unicode()).font(lucide_font()).size(20)
-}
-
-// Font helper
-pub fn lucide_font() -> Font {
-    Font::with_name("lucide")
-}
+pub use crate::common::ui_utils::{icon_text, icon_text_with_size, lucide_font};

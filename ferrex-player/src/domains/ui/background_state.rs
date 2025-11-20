@@ -5,7 +5,11 @@ use super::transitions::{
     generate_random_gradient_center,
 };
 pub use super::types::BackdropAspectMode;
-use super::widgets::background_shader::{BackgroundEffect, DepthLayout};
+use super::widgets::background_shader::{
+    BackgroundEffect, BackgroundShader, DepthLayout, background_shader,
+};
+use crate::domains::ui::views::library_controls_bar;
+use crate::infrastructure::constants::layout::{detail, header};
 
 /// Persistent state for the background shader
 #[derive(Debug, Clone)]
@@ -16,6 +20,8 @@ pub struct BackgroundShaderState {
     pub backdrop_handle: Option<iced::widget::image::Handle>,
     pub backdrop_aspect_ratio: Option<f32>,
     pub backdrop_aspect_mode: BackdropAspectMode,
+    pub backdrop_fade_start: f32,
+    pub backdrop_fade_end: f32,
     pub scroll_offset: f32,
     pub gradient_center: (f32, f32),
     pub depth_layout: DepthLayout,
@@ -37,8 +43,12 @@ impl Default for BackgroundShaderState {
             primary_color: primary,
             secondary_color: secondary,
             backdrop_handle: None,
-            backdrop_aspect_ratio: None,
+            backdrop_aspect_ratio: Some(
+                crate::infrastructure::constants::layout::backdrop::SOURCE_ASPECT,
+            ),
             backdrop_aspect_mode: BackdropAspectMode::default(),
+            backdrop_fade_start: 0.75,
+            backdrop_fade_end: 1.0,
             scroll_offset: 0.0,
             gradient_center: initial_center,
             depth_layout: DepthLayout {
@@ -66,6 +76,44 @@ impl Default for BackgroundShaderState {
     profiling::all_functions
 )]
 impl BackgroundShaderState {
+    /// Build a configured background shader instance for the provided view state.
+    /// All shared properties (color, offsets, depth layout) are sourced from this persistent state
+    /// so call sites do not need to manually wire them each frame.
+    pub fn build_shader(&self, view: &super::types::ViewState) -> BackgroundShader {
+        let mut shader = background_shader()
+            .colors(self.primary_color, self.secondary_color)
+            .scroll_offset(self.scroll_offset)
+            .gradient_center(self.gradient_center)
+            .backdrop_aspect_mode(self.backdrop_aspect_mode)
+            .backdrop_aspect_ratio(self.backdrop_aspect_ratio)
+            .effect(self.effect.clone());
+
+        if !self.depth_layout.regions.is_empty() {
+            shader = shader.with_depth_layout(self.depth_layout.clone());
+        }
+
+        if let Some(handle) = self.backdrop_handle.clone() {
+            shader = shader.backdrop(handle);
+        }
+
+        if matches!(
+            view,
+            super::types::ViewState::MovieDetail { .. }
+                | super::types::ViewState::SeriesDetail { .. }
+                | super::types::ViewState::SeasonDetail { .. }
+                | super::types::ViewState::EpisodeDetail { .. }
+        ) {
+            shader = shader.header_offset(header::HEIGHT);
+        }
+
+        shader
+    }
+
+    /// Retrieve the configured fade window for backdrop images.
+    pub fn backdrop_fade(&self) -> (f32, f32) {
+        (self.backdrop_fade_start, self.backdrop_fade_end)
+    }
+
     /// Updates depth regions based on the current view and window size
     pub fn update_depth_lines(
         &mut self,
@@ -75,7 +123,7 @@ impl BackgroundShaderState {
         current_library_id: Option<uuid::Uuid>,
     ) {
         use super::types::ViewState;
-        use super::widgets::background_shader::{DepthRegion, EdgeTransition, RegionBorder};
+        use super::widgets::background_shader::{DepthRegion, EdgeTransition};
 
         self.depth_layout.regions.clear();
 
@@ -88,62 +136,8 @@ impl BackgroundShaderState {
 
         match view {
             ViewState::Library => {
-                // Use consistent header height (errors will be toast notifications)
-                let header_height = crate::infrastructure::constants::layout::header::HEIGHT;
-
-                /*
-                // Header region (sunken)
-                self.depth_layout.regions.push(DepthRegion {
-                    bounds: iced::Rectangle {
-                        x: 0.0,
-                        y: 0.0,
-                        width: window_width,
-                        height: header_height,
-                    },
-                    depth: -5.0, // Header is 5 units deep
-                    edge_transition: EdgeTransition::Sharp,
-                    edge_overrides: Default::default(),
-                    shadow_enabled: false, // No shadows for header
-                    shadow_intensity: 0.0,
-                    z_order: 0,
-                    border: Some(RegionBorder {
-                        width: 1.0,
-                        color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.2),
-                        opacity: 1.0,
-                    }),
-                });
-
-                // If we have a specific library selected (not "All" view), add a region for the controls bar
-                let content_start = if current_library_id.is_some() {
-                    let controls_height = header_height; // Controls bar is same height as header
-
-                    // Controls bar region (slightly less sunken than header)
-                    self.depth_layout.regions.push(DepthRegion {
-                        bounds: iced::Rectangle {
-                            x: 0.0,
-                            y: header_height,
-                            width: window_width,
-                            height: controls_height,
-                        },
-                        depth: -3.0, // Controls bar is 3 units deep (between header and content)
-                        edge_transition: EdgeTransition::Sharp,
-                        edge_overrides: Default::default(),
-                        shadow_enabled: false,
-                        shadow_intensity: 0.0,
-                        z_order: 0,
-                        border: Some(RegionBorder {
-                            width: 1.0,
-                            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.15),
-                            opacity: 1.0,
-                        }),
-                    });
-
-                    header_height + controls_height
-                } else {
-                    header_height
-                };*/
-
-                let content_start = header_height * 2.0;
+                let content_start =
+                    library_controls_bar::calculate_top_bars_height(current_library_id.is_some());
 
                 // Content region (flat)
                 self.depth_layout.regions.push(DepthRegion {
@@ -165,8 +159,9 @@ impl BackgroundShaderState {
                 });
 
                 log::debug!(
-                    "Added library regions with controls: {}",
-                    current_library_id.is_some()
+                    "Added library regions with controls: {}, start: {}",
+                    current_library_id.is_some(),
+                    content_start
                 );
             }
             ViewState::MovieDetail { .. }
@@ -178,14 +173,13 @@ impl BackgroundShaderState {
                 // Calculate dynamic backdrop height based on aspect mode and window dimensions
                 let backdrop_aspect = self.calculate_display_aspect(window_width, window_height);
                 let backdrop_height = window_width / backdrop_aspect;
-                let _metadata_offset = 150.0;
                 // Content top is just backdrop height since header is outside scrollable
                 let content_top = backdrop_height - scroll_offset;
-                let poster_width = 300.0;
-                let poster_height = 450.0;
-                let poster_padding = 10.0;
+                let poster_width = detail::POSTER_WIDTH;
+                let poster_height = detail::POSTER_HEIGHT;
+                let poster_padding = detail::POSTER_PADDING;
                 let poster_left = 0.0;
-                let poster_right = poster_left + poster_width + 37.5;
+                let poster_right = poster_left + poster_width + detail::POSTER_METADATA_GAP;
                 let poster_bottom = content_top + poster_height + poster_padding;
 
                 // Backdrop region (flat, no shadows)
@@ -314,8 +308,6 @@ impl BackgroundShaderState {
 
     /// Reset colors to specific view defaults
     pub fn reset_to_view_colors(&mut self, view: &super::types::ViewState) {
-        use crate::domains::ui::theme::MediaServerTheme;
-
         match view {
             super::types::ViewState::Library
             | super::types::ViewState::LibraryManagement

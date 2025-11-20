@@ -8,7 +8,7 @@ use crate::Result;
 
 use super::{
     job::{EnqueueRequest, JobHandle, JobKind},
-    lease::{CompletionOutcome, DequeueRequest, JobLease, LeaseRenewal},
+    lease::{DequeueRequest, JobLease, LeaseRenewal},
 };
 
 /// Convenience slice covering every job kind the orchestrator currently knows about.
@@ -91,9 +91,7 @@ impl QueueSnapshot {
     }
 
     pub fn entry_mut(&mut self, kind: JobKind) -> &mut QueueSnapshotEntry {
-        self.queues
-            .entry(kind)
-            .or_insert_with(QueueSnapshotEntry::default)
+        self.queues.entry(kind).or_default()
     }
 }
 

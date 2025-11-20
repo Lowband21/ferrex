@@ -2,8 +2,8 @@ pub mod subscriptions;
 
 use crate::domains::ui::{DisplayMode, views::carousel::CarouselMessage};
 use ferrex_core::{
-    EpisodeID, LibraryID, MediaFile, MediaID, MediaIDLike, MovieID, MovieLike, MovieReference,
-    SeasonID, SeriesID, SortBy, UiDecade, UiGenre, UiResolution, UiWatchStatus,
+    EpisodeID, LibraryID, MediaID, MediaIDLike, MovieID, SeasonID, SeriesID, SortBy, UiDecade,
+    UiGenre, UiResolution, UiWatchStatus,
 };
 use iced::Size;
 use iced::widget::scrollable;

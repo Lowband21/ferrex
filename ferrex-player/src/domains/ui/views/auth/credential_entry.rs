@@ -1,8 +1,7 @@
 //! Credential entry view for both password and PIN
 
 use super::components::{
-    auth_card, auth_container, error_message, primary_button, secondary_button, spacing, subtitle,
-    title,
+    auth_card, auth_container, error_message, primary_button, secondary_button, spacing, title,
 };
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::messages as auth;
@@ -75,17 +74,17 @@ pub fn view_credential_entry<'a>(
     }
 
     // Attempts remaining warning
-    if let Some(attempts) = attempts_remaining {
-        if attempts < 3 {
-            content = content.push(
-                text(format!("{} attempts remaining", attempts))
-                    .size(14)
-                    .style(|theme: &Theme| text::Style {
-                        color: Some(theme.extended_palette().danger.base.color),
-                    }),
-            );
-            content = content.push(Space::with_height(Length::Fixed(8.0)));
-        }
+    if let Some(attempts) = attempts_remaining
+        && attempts < 3
+    {
+        content = content.push(
+            text(format!("{} attempts remaining", attempts))
+                .size(14)
+                .style(|theme: &Theme| text::Style {
+                    color: Some(theme.extended_palette().danger.base.color),
+                }),
+        );
+        content = content.push(Space::with_height(Length::Fixed(8.0)));
     }
 
     // Input field

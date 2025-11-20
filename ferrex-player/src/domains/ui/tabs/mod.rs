@@ -6,7 +6,6 @@
 
 use ferrex_core::LibraryID;
 use std::fmt;
-use uuid::Uuid;
 
 pub mod manager;
 pub mod state;
@@ -15,9 +14,10 @@ pub use manager::TabManager;
 pub use state::{AllTabState, LibraryTabState, TabState};
 
 /// Unique identifier for each tab in the application
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TabId {
     /// The "All" tab showing curated content from all libraries
+    #[default]
     All,
 
     /// A specific library tab
@@ -56,11 +56,5 @@ impl fmt::Display for TabId {
 impl From<LibraryID> for TabId {
     fn from(library_id: LibraryID) -> Self {
         TabId::Library(library_id)
-    }
-}
-
-impl Default for TabId {
-    fn default() -> Self {
-        TabId::All
     }
 }

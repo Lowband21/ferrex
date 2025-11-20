@@ -1,8 +1,7 @@
 //! PIN setup view
 
 use super::components::{
-    auth_card, auth_container, error_message, primary_button, secondary_button, spacing, subtitle,
-    title,
+    auth_card, auth_container, error_message, primary_button, secondary_button, spacing, title,
 };
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::messages as auth;

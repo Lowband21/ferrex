@@ -12,6 +12,7 @@ use axum_server::tls_rustls::RustlsConfig;
 use rustls::ServerConfig;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use std::{
+    fmt,
     io::BufReader,
     path::{Path, PathBuf},
     sync::Arc,
@@ -88,6 +89,23 @@ pub struct TlsConfigManager {
     config: Arc<RwLock<TlsCertConfig>>,
     rustls_config: Arc<RwLock<Arc<ServerConfig>>>,
     reload_interval: Duration,
+}
+
+impl fmt::Debug for TlsConfigManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let config_snapshot = self.config.try_read().ok().map(|guard| guard.clone());
+        let rustls_config_state = self
+            .rustls_config
+            .try_read()
+            .ok()
+            .map(|guard| Arc::strong_count(&*guard));
+
+        f.debug_struct("TlsConfigManager")
+            .field("config", &config_snapshot)
+            .field("rustls_config_strong_count", &rustls_config_state)
+            .field("reload_interval", &self.reload_interval)
+            .finish()
+    }
 }
 
 impl TlsConfigManager {

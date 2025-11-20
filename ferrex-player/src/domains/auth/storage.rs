@@ -117,7 +117,7 @@ impl AuthStorage {
             .hash_password_into(password.as_bytes(), salt, &mut output)
             .map_err(|e| anyhow::anyhow!("Key derivation failed: {}", e))?;
 
-        Ok(Key::<Aes256Gcm>::from_slice(&output).clone())
+        Ok(*Key::<Aes256Gcm>::from_slice(&output))
     }
 
     /// Save authentication data encrypted with device-specific key
@@ -198,6 +198,14 @@ impl AuthStorage {
         let nonce_bytes = BASE64
             .decode(&encrypted_data.nonce)
             .context("Failed to decode nonce")?;
+
+        if nonce_bytes.len() != NONCE_SIZE {
+            return Err(anyhow::anyhow!(
+                "Invalid nonce length: expected {} bytes, got {}",
+                NONCE_SIZE,
+                nonce_bytes.len()
+            ));
+        }
         let ciphertext = BASE64
             .decode(&encrypted_data.ciphertext)
             .context("Failed to decode ciphertext")?;
@@ -352,6 +360,14 @@ impl AuthStorage {
 
         let data = tokio::fs::read_to_string(&admin_unlock_path).await?;
         let unlock_state: AdminPinUnlock = serde_json::from_str(&data)?;
+
+        if unlock_state.enabled {
+            log::debug!(
+                "Admin PIN unlock enabled by {} at {}",
+                unlock_state.unlocked_by,
+                unlock_state.unlocked_at
+            );
+        }
 
         Ok(unlock_state.enabled)
     }

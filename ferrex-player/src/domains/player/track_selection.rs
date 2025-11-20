@@ -49,16 +49,16 @@ impl PlayerDomainState {
             log::info!("Selecting subtitle track: {:?}", index);
 
             // Debug: print available tracks
-            if let Some(idx) = index {
-                if let Some(track) = self.available_subtitle_tracks.get(idx as usize) {
-                    log::info!(
-                        "Track {} details: lang={:?}, codec={:?}, title={:?}",
-                        idx,
-                        track.language,
-                        track.codec,
-                        track.title
-                    );
-                }
+            if let Some(idx) = index
+                && let Some(track) = self.available_subtitle_tracks.get(idx as usize)
+            {
+                log::info!(
+                    "Track {} details: lang={:?}, codec={:?}, title={:?}",
+                    idx,
+                    track.language,
+                    track.codec,
+                    track.title
+                );
             }
 
             if let Err(e) = video.select_subtitle_track(index) {

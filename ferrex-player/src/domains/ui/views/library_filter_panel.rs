@@ -6,6 +6,7 @@ use iced::{
 use lucide_icons::Icon;
 
 use crate::{
+    common::ui_utils::icon_text_with_size,
     domains::ui::{
         messages::Message,
         theme::{self, MediaServerTheme},
@@ -61,7 +62,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
     let ws_pick = pick_list(
         watch_statuses,
         Some(ui_state.selected_watch_status),
-        |opt| Message::SetFilterWatchStatus(opt),
+        Message::SetFilterWatchStatus,
     )
     .placeholder("Watch Status")
     .width(Length::Fixed(160.0));
@@ -107,7 +108,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
             .size(18)
             .color(MediaServerTheme::TEXT_PRIMARY),
         Space::with_width(Length::Fill),
-        button(icon_text(Icon::X))
+        button(icon_text_with_size(Icon::X, 16.0))
             .padding([6, 8])
             .style(theme::Button::Icon.style())
             .on_press(Message::ToggleFilterPanel),
@@ -184,12 +185,4 @@ fn filter_chip_style(is_selected: bool) -> impl Fn(&iced::Theme, button::Status)
             snap: false,
         }
     }
-}
-
-fn icon_text(icon: Icon) -> text::Text<'static> {
-    text(icon.unicode()).font(lucide_font()).size(16)
-}
-
-fn lucide_font() -> iced::Font {
-    iced::Font::with_name("lucide")
 }

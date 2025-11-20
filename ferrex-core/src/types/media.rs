@@ -1,15 +1,9 @@
-use std::borrow::Cow;
-
 use crate::{
-    EpisodeID, EpisodeNumber, EpisodeURL, LibraryID, MediaDetailsOption, MediaFile, MediaID,
-    MediaIDLike, MovieID, MovieTitle, MovieURL, SeasonID, SeasonNumber, SeasonURL, SeriesID,
-    SeriesTitle, SeriesURL,
+    EpisodeID, EpisodeNumber, EpisodeURL, LibraryID, MediaDetailsOption, MediaFile, MovieID,
+    MovieTitle, MovieURL, SeasonID, SeasonNumber, SeasonURL, SeriesID, SeriesTitle, SeriesURL,
 };
-use rkyv::{
-    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize, deserialize, rancor::Error,
-};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// Lightweight movie reference for lists/collections
 #[derive(

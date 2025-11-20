@@ -32,12 +32,11 @@ impl Config {
         // Then load from config file (which can override env var)
         if let Some(config_dir) = dirs::config_dir() {
             let config_path = config_dir.join("ferrex-player").join("config.json");
-            if config_path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&config_path) {
-                    if let Ok(loaded_config) = serde_json::from_str::<Config>(&content) {
-                        config = loaded_config;
-                    }
-                }
+            if config_path.exists()
+                && let Ok(content) = std::fs::read_to_string(&config_path)
+                && let Ok(loaded_config) = serde_json::from_str::<Config>(&content)
+            {
+                config = loaded_config;
             }
         }
 

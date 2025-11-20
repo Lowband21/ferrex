@@ -4,11 +4,12 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
+use crate::orchestration::classification::FolderClassifier;
 use crate::{LibraryID, LibraryType, MediaError, Result};
 use tracing::info;
 
 use super::messages::{FolderScanSummary, MediaFileDiscovered, ParentDescriptors};
-use crate::orchestration::job::{FolderScanJob, MediaAnalyzeJob, MediaFingerprint, ScanReason};
+use crate::orchestration::job::{FolderScanJob, MediaFingerprint, ScanReason};
 use crate::orchestration::scan_cursor::{ListingEntry, compute_listing_hash};
 
 /// Context supplied to folder scans so they can infer parent relationships.
@@ -180,10 +181,10 @@ impl DefaultFolderScanActor {
     async fn list_directory(&self, path: &Path) -> Result<Vec<ListingEntry>> {
         let mut entries = Vec::new();
         let mut dir = fs::read_dir(path).await.map_err(|e| {
-            MediaError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to read directory: {}", e),
-            ))
+            MediaError::Io(std::io::Error::other(format!(
+                "Failed to read directory: {}",
+                e
+            )))
         })?;
 
         while let Some(entry_res) = dir.next_entry().await.transpose() {
@@ -211,6 +212,7 @@ impl DefaultFolderScanActor {
                 Err(e) => {
                     tracing::warn!(target: "scan::jobs", entry = %name_string, path = %path.display(), error = %e, "skipping entry due to metadata error");
                     // Skip this entry altogether
+                    // TODO: Collect the failures and allow rematching
                     continue;
                 }
             };
@@ -253,12 +255,11 @@ impl FolderScanActor for DefaultFolderScanActor {
                 }
 
                 let filter = self.should_filter_directories(&command.context.parent);
-                if filter {
-                    if let Some(lib_type) = command.context.parent.resolved_type {
-                        if !self.is_subfolder_relevant(&entry.name, lib_type) {
-                            continue;
-                        }
-                    }
+                if filter
+                    && let Some(lib_type) = command.context.parent.resolved_type
+                    && !self.is_subfolder_relevant(&entry.name, lib_type)
+                {
+                    continue;
                 }
 
                 directories.push(entry_path);
@@ -333,10 +334,23 @@ impl FolderScanActor for DefaultFolderScanActor {
         // enqueue even during bulk seed, and this keeps recursion uniform.
         let mut children = Vec::new();
         for dir in &plan.directories {
+            let folder_path_norm = dir.to_string_lossy().to_string();
+            let folder_name = dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| folder_path_norm.clone());
+
+            let parent_descriptors = FolderClassifier::derive_child_descriptors(
+                &parent.parent,
+                parent.parent.resolved_type,
+                &folder_name,
+            );
+
             children.push(FolderScanContext {
                 library_id: parent.library_id,
-                folder_path_norm: dir.to_string_lossy().to_string(),
-                parent: parent.parent.clone(),
+                folder_path_norm,
+                parent: parent_descriptors,
                 reason: parent.reason.clone(),
             });
         }

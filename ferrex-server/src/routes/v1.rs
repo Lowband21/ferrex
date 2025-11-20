@@ -8,9 +8,9 @@ use ferrex_core::api_routes::v1;
 use crate::{
     handlers::{
         admin::dev_handlers,
-        handle_websocket::{self, websocket_handler},
+        handle_websocket::websocket_handler,
         media::{
-            handle_image::{self, serve_image_handler},
+            handle_image::serve_image_handler,
             handle_library::{
                 create_library_handler, delete_library_handler, get_libraries_with_media_handler,
                 get_library_handler, get_library_media_handler, get_library_sorted_indices_handler,
@@ -74,7 +74,7 @@ pub fn create_v1_router(state: AppState) -> Router<AppState> {
         //
         .merge(create_libraries_routes(state.clone()))
         .merge(create_scan_routes(state.clone()))
-        .merge(create_metadata_routes(state.clone()))
+        .merge(create_metadata_routes())
         // Merge protected routes
         .merge(create_protected_routes(state.clone()))
         // Merge admin routes
@@ -297,12 +297,9 @@ fn create_scan_routes(state: AppState) -> Router<AppState> {
         ))
 }
 
-fn create_metadata_routes(state: AppState) -> Router<AppState> {
+fn create_metadata_routes() -> Router<AppState> {
     Router::new().route(v1::images::SERVE, get(serve_image_handler))
-    //.route_layer(middleware::from_fn_with_state(
-    //    state.clone(),
-    //    auth::middleware::auth_middleware,
-    //))
+    // When metadata endpoints require auth middleware, reintroduce state injection here.
 }
 
 /// Create admin routes that require admin role

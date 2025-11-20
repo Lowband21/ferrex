@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT variant, COUNT(*) as count\n            FROM image_variants\n            GROUP BY variant\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "variant",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "e777191b5729658c68b0866165690c47e8ba00057e2b083d17435465973ca8c9"
+}

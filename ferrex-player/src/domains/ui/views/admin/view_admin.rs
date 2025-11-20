@@ -4,22 +4,14 @@
 //! Different sections are shown/hidden based on what the user can access.
 
 use crate::{
-    domains::auth::permissions::StatePermissionExt, domains::ui::messages::Message,
-    domains::ui::theme, state_refactored::State,
+    common::ui_utils::icon_text, domains::auth::permissions::StatePermissionExt,
+    domains::ui::messages::Message, domains::ui::theme, state_refactored::State,
 };
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, text},
 };
 use lucide_icons::Icon;
-
-fn icon_text(icon: Icon) -> text::Text<'static> {
-    text(icon.unicode()).font(lucide_font()).size(20)
-}
-
-fn lucide_font() -> iced::Font {
-    iced::Font::with_name("lucide")
-}
 
 #[cfg_attr(
     any(
@@ -29,7 +21,7 @@ fn lucide_font() -> iced::Font {
     ),
     profiling::function
 )]
-pub fn view_admin_dashboard(state: &State) -> Element<Message> {
+pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
     let permissions = state.permission_checker();
 
     // Check if user has any admin permissions

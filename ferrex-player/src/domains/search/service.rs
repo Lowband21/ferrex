@@ -1,17 +1,16 @@
 //! Search service for executing searches against MediaStore and server
 
-use ferrex_core::{LibraryID, MediaDetailsOptionLike};
-use std::sync::{Arc, RwLock as StdRwLock};
-use uuid::Uuid;
+use ferrex_core::LibraryID;
+use std::sync::Arc;
 
 //use crate::domains::media::store::{MediaStore, MediaStoreQuerying};
 use crate::infrastructure::api_types::{Media, MovieReference, SeriesReference};
 use crate::infrastructure::services::api::ApiService;
-use ferrex_core::query::types::{SearchField, SearchQuery};
-use ferrex_core::query::{MediaQuery, MediaQueryBuilder};
+use ferrex_core::query::MediaQueryBuilder;
+use ferrex_core::query::types::SearchField;
 
 use super::metrics::SearchPerformanceMetrics;
-use super::types::{SearchDecisionEngine, SearchResult, SearchStrategy};
+use super::types::{SearchResult, SearchStrategy};
 use chrono::Datelike;
 use std::time::Instant;
 
@@ -369,36 +368,32 @@ impl SearchService {
         let mut best_score = 0.0f32;
 
         // Check title
-        if check_all || fields.contains(&SearchField::Title) {
-            if let Some(score) = self.calculate_match_score(&movie.title.as_str(), query, fuzzy) {
-                best_score = best_score.max(score);
-            }
+        if (check_all || fields.contains(&SearchField::Title))
+            && let Some(score) = self.calculate_match_score(movie.title.as_str(), query, fuzzy)
+        {
+            best_score = best_score.max(score);
         }
 
         // Check overview
-        if check_all || fields.contains(&SearchField::Overview) {
-            if let ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Movie(
+        if (check_all || fields.contains(&SearchField::Overview))
+            && let ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Movie(
                 details,
             )) = &movie.details
-            {
-                if let Some(overview) = &details.overview {
-                    if let Some(score) = self.calculate_match_score(overview, query, fuzzy) {
-                        best_score = best_score.max(score * 0.8); // Lower weight for overview matches
-                    }
-                }
-            }
+            && let Some(overview) = &details.overview
+            && let Some(score) = self.calculate_match_score(overview, query, fuzzy)
+        {
+            best_score = best_score.max(score * 0.8); // Lower weight for overview matches
         }
 
         // Check genres
-        if check_all || fields.contains(&SearchField::Genre) {
-            if let ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Movie(
+        if (check_all || fields.contains(&SearchField::Genre))
+            && let ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Movie(
                 details,
             )) = &movie.details
-            {
-                for genre in &details.genres {
-                    if let Some(score) = self.calculate_match_score(&genre.name, query, fuzzy) {
-                        best_score = best_score.max(score * 0.9);
-                    }
+        {
+            for genre in &details.genres {
+                if let Some(score) = self.calculate_match_score(&genre.name, query, fuzzy) {
+                    best_score = best_score.max(score * 0.9);
                 }
             }
         }
@@ -430,36 +425,32 @@ impl SearchService {
         let mut best_score = 0.0f32;
 
         // Check title
-        if check_all || fields.contains(&SearchField::Title) {
-            if let Some(score) = self.calculate_match_score(&series.title.as_str(), query, fuzzy) {
-                best_score = best_score.max(score);
-            }
+        if (check_all || fields.contains(&SearchField::Title))
+            && let Some(score) = self.calculate_match_score(series.title.as_str(), query, fuzzy)
+        {
+            best_score = best_score.max(score);
         }
 
         // Check overview
-        if check_all || fields.contains(&SearchField::Overview) {
-            if let ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Series(
+        if (check_all || fields.contains(&SearchField::Overview))
+            && let ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Series(
                 details,
             )) = &series.details
-            {
-                if let Some(overview) = &details.overview {
-                    if let Some(score) = self.calculate_match_score(overview, query, fuzzy) {
-                        best_score = best_score.max(score * 0.8);
-                    }
-                }
-            }
+            && let Some(overview) = &details.overview
+            && let Some(score) = self.calculate_match_score(overview, query, fuzzy)
+        {
+            best_score = best_score.max(score * 0.8);
         }
 
         // Check genres
-        if check_all || fields.contains(&SearchField::Genre) {
-            if let ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Series(
+        if (check_all || fields.contains(&SearchField::Genre))
+            && let ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Series(
                 details,
             )) = &series.details
-            {
-                for genre in &details.genres {
-                    if let Some(score) = self.calculate_match_score(&genre.name, query, fuzzy) {
-                        best_score = best_score.max(score * 0.9);
-                    }
+        {
+            for genre in &details.genres {
+                if let Some(score) = self.calculate_match_score(&genre.name, query, fuzzy) {
+                    best_score = best_score.max(score * 0.9);
                 }
             }
         }
@@ -650,7 +641,7 @@ impl SearchService {
             },
             Media::Season(season) => SearchResult {
                 title: format!("Season {}", season.season_number.value()),
-                subtitle: Some(format!("Series • Season")),
+                subtitle: Some("Series • Season".to_string()),
                 year: None,
                 poster_url: match &season.details {
                     ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Season(

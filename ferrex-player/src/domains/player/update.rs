@@ -167,7 +167,13 @@ pub fn update_player(
                     state.seeking = true;
                     state.seek_started_time = Some(std::time::Instant::now());
                     let duration = Duration::try_from_secs_f64(seek_position).unwrap_or_default();
-                    video.seek(duration, false);
+                    if let Err(err) = video.seek(duration, false) {
+                        log::error!(
+                            "Failed to seek video to {:.3}s: {}",
+                            duration.as_secs_f64(),
+                            err
+                        );
+                    }
                 } else if let Some(seek_position) = state.last_seek_position {
                     // Update position immediately for better UX
                     state.last_valid_position = seek_position;
@@ -273,7 +279,13 @@ pub fn update_player(
                 state.seeking = true;
                 state.seek_started_time = Some(std::time::Instant::now());
                 let seek_to = Duration::try_from_secs_f64(new_position).unwrap_or_default();
-                video.seek(seek_to, false);
+                if let Err(err) = video.seek(seek_to, false) {
+                    log::error!(
+                        "Failed to seek video to {:.3}s: {}",
+                        seek_to.as_secs_f64(),
+                        err
+                    );
+                }
 
                 // Update position immediately for better UX and remember as last valid
 
@@ -441,14 +453,13 @@ pub fn update_player(
                 }
 
                 // Check for seek timeout (500ms)
-                if state.seeking {
-                    if let Some(start_time) = state.seek_started_time {
-                        if start_time.elapsed() > Duration::from_millis(1000) {
-                            log::warn!("Seek timeout: clearing seeking flag after 1s");
-                            state.seeking = false;
-                            state.seek_started_time = None;
-                        }
-                    }
+                if state.seeking
+                    && let Some(start_time) = state.seek_started_time
+                    && start_time.elapsed() > Duration::from_millis(1000)
+                {
+                    log::warn!("Seek timeout: clearing seeking flag after 1s");
+                    state.seeking = false;
+                    state.seek_started_time = None;
                 }
 
                 // Update duration if it wasn't available during load
@@ -603,7 +614,13 @@ pub fn update_player(
                     if let Some(video) = state.video_opt.as_mut() {
                         let duration =
                             Duration::try_from_secs_f64(seek_position).unwrap_or_default();
-                        video.seek(duration, false);
+                        if let Err(err) = video.seek(duration, false) {
+                            log::error!(
+                                "Failed to seek video to {:.3}s while dragging: {}",
+                                duration.as_secs_f64(),
+                                err
+                            );
+                        }
                         state.last_seek_time = Some(Instant::now());
                         // Clear pending seek since we just performed it
                         state.pending_seek_position = None;
@@ -783,17 +800,23 @@ pub fn update_player(
         Message::PlayMediaWithId(media, media_id) => {
             // Store current media and id
             state.current_media = Some(media.clone());
-            state.current_media_id = Some(media_id.clone());
+            state.current_media_id = Some(media_id);
 
             // Transfer pending resume position from media domain if available
             state.pending_resume_position = app_state.domains.media.state.pending_resume_position;
             app_state.domains.media.state.pending_resume_position = None;
 
+            // Seed playback UI with the position we expect to resume from (or clear if none)
+            state.last_valid_position = state
+                .pending_resume_position
+                .map(|pos| pos as f64)
+                .unwrap_or(0.0);
+
             // Set duration from media metadata if available
-            if let Some(metadata) = &media.media_file_metadata {
-                if let Some(duration) = metadata.duration {
-                    state.last_valid_duration = duration;
-                }
+            if let Some(metadata) = &media.media_file_metadata
+                && let Some(duration) = metadata.duration
+            {
+                state.last_valid_duration = duration;
             }
 
             // HDR detection heuristics (copied from previous media handler)
@@ -900,9 +923,52 @@ pub fn update_player(
             }
         }
 
-        Message::PollExternalMpv => {
-            use iced::window;
+        Message::ProgressHeartbeat => {
+            // Periodic progress checkpoint from internal player
+            if let Some(video) = state.video_opt.as_mut() {
+                if let Some(resume_pos) = state.pending_resume_position {
+                    let target = Duration::from_secs_f32(resume_pos.max(0.0));
+                    match video.seek(target, false) {
+                        Ok(_) => {
+                            log::info!(
+                                "Applied deferred resume seek to {:.2}s via heartbeat",
+                                resume_pos
+                            );
+                            state.last_valid_position = resume_pos as f64;
+                            state.pending_resume_position = None;
+                            // Allow pipeline to settle before reporting progress
+                            return DomainUpdateResult::task(Task::none());
+                        }
+                        Err(e) => {
+                            log::debug!(
+                                "Deferred resume seek still pending at {:.2}s: {}",
+                                resume_pos,
+                                e
+                            );
+                        }
+                    }
+                }
 
+                if let Some(media_id) = state.current_media_id {
+                    let position = video.position().as_secs_f64();
+                    let duration = video.duration().as_secs_f64();
+                    if position > 0.0 && duration > 0.0 {
+                        state.last_valid_position = position;
+                        state.last_valid_duration = duration;
+                        return DomainUpdateResult::task(Task::done(
+                            crate::common::messages::DomainMessage::Media(
+                                crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                                    media_id, position, duration,
+                                ),
+                            ),
+                        ));
+                    }
+                }
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+
+        Message::PollExternalMpv => {
             match (state.external_mpv_handle.take(), state.current_media_id) {
                 (Some(mut handle), Some(media_id)) => {
                     // Check if MPV is still alive

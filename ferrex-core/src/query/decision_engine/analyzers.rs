@@ -1,6 +1,5 @@
 //! Analyzers for data completeness and query complexity
 
-use crate::api_types::ScalarRange;
 use crate::query::decision_engine::types::QueryContext;
 use crate::query::types::{MediaQuery, SortBy};
 use crate::{Media, MediaDetailsOption, MovieReference, SeriesReference};
@@ -31,7 +30,7 @@ impl DataCompletenessAnalyzer {
 
         // For now, we'll use a generic approach
         // In a real implementation, we'd check specific fields based on T
-        let sample_size = context.available_data.len().min(100);
+        let _sample_size = context.available_data.len().min(100);
 
         // Default to medium completeness
         // This would be overridden by specific implementations

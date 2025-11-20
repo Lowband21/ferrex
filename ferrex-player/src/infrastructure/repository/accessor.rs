@@ -1,10 +1,12 @@
+use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
 use ferrex_core::{
-    ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, Library, LibraryID, Media,
-    MediaDetailsOption, MediaID, MediaIDLike, MediaLike, MediaOps, SeasonID, SeasonLike,
-    SeasonReference, SeriesID,
+    ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, Library, LibraryID, Media, MediaID,
+    MediaIDLike, MediaLike, MediaOps, MediaType, MovieID, SeasonID, SeasonLike, SeasonReference,
+    SeriesID, SortBy, SortOrder,
 };
 use parking_lot::RwLock;
 use rkyv::{util::AlignedVec, vec::ArchivedVec};
@@ -14,8 +16,11 @@ use yoke::Yoke;
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 
 use super::{
-    EpisodeYoke, LibraryYoke, MediaYoke, MovieYoke, SeasonYoke, SeriesYoke, repository::MediaRepo,
+    EpisodeYoke, LibraryYoke, MediaYoke, MovieYoke, SeasonYoke, SeriesYoke,
+    repository::{MediaRepo, RuntimeMediaEntry},
 };
+
+use ferrex_core::query::sorting::compare_media;
 
 /// Marker types for capability roles
 #[derive(Debug, Clone, Copy)]
@@ -248,6 +253,8 @@ impl<R: ReadCap> Accessor<R> {
     pub fn get_sorted_index_by_library(
         &self,
         library_id: &LibraryID,
+        sort_by: SortBy,
+        sort_order: SortOrder,
     ) -> RepositoryResult<Vec<Uuid>> {
         self.with_repo(|repo| {
             let lib_uuid = library_id.as_uuid();
@@ -283,14 +290,14 @@ impl<R: ReadCap> Accessor<R> {
                     ferrex_core::LibraryType::Movies => slice
                         .iter()
                         .filter_map(|m| match m {
-                            ArchivedMedia::Movie(movie) => Some(Uuid::from_bytes(movie.id.0)),
+                            ArchivedMedia::Movie(movie) => Some(movie.id.0),
                             _ => None,
                         })
                         .collect(),
                     ferrex_core::LibraryType::Series => slice
                         .iter()
                         .filter_map(|m| match m {
-                            ArchivedMedia::Series(series) => Some(Uuid::from_bytes(series.id.0)),
+                            ArchivedMedia::Series(series) => Some(series.id.0),
                             _ => None,
                         })
                         .collect(),
@@ -304,27 +311,108 @@ impl<R: ReadCap> Accessor<R> {
 
             // Append runtime additions for this library, filtered by library type
             if let Some(additions) = repo.modifications.added_by_library.get(&lib_uuid) {
-                let mut new_ids: Vec<Uuid> = additions.iter().copied().collect();
-                new_ids.sort();
+                let mut base_set: HashSet<Uuid> = ids.iter().copied().collect();
+                let mut runtime_items: Vec<(Uuid, Media)> = Vec::new();
 
-                for media_id in new_ids {
-                    if ids.contains(&media_id) {
+                for media_id in additions {
+                    if base_set.contains(media_id) {
                         continue;
                     }
 
-                    let Some(media) = repo.modifications.added.get(&media_id) else {
+                    let Some(entry) = repo.modifications.added.get(media_id) else {
                         continue;
                     };
 
-                    let matches_library = match (&owned_lib.library_type, media) {
-                        (ferrex_core::LibraryType::Movies, Media::Movie(_)) => true,
-                        (ferrex_core::LibraryType::Series, Media::Series(_)) => true,
+                    let matches_library = match (&owned_lib.library_type, entry.media_type()) {
+                        (ferrex_core::LibraryType::Movies, MediaType::Movie) => true,
+                        (ferrex_core::LibraryType::Series, MediaType::Series) => true,
                         _ => false,
                     };
 
-                    if matches_library {
-                        ids.push(media_id);
+                    if !matches_library {
+                        continue;
                     }
+
+                    match entry.deserialize() {
+                        Ok(media) => runtime_items.push((*media_id, media)),
+                        Err(err) => {
+                            log::warn!(
+                                "Failed to deserialize runtime addition {}: {}",
+                                media_id,
+                                err
+                            );
+                        }
+                    }
+                }
+
+                if !runtime_items.is_empty() {
+                    let compare_with_fallback =
+                        |a_media: &Media, a_id: &Uuid, b_media: &Media, b_id: &Uuid| {
+                            compare_media(a_media, b_media, sort_by, sort_order)
+                                .unwrap_or_else(|| {
+                                    compare_media(
+                                        a_media,
+                                        b_media,
+                                        SortBy::Title,
+                                        SortOrder::Ascending,
+                                    )
+                                    .unwrap_or_else(|| a_id.cmp(b_id))
+                                })
+                                .then_with(|| a_id.cmp(b_id))
+                        };
+
+                    runtime_items.sort_by(|a, b| compare_with_fallback(&a.1, &a.0, &b.1, &b.0));
+
+                    let runtime_len = runtime_items.len();
+                    let mut merged_ids = Vec::with_capacity(ids.len() + runtime_len);
+
+                    let mut runtime_iter = runtime_items.into_iter();
+                    let mut pending_runtime = runtime_iter.next();
+
+                    for &base_id in &ids {
+                        let base_media = match owned_lib.library_type {
+                            ferrex_core::LibraryType::Movies => {
+                                repo.get_internal(&MovieID(base_id))?
+                            }
+                            ferrex_core::LibraryType::Series => {
+                                repo.get_internal(&SeriesID(base_id))?
+                            }
+                        };
+
+                        while let Some((runtime_id, runtime_media)) = pending_runtime.as_ref() {
+                            let ordering = compare_with_fallback(
+                                runtime_media,
+                                runtime_id,
+                                &base_media,
+                                &base_id,
+                            );
+
+                            if ordering != Ordering::Greater {
+                                if base_set.insert(*runtime_id) {
+                                    merged_ids.push(*runtime_id);
+                                }
+                                pending_runtime = runtime_iter.next();
+                            } else {
+                                break;
+                            }
+                        }
+
+                        merged_ids.push(base_id);
+                    }
+
+                    if let Some((runtime_id, _)) = pending_runtime
+                        && base_set.insert(runtime_id)
+                    {
+                        merged_ids.push(runtime_id);
+                    }
+
+                    for (runtime_id, _) in runtime_iter {
+                        if base_set.insert(runtime_id) {
+                            merged_ids.push(runtime_id);
+                        }
+                    }
+
+                    ids = merged_ids;
                 }
             }
 
@@ -379,36 +467,44 @@ impl<R: WriteCap> Accessor<R> {
     pub fn upsert(&self, media: Media, library_id: &LibraryID) -> RepositoryResult<()> {
         self.with_repo_mut(|repo| {
             let id = media.media_id().to_uuid();
+            let lib_uuid = library_id.as_uuid();
 
             // Remove from deleted if it was there
             repo.modifications.deleted.remove(&id);
 
-            if repo.media_id_index.contains_key(&id) {
-                // Existing archived item: consider as modified
-                repo.modifications.added.remove(&id);
-                // Remove from any added_by_library set if it happened to be there
-                if let Some(sets) = repo
-                    .modifications
-                    .added_by_library
-                    .get_mut(&library_id.as_uuid())
-                {
-                    sets.remove(&id);
-                    if sets.is_empty() {
-                        repo.modifications
-                            .added_by_library
-                            .remove(&library_id.as_uuid());
-                    }
-                }
-                repo.modifications.modified.insert(id, media);
-            } else {
-                // New runtime item: track by library
-                repo.modifications.added.insert(id, media);
-                let lib_uuid = library_id.as_uuid();
+            let entry = RuntimeMediaEntry::from_media(&media)?;
+
+            if repo.modifications.added.contains_key(&id) {
+                // Existing runtime addition: update in-place
+                repo.modifications.added.insert(id, entry);
+                repo.media_id_index.entry(id).or_insert(lib_uuid);
                 repo.modifications
                     .added_by_library
                     .entry(lib_uuid)
                     .or_default()
                     .insert(id);
+                repo.modifications.mark_runtime_only(id);
+            } else if repo.media_id_index.contains_key(&id) {
+                // Existing archived item: treat as modified overlay
+                repo.modifications.added.remove(&id);
+                repo.modifications.unmark_runtime_only(&id);
+                if let Some(sets) = repo.modifications.added_by_library.get_mut(&lib_uuid) {
+                    sets.remove(&id);
+                    if sets.is_empty() {
+                        repo.modifications.added_by_library.remove(&lib_uuid);
+                    }
+                }
+                repo.modifications.modified.insert(id, entry);
+            } else {
+                // New runtime item: track in overlay and index by library
+                repo.modifications.added.insert(id, entry);
+                repo.media_id_index.insert(id, lib_uuid);
+                repo.modifications
+                    .added_by_library
+                    .entry(lib_uuid)
+                    .or_default()
+                    .insert(id);
+                repo.modifications.mark_runtime_only(id);
             }
 
             Ok(())
@@ -422,30 +518,36 @@ impl<R: WriteCap> Accessor<R> {
 
             // Mark as deleted and remove from modifications
             repo.modifications.deleted.insert(*uuid);
-            repo.modifications.added.remove(&uuid);
-            repo.modifications.modified.remove(&uuid);
+            repo.modifications.added.remove(uuid);
+            repo.modifications.modified.remove(uuid);
+            let was_runtime = repo.modifications.is_runtime_only(uuid);
+            repo.modifications.unmark_runtime_only(uuid);
 
             // Remove from added_by_library if present
             // If the item was archived, we can compute its library via media_id_index
-            if let Some(arch_lib_id) = repo.media_id_index.get(&uuid) {
+            if let Some(arch_lib_id) = repo.media_id_index.get(uuid) {
                 let lib_uuid = arch_lib_id;
-                if let Some(set) = repo.modifications.added_by_library.get_mut(&lib_uuid) {
-                    set.remove(&uuid);
+                if let Some(set) = repo.modifications.added_by_library.get_mut(lib_uuid) {
+                    set.remove(uuid);
                     if set.is_empty() {
-                        repo.modifications.added_by_library.remove(&lib_uuid);
+                        repo.modifications.added_by_library.remove(lib_uuid);
                     }
                 }
             } else {
                 // Not in archived index, so it was a runtime-added item. Find and remove.
                 let mut empty_keys = Vec::new();
                 for (lib_uuid, set) in repo.modifications.added_by_library.iter_mut() {
-                    if set.remove(&uuid) && set.is_empty() {
+                    if set.remove(uuid) && set.is_empty() {
                         empty_keys.push(*lib_uuid);
                     }
                 }
                 for k in empty_keys {
                     repo.modifications.added_by_library.remove(&k);
                 }
+            }
+
+            if was_runtime {
+                repo.media_id_index.remove(uuid);
             }
 
             Ok(())
@@ -455,7 +557,10 @@ impl<R: WriteCap> Accessor<R> {
     /// Clear all runtime modifications
     pub fn clear_modifications(&self) -> RepositoryResult<()> {
         self.with_repo_mut(|repo| {
-            repo.modifications.clear();
+            let runtime_ids = repo.modifications.clear();
+            for id in runtime_ids {
+                repo.media_id_index.remove(&id);
+            }
             Ok(())
         })
     }

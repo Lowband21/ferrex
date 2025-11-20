@@ -36,7 +36,7 @@ pub struct RoleWithPermissions {
 /// Requires: users:manage_roles permission
 pub async fn list_roles_handler(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    Extension(_user): Extension<User>,
 ) -> AppResult<Json<ApiResponse<RolesResponse>>> {
     // Permission check is handled by middleware
 
@@ -52,7 +52,7 @@ pub async fn list_roles_handler(
             .get_all_permissions()
             .await?
             .into_iter()
-            .filter(|p| {
+            .filter(|_| {
                 // TODO: Add a method to get permissions for a specific role
                 // For now, we'll just return the role without detailed permissions
                 false
@@ -73,7 +73,7 @@ pub async fn list_roles_handler(
 /// Requires: users:manage_roles permission
 pub async fn list_permissions_handler(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    Extension(_user): Extension<User>,
 ) -> AppResult<Json<ApiResponse<Vec<Permission>>>> {
     let permissions = state.db.backend().get_all_permissions().await?;
 

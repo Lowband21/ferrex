@@ -9,6 +9,7 @@ use crate::{MediaError, Result};
 
 use super::{ImageFetchActor, ImageFetchCommand};
 
+#[derive(Debug)]
 pub struct DefaultImageFetchActor {
     image_service: Arc<ImageService>,
 }

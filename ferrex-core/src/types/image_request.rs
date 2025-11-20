@@ -4,6 +4,113 @@ use uuid::Uuid;
 
 use crate::{ImageSize, ImageType};
 
+/// Domain-specific categories for poster imagery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PosterKind {
+    Movie,
+    Series,
+    Season,
+}
+
+impl PosterKind {
+    const fn image_type(self) -> ImageType {
+        match self {
+            PosterKind::Movie => ImageType::Movie,
+            PosterKind::Series => ImageType::Series,
+            PosterKind::Season => ImageType::Season,
+        }
+    }
+}
+
+/// Available logical poster sizes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum PosterSize {
+    /// Small thumbnail poster (maps to `ImageSize::Thumbnail`).
+    Thumb,
+    /// Default poster resolution (maps to `ImageSize::Poster`).
+    #[default]
+    Standard,
+    /// Higher-quality poster that prefers richer variants while staying cache friendly.
+    Quality,
+    /// Hero poster used in detail views (maps to `ImageSize::Full`, w500).
+    Original,
+}
+
+impl PosterSize {
+    const fn as_image_size(self) -> ImageSize {
+        match self {
+            PosterSize::Thumb => ImageSize::Thumbnail,
+            PosterSize::Standard => ImageSize::Poster,
+            PosterSize::Quality => ImageSize::Poster,
+            PosterSize::Original => ImageSize::Full,
+        }
+    }
+}
+
+/// Domain-specific categories for backdrop imagery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BackdropKind {
+    Movie,
+    Series,
+    Season,
+}
+
+impl BackdropKind {
+    const fn image_type(self) -> ImageType {
+        match self {
+            BackdropKind::Movie => ImageType::Movie,
+            BackdropKind::Series => ImageType::Series,
+            BackdropKind::Season => ImageType::Season,
+        }
+    }
+}
+
+/// Logical backdrop size (currently a single option to encourage type safety).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum BackdropSize {
+    #[default]
+    Quality,
+}
+
+impl BackdropSize {
+    const fn as_image_size(self) -> ImageSize {
+        match self {
+            BackdropSize::Quality => ImageSize::Backdrop,
+        }
+    }
+}
+
+/// Logical profile image size for cast/people portraits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ProfileSize {
+    #[default]
+    Standard,
+    Any,
+}
+
+impl ProfileSize {
+    const fn as_image_size(self) -> ImageSize {
+        match self {
+            ProfileSize::Standard | ProfileSize::Any => ImageSize::Profile,
+        }
+    }
+}
+
+/// Logical size for episode still images.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum EpisodeStillSize {
+    #[default]
+    Standard,
+}
+
+impl EpisodeStillSize {
+    const fn as_image_size(self) -> ImageSize {
+        match self {
+            EpisodeStillSize::Standard => ImageSize::Thumbnail,
+        }
+    }
+}
+
 /// Priority hint for unified image loading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Priority {
@@ -61,7 +168,14 @@ impl PartialEq for ImageRequest {
 impl Eq for ImageRequest {}
 
 impl ImageRequest {
+    #[track_caller]
     pub fn new(media_id: Uuid, size: ImageSize, image_type: ImageType) -> Self {
+        assert!(
+            is_valid_combination(image_type, size),
+            "Invalid image size {:?} for image type {:?}",
+            size,
+            image_type
+        );
         Self {
             media_id,
             size,
@@ -69,6 +183,26 @@ impl ImageRequest {
             priority: Priority::Visible,
             image_index: 0,
         }
+    }
+
+    /// Construct a poster request using typed variants.
+    pub fn poster(media_id: Uuid, kind: PosterKind, size: PosterSize) -> Self {
+        Self::new(media_id, size.as_image_size(), kind.image_type())
+    }
+
+    /// Construct a backdrop request using typed variants.
+    pub fn backdrop(media_id: Uuid, kind: BackdropKind, size: BackdropSize) -> Self {
+        Self::new(media_id, size.as_image_size(), kind.image_type())
+    }
+
+    /// Construct an episode still request (2:1 still/thumbnail imagery).
+    pub fn episode_still(media_id: Uuid, size: EpisodeStillSize) -> Self {
+        Self::new(media_id, size.as_image_size(), ImageType::Episode)
+    }
+
+    /// Construct a person profile request.
+    pub fn person_profile(media_id: Uuid, size: ProfileSize) -> Self {
+        Self::new(media_id, size.as_image_size(), ImageType::Person)
     }
 
     pub fn with_priority(mut self, priority: Priority) -> Self {
@@ -82,9 +216,23 @@ impl ImageRequest {
     }
 }
 
+const fn is_valid_combination(image_type: ImageType, size: ImageSize) -> bool {
+    use ImageSize::*;
+    use ImageType::*;
+
+    match image_type {
+        Movie | Series | Season => matches!(size, Thumbnail | Poster | Backdrop | Full),
+        Episode => matches!(size, Thumbnail),
+        Person => matches!(size, Profile),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ImageRequest, ImageSize, ImageType, Priority};
+    use super::{
+        BackdropKind, BackdropSize, EpisodeStillSize, ImageRequest, ImageSize, ImageType,
+        PosterKind, PosterSize, Priority, ProfileSize,
+    };
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     use uuid::Uuid;
@@ -115,5 +263,43 @@ mod tests {
 
         assert_ne!(first, second);
         assert_ne!(hash_of(&first), hash_of(&second));
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid image size")]
+    fn invalid_combinations_panic() {
+        let media_id = Uuid::new_v4();
+        // Movie media cannot request a profile-sized image.
+        let _ = ImageRequest::new(media_id, ImageSize::Profile, ImageType::Movie);
+    }
+
+    #[test]
+    fn typed_constructors_produce_expected_mappings() {
+        let media_id = Uuid::new_v4();
+
+        let poster = ImageRequest::poster(media_id, PosterKind::Movie, PosterSize::Original);
+        assert_eq!(poster.image_type, ImageType::Movie);
+        assert_eq!(poster.size, ImageSize::Full);
+
+        let quality_poster = ImageRequest::poster(media_id, PosterKind::Movie, PosterSize::Quality);
+        assert_eq!(quality_poster.image_type, ImageType::Movie);
+        assert_eq!(quality_poster.size, ImageSize::Poster);
+
+        let backdrop =
+            ImageRequest::backdrop(media_id, BackdropKind::Series, BackdropSize::Quality);
+        assert_eq!(backdrop.image_type, ImageType::Series);
+        assert_eq!(backdrop.size, ImageSize::Backdrop);
+
+        let still = ImageRequest::episode_still(media_id, EpisodeStillSize::Standard);
+        assert_eq!(still.image_type, ImageType::Episode);
+        assert_eq!(still.size, ImageSize::Thumbnail);
+
+        let profile = ImageRequest::person_profile(media_id, ProfileSize::Standard);
+        assert_eq!(profile.image_type, ImageType::Person);
+        assert_eq!(profile.size, ImageSize::Profile);
+
+        let any_profile = ImageRequest::person_profile(media_id, ProfileSize::Any);
+        assert_eq!(any_profile.image_type, ImageType::Person);
+        assert_eq!(any_profile.size, ImageSize::Profile);
     }
 }

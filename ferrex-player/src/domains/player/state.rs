@@ -221,10 +221,10 @@ impl PlayerDomainState {
     }
 
     pub fn update_track_notification(&mut self) {
-        if let Some(notification) = &self.track_notification {
-            if notification.show_time.elapsed() > Duration::from_secs(2) {
-                self.track_notification = None;
-            }
+        if let Some(notification) = &self.track_notification
+            && notification.show_time.elapsed() > Duration::from_secs(2)
+        {
+            self.track_notification = None;
         }
     }
 

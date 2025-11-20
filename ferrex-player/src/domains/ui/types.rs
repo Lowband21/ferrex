@@ -131,16 +131,11 @@ pub enum DisplayMode {
 }
 
 /// Backdrop aspect ratio mode
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum BackdropAspectMode {
     /// Automatically select aspect ratio based on window dimensions
+    #[default]
     Auto,
     /// Force 21:9 aspect ratio regardless of window dimensions
     Force21x9,
-}
-
-impl Default for BackdropAspectMode {
-    fn default() -> Self {
-        Self::Auto
-    }
 }

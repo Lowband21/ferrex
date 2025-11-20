@@ -11,13 +11,14 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ferrex_core::auth::rate_limit::RateLimitRule;
-use std::pin::Pin;
 use std::sync::Arc;
+use std::{fmt, pin::Pin};
 use tracing::{info, warn};
 
 use crate::infra::app_state::AppState;
 
 /// Rate limit configuration for different endpoint categories
+#[derive(Debug)]
 pub struct RateLimitConfig {
     /// Enable rate limiting globally
     pub enabled: bool,
@@ -129,10 +130,10 @@ fn extract_client_id(req: &Request<Body>) -> String {
     }
 
     // Last resort - use a header
-    if let Some(forwarded) = req.headers().get("x-forwarded-for") {
-        if let Ok(ip) = forwarded.to_str() {
-            return format!("ip:{}", ip.split(',').next().unwrap_or("unknown"));
-        }
+    if let Some(forwarded) = req.headers().get("x-forwarded-for")
+        && let Ok(ip) = forwarded.to_str()
+    {
+        return format!("ip:{}", ip.split(',').next().unwrap_or("unknown"));
     }
 
     "unknown".to_string()
@@ -174,6 +175,12 @@ fn rate_limit_exceeded_response(window_seconds: u64) -> Response {
 /// In-memory rate limiter for fallback when Redis unavailable
 pub struct InMemoryRateLimiter {
     requests: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Vec<std::time::Instant>>>>,
+}
+
+impl fmt::Debug for InMemoryRateLimiter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InMemoryRateLimiter").finish()
+    }
 }
 
 impl Default for InMemoryRateLimiter {

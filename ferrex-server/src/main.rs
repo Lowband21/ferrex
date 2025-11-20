@@ -25,16 +25,15 @@ use anyhow::Context;
 use axum::{
     Router,
     body::Body,
-    extract::{Path, Request, State},
-    http::{HeaderMap, StatusCode, header},
+    extract::{Request, State},
+    http::StatusCode,
     response::{Json, Response},
-    routing::{get, post},
+    routing::get,
 };
 use clap::Parser;
 use ferrex_core::{
-    LibraryActorConfig, LibraryReference, MediaDatabase, ScanRequest,
-    auth::domain::services::{AuthenticationService, create_authentication_service},
-    database::PostgresDatabase,
+    LibraryActorConfig, LibraryReference, MediaDatabase,
+    auth::domain::services::create_authentication_service, database::PostgresDatabase,
 };
 use ferrex_server::{
     infra::{
@@ -48,7 +47,6 @@ use ferrex_server::{
     media::prep::thumbnail_service::ThumbnailService,
     routes,
 };
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -59,7 +57,6 @@ use tokio::sync::Mutex;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use uuid::Uuid;
 
 use ferrex_server::users::auth::tls::{TlsCertConfig, create_tls_acceptor};
 
@@ -85,6 +82,20 @@ struct Args {
     host: Option<String>,
 }
 
+fn derive_database_url_from_env() -> Option<String> {
+    let database = std::env::var("PGDATABASE")
+        .or_else(|_| std::env::var("POSTGRES_DB"))
+        .ok()?
+        .trim()
+        .to_owned();
+
+    if database.is_empty() {
+        return None;
+    }
+
+    Some(format!("postgresql:///{database}"))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Parse command line arguments
@@ -100,8 +111,6 @@ async fn main() -> anyhow::Result<()> {
     if let Some(host) = args.host {
         config.server_host = host;
     }
-
-    let config = Arc::new(config);
 
     tracing_subscriber::registry()
         .with(
@@ -131,37 +140,51 @@ async fn main() -> anyhow::Result<()> {
         warn!("No MEDIA_ROOT configured - will require path parameter for scans");
     }
 
-    // Ensure cache directories exist
+    // Ensure cache directories exist and resolve to absolute paths exactly once
     config.ensure_directories()?;
-    info!("Cache directories created");
+    config.normalize_paths()?;
+    info!("Cache directories prepared");
+
+    let config = Arc::new(config);
 
     // Create database instance based on configuration
-    let db = if let Some(db_url) = &config.database_url {
-        // Check if the URL looks like PostgreSQL
-        if db_url.starts_with("postgres://") || db_url.starts_with("postgresql://") {
-            info!("Connecting to PostgreSQL database at {}", db_url);
-
-            // Use Redis cache if available
-            let with_cache = config.redis_url.is_some();
-            match MediaDatabase::new_postgres(db_url, with_cache).await {
-                Ok(database) => {
-                    info!("Successfully connected to PostgreSQL");
-                    Arc::new(database)
-                }
-                Err(e) => {
-                    error!("Failed to connect to PostgreSQL: {}", e);
-                    return Err(anyhow::anyhow!("Database connection failed: {}", e));
-                }
+    let (database_url, url_source) = match config
+        .database_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+    {
+        Some(url) => (url.to_owned(), "DATABASE_URL"),
+        None => match derive_database_url_from_env() {
+            Some(url) => (url, "PG env"),
+            None => {
+                error!("DATABASE_URL or PGDATABASE must be provided for PostgreSQL connections");
+                return Err(anyhow::anyhow!(
+                    "No PostgreSQL connection configuration found"
+                ));
             }
-        } else {
-            error!("Only PostgreSQL database URLs are supported");
-            return Err(anyhow::anyhow!(
-                "Invalid database URL: must start with postgres:// or postgresql://"
-            ));
+        },
+    };
+
+    if !(database_url.starts_with("postgres://") || database_url.starts_with("postgresql://")) {
+        error!("Only PostgreSQL database URLs are supported");
+        return Err(anyhow::anyhow!(
+            "Invalid database URL: must start with postgres:// or postgresql://"
+        ));
+    }
+
+    info!("Connecting to PostgreSQL via {}", url_source);
+
+    let with_cache = config.redis_url.is_some();
+    let db = match MediaDatabase::new_postgres(&database_url, with_cache).await {
+        Ok(database) => {
+            info!("Successfully connected to PostgreSQL");
+            Arc::new(database)
         }
-    } else {
-        error!("DATABASE_URL environment variable is required");
-        return Err(anyhow::anyhow!("DATABASE_URL not set"));
+        Err(e) => {
+            error!("Failed to connect to PostgreSQL: {}", e);
+            return Err(anyhow::anyhow!("Database connection failed: {}", e));
+        }
     };
 
     if let Err(e) = db.backend().initialize_schema().await {
@@ -442,59 +465,6 @@ pub fn create_app(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Create backward compatibility routes that redirect to v1 endpoints
-fn create_compatibility_routes(state: AppState) -> Router<AppState> {
-    Router::new()
-        // Auth redirects: /api/auth/* -> /api/v1/auth/*
-        .route("/api/library/events/sse", get(redirect_to_v1))
-        //
-        .route("/api/auth/register", post(redirect_to_v1))
-        .route("/api/auth/login", post(redirect_to_v1))
-        .route("/api/auth/refresh", post(redirect_to_v1))
-        .route("/api/auth/logout", post(redirect_to_v1))
-        .route("/api/auth/device/login", post(redirect_to_v1))
-        .route("/api/auth/device/pin", post(redirect_to_v1))
-        .route("/api/auth/device/status", get(redirect_to_v1))
-        // User redirects: /api/users/* -> /api/v1/users/*
-        .route("/api/users/me", get(redirect_to_v1))
-        .route("/api/users", get(redirect_to_v1))
-        .route("/api/users/{id}", get(redirect_to_v1))
-        // Media redirects: /api/media/* -> /api/v1/media/*
-        .route("/api/media/query", post(redirect_to_v1))
-        // Watch status redirects: /api/watch/* -> /api/v1/watch/*
-        .route("/api/watch/progress", post(redirect_to_v1))
-        .route("/api/watch/state", get(redirect_to_v1))
-        .route("/api/watch/continue", get(redirect_to_v1))
-        // Setup redirects: /api/setup/* -> /api/v1/setup/*
-        .route("/api/setup/status", get(redirect_to_v1))
-        .route("/api/setup/admin", post(redirect_to_v1))
-        .with_state(state)
-}
-
-// Add this redirect handler function to main.rs
-async fn redirect_to_v1(uri: axum::http::Uri) -> Response {
-    let new_path = uri.path().replace("/api/", "/api/v1/");
-    let new_uri = if let Some(query) = uri.query() {
-        format!("{}?{}", new_path, query)
-    } else {
-        new_path
-    };
-
-    Response::builder()
-        .status(StatusCode::MOVED_PERMANENTLY)
-        .header("Location", new_uri)
-        .header("X-API-Migration", "Redirected to v1")
-        .body(Body::empty())
-        .unwrap()
-}
-
-// These types are now in ferrex_core::api_types
-// #[derive(Deserialize)]
-#[derive(Deserialize)]
-struct MetadataRequest {
-    path: String,
-}
-
 async fn ping_handler() -> Result<Json<Value>, StatusCode> {
     info!("Ping endpoint called");
     Ok(Json(json!({
@@ -556,283 +526,4 @@ async fn health_handler(State(state): State<AppState>) -> Result<Json<Value>, St
     }
 }
 
-// Deprecated scan handler - use start_scan_handler instead
-async fn scan_handler(_request: Json<ScanRequest>) -> Result<Json<Value>, StatusCode> {
-    warn!("Deprecated /scan endpoint called. Use /scan/start instead");
-    Ok(Json(json!({
-        "status": "error",
-        "message": "This endpoint is deprecated. Use POST /scan/start instead",
-        "error": "deprecated_endpoint"
-    })))
-}
-
-async fn scan_status_handler() -> Result<Json<Value>, StatusCode> {
-    info!("Scan status requested");
-    Ok(Json(json!({
-        "status": "ready",
-        "message": "Media scanner is ready",
-        "supported_extensions": [
-            "mp4", "mkv", "avi", "mov", "webm", "flv", "wmv",
-            "m4v", "mpg", "mpeg", "3gp", "ogv", "ts", "mts", "m2ts"
-        ]
-    })))
-}
-
-// Deprecated - will be removed
-async fn metadata_handler(Json(request): Json<MetadataRequest>) -> Result<Json<Value>, StatusCode> {
-    warn!("Deprecated metadata handler called for: {}", request.path);
-    Err(StatusCode::NOT_IMPLEMENTED)
-}
-
-async fn config_handler(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
-    info!("Config request");
-
-    Ok(Json(json!({
-        "status": "success",
-        "config": {
-            "server_host": state.config.server_host,
-            "server_port": state.config.server_port,
-            "media_root": state.config.media_root.as_ref().map(|p| p.display().to_string()),
-            "dev_mode": state.config.dev_mode,
-            "database_configured": state.config.database_url.is_some(),
-            "redis_configured": state.config.redis_url.is_some(),
-            "transcode_cache_dir": state.config.transcode_cache_dir.display().to_string(),
-            "thumbnail_cache_dir": state.config.thumbnail_cache_dir.display().to_string(),
-        }
-    })))
-}
-
-// Legacy metadata fetch endpoints removed; metadata is managed by the orchestration pipeline
-
-// Legacy season poster handler removed; use /api/v1/images routes instead
-
-async fn thumbnail_handler(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> Result<Response, StatusCode> {
-    info!("Thumbnail request for media ID: {}", id);
-
-    // Try to get or extract thumbnail
-    match state.thumbnail_service.get_or_extract_thumbnail(&id).await {
-        Ok(thumbnail_path) => {
-            // Serve the thumbnail file
-            match tokio::fs::read(&thumbnail_path).await {
-                Ok(bytes) => {
-                    let mut response = Response::new(bytes.into());
-                    response.headers_mut().insert(
-                        header::CONTENT_TYPE,
-                        header::HeaderValue::from_static("image/jpeg"),
-                    );
-                    Ok(response)
-                }
-                Err(e) => {
-                    warn!("Failed to read thumbnail file: {}", e);
-                    Err(StatusCode::INTERNAL_SERVER_ERROR)
-                }
-            }
-        }
-        Err(e) => {
-            warn!("Failed to get thumbnail for {}: {}", id, e);
-            Err(StatusCode::NOT_FOUND)
-        }
-    }
-}
-
-// Temporary maintenance handler to delete media by title
-async fn delete_by_title_handler(
-    State(state): State<AppState>,
-    Path(title): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
-    info!(
-        "Maintenance: Deleting all media with title containing: {}",
-        title
-    );
-
-    // Get all media files
-    let all_media = match state.db.backend().get_all_media().await {
-        Ok(media) => media,
-        Err(e) => {
-            warn!("Failed to get all media: {}", e);
-            return Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })));
-        }
-    };
-
-    let mut deleted_count = 0;
-    let mut errors = Vec::new();
-    let title_lower = title.to_lowercase();
-
-    for media in all_media {
-        // Check if filename contains the title (case insensitive)
-        if media.filename.to_lowercase().contains(&title_lower) {
-            info!("Deleting media: {} (ID: {})", media.filename, media.id);
-
-            match state.db.backend().delete_media(&media.id.to_string()).await {
-                Err(e) => {
-                    errors.push(format!("Failed to delete {}: {}", media.filename, e));
-                }
-                _ => {
-                    deleted_count += 1;
-
-                    // Clean up thumbnail
-                    let thumbnail_path = state
-                        .thumbnail_service
-                        .get_thumbnail_path(media.id.as_ref());
-                    if thumbnail_path.exists() {
-                        if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
-                            warn!("Failed to delete thumbnail: {}", e);
-                        }
-                    }
-
-                    // Posters/images handled by ImageService; no direct FS poster cleanup
-                }
-            }
-        }
-    }
-
-    // Cleanup orphaned images after deletions
-    match state.image_service.cleanup_orphaned().await {
-        Ok(count) => info!("Cleaned up {} orphaned images", count),
-        Err(e) => warn!("Failed to cleanup orphaned images: {}", e),
-    }
-
-    Ok(Json(json!({
-        "status": "success",
-        "message": format!("Deleted {} media files containing '{}'", deleted_count, title),
-        "deleted": deleted_count,
-        "errors": errors
-    })))
-}
-
-// Clear all media from the database (for testing/debugging)
-async fn clear_database_handler(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
-    info!("Maintenance: Clearing entire database");
-
-    // Get all media files
-    let all_media = match state.db.backend().get_all_media().await {
-        Ok(media) => media,
-        Err(e) => {
-            warn!("Failed to get all media: {}", e);
-            return Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })));
-        }
-    };
-
-    let total_count = all_media.len();
-    let mut deleted_count = 0;
-    let mut errors = Vec::new();
-
-    for media in all_media {
-        info!("Deleting media: {} (ID: {})", media.filename, media.id);
-
-        match state.db.backend().delete_media(&media.id.to_string()).await {
-            Err(e) => {
-                errors.push(format!("Failed to delete {}: {}", media.filename, e));
-            }
-            _ => {
-                deleted_count += 1;
-
-                let media_id_str = media.id.to_string();
-
-                // Clean up thumbnail
-                let thumbnail_path = state.thumbnail_service.get_thumbnail_path(&media.id);
-                if thumbnail_path.exists() {
-                    if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
-                        warn!("Failed to delete thumbnail: {}", e);
-                    }
-                }
-
-                // Posters/images handled by ImageService; no direct FS poster cleanup
-            }
-        }
-    }
-
-    // Cleanup orphaned images after mass deletions
-    match state.image_service.cleanup_orphaned().await {
-        Ok(count) => info!("Cleaned up {} orphaned images after clearing DB", count),
-        Err(e) => warn!("Failed to cleanup orphaned images: {}", e),
-    }
-
-    Ok(Json(json!({
-        "status": "success",
-        "message": format!("Cleared database: deleted {} out of {} media files", deleted_count, total_count),
-        "total": total_count,
-        "deleted": deleted_count,
-        "errors": errors
-    })))
-}
-
-// Legacy batch metadata and poster endpoints removed
-
-async fn library_status_handler(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
-    // Check if media root exists
-    let library_status = if let Some(media_root) = &state.config.media_root {
-        if media_root.exists() {
-            "online"
-        } else {
-            "offline"
-        }
-    } else {
-        "not_configured"
-    };
-
-    Ok(Json(json!({
-        "status": library_status,
-        "media_root": state.config.media_root.as_ref().map(|p| p.display().to_string()),
-        "media_root_exists": state.config.media_root.as_ref().map(|p| p.exists()).unwrap_or(false)
-    })))
-}
-
-async fn media_availability_handler(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<Value>, StatusCode> {
-    // Get media file from database
-    let media_file = match state.db.backend().get_media(&id).await {
-        Ok(Some(media)) => media,
-        Ok(None) => {
-            return Ok(Json(json!({
-                "available": false,
-                "reason": "not_found",
-                "message": "Media not found in database"
-            })));
-        }
-        Err(_) => {
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-
-    // Check if file exists
-    if !media_file.path.exists() {
-        // Check if library is offline
-        if let Some(media_root) = &state.config.media_root {
-            if !media_root.exists() {
-                return Ok(Json(json!({
-                    "available": false,
-                    "reason": "library_offline",
-                    "message": "Media library is offline",
-                    "path": media_file.path.display().to_string()
-                })));
-            }
-        }
-
-        // File is missing but library is online
-        return Ok(Json(json!({
-            "available": false,
-            "reason": "file_missing",
-            "message": "Media file not found on disk",
-            "path": media_file.path.display().to_string()
-        })));
-    }
-
-    // File exists and is available
-    Ok(Json(json!({
-        "available": true,
-        "path": media_file.path.display().to_string(),
-        "size": media_file.size
-    })))
-}
+// Note: legacy v0 compatibility handlers now live in `archive/ferrex_server_legacy_handlers.rs`.

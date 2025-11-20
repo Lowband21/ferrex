@@ -6,7 +6,7 @@ use crate::{
         theme,
         views::{
             all::view_all_content,
-            grid::{macro_gen, virtual_movie_references_grid, virtual_series_references_grid},
+            grid::{virtual_movie_references_grid, virtual_series_references_grid},
         },
         widgets::{collect_cached_handles_for_media, texture_preloader},
     },
@@ -15,7 +15,7 @@ use crate::{
 use ferrex_core::{ImageSize, ImageType};
 use iced::{
     Element, Length,
-    widget::{Container, Row, Space, button, column, container, row, text},
+    widget::{Space, button, column, container, row, text},
 };
 
 #[cfg_attr(
@@ -57,7 +57,7 @@ fn library_loading() -> Element<'static, Message> {
     ),
     profiling::function
 )]
-pub fn view_library(state: &State) -> Element<Message> {
+pub fn view_library(state: &State) -> Element<'_, Message> {
     let view_library = iced::debug::time("view::view_library");
 
     if state.loading {

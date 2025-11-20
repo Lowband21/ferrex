@@ -17,9 +17,7 @@ pub mod state_machine;
 pub mod state_manager;
 
 pub use device::*;
-pub use domain::*;
 #[cfg(feature = "database")]
-pub use infrastructure::*;
 pub use pin::*;
 // Re-export session types with explicit naming to avoid conflicts
 pub use session::{

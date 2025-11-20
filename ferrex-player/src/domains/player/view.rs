@@ -3,10 +3,9 @@ use super::state::{PlayerDomainState, TrackNotification};
 use super::theme;
 use iced::Theme;
 use iced::{
-    ContentFit, Element, Length, Padding,
-    widget::{Space, column, container, mouse_area, row, stack, text},
+    Element, Length, Padding,
+    widget::{Space, column, container, mouse_area, row, text},
 };
-use std::sync::Arc;
 
 #[cfg_attr(
     any(
@@ -19,7 +18,7 @@ use std::sync::Arc;
 impl PlayerDomainState {
     /// Build the main player view
     /// Note: Returns wgpu renderer elements since video playback requires GPU acceleration
-    pub fn view(&self) -> iced::Element<Message, Theme> {
+    pub fn view(&self) -> iced::Element<'_, Message, Theme> {
         log::trace!(
             "PlayerState::view() called - position: {:.2}s, duration: {:.2}s, source_duration: {:?}, controls: {}",
             self.last_valid_position,
@@ -77,12 +76,10 @@ impl PlayerDomainState {
                 }
                 children.push(controls);
                 iced::widget::Stack::with_children(children).into()
+            } else if let Some(ov) = subtitle_overlay {
+                iced::widget::Stack::with_children(vec![clickable_video, ov]).into()
             } else {
-                if let Some(ov) = subtitle_overlay {
-                    iced::widget::Stack::with_children(vec![clickable_video, ov]).into()
-                } else {
-                    clickable_video
-                }
+                clickable_video
             };
 
             // Add settings panel if visible
@@ -117,12 +114,10 @@ impl PlayerDomainState {
                 .show_quality_menu
             {
                 let quality_menu = self.quality_menu_overlay();
-                iced::widget::Stack::with_children(vec![player_with_settings, quality_menu.into()])
-                    .into()
+                iced::widget::Stack::with_children(vec![player_with_settings, quality_menu]).into()
             } else if self.show_subtitle_menu {
                 let subtitle_menu = self.subtitle_menu_overlay();
-                iced::widget::Stack::with_children(vec![player_with_settings, subtitle_menu.into()])
-                    .into()
+                iced::widget::Stack::with_children(vec![player_with_settings, subtitle_menu]).into()
             } else {
                 player_with_settings
             };
@@ -133,7 +128,7 @@ impl PlayerDomainState {
                     let notification_overlay = self.notification_overlay(notification);
                     iced::widget::Stack::with_children(vec![
                         player_with_menus,
-                        notification_overlay.into(),
+                        notification_overlay,
                     ])
                     .into()
                 } else {
@@ -142,7 +137,7 @@ impl PlayerDomainState {
 
             // Wrap with mouse movement detection and release handling for seek bar
             let interactive = mouse_area(player_with_notification)
-                .on_move(|point| Message::MouseMoved(point))
+                .on_move(Message::MouseMoved)
                 .on_release(Message::SeekRelease);
 
             container(interactive)
@@ -221,7 +216,7 @@ impl PlayerDomainState {
     }
 
     /// Build the controls overlay
-    fn controls_overlay(&self) -> iced::Element<Message, Theme> {
+    fn controls_overlay(&self) -> iced::Element<'_, Message, Theme> {
         // Delegate to controls.rs for the full implementation
         self.build_controls()
     }
@@ -247,13 +242,13 @@ impl PlayerDomainState {
     }
 
     /// Build the settings panel
-    fn settings_panel(&self) -> iced::Element<Message, Theme, iced_wgpu::Renderer> {
+    fn settings_panel(&self) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
         // Delegate to controls.rs for the full implementation
         self.build_settings_panel()
     }
 
     /// Build the quality menu overlay
-    fn quality_menu_overlay(&self) -> iced::Element<Message, Theme, iced_wgpu::Renderer> {
+    fn quality_menu_overlay(&self) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
         // Position the menu near the quality button (bottom right)
         container(row![
             Space::with_width(Length::Fill),
@@ -272,7 +267,7 @@ impl PlayerDomainState {
         .into()
     }
 
-    fn subtitle_menu_overlay(&self) -> iced::Element<Message, Theme, iced_wgpu::Renderer> {
+    fn subtitle_menu_overlay(&self) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
         // Position the menu near the subtitle button (bottom right)
         container(row![
             Space::with_width(Length::Fill),
@@ -292,7 +287,7 @@ impl PlayerDomainState {
     }
 
     /// Build a minimal player view for embedding (e.g., in library view)
-    pub fn minimal_view(&self) -> Option<Element<Message>> {
+    pub fn minimal_view(&self) -> Option<Element<'_, Message>> {
         self.video_opt.as_ref().map(|video| {
             let player = video
                 .widget(self.content_fit, Some(Message::NewFrame))

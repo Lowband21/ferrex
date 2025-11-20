@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -201,6 +200,12 @@ pub enum ConnectionQuality {
     Offline,   // No connection
 }
 
+impl Default for NetworkMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NetworkMonitor {
     pub fn new() -> Self {
         Self {
@@ -279,6 +284,12 @@ pub struct ClientCapabilities {
     pub average_client_search_time: Option<Duration>,
 }
 
+impl Default for ClientCapabilities {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClientCapabilities {
     pub fn new() -> Self {
         Self {
@@ -310,6 +321,12 @@ pub struct StrategyWeights {
     client_weight: f32,
     server_weight: f32,
     hybrid_weight: f32,
+}
+
+impl Default for StrategyWeights {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StrategyWeights {
@@ -359,16 +376,14 @@ impl StrategyWeights {
         // Adjust based on execution times
         if let Some(client_time) =
             history.get_average_execution_time(super::types::SearchStrategy::Client)
-        {
-            if let Some(server_time) =
+            && let Some(server_time) =
                 history.get_average_execution_time(super::types::SearchStrategy::Server)
-            {
-                let time_ratio = client_time.as_millis() as f32 / server_time.as_millis() as f32;
-                if time_ratio > 2.0 {
-                    self.client_weight *= 0.5;
-                } else if time_ratio < 0.5 {
-                    self.server_weight *= 0.5;
-                }
+        {
+            let time_ratio = client_time.as_millis() as f32 / server_time.as_millis() as f32;
+            if time_ratio > 2.0 {
+                self.client_weight *= 0.5;
+            } else if time_ratio < 0.5 {
+                self.server_weight *= 0.5;
             }
         }
 

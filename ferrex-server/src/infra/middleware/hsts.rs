@@ -19,6 +19,7 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{Layer, Service};
+use tracing::debug;
 
 /// Configuration for HSTS middleware
 #[derive(Clone, Debug)]
@@ -64,7 +65,7 @@ impl HstsConfig {
 }
 
 /// Layer for HSTS middleware
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct HstsLayer {
     config: HstsConfig,
     header_value: HeaderValue,
@@ -140,6 +141,7 @@ impl<S> Layer<S> for HstsLayer {
     type Service = HstsMiddleware<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
+        debug!(config = ?self.config, "installing HSTS middleware layer");
         HstsMiddleware {
             inner,
             header_value: self.header_value.clone(),
@@ -163,17 +165,17 @@ impl<S> HstsMiddleware<S> {
         }
 
         // Check X-Forwarded-Proto header for proxy scenarios
-        if let Some(proto) = req.headers().get("x-forwarded-proto") {
-            if let Ok(proto_str) = proto.to_str() {
-                return proto_str.eq_ignore_ascii_case("https");
-            }
+        if let Some(proto) = req.headers().get("x-forwarded-proto")
+            && let Ok(proto_str) = proto.to_str()
+        {
+            return proto_str.eq_ignore_ascii_case("https");
         }
 
         // Check X-Forwarded-Ssl header (used by some load balancers)
-        if let Some(ssl) = req.headers().get("x-forwarded-ssl") {
-            if let Ok(ssl_str) = ssl.to_str() {
-                return ssl_str.eq_ignore_ascii_case("on");
-            }
+        if let Some(ssl) = req.headers().get("x-forwarded-ssl")
+            && let Ok(ssl_str) = ssl.to_str()
+        {
+            return ssl_str.eq_ignore_ascii_case("on");
         }
 
         false
