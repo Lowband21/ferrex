@@ -446,13 +446,14 @@ macro_rules! media_card {
             .on_enter($crate::domains::ui::messages::UiMessage::MediaHovered($image_key))
             .on_exit($crate::domains::ui::messages::UiMessage::MediaUnhovered($image_key));
 
-        // Create the poster element
-        // Always wrap in button for non-hover clicks, but the shader handles its own overlay buttons
-        let poster_element: Element<'_, $crate::domains::ui::messages::UiMessage> = button(image_with_hover)
-            .on_press($click_msg)
-            .padding(0)
-            .style(theme::Button::MediaCard.style())
-            .into();
+        // Create the poster element.
+        // Navigation/click handling is driven by the image_for widget's `on_click`;
+        // the outer button is retained only for styling/focus, without its own on_press.
+        let poster_element: Element<'_, $crate::domains::ui::messages::UiMessage> =
+            button(image_with_hover)
+                .padding(0)
+                .style(theme::Button::MediaCard.style())
+                .into();
 
         // Calculate container dimensions including animation padding so layout width
         // matches the shader's animated bounds for all animation types.

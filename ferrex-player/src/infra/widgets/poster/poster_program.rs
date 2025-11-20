@@ -39,6 +39,8 @@ pub struct PosterState {
     pub mouse_position: Option<Point>,
     /// Whether mouse is over the widget
     pub is_hovered: bool,
+    /// Whether the primary button was pressed inside this widget
+    pub pressed_inside: bool,
 }
 
 impl Program<UiMessage> for PosterProgram {
@@ -149,11 +151,11 @@ impl Program<UiMessage> for PosterProgram {
                     // First verify cursor is actually within widget bounds
                     if let Some(cursor_pos) = cursor.position() {
                         if !bounds.contains(cursor_pos) {
-                            // Click is outside widget bounds, ignore it
+                            // Press is outside widget bounds, ignore it
                             return None;
                         }
                     } else {
-                        // No cursor position available, ignore click
+                        // No cursor position available, ignore press
                         return None;
                     }
 
@@ -178,11 +180,43 @@ impl Program<UiMessage> for PosterProgram {
                         }
                     }
 
+                    // Record that the primary button is pressed inside this widget.
+                    // Actual click actions are handled on ButtonReleased to avoid
+                    // cross-view \"click-through\" behavior.
+                    state.pressed_inside = true;
+                }
+                mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                    // Only treat as a click if the press began inside this widget.
+                    if !state.pressed_inside {
+                        return None;
+                    }
+
+                    // Reset pressed flag regardless of cursor location.
+                    state.pressed_inside = false;
+
+                    // Verify cursor position is available and still within bounds.
+                    let cursor_pos = if let Some(cursor_pos) = cursor.position()
+                    {
+                        cursor_pos
+                    } else {
+                        // No cursor position available, ignore release
+                        return None;
+                    };
+
+                    if !bounds.contains(cursor_pos) {
+                        // Released outside widget; treat as cancelled click.
+                        return None;
+                    }
+
+                    // Update relative mouse position to the release location.
+                    let current_relative = Point::new(
+                        cursor_pos.x - bounds.x,
+                        cursor_pos.y - bounds.y,
+                    );
+                    state.mouse_position = Some(current_relative);
+
                     // Handle click events based on mouse position
                     if let Some(mouse_pos) = state.mouse_position {
-                        //log::debug!("Click in widget - cursor_pos: {:?}, widget bounds: {:?}, relative mouse_pos: {:?}",
-                        //    cursor.position(), bounds, mouse_pos);
-
                         // Normalize mouse position to 0-1 range
                         let norm_x = mouse_pos.x / bounds.width;
                         let norm_y = mouse_pos.y / bounds.height;
@@ -199,7 +233,7 @@ impl Program<UiMessage> for PosterProgram {
                         .sqrt();
                         if dist_from_center <= radius {
                             if let Some(on_play) = &self.on_play {
-                                log::debug!("Play button clicked!");
+                                log::debug!("Play button clicked (release)!");
                                 return Some(iced::widget::Action::publish(
                                     on_play.clone(),
                                 ));
@@ -210,7 +244,7 @@ impl Program<UiMessage> for PosterProgram {
                             && (0.09..=0.21).contains(&norm_y)
                         {
                             if let Some(on_edit) = &self.on_edit {
-                                log::debug!("Edit button clicked!");
+                                log::debug!("Edit button clicked (release)!");
                                 return Some(iced::widget::Action::publish(
                                     on_edit.clone(),
                                 ));
@@ -221,7 +255,9 @@ impl Program<UiMessage> for PosterProgram {
                             && (0.79..=0.91).contains(&norm_y)
                         {
                             if let Some(on_options) = &self.on_options {
-                                log::debug!("Options button clicked!");
+                                log::debug!(
+                                    "Options button clicked (release)!"
+                                );
                                 return Some(iced::widget::Action::publish(
                                     on_options.clone(),
                                 ));
@@ -229,7 +265,7 @@ impl Program<UiMessage> for PosterProgram {
                         }
                         // Empty space - trigger on_click
                         else if let Some(on_click) = &self.on_click {
-                            log::debug!("Empty space clicked!");
+                            log::debug!("Empty space clicked (release)!");
                             return Some(iced::widget::Action::publish(
                                 on_click.clone(),
                             ));
@@ -254,6 +290,7 @@ impl Program<UiMessage> for PosterProgram {
                     // Clear mouse position when cursor leaves
                     state.mouse_position = None;
                     state.is_hovered = false;
+                    state.pressed_inside = false;
                     log::debug!("Cursor left widget");
                 }
                 _ => {}
