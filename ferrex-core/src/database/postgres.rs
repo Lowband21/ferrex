@@ -300,10 +300,6 @@ impl PostgresDatabase {
         &self.folder_inventory
     }
 
-    pub(crate) fn media_repository(&self) -> &PostgresMediaRepository {
-        &self.media
-    }
-
     pub(crate) fn processing_status_repository(
         &self,
     ) -> &PostgresProcessingStatusRepository {
@@ -988,6 +984,8 @@ impl MediaDatabaseTrait for PostgresDatabase {
             r#"
             INSERT INTO images (id, tmdb_path, created_at, updated_at)
             VALUES ($1, $2, $3, $3)
+            ON CONFLICT (tmdb_path) DO UPDATE SET
+                updated_at = EXCLUDED.updated_at
             RETURNING id, tmdb_path, file_hash, file_size, width, height, format, created_at
             "#,
             id,
@@ -996,7 +994,9 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to create image: {}", e)))?;
+        .map_err(|e: sqlx::Error| {
+            MediaError::Internal(format!("Failed to create image: {}", e))
+        })?;
 
         Ok(ImageRecord {
             id: row.id,

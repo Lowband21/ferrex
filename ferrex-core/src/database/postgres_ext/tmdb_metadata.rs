@@ -2426,68 +2426,37 @@ async fn upsert_series_reference(
     };
 
     let result_id = if let Some(tmdb_value) = tmdb_id {
-        let existing = sqlx::query!(
+        let row = sqlx::query!(
             r#"
-            SELECT id
-            FROM series_references
-            WHERE library_id = $1 AND tmdb_id = $2
+            INSERT INTO series_references (
+                id,
+                library_id,
+                tmdb_id,
+                title,
+                theme_color,
+                created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (tmdb_id, library_id) WHERE (tmdb_id IS NOT NULL) DO UPDATE SET
+                title = EXCLUDED.title,
+                theme_color = EXCLUDED.theme_color,
+                updated_at = NOW()
+            RETURNING id
             "#,
+            series.id.to_uuid(),
             series.library_id.as_uuid(),
-            tmdb_value
+            tmdb_value,
+            series.title.as_str(),
+            series.theme_color.as_deref(),
+            series.created_at
         )
-        .fetch_optional(&mut **tx)
+        .fetch_one(&mut **tx)
         .await
-        .map_err(|e| {
-            MediaError::Internal(format!(
-                "Failed to lookup series reference: {}",
-                e
-            ))
+        .map_err(|e: sqlx::Error| {
+            MediaError::Internal(format!("Failed to upsert series reference: {}", e))
         })?;
 
-        if let Some(row) = existing {
-            sqlx::query!(
-                r#"
-                UPDATE series_references
-                SET title = $2, theme_color = $3, updated_at = NOW()
-                WHERE id = $1
-                "#,
-                row.id,
-                series.title.as_str(),
-                series.theme_color.as_deref()
-            )
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to update series reference: {}",
-                    e
-                ))
-            })?;
-
-            row.id
-        } else {
-            let inserted = sqlx::query!(
-                r#"
-                INSERT INTO series_references (id, library_id, tmdb_id, title, theme_color, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (id) DO UPDATE SET
-                    title = EXCLUDED.title,
-                    theme_color = EXCLUDED.theme_color,
-                    updated_at = NOW()
-                RETURNING id
-                "#,
-                series.id.to_uuid(),
-                series.library_id.as_uuid(),
-                tmdb_value,
-                series.title.as_str(),
-                series.theme_color.as_deref(),
-                series.created_at
-            )
-            .fetch_one(&mut **tx)
-            .await?;
-
-            inserted.id
-        }
+        row.id
     } else {
         let row = sqlx::query!(
             r#"
@@ -2506,7 +2475,10 @@ async fn upsert_series_reference(
             series.created_at
         )
         .fetch_one(&mut **tx)
-        .await?;
+        .await
+        .map_err(|e: sqlx::Error| {
+            MediaError::Internal(format!("Failed to upsert local series reference: {}", e))
+        })?;
 
         row.id
     };
