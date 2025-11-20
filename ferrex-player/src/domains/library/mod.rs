@@ -39,7 +39,7 @@ pub struct LibraryDomainState {
     pub library_media_cache: HashMap<Uuid, LibraryMediaCache>,
     pub active_scans: HashMap<Uuid, ScanSnapshotDto>,
     pub latest_progress: HashMap<Uuid, ScanProgressEvent>,
-    pub initial_library_fetch: bool,
+    pub load_state: LibrariesLoadState,
 
     // Diagnostics
     pub scan_metrics: Option<ScanMetrics>,
@@ -82,7 +82,7 @@ impl LibraryDomainState {
             library_media_cache: HashMap::new(),
             active_scans: HashMap::new(),
             latest_progress: HashMap::new(),
-            initial_library_fetch: false,
+            load_state: LibrariesLoadState::NotStarted,
             scan_metrics: None,
             scan_config: None,
             media_root_browser: MediaRootBrowserState::default(),
@@ -131,6 +131,7 @@ impl LibraryDomain {
                 // Clear library cache
                 self.state.library_media_cache.clear();
                 self.state.current_library_id = None;
+                self.state.load_state = LibrariesLoadState::NotStarted;
                 Task::none()
             }
             // Should probably be depricated in favor of repo centric handling
@@ -138,9 +139,23 @@ impl LibraryDomain {
                 // Clear libraries and current_library_id
                 self.state.current_library_id = None;
                 self.state.library_media_cache.clear();
+                self.state.load_state = LibrariesLoadState::NotStarted;
                 Task::none()
             }
             _ => Task::none(),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum LibrariesLoadState {
+    NotStarted,
+    InProgress,
+    Succeeded {
+        user_id: Option<Uuid>,
+        server_url: String,
+    },
+    Failed {
+        last_error: String,
+    },
 }

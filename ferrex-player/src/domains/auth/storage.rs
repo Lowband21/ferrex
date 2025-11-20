@@ -21,7 +21,7 @@ use crate::domains::auth::dto::UserListItemDto;
 use ferrex_core::player_prelude::{AuthToken, User, UserPermissions};
 use uuid::Uuid;
 
-const AUTH_CACHE_FILE: &str = "auth_cache.enc";
+pub(crate) const AUTH_CACHE_FILE: &str = "auth_cache.enc";
 const NONCE_SIZE: usize = 12;
 const KEY_DERIVATION_SALT: &str = "ferrex-auth-v2";
 const ARGON2_MEM_COST: u32 = 64 * 1024; // 64 MB
@@ -87,7 +87,17 @@ impl AuthStorage {
 
         let cache_path = proj_dirs.data_dir().join(AUTH_CACHE_FILE);
 
-        Ok(Self { cache_path })
+        let storage = Self { cache_path };
+        // Best-effort cleanup for a legacy, non-server-scoped user cache file that older builds
+        // may have written. Keeping it risks presenting users from a previous server instance
+        // after a reset. Current code only uses server-scoped caches, so remove the legacy file.
+        if let Err(e) = storage.cleanup_legacy_user_cache() {
+            log::debug!(
+                "[AuthStorage] Legacy user cache cleanup skipped: {}",
+                e
+            );
+        }
+        Ok(storage)
     }
 
     /// Detect whether demo mode is enabled using the same environment/CLI
@@ -249,6 +259,20 @@ impl AuthStorage {
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
             .join("users_cache.json")
+    }
+
+    /// Remove legacy global user cache file if present (non-server-scoped), to prevent
+    /// stale user lists from previous server instances being shown.
+    fn cleanup_legacy_user_cache(&self) -> anyhow::Result<()> {
+        let legacy = self.users_cache_path();
+        if legacy.exists() {
+            std::fs::remove_file(&legacy)?;
+            log::warn!(
+                "[AuthStorage] Removed legacy global user cache at {:?}",
+                legacy
+            );
+        }
+        Ok(())
     }
 
     fn server_hash(base_url: &str) -> String {
@@ -521,14 +545,19 @@ impl AuthStorage {
             .decode(&encrypted_data.ciphertext)
             .context("Failed to decode ciphertext")?;
 
-        // Handle different versions
-        let (key, needs_migration) = match encrypted_data.version {
+        // Handle supported versions (v2 only). Any other version is treated as
+        // unsupported and will be ignored (cache cleared or skipped).
+        let key = match encrypted_data.version {
             1 => {
-                // Legacy SHA256 format - derive key using old method
-                log::info!(
-                    "Loading v1 auth cache - will migrate to v2 on next save"
+                // Legacy v1 format detected. We no longer support decrypting the
+                // old format here. Treat it as stale/invalid cached auth rather
+                // than crashing startup. Clear the cache and continue without
+                // stored auth so the app can reach the login screen.
+                log::warn!(
+                    "Unsupported v1 auth cache detected; clearing and proceeding without stored auth"
                 );
-                panic!("Found v1 auth cache");
+                let _ = self.clear_auth().await;
+                return Ok(None);
             }
             2 => {
                 // Current Argon2 format
@@ -538,13 +567,10 @@ impl AuthStorage {
                             SaltString::from_b64(salt_str).map_err(|e| {
                                 anyhow::anyhow!("Invalid salt format: {}", e)
                             })?;
-                        (
-                            Self::derive_key(
-                                device_fingerprint,
-                                salt.as_str().as_bytes(),
-                            )?,
-                            false,
-                        )
+                        Self::derive_key(
+                            device_fingerprint,
+                            salt.as_str().as_bytes(),
+                        )?
                     }
                     None => {
                         return Err(anyhow::anyhow!(
@@ -581,14 +607,6 @@ impl AuthStorage {
             .context("Failed to deserialize auth data")?;
 
         log::info!("Successfully loaded auth for user: {}", auth.user.username);
-
-        // If we loaded a v1 file, automatically migrate it to v2
-        if needs_migration {
-            log::info!("Migrating auth cache from v1 to v2 format");
-            if let Err(e) = self.save_auth(&auth, device_fingerprint).await {
-                log::warn!("Failed to migrate auth cache to v2: {}", e);
-            }
-        }
 
         Ok(Some(auth))
     }
@@ -842,5 +860,80 @@ mod tests {
         // Clear auth
         storage.clear_auth().await.unwrap();
         assert!(!cache_path.exists());
+    }
+
+    #[tokio::test]
+    async fn v1_auth_cache_is_ignored_and_cleared() {
+        use tempfile::TempDir;
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join(AUTH_CACHE_FILE);
+
+        // Craft a minimal v1-style file that passes JSON and base64 parsing.
+        // Note: Nonce must be 12 bytes when decoded; 16 'A' => 12 zero bytes.
+        let v1_json = serde_json::json!({
+            "nonce": "AAAAAAAAAAAAAAAA",
+            "ciphertext": "AQIDBAUGBwgJCgsMDQ4P", // arbitrary valid base64
+            "encrypted_at": Utc::now(),
+            "version": 1
+        });
+        tokio::fs::write(
+            &cache_path,
+            serde_json::to_string_pretty(&v1_json).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let storage = AuthStorage {
+            cache_path: cache_path.clone(),
+        };
+        // Attempt to load with any fingerprint should not panic; should return None
+        let loaded = storage.load_auth("any-fingerprint").await.unwrap();
+        assert!(
+            loaded.is_none(),
+            "v1 cache should be ignored and yield None"
+        );
+        // File should be cleared as part of v1 handling
+        assert!(
+            !cache_path.exists(),
+            "v1 cache file should be removed after detection"
+        );
+    }
+
+    #[tokio::test]
+    async fn server_scoped_user_cache_clears_on_request() {
+        use tempfile::TempDir;
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join(AUTH_CACHE_FILE);
+
+        let storage = AuthStorage { cache_path };
+
+        // Seed a server-scoped user cache
+        let base_url = "http://localhost:3000";
+        let sample = vec![crate::domains::auth::dto::UserListItemDto {
+            id: Uuid::now_v7(),
+            username: "alice".into(),
+            display_name: "Alice".into(),
+            avatar_url: None,
+            has_pin: true,
+            last_login: Some(Utc::now()),
+        }];
+        storage
+            .save_user_summaries_for_server(base_url, &sample)
+            .await
+            .unwrap();
+
+        // Sanity: cache file should exist
+        let server_cache = storage.users_cache_path_for_server(base_url);
+        assert!(server_cache.exists());
+
+        // Clear cache and verify removal
+        storage
+            .clear_user_summaries_for_server(base_url)
+            .await
+            .unwrap();
+        assert!(
+            !server_cache.exists(),
+            "server-scoped users cache should be deleted"
+        );
     }
 }

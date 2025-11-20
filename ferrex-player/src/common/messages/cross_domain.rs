@@ -513,6 +513,21 @@ fn handle_authentication_complete(state: &State) -> Task<DomainMessage> {
         return Task::none();
     }
 
+    // Also guard based on the library domain's load state
+    {
+        use crate::domains::library::LibrariesLoadState;
+        match state.domains.library.state.load_state {
+            LibrariesLoadState::InProgress
+            | LibrariesLoadState::Succeeded { .. } => {
+                log::info!(
+                    "[CrossDomain] Library load is in-progress or already succeeded; skipping duplicate trigger"
+                );
+                return Task::none();
+            }
+            LibrariesLoadState::NotStarted | LibrariesLoadState::Failed { .. } => {}
+        }
+    }
+
     let mut tasks = vec![];
 
     // Load libraries
@@ -552,13 +567,18 @@ fn handle_library_refresh_request(state: &State) -> Task<DomainMessage> {
 
     let mut tasks = vec![];
 
-    if !state.domains.library.state.repo_accessor.is_initialized()
-        && !state.domains.library.state.initial_library_fetch
-    {
-        // Reload libraries
-        tasks.push(Task::done(DomainMessage::Library(
-            library::messages::Message::LoadLibraries,
-        )));
+    if !state.domains.library.state.repo_accessor.is_initialized() {
+        use crate::domains::library::LibrariesLoadState;
+        match state.domains.library.state.load_state {
+            LibrariesLoadState::NotStarted | LibrariesLoadState::Failed { .. } => {
+                // Reload libraries
+                tasks.push(Task::done(DomainMessage::Library(
+                    library::messages::Message::LoadLibraries,
+                )));
+            }
+            LibrariesLoadState::InProgress
+            | LibrariesLoadState::Succeeded { .. } => {}
+        }
     }
 
     // If we have a current library, refresh its content

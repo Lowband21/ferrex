@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::domains::auth::types::AuthenticationFlow;
 use crate::domains::library::messages::Message;
+use crate::domains::library::LibrariesLoadState;
 use crate::infra::repository::repository::MediaRepo;
 use crate::infra::services::api::ApiService;
 use crate::state::State;
@@ -81,11 +83,31 @@ pub fn handle_libraries_loaded(
                     // Refresh the All tab
                     state.tab_manager.refresh_active_tab();
 
+                    // Mark load succeeded for the current session
+                    let user_id = match &state.domains.auth.state.auth_flow {
+                        AuthenticationFlow::Authenticated { user, .. } => {
+                            Some(user.id)
+                        }
+                        _ => None,
+                    };
+                    state.domains.library.state.load_state =
+                        LibrariesLoadState::Succeeded {
+                            user_id,
+                            server_url: state.server_url.clone(),
+                        };
+
                     state.loading = false;
                     Task::none()
                 }
                 Err(e) => {
                     log::error!("Failed to create MediaRepo: {:?}", e);
+                    state.domains.library.state.load_state =
+                        LibrariesLoadState::Failed {
+                            last_error: format!(
+                                "Failed to create MediaRepo: {:?}",
+                                e
+                            ),
+                        };
                     state.loading = false;
                     Task::none()
                 }
@@ -93,6 +115,8 @@ pub fn handle_libraries_loaded(
         }
         Err(e) => {
             log::error!("Failed to load libraries: {}", e);
+            state.domains.library.state.load_state =
+                LibrariesLoadState::Failed { last_error: e };
             state.loading = false;
             Task::none()
         }

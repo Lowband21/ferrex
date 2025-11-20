@@ -512,29 +512,73 @@ pub fn handle_auth_status_confirmed_with_pin(
     state.is_authenticated = true;
     state.domains.auth.state.is_authenticated = true;
 
-    // Load permissions from stored auth
+    // Unify completion signaling with the LoginSuccess path so that
+    // AuthenticationComplete is always emitted from a single branch.
+    // We synchronously fetch the current user and permissions and
+    // immediately dispatch LoginSuccess; the LoginSuccess handler
+    // will take care of watch-state fetching and further initialization.
+
+    // Obtain current identity synchronously in this non-async context
     let auth_service = &state.domains.auth.state.auth_service;
     let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
-    // Block to obtain permissions synchronously for immediate use
-    state.domains.auth.state.user_permissions =
-        tokio::task::block_in_place(move || {
-            tokio::runtime::Handle::current().block_on(async move {
-                svc.get_current_permissions().await.ok().flatten()
-            })
-        });
 
-    // Fetch watch status and then signal authentication complete
-    let api_service = &state.domains.auth.state.api_service;
-    let api_service = api_service.clone();
-    Task::perform(
-        async move { api_service.get_watch_state().await },
-        |result| match result {
-            Ok(watch_state) => {
-                auth::Message::WatchStatusLoaded(Ok(watch_state))
-            }
-            Err(e) => auth::Message::WatchStatusLoaded(Err(e.to_string())),
-        },
-    )
+    let (maybe_user, maybe_perms) = tokio::task::block_in_place(move || {
+        tokio::runtime::Handle::current().block_on(async move {
+            let user = svc.get_current_user().await.ok().flatten();
+            let perms = svc.get_current_permissions().await.ok().flatten();
+            (user, perms)
+        })
+    });
+
+    // Fallbacks in case the service doesn't return identity immediately
+    let user = maybe_user.or_else(|| match &state.domains.auth.state.auth_flow {
+        crate::domains::auth::types::AuthenticationFlow::EnteringCredentials { user, .. } => {
+            Some(user.clone())
+        }
+        crate::domains::auth::types::AuthenticationFlow::Authenticated { user, .. } => {
+            Some(user.clone())
+        }
+        _ => None,
+    });
+
+    // Update cached permissions if available
+    if let Some(perms) = maybe_perms.clone() {
+        state.domains.auth.state.user_permissions = Some(perms);
+    }
+
+    match (user, maybe_perms) {
+        (Some(user), Some(perms)) => {
+            Task::done(auth::Message::LoginSuccess(user, perms))
+        }
+        // If permissions are unavailable, synthesize an empty set so we can still
+        // drive the unified LoginSuccess path and emit AuthenticationComplete.
+        (Some(user), None) => {
+            let perms = ferrex_core::player_prelude::UserPermissions {
+                user_id: user.id,
+                roles: Vec::new(),
+                permissions: std::collections::HashMap::new(),
+                permission_details: None,
+            };
+            Task::done(auth::Message::LoginSuccess(user, perms))
+        }
+        // If the user can't be determined (shouldn't happen in this path),
+        // fall back to previous behavior: proceed with watch-state only.
+        (None, _) => {
+            let api_service = &state.domains.auth.state.api_service;
+            let api_service = api_service.clone();
+            Task::perform(
+                async move { api_service.get_watch_state().await },
+                |result| match result {
+                    Ok(watch_state) => {
+                        auth::Message::WatchStatusLoaded(Ok(watch_state))
+                    }
+                    Err(e) => {
+                        auth::Message::WatchStatusLoaded(Err(e.to_string()))
+                    }
+                },
+            )
+        }
+    }
 }
 
 /// Handle auto-login check complete - proceed to load users
@@ -858,23 +902,12 @@ pub fn handle_auth_flow_auth_result(
                     mode: AuthenticationMode::Online,
                 };
 
-            // BatchMetadataFetcher initialization moved to handle_auth_flow_completed
-            // to ensure it's only initialized once after full auth flow completes
-
-            // Fetch watch status and then signal authentication complete
-            let api_service = &state.domains.auth.state.api_service;
-            let api_service = api_service.clone();
-            Task::perform(
-                async move { api_service.get_watch_state().await },
-                |result| match result {
-                    Ok(watch_state) => {
-                        auth::Message::WatchStatusLoaded(Ok(watch_state))
-                    }
-                    Err(e) => {
-                        auth::Message::WatchStatusLoaded(Err(e.to_string()))
-                    }
-                },
-            )
+            // Unify with auto-login path: dispatch LoginSuccess immediately so
+            // AuthenticationComplete is emitted regardless of watch-state outcome.
+            Task::done(auth::Message::LoginSuccess(
+                auth_result.user,
+                auth_result.permissions,
+            ))
         }
         Err(error) => {
             let mut flow = state.domains.auth.state.auth_flow.clone();
@@ -958,10 +991,9 @@ pub fn handle_auth_flow_pin_set(
 
     match result {
         Ok(()) => {
+            let auth_flow = &state.domains.auth.state.auth_flow.clone();
             // PIN set successfully, complete authentication
-            if let AuthenticationFlow::SettingUpPin { user, .. } =
-                &state.domains.auth.state.auth_flow
-            {
+            if let AuthenticationFlow::SettingUpPin { user, .. } = auth_flow {
                 state.domains.auth.state.auth_flow =
                     AuthenticationFlow::Authenticated {
                         user: user.clone(),
@@ -971,20 +1003,26 @@ pub fn handle_auth_flow_pin_set(
                 // BatchMetadataFetcher initialization moved to handle_auth_flow_completed
                 // to ensure it's only initialized once after full auth flow completes
 
-                // PIN setup complete - fetch watch status and signal authentication complete
-                let api_service = &state.domains.auth.state.api_service;
-                let api_service = api_service.clone();
-                return Task::perform(
-                    async move { api_service.get_watch_state().await },
-                    |result| match result {
-                        Ok(watch_state) => {
-                            auth::Message::WatchStatusLoaded(Ok(watch_state))
+                // Reuse the LoginSuccess path to ensure AuthenticationComplete
+                // is emitted even if watch-state retrieval fails.
+                let permissions = state
+                    .domains
+                    .auth
+                    .state
+                    .user_permissions
+                    .clone()
+                    .unwrap_or_else(|| {
+                        ferrex_core::player_prelude::UserPermissions {
+                            user_id: user.id,
+                            roles: Vec::new(),
+                            permissions: std::collections::HashMap::new(),
+                            permission_details: None,
                         }
-                        Err(e) => {
-                            auth::Message::WatchStatusLoaded(Err(e.to_string()))
-                        }
-                    },
-                );
+                    });
+                return Task::done(auth::Message::LoginSuccess(
+                    user.clone(),
+                    permissions,
+                ));
             }
         }
         Err(error) => {

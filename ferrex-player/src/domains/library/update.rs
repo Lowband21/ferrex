@@ -12,6 +12,8 @@ use crate::{
 };
 
 use super::messages::Message;
+use crate::domains::auth::types::AuthenticationFlow;
+use crate::domains::library::LibrariesLoadState;
 use iced::Task;
 use std::collections::{HashMap, HashSet};
 
@@ -58,25 +60,91 @@ pub fn update_library(
         }
 
         Message::LoadLibraries => {
-            let task = if !state.domains.library.state.initial_library_fetch {
-                state.domains.library.state.initial_library_fetch = true;
-                Task::perform(
-                    fetch_libraries(state.api_service.clone()),
-                    |result| {
-                        Message::LibrariesLoaded(
-                            result.map_err(|e| e.to_string()),
-                        )
-                    },
-                )
-            } else {
-                log::warn!(
-                    "The libraries are already loaded, why is another attempt being made?"
+            // Auth gating: avoid starting a fetch if we're not authenticated yet.
+            if !state.is_authenticated {
+                log::info!(
+                    "[Library] Ignoring LoadLibraries: user not authenticated yet"
                 );
-                Task::none()
+                return DomainUpdateResult::task(Task::none());
+            }
+
+            // Determine current session identity
+            let current_user_id = match &state.domains.auth.state.auth_flow {
+                AuthenticationFlow::Authenticated { user, .. } => {
+                    Some(user.id)
+                }
+                _ => None,
             };
-            log::info!(
-                "LoadLibraries message received - loading libraries from server"
-            );
+            let current_server = state.server_url.clone();
+
+            // Act based on current load state
+            let task = match &state.domains.library.state.load_state {
+                LibrariesLoadState::NotStarted => {
+                    state.domains.library.state.load_state =
+                        LibrariesLoadState::InProgress;
+                    Task::perform(
+                        fetch_libraries(state.api_service.clone()),
+                        |result| {
+                            Message::LibrariesLoaded(
+                                result.map_err(|e| e.to_string()),
+                            )
+                        },
+                    )
+                }
+                LibrariesLoadState::Failed { .. } => {
+                    // Allow retry after failure
+                    log::info!("[Library] Retrying library load after failure");
+                    state.domains.library.state.load_state =
+                        LibrariesLoadState::InProgress;
+                    Task::perform(
+                        fetch_libraries(state.api_service.clone()),
+                        |result| {
+                            Message::LibrariesLoaded(
+                                result.map_err(|e| e.to_string()),
+                            )
+                        },
+                    )
+                }
+                LibrariesLoadState::InProgress => {
+                    // Idempotent: no-op while a fetch is already in flight
+                    log::debug!(
+                        "[Library] LoadLibraries ignored: load already in progress"
+                    );
+                    Task::none()
+                }
+                LibrariesLoadState::Succeeded {
+                    user_id,
+                    server_url,
+                } => {
+                    // If session changed (user or server), re-load; else no-op
+                    let same_user = user_id.is_some()
+                        && current_user_id.is_some()
+                        && user_id == &current_user_id;
+                    let same_server = *server_url == current_server;
+                    if same_user && same_server {
+                        log::debug!(
+                            "[Library] LoadLibraries ignored: libraries already loaded for this session"
+                        );
+                        Task::none()
+                    } else {
+                        log::info!(
+                            "[Library] Session changed (user or server); reloading libraries"
+                        );
+                        state.domains.library.state.load_state =
+                            LibrariesLoadState::InProgress;
+                        Task::perform(
+                            fetch_libraries(state.api_service.clone()),
+                            |result| {
+                                Message::LibrariesLoaded(
+                                    result.map_err(|e| e.to_string()),
+                                )
+                            },
+                        )
+                    }
+                }
+            };
+
+            log::info!("LoadLibraries message received");
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 

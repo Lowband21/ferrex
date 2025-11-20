@@ -1236,9 +1236,14 @@ pub fn update_ui(
             DomainUpdateResult::task(Task::none())
         }
 
+        // Logout: delegate to Auth domain so it performs a secure logout
+        // flow and then reloads users. This avoids getting stuck on the
+        // auth view's fallback "loading users" state without any tasks.
         ui::Message::Logout => {
-            // Proxy to auth domain for logout via cross-domain event
-            DomainUpdateResult::with_events(Task::none(), vec![CrossDomainEvent::UserLoggedOut])
+            use crate::domains::auth::messages as auth;
+            DomainUpdateResult::task(Task::done(DomainMessage::Auth(
+                auth::Message::Logout,
+            )))
         }
         ui::Message::CarouselNavigation(carousel_msg) => DomainUpdateResult::task(
             handle_carousel_navigation(state, carousel_msg).map(DomainMessage::Ui),

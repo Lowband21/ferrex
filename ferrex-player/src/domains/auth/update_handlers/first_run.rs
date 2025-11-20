@@ -41,9 +41,13 @@ pub fn handle_check_setup_status(state: &mut State) -> Task<auth::Message> {
             }
             Err(e) => {
                 error!("Failed to check setup status: {}", e);
+                // Conservative default: if setup status cannot be determined, prefer
+                // showing the setup flow rather than presenting stale user lists or
+                // an empty login. The subsequent setup attempt will validate against
+                // the server and guide the user appropriately.
                 auth::Message::SetupStatusChecked(SetupStatus {
-                    needs_setup: false,
-                    has_admin: true,
+                    needs_setup: true,
+                    has_admin: false,
                     requires_setup_token: false,
                     user_count: 0,
                     library_count: 0,

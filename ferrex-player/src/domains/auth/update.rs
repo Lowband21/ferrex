@@ -120,23 +120,10 @@ pub fn update_auth(
         }
 
         auth::Message::WatchStatusLoaded(result) => {
+            // Watch-state improves the UX, but should not control overall auth completion.
+            // Auth completion is centralized in the LoginSuccess path only.
             let task = handle_watch_status_loaded(state, result.clone());
-
-            // For successful manual login, emit AuthenticationComplete to trigger library loading
-            // This only happens after manual auth (not auto-login which goes through LoginSuccess)
-            let events = if result.is_ok() && state.is_authenticated {
-                log::info!(
-                    "[Auth] WatchStatusLoaded after manual auth - emitting AuthenticationComplete"
-                );
-                vec![CrossDomainEvent::AuthenticationComplete]
-            } else {
-                vec![]
-            };
-
-            DomainUpdateResult::with_events(
-                task.map(DomainMessage::Auth),
-                events,
-            )
+            DomainUpdateResult::task(task.map(DomainMessage::Auth))
         }
 
         auth::Message::Logout => {

@@ -1308,7 +1308,12 @@ impl AuthManager {
             fetched
         } else {
             // When unauthenticated, proactively check server setup status.
-            // If the server needs setup, cached users are certainly stale; clear and return empty
+            // If the server needs setup, cached users are certainly stale; clear and return empty.
+            // If the check fails with an authorization/HTTP error (common on fresh servers that
+            // restrict the setup endpoint), also clear cache to avoid showing users from a previous
+            // database instance. Only fall back to cached users when the error strongly suggests a
+            // connectivity problem (offline/timeout/connection refused), where cached users act as
+            // an offline hint.
             match self.check_setup_status().await {
                 Ok(true) => {
                     if let Err(e) = self
@@ -1322,20 +1327,53 @@ impl AuthManager {
                     }
                     Vec::new()
                 }
-                // Server reachable and not in setup: do not show cached users; prompt login
                 Ok(false) => Vec::new(),
-                // Network error: fall back to cached summaries (offline hints)
-                Err(_) => match self
-                    .auth_storage
-                    .load_user_summaries_for_server(self.api_client.base_url())
-                    .await
-                {
-                    Ok(users) => users,
-                    Err(e) => {
-                        warn!("Failed to load cached user summaries: {}", e);
+                Err(err) => {
+                    let msg = err.to_string().to_ascii_lowercase();
+                    let looks_like_connectivity = msg.contains("timeout")
+                        || msg.contains("timed out")
+                        || msg.contains("dns")
+                        || msg.contains("failed to resolve")
+                        || msg.contains("connection refused")
+                        || msg.contains("connection reset")
+                        || msg.contains("no route to host")
+                        || msg.contains("network unreachable")
+                        || msg.contains("host unreachable");
+
+                    if looks_like_connectivity {
+                        match self
+                            .auth_storage
+                            .load_user_summaries_for_server(
+                                self.api_client.base_url(),
+                            )
+                            .await
+                        {
+                            Ok(users) => users,
+                            Err(e) => {
+                                warn!(
+                                    "Failed to load cached user summaries during offline fallback: {}",
+                                    e
+                                );
+                                Vec::new()
+                            }
+                        }
+                    } else {
+                        // Not a connectivity error: treat this as a hard failure and clear any stale cache
+                        if let Err(e) = self
+                            .auth_storage
+                            .clear_user_summaries_for_server(
+                                self.api_client.base_url(),
+                            )
+                            .await
+                        {
+                            warn!(
+                                "Failed to clear cached user summaries after setup-status error: {}",
+                                e
+                            );
+                        }
                         Vec::new()
                     }
-                },
+                }
             }
         };
 
@@ -1508,6 +1546,11 @@ fn get_current_platform() -> Platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::auth::dto::UserListItemDto;
+    use crate::domains::auth::storage::AUTH_CACHE_FILE;
+    use sha2::{Digest, Sha256};
+    use tempfile::TempDir;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn derive_pin_proof_requires_non_empty_salt() {
@@ -1535,6 +1578,90 @@ mod tests {
         assert_ne!(
             proof_a, proof_b,
             "different salts must produce distinct proofs"
+        );
+    }
+
+    // Minimal HTTP 401 responder for a single request
+    async fn spawn_unauthorized_server() -> (String, tokio::task::JoinHandle<()>)
+    {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            if let Ok((mut socket, _peer)) = listener.accept().await {
+                // Read and discard request
+                let mut buf = [0u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                // Respond with 401 Unauthorized and minimal body
+                let resp = b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                let _ = socket.write_all(resp).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        (format!("http://{}", addr), handle)
+    }
+
+    fn server_hash(base_url: &str) -> String {
+        let normalized = base_url.trim().trim_end_matches('/').to_lowercase();
+        let mut hasher = Sha256::new();
+        hasher.update(normalized.as_bytes());
+        let digest = hasher.finalize();
+        let mut out = String::with_capacity(digest.len() * 2);
+        for b in digest {
+            use std::fmt::Write as _;
+            let _ = write!(&mut out, "{:02x}", b);
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_401_clears_server_scoped_user_cache() {
+        let (base_url, _server_handle) = spawn_unauthorized_server().await;
+
+        // Create auth storage in a temp directory
+        let tmp = TempDir::new().unwrap();
+        let cache_path = tmp.path().join(AUTH_CACHE_FILE);
+        let storage = AuthStorage::with_cache_path(cache_path);
+
+        // Pre-seed server-scoped user cache with one user
+        let seed = vec![UserListItemDto {
+            id: Uuid::now_v7(),
+            username: "cached".into(),
+            display_name: "Cached User".into(),
+            avatar_url: None,
+            has_pin: true,
+            last_login: Some(Utc::now()),
+        }];
+        storage
+            .save_user_summaries_for_server(&base_url, &seed)
+            .await
+            .unwrap();
+
+        // Sanity: cache file exists
+        let expected_cache = storage
+            .cache_path()
+            .parent()
+            .unwrap()
+            .join("servers")
+            .join(server_hash(&base_url))
+            .join("users_cache.json");
+        assert!(expected_cache.exists());
+
+        // Build ApiClient pointing to the unauthorized server
+        let client = ApiClient::new(base_url.clone());
+        let mut manager = AuthManager::new(client);
+        // Inject our temp storage
+        manager.auth_storage = Arc::new(storage);
+
+        // Call get_all_users while unauthenticated (default state)
+        let users = manager.get_all_users().await.unwrap();
+        assert!(users.is_empty(), "expected empty list after HTTP 401");
+
+        // The server-scoped cache file should have been cleared
+        assert!(
+            !expected_cache.exists(),
+            "server-scoped cache file should be removed on 401"
         );
     }
 }
