@@ -41,6 +41,70 @@ pub fn update_ui(
     message: ui::Message,
 ) -> DomainUpdateResult {
     match message {
+        ui::Message::OpenSearchWindow => {
+            let settings = iced::window::Settings {
+                size: iced::Size::new(800.0, 560.0),
+                resizable: true,
+                decorations: true,
+                transparent: true,
+                // Ensure closing this window does not exit the app
+                ..Default::default()
+            };
+
+            let task = iced::window::open(settings).and_then(|id| {
+                Task::done(DomainMessage::Ui(ui::Message::SearchWindowOpened(id)))
+            });
+
+            DomainUpdateResult::task(task)
+        }
+        ui::Message::OpenSearchWindowWithSeed(seed) => {
+            // Update query (and maintain scroll state) + open window
+            let update_task = super::update_handlers::search_updates::update_search_query(
+                state,
+                seed,
+            )
+            .task;
+
+            let settings = iced::window::Settings {
+                size: iced::Size::new(800.0, 560.0),
+                resizable: true,
+                decorations: true,
+                transparent: true,
+                ..Default::default()
+            };
+
+            let open_task = iced::window::open(settings).and_then(|id| {
+                Task::done(DomainMessage::Ui(ui::Message::SearchWindowOpened(id)))
+            });
+
+            DomainUpdateResult::task(Task::batch([update_task, open_task]))
+        }
+        ui::Message::SearchWindowOpened(id) => {
+            state.search_window_id = Some(id);
+
+            // Focus the new window and the search input field
+            let focus_input = iced::widget::text_input::focus::<DomainMessage>(
+                iced::widget::text_input::Id::new("search-input"),
+            );
+
+            let focus_window = iced::window::gain_focus(id);
+
+            DomainUpdateResult::task(Task::batch([focus_window, focus_input]))
+        }
+        ui::Message::FocusSearchWindow => {
+            if let Some(id) = state.search_window_id {
+                DomainUpdateResult::task(iced::window::gain_focus(id))
+            } else {
+                DomainUpdateResult::task(Task::none())
+            }
+        }
+        ui::Message::CloseSearchWindow => {
+            if let Some(id) = state.search_window_id.take() {
+                DomainUpdateResult::task(iced::window::close(id))
+            } else {
+                DomainUpdateResult::task(Task::none())
+            }
+        }
         ui::Message::SetDisplayMode(display_mode) => {
             state.domains.ui.state.display_mode = display_mode;
 
@@ -100,9 +164,9 @@ pub fn update_ui(
             // NEW ARCHITECTURE: Also refresh the active tab
             state.tab_manager.refresh_active_tab();
 
-            let task = state.schedule_check_scroll_stopped();
-
-            DomainUpdateResult::task(task)
+            // Ensure all domains (including Search) switch to global scope
+            DomainUpdateResult::with_events(Task::none(), vec![CrossDomainEvent::LibrarySelectAll])
+            
         }
         ui::Message::SelectLibraryAndMode(library_id) => {
             // NEW ARCHITECTURE: Activate the library tab in TabManager with scroll restoration
@@ -896,38 +960,10 @@ pub fn update_ui(
             }
         }
         ui::Message::UpdateSearchQuery(query) => {
-            // Update local UI state so the text input shows the current value
-            state.domains.ui.state.search_query = query.clone();
-
-            // Preserve scroll position when search query changes
-            // The UI rebuild causes scrollables to reset, so we need to restore position
-            let scroll_restore_task =
-                if let Some(tab) = state.tab_manager.get_tab(state.tab_manager.active_tab_id()) {
-                    match tab {
-                        crate::domains::ui::tabs::TabState::Library(lib_state) => {
-                            let scroll_position = lib_state.grid_state.scroll_position;
-                            let scrollable_id = lib_state.grid_state.scrollable_id.clone();
-                            scroll_to::<DomainMessage>(
-                                                    scrollable_id,
-                                                    AbsoluteOffset {
-                                                        x: 0.0,
-                                                        y: scroll_position,
-                                                    },
-                                                )
-                        }
-                        _ => Task::none(),
-                    }
-                } else {
-                    Task::none()
-                };
-
-            // Forward to search domain and restore scroll position
-            DomainUpdateResult::task(Task::batch([
-                Task::done(DomainMessage::Search(
-                    crate::domains::search::messages::Message::UpdateQuery(query),
-                )),
-                scroll_restore_task,
-            ]))
+            super::update_handlers::update_search_query(state, query)
+        }
+        ui::Message::BeginSearchFromKeyboard(seed) => {
+            super::update_handlers::begin_search_from_keyboard(state, seed)
         }
         ui::Message::ExecuteSearch => {
             // Forward directly to search domain

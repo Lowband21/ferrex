@@ -4,6 +4,8 @@ use super::metrics::SearchPerformanceMetrics;
 use super::types::{SearchMode, SearchResult};
 use crate::infra::api_types::Media;
 
+pub mod subscriptions;
+
 /// Search domain messages
 #[derive(Clone)]
 pub enum Message {
@@ -48,7 +50,7 @@ pub enum Message {
     // Cross-domain coordination
     /// Request media details for result preview
     RequestMediaDetails(Media),
-    /// Refresh search from MediaStore changes
+    /// Refresh search when media content changes
     RefreshFromMediaStore,
 
     // Internal calibration complete

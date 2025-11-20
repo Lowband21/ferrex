@@ -81,6 +81,9 @@ pub struct State {
     pub window_position: Option<iced::Point>,
     pub is_fullscreen: bool,
 
+    /// Secondary windows
+    pub search_window_id: Option<iced::window::Id>,
+
     /// MediaRepo for new architecture - single source of truth for media/library data
     pub media_repo: Arc<StdRwLock<Option<MediaRepo>>>,
 }
@@ -279,6 +282,7 @@ impl State {
             window_size: iced::Size::new(1280.0, 720.0),
             window_position: None,
             is_fullscreen: false,
+            search_window_id: None,
             media_repo,
         }
     }

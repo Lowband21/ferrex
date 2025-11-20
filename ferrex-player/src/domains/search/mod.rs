@@ -1,4 +1,4 @@
-//! Search domain - handles all search functionality
+//! Search domain - coordinates global, server-backed search
 
 pub mod calibrator;
 pub mod messages;
@@ -34,7 +34,6 @@ impl SearchDomain {
         profiling::function
     )]
     pub fn new(
-        //media_store: Arc<StdRwLock<crate::domains::media::store::MediaStore>>,
         api_service: Option<Arc<dyn crate::infra::services::api::ApiService>>,
     ) -> Self {
         Self {
@@ -52,7 +51,6 @@ impl SearchDomain {
         profiling::function
     )]
     pub fn new_with_metrics(
-        //media_store: Arc<StdRwLock<crate::domains::media::store::MediaStore>>,
         api_service: Option<Arc<dyn crate::infra::services::api::ApiService>>,
     ) -> Self {
         let state = SearchState {
@@ -92,12 +90,17 @@ impl SearchDomain {
         event: &CrossDomainEvent,
     ) -> Task<DomainMessage> {
         match event {
-            // NOTE: MediaStoreRefreshed moved to direct Search messages in Task 2.10
-            CrossDomainEvent::LibrarySelected(library_id) => {
-                // Update search scope to selected library
-                self.state.library_id = Some(*library_id);
+            CrossDomainEvent::LibrarySelected(_library_id) => {
+                // Keep search global; no library scoping.
                 if !self.state.query.is_empty() {
-                    // Re-run search with new library scope
+                    Task::done(DomainMessage::Search(Message::ExecuteSearch))
+                } else {
+                    Task::none()
+                }
+            }
+            CrossDomainEvent::LibrarySelectAll => {
+                // Already global; just rerun if needed.
+                if !self.state.query.is_empty() {
                     Task::done(DomainMessage::Search(Message::ExecuteSearch))
                 } else {
                     Task::none()

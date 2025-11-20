@@ -214,7 +214,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
         | ViewState::SeriesDetail { .. }
         | ViewState::SeasonDetail { .. }
         | ViewState::EpisodeDetail { .. } => {
-            // Simplified header for detail views
+            // Detail views header with global search in the center
             let mut left_section_items = vec![];
 
             // Home button
@@ -247,6 +247,37 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
 
             let left_section =
                 row(left_section_items).align_y(iced::Alignment::Center);
+
+            // Center section - Search (always visible for global search)
+            let center_section = container(
+                row![
+                    container(
+                        text_input("Search...", &state.domains.search.state.query)
+                            .id(Id::new("search-input"))
+                            .on_input(Message::UpdateSearchQuery)
+                            .on_submit(Message::ExecuteSearch)
+                            .style(theme::TextInput::header_search())
+                            .padding([15, 12])
+                            .size(14)
+                            .width(Length::Fixed(300.0))
+                    )
+                    .height(HEIGHT)
+                    .center_y(Length::Fill),
+                    button(
+                        container(icon_text_with_size(Icon::Search, 16.0))
+                            .center_x(Length::Fill)
+                            .center_y(Length::Fill)
+                    )
+                    .on_press(Message::ExecuteSearch)
+                    .style(theme::Button::HeaderIcon.style())
+                    .width(Length::Fixed(HEIGHT))
+                    .height(HEIGHT)
+                ]
+                .align_y(iced::Alignment::Center),
+            )
+            .height(HEIGHT)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center);
 
             // Right section - same controls as library view
             let right_section = row![
@@ -306,16 +337,12 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
 
             Stack::new()
                 .push(
-                    // Base layer: centered title
-                    container(
-                        text(get_detail_title(state))
-                            .size(20)
-                            .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                    )
-                    .width(Length::Fill)
-                    .height(HEIGHT)
-                    .align_x(iced::alignment::Horizontal::Center)
-                    .align_y(iced::alignment::Vertical::Center),
+                    // Base layer: centered search
+                    container(center_section)
+                        .width(Length::Fill)
+                        .height(HEIGHT)
+                        .align_x(iced::alignment::Horizontal::Center)
+                        .align_y(iced::alignment::Vertical::Center),
                 )
                 .push(
                     // Top layer: left and right sections

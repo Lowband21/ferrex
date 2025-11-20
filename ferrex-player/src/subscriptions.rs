@@ -30,6 +30,8 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         crate::domains::library::messages::subscriptions::subscription(state),
         // Metadata domain subscriptions
         crate::domains::metadata::messages::subscriptions::subscription(state),
+        // Search domain subscriptions
+        crate::domains::search::messages::subscriptions::subscription(state),
         // UI domain subscriptions
         crate::domains::ui::messages::subscriptions::subscription(state),
         // Global focus traversal

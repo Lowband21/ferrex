@@ -86,7 +86,14 @@ pub enum Message {
     NavigateHome,
     NavigateBack, // Navigate to previous view in history
     UpdateSearchQuery(String),
+    BeginSearchFromKeyboard(String),
     ExecuteSearch,
+    // Search window lifecycle
+    OpenSearchWindow,                      // Open an empty search window
+    OpenSearchWindowWithSeed(String),      // Open search window seeded with text
+    SearchWindowOpened(iced::window::Id),  // Internal: window created, record Id
+    FocusSearchWindow,                     // Bring search window to front
+    CloseSearchWindow,                     // Close search window
     ShowLibraryMenu,
     ShowAllLibrariesMenu,
     ShowProfile,
@@ -257,7 +264,13 @@ impl Message {
             Self::NavigateHome => "UI::NavigateHome",
             Self::NavigateBack => "UI::NavigateBack",
             Self::UpdateSearchQuery(_) => "UI::UpdateSearchQuery",
+            Self::BeginSearchFromKeyboard(_) => "UI::BeginSearchFromKeyboard",
             Self::ExecuteSearch => "UI::ExecuteSearch",
+            Self::OpenSearchWindow => "UI::OpenSearchWindow",
+            Self::OpenSearchWindowWithSeed(_) => "UI::OpenSearchWindowWithSeed",
+            Self::SearchWindowOpened(_) => "UI::SearchWindowOpened",
+            Self::FocusSearchWindow => "UI::FocusSearchWindow",
+            Self::CloseSearchWindow => "UI::CloseSearchWindow",
             Self::ShowLibraryMenu => "UI::ShowLibraryMenu",
             Self::ShowAllLibrariesMenu => "UI::ShowAllLibrariesMenu",
             Self::ShowProfile => "UI::ShowProfile",
@@ -481,7 +494,15 @@ impl std::fmt::Debug for Message {
             Self::MediaUnhovered(_) => write!(f, "UI::MediaUnhovered"),
             Self::NavigateBack => write!(f, "UI::NavigateBack"),
             Self::UpdateSearchQuery(_) => write!(f, "UI::UpdateSearchQuery"),
+            Self::BeginSearchFromKeyboard(_) => {
+                write!(f, "UI::BeginSearchFromKeyboard")
+            }
             Self::ExecuteSearch => write!(f, "UI::ExecuteSearch"),
+            Self::OpenSearchWindow => write!(f, "UI::OpenSearchWindow"),
+            Self::OpenSearchWindowWithSeed(_) => write!(f, "UI::OpenSearchWindowWithSeed"),
+            Self::SearchWindowOpened(_) => write!(f, "UI::SearchWindowOpened"),
+            Self::FocusSearchWindow => write!(f, "UI::FocusSearchWindow"),
+            Self::CloseSearchWindow => write!(f, "UI::CloseSearchWindow"),
             Self::ShowLibraryMenu => write!(f, "UI::ShowLibraryMenu"),
             Self::ShowAllLibrariesMenu => write!(f, "UI::ShowAllLibrariesMenu"),
             Self::ShowProfile => write!(f, "UI::ShowProfile"),

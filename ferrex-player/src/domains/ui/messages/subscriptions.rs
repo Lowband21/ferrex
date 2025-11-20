@@ -14,10 +14,37 @@ use iced::Subscription;
 pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let mut subscriptions = vec![];
 
-    subscriptions
-        .push(iced::window::resize_events().map(|(_id, size)| {
-            DomainMessage::Ui(Message::WindowResized(size))
+    subscriptions.push(
+        iced::window::resize_events()
+            .map(|(_id, size)| DomainMessage::Ui(Message::WindowResized(size))),
+    );
+
+    // Close search window on Esc/Enter when it is open
+    if state.search_window_id.is_some() {
+        subscriptions.push(iced::keyboard::on_key_press(|key, _modifiers| {
+            use iced::keyboard::key::Named;
+            use iced::keyboard::Key;
+            match key {
+                Key::Named(Named::Escape) | Key::Named(Named::Enter) => {
+                    Some(DomainMessage::Ui(Message::CloseSearchWindow))
+                }
+                _ => None,
+            }
         }));
+    }
+
+    // Watch for close requests and close only our search window
+    if let Some(search_id) = state.search_window_id {
+        subscriptions.push(
+            iced::window::close_requests().map(move |(id, _)| {
+                if id == search_id {
+                    DomainMessage::Ui(Message::CloseSearchWindow)
+                } else {
+                    DomainMessage::NoOp
+                }
+            }),
+        );
+    }
 
     let poster_anim_active = state
         .domains

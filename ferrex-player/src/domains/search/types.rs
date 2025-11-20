@@ -18,11 +18,11 @@ pub enum SearchMode {
 /// Search execution strategy
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchStrategy {
-    /// Use local MediaStore cache
+    /// Local (client-side) search — reserved for future use
     Client,
-    /// Query server directly
+    /// Query server directly (current behavior)
     Server,
-    /// Hybrid approach - client first, then server for missing data
+    /// Hybrid approach — reserved for future evaluation
     Hybrid,
 }
 

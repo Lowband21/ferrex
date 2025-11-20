@@ -1,4 +1,4 @@
-//! Search service for executing searches against the server
+//! Search service for executing global, server-backed queries
 
 use ferrex_core::player_prelude::{
     LibraryID, MediaQueryBuilder, MediaWithStatus, SearchField,
@@ -15,6 +15,7 @@ use std::time::Instant;
 
 #[derive(Debug)]
 pub struct SearchService {
+    /// API service for server-backed searching (optional)
     api_service: Option<Arc<dyn ApiService>>,
 }
 
@@ -29,13 +30,9 @@ impl SearchService {
         profiling::function
     )]
     pub fn new(
-        //media_store: Arc<StdRwLock<MediaStore>>,
         api_service: Option<Arc<dyn ApiService>>,
     ) -> Self {
-        Self {
-            //media_store,
-            api_service,
-        }
+        Self { api_service }
     }
 
     /// Check if network is available (api_service is present)
@@ -241,6 +238,126 @@ impl SearchService {
 
         Ok(results)
     } */
+    /*
+    /// Client-side search using MediaStore
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
+    fn search_client(
+        &self,
+        query: &str,
+        fields: &[SearchField],
+        library_id: Option<LibraryID>,
+        fuzzy: bool,
+    ) -> Result<Vec<SearchResult>, String> {
+        //let store = self
+        //    .media_store
+        //    .read()
+        //    .map_err(|e| format!("Failed to acquire media store lock: {}", e))?;
+
+        let mut results = Vec::new();
+        let query_lower = query.to_lowercase();
+
+        // Search movies
+        let movies = store.get_all_movies();
+        for movie in movies {
+            if let Some(score) = self.match_movie(&movie, &query_lower, fields, fuzzy) {
+                // Check library filter
+                if let Some(lib_id) = library_id {
+                    if movie.file.library_id != lib_id {
+                        continue;
+                    }
+                }
+
+                results.push(SearchResult {
+                    media_ref: Media::Movie(movie.clone()),
+                    title: movie.title.as_str().to_string(),
+                    subtitle: movie
+                        .details
+                        .get_release_year()
+                        .map(|year| format!("{} • Movie", year)),
+                    year: match &movie.details {
+                        ferrex_core::MediaDetailsOption::Details(
+                            ferrex_core::TmdbDetails::Movie(details),
+                        ) => details.release_date.as_ref().and_then(|d| {
+                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                                .ok()
+                                .map(|date| date.year())
+                        }),
+                        _ => None,
+                    },
+                    poster_url: match &movie.details {
+                        ferrex_core::MediaDetailsOption::Details(
+                            ferrex_core::TmdbDetails::Movie(details),
+                        ) => details.poster_path.clone(),
+                        _ => None,
+                    },
+                    match_score: score,
+                    match_field: SearchField::Title, // TODO: Track which field matched
+                    library_id: Some(movie.file.library_id),
+                });
+            }
+        }
+
+        // Search series
+        let series_list = store.get_all_series();
+        for series in series_list {
+            if let Some(score) = self.match_series(&series, &query_lower, fields, fuzzy) {
+                // Check library filter
+                if let Some(lib_id) = library_id {
+                    if series.library_id != lib_id {
+                        continue;
+                    }
+                }
+
+                results.push(SearchResult {
+                    media_ref: Media::Series(series.clone()),
+                    title: series.title.as_str().to_string(),
+                    subtitle: match &series.details {
+                        ferrex_core::MediaDetailsOption::Details(
+                            ferrex_core::TmdbDetails::Series(details),
+                        ) => details.first_air_date.as_ref().and_then(|d| {
+                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                                .ok()
+                                .map(|date| format!("{} • Series", date.year()))
+                        }),
+                        _ => Some("Series".to_string()),
+                    },
+                    year: match &series.details {
+                        ferrex_core::MediaDetailsOption::Details(
+                            ferrex_core::TmdbDetails::Series(details),
+                        ) => details.first_air_date.as_ref().and_then(|d| {
+                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                                .ok()
+                                .map(|date| date.year())
+                        }),
+                        _ => None,
+                    },
+                    poster_url: match &series.details {
+                        ferrex_core::MediaDetailsOption::Details(
+                            ferrex_core::TmdbDetails::Series(details),
+                        ) => details.poster_path.clone(),
+                        _ => None,
+                    },
+                    match_score: score,
+                    match_field: SearchField::Title,
+                    library_id: Some(series.library_id),
+                });
+            }
+        }
+
+        // TODO: Search episodes within series
+
+        // Sort by relevance score
+        results.sort_by(|a, b| b.match_score.partial_cmp(&a.match_score).unwrap());
+
+        Ok(results)
+    } */
 
     async fn search_server(
         &self,
@@ -256,10 +373,7 @@ impl SearchService {
         // Build MediaQuery for server
         let mut query_builder = MediaQueryBuilder::new();
 
-        // Add library filter if specified
-        if let Some(lib_id) = library_id {
-            query_builder = query_builder.in_library(lib_id);
-        }
+        // Global search only: ignore any library filter for now
 
         // Always use fuzzy search (which includes exact matches)
         // This avoids API issues with exact search mode

@@ -1,4 +1,4 @@
-//! Search domain update logic
+//! Search domain update logic (global, server-backed)
 
 use iced::Task;
 use iced::widget::Id;
@@ -214,9 +214,8 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
         }
 
         Message::RefreshFromMediaStore => {
-            // Re-run search if we have a query
+            // Media changed; re-run search if we have a query
             if !state.domains.search.state.query.is_empty() {
-                // MediaStore refresh - keep current mode
                 handle_execute_search(state, false)
             } else {
                 DomainUpdateResult::task(Task::none())
@@ -299,29 +298,7 @@ fn handle_execute_search(
         ));
     }
 
-    // Determine search strategy using the enhanced decision engine
-    //let data_completeness = calculate_data_completeness(state);
-    //let network_available = state.domains.search.service.has_network();
-
-    //let strategy = state
-    //    .domains
-    //    .search
-    //    .state
-    //    .decision_engine
-    //    .determine_strategy_enhanced(
-    //        &query,
-    //        data_completeness,
-    //        &state.domains.search.state.search_fields,
-    //        network_available,
-    //    );
-
-    //log::info!(
-    //    "Search strategy selected: {:?} (query: '{}', completeness: {:.1}%, network: {})",
-    //    strategy,
-    //    query,
-    //    data_completeness * 100.0,
-    //    network_available
-    //);
+    // Strategy selection is reserved for future use; we currently use server search for best coverage
     let strategy = SearchStrategy::Server;
 
     state.domains.search.state.current_strategy = Some(strategy);
@@ -331,13 +308,13 @@ fn handle_execute_search(
     // Execute search with metrics
     let service = state.domains.search.service.clone();
     let fields = state.domains.search.state.search_fields.clone();
-    let library_id = state.domains.search.state.library_id;
+    // Always search globally; ignore any library filter
+    let library_id = None;
     let fuzzy = state.domains.search.state.fuzzy_matching;
     let search_state = state.domains.search.state.clone();
 
     DomainUpdateResult::task(Task::perform(
         async move {
-            // TODO: Switch to search_with_metrics when we implement proper message batching
             match service
                 .search(&query, &fields, strategy, library_id, fuzzy)
                 .await
@@ -384,30 +361,4 @@ fn handle_select_result(
     }))
 }
 
-/*
-/// Calculate how complete our local data is
-fn calculate_data_completeness(state: &State) -> f32 {
-    // Simple heuristic: check what percentage of media has TMDB details
-    let store = match state.domains.media.state.media_store.read() {
-        Ok(store) => store,
-        Err(_) => return 0.0,
-    };
-
-    let total_media = store.len();
-    if total_media == 0 {
-        return 0.0;
-    }
-
-    let with_details = store
-        .get_all_movies()
-        .into_iter()
-        .filter(|m| m.tmdb_id > 0)
-        .count()
-        + store
-            .get_all_series()
-            .into_iter()
-            .filter(|s| s.tmdb_id > 0)
-            .count();
-
-    with_details as f32 / total_media as f32
-} */
+// NOTE: Local data completeness heuristics are deferred; server search is authoritative for now.
