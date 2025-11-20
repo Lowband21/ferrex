@@ -12,6 +12,9 @@ use iced::Task;
 /// Main settings update handler
 /// Returns a DomainUpdateResult containing both the task and any events to emit
 pub fn update_settings(state: &mut State, message: Message) -> DomainUpdateResult {
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::SETTINGS_UPDATE);
+    
     match message {
         // Navigation
         Message::ShowProfile => navigation::handle_show_profile(state),

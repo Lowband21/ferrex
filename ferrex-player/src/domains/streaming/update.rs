@@ -8,6 +8,9 @@ use iced::Task;
 ///
 /// This handler is part of the domain message architecture migration.
 pub fn update_streaming(state: &mut State, message: Message) -> DomainUpdateResult {
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::STREAMING_UPDATE);
+    
     match message {
         // Transcoding messages
         Message::TranscodingStarted(result) => {

@@ -10,6 +10,9 @@ use iced::Task;
 /// Handle library domain messages
 /// Returns a DomainUpdateResult containing both the task and any events to emit
 pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult {
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::LIBRARY_UPDATE);
+    
     match message {
         // Core library loading
 

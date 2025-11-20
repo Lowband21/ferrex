@@ -22,6 +22,16 @@ fn main() -> iced::Result {
         std::env::set_var("RUST_LOG", "ferrex_player=debug");
     }
     env_logger::init();
+    
+    // Initialize profiling system if enabled
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    {
+        infrastructure::profiling::init();
+        log::info!("Profiling system initialized");
+        
+        #[cfg(feature = "puffin-server")]
+        log::info!("Puffin server listening on 127.0.0.1:8585 - connect with: puffin_viewer --url 127.0.0.1:8585");
+    }
 
     let server_url =
         std::env::var("FERREX_SERVER_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());

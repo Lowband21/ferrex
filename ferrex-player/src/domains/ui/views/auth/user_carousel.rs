@@ -291,7 +291,7 @@ fn create_user_carousel_from_data<'a>(
     }
 
     // Create scrollable carousel
-    let carousel_content = scrollable(container(user_row).padding([20, 40]).width(Length::Fill))
+    let carousel_content = scrollable(container(user_row).padding([20, 40]))
         .direction(scrollable::Direction::Horizontal(
             scrollable::Scrollbar::new()
                 .width(0) // Hide scrollbar

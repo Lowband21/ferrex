@@ -16,7 +16,6 @@ use crate::domains::ui::views::tv::{view_episode_detail, view_season_detail, vie
 use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::{background_shader, BackgroundEffect};
 use crate::domains::{player, ui};
-use crate::infrastructure::profiling::PROFILER;
 use crate::state_refactored::State;
 use ferrex_core::api_types::MediaId;
 use iced::widget::{column, container, scrollable, Stack};
@@ -24,182 +23,182 @@ use iced::{Element, Font, Length};
 
 /// Main view composition function
 pub fn view(state: &State) -> Element<DomainMessage> {
-    PROFILER.start("view");
-
+    // Profile the view operation
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!("view");
+    
     // Check for first-run setup
     if matches!(state.domains.ui.state.view, ViewState::FirstRunSetup) {
-        let first_run_content = view_first_run(state, &state.domains.auth.state.first_run_state)
-            .map(DomainMessage::from);
-        PROFILER.end("view");
-        return first_run_content;
-    }
-
-    // Check authentication state
-    if !state.is_authenticated {
-        log::debug!("[Auth] Not authenticated, showing auth view");
-        let auth_content = view_auth(
-            &state.domains.auth.state.auth_flow,
-            state.domains.auth.state.user_permissions.as_ref(),
-        )
-        .map(DomainMessage::from);
-        PROFILER.end("view");
-        return auth_content;
-    }
-
-    // Get the view content
-    let content = match &state.domains.ui.state.view {
-        ViewState::Library => view_library(state).map(DomainMessage::from),
-        ViewState::LibraryManagement => view_library_management(state).map(DomainMessage::from),
-        ViewState::AdminDashboard => view_admin_dashboard(state).map(DomainMessage::from),
-        ViewState::FirstRunSetup => {
-            view_first_run(state, &state.domains.auth.state.first_run_state)
-                .map(DomainMessage::from)
+            let first_run_content = view_first_run(state, &state.domains.auth.state.first_run_state)
+                .map(DomainMessage::from);
+            return first_run_content;
         }
-        ViewState::Player => view_player(state).map(DomainMessage::Player),
-        ViewState::LoadingVideo { url } => view_loading_video(state, url).map(DomainMessage::from),
-        ViewState::VideoError { message } => view_video_error(message).map(DomainMessage::from),
-        ViewState::MovieDetail { movie, .. } => {
-            view_movie_detail(state, movie).map(DomainMessage::from)
-        }
-        ViewState::TvShowDetail { series_id, .. } => {
-            view_tv_show_detail(state, series_id.as_str()).map(DomainMessage::from)
-        }
-        ViewState::SeasonDetail {
-            series_id,
-            season_id,
-            ..
-        } => view_season_detail(state, series_id, season_id).map(DomainMessage::from),
-        ViewState::EpisodeDetail { episode_id, .. } => {
-            view_episode_detail(state, episode_id).map(DomainMessage::from)
-        }
-        ViewState::UserSettings => view_user_settings(state).map(DomainMessage::from),
-    };
 
-    // Add header if the view needs it
-    let content_with_header = if state.domains.ui.state.view.has_header() {
-        let header = view_header(state).map(DomainMessage::from);
-
-        // Wrap header in a container with opaque background
-        let header_container = container(header)
-            .width(Length::Fill)
-            .style(theme::Container::Header.style());
-
-        // Check if we need library controls bar
-        let selected_library = state.domains.library.state.current_library_id;
-        let controls_bar = match &state.domains.ui.state.view {
-            ViewState::Library => view_library_controls_bar(state, selected_library)
-                .map(|bar| bar.map(DomainMessage::from)),
-            _ => None,
-        };
-
-        // Check if this is a detail view that needs scrollable content
-        let scrollable_content = match &state.domains.ui.state.view {
-            ViewState::MovieDetail { .. }
-            | ViewState::TvShowDetail { .. }
-            | ViewState::SeasonDetail { .. }
-            | ViewState::EpisodeDetail { .. } => {
-                // Wrap content in scrollable for detail views
-                scrollable(content)
-                    .on_scroll(|viewport| {
-                        DomainMessage::from(ui::messages::Message::DetailViewScrolled(viewport))
-                    })
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into()
-            }
-            _ => {
-                // Library and other views already have their own scrollable
-                content
-            }
-        };
-
-        // Build the column with optional controls bar
-        let mut col = column![header_container];
-        if let Some(controls) = controls_bar {
-            col = col.push(controls);
-        }
-        col = col.push(scrollable_content);
-
-        col.width(Length::Fill).height(Length::Fill).into()
-    } else {
-        content
-    };
-
-    // Use ViewState helper methods for cleaner logic
-    let result = if state.domains.ui.state.view.has_background() {
-        // Note: Theme colors and backdrops are now handled in the update function
-        // when view changes occur, updating state.background_shader_state
-
-        // Create background shader from persistent state
-        let mut bg_shader = background_shader()
-            .colors(
-                state.domains.ui.state.background_shader_state.primary_color,
-                state
-                    .domains
-                    .ui
-                    .state
-                    .background_shader_state
-                    .secondary_color,
+        // Check authentication state
+        if !state.is_authenticated {
+            log::debug!("[Auth] Not authenticated, showing auth view");
+            let auth_content = view_auth(
+                &state.domains.auth.state.auth_flow,
+                state.domains.auth.state.user_permissions.as_ref(),
             )
-            .scroll_offset(state.domains.ui.state.background_shader_state.scroll_offset)
-            .gradient_center(
-                state
-                    .domains
-                    .ui
-                    .state
-                    .background_shader_state
-                    .gradient_center,
-            );
-
-        // For detail views, tell shader to offset backdrop by header height
-        if matches!(
-            &state.domains.ui.state.view,
-            ViewState::MovieDetail { .. }
-                | ViewState::TvShowDetail { .. }
-                | ViewState::SeasonDetail { .. }
-                | ViewState::EpisodeDetail { .. }
-        ) {
-            bg_shader =
-                bg_shader.header_offset(crate::infrastructure::constants::layout::header::HEIGHT);
+            .map(DomainMessage::from);
+            return auth_content;
         }
 
-        // Get backdrop from image service based on current view (reactive approach)
-        let backdrop_handle = match &state.domains.ui.state.view {
+        // Get the view content
+        let content = match &state.domains.ui.state.view {
+            ViewState::Library => view_library(state).map(DomainMessage::from),
+            ViewState::LibraryManagement => view_library_management(state).map(DomainMessage::from),
+            ViewState::AdminDashboard => view_admin_dashboard(state).map(DomainMessage::from),
+            ViewState::FirstRunSetup => {
+                view_first_run(state, &state.domains.auth.state.first_run_state)
+                    .map(DomainMessage::from)
+            }
+            ViewState::Player => view_player(state).map(DomainMessage::Player),
+            ViewState::LoadingVideo { url } => view_loading_video(state, url).map(DomainMessage::from),
+            ViewState::VideoError { message } => view_video_error(message).map(DomainMessage::from),
             ViewState::MovieDetail { movie, .. } => {
-                let request =
-                    ImageRequest::new(MediaId::Movie(movie.id.clone()), ImageSize::Backdrop);
-                state.image_service.get(&request)
+                view_movie_detail(state, movie).map(DomainMessage::from)
             }
             ViewState::TvShowDetail { series_id, .. } => {
-                let request =
-                    ImageRequest::new(MediaId::Series(series_id.clone()), ImageSize::Backdrop);
-                state.image_service.get(&request)
+                view_tv_show_detail(state, series_id.as_str()).map(DomainMessage::from)
             }
-            ViewState::SeasonDetail { season_id, .. } => {
-                let request =
-                    ImageRequest::new(MediaId::Season(season_id.clone()), ImageSize::Backdrop);
-                state.image_service.get(&request)
+            ViewState::SeasonDetail {
+                series_id,
+                season_id,
+                ..
+            } => view_season_detail(state, series_id, season_id).map(DomainMessage::from),
+            ViewState::EpisodeDetail { episode_id, .. } => {
+                view_episode_detail(state, episode_id).map(DomainMessage::from)
             }
-            _ => None,
+            ViewState::UserSettings => view_user_settings(state).map(DomainMessage::from),
         };
 
-        // Add backdrop if available
-        if let Some(handle) = backdrop_handle {
-            // Use BackdropGradient effect with dummy fade values (shader calculates them dynamically)
-            bg_shader = bg_shader
-                .backdrop_with_fade(handle, 0.75, 1.0) // Values ignored by shader
-                .backdrop_aspect_mode(
+        // Add header if the view needs it
+        let content_with_header = if state.domains.ui.state.view.has_header() {
+            let header = view_header(state).map(DomainMessage::from);
+
+            // Wrap header in a container with opaque background
+            let header_container = container(header)
+                .width(Length::Fill)
+                .style(theme::Container::Header.style());
+
+            // Check if we need library controls bar
+            let selected_library = state.domains.library.state.current_library_id;
+            let controls_bar = match &state.domains.ui.state.view {
+                ViewState::Library => view_library_controls_bar(state, selected_library)
+                    .map(|bar| bar.map(DomainMessage::from)),
+                _ => None,
+            };
+
+            // Check if this is a detail view that needs scrollable content
+            let scrollable_content = match &state.domains.ui.state.view {
+                ViewState::MovieDetail { .. }
+                | ViewState::TvShowDetail { .. }
+                | ViewState::SeasonDetail { .. }
+                | ViewState::EpisodeDetail { .. } => {
+                    // Wrap content in scrollable for detail views
+                    scrollable(content)
+                        .on_scroll(|viewport| {
+                            DomainMessage::from(ui::messages::Message::DetailViewScrolled(viewport))
+                        })
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into()
+                }
+                _ => {
+                    // Library and other views already have their own scrollable
+                    content
+                }
+            };
+
+            // Build the column with optional controls bar
+            let mut col = column![header_container];
+            if let Some(controls) = controls_bar {
+                col = col.push(controls);
+            }
+            col = col.push(scrollable_content);
+
+            col.width(Length::Fill).height(Length::Fill).into()
+        } else {
+            content
+        };
+
+        // Use ViewState helper methods for cleaner logic
+        let result = if state.domains.ui.state.view.has_background() {
+            // Note: Theme colors and backdrops are now handled in the update function
+            // when view changes occur, updating state.background_shader_state
+
+            // Create background shader from persistent state
+            let mut bg_shader = background_shader()
+                .colors(
+                    state.domains.ui.state.background_shader_state.primary_color,
                     state
                         .domains
                         .ui
                         .state
                         .background_shader_state
-                        .backdrop_aspect_mode,
+                        .secondary_color,
+                )
+                .scroll_offset(state.domains.ui.state.background_shader_state.scroll_offset)
+                .gradient_center(
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .background_shader_state
+                        .gradient_center,
                 );
-        } else {
-            // No backdrop, use gradient effect
-            bg_shader = bg_shader.effect(BackgroundEffect::Gradient);
-        }
+
+            // For detail views, tell shader to offset backdrop by header height
+            if matches!(
+                &state.domains.ui.state.view,
+                ViewState::MovieDetail { .. }
+                    | ViewState::TvShowDetail { .. }
+                    | ViewState::SeasonDetail { .. }
+                    | ViewState::EpisodeDetail { .. }
+            ) {
+                bg_shader =
+                    bg_shader.header_offset(crate::infrastructure::constants::layout::header::HEIGHT);
+            }
+
+            // Get backdrop from image service based on current view (reactive approach)
+            let backdrop_handle = match &state.domains.ui.state.view {
+                ViewState::MovieDetail { movie, .. } => {
+                    let request =
+                        ImageRequest::new(MediaId::Movie(movie.id.clone()), ImageSize::Backdrop);
+                    state.image_service.get(&request)
+                }
+                ViewState::TvShowDetail { series_id, .. } => {
+                    let request =
+                        ImageRequest::new(MediaId::Series(series_id.clone()), ImageSize::Backdrop);
+                    state.image_service.get(&request)
+                }
+                ViewState::SeasonDetail { season_id, .. } => {
+                    let request =
+                        ImageRequest::new(MediaId::Season(season_id.clone()), ImageSize::Backdrop);
+                    state.image_service.get(&request)
+                }
+                _ => None,
+            };
+
+            // Add backdrop if available
+            if let Some(handle) = backdrop_handle {
+                // Use BackdropGradient effect with dummy fade values (shader calculates them dynamically)
+                bg_shader = bg_shader
+                    .backdrop_with_fade(handle, 0.75, 1.0) // Values ignored by shader
+                    .backdrop_aspect_mode(
+                        state
+                            .domains
+                            .ui
+                            .state
+                            .background_shader_state
+                            .backdrop_aspect_mode,
+                    );
+            } else {
+                // No backdrop, use gradient effect
+                bg_shader = bg_shader.effect(BackgroundEffect::Gradient);
+            }
 
         // Add depth layout from state
         if !state
@@ -233,27 +232,25 @@ pub fn view(state: &State) -> Element<DomainMessage> {
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
-    } else {
-        // For player view, no background
-        content_with_header
-    };
+        } else {
+            // For player view, no background
+            content_with_header
+        };
 
-    PROFILER.end("view");
-
-    // Check search mode and render appropriate view
-    if state.domains.search.state.mode == crate::domains::search::types::SearchMode::FullScreen {
-        // Show full-screen search view
-        crate::domains::ui::views::components::view_search_fullscreen(state)
-    } else if let Some(search_dropdown) =
-        crate::domains::ui::views::components::view_search_dropdown(state)
-    {
-        // Wrap the main content in a stack with the search dropdown overlay
-        Stack::new()
-            .push(result)
-            .push(search_dropdown)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        // Check search mode and render appropriate view
+        if state.domains.search.state.mode == crate::domains::search::types::SearchMode::FullScreen {
+            // Show full-screen search view
+            crate::domains::ui::views::components::view_search_fullscreen(state)
+        } else if let Some(search_dropdown) =
+            crate::domains::ui::views::components::view_search_dropdown(state)
+        {
+            // Wrap the main content in a stack with the search dropdown overlay
+            Stack::new()
+                .push(result)
+                .push(search_dropdown)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
     } else {
         result
     }

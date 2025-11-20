@@ -927,6 +927,9 @@ impl Primitive for RoundedImagePrimitive {
         bounds: &Rectangle,
         viewport: &Viewport,
     ) {
+        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        profiling::scope!(crate::infrastructure::profiling_scopes::scopes::POSTER_GPU_UPLOAD);
+        
         // Initialize pipeline if needed
         if !storage.has::<Pipeline>() {
             //log::info!("Creating rounded image shader pipeline");
@@ -1082,6 +1085,9 @@ impl Primitive for RoundedImagePrimitive {
         //log::debug!("  - opacity: {}", self.opacity);
 
         // Calculate animation values based on animation type
+        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        profiling::scope!(crate::infrastructure::profiling_scopes::scopes::ANIM_TRANSITION);
+        
         let (
             actual_opacity,
             rotation_y,
@@ -1497,6 +1503,9 @@ impl Primitive for RoundedImagePrimitive {
         target: &wgpu::TextureView,
         clip_bounds: &Rectangle<u32>,
     ) {
+        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        profiling::scope!(crate::infrastructure::profiling_scopes::scopes::VIEW_DRAW);
+        
         let pipeline = storage.get::<Pipeline>().unwrap();
         let state = storage.get::<State>().unwrap();
 

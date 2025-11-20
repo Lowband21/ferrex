@@ -9,6 +9,9 @@ use iced::{
 
 // Helper function for carousel view used in All mode
 pub fn view_all_content(state: &State) -> Element<Message> {
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::VIEW_RENDER);
+    
     let mut content = column![].spacing(30).padding(20);
 
     // TV Shows carousel - use ViewModel
@@ -96,9 +99,8 @@ pub fn view_all_content(state: &State) -> Element<Message> {
                 .align_x(iced::Alignment::Center),
             )
             .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::alignment::Horizontal::Center)
-            .align_y(iced::alignment::Vertical::Center),
+            .padding(100) // Add padding instead of fill height for visual centering
+            .align_x(iced::alignment::Horizontal::Center),
         );
     }
 

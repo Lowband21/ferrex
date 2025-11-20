@@ -24,7 +24,6 @@ pub struct ImageEntry {
     pub retry_count: u8,
 }
 
-
 #[derive(Debug, Clone)]
 pub struct UnifiedImageService {
     // Single cache for all images
@@ -59,6 +58,9 @@ impl UnifiedImageService {
     }
 
     pub fn get(&self, request: &ImageRequest) -> Option<Handle> {
+        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        profiling::scope!("ImageService::get");
+        
         self.cache
             .get(request)
             .and_then(|entry| match &entry.state {
@@ -82,20 +84,29 @@ impl UnifiedImageService {
     }
 
     pub fn request_image(&self, request: ImageRequest) {
+        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        profiling::scope!("ImageService::request_image");
+        
         //log::info!("Requesting image with request: {:#?}", request);
         // Check if already cached
         if let Some(mut entry) = self.cache.get_mut(&request) {
             entry.last_accessed = std::time::Instant::now();
-            
+
             // Don't retry if already loaded
             if matches!(entry.state, LoadState::Loaded(_)) {
                 return;
             }
-            
+
             // Don't retry if failed too many times
-            if matches!(entry.state, LoadState::Failed(_)) && entry.retry_count >= MAX_RETRY_ATTEMPTS {
-                log::debug!("Skipping image request for {:?} - exceeded max retries ({}/{})", 
-                          request.media_id, entry.retry_count, MAX_RETRY_ATTEMPTS);
+            if matches!(entry.state, LoadState::Failed(_))
+                && entry.retry_count >= MAX_RETRY_ATTEMPTS
+            {
+                log::debug!(
+                    "Skipping image request for {:?} - exceeded max retries ({}/{})",
+                    request.media_id,
+                    entry.retry_count,
+                    MAX_RETRY_ATTEMPTS
+                );
                 return;
             }
         }
@@ -108,13 +119,15 @@ impl UnifiedImageService {
         // Add to queue or upgrade priority
         if let Ok(mut queue) = self.queue.lock() {
             let new_priority = request.priority.weight();
-            
+
             if let Some(&existing_priority) = queue.get_priority(&request) {
                 // Image already queued - upgrade priority if new is higher
                 if new_priority > existing_priority {
-                    log::info!("Upgrading priority for {:?} from {} to {} ({})", 
+                    /*
+                    log::debug!("Upgrading priority for {:?} from {} to {} ({})",
                                request.media_id, existing_priority, new_priority,
                                if new_priority == 3 { "VISIBLE" } else if new_priority == 2 { "PRELOAD" } else { "BACKGROUND" });
+                     */
                     queue.change_priority(&request, new_priority);
                     // Send wake-up signal to notify loader of priority change
                     match self.load_sender.send(()) {
@@ -171,7 +184,7 @@ impl UnifiedImageService {
 
         // Check if this is a 404 error (image doesn't exist on server)
         let is_404 = error.contains("404");
-        
+
         let retry_count = if let Some(mut entry) = self.cache.get_mut(request) {
             entry.state = LoadState::Failed(error.clone());
             // For 404 errors, immediately set to max retries to prevent further attempts
@@ -194,19 +207,28 @@ impl UnifiedImageService {
             );
             retry_count
         };
-        
+
         // Log permanent failures for metadata aggregation
         if retry_count >= MAX_RETRY_ATTEMPTS {
             if is_404 {
                 log::info!("Image not found on server (404): {:?}", request.media_id);
             } else {
-                log::warn!("Image permanently failed after {} attempts: {:?} - {}", 
-                          retry_count, request.media_id, error);
+                log::warn!(
+                    "Image permanently failed after {} attempts: {:?} - {}",
+                    retry_count,
+                    request.media_id,
+                    error
+                );
             }
             // TODO: Could aggregate these failures for missing metadata reporting
         } else {
-            log::debug!("Image failed (attempt {}/{}): {:?} - {}", 
-                       retry_count, MAX_RETRY_ATTEMPTS, request.media_id, error);
+            log::debug!(
+                "Image failed (attempt {}/{}): {:?} - {}",
+                retry_count,
+                MAX_RETRY_ATTEMPTS,
+                request.media_id,
+                error
+            );
         }
     }
 

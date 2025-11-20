@@ -14,12 +14,12 @@ use crate::infrastructure::api_types::{
     EpisodeReference, MediaDetailsOption, MediaId, MediaReference, MovieReference, SeasonReference,
     SeriesReference, TmdbDetails,
 };
-use ferrex_core::SeriesID;
 use ferrex_core::query::sorting::{
     fields::*,
     strategy::{FieldSort, SortStrategy},
     traits::{SortKey, SortableEntity},
 };
+use ferrex_core::SeriesID;
 
 /// Types of media for categorization
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -124,11 +124,7 @@ impl MediaStoreNotifier {
 }
 
 impl MediaStoreSubscriber for MediaStoreNotifier {
-    fn on_media_changed(&self, event: MediaChangeEvent) {
-        log::debug!(
-            "MediaStoreNotifier: Received change event {:?}",
-            event.change_type
-        );
+    fn on_media_changed(&self, _event: MediaChangeEvent) {
         self.needs_refresh.store(true, Ordering::Release);
     }
 
@@ -161,14 +157,14 @@ pub struct MediaStore {
     // Batch mode flag to delay sorting and notifications
     batch_mode: bool,
     pending_events: Vec<MediaChangeEvent>,
-    
+
     // Performance optimization flags
-    needs_resort: bool, // Whether we need to resort after batch
+    needs_resort: bool,    // Whether we need to resort after batch
     is_initial_load: bool, // Whether this is the initial load from server (pre-sorted)
-    
+
     // Track series to library mapping for deriving child library_ids
     series_to_library: HashMap<SeriesID, Uuid>,
-    
+
     // Deferred items that need parent relationships resolved
     deferred_items: Vec<MediaReference>,
 }
@@ -182,8 +178,8 @@ impl MediaStore {
             by_type: HashMap::new(),
             sorted_movie_ids: Vec::new(),
             sorted_series_ids: Vec::new(),
-            current_movie_sort: (SortBy::Title, SortOrder::Ascending),  // Default to alphabetical
-            current_series_sort: (SortBy::Title, SortOrder::Ascending),  // Default to alphabetical
+            current_movie_sort: (SortBy::Title, SortOrder::Ascending), // Default to alphabetical
+            current_series_sort: (SortBy::Title, SortOrder::Ascending), // Default to alphabetical
             subscribers: Vec::new(),
             batch_mode: false,
             pending_events: Vec::new(),
@@ -201,33 +197,43 @@ impl MediaStore {
 
     /// Start a batch update (delays notifications until end_batch)
     pub fn begin_batch(&mut self) {
-        log::info!("MediaStore: Beginning batch mode - current store size: {}", self.media.len());
+        log::info!(
+            "MediaStore: Beginning batch mode - current store size: {}",
+            self.media.len()
+        );
         if self.batch_mode {
             log::warn!("MediaStore: begin_batch called while already in batch mode!");
         }
-        
+
         // DEBUG: Log what's currently in the store
-        let season_count = self.by_type.get(&MediaType::Season).map(|s| s.len()).unwrap_or(0);
+        let season_count = self
+            .by_type
+            .get(&MediaType::Season)
+            .map(|s| s.len())
+            .unwrap_or(0);
         if season_count > 0 {
-            log::info!("MediaStore: {} seasons already in store before batch", season_count);
+            log::info!(
+                "MediaStore: {} seasons already in store before batch",
+                season_count
+            );
         }
-        
+
         self.batch_mode = true;
         self.pending_events.clear();
         self.deferred_items.clear();
     }
-    
+
     /// Mark the next batch as initial load (skip sorting, preserve server order)
     pub fn set_initial_load(&mut self, is_initial: bool) {
         self.is_initial_load = is_initial;
     }
-    
+
     /// Preserve the current insertion order in sorted indices
     /// Used when we receive pre-sorted data from the server
     fn preserve_insertion_order(&mut self) {
         // During initial load, items were already added to sorted_movie_ids and sorted_series_ids
         // in the correct order as they were inserted. We just need to ensure the sets match.
-        
+
         // For movies, preserve the insertion order
         if !self.sorted_movie_ids.is_empty() {
             log::debug!(
@@ -235,7 +241,7 @@ impl MediaStore {
                 self.sorted_movie_ids.len()
             );
         }
-        
+
         // For series, preserve the insertion order
         if !self.sorted_series_ids.is_empty() {
             log::debug!(
@@ -253,10 +259,13 @@ impl MediaStore {
 
         log::debug!("MediaStore: Ending batch mode - processing deferred items");
         self.batch_mode = false;
-        
+
         // Process any deferred items that were waiting for parent relationships
         if !self.deferred_items.is_empty() {
-            log::debug!("Processing {} deferred items after batch", self.deferred_items.len());
+            log::debug!(
+                "Processing {} deferred items after batch",
+                self.deferred_items.len()
+            );
             let deferred = std::mem::take(&mut self.deferred_items);
             for item in deferred {
                 // Re-attempt to insert with parent mappings now available
@@ -269,16 +278,32 @@ impl MediaStore {
         // This ensures deduplication and proper alphabetical ordering
         self.update_sorted_movie_ids();
         self.update_sorted_series_ids();
-        
+
         // Reset the needs_resort flag
         self.needs_resort = false;
-        
+
         // Log a summary of what was added during the batch
-        let movie_count = self.by_type.get(&MediaType::Movie).map(|s| s.len()).unwrap_or(0);
-        let series_count = self.by_type.get(&MediaType::Series).map(|s| s.len()).unwrap_or(0);
-        let season_count = self.by_type.get(&MediaType::Season).map(|s| s.len()).unwrap_or(0);
-        let episode_count = self.by_type.get(&MediaType::Episode).map(|s| s.len()).unwrap_or(0);
-        
+        let movie_count = self
+            .by_type
+            .get(&MediaType::Movie)
+            .map(|s| s.len())
+            .unwrap_or(0);
+        let series_count = self
+            .by_type
+            .get(&MediaType::Series)
+            .map(|s| s.len())
+            .unwrap_or(0);
+        let season_count = self
+            .by_type
+            .get(&MediaType::Season)
+            .map(|s| s.len())
+            .unwrap_or(0);
+        let episode_count = self
+            .by_type
+            .get(&MediaType::Episode)
+            .map(|s| s.len())
+            .unwrap_or(0);
+
         log::info!(
             "MediaStore batch complete: {} movies, {} series, {} seasons, {} episodes (total: {})",
             movie_count,
@@ -287,7 +312,7 @@ impl MediaStore {
             episode_count,
             self.media.len()
         );
-        
+
         // Reset flags
         self.needs_resort = false;
 
@@ -301,22 +326,16 @@ impl MediaStore {
         self.notify_batch_complete();
     }
 
-
     /// Insert or update a media item
     pub fn upsert(&mut self, media: MediaReference) -> MediaId {
         let media_id = get_media_id(&media);
-        
+
         // Update series_to_library mapping for series (still needed for episodes)
         if let MediaReference::Series(series) = &media {
             let library_id = series.library_id;
             self.series_to_library.insert(series.id.clone(), library_id);
-            log::debug!(
-                "MediaStore: Mapped series {} to library {}",
-                series.id.as_str(),
-                library_id
-            );
         }
-        
+
         // Episodes still need parent mapping check, but seasons don't anymore
         if self.batch_mode {
             if let MediaReference::Episode(episode) = &media {
@@ -335,7 +354,7 @@ impl MediaStore {
             }
             // Seasons no longer need deferral as they have library_id directly
         }
-        
+
         let library_id = get_library_id(&media, &self.series_to_library);
         let media_type = MediaType::from(&media);
 
@@ -347,7 +366,7 @@ impl MediaStore {
                 library_id
             );
         }
-        
+
         // DEBUG: Log seasons being upserted (only in trace mode to avoid performance impact)
         if let MediaReference::Season(season) = &media {
             log::trace!(
@@ -356,7 +375,7 @@ impl MediaStore {
                 season.id.as_str(),
                 season.series_id.as_str()
             );
-            
+
             // Extra validation
             if season.series_id.as_str().is_empty() {
                 log::error!("Season {} has EMPTY series_id!", season.id.as_str());
@@ -482,14 +501,19 @@ impl MediaStore {
         }
 
         // Add to by_type index
-        let inserted = self.by_type
+        let inserted = self
+            .by_type
             .entry(media_type)
             .or_insert_with(HashSet::new)
             .insert(media_id.clone());
-            
+
         // Only log season insertions in trace mode to avoid performance impact
         if media_type == MediaType::Season && log::log_enabled!(log::Level::Trace) {
-            let season_count = self.by_type.get(&MediaType::Season).map(|s| s.len()).unwrap_or(0);
+            let season_count = self
+                .by_type
+                .get(&MediaType::Season)
+                .map(|s| s.len())
+                .unwrap_or(0);
             log::trace!(
                 "MediaStore: Season added to by_type index. Total seasons: {}, was_new: {}",
                 season_count,
@@ -566,33 +590,33 @@ impl MediaStore {
     /// This is much more efficient than calling upsert() in a loop
     pub fn bulk_upsert(&mut self, items: Vec<MediaReference>) -> Vec<MediaId> {
         let was_batch_mode = self.batch_mode;
-        
+
         // Temporarily enable batch mode if not already enabled
         if !was_batch_mode {
             self.begin_batch();
         }
-        
+
         let mut media_ids = Vec::with_capacity(items.len());
-        
+
         // First pass: insert all series to establish parent mappings
         for item in items.iter() {
             if matches!(item, MediaReference::Series(_)) {
                 media_ids.push(self.upsert(item.clone()));
             }
         }
-        
+
         // Second pass: insert everything else
         for item in items {
             if !matches!(item, MediaReference::Series(_)) {
                 media_ids.push(self.upsert(item));
             }
         }
-        
+
         // Restore original batch mode state
         if !was_batch_mode {
             self.end_batch();
         }
-        
+
         media_ids
     }
 
@@ -657,6 +681,9 @@ impl MediaStore {
 
     /// Update the sorted movie indices based on current sort criteria
     pub fn update_sorted_movie_ids(&mut self) {
+        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        profiling::scope!("MediaStore::update_sorted_movie_ids");
+        
         use ferrex_core::query::sorting::strategy::FieldSort;
 
         // Get all movie IDs without cloning the HashSet
@@ -771,6 +798,9 @@ impl MediaStore {
 
     /// Update the sorted series indices based on current sort criteria
     pub fn update_sorted_series_ids(&mut self) {
+        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        profiling::scope!("MediaStore::update_sorted_series_ids");
+        
         use ferrex_core::query::sorting::strategy::FieldSort;
 
         // Get all series IDs without cloning the HashSet
@@ -850,7 +880,8 @@ impl MediaStore {
             };
 
             // Extract the sorted IDs and dedup
-            let mut series_ids: Vec<MediaId> = series.into_iter().map(|s| MediaId::Series(s.id)).collect();
+            let mut series_ids: Vec<MediaId> =
+                series.into_iter().map(|s| MediaId::Series(s.id)).collect();
             series_ids.dedup();
             self.sorted_series_ids = series_ids;
         } else {
@@ -878,6 +909,9 @@ impl MediaStore {
 
     /// Get all movies, optionally filtered by library
     pub fn get_movies(&self, library_id: Option<Uuid>) -> Vec<&MovieReference> {
+        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        profiling::scope!("MediaStore::get_movies");
+        
         // Use sorted indices for predictable order
         match library_id {
             Some(lib_id) => {
@@ -904,6 +938,9 @@ impl MediaStore {
 
     /// Get all series, optionally filtered by library
     pub fn get_series(&self, library_id: Option<Uuid>) -> Vec<&SeriesReference> {
+        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        profiling::scope!("MediaStore::get_series");
+        
         // Use sorted indices for predictable order
         match library_id {
             Some(lib_id) => {
@@ -938,23 +975,24 @@ impl MediaStore {
                 ids.len(),
                 series_id
             );
-            
+
             // Log first few season IDs for debugging
             for (i, id) in ids.iter().take(3).enumerate() {
                 log::debug!("  Season ID {}: {:?}", i, id);
             }
-            
-            let all_seasons: Vec<_> = ids.iter()
+
+            let all_seasons: Vec<_> = ids
+                .iter()
                 .filter_map(|id| self.media.get(id))
                 .filter_map(|media| media.as_season())
                 .collect();
-            
+
             log::info!(
                 "MediaStore::get_seasons - {} seasons found in media HashMap (out of {} in index)",
                 all_seasons.len(),
                 ids.len()
             );
-            
+
             // DEBUG: Log what series_ids the seasons have
             if all_seasons.is_empty() {
                 log::warn!("No seasons found in media HashMap despite having IDs in index!");
@@ -969,18 +1007,18 @@ impl MediaStore {
                     );
                 }
             }
-            
+
             let matching_seasons: Vec<_> = all_seasons
                 .into_iter()
                 .filter(|season| season.series_id.as_str() == series_id)
                 .collect();
-            
+
             log::info!(
                 "MediaStore::get_seasons - {} seasons match series_id {}",
                 matching_seasons.len(),
                 series_id
             );
-            
+
             matching_seasons
         } else {
             log::warn!("MediaStore::get_seasons - No seasons in by_type index!");
@@ -1090,7 +1128,10 @@ impl MediaStore {
 
     /// Get MediaFile by MediaId - O(1) lookup for efficient playback
     /// Returns None if the MediaId doesn't exist or doesn't have a file (Series/Season)
-    pub fn get_media_file_by_id(&self, media_id: &MediaId) -> Option<ferrex_core::media::MediaFile> {
+    pub fn get_media_file_by_id(
+        &self,
+        media_id: &MediaId,
+    ) -> Option<ferrex_core::media::MediaFile> {
         // Direct O(1) HashMap lookup
         self.media.get(media_id).and_then(|media_ref| {
             match media_ref {
@@ -1139,7 +1180,10 @@ impl MediaStore {
 
     /// Clear all data from a specific library
     pub fn clear_library(&mut self, library_id: Uuid) {
-        log::warn!("MediaStore::clear_library() called for library {}", library_id);
+        log::warn!(
+            "MediaStore::clear_library() called for library {}",
+            library_id
+        );
         if let Some(media_ids) = self.by_library.remove(&library_id) {
             for media_id in &media_ids {
                 self.media.remove(media_id);
@@ -1442,11 +1486,15 @@ fn get_library_id(media: &MediaReference, series_to_library: &HashMap<SeriesID, 
         }
         MediaReference::Episode(episode) => {
             // Episodes still need derivation from parent series or file
-            series_to_library.get(&episode.series_id)
+            series_to_library
+                .get(&episode.series_id)
                 .copied()
                 .unwrap_or_else(|| {
                     // Fallback to file's library_id if series not found
-                    log::debug!("Episode {} using file library_id as fallback", episode.id.as_str());
+                    log::debug!(
+                        "Episode {} using file library_id as fallback",
+                        episode.id.as_str()
+                    );
                     episode.file.library_id
                 })
         }
@@ -1466,6 +1514,7 @@ fn get_library_id(media: &MediaReference, series_to_library: &HashMap<SeriesID, 
         }
     };
 
+    /*
     // Debug logging
     match media.media_type() {
         "movie" | "series" => log::debug!(
@@ -1485,7 +1534,7 @@ fn get_library_id(media: &MediaReference, series_to_library: &HashMap<SeriesID, 
             lib_id
         ),
         _ => {}
-    }
+    } */
 
     lib_id
 }

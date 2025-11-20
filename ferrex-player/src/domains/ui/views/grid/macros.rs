@@ -22,11 +22,26 @@ macro_rules! virtual_reference_grid {
                 widget::{column, container, row, scrollable, text, Space},
                 Length,
             };
-            use $crate::infrastructure::profiling::PROFILER;
+            use $crate::infrastructure::profiling_scopes::scopes;
 
-            PROFILER.start($profiler_label);
+            // Scroll-aware profiling: sample less during scrolling to reduce overhead
+            let is_scrolling = if let Some(last_scroll) = state.domains.ui.state.last_scroll_time {
+                let elapsed = last_scroll.elapsed();
+                elapsed < std::time::Duration::from_millis(
+                    $crate::infrastructure::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS
+                )
+            } else {
+                false
+            };
 
-            log::trace!("{}: rendering {} items", $profiler_label, items.len());
+            // Profile grid rendering operations
+            #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+            profiling::scope!(scopes::GRID_RENDER);
+            
+            let layout_start = std::time::Instant::now();
+
+            log::trace!("{}: rendering {} items (scroll={})", 
+                      $profiler_label, items.len(), is_scrolling);
             if !items.is_empty() {
                 log::trace!("First item in grid");
             }
@@ -82,26 +97,34 @@ macro_rules! virtual_reference_grid {
                         } else {
                             false
                         };
-                        
+
                         let is_visible = if is_scrolling {
                             false  // Always use Preload priority while scrolling
                         } else {
                             item_idx >= grid_state.visible_range.start
                                 && item_idx < grid_state.visible_range.end
                         };
-                        
+
+                        /*
                         // Log priority decision for first item in range for debugging
                         if item_idx == grid_state.visible_range.start {
-                            let elapsed_ms = state.domains.ui.state.last_scroll_time
+                            let _elapsed_ms = state.domains.ui.state.last_scroll_time
                                 .map(|t| t.elapsed().as_millis())
                                 .unwrap_or(999999);
                             log::debug!("Grid item priority: scrolling={}, elapsed={}ms, is_visible={} -> priority={}",
-                                is_scrolling, 
+                                is_scrolling,
                                 elapsed_ms,
                                 is_visible,
                                 if is_visible { "VISIBLE" } else { "PRELOAD" });
                         }
+                        */
 
+                        // Profile poster loading for visible items
+                        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+                        if is_visible {
+                            profiling::scope!(scopes::POSTER_LOAD);
+                        }
+                        
                         // Call the card creation function with visibility info
                         let card = $create_card(item, hovered_media_id, is_visible, state);
 
@@ -197,7 +220,11 @@ macro_rules! virtual_reference_grid {
             .height(Length::Fill)
             .style($crate::domains::ui::theme::Scrollable::style());
 
-            PROFILER.end($profiler_label);
+            // Log if layout took too long
+            let layout_duration = layout_start.elapsed();
+            $crate::infrastructure::profiling_scopes::log_if_slow(scopes::GRID_LAYOUT, layout_duration);
+            
+            // Profiling scopes will automatically close
             scrollable_content.into()
         }
     };

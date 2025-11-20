@@ -13,6 +13,9 @@ macro_rules! wrap_task {
 
 /// Handle auth domain messages - returns DomainUpdateResult for cross-domain events
 pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateResult {
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::AUTH_UPDATE);
+    
     match message {
         // Core auth flow
         auth::Message::CheckAuthStatus => {

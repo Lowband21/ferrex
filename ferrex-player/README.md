@@ -61,6 +61,7 @@ A high-performance media player built with Iced and GStreamer, featuring video r
 - Playback controls with auto-hide
 - Volume control and seeking
 - Support for various video formats
+- **Performance Profiling**: Comprehensive profiling infrastructure with Puffin/Tracy support
 
 ## Architecture
 
@@ -69,6 +70,41 @@ This client uses:
 - **iced_video_player**: GStreamer-based video widget for Iced
 - **GStreamer**: Media playback backend
 - **Tokio**: Async runtime for network requests
+- **Profiling**: Puffin/Tracy/Tracing for performance analysis
+
+## Performance Profiling
+
+The application includes comprehensive performance profiling infrastructure:
+
+### Running with Profiling
+
+```bash
+# Run with Puffin web UI (recommended for development)
+cargo run --features puffin-server
+# Open http://127.0.0.1:8585 in browser to view profiling data
+
+# Run with Tracy (requires Tracy profiler)
+cargo run --features profile-with-tracy
+
+# Run with tracing output
+cargo run --features profile-with-tracing
+```
+
+### Profiled Areas
+
+- **UI Operations**: Grid rendering, virtual lists, view updates
+- **Domain Updates**: All domain message handlers (auth, library, media, etc.)
+- **Poster Loading**: Cache hits, network loads, GPU uploads
+- **Animations**: Shader transitions, hover effects, flip animations
+- **Metadata**: Fetching and processing media metadata
+
+### Performance Targets
+
+- View operations: <8ms
+- Frame time: <8.33ms (120fps)
+- Scroll frame: <4ms during scrolling
+- Poster load: <50ms
+- Cache hit rate: >80%
 
 ## Troubleshooting
 

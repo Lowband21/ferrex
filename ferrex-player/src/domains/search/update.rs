@@ -10,6 +10,9 @@ use crate::state_refactored::State;
 
 /// Handle search domain messages
 pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::SEARCH_UPDATE);
+    
     match message {
         Message::UpdateQuery(query) => {
             state.domains.search.state.query = query.clone();

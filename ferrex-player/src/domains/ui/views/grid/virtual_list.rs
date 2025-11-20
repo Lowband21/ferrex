@@ -38,6 +38,10 @@ impl VirtualListState {
 
     /// Calculate which items should be visible based on scroll position
     pub fn calculate_visible_range(&mut self) -> Range<usize> {
+        // Profile the visibility calculation
+        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        profiling::scope!(crate::infrastructure::profiling_scopes::scopes::VIRTUAL_LIST_CALC);
+        
         if self.total_items == 0 {
             self.visible_range = 0..0;
             return self.visible_range.clone();
@@ -76,6 +80,10 @@ pub fn virtual_list<'a, Message: 'a>(
     items: impl FnMut(usize) -> Element<'a, Message>,
     on_scroll: impl Fn(scrollable::Viewport) -> Message + 'a,
 ) -> Element<'a, Message> {
+    // Profile the virtual list rendering
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::VIRTUAL_LIST_RENDER);
+    
     let mut content = column![].spacing(0).width(Length::Fill);
 
     // Add spacer for items above viewport
@@ -143,9 +151,14 @@ impl VirtualGridState {
     pub fn new(total_items: usize, columns: usize, row_height: f32) -> Self {
         Self::with_id(total_items, columns, row_height, scrollable::Id::unique())
     }
-    
+
     /// Create a new VirtualGridState with a specific scrollable ID
-    pub fn with_id(total_items: usize, columns: usize, row_height: f32, scrollable_id: scrollable::Id) -> Self {
+    pub fn with_id(
+        total_items: usize,
+        columns: usize,
+        row_height: f32,
+        scrollable_id: scrollable::Id,
+    ) -> Self {
         let mut grid = Self {
             total_items,
             columns,
@@ -209,14 +222,15 @@ impl VirtualGridState {
 
         self.visible_range = start_item..end_item;
 
-        log::info!(
+        /*
+        log::debug!(
             "Visible range calculated: {}..{} (rows {}-{}, viewport_height={})",
             start_item,
             end_item,
             start_row,
             end_row,
             self.viewport_height
-        );
+        ); */
 
         self.visible_range.clone()
     }

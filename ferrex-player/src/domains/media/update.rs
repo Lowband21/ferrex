@@ -6,6 +6,8 @@ use iced::Task;
 
 /// Handle media domain messages - focused on media management, not playback
 pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::MEDIA_UPDATE);
 
     match message {
         // Media management messages

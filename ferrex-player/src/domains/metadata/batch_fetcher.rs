@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::common::messages::CrossDomainEvent;
 use crate::common::messages::DomainMessage;
 use crate::domains::media::store::MediaStore;
+use crate::domains::metadata::batch_fetch_helper::{BatchFetchHelper, BatchFetchResult};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use crate::infrastructure::api_types::{MediaId, MediaReference};
 use iced::Task;
@@ -23,15 +24,18 @@ pub struct BatchMetadataFetcher {
     api_service: Arc<ApiClientAdapter>,
     media_store: Arc<std::sync::RwLock<MediaStore>>,
     is_complete: Arc<AtomicBool>,
+    helper: BatchFetchHelper,
 }
 
 impl BatchMetadataFetcher {
     /// Create a new batch metadata fetcher
     pub fn new(api_service: Arc<ApiClientAdapter>, media_store: Arc<std::sync::RwLock<MediaStore>>) -> Self {
+        let helper = BatchFetchHelper::new(Arc::clone(&api_service), Arc::clone(&media_store));
         Self {
             api_service,
             media_store,
             is_complete: Arc::new(AtomicBool::new(false)),
+            helper,
         }
     }
 
@@ -404,5 +408,23 @@ impl BatchMetadataFetcher {
         // Mark processing as complete
         self.is_complete.store(true, Ordering::Relaxed);
         log::info!("[BatchMetadataFetcher] All libraries processed - ViewModels will refresh once");
+    }
+
+    /// Process multiple libraries with verification results for benchmarking
+    /// This provides detailed metrics about the batch fetching process
+    pub async fn process_libraries_with_verification(
+        self: Arc<Self>,
+        libraries: Vec<(Uuid, Vec<MediaReference>)>,
+    ) -> Vec<(Uuid, BatchFetchResult)> {
+        log::info!("[BatchMetadataFetcher] Processing {} libraries with verification", libraries.len());
+        
+        let results = self.helper.batch_fetch_multiple_libraries(libraries).await;
+        
+        // Mark processing as complete
+        self.is_complete.store(true, Ordering::Relaxed);
+        
+        log::info!("[BatchMetadataFetcher] All libraries processed with verification - {} results", results.len());
+        
+        results
     }
 }

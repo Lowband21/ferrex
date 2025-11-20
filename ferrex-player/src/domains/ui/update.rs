@@ -22,6 +22,9 @@ fn check_user_has_pin() -> DomainUpdateResult {
 /// Handle UI domain messages
 /// Returns a DomainUpdateResult containing both the task and any events to emit
 pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult {
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::UI_UPDATE);
+    
     match message {
         ui::Message::SetDisplayMode(display_mode) => {
             state.domains.ui.state.display_mode = display_mode;

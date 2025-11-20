@@ -210,6 +210,10 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
 
         // Check if we have access to the image service
         if let Some(image_service) = service_registry::get_image_service() {
+            // Profile cache check
+            #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+            profiling::scope!(crate::infrastructure::profiling_scopes::scopes::POSTER_CACHE_HIT);
+            
             // Check the cache first
             if let Some((handle, loaded_at)) = image_service.get().get_with_load_time(&request) {
                 //log::debug!("image_for: Cache HIT for {:?}", request.media_id);
@@ -315,6 +319,10 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                 //    image.theme_color
                 //);
 
+                // Profile image request for loading
+                #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+                profiling::scope!(crate::infrastructure::profiling_scopes::scopes::POSTER_LOAD);
+                
                 // Request the image - throttling happens in the loader thread
                 image_service.get().request_image(request);
 

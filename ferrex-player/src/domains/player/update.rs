@@ -12,6 +12,9 @@ pub fn update_player(
     message: Message,
     window_size: iced::Size,
 ) -> DomainUpdateResult {
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::PLAYER_UPDATE);
+    
     match message {
         Message::PlayMedia(_media) => {
             // This is handled in main.rs as it needs access to server_url

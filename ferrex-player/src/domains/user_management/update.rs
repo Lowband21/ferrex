@@ -10,6 +10,9 @@ use crate::{
 
 /// Handle user management domain messages
 pub fn update_user_management(state: &mut State, message: Message) -> DomainUpdateResult {
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::USER_MGMT_UPDATE);
+    
     debug!("User management update: {}", message.name());
 
     match message {

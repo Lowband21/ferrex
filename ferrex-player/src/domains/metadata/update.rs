@@ -5,6 +5,9 @@ use iced::Task;
 
 /// Handle metadata domain messages by routing to appropriate handlers
 pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResult {
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::METADATA_UPDATE);
+    
     match message {
         Message::InitializeService => {
             log::info!("Metadata service initialization requested");
@@ -42,7 +45,10 @@ pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResul
                 Ok(media_ref) => {
                     log::info!("Media details fetched for {:?}", media_id);
                     // Delegate to MediaDetailsUpdated
-                    DomainUpdateResult::task(Task::done(Message::MediaDetailsUpdated(media_ref)).map(DomainMessage::Metadata))
+                    DomainUpdateResult::task(
+                        Task::done(Message::MediaDetailsUpdated(media_ref))
+                            .map(DomainMessage::Metadata),
+                    )
                 }
                 Err(e) => {
                     log::error!("Failed to fetch media details for {:?}: {}", media_id, e);
@@ -100,7 +106,7 @@ pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResul
                 state
                     .handle_media_details_batch(vec![media_reference])
                     .discard()
-                    .map(DomainMessage::Metadata)
+                    .map(DomainMessage::Metadata),
             )
         }
         Message::MediaDetailsBatch(media_references) => {
@@ -113,7 +119,7 @@ pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResul
                 state
                     .handle_media_details_batch(media_references)
                     .map(|_| Message::BatchMetadataComplete)
-                    .map(DomainMessage::Metadata)
+                    .map(DomainMessage::Metadata),
             )
         }
         Message::CheckDetailsFetcherQueue => {
@@ -123,20 +129,25 @@ pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResul
             DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
         }
         Message::FetchBatchMetadata(libraries_data) => {
-            log::info!("Fetching batch metadata for {} libraries", libraries_data.len());
+            log::info!(
+                "Fetching batch metadata for {} libraries",
+                libraries_data.len()
+            );
 
             // Execute the batch metadata fetcher directly on background thread
             if let Some(fetcher) = &state.batch_metadata_fetcher {
                 let fetcher_clone = std::sync::Arc::clone(fetcher);
-                
+
                 // Spawn the metadata fetching directly - no Iced tasks
                 tokio::spawn(async move {
                     log::info!("[Metadata] Starting batch metadata fetch");
                     // Process libraries will now emit events directly, not return tasks
-                    fetcher_clone.process_libraries_direct(libraries_data).await;
+                    fetcher_clone
+                        .process_libraries_with_verification(libraries_data)
+                        .await;
                     log::info!("[Metadata] Batch metadata fetch initiated");
                 });
-                
+
                 // Return immediately - processing happens in background
                 DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
             } else {

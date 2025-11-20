@@ -158,6 +158,14 @@ impl State {
             search: search_domain,
         };
 
+        // Create batch metadata fetcher for efficient metadata processing
+        let batch_metadata_fetcher = Arc::new(
+            crate::domains::metadata::batch_fetcher::BatchMetadataFetcher::new(
+                api_adapter.clone(),
+                media_store.clone(),
+            ),
+        );
+
         // Create MediaStore notifier with longer debounce to reduce refresh frequency
         // 250ms debounce reduces UI refresh load during initial library loading
         let media_store_notifier =
@@ -200,7 +208,7 @@ impl State {
             api_client: Some(api_client),
             image_service: image_service.clone(), // TODO: Fix this clone
             image_receiver: Arc::new(std::sync::Mutex::new(Some(_receiver))),
-            batch_metadata_fetcher: None,
+            batch_metadata_fetcher: Some(batch_metadata_fetcher),
             loading: true,
             is_authenticated: false,
             window_size: iced::Size::new(1280.0, 720.0),
