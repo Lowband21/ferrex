@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO user_episode_state (\n                user_id, tmdb_series_id, season_number, episode_number,\n                position, duration, last_watched, is_completed\n            ) VALUES ($1,$2,$3,$4,1.0,1.0,$5,true)\n            ON CONFLICT (user_id, tmdb_series_id, season_number, episode_number)\n            DO UPDATE SET is_completed = true, last_watched = GREATEST(user_episode_state.last_watched, EXCLUDED.last_watched)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int2",
+        "Int2",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "057a91dbb92d84a95a2a3df8150fa4dec6145e39f66adb3f0d419579318e540b"
+}

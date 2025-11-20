@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT episode_number\n            FROM episode_metadata\n            WHERE series_tmdb_id = $1 AND season_number = $2\n            GROUP BY episode_number\n            ORDER BY episode_number\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "episode_number",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "6abfb8983d02fed41c9539e665c4faf7b30eb3dd469317598a219484116a5898"
+}

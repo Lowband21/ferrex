@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    INSERT INTO user_episode_state (\n                        user_id, tmdb_series_id, season_number, episode_number,\n                        position, duration, last_watched, is_completed, last_media_uuid\n                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)\n                    ON CONFLICT (user_id, tmdb_series_id, season_number, episode_number)\n                    DO UPDATE SET\n                        position = EXCLUDED.position,\n                        duration = EXCLUDED.duration,\n                        last_watched = EXCLUDED.last_watched,\n                        is_completed = EXCLUDED.is_completed,\n                        last_media_uuid = COALESCE(EXCLUDED.last_media_uuid, user_episode_state.last_media_uuid)\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int2",
+        "Int2",
+        "Float4",
+        "Float4",
+        "Int8",
+        "Bool",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "45ec259b7a58b087f212459e4b98eca5b4ae262f68c271bb667579c7599f7943"
+}

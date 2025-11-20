@@ -5,6 +5,11 @@
 //! paths continue to work through compatibility shims.
 
 use crate::types::util_types::MediaType;
+// Re-export identity types from model for convenience
+pub use crate::types::watch::{
+    EpisodeKey, EpisodeStatus, NextEpisode, NextReason, SeasonKey,
+    SeasonWatchStatus, SeriesWatchStatus,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     collections::{HashMap, HashSet},
@@ -170,7 +175,7 @@ pub enum WatchStatusFilter {
 /// - `position` should not exceed `duration`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateProgressRequest {
-    /// Media to update progress for
+    /// Media to update progress for (required for movies; for episodes this is the EpisodeReference id)
     pub media_id: Uuid,
     /// Type of media (movie, series, season, episode)
     pub media_type: MediaType,
@@ -178,6 +183,12 @@ pub struct UpdateProgressRequest {
     pub position: f32,
     /// Total media duration in seconds
     pub duration: f32,
+    /// Optional identity locator for episodes to update identity-based state
+    #[serde(default)]
+    pub episode: Option<EpisodeKey>,
+    /// Optional hint of the specific media UUID used for playback (useful for identity rows)
+    #[serde(default)]
+    pub last_media_uuid: Option<Uuid>,
 }
 
 /// Watch progress percentage

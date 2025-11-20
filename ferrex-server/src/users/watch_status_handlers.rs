@@ -9,6 +9,7 @@ use ferrex_core::{
     domain::watch::{InProgressItem, UpdateProgressRequest, UserWatchState},
     types::MediaType,
 };
+use ferrex_core::types::watch::{SeasonWatchStatus, SeriesWatchStatus, NextEpisode};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -246,6 +247,8 @@ pub async fn mark_completed_handler(
         media_type,
         position: 1.0, // Dummy position
         duration: 1.0, // Dummy duration to ensure 100% completion
+        episode: None,
+        last_media_uuid: Some(media_id),
     };
 
     // Update progress to mark as completed
@@ -283,4 +286,64 @@ pub async fn is_completed_handler(
         })?;
 
     Ok(Json(is_completed))
+}
+
+/// Get series watch state (identity-based aggregation)
+pub async fn get_series_watch_state_handler(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(tmdb_series_id): Path<u64>,
+) -> Result<Json<ApiResponse<SeriesWatchStatus>>, (StatusCode, String)> {
+    let status = state
+        .unit_of_work()
+        .watch_status
+        .get_series_watch_status(user.id, tmdb_series_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get series watch state: {}", e),
+            )
+        })?;
+    Ok(Json(ApiResponse::success(status)))
+}
+
+/// Get season watch state (identity-based aggregation)
+pub async fn get_season_watch_state_handler(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((tmdb_series_id, season_number)): Path<(u64, u16)>,
+) -> Result<Json<ApiResponse<SeasonWatchStatus>>, (StatusCode, String)> {
+    let status = state
+        .unit_of_work()
+        .watch_status
+        .get_season_watch_status(user.id, tmdb_series_id, season_number)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get season watch state: {}", e),
+            )
+        })?;
+    Ok(Json(ApiResponse::success(status)))
+}
+
+/// Get next episode for a series (identity-based)
+pub async fn get_series_next_episode_handler(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(tmdb_series_id): Path<u64>,
+) -> Result<Json<ApiResponse<Option<NextEpisode>>>, (StatusCode, String)> {
+    let next = state
+        .unit_of_work()
+        .watch_status
+        .get_next_episode(user.id, tmdb_series_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get next episode: {}", e),
+            )
+        })?;
+    Ok(Json(ApiResponse::success(next)))
 }

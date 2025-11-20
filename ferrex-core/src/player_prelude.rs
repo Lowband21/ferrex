@@ -16,6 +16,10 @@ pub use crate::infrastructure::archive::ArchivedModel;
 pub use crate::query::prelude::*;
 pub use crate::traits::prelude::*;
 pub use crate::types::prelude::*;
+pub use crate::types::watch::{
+    EpisodeKey, EpisodeStatus, NextEpisode, NextReason, SeasonKey,
+    SeasonWatchStatus, SeriesWatchStatus,
+};
 
 // Auth rewrite: re-export current auth/user surfaces, documenting where new
 // device/auth abstractions will hook in once stabilized.

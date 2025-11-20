@@ -247,6 +247,8 @@ pub async fn report_progress_handler(
         media_type,
         position: progress.position,
         duration: progress.duration,
+        episode: None,
+        last_media_uuid: Some(media_id),
     };
 
     // Update progress

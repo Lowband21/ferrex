@@ -36,3 +36,7 @@ pub use super::transcoding::{
     TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,
 };
 pub use super::util_types::{ImageSize, ImageType, MediaType};
+pub use super::watch::{
+    EpisodeKey, EpisodeStatus, NextEpisode, NextReason, SeasonKey,
+    SeasonWatchStatus, SeriesWatchStatus,
+};

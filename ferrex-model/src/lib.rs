@@ -29,6 +29,7 @@ pub mod titles;
 pub mod transcoding;
 pub mod urls;
 pub mod util_types;
+pub mod watch;
 
 // Intentionally curated re-exports for downstream consumers.
 #[cfg(feature = "rkyv")]
@@ -67,3 +68,7 @@ pub use transcoding::{
     TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,
 };
 pub use util_types::{ImageSize, ImageType, MediaType};
+pub use watch::{
+    EpisodeKey, EpisodeStatus, NextEpisode, NextReason, SeasonKey,
+    SeasonWatchStatus, SeriesWatchStatus,
+};

@@ -73,6 +73,14 @@ pub mod v1 {
         pub const STATE: &str = v1_path!("/watch/state");
         pub const CONTINUE: &str = v1_path!("/watch/continue");
         pub const CLEAR_PROGRESS: &str = v1_path!("/watch/progress/{media_id}");
+        // Identity-based TV helpers
+        pub const SERIES_STATE: &str =
+            v1_path!("/watch/series/{tmdb_series_id}");
+        pub const SEASON_STATE: &str = v1_path!(
+            "/watch/series/{tmdb_series_id}/season/{season_number}"
+        );
+        pub const SERIES_NEXT: &str =
+            v1_path!("/watch/series/{tmdb_series_id}/next");
     }
 
     pub mod folders {

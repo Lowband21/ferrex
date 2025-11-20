@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT em.season_number, em.episode_number\n            FROM episode_metadata em\n            LEFT JOIN user_episode_state ues\n                ON ues.user_id = $1 AND ues.tmdb_series_id = em.series_tmdb_id\n                AND ues.season_number = em.season_number AND ues.episode_number = em.episode_number\n            WHERE em.series_tmdb_id = $2 AND (ues.is_completed IS NULL OR ues.is_completed = false)\n            GROUP BY em.season_number, em.episode_number\n            ORDER BY em.season_number, em.episode_number\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "season_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "episode_number",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "3ac76a6b590c8a6284de39c26af8568519ca56259ae40ba2da6f95e3fc21fab6"
+}

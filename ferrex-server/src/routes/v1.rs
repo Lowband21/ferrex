@@ -180,6 +180,19 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
                 watch_status_handlers::clear_progress_handler,
             ),
         )
+        // TV identity-based watch helpers
+        .route(
+            v1::watch::SERIES_STATE,
+            get(watch_status_handlers::get_series_watch_state_handler),
+        )
+        .route(
+            v1::watch::SEASON_STATE,
+            get(watch_status_handlers::get_season_watch_state_handler),
+        )
+        .route(
+            v1::watch::SERIES_NEXT,
+            get(watch_status_handlers::get_series_next_episode_handler),
+        )
         // Media endpoints
         //
         .route(
