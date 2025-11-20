@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::domains::auth::dto::UserListItemDto;
 use crate::domains::auth::manager::{DeviceAuthStatus, PlayerAuthResult};
+use crate::infrastructure::api_client::SetupStatus as ApiSetupStatus;
 
 pub mod commands;
 pub mod subscriptions;
@@ -29,7 +30,7 @@ pub enum Message {
     CheckAuthStatus,
     AuthStatusConfirmedWithPin,
     CheckSetupStatus,
-    SetupStatusChecked(bool), // needs_setup
+    SetupStatusChecked(ApiSetupStatus),
     AutoLoginCheckComplete,
     AutoLoginSuccessful(User),
 
@@ -111,8 +112,12 @@ impl std::fmt::Debug for Message {
                 write!(f, "AuthStatusConfirmedWithPin")
             }
             Self::CheckSetupStatus => write!(f, "CheckSetupStatus"),
-            Self::SetupStatusChecked(needs_setup) => {
-                write!(f, "SetupStatusChecked({})", needs_setup)
+            Self::SetupStatusChecked(status) => {
+                write!(
+                    f,
+                    "SetupStatusChecked(needs_setup={}, requires_token={})",
+                    status.needs_setup, status.requires_setup_token
+                )
             }
             Self::AutoLoginCheckComplete => write!(f, "AutoLoginCheckComplete"),
             Self::AutoLoginSuccessful(_) => {

@@ -5,7 +5,7 @@ use uuid::Uuid;
 use super::super::views::carousel::CarouselState;
 use crate::{
     domains::ui::{ViewState, messages::Message, types, views::grid::macros},
-    state_refactored::State,
+    state::State,
 };
 use ferrex_core::{
     traits::{

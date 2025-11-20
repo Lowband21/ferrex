@@ -72,6 +72,8 @@ pub struct UIDomainState {
     pub last_scroll_time: Option<Instant>,
     pub last_check_task_created: Option<Instant>,
     pub scroll_manager: ScrollPositionManager,
+    /// Force the next scroll-stop check even if recent scroll activity continues.
+    pub force_scroll_stop_check: bool,
 
     // Background and visual state
     pub background_shader_state: BackgroundShaderState,

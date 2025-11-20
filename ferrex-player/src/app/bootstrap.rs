@@ -6,7 +6,7 @@ use crate::common::messages::DomainMessage;
 use crate::domains::auth::{
     messages as auth_messages, types::AuthenticationFlow,
 };
-use crate::state_refactored::State;
+use crate::state::State;
 
 #[derive(Clone, Debug)]
 pub struct AppConfig {

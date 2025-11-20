@@ -17,7 +17,7 @@ use crate::domains::ui::types::ViewState;
 use crate::domains::ui::views::settings::device_management::{
     DeviceManagementState, UserDevice,
 };
-use crate::state_refactored::State;
+use crate::state::State;
 
 pub fn collect(config: &Arc<AppConfig>) -> Vec<Preset<State, DomainMessage>> {
     let mut presets = Vec::new();
@@ -59,6 +59,7 @@ fn first_run_preset(config: Arc<AppConfig>) -> Preset<State, DomainMessage> {
                     is_requesting: false,
                     is_confirming: false,
                 },
+                setup_token_required: true,
             };
 
         (state, Task::none())

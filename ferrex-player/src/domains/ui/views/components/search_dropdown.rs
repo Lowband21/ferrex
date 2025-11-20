@@ -7,7 +7,7 @@ use crate::common::messages::DomainMessage;
 use crate::domains::search::types::{SearchMode, SearchResult};
 use crate::domains::ui::theme::Button as ButtonStyle;
 use crate::infrastructure::api_types::Media;
-use crate::state_refactored::State;
+use crate::state::State;
 
 type Message = DomainMessage;
 

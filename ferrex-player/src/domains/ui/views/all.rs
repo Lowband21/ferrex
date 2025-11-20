@@ -6,7 +6,7 @@ use crate::domains::ui::{
     messages::Message, views::carousel::windowed_media_carousel,
 };
 use crate::infrastructure::LibraryType;
-use crate::state_refactored::State;
+use crate::state::State;
 use ferrex_core::player_prelude::{MovieID, SeriesID};
 use iced::{
     Element, Length,

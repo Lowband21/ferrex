@@ -1,6 +1,6 @@
 use super::messages::Message;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
-use crate::state_refactored::State;
+use crate::state::State;
 use iced::Task;
 
 #[cfg_attr(

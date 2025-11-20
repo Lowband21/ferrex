@@ -694,6 +694,8 @@ impl ApiClient {
 pub struct SetupStatus {
     pub needs_setup: bool,
     pub has_admin: bool,
+    #[serde(default)]
+    pub requires_setup_token: bool,
     pub user_count: usize,
     pub library_count: usize,
 }

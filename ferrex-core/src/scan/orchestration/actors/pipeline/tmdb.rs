@@ -98,7 +98,6 @@ struct EpisodeContextInfo {
     season_number: u32,
     episode_number: u32,
     episode_title: Option<String>,
-    episode_year: Option<u16>,
 }
 
 impl TmdbMetadataActor {
@@ -237,22 +236,17 @@ impl TmdbMetadataActor {
                 season_number: info.season,
                 episode_number: info.episode,
                 episode_title: info.episode_title.clone(),
-                episode_year: info.year,
             });
         }
 
         TvParser::parse_episode_info(path).map(|info| {
             let clues = folder_clues;
             let episode_title = TvParser::extract_episode_title(path);
-            let episode_year =
-                info.year.and_then(|value| u16::try_from(value).ok());
-
             EpisodeContextInfo {
                 series: clues,
                 season_number: info.season,
                 episode_number: info.episode,
                 episode_title,
-                episode_year,
             }
         })
     }

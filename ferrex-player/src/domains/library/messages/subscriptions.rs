@@ -1,5 +1,5 @@
 use crate::common::messages::DomainMessage;
-use crate::state_refactored::State;
+use crate::state::State;
 use iced::Subscription;
 use std::collections::HashSet;
 use std::sync::Arc;

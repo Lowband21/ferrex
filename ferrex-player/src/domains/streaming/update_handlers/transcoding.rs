@@ -2,7 +2,7 @@ use crate::{
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
     domains::streaming::messages::Message,
     domains::ui::types::ViewState,
-    state_refactored::State,
+    state::State,
 };
 use ferrex_core::player_prelude::TranscodingStatus;
 use iced::Task;

@@ -18,7 +18,7 @@ use crate::domains::ui::views::tv::{
 use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::BackgroundEffect;
 use crate::domains::{player, ui};
-use crate::state_refactored::State;
+use crate::state::State;
 use ferrex_core::player_prelude::{
     BackdropKind, BackdropSize, ImageRequest, MediaIDLike,
 };

@@ -8,7 +8,7 @@ use crate::{
         ui::tabs::{TabId, TabState},
     },
     infrastructure::api_types::Media,
-    state_refactored::State,
+    state::State,
 };
 
 use super::messages::Message;
@@ -54,7 +54,11 @@ pub fn update_library(
                 super::update_handlers::library_loaded::handle_libraries_loaded(
                     state, result,
                 );
-            DomainUpdateResult::task(task.map(DomainMessage::Library))
+            let domain_tasks = Task::batch(vec![
+                task.map(DomainMessage::Library),
+                state.schedule_check_scroll_stopped(),
+            ]);
+            DomainUpdateResult::task(domain_tasks)
         }
 
         Message::LoadLibraries => {
@@ -364,6 +368,13 @@ pub fn update_library(
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
+        Message::MediaRootBrowser(inner) => {
+            let task = super::update_handlers::media_root_browser::update(
+                state, inner,
+            );
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
         // Scanning - duplicate handler removed
         // Already handled above
         Message::ScanStarted {
@@ -618,13 +629,20 @@ pub fn update_library(
 
             let inline_updated =
                 apply_discovered_media_to_tabs(state, &inline_additions);
-            mark_tabs_after_media_changes(
+            let refreshed = mark_tabs_after_media_changes(
                 state,
                 &touched_libraries,
                 &inline_updated,
             );
 
-            DomainUpdateResult::task(Task::none())
+            let should_trigger = !inline_updated.is_empty() || refreshed;
+            let task = if should_trigger {
+                state.schedule_check_scroll_stopped()
+            } else {
+                Task::none()
+            };
+
+            DomainUpdateResult::task(task)
         }
 
         Message::MediaUpdated(media) => {
@@ -657,9 +675,15 @@ pub fn update_library(
                 }
             }
 
-            refresh_tabs_for_libraries(state, &touched_libraries);
+            let refreshed =
+                refresh_tabs_for_libraries(state, &touched_libraries);
+            let task = if refreshed {
+                state.schedule_check_scroll_stopped()
+            } else {
+                Task::none()
+            };
 
-            DomainUpdateResult::task(Task::none())
+            DomainUpdateResult::task(task)
         }
 
         Message::MediaDeleted(id) => {
@@ -689,9 +713,15 @@ pub fn update_library(
                 }
             }
 
-            refresh_tabs_for_libraries(state, &touched_libraries);
+            let refreshed =
+                refresh_tabs_for_libraries(state, &touched_libraries);
+            let task = if refreshed {
+                state.schedule_check_scroll_stopped()
+            } else {
+                Task::none()
+            };
 
-            DomainUpdateResult::task(Task::none())
+            DomainUpdateResult::task(task)
         }
 
         // Note: _EmitCrossDomainEvent variant has been removed
@@ -786,9 +816,9 @@ fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
 fn refresh_tabs_for_libraries(
     state: &mut State,
     libraries: &HashSet<LibraryID>,
-) {
+) -> bool {
     if libraries.is_empty() {
-        return;
+        return false;
     }
 
     let active_tab = state.tab_manager.active_tab_id();
@@ -805,6 +835,8 @@ fn refresh_tabs_for_libraries(
     if active_needs_refresh {
         state.tab_manager.refresh_active_tab();
     }
+
+    active_needs_refresh
 }
 
 #[cfg(feature = "demo")]
@@ -890,9 +922,9 @@ fn mark_tabs_after_media_changes(
     state: &mut State,
     libraries: &HashSet<LibraryID>,
     inline_updated: &HashSet<LibraryID>,
-) {
+) -> bool {
     if libraries.is_empty() {
-        return;
+        return false;
     }
 
     let active_tab = state.tab_manager.active_tab_id();
@@ -916,4 +948,6 @@ fn mark_tabs_after_media_changes(
     if active_needs_refresh {
         state.tab_manager.refresh_active_tab();
     }
+
+    active_needs_refresh
 }

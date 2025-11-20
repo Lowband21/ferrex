@@ -2,13 +2,16 @@
 //!
 //! Contains all library-related state and logic moved from the monolithic State
 
+pub mod media_root_browser;
 pub mod messages;
 pub mod server;
 pub mod types;
 pub mod update;
 pub mod update_handlers;
 
-use self::types::LibraryFormData;
+use self::{
+    media_root_browser::State as MediaRootBrowserState, types::LibraryFormData,
+};
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use crate::infrastructure::repository::accessor::{Accessor, ReadWrite};
@@ -42,6 +45,7 @@ pub struct LibraryDomainState {
     // Diagnostics
     pub scan_metrics: Option<ScanMetrics>,
     pub scan_config: Option<ScanConfig>,
+    pub media_root_browser: MediaRootBrowserState,
 
     pub api_service: Option<Arc<dyn ApiService>>,
 
@@ -82,6 +86,7 @@ impl LibraryDomainState {
             initial_library_fetch: false,
             scan_metrics: None,
             scan_config: None,
+            media_root_browser: MediaRootBrowserState::default(),
             api_service,
             repo_accessor,
             #[cfg(feature = "demo")]

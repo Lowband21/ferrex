@@ -5,7 +5,7 @@ use iced::Task;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::library;
 use crate::infrastructure::api_types::DemoResetRequest;
-use crate::state_refactored::State;
+use crate::state::State;
 
 pub fn augment_show_library_management_tasks(
     state: &mut State,

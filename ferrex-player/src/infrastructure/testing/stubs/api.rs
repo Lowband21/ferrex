@@ -9,11 +9,12 @@ use ferrex_core::auth::domain::value_objects::SessionScope;
 use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, ConfirmClaimResponse,
     CreateLibraryRequest, FilterIndicesRequest, LatestProgressResponse,
-    Library, LibraryID, LibraryType, Media, MediaQuery, MediaWithStatus,
-    Platform, Role, ScanCommandAcceptedResponse, ScanCommandRequest,
-    ScanConfig, ScanMetrics, StartClaimResponse, StartScanRequest,
-    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions,
-    UserPreferences, UserWatchState,
+    Library, LibraryID, LibraryType, Media, MediaQuery,
+    MediaRootBrowseResponse, MediaWithStatus, Platform, Role,
+    ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics,
+    StartClaimResponse, StartScanRequest, UpdateLibraryRequest,
+    UpdateProgressRequest, User, UserPermissions, UserPreferences,
+    UserWatchState,
 };
 use rkyv::util::AlignedVec;
 use uuid::Uuid;
@@ -273,6 +274,15 @@ impl ApiService for TestApiService {
         ))
     }
 
+    async fn browse_media_root(
+        &self,
+        _path: Option<&str>,
+    ) -> RepositoryResult<MediaRootBrowseResponse> {
+        Err(RepositoryError::QueryFailed(
+            "Media root browser not available in test stub".into(),
+        ))
+    }
+
     async fn health_check(&self) -> RepositoryResult<bool> {
         Ok(true)
     }
@@ -354,6 +364,7 @@ impl ApiService for TestApiService {
             has_admin: !guard.setup_required,
             user_count: guard.current_user.iter().count(),
             library_count: guard.libraries.len(),
+            requires_setup_token: todo!(),
         })
     }
 

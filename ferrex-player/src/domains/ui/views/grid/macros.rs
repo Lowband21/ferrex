@@ -21,7 +21,7 @@ macro_rules! virtual_reference_grid {
             grid_state: &super::VirtualGridState,
             hovered_media_id: &Option<Uuid>,
             on_scroll: impl Fn(iced::widget::scrollable::Viewport) -> $crate::domains::ui::messages::Message + 'a,
-            state: &'a $crate::state_refactored::State,
+            state: &'a $crate::state::State,
         ) -> iced::Element<'a, $crate::domains::ui::messages::Message> {
             let len = item_index.len();
             //let reference_grid = iced::debug::time($profiler_label);
@@ -91,12 +91,9 @@ macro_rules! virtual_reference_grid {
                     if item_idx < len && item_idx < grid_state.visible_range.end {
                         //let item = &items[item_idx];
 
-                        let is_visible = if is_scrolling {
-                            false  // Always use Preload priority while scrolling
-                        } else {
+                        let is_visible =
                             item_idx >= grid_state.visible_range.start
-                                && item_idx < grid_state.visible_range.end
-                        };
+                                && item_idx < grid_state.visible_range.end;
 
                         let item_id = item_index[item_idx];
 

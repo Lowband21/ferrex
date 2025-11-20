@@ -6,7 +6,7 @@ use log::{debug, error, info};
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
     domains::user_management::messages::Message,
-    state_refactored::State,
+    state::State,
 };
 
 /// Handle user management domain messages

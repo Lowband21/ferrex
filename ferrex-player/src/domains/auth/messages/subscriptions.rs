@@ -1,7 +1,7 @@
 use super::Message;
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::state_types::{AuthState, AuthStateStore};
-use crate::state_refactored::State;
+use crate::state::State;
 use futures::stream;
 use iced::Subscription;
 

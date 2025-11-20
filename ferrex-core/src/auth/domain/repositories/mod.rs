@@ -69,6 +69,7 @@ pub struct RefreshTokenRecord {
 
 #[async_trait]
 pub trait RefreshTokenRepository: Send + Sync {
+    #[allow(clippy::too_many_arguments)]
     async fn insert_refresh_token(
         &self,
         token_hash: &str,

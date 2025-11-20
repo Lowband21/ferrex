@@ -5,7 +5,7 @@ use iced::{
 };
 
 use crate::common::messages::DomainMessage;
-use crate::state_refactored::State;
+use crate::state::State;
 use crate::{subscriptions, update, view};
 
 pub mod bootstrap;

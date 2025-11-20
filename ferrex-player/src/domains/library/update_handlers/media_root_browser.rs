@@ -9,7 +9,7 @@ use crate::{
         },
         messages::Message,
     },
-    state_refactored::State,
+    state::State,
 };
 
 pub fn update(state: &mut State, message: BrowserMessage) -> Task<Message> {

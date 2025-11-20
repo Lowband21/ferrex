@@ -8,7 +8,6 @@ use uuid::Uuid;
 use crate::database::ports::watch_status::WatchStatusRepository;
 use crate::{
     error::{MediaError, Result},
-    types::util_types::MediaType,
     watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
 };
 
@@ -24,17 +23,6 @@ impl PostgresWatchStatusRepository {
 
     fn pool(&self) -> &PgPool {
         &self.pool
-    }
-}
-
-/// Helper function to convert MediaType to u8 encoding used in DB (SMALLINT)
-#[inline]
-fn media_type_to_u8(media_type: &MediaType) -> i16 {
-    match media_type {
-        MediaType::Movie => 0,
-        MediaType::Series => 1,
-        MediaType::Season => 2,
-        MediaType::Episode => 3,
     }
 }
 

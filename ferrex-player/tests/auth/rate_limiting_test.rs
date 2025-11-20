@@ -20,7 +20,7 @@ async fn rate_limiting_on_failed_pin_attempts() {
         .expect("User creation should succeed");
     
     // Admin sets up PIN (first user is admin)
-    let admin_id = auth
+    let _admin_id = auth
         .create_user("admin".to_string(), "admin_pass".to_string())
         .await
         .expect("Admin creation should succeed");

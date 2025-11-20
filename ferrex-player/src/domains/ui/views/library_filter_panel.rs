@@ -11,7 +11,7 @@ use crate::{
         messages::Message,
         theme::{self, MediaServerTheme},
     },
-    state_refactored::State,
+    state::State,
 };
 use ferrex_core::player_prelude::{
     UiDecade, UiGenre, UiResolution, UiWatchStatus,

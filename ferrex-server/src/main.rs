@@ -76,7 +76,6 @@ use ferrex_server::{
 #[cfg(feature = "demo")]
 use ferrex_server::{db::prepare_demo_database, demo::DemoCoordinator};
 use serde_json::{Value, json};
-use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -89,7 +88,6 @@ use tower_http::{
 };
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use url::Url;
 use uuid::Uuid;
 
 use ferrex_server::infra::config::cli::{
@@ -143,12 +141,22 @@ struct ServeArgs {
 enum Command {
     #[command(subcommand)]
     Config(ConfigCommand),
+    #[command(subcommand)]
+    Db(DbCommand),
 }
 
 #[derive(Debug, Subcommand)]
 enum ConfigCommand {
     Init(ConfigInitArgs),
     Check(ConfigCheckArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum DbCommand {
+    /// Run database preflight checks (privileges + extensions) and exit
+    Preflight,
+    /// Apply database migrations and exit (runs preflight first)
+    Migrate,
 }
 
 #[derive(ClapArgs, Debug, Clone)]
@@ -215,10 +223,40 @@ async fn main() -> anyhow::Result<()> {
                 run_config_check(&options).await?;
                 return Ok(());
             }
+            Command::Db(DbCommand::Preflight) => {
+                run_db_preflight(&cli.serve).await?;
+                return Ok(());
+            }
+            Command::Db(DbCommand::Migrate) => {
+                run_db_migrate(&cli.serve).await?;
+                return Ok(());
+            }
         }
     }
 
     run_server(cli.serve).await
+}
+
+async fn run_db_preflight(args: &ServeArgs) -> anyhow::Result<()> {
+    let ConfigBootstrap { database_url, .. } = load_runtime_config(args).await?;
+    let pg = PostgresDatabase::new(&database_url).await
+        .context("failed to connect to PostgreSQL for preflight")?;
+    pg.preflight_only()
+        .await
+        .context("database preflight failed")?;
+    info!("Database preflight passed");
+    Ok(())
+}
+
+async fn run_db_migrate(args: &ServeArgs) -> anyhow::Result<()> {
+    let ConfigBootstrap { database_url, .. } = load_runtime_config(args).await?;
+    let pg = PostgresDatabase::new(&database_url).await
+        .context("failed to connect to PostgreSQL for migration")?;
+    pg.initialize_schema()
+        .await
+        .context("database migration failed")?;
+    info!("Database migrations applied successfully");
+    Ok(())
 }
 
 fn derive_database_url_from_env() -> Option<String> {
@@ -444,52 +482,15 @@ async fn wire_app_resources(
             info!("Successfully connected to PostgreSQL");
             Arc::new(database)
         }
-        Err(initial_error) => {
-            warn!(
-                error = %initial_error,
-                "Initial PostgreSQL connection failed; attempting bootstrap"
+        Err(connect_error) => {
+            error!(
+                error = %connect_error,
+                "PostgreSQL connection failed. Connection URL: \n {}", database_url
             );
-
-            match attempt_database_bootstrap(database_url).await {
-                Ok(true) => match PostgresDatabase::new(database_url).await {
-                    Ok(database) => {
-                        info!(
-                            "Database connection succeeded after application role bootstrap"
-                        );
-                        Arc::new(database)
-                    }
-                    Err(retry_error) => {
-                        error!(
-                            error = %retry_error,
-                            "PostgreSQL connection still failing after bootstrap"
-                        );
-                        return Err(anyhow::anyhow!(
-                            "Database connection failed after bootstrap attempt: {}",
-                            retry_error
-                        ));
-                    }
-                },
-                Ok(false) => {
-                    error!(
-                        error = %initial_error,
-                        "Bootstrap skipped (admin credentials unavailable)"
-                    );
-                    return Err(anyhow::anyhow!(
-                        "Database connection failed: {}",
-                        initial_error
-                    ));
-                }
-                Err(bootstrap_error) => {
-                    error!(
-                        error = %bootstrap_error,
-                        "Database bootstrap attempt failed"
-                    );
-                    return Err(anyhow::anyhow!(
-                        "Database connection failed (bootstrap error): {}",
-                        bootstrap_error
-                    ));
-                }
-            }
+            return Err(anyhow::anyhow!(
+                "Database connection failed: {}",
+                connect_error
+            ));
         }
     };
 
@@ -693,141 +694,6 @@ async fn wire_app_resources(
     })
 }
 
-async fn attempt_database_bootstrap(
-    database_url: &str,
-) -> anyhow::Result<bool> {
-    let parsed = match Url::parse(database_url) {
-        Ok(url) => url,
-        Err(err) => {
-            warn!(error = %err, "Unable to parse DATABASE_URL for bootstrap");
-            return Ok(false);
-        }
-    };
-
-    let app_user = parsed.username().to_string();
-    if app_user.is_empty() {
-        warn!("DATABASE_URL is missing a username; skipping bootstrap");
-        return Ok(false);
-    }
-
-    let app_password = match parsed.password() {
-        Some(password) if !password.is_empty() => password.to_string(),
-        _ => match std::env::var("FERREX_APP_PASSWORD") {
-            Ok(value) if !value.is_empty() => value,
-            _ => {
-                warn!("No application password available for bootstrap");
-                return Ok(false);
-            }
-        },
-    };
-
-    let db_name = parsed
-        .path()
-        .trim_start_matches('/')
-        .split('/')
-        .next()
-        .unwrap_or_default()
-        .trim();
-    if db_name.is_empty() {
-        warn!("DATABASE_URL is missing a database name; skipping bootstrap");
-        return Ok(false);
-    }
-
-    let host = parsed.host_str().unwrap_or("localhost").to_string();
-    let port = parsed.port().unwrap_or(5432);
-
-    let admin_url = std::env::var("DATABASE_ADMIN_URL").ok().or_else(|| {
-        let admin_user = std::env::var("POSTGRES_USER").ok()?;
-        let admin_password = std::env::var("POSTGRES_PASSWORD").ok()?;
-        let admin_host = std::env::var("POSTGRES_HOST")
-            .ok()
-            .filter(|value| !value.is_empty())
-            .unwrap_or(host.clone());
-        let admin_port = std::env::var("POSTGRES_PORT")
-            .ok()
-            .and_then(|value| value.parse::<u16>().ok())
-            .unwrap_or(port);
-        Some(format!(
-            "postgresql://{}:{}@{}:{}/postgres",
-            admin_user, admin_password, admin_host, admin_port
-        ))
-    });
-
-    let Some(admin_url) = admin_url else {
-        warn!(
-            "Admin connection details absent; cannot bootstrap application role"
-        );
-        return Ok(false);
-    };
-
-    let admin_parsed = match Url::parse(&admin_url) {
-        Ok(url) => url,
-        Err(err) => {
-            warn!(error = %err, "Invalid DATABASE_ADMIN_URL; skipping bootstrap");
-            return Ok(false);
-        }
-    };
-
-    let admin_db_url = {
-        let mut url = admin_parsed.clone();
-        url.set_path(&format!("/{db_name}"));
-        url.to_string()
-    };
-
-    let admin_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&admin_url)
-        .await
-        .map_err(|err| {
-            anyhow::anyhow!("failed to connect with admin credentials: {err}")
-        })?;
-
-    sqlx::query(
-        "DO $$\nDECLARE\n    role_name text := $1;\n    role_password text := $2;\nBEGIN\n    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN\n        EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', role_name, role_password);\n    ELSE\n        EXECUTE format('ALTER ROLE %I WITH PASSWORD %L', role_name, role_password);\n    END IF;\nEND\n$$;",
-    )
-    .bind(&app_user)
-    .bind(&app_password)
-    .execute(&admin_pool)
-    .await
-    .map_err(|err| anyhow::anyhow!("failed to ensure application role: {err}"))?;
-
-    sqlx::query(
-        "DO $$\nDECLARE\n    db_name text := $1;\n    role_name text := $2;\nBEGIN\n    IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = db_name) THEN\n        EXECUTE format('CREATE DATABASE %I OWNER %I', db_name, role_name);\n    ELSE\n        EXECUTE format('ALTER DATABASE %I OWNER TO %I', db_name, role_name);\n    END IF;\nEND\n$$;",
-    )
-    .bind(db_name)
-    .bind(&app_user)
-    .execute(&admin_pool)
-    .await
-    .map_err(|err| anyhow::anyhow!("failed to ensure database ownership: {err}"))?;
-
-    let target_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&admin_db_url)
-        .await
-        .map_err(|err| {
-            anyhow::anyhow!(
-                "failed to connect to application database as admin: {err}"
-            )
-        })?;
-
-    sqlx::query(
-        "DO $$\nDECLARE\n    role_name text := $1;\nBEGIN\n    EXECUTE format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', current_database(), role_name);\n    EXECUTE format('GRANT USAGE, CREATE ON SCHEMA public TO %I', role_name);\n    EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I', role_name);\n    EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I', role_name);\n    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I', role_name);\n    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO %I', role_name);\nEND\n$$;",
-    )
-    .bind(&app_user)
-    .execute(&target_pool)
-    .await
-    .map_err(|err| anyhow::anyhow!("failed to configure database privileges: {err}"))?;
-
-    info!(
-        "Application role '{}' ensured with expected privileges",
-        app_user
-    );
-
-    Ok(true)
-}
-
 #[derive(Debug, Default, Clone)]
 struct ResolvedTlsPaths {
     cert: Option<PathBuf>,
@@ -988,111 +854,6 @@ where
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        ResolvedTlsPaths, ServeArgs, ServerMode, determine_server_mode,
-        resolve_tls_paths,
-    };
-    use std::{ffi::OsString, path::PathBuf};
-
-    struct EnvVarGuard {
-        key: &'static str,
-        previous: Option<OsString>,
-    }
-
-    impl EnvVarGuard {
-        fn unset(key: &'static str) -> Self {
-            let previous = std::env::var_os(key);
-            // SAFETY: tests run in isolation and restore previous environment state on drop.
-            unsafe {
-                std::env::remove_var(key);
-            }
-            Self { key, previous }
-        }
-
-        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-            let previous = std::env::var_os(key);
-            // SAFETY: tests run in isolation and restore previous environment state on drop.
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self { key, previous }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            // SAFETY: we reinstate the environment variable to its prior state.
-            unsafe {
-                match &self.previous {
-                    Some(prev) => std::env::set_var(self.key, prev),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
-    }
-
-    fn sample_args() -> ServeArgs {
-        ServeArgs {
-            cert: None,
-            key: None,
-            port: None,
-            host: None,
-            claim_reset: false,
-            #[cfg(feature = "demo")]
-            demo: false,
-        }
-    }
-
-    #[test]
-    fn resolve_tls_prefers_args_over_env() {
-        let _cert_clear = EnvVarGuard::unset("TLS_CERT_PATH");
-        let _key_clear = EnvVarGuard::unset("TLS_KEY_PATH");
-
-        let mut args = sample_args();
-        args.cert = Some(PathBuf::from("cert-from-args.pem"));
-        args.key = Some(PathBuf::from("key-from-args.pem"));
-
-        let _cert_scope = EnvVarGuard::set("TLS_CERT_PATH", "env-cert.pem");
-        let _key_scope = EnvVarGuard::set("TLS_KEY_PATH", "env-key.pem");
-
-        let resolved = resolve_tls_paths(&args);
-        assert_eq!(resolved.cert, Some(PathBuf::from("cert-from-args.pem")));
-        assert_eq!(resolved.key, Some(PathBuf::from("key-from-args.pem")));
-    }
-
-    #[test]
-    fn determine_server_mode_returns_https_when_paths_present() {
-        let tls = ResolvedTlsPaths {
-            cert: Some(PathBuf::from("cert.pem")),
-            key: Some(PathBuf::from("key.pem")),
-        };
-
-        match determine_server_mode(9443, &tls) {
-            ServerMode::Https { addr, tls } => {
-                assert_eq!(addr.port(), 9443);
-                assert_eq!(tls.cert_path, PathBuf::from("cert.pem"));
-                assert_eq!(tls.key_path, PathBuf::from("key.pem"));
-            }
-            other => panic!("expected HTTPS mode, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn determine_server_mode_returns_http_when_missing_key() {
-        let tls = ResolvedTlsPaths {
-            cert: Some(PathBuf::from("cert.pem")),
-            key: None,
-        };
-
-        match determine_server_mode(8080, &tls) {
-            ServerMode::Http { addr } => assert_eq!(addr.port(), 8080),
-            other => panic!("expected HTTP mode, got {other:?}"),
-        }
-    }
-}
-
 pub fn create_app(state: AppState, https_terminates_here: bool) -> Router {
     // Create versioned API routes
     let versioned_api = routes::create_api_router(state.clone());
@@ -1102,9 +863,7 @@ pub fn create_app(state: AppState, https_terminates_here: bool) -> Router {
         use axum::extract::{ConnectInfo, MatchedPath};
         use axum::http::header::{HeaderName, HeaderValue, RETRY_AFTER};
         use ferrex_core::api_routes::v1;
-        use ferrex_core::auth::rate_limit::{
-            EndpointLimits, RateLimitKey, RateLimiter,
-        };
+        use ferrex_core::auth::rate_limit::RateLimitKey;
         use ferrex_server::infra::middleware::create_rate_limiter;
         use std::net::SocketAddr;
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -1261,13 +1020,11 @@ pub fn create_app(state: AppState, https_terminates_here: bool) -> Router {
                 };
 
                 let mut response: Response<Body> = next.run(req).await;
-                if is_https {
-                    if let Some(value) = &header_value {
-                        response.headers_mut().insert(
-                            header::STRICT_TRANSPORT_SECURITY,
-                            value.clone(),
-                        );
-                    }
+                if is_https && let Some(value) = &header_value {
+                    response.headers_mut().insert(
+                        header::STRICT_TRANSPORT_SECURITY,
+                        value.clone(),
+                    );
                 }
 
                 Ok::<Response<Body>, std::convert::Infallible>(response)
@@ -1423,5 +1180,110 @@ async fn health_handler(
         Err(StatusCode::SERVICE_UNAVAILABLE)
     } else {
         Ok(Json(health_status))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ResolvedTlsPaths, ServeArgs, ServerMode, determine_server_mode,
+        resolve_tls_paths,
+    };
+    use std::{ffi::OsString, path::PathBuf};
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            // SAFETY: tests run in isolation and restore previous environment state on drop.
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, previous }
+        }
+
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var_os(key);
+            // SAFETY: tests run in isolation and restore previous environment state on drop.
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // SAFETY: we reinstate the environment variable to its prior state.
+            unsafe {
+                match &self.previous {
+                    Some(prev) => std::env::set_var(self.key, prev),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    fn sample_args() -> ServeArgs {
+        ServeArgs {
+            cert: None,
+            key: None,
+            port: None,
+            host: None,
+            claim_reset: false,
+            #[cfg(feature = "demo")]
+            demo: false,
+        }
+    }
+
+    #[test]
+    fn resolve_tls_prefers_args_over_env() {
+        let _cert_clear = EnvVarGuard::unset("TLS_CERT_PATH");
+        let _key_clear = EnvVarGuard::unset("TLS_KEY_PATH");
+
+        let mut args = sample_args();
+        args.cert = Some(PathBuf::from("cert-from-args.pem"));
+        args.key = Some(PathBuf::from("key-from-args.pem"));
+
+        let _cert_scope = EnvVarGuard::set("TLS_CERT_PATH", "env-cert.pem");
+        let _key_scope = EnvVarGuard::set("TLS_KEY_PATH", "env-key.pem");
+
+        let resolved = resolve_tls_paths(&args);
+        assert_eq!(resolved.cert, Some(PathBuf::from("cert-from-args.pem")));
+        assert_eq!(resolved.key, Some(PathBuf::from("key-from-args.pem")));
+    }
+
+    #[test]
+    fn determine_server_mode_returns_https_when_paths_present() {
+        let tls = ResolvedTlsPaths {
+            cert: Some(PathBuf::from("cert.pem")),
+            key: Some(PathBuf::from("key.pem")),
+        };
+
+        match determine_server_mode(9443, &tls) {
+            ServerMode::Https { addr, tls } => {
+                assert_eq!(addr.port(), 9443);
+                assert_eq!(tls.cert_path, PathBuf::from("cert.pem"));
+                assert_eq!(tls.key_path, PathBuf::from("key.pem"));
+            }
+            other => panic!("expected HTTPS mode, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn determine_server_mode_returns_http_when_missing_key() {
+        let tls = ResolvedTlsPaths {
+            cert: Some(PathBuf::from("cert.pem")),
+            key: None,
+        };
+
+        match determine_server_mode(8080, &tls) {
+            ServerMode::Http { addr } => assert_eq!(addr.port(), 8080),
+            other => panic!("expected HTTP mode, got {other:?}"),
+        }
     }
 }

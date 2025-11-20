@@ -46,7 +46,7 @@ use crate::domains::settings::update::update_settings;
 use crate::domains::streaming::update::update_streaming;
 use crate::domains::ui::update::update_ui;
 use crate::domains::user_management::update::update_user_management;
-use crate::state_refactored::State;
+use crate::state::State;
 use iced::Task;
 
 /// Domain-aware update function that routes messages to appropriate handlers

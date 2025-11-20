@@ -4,8 +4,10 @@
 //! for different views, ensuring a smooth user experience when navigating.
 //! Supports library-aware keys for grid views and efficient state management.
 
+use crate::common::messages::DomainMessage;
 use crate::domains::ui::{types::ViewState, views::grid::VirtualGridState};
 use ferrex_core::player_prelude::{LibraryID, MediaIDLike};
+use iced::Task;
 use iced::widget::scrollable::Viewport;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -438,7 +440,10 @@ pub trait ScrollStateExt {
     ) -> Option<&ScrollState>;
     fn save_current_view_scroll(&mut self, state: ScrollState);
     fn restore_current_view_scroll(&self) -> Option<&ScrollState>;
-    fn restore_library_scroll_state(&mut self, library_id: Option<LibraryID>);
+    fn restore_library_scroll_state(
+        &mut self,
+        library_id: Option<LibraryID>,
+    ) -> Task<DomainMessage>;
 
     // ViewModel-specific methods
     fn save_movies_vm_scroll(
@@ -478,7 +483,7 @@ pub trait ScrollStateExt {
     ),
     profiling::all_functions
 )]
-impl ScrollStateExt for crate::state_refactored::State {
+impl ScrollStateExt for crate::state::State {
     fn save_scroll_state(&mut self, view_key: String, state: ScrollState) {
         self.domains
             .ui
@@ -551,7 +556,10 @@ impl ScrollStateExt for crate::state_refactored::State {
         self.restore_view_scroll(view, library_id)
     }
 
-    fn restore_library_scroll_state(&mut self, library_id: Option<LibraryID>) {
+    fn restore_library_scroll_state(
+        &mut self,
+        library_id: Option<LibraryID>,
+    ) -> Task<DomainMessage> {
         if library_id.is_some() {
             if let Some(lib_id) = library_id {
                 self.tab_manager.set_active_tab_with_scroll(
@@ -575,6 +583,8 @@ impl ScrollStateExt for crate::state_refactored::State {
             "Restored library scroll state through TabManager for library_id: {:?}",
             library_id
         );
+
+        self.schedule_check_scroll_stopped()
     }
 
     // ViewModel-specific implementations

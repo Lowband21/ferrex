@@ -106,8 +106,10 @@ impl PostgresMediaRepository {
     fn convert_filters(
         filters: MediaFilters,
     ) -> (MediaFileFilter, MediaFileSort, Page) {
-        let mut filter = MediaFileFilter::default();
-        filter.library_id = filters.library_id;
+        let mut filter = MediaFileFilter {
+            library_id: filters.library_id,
+            ..MediaFileFilter::default()
+        };
 
         let mut sort = Self::default_sort();
         if let Some(order) = filters.order_by.as_deref() {
@@ -150,8 +152,7 @@ impl PostgresMediaRepository {
             }
         }
 
-        let requested_limit =
-            filters.limit.unwrap_or(100).max(1).min(500) as u32;
+        let requested_limit = filters.limit.unwrap_or(100).clamp(1, 500) as u32;
         let page = Page {
             limit: requested_limit,
             offset: 0,

@@ -3,7 +3,7 @@
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::settings::messages as settings;
 use crate::domains::ui::views::settings::device_management::UserDevice;
-use crate::state_refactored::State;
+use crate::state::State;
 use iced::Task;
 use log::{error, info};
 use std::str::FromStr;

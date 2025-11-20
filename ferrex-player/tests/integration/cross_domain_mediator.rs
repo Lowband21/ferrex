@@ -6,27 +6,28 @@
 use ferrex_core::player_prelude::LibraryID;
 use ferrex_core::rbac::UserPermissions;
 use ferrex_player::common::messages::{CrossDomainEvent, DomainUpdateResult};
-use ferrex_player::state_refactored::State;
+use ferrex_player::state::State;
 use iced::Task;
 use uuid::Uuid;
 
 /// Test that UserLoggedOut event clears authentication state
 #[tokio::test]
 async fn test_user_logout_clears_authentication() {
-    let mut state = State::default();
+    let mut state = State {
+        is_authenticated: true,
+        ..State::default()
+    };
 
     // Set up authenticated state
-    state.is_authenticated = true;
     state.domains.auth.state.is_authenticated = true;
     state.domains.auth.state.user_permissions =
         Some(UserPermissions::default());
 
     // Process the UserLoggedOut event through handle_event
-    let cleanup_task =
-        ferrex_player::common::messages::cross_domain::handle_event(
-            &mut state,
-            CrossDomainEvent::UserLoggedOut,
-        );
+    let _ = ferrex_player::common::messages::cross_domain::handle_event(
+        &mut state,
+        CrossDomainEvent::UserLoggedOut,
+    );
 
     // Verify state was cleared
     assert!(
@@ -54,7 +55,7 @@ async fn test_auth_command_routing() {
     };
 
     // Process the event through handle_event
-    let task = ferrex_player::common::messages::cross_domain::handle_event(
+    let _ = ferrex_player::common::messages::cross_domain::handle_event(
         &mut state,
         CrossDomainEvent::AuthCommandRequested(command.clone()),
     );
@@ -87,7 +88,7 @@ async fn test_auth_command_completion_routing() {
     let initial_auth_state = state.is_authenticated;
 
     // Process completion event
-    let task = ferrex_player::common::messages::cross_domain::handle_event(
+    let _ = ferrex_player::common::messages::cross_domain::handle_event(
         &mut state,
         CrossDomainEvent::AuthCommandCompleted(
             password_command,
@@ -106,7 +107,7 @@ async fn test_auth_command_completion_routing() {
 
     let error_result = AuthCommandResult::Error("Invalid PIN".to_string());
 
-    let task = ferrex_player::common::messages::cross_domain::handle_event(
+    let _ = ferrex_player::common::messages::cross_domain::handle_event(
         &mut state,
         CrossDomainEvent::AuthCommandCompleted(pin_command, error_result),
     );
@@ -131,7 +132,7 @@ async fn test_library_selection_updates_state() {
     );
 
     // Process LibrarySelected event
-    let task = ferrex_player::common::messages::cross_domain::handle_event(
+    let _ = ferrex_player::common::messages::cross_domain::handle_event(
         &mut state,
         CrossDomainEvent::LibrarySelected(library_id),
     );
@@ -153,7 +154,7 @@ async fn test_library_select_all_clears_selection() {
     state.domains.library.state.current_library_id = Some(LibraryID::new());
 
     // Process LibrarySelectAll event
-    let task = ferrex_player::common::messages::cross_domain::handle_event(
+    let _ = ferrex_player::common::messages::cross_domain::handle_event(
         &mut state,
         CrossDomainEvent::LibrarySelectAll,
     );
@@ -183,11 +184,10 @@ async fn test_mediator_processes_multiple_events() {
     // Simulate what the mediator does
     let mut tasks = vec![update_result.task];
     for event in update_result.events {
-        tasks.push(
-            ferrex_player::common::messages::cross_domain::handle_event(
-                &mut state, event,
-            ),
+        let task = ferrex_player::common::messages::cross_domain::handle_event(
+            &mut state, event,
         );
+        tasks.push(task);
     }
 
     // All three events should have been processed
@@ -219,7 +219,7 @@ async fn test_user_authenticated_updates_state() {
     let permissions = UserPermissions::default();
 
     // Process UserAuthenticated event
-    let task = ferrex_player::common::messages::cross_domain::handle_event(
+    let _ = ferrex_player::common::messages::cross_domain::handle_event(
         &mut state,
         CrossDomainEvent::UserAuthenticated(user.clone(), permissions.clone()),
     );
@@ -250,7 +250,7 @@ mod event_ordering_tests {
 
         // Process in order
         for event in &events {
-            ferrex_player::common::messages::cross_domain::handle_event(
+            let _ = ferrex_player::common::messages::cross_domain::handle_event(
                 &mut state,
                 event.clone(),
             );

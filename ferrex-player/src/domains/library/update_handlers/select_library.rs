@@ -1,6 +1,6 @@
 use crate::common::messages::{CrossDomainEvent, DomainUpdateResult};
 
-use crate::state_refactored::State;
+use crate::state::State;
 use ferrex_core::player_prelude::LibraryID;
 use iced::Task;
 

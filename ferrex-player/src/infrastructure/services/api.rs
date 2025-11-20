@@ -12,9 +12,9 @@ use ferrex_core::{
     player_prelude::{
         ActiveScansResponse, AuthToken, AuthenticatedDevice,
         CreateLibraryRequest, FilterIndicesRequest, LatestProgressResponse,
-        Library, LibraryID, Media, MediaQuery, MediaWithStatus,
-        ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig,
-        ScanMetrics, StartScanRequest, UpdateLibraryRequest,
+        Library, LibraryID, Media, MediaQuery, MediaRootBrowseResponse,
+        MediaWithStatus, ScanCommandAcceptedResponse, ScanCommandRequest,
+        ScanConfig, ScanMetrics, StartScanRequest, UpdateLibraryRequest,
         UpdateProgressRequest, User, UserPermissions, UserWatchState,
     },
 };
@@ -107,6 +107,12 @@ pub trait ApiService: Send + Sync + Debug {
 
     /// Fetch orchestrator configuration currently in effect
     async fn fetch_scan_config(&self) -> RepositoryResult<ScanConfig>;
+
+    /// Browse the server's media root (relative paths) to help admins pick folders.
+    async fn browse_media_root(
+        &self,
+        path: Option<&str>,
+    ) -> RepositoryResult<MediaRootBrowseResponse>;
 
     /// Check server health
     async fn health_check(&self) -> RepositoryResult<bool>;

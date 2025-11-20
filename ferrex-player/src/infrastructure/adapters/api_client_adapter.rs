@@ -17,16 +17,19 @@ use crate::infrastructure::api_client::SetupStatus;
 use crate::infrastructure::api_types::{DemoResetRequest, DemoStatus};
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::api::ApiService;
-use ferrex_core::api_routes::{utils::replace_param, v1};
+use ferrex_core::api_routes::{
+    utils::replace_param,
+    v1::{self, admin::MEDIA_ROOT_BROWSER},
+};
 use ferrex_core::api_types::setup::{ConfirmClaimResponse, StartClaimResponse};
 use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
     FilterIndicesRequest, IndicesResponse, LatestProgressResponse, Library,
     LibraryID, LibraryMediaResponse, Media, MediaID, MediaQuery,
-    MediaWithStatus, ScanCommandAcceptedResponse, ScanCommandRequest,
-    ScanConfig, ScanMetrics, SortBy, SortOrder, StartScanRequest,
-    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions,
-    UserWatchState,
+    MediaRootBrowseResponse, MediaWithStatus, ScanCommandAcceptedResponse,
+    ScanCommandRequest, ScanConfig, ScanMetrics, SortBy, SortOrder,
+    StartScanRequest, UpdateLibraryRequest, UpdateProgressRequest, User,
+    UserPermissions, UserWatchState,
 };
 use ferrex_core::player_prelude::{MediaIDLike, hash_filter_spec};
 use parking_lot::RwLock;
@@ -570,6 +573,24 @@ impl ApiService for ApiClientAdapter {
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
         Ok(wrapped)
+    }
+
+    async fn browse_media_root(
+        &self,
+        path: Option<&str>,
+    ) -> RepositoryResult<MediaRootBrowseResponse> {
+        let mut url = MEDIA_ROOT_BROWSER.to_string();
+        if let Some(rel) = path {
+            if !rel.is_empty() {
+                url.push_str("?path=");
+                url.push_str(&urlencoding::encode(rel));
+            }
+        }
+
+        self.client
+            .get(&url)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
     }
 
     #[cfg(feature = "demo")]

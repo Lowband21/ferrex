@@ -104,7 +104,7 @@ pub trait StatePermissionExt {
     fn is_admin(&self) -> bool;
 }
 
-impl StatePermissionExt for crate::state_refactored::State {
+impl StatePermissionExt for crate::state::State {
     fn permission_checker(&self) -> PermissionChecker<'_> {
         PermissionChecker::new(
             self.domains.auth.state.user_permissions.as_ref(),

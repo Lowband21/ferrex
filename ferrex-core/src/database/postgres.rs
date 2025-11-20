@@ -119,6 +119,14 @@ impl PostgresDatabase {
             .max_lifetime(std::time::Duration::from_secs(1800)) // 30 min lifetime
             .idle_timeout(std::time::Duration::from_secs(600)) // 10 min idle timeout
             .test_before_acquire(true) // Ensure connections are healthy
+            // Ensure unqualified names resolve to application schema first.
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    // Safe to set even if schema doesn't yet exist; Postgres allows arbitrary names in search_path.
+                    let _ = sqlx::query("SET search_path = ferrex, public").execute(conn).await;
+                    Ok(())
+                })
+            })
             .connect(connection_string)
             .await
             .map_err(|e| {
@@ -158,6 +166,183 @@ impl PostgresDatabase {
             media,
             processing_status,
         })
+    }
+
+    /// Run only the preflight checks without applying migrations.
+    pub async fn preflight_only(&self) -> Result<()> {
+        self.preflight_check().await
+    }
+
+    /// Preflight checks for schema privileges and required extensions.
+    ///
+    /// Rationale: surface clear, actionable errors (GRANTs/CREATE EXTENSION)
+    /// instead of a generic "permission denied for schema" during
+    /// migrations. This helps operators fix DB permissions without guessing.
+    async fn preflight_check(&self) -> Result<()> {
+        // Determine target schema for privileges: prefer `ferrex` if present, otherwise `public`.
+        let ferrex_exists = sqlx::query!(
+            "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'ferrex') AS \"exists!: bool\"",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Schema existence check failed: {}", e)))?
+        .exists;
+
+        let target_schema = if ferrex_exists { "ferrex" } else { "public" };
+
+        // Check required privileges on target schema.
+        let privs = sqlx::query!(
+            r#"
+            SELECT
+              has_schema_privilege(current_user, $1, 'USAGE')  AS "usage!: bool",
+              has_schema_privilege(current_user, $1, 'CREATE') AS "create!: bool"
+            "#,
+            target_schema
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Privilege preflight failed: {}", e)))?;
+
+        // Detect presence of required extensions; migrations create them IF NOT EXISTS.
+        let ext_citext = sqlx::query!(
+            "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'citext') AS \"exists!: bool\""
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Extension check (citext) failed: {}", e)))?
+        .exists;
+
+        let ext_trgm = sqlx::query!(
+            "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') AS \"exists!: bool\""
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Extension check (pg_trgm) failed: {}", e)))?
+        .exists;
+
+        let ext_pgcrypto = sqlx::query!(
+            "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pgcrypto') AS \"exists!: bool\""
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Extension check (pgcrypto) failed: {}", e)))?
+        .exists;
+
+        // Determine whether current_user can CREATE EXTENSION (db owner or superuser).
+        let db_info = sqlx::query!(
+            r#"
+            SELECT current_database() AS "db!: String",
+                   pg_get_userbyid(datdba) AS "owner!: String"
+            FROM pg_database
+            WHERE datname = current_database()
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Database owner lookup failed: {}", e)))?;
+
+        let current_user = sqlx::query!(
+            "SELECT current_user AS \"u!: String\""
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Current user lookup failed: {}", e)))?
+        .u;
+
+        let is_db_owner = current_user == db_info.owner;
+        // Avoid Rust keyword field name by aliasing to `is_superuser`.
+        let is_superuser = sqlx::query!(
+            r#"SELECT rolsuper AS "is_superuser!: bool" FROM pg_roles WHERE rolname = current_user"#
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Role check failed: {}", e)))?
+        .is_superuser;
+        let can_create_extension = is_db_owner || is_superuser;
+
+        // Build actionable errors if prerequisites are missing.
+        let mut problems: Vec<String> = Vec::new();
+        if !privs.create {
+            problems.push(format!(
+                "Role '{current_user}' lacks CREATE on schema {schema}.",
+                schema = target_schema
+            ));
+        }
+
+        let mut missing_exts: Vec<&str> = Vec::new();
+        if !ext_citext { missing_exts.push("citext"); }
+        if !ext_trgm { missing_exts.push("pg_trgm"); }
+        if !ext_pgcrypto { missing_exts.push("pgcrypto"); }
+
+        // If extensions are missing and we cannot create them, fail with guidance.
+        if !missing_exts.is_empty() && !can_create_extension {
+            problems.push(format!(
+                "Missing extensions ({}) and role '{current_user}' cannot CREATE EXTENSION; database owner is '{}'",
+                missing_exts.join(", "),
+                db_info.owner
+            ));
+        }
+
+        if !problems.is_empty() {
+            // Provide a concise, copy-pastable remediation.
+            let grants = format!(
+                r#"Recommended fixes (run as a superuser/DB owner):
+
+-- Create and grant within the application schema
+CREATE SCHEMA IF NOT EXISTS ferrex AUTHORIZATION {current_user};
+GRANT USAGE, CREATE ON SCHEMA {schema} TO {current_user};
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema} TO {current_user};
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA {schema} TO {current_user};
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA {schema} TO {current_user};
+ALTER DEFAULT PRIVILEGES FOR ROLE {current_user} IN SCHEMA {schema}
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {current_user};
+ALTER DEFAULT PRIVILEGES FOR ROLE {current_user} IN SCHEMA {schema}
+  GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO {current_user};
+ALTER DEFAULT PRIVILEGES FOR ROLE {current_user} IN SCHEMA {schema}
+  GRANT EXECUTE ON FUNCTIONS TO {current_user};
+
+-- Optional: set search_path so unqualified names resolve to the app schema
+-- Replace your_database with the actual DB name
+ALTER ROLE {current_user} IN DATABASE your_database SET search_path = ferrex, public;
+
+-- If extensions are missing, install into public (requires superuser or DB owner '{owner}')
+-- Only run those that are missing:
+CREATE EXTENSION IF NOT EXISTS citext    WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS pg_trgm   WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS pgcrypto  WITH SCHEMA public;
+"#,
+                current_user = current_user,
+                owner = db_info.owner,
+                schema = target_schema
+            );
+
+            let detail = format!(
+                "Database preflight failed:\n- {}\n\n{}",
+                problems.join("\n- "),
+                grants
+            );
+
+            return Err(MediaError::Internal(detail));
+        }
+
+        // Optional: if extensions are missing but can be created, migrations will install them.
+        if !missing_exts.is_empty() && can_create_extension {
+            warn!(
+                missing = %missing_exts.join(", "),
+                owner = %db_info.owner,
+                "Required extensions missing; migrations will attempt to create them"
+            );
+        }
+
+        // Ensure CREATE on target schema; otherwise object creation will fail even if migrations run.
+        if !privs.create {
+            return Err(MediaError::Internal(format!(
+                "Role '{current_user}' lacks CREATE on schema {schema}; apply the GRANTs above and restart.",
+                schema = target_schema
+            )));
+        }
+
+        Ok(())
     }
 
     /// Create a PostgresDatabase from an existing pool (mainly for testing)
@@ -432,6 +617,9 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn initialize_schema(&self) -> Result<()> {
+        // Preflight: verify privileges and required extensions for clearer errors
+        self.preflight_check().await?;
+
         // Run migrations using sqlx migrate
         sqlx::migrate!("./migrations")
             .run(&self.pool)

@@ -26,10 +26,6 @@ pub enum DeviceFingerprintError {
 pub struct DeviceFingerprint {
     /// The computed fingerprint hash
     hash: String,
-
-    /// Components used to generate the fingerprint
-    #[serde(skip_serializing)]
-    components: FingerprintComponents,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,7 +80,7 @@ impl DeviceFingerprint {
 
         let hash = Self::compute_hash(&components);
 
-        Ok(Self { hash, components })
+        Ok(Self { hash })
     }
 
     /// Create from a known hash (for deserialization)
@@ -94,16 +90,7 @@ impl DeviceFingerprint {
             return Err(DeviceFingerprintError::InvalidFormat);
         }
 
-        Ok(Self {
-            hash,
-            components: FingerprintComponents {
-                os_info: String::new(),
-                cpu_info: None,
-                mac_address: None,
-                machine_id: None,
-                hostname_hash: None,
-            },
-        })
+        Ok(Self { hash })
     }
 
     /// Compute the fingerprint hash from components

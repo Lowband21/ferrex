@@ -103,6 +103,7 @@ pub enum AuthenticationFlow {
         error: Option<String>,
         loading: bool,
         claim: SetupClaimUi,
+        setup_token_required: bool,
     },
 
     /// Checking for cached auth and auto-login

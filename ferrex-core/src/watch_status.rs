@@ -270,7 +270,7 @@ impl UserWatchState {
 
         if progress.is_completed() {
             // Move to completed
-            self.in_progress.retain(|k, v| k != &media_id);
+            self.in_progress.retain(|k, _| k != &media_id);
             self.completed.insert(media_id);
         } else if progress.is_started() {
             // Update or insert in progress

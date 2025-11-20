@@ -7,7 +7,7 @@
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::domains::ui::scroll_manager::ScrollStateExt;
 use crate::domains::{auth, library, player, ui};
-use crate::state_refactored::State;
+use crate::state::State;
 use ferrex_core::player_prelude::MediaIDLike;
 use iced::Task;
 
@@ -135,9 +135,11 @@ pub fn handle_event(
             state.domains.library.state.current_library_id = Some(library_id);
 
             // Restore scroll state for the new library context
-            state.restore_library_scroll_state(Some(library_id));
+            let scroll_task =
+                state.restore_library_scroll_state(Some(library_id));
 
             Task::batch(vec![
+                scroll_task,
                 Task::done(DomainMessage::Library(
                     library::messages::Message::SelectLibrary(Some(library_id)),
                 )),
@@ -149,9 +151,10 @@ pub fn handle_event(
             state.domains.library.state.current_library_id = None;
 
             // Restore scroll state for the global context (all libraries)
-            state.restore_library_scroll_state(None);
+            let scroll_task = state.restore_library_scroll_state(None);
 
             Task::batch(vec![
+                scroll_task,
                 Task::done(DomainMessage::Library(
                     library::messages::Message::SelectLibrary(None),
                 )),

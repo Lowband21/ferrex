@@ -4,10 +4,9 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use ferrex_core::player_prelude::{
-    ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, EpisodeReference,
-    Library, LibraryID, LibraryType, Media, MediaID, MediaIDLike, MediaLike,
-    MediaOps, MediaType, MovieID, SeasonID, SeasonLike, SeasonReference,
-    SeriesID, SortBy, SortOrder,
+    ArchivedLibrary, ArchivedLibraryExt, EpisodeReference, Library, LibraryID,
+    LibraryType, Media, MediaID, MediaIDLike, MediaLike, MediaOps, SeasonID,
+    SeasonLike, SeasonReference, SeriesID, SortBy, SortOrder,
 };
 use parking_lot::RwLock;
 use rkyv::{util::AlignedVec, vec::ArchivedVec};
@@ -307,164 +306,46 @@ impl<R: ReadCap> Accessor<R> {
                 },
             )?;
 
-            // Preferred path: server-provided sorted indices (movies only for now)
-            let mut ids = if let Some(vec) = repo
-                .sorted_indices
-                .as_ref()
-                .and_then(|map| map.get(&lib_uuid))
-            {
-                vec.clone()
-            } else {
-                // Fallback: compute indices directly from archived library
-                let yoke = repo
-                    .get_archived_library_yoke_internal(&lib_uuid)
-                    .ok_or(RepositoryError::NotFound {
-                    entity_type: "ArchivedLibrary".to_string(),
-                    id: library_id.to_string(),
-                })?;
+            // TODO: Once server-provided indices are trustworthy for the requested
+            // sort field and stored sort state, prefer them here before falling back.
+            let mut items = repo.get_library_media_internal(library_id)?;
 
-                let archived = yoke.get();
-                let slice = archived.media_as_slice();
+            let library_type = owned_lib.library_type;
+            items.retain(|media| match (library_type, media) {
+                (LibraryType::Movies, Media::Movie(_))
+                | (LibraryType::Series, Media::Series(_)) => true,
+                _ => false,
+            });
 
-                match owned_lib.library_type {
-                    LibraryType::Movies => slice
-                        .iter()
-                        .filter_map(|m| match m {
-                            ArchivedMedia::Movie(movie) => Some(movie.id.0),
-                            _ => None,
-                        })
-                        .collect(),
-                    LibraryType::Series => slice
-                        .iter()
-                        .filter_map(|m| match m {
-                            ArchivedMedia::Series(series) => Some(series.id.0),
-                            _ => None,
-                        })
-                        .collect(),
+            let compare_with_fallback = |a: &Media, b: &Media| -> Ordering {
+                match compare_media(a, b, sort_by, sort_order) {
+                    Some(ord) if ord != Ordering::Equal => ord,
+                    Some(_) | None => {
+                        let fallback = compare_media(
+                            a,
+                            b,
+                            SortBy::Title,
+                            SortOrder::Ascending,
+                        );
+                        match fallback {
+                            Some(ord) if ord != Ordering::Equal => ord,
+                            _ => a
+                                .media_id()
+                                .to_uuid()
+                                .cmp(&b.media_id().to_uuid()),
+                        }
+                    }
                 }
             };
 
-            // Remove any ids marked deleted in the overlay
-            if !repo.modifications.deleted.is_empty() {
-                ids.retain(|id| !repo.modifications.deleted.contains(id));
-            }
+            items.sort_by(|a, b| compare_with_fallback(a, b));
 
-            // Append runtime additions for this library, filtered by library type
-            if let Some(additions) =
-                repo.modifications.added_by_library.get(&lib_uuid)
-            {
-                let mut base_set: HashSet<Uuid> = ids.iter().copied().collect();
-                let mut runtime_items: Vec<(Uuid, Media)> = Vec::new();
-
-                for media_id in additions {
-                    if base_set.contains(media_id) {
-                        continue;
-                    }
-
-                    let Some(entry) = repo.modifications.added.get(media_id)
-                    else {
-                        continue;
-                    };
-
-                    let matches_library =
-                        match (&owned_lib.library_type, entry.media_type()) {
-                            (LibraryType::Movies, MediaType::Movie) => true,
-                            (LibraryType::Series, MediaType::Series) => true,
-                            _ => false,
-                        };
-
-                    if !matches_library {
-                        continue;
-                    }
-
-                    match entry.deserialize() {
-                        Ok(media) => runtime_items.push((*media_id, media)),
-                        Err(err) => {
-                            log::warn!(
-                                "Failed to deserialize runtime addition {}: {}",
-                                media_id,
-                                err
-                            );
-                        }
-                    }
-                }
-
-                if !runtime_items.is_empty() {
-                    let compare_with_fallback =
-                        |a_media: &Media,
-                         a_id: &Uuid,
-                         b_media: &Media,
-                         b_id: &Uuid| {
-                            compare_media(a_media, b_media, sort_by, sort_order)
-                                .unwrap_or_else(|| {
-                                    compare_media(
-                                        a_media,
-                                        b_media,
-                                        SortBy::Title,
-                                        SortOrder::Ascending,
-                                    )
-                                    .unwrap_or_else(|| a_id.cmp(b_id))
-                                })
-                                .then_with(|| a_id.cmp(b_id))
-                        };
-
-                    runtime_items.sort_by(|a, b| {
-                        compare_with_fallback(&a.1, &a.0, &b.1, &b.0)
-                    });
-
-                    let runtime_len = runtime_items.len();
-                    let mut merged_ids =
-                        Vec::with_capacity(ids.len() + runtime_len);
-
-                    let mut runtime_iter = runtime_items.into_iter();
-                    let mut pending_runtime = runtime_iter.next();
-
-                    for &base_id in &ids {
-                        let base_media = match owned_lib.library_type {
-                            LibraryType::Movies => {
-                                repo.get_internal(&MovieID(base_id))?
-                            }
-                            LibraryType::Series => {
-                                repo.get_internal(&SeriesID(base_id))?
-                            }
-                        };
-
-                        while let Some((runtime_id, runtime_media)) =
-                            pending_runtime.as_ref()
-                        {
-                            let ordering = compare_with_fallback(
-                                runtime_media,
-                                runtime_id,
-                                &base_media,
-                                &base_id,
-                            );
-
-                            if ordering != Ordering::Greater {
-                                if base_set.insert(*runtime_id) {
-                                    merged_ids.push(*runtime_id);
-                                }
-                                pending_runtime = runtime_iter.next();
-                            } else {
-                                break;
-                            }
-                        }
-
-                        merged_ids.push(base_id);
-                    }
-
-                    if let Some((runtime_id, _)) = pending_runtime
-                        && base_set.insert(runtime_id)
-                    {
-                        merged_ids.push(runtime_id);
-                    }
-
-                    for (runtime_id, _) in runtime_iter {
-                        if base_set.insert(runtime_id) {
-                            merged_ids.push(runtime_id);
-                        }
-                    }
-
-                    ids = merged_ids;
+            let mut seen = HashSet::with_capacity(items.len());
+            let mut ids = Vec::with_capacity(items.len());
+            for media in items {
+                let uuid = media.media_id().to_uuid();
+                if seen.insert(uuid) {
+                    ids.push(uuid);
                 }
             }
 

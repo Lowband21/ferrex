@@ -2,6 +2,7 @@
 //! Modules expose intentional surfaces so downstream crates can depend on
 //! specialized namespaces instead of the entire API layer.
 
+pub mod admin;
 pub mod demo;
 pub mod filters;
 pub mod library;
@@ -11,6 +12,10 @@ pub mod scan;
 pub mod setup;
 pub mod users_admin;
 
+pub use admin::{
+    MediaRootBreadcrumb, MediaRootBrowseRequest, MediaRootBrowseResponse,
+    MediaRootEntry, MediaRootEntryKind,
+};
 pub use demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
 pub use filters::{
     FilterIndicesRequest, IndicesResponse, LibraryFilters,
@@ -32,6 +37,10 @@ pub use users_admin::{AdminUserInfo, CreateUserRequest, UpdateUserRequest};
 
 /// Curated exports relied on by the UI/player crates.
 pub mod player {
+    pub use super::admin::{
+        MediaRootBreadcrumb, MediaRootBrowseRequest, MediaRootBrowseResponse,
+        MediaRootEntry, MediaRootEntryKind,
+    };
     pub use super::demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
     pub use super::library::{
         BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest,

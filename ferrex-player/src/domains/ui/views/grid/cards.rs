@@ -21,7 +21,7 @@ use crate::infrastructure::constants::poster::CORNER_RADIUS;
 use iced::{Element, widget::column};
 use uuid::Uuid;
 
-use crate::{domains::ui::theme, state_refactored::State};
+use crate::{domains::ui::theme, state::State};
 use std::sync::Arc;
 
 #[cfg_attr(

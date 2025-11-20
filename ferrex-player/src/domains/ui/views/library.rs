@@ -12,7 +12,7 @@ use crate::{
         },
         widgets::{collect_cached_handles_for_media, texture_preloader},
     },
-    state_refactored::State,
+    state::State,
 };
 use ferrex_core::player_prelude::{ImageSize, ImageType};
 use iced::{

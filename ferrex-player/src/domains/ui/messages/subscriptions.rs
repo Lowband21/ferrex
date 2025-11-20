@@ -1,6 +1,6 @@
 use super::Message;
 use crate::common::messages::DomainMessage;
-use crate::state_refactored::State;
+use crate::state::State;
 use iced::Subscription;
 
 #[cfg_attr(

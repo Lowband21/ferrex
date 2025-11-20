@@ -4,12 +4,13 @@ use axum::{
 };
 
 use ferrex_core::api_routes::v1;
+use ferrex_core::api_routes::v1::admin::MEDIA_ROOT_BROWSER;
 
 #[cfg(feature = "demo")]
 use crate::handlers::admin::demo_handlers;
 use crate::{
     handlers::{
-        admin::dev_handlers,
+        admin::{dev_handlers, media_root},
         handle_websocket::websocket_handler,
         media::{
             handle_image::serve_image_handler,
@@ -367,6 +368,7 @@ fn create_admin_routes(state: AppState) -> Router<AppState> {
             v1::admin::dev::RESET_DATABASE,
             post(dev_handlers::reset_database),
         )
+        .route(MEDIA_ROOT_BROWSER, get(media_root::browse_media_root))
         // Admin session management for PIN authentication
         .route(
             v1::admin::sessions::REGISTER,

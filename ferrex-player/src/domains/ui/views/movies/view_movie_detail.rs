@@ -5,7 +5,7 @@ use crate::infrastructure::api_types::{MediaDetailsOption, TmdbDetails};
 use crate::{
     domains::ui::components, domains::ui::messages::Message,
     domains::ui::theme, domains::ui::widgets::image_for::image_for,
-    state_refactored::State,
+    state::State,
 };
 
 use ferrex_core::{

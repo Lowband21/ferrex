@@ -1,6 +1,6 @@
 use crate::common::messages::DomainMessage;
 use crate::infrastructure::services::api::ApiService;
-use crate::state_refactored::State;
+use crate::state::State;
 use iced::Subscription;
 use std::sync::Arc;
 

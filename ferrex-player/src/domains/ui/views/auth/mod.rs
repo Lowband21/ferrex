@@ -58,6 +58,7 @@ pub fn view_auth<'a>(
             error,
             loading,
             claim,
+            setup_token_required,
         } => view_first_run_setup(
             username,
             password,
@@ -69,6 +70,7 @@ pub fn view_auth<'a>(
             error.as_deref(),
             *loading,
             claim,
+            *setup_token_required,
         ),
 
         LoadingUsers => view_loading_users(),
@@ -136,6 +138,7 @@ pub fn view_first_run_setup<'a>(
     error: Option<&'a str>,
     loading: bool,
     claim: &'a SetupClaimUi,
+    setup_token_required: bool,
 ) -> Element<'a, DomainMessage> {
     use crate::domains::auth::messages as auth;
     use crate::domains::ui::theme;
@@ -432,15 +435,41 @@ pub fn view_first_run_setup<'a>(
         text("Setup Token").size(14),
         Space::new().height(4),
         setup_token_input,
-        Space::new().height(16),
-        text("Claim Token").size(14),
-        Space::new().height(4),
-        claim_token_display,
-        Space::new().height(32),
-        create_button,
     ]
     .width(Length::Fixed(400.0))
     .align_x(Alignment::Center);
+
+    if setup_token_required {
+        let setup_token_hint = container(
+            column![
+                text("Setup token required for this server")
+                    .size(14)
+                    .style(|theme: &iced::Theme| text::Style {
+                        color: Some(theme.extended_palette().primary.strong.text),
+                    }),
+                Space::new().height(6),
+                text(
+                    "Run `just show-setup-token` in the server workspace to display the current token. Treat it like a one-time setup secret."
+                )
+                .size(13)
+                .style(|theme: &iced::Theme| text::Style {
+                    color: Some(theme.extended_palette().background.strong.text),
+                }),
+            ],
+        )
+        .padding(12)
+        .style(theme::Container::TechDetail.style());
+
+        content = content.push(Space::new().height(8)).push(setup_token_hint);
+    }
+
+    content = content
+        .push(Space::new().height(16))
+        .push(text("Claim Token").size(14))
+        .push(Space::new().height(4))
+        .push(claim_token_display)
+        .push(Space::new().height(32))
+        .push(create_button);
 
     if let Some(err) = error {
         content = content.push(Space::new().height(16)).push(

@@ -4,7 +4,7 @@ use chrono::Utc;
 use ferrex_core::auth::device::{AuthDeviceStatus, AuthenticatedDevice};
 use ferrex_player::domains::ui::views::settings::device_management::UserDevice;
 use ferrex_player::infrastructure::services::settings::SettingsService;
-use ferrex_player::state_refactored::State;
+use ferrex_player::state::State;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -42,19 +42,6 @@ impl SettingsService for MockSettingsServiceOk {
     }
     async fn revoke_device(&self, _device_id: Uuid) -> anyhow::Result<()> {
         Ok(())
-    }
-}
-
-struct MockSettingsServiceErr;
-#[async_trait::async_trait]
-impl SettingsService for MockSettingsServiceErr {
-    async fn list_user_devices(
-        &self,
-    ) -> anyhow::Result<Vec<AuthenticatedDevice>> {
-        anyhow::bail!("boom")
-    }
-    async fn revoke_device(&self, _device_id: Uuid) -> anyhow::Result<()> {
-        anyhow::bail!("boom")
     }
 }
 

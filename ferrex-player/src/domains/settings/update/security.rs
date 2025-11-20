@@ -4,7 +4,7 @@ use crate::common::messages::{
 use crate::domains::auth::messages as auth;
 use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::settings::messages as settings;
-use crate::state_refactored::State;
+use crate::state::State;
 use iced::Task;
 
 /// Handle show change password modal

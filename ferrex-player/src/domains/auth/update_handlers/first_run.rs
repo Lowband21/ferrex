@@ -1,15 +1,14 @@
 //! First-run admin setup handlers, including the secure claim workflow.
 
-use std::sync::Arc;
-
 use crate::domains::auth::messages as auth;
 use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::auth::types::{
     AuthenticationFlow, SetupClaimStatus, SetupClaimUi,
 };
+use crate::infrastructure::api_client::SetupStatus;
 use crate::infrastructure::services::api::ApiService;
 use crate::infrastructure::services::auth::AuthService;
-use crate::state_refactored::State;
+use crate::state::State;
 use ferrex_core::api_types::setup::{ConfirmClaimResponse, StartClaimResponse};
 use ferrex_core::{
     auth::domain::value_objects::SessionScope, player_prelude as core,
@@ -23,25 +22,33 @@ pub fn handle_check_setup_status(state: &mut State) -> Task<auth::Message> {
         "[Auth] handle_check_setup_status called - checking if first-run setup is needed"
     );
 
-    let auth_service = &state.domains.auth.state.auth_service;
-    let svc: Arc<dyn AuthService> = Arc::clone(auth_service);
+    let api_service = state.domains.auth.state.api_service.clone();
 
     Task::perform(
         async move {
-            info!("[Auth] Calling auth_service.check_setup_status()");
-            svc.check_setup_status().await.map_err(|e| e.to_string())
+            info!("[Auth] Calling api_service.check_setup_status()");
+            api_service
+                .check_setup_status()
+                .await
+                .map_err(|e| e.to_string())
         },
         |result| match result {
-            Ok(needs_setup) => {
+            Ok(status) => {
                 info!(
                     "[Auth] Setup status check result: needs_setup = {}",
-                    needs_setup
+                    status.needs_setup
                 );
-                auth::Message::SetupStatusChecked(needs_setup)
+                auth::Message::SetupStatusChecked(status)
             }
             Err(e) => {
                 error!("Failed to check setup status: {}", e);
-                auth::Message::SetupStatusChecked(false)
+                auth::Message::SetupStatusChecked(SetupStatus {
+                    needs_setup: false,
+                    has_admin: true,
+                    requires_setup_token: false,
+                    user_count: 0,
+                    library_count: 0,
+                })
             }
         },
     )
@@ -50,14 +57,14 @@ pub fn handle_check_setup_status(state: &mut State) -> Task<auth::Message> {
 /// Handle setup status checked response
 pub fn handle_setup_status_checked(
     state: &mut State,
-    needs_setup: bool,
+    status: SetupStatus,
 ) -> Task<auth::Message> {
     info!(
-        "[Auth] handle_setup_status_checked called with needs_setup = {}",
-        needs_setup
+        "[Auth] handle_setup_status_checked called with needs_setup = {}, requires_setup_token = {}",
+        status.needs_setup, status.requires_setup_token
     );
 
-    if needs_setup {
+    if status.needs_setup {
         info!("First-run setup needed, showing admin setup");
         state.is_authenticated = false;
         state.domains.auth.state.is_authenticated = false;
@@ -74,6 +81,7 @@ pub fn handle_setup_status_checked(
                 error: None,
                 loading: false,
                 claim: SetupClaimUi::default(),
+                setup_token_required: status.requires_setup_token,
             };
         Task::none()
     } else {

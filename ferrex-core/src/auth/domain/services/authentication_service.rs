@@ -492,8 +492,11 @@ impl AuthenticationService {
                 ))
             })?;
 
-        let mut context = AuthEventContext::default();
-        context.auth_session_id = Some(session_record_id);
+        let context = AuthEventContext {
+            auth_session_id: Some(session_record_id),
+            ..Default::default()
+        };
+
         self.publish_events(events, context).await?;
 
         let refresh_token = RefreshToken::generate(Duration::days(30))
@@ -623,8 +626,10 @@ impl AuthenticationService {
                     ))
                 })?;
 
-            let mut context = AuthEventContext::default();
-            context.auth_session_id = Some(session_record_id);
+            let context = AuthEventContext {
+                auth_session_id: Some(session_record_id),
+                ..Default::default()
+            };
             self.publish_events(events, context).await?;
 
             let refresh_token =
@@ -755,7 +760,6 @@ impl AuthenticationService {
 
         // Verify possession first if repo configured
         if let Some(challenges) = self.challenge_repo.as_ref() {
-            use crate::auth::domain::repositories::DeviceChallengeRepository as _;
             // Atomically consume challenge if fresh
             let consumed = challenges
                 .consume_if_fresh(challenge_id)
@@ -846,8 +850,10 @@ impl AuthenticationService {
                 ))
             })?;
 
-        let mut context = AuthEventContext::default();
-        context.auth_session_id = Some(session_record_id);
+        let context = AuthEventContext {
+            auth_session_id: Some(session_record_id),
+            ..Default::default()
+        };
         self.publish_events(events, context).await?;
 
         let refresh_token = RefreshToken::generate(Duration::days(30))

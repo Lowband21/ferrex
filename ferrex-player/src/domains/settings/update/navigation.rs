@@ -3,7 +3,7 @@ use crate::domains::auth::security::SecureCredential;
 use crate::domains::settings::messages::Message;
 use crate::domains::settings::state::SettingsView as SettingsSubview;
 use crate::domains::ui;
-use crate::state_refactored::State;
+use crate::state::State;
 use iced::Task;
 
 /// Handle showing profile view

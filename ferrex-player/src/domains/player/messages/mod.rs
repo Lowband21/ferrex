@@ -181,11 +181,9 @@ impl fmt::Debug for Message {
             Message::PollExternalMpv => write!(f, "PollExternalMpv"),
 
             // External MPV player messages
-            #[cfg(feature = "external-mpv-player")]
             Message::ExternalPlaybackStarted => {
                 write!(f, "ExternalPlaybackStarted")
             }
-            #[cfg(feature = "external-mpv-player")]
             Message::ExternalPlaybackUpdate { position, duration } => {
                 write!(
                     f,
@@ -193,11 +191,9 @@ impl fmt::Debug for Message {
                     position, duration
                 )
             }
-            #[cfg(feature = "external-mpv-player")]
             Message::ExternalPlaybackEnded => {
                 write!(f, "ExternalPlaybackEnded")
             }
-            #[cfg(feature = "external-mpv-player")]
             Message::PollExternalMpv => write!(f, "PollExternalMpv"),
         }
     }

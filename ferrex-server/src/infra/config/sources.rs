@@ -5,7 +5,7 @@ use super::rate_limits::RateLimitSpec;
 use crate::infra::config::scanner::ScannerConfig;
 
 /// Raw configuration as defined in a TOML file.
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct FileConfig {
     #[serde(default)]
@@ -30,7 +30,7 @@ pub struct FileConfig {
     pub dev_mode: Option<bool>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct FileServerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
@@ -38,24 +38,26 @@ pub struct FileServerConfig {
     pub port: Option<u16>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct FileDatabaseConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password_file: Option<PathBuf>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FileRedisConfig {
     pub url: String,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct FileMediaConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root: Option<PathBuf>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct FileCacheConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root: Option<PathBuf>,
@@ -65,7 +67,7 @@ pub struct FileCacheConfig {
     pub thumbnails: Option<PathBuf>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct FileFfmpegConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ffmpeg_path: Option<String>,
@@ -73,7 +75,7 @@ pub struct FileFfmpegConfig {
     pub ffprobe_path: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct FileCorsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_origins: Option<Vec<String>>,
@@ -85,7 +87,7 @@ pub struct FileCorsConfig {
     pub allow_credentials: Option<bool>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct FileSecurityConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enforce_https: Option<bool>,
@@ -95,7 +97,7 @@ pub struct FileSecurityConfig {
     pub hsts: FileHstsConfig,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct FileHstsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_age: Option<u64>,
@@ -105,7 +107,7 @@ pub struct FileHstsConfig {
     pub preload: Option<bool>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct FileAuthConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password_pepper: Option<String>,
@@ -115,7 +117,7 @@ pub struct FileAuthConfig {
     pub setup_token: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct FileRateLimiterConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
@@ -124,11 +126,20 @@ pub struct FileRateLimiterConfig {
 }
 
 /// Environment-derived configuration values.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct EnvConfig {
     pub server_host: Option<String>,
     pub server_port: Option<u16>,
     pub database_url: Option<String>,
+    pub database_url_file: Option<PathBuf>,
+    pub database_host: Option<String>,
+    pub database_port: Option<u16>,
+    pub database_user: Option<String>,
+    pub database_name: Option<String>,
+    pub database_password: Option<String>,
+    pub database_password_file: Option<PathBuf>,
+    pub ferrex_app_password: Option<String>,
+    pub ferrex_app_password_file: Option<PathBuf>,
     pub redis_url: Option<String>,
     pub media_root: Option<PathBuf>,
     pub cache_root: Option<PathBuf>,
@@ -164,6 +175,25 @@ impl EnvConfig {
             .ok()
             .and_then(|s| s.parse().ok());
         env_config.database_url = std::env::var("DATABASE_URL").ok();
+        env_config.database_url_file =
+            std::env::var("DATABASE_URL_FILE").ok().map(PathBuf::from);
+        env_config.database_host = std::env::var("DATABASE_HOST").ok();
+        env_config.database_port = std::env::var("DATABASE_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok());
+        env_config.database_user = std::env::var("DATABASE_USER").ok();
+        env_config.database_name = std::env::var("DATABASE_NAME").ok();
+        env_config.database_password = std::env::var("DATABASE_PASSWORD").ok();
+        env_config.database_password_file =
+            std::env::var("DATABASE_PASSWORD_FILE")
+                .ok()
+                .map(PathBuf::from);
+        env_config.ferrex_app_password =
+            std::env::var("FERREX_APP_PASSWORD").ok();
+        env_config.ferrex_app_password_file =
+            std::env::var("FERREX_APP_PASSWORD_FILE")
+                .ok()
+                .map(PathBuf::from);
         env_config.redis_url = std::env::var("REDIS_URL").ok();
         env_config.media_root =
             std::env::var("MEDIA_ROOT").ok().map(PathBuf::from);

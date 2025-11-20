@@ -20,6 +20,7 @@ use ferrex_core::player_prelude::{
 };
 use iced::{Color, Element, Length, widget::image::Handle};
 use lucide_icons::Icon;
+use rand::random;
 use std::hash::{Hash, Hasher};
 use uuid::Uuid;
 
@@ -338,11 +339,17 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                         shader = shader.on_click(click_msg);
                     }
 
+                    // Add a tiny random jitter to animation start so rows don't animate in lockstep
                     let (selected_animation, load_time_opt) = match loaded_at {
-                        Some(load_time) => (
-                            animation_behavior.select(Some(load_time)),
-                            Some(load_time),
-                        ),
+                        Some(load_time) => {
+                            let jitter_ms: u64 = (random::<u8>() as u64) % 21; // 0-20ms
+                            let jittered = load_time
+                                + std::time::Duration::from_millis(jitter_ms);
+                            (
+                                animation_behavior.select(Some(jittered)),
+                                Some(jittered),
+                            )
+                        }
                         None => (AnimationType::None, None),
                     };
 
@@ -431,7 +438,12 @@ fn create_shader_from_cached<'a>(
 
     // Apply load-time aware animation selection
     let (selected_animation, load_time_opt) = match loaded_at {
-        Some(load_time) => (animation.select(Some(load_time)), Some(load_time)),
+        Some(load_time) => {
+            let jitter_ms: u64 = (random::<u8>() as u64) % 21; // 0-20ms
+            let jittered =
+                load_time + std::time::Duration::from_millis(jitter_ms);
+            (animation.select(Some(jittered)), Some(jittered))
+        }
         None => (AnimationType::None, None),
     };
 

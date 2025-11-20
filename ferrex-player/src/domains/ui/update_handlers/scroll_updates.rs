@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crate::{
     domains::ui::{messages::Message, tabs::TabState},
     infrastructure::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS,
-    state_refactored::State,
+    state::State,
 };
 use ferrex_core::player_prelude::{MediaID, MediaIDLike};
 use iced::{Task, widget::scrollable::Viewport};

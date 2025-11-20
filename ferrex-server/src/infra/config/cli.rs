@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -9,6 +10,7 @@ use dialoguer::{Confirm, Input};
 use rand::{Rng, distr::Alphanumeric, rng};
 use redis::{AsyncCommands, aio::ConnectionManager};
 use sqlx::postgres::PgPoolOptions;
+use url::Url;
 use uuid::Uuid;
 
 use super::{
@@ -16,7 +18,7 @@ use super::{
     models::Config,
     sources::{
         FileAuthConfig, FileCacheConfig, FileConfig, FileCorsConfig,
-        FileDatabaseConfig, FileFfmpegConfig, FileHstsConfig, FileMediaConfig,
+        FileDatabaseConfig, FileHstsConfig, FileMediaConfig,
         FileSecurityConfig, FileServerConfig,
     },
 };
@@ -52,33 +54,59 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
         })?;
     }
 
-    let mut dev_mode = true;
+    let existing_file_config = load_existing_file_config(&opts.config_path)?;
+    let existing_env = load_env_map(&opts.env_path)?;
+
+    let dev_mode_default = existing_file_config
+        .as_ref()
+        .and_then(|cfg| cfg.dev_mode)
+        .or_else(|| {
+            existing_env
+                .get("DEV_MODE")
+                .and_then(|value| parse_bool(value))
+        })
+        .unwrap_or(true);
+
+    let mut dev_mode = dev_mode_default;
     if !opts.non_interactive {
         dev_mode = Confirm::new()
             .with_prompt("Use development mode defaults (recommended for localhost setup)?")
-            .default(true)
+            .default(dev_mode_default)
             .interact()
             .context("prompt failed")?;
     }
 
-    let default_host = if dev_mode { "127.0.0.1" } else { "0.0.0.0" };
+    let env_server_host = existing_env
+        .get("SERVER_HOST")
+        .cloned()
+        .filter(|value| !value.trim().is_empty());
+    let server_host_default = existing_file_config
+        .as_ref()
+        .and_then(|cfg| cfg.server.host.clone())
+        .or(env_server_host.clone())
+        .unwrap_or_else(|| "0.0.0.0".to_string());
     let server_host: String = if opts.non_interactive {
-        default_host.into()
+        server_host_default.clone()
     } else {
         Input::new()
-            .with_prompt("Server host")
-            .default(default_host.to_string())
+            .with_prompt(
+                "Server host (0.0.0.0 for containers/Tailscale; 127.0.0.1 for localhost-only)",
+            )
+            .default(server_host_default.clone())
             .interact_text()
             .context("prompt failed")?
     };
 
-    let default_port = if dev_mode { 3000 } else { 443 };
+    let server_port_default = existing_file_config
+        .as_ref()
+        .and_then(|cfg| cfg.server.port)
+        .unwrap_or(if dev_mode { 3000 } else { 443 });
     let server_port: u16 = if opts.non_interactive {
-        default_port
+        server_port_default
     } else {
         Input::new()
             .with_prompt("Server port")
-            .default(default_port.to_string())
+            .default(server_port_default.to_string())
             .validate_with(|input: &String| match input.parse::<u16>() {
                 Ok(_) => Ok(()),
                 Err(_) => Err("enter a valid port number"),
@@ -89,14 +117,13 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
             .expect("validated port to parse")
     };
 
-    let default_media_root = if dev_mode {
-        Some(PathBuf::from("./media"))
-    } else {
-        None
-    };
+    let default_media_root = existing_file_config
+        .as_ref()
+        .and_then(|cfg| cfg.media.root.clone())
+        .or(None);
 
     let media_root: Option<PathBuf> = if opts.non_interactive {
-        default_media_root
+        default_media_root.clone()
     } else {
         let answer: String = Input::new()
             .with_prompt("Media library root (leave blank to configure later)")
@@ -127,30 +154,156 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
         );
     }
 
-    let default_database_url = if dev_mode {
-        Some("postgres://localhost/ferrex".to_string())
+    let managed_database_url_host =
+        std::env::var("FERREX_CONFIG_INIT_HOST_DATABASE_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+
+    let database_url_existing = existing_file_config
+        .as_ref()
+        .and_then(|cfg| cfg.database.url.clone());
+    let env_database_url_host = existing_env.get("DATABASE_URL").cloned();
+    let env_database_url_container =
+        existing_env.get("DATABASE_URL_CONTAINER").cloned();
+
+    let mut db_host_default = existing_env
+        .get("DATABASE_HOST")
+        .cloned()
+        .or_else(|| existing_env.get("POSTGRES_HOST_LOCAL").cloned())
+        .unwrap_or_else(|| "localhost".to_string());
+    let mut db_port_default = existing_env
+        .get("DATABASE_PORT")
+        .and_then(|value| value.parse::<u16>().ok())
+        .or_else(|| {
+            existing_env
+                .get("POSTGRES_PORT")
+                .and_then(|v| v.parse().ok())
+        })
+        .unwrap_or(5432);
+    let mut db_user_default = existing_env
+        .get("DATABASE_USER")
+        .cloned()
+        .or_else(|| existing_env.get("FERREX_APP_USER").cloned())
+        .unwrap_or_else(|| "ferrex_app".to_string());
+    let mut db_name_default = existing_env
+        .get("DATABASE_NAME")
+        .cloned()
+        .or_else(|| existing_env.get("FERREX_DB").cloned())
+        .unwrap_or_else(|| "ferrex".to_string());
+
+    for candidate in [
+        managed_database_url_host.as_deref(),
+        managed_database_url.as_deref(),
+        database_url_existing.as_deref(),
+        env_database_url_host.as_deref(),
+    ] {
+        if let Some(parts) = candidate.and_then(parse_postgres_connection_parts)
+        {
+            db_host_default = parts.host;
+            db_port_default = parts.port;
+            db_user_default = parts.user;
+            db_name_default = parts.database;
+            break;
+        }
+    }
+
+    let db_host: String = if opts.non_interactive {
+        db_host_default.clone()
     } else {
-        None
+        Input::new()
+            .with_prompt("PostgreSQL host (from host machine)")
+            .default(db_host_default.clone())
+            .interact_text()
+            .context("prompt failed")?
     };
 
-    let database_url: Option<String> = if let Some(url) = managed_database_url {
-        Some(url)
-    } else if opts.non_interactive {
-        default_database_url
+    let db_port: u16 = if opts.non_interactive {
+        db_port_default
     } else {
-        let answer: String = Input::new()
-            .with_prompt("PostgreSQL connection URL")
-            .allow_empty(true)
-            .default(default_database_url.clone().unwrap_or_default())
+        Input::new()
+            .with_prompt("PostgreSQL port (from host machine)")
+            .default(db_port_default.to_string())
+            .validate_with(|input: &String| match input.parse::<u16>() {
+                Ok(_) => Ok(()),
+                Err(_) => Err("enter a valid port number"),
+            })
             .interact_text()
-            .context("prompt failed")?;
-        let trimmed = answer.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
+            .context("prompt failed")?
+            .parse()
+            .expect("validated port to parse")
     };
+
+    let db_name: String = if opts.non_interactive {
+        db_name_default.clone()
+    } else {
+        Input::new()
+            .with_prompt("Application database name")
+            .default(db_name_default.clone())
+            .interact_text()
+            .context("prompt failed")?
+    };
+
+    let db_user: String = if opts.non_interactive {
+        db_user_default.clone()
+    } else {
+        Input::new()
+            .with_prompt("Application database user")
+            .default(db_user_default.clone())
+            .interact_text()
+            .context("prompt failed")?
+    };
+
+    let db_internal_host_default = existing_env
+        .get("DATABASE_INTERNAL_HOST")
+        .cloned()
+        .or_else(|| existing_env.get("POSTGRES_INTERNAL_HOST").cloned())
+        .unwrap_or_else(|| "db".to_string());
+    let db_internal_port_default = existing_env
+        .get("DATABASE_INTERNAL_PORT")
+        .and_then(|value| value.parse::<u16>().ok())
+        .or_else(|| {
+            existing_env
+                .get("POSTGRES_INTERNAL_PORT")
+                .and_then(|v| v.parse().ok())
+        })
+        .unwrap_or(5432);
+
+    let db_internal_host = existing_env
+        .get("DATABASE_INTERNAL_HOST")
+        .cloned()
+        .unwrap_or(db_internal_host_default);
+    let db_internal_port = existing_env
+        .get("DATABASE_INTERNAL_PORT")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(db_internal_port_default);
+
+    let database_url_host_default = format!(
+        "postgresql://{}@{}:{}/{}",
+        db_user, db_host, db_port, db_name
+    );
+    let database_url_container_default = format!(
+        "postgresql://{}@{}:{}/{}",
+        db_user, db_internal_host, db_internal_port, db_name
+    );
+
+    let database_url_host = managed_database_url_host
+        .clone()
+        .or(env_database_url_host.clone())
+        .or(existing_env.get("DATABASE_URL").cloned())
+        .unwrap_or_else(|| database_url_host_default.clone());
+
+    let database_url_container = managed_database_url
+        .clone()
+        .or(env_database_url_container.clone())
+        .or_else(|| {
+            database_url_existing
+                .clone()
+                .or(Some(database_url_host.clone()))
+                .and_then(|url| {
+                    derive_internal_connection_url(&url, &db_internal_host)
+                })
+        })
+        .unwrap_or_else(|| database_url_container_default.clone());
 
     let managed_redis_url = std::env::var("FERREX_CONFIG_INIT_REDIS_URL")
         .ok()
@@ -162,14 +315,33 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
         );
     }
 
-    let redis_url: Option<String> = if let Some(url) = managed_redis_url {
-        Some(url)
-    } else if opts.non_interactive {
-        None
+    let managed_redis_url_host =
+        std::env::var("FERREX_CONFIG_INIT_HOST_REDIS_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+
+    let existing_redis_url = existing_file_config
+        .as_ref()
+        .and_then(|cfg| cfg.redis.as_ref().map(|r| r.url.clone()));
+    let env_redis_url_host = existing_env.get("REDIS_URL").cloned();
+    let env_redis_url_container =
+        existing_env.get("REDIS_URL_CONTAINER").cloned();
+
+    let default_redis_url_host = managed_redis_url_host
+        .clone()
+        .or(env_redis_url_host.clone())
+        .or(existing_redis_url.clone())
+        .or_else(|| Some("redis://127.0.0.1:6379".to_string()));
+
+    let redis_url_host: Option<String> = if opts.non_interactive {
+        default_redis_url_host.clone()
     } else {
         let answer: String = Input::new()
-            .with_prompt("Redis connection URL for rate limiting (leave blank to disable rate limiting)")
+            .with_prompt(
+                "Redis connection URL for rate limiting (leave blank to disable rate limiting)",
+            )
             .allow_empty(true)
+            .default(default_redis_url_host.clone().unwrap_or_default())
             .interact_text()
             .context("prompt failed")?;
         let trimmed = answer.trim();
@@ -180,12 +352,38 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
         }
     };
 
-    let default_origins = vec![
-        "http://localhost:5173".to_string(),
-        "https://localhost:5173".to_string(),
-        "http://localhost:3000".to_string(),
-        "https://localhost:3000".to_string(),
-    ];
+    let redis_url_container = managed_redis_url
+        .clone()
+        .or(env_redis_url_container)
+        .or_else(|| {
+            redis_url_host
+                .as_deref()
+                .and_then(|url| derive_internal_connection_url(url, "cache"))
+        });
+
+    let existing_cors = existing_file_config
+        .as_ref()
+        .map(|cfg| cfg.cors.clone())
+        .unwrap_or_default();
+    let default_origins =
+        existing_cors.allowed_origins.clone().unwrap_or_else(|| {
+            vec![
+                "http://localhost:5173".to_string(),
+                "https://localhost:5173".to_string(),
+                "http://localhost:3000".to_string(),
+                "https://localhost:3000".to_string(),
+            ]
+        });
+    let default_methods = existing_cors
+        .allowed_methods
+        .clone()
+        .unwrap_or_else(default_cors_methods);
+    let default_headers = existing_cors
+        .allowed_headers
+        .clone()
+        .unwrap_or_else(default_cors_headers);
+    let allow_credentials_default =
+        existing_cors.allow_credentials.unwrap_or(false);
 
     let cors_origins: Vec<String> = if opts.non_interactive {
         default_origins.clone()
@@ -209,36 +407,93 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
     };
 
     let allow_credentials = if opts.non_interactive {
-        false
+        allow_credentials_default
     } else {
         Confirm::new()
             .with_prompt("Allow CORS credentials (only when serving a trusted frontend)?")
-            .default(false)
+            .default(allow_credentials_default)
             .interact()
             .context("prompt failed")?
     };
 
-    let mut enforce_https = !dev_mode;
-    if !opts.non_interactive {
-        enforce_https = Confirm::new()
-            .with_prompt("Enforce HTTPS redirects?")
-            .default(!dev_mode)
-            .interact()
-            .context("prompt failed")?;
-    }
+    let existing_security = existing_file_config
+        .as_ref()
+        .map(|cfg| cfg.security.clone())
+        .unwrap_or_default();
 
-    let mut trust_proxy_headers = enforce_https;
-    if enforce_https && !opts.non_interactive {
-        trust_proxy_headers = Confirm::new()
+    let enforce_https_default =
+        existing_security.enforce_https.unwrap_or(!dev_mode);
+    let enforce_https = if opts.non_interactive {
+        enforce_https_default
+    } else {
+        Confirm::new()
+            .with_prompt("Enforce HTTPS redirects?")
+            .default(enforce_https_default)
+            .interact()
+            .context("prompt failed")?
+    };
+
+    let trust_proxy_default = existing_security
+        .trust_proxy_headers
+        .unwrap_or(enforce_https);
+    let trust_proxy_headers = if enforce_https && !opts.non_interactive {
+        Confirm::new()
             .with_prompt(
                 "Trust proxy headers like X-Forwarded-Proto? (enable when TLS terminates upstream)",
             )
-            .default(trust_proxy_headers)
+            .default(trust_proxy_default)
             .interact()
-            .context("prompt failed")?;
-    }
+            .context("prompt failed")?
+    } else {
+        trust_proxy_default
+    };
 
-    let cache_root = PathBuf::from("./cache");
+    let hsts_max_age = existing_security
+        .hsts
+        .max_age
+        .unwrap_or(if enforce_https { 31_536_000 } else { 0 });
+    let hsts_include_subdomains =
+        existing_security.hsts.include_subdomains.unwrap_or(false);
+    let hsts_preload = existing_security.hsts.preload.unwrap_or(false);
+
+    let existing_cache = existing_file_config
+        .as_ref()
+        .map(|cfg| cfg.cache.clone())
+        .unwrap_or_default();
+    let cache_root = existing_cache
+        .root
+        .unwrap_or_else(|| PathBuf::from("./cache"));
+    let cache_transcode = existing_cache
+        .transcode
+        .unwrap_or_else(|| cache_root.join("transcode"));
+    let cache_thumbnails = existing_cache
+        .thumbnails
+        .unwrap_or_else(|| cache_root.join("thumbnails"));
+
+    let existing_ffmpeg = existing_file_config
+        .as_ref()
+        .map(|cfg| cfg.ffmpeg.clone())
+        .unwrap_or_default();
+
+    let auth_defaults = existing_file_config
+        .as_ref()
+        .map(|cfg| cfg.auth.clone())
+        .unwrap_or_default();
+    let auth_password_pepper = auth_defaults
+        .password_pepper
+        .clone()
+        .or(existing_env.get("AUTH_PASSWORD_PEPPER").cloned())
+        .unwrap_or_else(|| generate_secret(64));
+    let auth_token_key = auth_defaults
+        .token_key
+        .clone()
+        .or(existing_env.get("AUTH_TOKEN_KEY").cloned())
+        .unwrap_or_else(|| generate_secret(64));
+    let setup_token = auth_defaults
+        .setup_token
+        .clone()
+        .or(existing_env.get("FERREX_SETUP_TOKEN").cloned())
+        .or_else(|| Some(generate_secret(48)));
 
     let file_config = FileConfig {
         server: FileServerConfig {
@@ -246,9 +501,10 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
             port: Some(server_port),
         },
         database: FileDatabaseConfig {
-            url: database_url.clone(),
+            url: Some(database_url_container.clone()),
+            ..Default::default()
         },
-        redis: redis_url
+        redis: redis_url_host
             .clone()
             .map(|url| super::sources::FileRedisConfig { url }),
         media: FileMediaConfig {
@@ -256,28 +512,36 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
         },
         cache: FileCacheConfig {
             root: Some(cache_root.clone()),
-            transcode: Some(cache_root.join("transcode")),
-            thumbnails: Some(cache_root.join("thumbnails")),
+            transcode: Some(cache_transcode.clone()),
+            thumbnails: Some(cache_thumbnails.clone()),
         },
-        ffmpeg: FileFfmpegConfig::default(),
+        ffmpeg: existing_ffmpeg,
         cors: FileCorsConfig {
             allowed_origins: Some(cors_origins.clone()),
-            allowed_methods: Some(default_cors_methods()),
-            allowed_headers: Some(default_cors_headers()),
+            allowed_methods: Some(default_methods.clone()),
+            allowed_headers: Some(default_headers.clone()),
             allow_credentials: Some(allow_credentials),
         },
         security: FileSecurityConfig {
             enforce_https: Some(enforce_https),
             trust_proxy_headers: Some(trust_proxy_headers),
             hsts: FileHstsConfig {
-                max_age: Some(if enforce_https { 31_536_000 } else { 0 }),
-                include_subdomains: Some(false),
-                preload: Some(false),
+                max_age: Some(hsts_max_age),
+                include_subdomains: Some(hsts_include_subdomains),
+                preload: Some(hsts_preload),
             },
         },
-        auth: FileAuthConfig::default(),
-        rate_limiter: None,
-        scanner: None,
+        auth: FileAuthConfig {
+            password_pepper: Some(auth_password_pepper.clone()),
+            token_key: Some(auth_token_key.clone()),
+            setup_token: setup_token.clone(),
+        },
+        rate_limiter: existing_file_config
+            .as_ref()
+            .and_then(|cfg| cfg.rate_limiter.clone()),
+        scanner: existing_file_config
+            .as_ref()
+            .and_then(|cfg| cfg.scanner.clone()),
         dev_mode: Some(dev_mode),
     };
 
@@ -290,34 +554,63 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
         )
     })?;
 
-    // Prepare cache directories
-    fs::create_dir_all(cache_root.join("transcode"))
+    fs::create_dir_all(&cache_root)
+        .context("failed to create cache directory")?;
+    fs::create_dir_all(&cache_transcode)
         .context("failed to create transcode cache directory")?;
-    fs::create_dir_all(cache_root.join("thumbnails"))
+    fs::create_dir_all(&cache_thumbnails)
         .context("failed to create thumbnail cache directory")?;
-
-    let auth_password_pepper = generate_secret(64);
-    let auth_token_key = generate_secret(64);
-    let setup_token = generate_secret(48);
 
     let mut env_file = fs::File::create(&opts.env_path).with_context(|| {
         format!("failed to create {}", opts.env_path.display())
     })?;
-    writeln!(env_file, "# Ferrex environment secrets")?;
+    writeln!(env_file, "# Ferrex environment (host tooling)")?;
     writeln!(env_file, "DEV_MODE={}", dev_mode)?;
+    writeln!(env_file, "SERVER_HOST={}", server_host)?;
+    writeln!(env_file, "SERVER_PORT={}", server_port)?;
+
+    write_env_entry(
+        &mut env_file,
+        "DATABASE_URL",
+        Some(database_url_host.as_str()),
+    )?;
+    write_env_entry(
+        &mut env_file,
+        "DATABASE_URL_CONTAINER",
+        Some(database_url_container.as_str()),
+    )?;
+
+    let media_root_string =
+        media_root.as_ref().map(|path| path.display().to_string());
+    write_env_entry(&mut env_file, "MEDIA_ROOT", media_root_string.as_deref())?;
+
+    writeln!(env_file, "DATABASE_HOST={}", db_host)?;
+    writeln!(env_file, "DATABASE_PORT={}", db_port)?;
+    writeln!(env_file, "DATABASE_NAME={}", db_name)?;
+    writeln!(env_file, "DATABASE_USER={}", db_user)?;
+    writeln!(env_file, "DATABASE_INTERNAL_HOST={}", db_internal_host)?;
+    writeln!(env_file, "DATABASE_INTERNAL_PORT={}", db_internal_port)?;
+
+    write_env_entry(&mut env_file, "REDIS_URL", redis_url_host.as_deref())?;
+    write_env_entry(
+        &mut env_file,
+        "REDIS_URL_CONTAINER",
+        redis_url_container.as_deref(),
+    )?;
+
     writeln!(env_file, "AUTH_PASSWORD_PEPPER={}", auth_password_pepper)?;
     writeln!(env_file, "AUTH_TOKEN_KEY={}", auth_token_key)?;
-    writeln!(env_file, "FERREX_SETUP_TOKEN={}", setup_token)?;
-    if let Some(db) = &database_url {
-        writeln!(env_file, "DATABASE_URL={}", db)?;
-    }
-    if let Some(redis) = &redis_url {
-        writeln!(env_file, "REDIS_URL={}", redis)?;
-    }
-    writeln!(
-        env_file,
-        "FERREX_CONFIG_PATH={}",
-        opts.config_path.display()
+    write_env_entry(
+        &mut env_file,
+        "FERREX_SETUP_TOKEN",
+        setup_token.as_deref(),
+    )?;
+
+    let ferrex_config_path = opts.config_path.display().to_string();
+    write_env_entry(
+        &mut env_file,
+        "FERREX_CONFIG_PATH",
+        Some(ferrex_config_path.as_str()),
     )?;
 
     println!(
@@ -327,6 +620,121 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
     );
     println!("Run `ferrex-server config check` before starting the server.");
 
+    Ok(())
+}
+
+fn load_existing_file_config(path: &Path) -> Result<Option<FileConfig>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let contents = fs::read_to_string(path).with_context(|| {
+        format!(
+            "failed to read existing configuration at {}",
+            path.display()
+        )
+    })?;
+
+    let config: FileConfig = toml::from_str(&contents).with_context(|| {
+        format!(
+            "failed to parse existing configuration at {}",
+            path.display()
+        )
+    })?;
+
+    Ok(Some(config))
+}
+
+fn load_env_map(path: &Path) -> Result<HashMap<String, String>> {
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+
+    let mut map = HashMap::new();
+    for entry in dotenvy::from_path_iter(path)? {
+        let (key, value) = entry?;
+        map.insert(key, value);
+    }
+
+    Ok(map)
+}
+
+fn parse_bool(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "y" => Some(true),
+        "false" | "0" | "no" | "n" => Some(false),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PostgresConnectionParts {
+    host: String,
+    port: u16,
+    user: String,
+    database: String,
+}
+
+fn parse_postgres_connection_parts(
+    url: &str,
+) -> Option<PostgresConnectionParts> {
+    let parsed = Url::parse(url).ok()?;
+    let host = parsed.host_str()?.to_string();
+    let port = parsed.port().unwrap_or(5432);
+    let username = parsed.username();
+    if username.is_empty() {
+        return None;
+    }
+    let database = parsed
+        .path()
+        .trim_start_matches('/')
+        .split('/')
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    if database.is_empty() {
+        return None;
+    }
+    Some(PostgresConnectionParts {
+        host,
+        port,
+        user: username.to_string(),
+        database,
+    })
+}
+
+fn derive_internal_connection_url(
+    url: &str,
+    internal_host: &str,
+) -> Option<String> {
+    let mut parsed = Url::parse(url).ok()?;
+    if let Some(host) = parsed.host_str()
+        && !is_loopback_host(host)
+    {
+        return Some(url.to_string());
+    }
+    parsed.set_host(Some(internal_host)).ok()?;
+    Some(parsed.to_string())
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    let normalized = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    normalized == "localhost"
+        || normalized == "::1"
+        || normalized == "[::1]"
+        || normalized == "0.0.0.0"
+        || normalized.starts_with("127.")
+}
+
+fn write_env_entry(
+    file: &mut fs::File,
+    key: &str,
+    value: Option<&str>,
+) -> Result<()> {
+    match value {
+        Some(value) => writeln!(file, "{}={}", key, value)?,
+        None => writeln!(file, "{}=", key)?,
+    }
     Ok(())
 }
 

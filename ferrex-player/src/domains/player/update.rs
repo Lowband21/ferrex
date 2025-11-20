@@ -17,7 +17,7 @@ use std::time::Duration;
     profiling::function
 )]
 pub fn update_player(
-    app_state: &mut crate::state_refactored::State,
+    app_state: &mut crate::state::State,
     message: Message,
 ) -> DomainUpdateResult {
     #[cfg(any(

@@ -1014,7 +1014,7 @@ where
             self.config.lease.housekeeper_interval_ms,
         );
         let shutdown = self.shutdown_token.clone();
-        let handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             loop {
                 tokio::select! {
                     _ = shutdown.cancelled() => {
@@ -1293,6 +1293,7 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::Mutex as TokioMutex;
     use tokio::time;
+    use uuid::Uuid;
 
     #[derive(Default)]
     struct DispatcherState {

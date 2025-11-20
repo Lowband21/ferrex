@@ -1,5 +1,5 @@
 use crate::domains::library::messages::Message;
-use crate::state_refactored::State;
+use crate::state::State;
 use iced::Task;
 
 /// Handles RefreshLibrary message

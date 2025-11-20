@@ -1,9 +1,12 @@
 pub mod subscriptions;
 
-use crate::domains::ui::{DisplayMode, views::carousel::CarouselMessage};
+use crate::domains::{
+    library::media_root_browser,
+    ui::{DisplayMode, views::carousel::CarouselMessage},
+};
 use ferrex_core::player_prelude::{
-    EpisodeID, Library, LibraryID, MediaID, MediaIDLike, MovieID, SeasonID,
-    SeriesID, SortBy, UiDecade, UiGenre, UiResolution, UiWatchStatus,
+    EpisodeID, Library, LibraryID, MediaID, MediaIDLike, MediaType, MovieID,
+    SeasonID, SeriesID, SortBy, UiDecade, UiGenre, UiResolution, UiWatchStatus,
 };
 use iced::Size;
 use iced::widget::scrollable;
@@ -68,6 +71,8 @@ pub enum Message {
     TabGridScrolled(scrollable::Viewport), // Unified scroll message for tab system
     CheckScrollStopped,                    // Check if scrolling has stopped
     DetailViewScrolled(scrollable::Viewport), // Scroll events in detail views
+    // Image promotion chunk (center-first batches with small delays)
+    PromoteVisibleChunk(Vec<(MediaType, Uuid)>),
 
     // Window events
     WindowResized(Size),
@@ -166,6 +171,7 @@ pub enum Message {
     ToggleLibraryFormEnabled,         // Proxy for Library::ToggleLibraryFormEnabled
     ToggleLibraryFormStartScan,       // Proxy for Library::ToggleLibraryFormStartScan
     SubmitLibraryForm,                // Proxy for Library::SubmitLibraryForm
+    LibraryMediaRoot(media_root_browser::Message), // Proxy collection for media root browser actions
     PauseLibraryScan(LibraryID, Uuid), // Proxy for Library::PauseScan
     ResumeLibraryScan(LibraryID, Uuid), // Proxy for Library::ResumeScan
     CancelLibraryScan(LibraryID, Uuid), // Proxy for Library::CancelScan
@@ -237,6 +243,7 @@ impl Message {
             Self::TabGridScrolled(_) => "UI::TabGridScrolled",
             Self::CheckScrollStopped => "UI::CheckScrollStopped",
             Self::DetailViewScrolled(_) => "UI::DetailViewScrolled",
+            Self::PromoteVisibleChunk(_) => "UI::PromoteVisibleChunk",
 
             // Window events
             Self::WindowResized(_) => "UI::WindowResized",
@@ -339,6 +346,7 @@ impl Message {
                 "UI::ToggleLibraryFormStartScan"
             }
             Self::SubmitLibraryForm => "UI::SubmitLibraryForm",
+            Self::LibraryMediaRoot(_) => "UI::LibraryMediaRoot",
             Self::PauseLibraryScan(_, _) => "UI::PauseLibraryScan",
             Self::ResumeLibraryScan(_, _) => "UI::ResumeLibraryScan",
             Self::CancelLibraryScan(_, _) => "UI::CancelLibraryScan",
@@ -516,6 +524,9 @@ impl std::fmt::Debug for Message {
                 ),
                 Err(e) => write!(f, "UI::DevicesLoaded(Err: {})", e),
             },
+            Self::PromoteVisibleChunk(items) => {
+                write!(f, "UI::PromoteVisibleChunk(len={})", items.len())
+            }
             Self::RevokeDevice(device_id) => {
                 write!(f, "UI::RevokeDevice({})", device_id)
             }
@@ -571,6 +582,9 @@ impl std::fmt::Debug for Message {
                 write!(f, "UI::ToggleLibraryFormStartScan")
             }
             Self::SubmitLibraryForm => write!(f, "UI::SubmitLibraryForm"),
+            Self::LibraryMediaRoot(message) => {
+                write!(f, "UI::LibraryMediaRoot({:?})", message)
+            }
             Self::PauseLibraryScan(library_id, scan_id) => {
                 write!(f, "UI::PauseLibraryScan({}, {})", library_id, scan_id)
             }

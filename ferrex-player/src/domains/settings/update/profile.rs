@@ -1,5 +1,5 @@
 use crate::common::messages::DomainUpdateResult;
-use crate::state_refactored::State;
+use crate::state::State;
 use iced::Task;
 
 /// Handle update display name

@@ -105,7 +105,7 @@ mod tests {
         let positions = vec![0, 1, 2];
         let uuid_a = Uuid::from_u128(1);
         let uuid_c = Uuid::from_u128(3);
-        let data = vec![Some(uuid_a), None, Some(uuid_c)];
+        let data = [Some(uuid_a), None, Some(uuid_c)];
 
         let (indices, ids) = LibraryTabState::reconcile_positions(
             &positions,
@@ -123,7 +123,7 @@ mod tests {
         let uuid_a = Uuid::from_u128(10);
         let uuid_b = Uuid::from_u128(11);
         let uuid_c = Uuid::from_u128(12);
-        let data = vec![Some(uuid_a), Some(uuid_b), Some(uuid_c)];
+        let data = [Some(uuid_a), Some(uuid_b), Some(uuid_c)];
 
         let allowed: HashSet<Uuid> = [uuid_c, uuid_a].into_iter().collect();
 

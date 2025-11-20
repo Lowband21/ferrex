@@ -2,6 +2,7 @@ pub mod media_events_subscription;
 pub mod scan_subscription;
 pub mod subscriptions;
 
+use crate::domains::library::media_root_browser;
 use crate::infrastructure::api_types::{Library, Media, MediaID};
 use ferrex_core::player_prelude::{
     LibraryID, LibraryMediaResponse, MediaFile, MediaIDLike, ScanConfig,
@@ -42,6 +43,7 @@ pub enum Message {
     ToggleLibraryFormEnabled,
     ToggleLibraryFormStartScan,
     SubmitLibraryForm,
+    MediaRootBrowser(media_root_browser::Message),
 
     // Scanning
     ScanStarted {
@@ -150,6 +152,7 @@ impl Message {
                 "Library::ToggleLibraryFormStartScan"
             }
             Self::SubmitLibraryForm => "Library::SubmitLibraryForm",
+            Self::MediaRootBrowser(msg) => msg.name(),
 
             // Scanning
             Self::ScanLibrary(_) => "Library::ScanLibrary",
@@ -296,6 +299,9 @@ impl std::fmt::Debug for Message {
                 write!(f, "Library::ToggleLibraryFormStartScan")
             }
             Self::SubmitLibraryForm => write!(f, "Library::SubmitLibraryForm"),
+            Self::MediaRootBrowser(inner) => {
+                write!(f, "Library::MediaRootBrowser({:?})", inner)
+            }
 
             // Scanning
             Self::ScanLibrary(_) => write!(f, "Library::ScanLibrary"),

@@ -3,7 +3,7 @@ use iced::Task;
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage},
     domains::ui::types::ViewState,
-    state_refactored::State,
+    state::State,
 };
 
 pub fn handle_clear_database(state: &mut State) -> Task<DomainMessage> {

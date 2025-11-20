@@ -1,7 +1,7 @@
 //! Root-level subscription composition
 
 use crate::common::messages::DomainMessage;
-use crate::state_refactored::State;
+use crate::state::State;
 use iced::Subscription;
 
 /// Composes all domain subscriptions into a single batch

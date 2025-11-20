@@ -11,7 +11,7 @@ use crate::{
         },
     },
     infrastructure::api_types::LibraryType,
-    state_refactored::State,
+    state::State,
 };
 use ferrex_core::{
     player_prelude::{
@@ -100,7 +100,9 @@ pub fn update_ui(
             // NEW ARCHITECTURE: Also refresh the active tab
             state.tab_manager.refresh_active_tab();
 
-            DomainUpdateResult::task(Task::none())
+            let task = state.schedule_check_scroll_stopped();
+
+            DomainUpdateResult::task(task)
         }
         ui::Message::SelectLibraryAndMode(library_id) => {
             // NEW ARCHITECTURE: Activate the library tab in TabManager with scroll restoration
@@ -192,9 +194,11 @@ pub fn update_ui(
             state.tab_manager.refresh_active_tab();
 
             // Then request server-provided filtered indices (movies-only) asynchronously
-            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+            let check_task = state.schedule_check_scroll_stopped();
+            let fetch_task = Task::done(DomainMessage::Ui(
                 ui::Message::RequestFilteredPositions,
-            )))
+            ));
+            DomainUpdateResult::task(Task::batch(vec![check_task, fetch_task]))
         }
         ui::Message::ToggleSortOrder => {
             // Toggle sort order and refresh the active tab immediately so the grid stays visible.
@@ -211,22 +215,31 @@ pub fn update_ui(
             state.tab_manager.refresh_active_tab();
 
             // Then kick off filtered indices request (movies-only)
-            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+            let check_task = state.schedule_check_scroll_stopped();
+            let fetch_task = Task::done(DomainMessage::Ui(
                 ui::Message::RequestFilteredPositions,
-            )))
+            ));
+            DomainUpdateResult::task(Task::batch(vec![check_task, fetch_task]))
         }
         ui::Message::ApplyFilteredPositions(library_id, cache_key, positions) => {
             // Apply server-provided positions directly to the active library tab.
             // Do NOT call refresh_active_tab() here; it would clear the applied positions
             // and briefly reset the grid, causing it to appear empty.
+            let mut applied = false;
             if let Some(tab) = state
                 .tab_manager
                 .get_tab_mut(crate::domains::ui::tabs::TabId::Library(library_id))
                 && let crate::domains::ui::tabs::TabState::Library(lib_state) = tab
             {
                 lib_state.apply_sorted_positions(&positions, Some(cache_key));
+                applied = true;
             }
-            DomainUpdateResult::task(Task::none())
+            let task = if applied {
+                state.schedule_check_scroll_stopped()
+            } else {
+                Task::none()
+            };
+            DomainUpdateResult::task(task)
         }
         ui::Message::RequestFilteredPositions => {
             // Build a FilterIndicesRequest from current UI filters (Phase 1: movies only)
@@ -385,6 +398,7 @@ pub fn update_ui(
         }
         ui::Message::ApplySortedPositions(library_id, cache_key, positions) => {
             // Update the active Library tab: apply positions -> reorder ID index and refresh
+            let mut applied = false;
             if let Some(tab) = state
                 .tab_manager
                 .get_tab_mut(crate::domains::ui::tabs::TabId::Library(library_id))
@@ -401,9 +415,15 @@ pub fn update_ui(
                     last
                 );
                 lib_state.apply_sorted_positions(&positions, cache_key);
+                applied = true;
             }
             // Do not refresh here; keep applied positions intact.
-            DomainUpdateResult::task(Task::none())
+            let task = if applied {
+                state.schedule_check_scroll_stopped()
+            } else {
+                Task::none()
+            };
+            DomainUpdateResult::task(task)
         }
         ui::Message::SortedIndexFailed(err) => {
             log::warn!("Sorted index fetch failed: {}", err);
@@ -525,61 +545,99 @@ pub fn update_ui(
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
         ui::Message::CheckScrollStopped => {
-            // Check if scrolling has actually stopped
-            if let Some(last_time) = state.domains.ui.state.last_scroll_time {
-                let elapsed = last_time.elapsed();
+            let force = state.domains.ui.state.force_scroll_stop_check;
+            state.domains.ui.state.force_scroll_stop_check = false;
 
-                // Only process if enough time has passed since last scroll event
-                let priority = if elapsed >= std::time::Duration::from_millis(
-                    crate::infrastructure::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS
-                ) {
-                    state.domains.ui.state.scroll_stopped_time = Some(std::time::Instant::now());
-                    log::info!("Scroll STOPPED after {:.0}ms", elapsed.as_millis());
-                    Priority::Visible
-                } else {
-                    Priority::Preload
-                };
-
-                // Re-request visible items with Priority::Visible
-                if let Some(image_service) =
-                    crate::infrastructure::service_registry::get_image_service()
-                {
-                    // Get visible items from the active tab
-                    let visible_items = state.tab_manager.get_active_tab_visible_items();
-
-                    // Count for logging
-                    let mut count = 0;
-
-                    // Process each visible item and request its image with high priority
-                    for id in visible_items {
-                        count += 1;
-                        let media_type = id.media_type();
-                        let uuid = id.to_uuid();
-
-                        let request = match media_type {
-                            MediaType::Movie => {
-                                ImageRequest::poster(uuid, PosterKind::Movie, PosterSize::Standard)
-                            }
-                            MediaType::Series => {
-                                ImageRequest::poster(uuid, PosterKind::Series, PosterSize::Standard)
-                            }
-                            MediaType::Season => {
-                                ImageRequest::poster(uuid, PosterKind::Season, PosterSize::Standard)
-                            }
-                            MediaType::Episode => {
-                                ImageRequest::episode_still(uuid, EpisodeStillSize::Standard)
-                            }
-                        }
-                        .with_priority(priority);
-                        image_service.get().request_image(request);
+            let mut should_process = force;
+            if !should_process {
+                if let Some(last_time) = state.domains.ui.state.last_scroll_time {
+                    let elapsed = last_time.elapsed();
+                    should_process = elapsed
+                        >= std::time::Duration::from_millis(
+                            crate::infrastructure::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS,
+                        );
+                    if should_process {
+                        log::info!("Scroll STOPPED after {:.0}ms", elapsed.as_millis());
                     }
-
-                    log::info!("Re-requested {} items with {:?} priority", count, priority,);
+                } else {
+                    should_process = true;
                 }
-                DomainUpdateResult::task(Task::none())
-            } else {
-                DomainUpdateResult::task(Task::none())
             }
+
+            if !should_process {
+                return DomainUpdateResult::task(Task::none());
+            }
+
+            state.domains.ui.state.scroll_stopped_time =
+                Some(std::time::Instant::now());
+
+            // Chunked promotion: center-first ordering, 4 per wave with slight jitter
+            let visible_items = state.tab_manager.get_active_tab_visible_items();
+            let len = visible_items.len();
+            if len == 0 {
+                return DomainUpdateResult::task(Task::none());
+            }
+
+            let center = len / 2;
+            let mut ordered: Vec<(usize, MediaType, uuid::Uuid)> = visible_items
+                .into_iter()
+                .enumerate()
+                .map(|(i, id)| (i, id.media_type(), id.to_uuid()))
+                .collect();
+            ordered.sort_by_key(|(i, _t, _u)| i.abs_diff(center));
+
+            let chunk_size: usize = 4; // visible limit
+            let mut tasks: Vec<Task<DomainMessage>> = Vec::new();
+            for (chunk_idx, chunk) in ordered.chunks(chunk_size).enumerate() {
+                let payload: Vec<(MediaType, uuid::Uuid)> =
+                    chunk.iter().map(|(_, t, u)| (*t, *u)).collect();
+                let base_ms = 30u64 * (chunk_idx as u64);
+                // Small jitter 0-20ms
+                let jitter_ms: u64 = (rand::random::<u8>() as u64) % 21;
+                let delay_ms = base_ms + jitter_ms;
+
+                let task = Task::perform(
+                    async move { tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await },
+                    move |_| DomainMessage::Ui(ui::Message::PromoteVisibleChunk(payload.clone())),
+                );
+                tasks.push(task);
+            }
+
+            DomainUpdateResult::task(Task::batch(tasks))
+        }
+        ui::Message::PromoteVisibleChunk(items) => {
+            if let Some(image_service) =
+                crate::infrastructure::service_registry::get_image_service()
+            {
+                let mut count = 0usize;
+                for (media_type, uuid) in items.into_iter() {
+                    let request = match media_type {
+                        MediaType::Movie => ImageRequest::poster(
+                            uuid,
+                            PosterKind::Movie,
+                            PosterSize::Standard,
+                        ),
+                        MediaType::Series => ImageRequest::poster(
+                            uuid,
+                            PosterKind::Series,
+                            PosterSize::Standard,
+                        ),
+                        MediaType::Season => ImageRequest::poster(
+                            uuid,
+                            PosterKind::Season,
+                            PosterSize::Standard,
+                        ),
+                        MediaType::Episode => {
+                            ImageRequest::episode_still(uuid, EpisodeStillSize::Standard)
+                        }
+                    }
+                    .with_priority(Priority::Visible);
+                    image_service.get().request_image(request);
+                    count += 1;
+                }
+                log::trace!("Promoted {} items in chunk", count);
+            }
+            DomainUpdateResult::task(Task::none())
         }
         ui::Message::DetailViewScrolled(viewport) => DomainUpdateResult::task(
             super::update_handlers::scroll_updates::handle_detail_view_scrolled(state, viewport)
@@ -655,7 +713,7 @@ pub fn update_ui(
                     library_id,
                 );
 
-            DomainUpdateResult::task(Task::none())
+            DomainUpdateResult::task(state.schedule_check_scroll_stopped())
         }
         ui::Message::NavigateBack => {
             // Navigate to the previous view in history
@@ -757,7 +815,11 @@ pub fn update_ui(
                                     library_id,
                                 );
 
-                            return DomainUpdateResult::task(scroll_task);
+                            let combined = Task::batch(vec![
+                                scroll_task,
+                                state.schedule_check_scroll_stopped(),
+                            ]);
+                            return DomainUpdateResult::task(combined);
                         }
                         _ => {
                             // Detail views don't have scrollable content in current implementation
@@ -1205,7 +1267,7 @@ pub fn update_ui(
             state.tab_manager.refresh_active_tab();
             log::info!("TabManager: All tabs refreshed with sorted data from MediaStore");
 
-            DomainUpdateResult::task(Task::none())
+            DomainUpdateResult::task(state.schedule_check_scroll_stopped())
         }
         ui::Message::UpdateViewModelFilters => {
             // Lightweight update - just change filters without re-reading from MediaStore
@@ -1398,6 +1460,11 @@ pub fn update_ui(
                 library::messages::Message::SubmitLibraryForm,
             )))
         }
+        ui::Message::LibraryMediaRoot(message) => DomainUpdateResult::task(
+            Task::done(DomainMessage::Library(
+                library::messages::Message::MediaRootBrowser(message),
+            )),
+        ),
         ui::Message::PauseLibraryScan(library_id, scan_id) => DomainUpdateResult::task(Task::done(
             DomainMessage::Library(library::messages::Message::PauseScan {
                 library_id,

@@ -232,10 +232,10 @@ where
 {
     config: LibraryActorConfig,
     state: LibraryActorState,
-    queue: Arc<Q>,
-    observer: Arc<O>,
-    events: Arc<E>,
-    correlations: CorrelationCache,
+    _queue: Arc<Q>,
+    _observer: Arc<O>,
+    _events: Arc<E>,
+    _correlations: CorrelationCache,
 }
 
 impl<Q, O, E> fmt::Debug for DefaultLibraryActor<Q, O, E>
@@ -274,10 +274,10 @@ where
         Self {
             config,
             state: LibraryActorState::default(),
-            queue,
-            observer,
-            events,
-            correlations,
+            _queue: queue,
+            _observer: observer,
+            _events: events,
+            _correlations: correlations,
         }
     }
 

@@ -10,7 +10,7 @@ use super::types::{SearchMode, SearchStrategy};
 use crate::common::messages::{
     CrossDomainEvent, DomainMessage, DomainUpdateResult,
 };
-use crate::state_refactored::State;
+use crate::state::State;
 
 pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
     #[cfg(any(

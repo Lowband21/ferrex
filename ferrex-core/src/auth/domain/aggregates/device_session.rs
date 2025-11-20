@@ -92,6 +92,7 @@ pub struct DeviceSession {
 
 impl DeviceSession {
     /// Rehydrate a device session from persisted storage.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn hydrate(
         id: Uuid,
         user_id: Uuid,

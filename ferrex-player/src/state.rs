@@ -4,6 +4,7 @@
 //! keeping only the view models and cross-cutting concerns at the top level.
 
 use crate::common::focus::FocusManager;
+use crate::common::messages::DomainMessage;
 use crate::domains::DomainRegistry;
 use crate::domains::auth::AuthDomainState;
 use crate::domains::auth::AuthManager;
@@ -39,6 +40,7 @@ use crate::infrastructure::services::user_management::UserAdminApiAdapter;
 use ferrex_core::player_prelude::{
     LibraryID, SortBy, SortOrder, UiResolution, UiWatchStatus,
 };
+use iced::Task;
 use parking_lot::RwLock as StdRwLock;
 use std::sync::Arc;
 
@@ -160,6 +162,7 @@ impl State {
             last_scroll_time: None,
             last_check_task_created: None,
             scroll_manager: crate::domains::ui::scroll_manager::ScrollPositionManager::default(),
+            force_scroll_stop_check: false,
             background_shader_state:
                 crate::domains::ui::background_state::BackgroundShaderState::default(),
             search_query: String::new(),
@@ -297,6 +300,13 @@ impl State {
     /// Get the active tab ID
     pub fn active_tab_id(&self) -> TabId {
         self.tab_manager.active_tab_id()
+    }
+
+    /// Schedule a `CheckScrollStopped` message and force it to run even without recent scroll input.
+    pub fn schedule_check_scroll_stopped(&mut self) -> Task<DomainMessage> {
+        self.domains.ui.state.force_scroll_stop_check = true;
+        Task::done(crate::domains::ui::messages::Message::CheckScrollStopped)
+            .map(DomainMessage::Ui)
     }
 }
 

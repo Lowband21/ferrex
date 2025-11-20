@@ -136,6 +136,8 @@ pub struct SetupStatus {
     pub needs_setup: bool,
     /// Whether an admin user exists
     pub has_admin: bool,
+    /// Whether clients must supply the configured setup token
+    pub requires_setup_token: bool,
     /// Total number of users
     pub user_count: usize,
     /// Total number of libraries
@@ -250,9 +252,18 @@ pub async fn check_setup_status(
             ))
         })?;
 
+    let requires_setup_token = state
+        .config()
+        .auth
+        .setup_token
+        .clone()
+        .or_else(|| std::env::var("FERREX_SETUP_TOKEN").ok())
+        .is_some_and(|value| !value.trim().is_empty());
+
     let status = SetupStatus {
         needs_setup,
         has_admin: !needs_setup,
+        requires_setup_token,
         user_count: users.len(),
         library_count: libraries.len(),
         admin_password_policy: PasswordPolicyResponse::from(
@@ -451,6 +462,13 @@ async fn check_setup_status_internal(
 ) -> AppResult<SetupStatus> {
     let user_service = UserService::new(state);
     let needs_setup = user_service.needs_setup().await?;
+    let requires_setup_token = state
+        .config()
+        .auth
+        .setup_token
+        .clone()
+        .or_else(|| std::env::var("FERREX_SETUP_TOKEN").ok())
+        .is_some_and(|value| !value.trim().is_empty());
 
     let users =
         state
@@ -483,6 +501,7 @@ async fn check_setup_status_internal(
     Ok(SetupStatus {
         needs_setup,
         has_admin: !needs_setup,
+        requires_setup_token,
         user_count: users.len(),
         library_count: libraries.len(),
         admin_password_policy: PasswordPolicyResponse::from(

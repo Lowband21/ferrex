@@ -4,7 +4,7 @@ use crate::common::messages::{
     CrossDomainEvent, DomainMessage, DomainUpdateResult,
 };
 use crate::domains::auth::messages as auth;
-use crate::state_refactored::State;
+use crate::state::State;
 use iced::Task;
 use log::{error, info};
 
@@ -41,8 +41,9 @@ pub fn update_auth(
             wrap_task!(handle_check_setup_status(state))
         }
 
-        auth::Message::SetupStatusChecked(needs_setup) => {
-            let setup_task = handle_setup_status_checked(state, needs_setup)
+        auth::Message::SetupStatusChecked(status) => {
+            let needs_setup = status.needs_setup;
+            let setup_task = handle_setup_status_checked(state, status)
                 .map(DomainMessage::Auth);
 
             let focus_task = if needs_setup

@@ -78,12 +78,14 @@ impl PostgresQueueService {
         info!("Queue service connected to Postgres");
 
         // Schema validation: ensure critical dequeue index exists
+        // The baseline migration now moves app objects into `ferrex`.
+        // Accept either schema to support upgraded databases without forcing a rewrite.
         let idx_exists = sqlx::query_scalar::<_, Option<i32>>(
             r#"
             SELECT 1
             FROM pg_indexes
-            WHERE schemaname = 'public'
-              AND indexname = $1
+            WHERE indexname = $1
+              AND schemaname IN ('ferrex','public')
             LIMIT 1
             "#,
         )
@@ -294,7 +296,7 @@ impl PostgresQueueService {
         };
 
         if is_fast_path {
-            self.retry_config.fast_retry_factor.max(0.05).min(1.0)
+            self.retry_config.fast_retry_factor.clamp(0.05, 1.0)
         } else {
             1.0
         }
@@ -894,15 +896,12 @@ impl QueueService for PostgresQueueService {
 
         struct SelectedRow {
             id: Uuid,
-            library_id: Uuid,
-            kind: String,
             payload: serde_json::Value,
             priority: i16,
             attempts: i32,
             available_at: chrono::DateTime<chrono::Utc>,
             dedupe_key: String,
             created_at: chrono::DateTime<chrono::Utc>,
-            updated_at: chrono::DateTime<chrono::Utc>,
         }
 
         let row: Option<SelectedRow> = if let Some(selector) = request.selector
@@ -932,8 +931,8 @@ impl QueueService for PostgresQueueService {
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
                 )
-                SELECT j.id, j.library_id, j.kind, j.payload, j.priority, j.attempts,
-                       j.available_at, j.dedupe_key, j.created_at, j.updated_at
+                SELECT j.id, j.payload, j.priority, j.attempts,
+                       j.available_at, j.dedupe_key, j.created_at
                 FROM orchestrator_jobs j
                 JOIN (
                     SELECT id FROM next
@@ -948,24 +947,23 @@ impl QueueService for PostgresQueueService {
             )
             .fetch_optional(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("dequeue select failed: {e}")))?
+            .map_err(|e| {
+                MediaError::Internal(format!("dequeue select failed: {e}"))
+            })?
             .map(|row| SelectedRow {
                 id: row.id,
-                library_id: row.library_id,
-                kind: row.kind,
                 payload: row.payload,
                 priority: row.priority,
                 attempts: row.attempts,
                 available_at: row.available_at,
                 dedupe_key: row.dedupe_key,
                 created_at: row.created_at,
-                updated_at: row.updated_at,
             })
         } else {
             sqlx::query!(
                 r#"
-                SELECT id, library_id, kind, payload, priority, attempts, available_at,
-                       dedupe_key, created_at, updated_at
+                SELECT id, payload, priority, attempts, available_at,
+                       dedupe_key, created_at
                 FROM orchestrator_jobs
                 WHERE kind = $1
                   AND state = 'ready'
@@ -981,15 +979,12 @@ impl QueueService for PostgresQueueService {
             .map_err(|e| MediaError::Internal(format!("dequeue select failed: {e}")))?
             .map(|row| SelectedRow {
                 id: row.id,
-                library_id: row.library_id,
-                kind: row.kind,
                 payload: row.payload,
                 priority: row.priority,
                 attempts: row.attempts,
                 available_at: row.available_at,
                 dedupe_key: row.dedupe_key,
                 created_at: row.created_at,
-                updated_at: row.updated_at,
             })
         };
 
@@ -1340,7 +1335,7 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
         } else {
             // Terminal: dead-letter or failed
             let new_state = if retryable { "dead_letter" } else { "failed" };
-            let res = sqlx::query!(
+            let _ = sqlx::query!(
                 r#"
                 UPDATE orchestrator_jobs
                 SET state = $2,

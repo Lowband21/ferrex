@@ -1,7 +1,7 @@
 use super::messages::Message;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::infrastructure::services::api::ApiService;
-use crate::state_refactored::State;
+use crate::state::State;
 use ferrex_core::player_prelude::{
     MediaIDLike, UpdateProgressRequest, UserWatchState,
 };

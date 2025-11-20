@@ -102,9 +102,7 @@ pub trait FolderScanActor: Send + Sync {
 
 /// Stateless `FolderScanActor` that performs filesystem operations for one folder per job.
 #[derive(Debug)]
-pub struct DefaultFolderScanActor {
-    supported_extensions: Vec<String>,
-}
+pub struct DefaultFolderScanActor;
 
 /// Shared helper so other actors (e.g., LibraryActor) can apply the
 /// same definition of what constitutes a media file.
@@ -141,22 +139,7 @@ impl Default for DefaultFolderScanActor {
 
 impl DefaultFolderScanActor {
     pub fn new() -> Self {
-        Self {
-            supported_extensions: vec![
-                "mkv".into(),
-                "mp4".into(),
-                "avi".into(),
-                "mov".into(),
-                "webm".into(),
-                "flv".into(),
-                "wmv".into(),
-                "mpg".into(),
-                "mpeg".into(),
-                "m4v".into(),
-                "3gp".into(),
-                "ts".into(),
-            ],
-        }
+        Self
     }
 
     fn is_media_file(&self, path: &Path) -> bool {

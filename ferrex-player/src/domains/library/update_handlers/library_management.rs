@@ -1,11 +1,6 @@
-use std::path::PathBuf;
-
+use crate::domains::library::messages::Message;
 use crate::infrastructure::api_types::Library;
-use crate::state_refactored::State;
-use crate::{
-    domains::library::messages::Message,
-    infrastructure::services::api::ApiService,
-};
+use crate::state::State;
 
 use chrono::Utc;
 use ferrex_core::{
@@ -13,6 +8,7 @@ use ferrex_core::{
     types::{ids::LibraryID, library::LibraryType},
 };
 use iced::Task;
+use std::path::PathBuf;
 
 pub fn handle_create_library(
     state: &mut State,

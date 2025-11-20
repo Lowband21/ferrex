@@ -137,6 +137,9 @@ pub mod v1 {
             v1_path!("/admin/users/{user_id}/sessions/{session_id}");
         pub const STATS: &str = v1_path!("/admin/stats");
 
+        pub const MEDIA_ROOT_BROWSER: &str =
+            v1_path!("/admin/media/root-browser");
+
         pub mod dev {
             pub const RESET_CHECK: &str = v1_path!("/admin/dev/reset/check");
             pub const RESET_DATABASE: &str =

@@ -2,7 +2,7 @@ use super::super::messages::Message;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::auth::errors::{AuthError, NetworkError};
 use crate::domains::auth::manager::AutoLoginScope;
-use crate::state_refactored::State;
+use crate::state::State;
 use iced::Task;
 
 /// Handle toggle auto-login preference
