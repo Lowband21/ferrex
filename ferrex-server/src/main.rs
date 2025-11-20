@@ -77,7 +77,14 @@ use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
-use crate::{media::{metadata_service::MetadataService, prep::thumbnail_service::ThumbnailService, scan::scan_manager::ScanManager}, stream::transcoding::{config::TranscodingConfig, TranscodingService}, users::auth::tls::{create_tls_acceptor, TlsCertConfig}};
+use crate::{
+    media::{
+        metadata_service::MetadataService, prep::thumbnail_service::ThumbnailService,
+        scan::scan_manager::ScanManager,
+    },
+    stream::transcoding::{TranscodingService, config::TranscodingConfig},
+    users::auth::tls::{TlsCertConfig, create_tls_acceptor},
+};
 
 /// Command line arguments for the Ferrex media server
 #[derive(Parser, Debug)]
@@ -236,8 +243,9 @@ async fn main() -> anyhow::Result<()> {
 
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "ferrex_server=debug,ferrex_core=debug,tower_http=debug".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                "ferrex_server=debug,ferrex_core=debug,tower_http=debug".into()
+            }),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -294,10 +302,7 @@ async fn main() -> anyhow::Result<()> {
         Some(key) => info!("TMDB API key configured (length: {})", key.len()),
         None => warn!("TMDB_API_KEY not set - metadata fetching will be limited"),
     }
-    let metadata_service = Arc::new(MetadataService::new(
-        tmdb_api_key,
-        config.cache_dir.clone(),
-    ));
+    let metadata_service = Arc::new(MetadataService::new(tmdb_api_key, config.cache_dir.clone()));
 
     let thumbnail_service = Arc::new(
         ThumbnailService::new(config.cache_dir.clone(), db.clone())

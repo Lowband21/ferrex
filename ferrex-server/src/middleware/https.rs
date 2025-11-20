@@ -9,7 +9,7 @@
 use axum::{
     body::Body,
     extract::Request,
-    http::{header, HeaderValue, Response, StatusCode, Uri},
+    http::{HeaderValue, Response, StatusCode, Uri, header},
 };
 use std::{
     future::Future,
@@ -116,7 +116,8 @@ where
                             return Box::pin(async move { Ok(response) });
                         }
                         Err(_) => {
-                            let mut response = Response::new(Body::from("Invalid redirect location"));
+                            let mut response =
+                                Response::new(Body::from("Invalid redirect location"));
                             *response.status_mut() = StatusCode::BAD_REQUEST;
                             return Box::pin(async move { Ok(response) });
                         }

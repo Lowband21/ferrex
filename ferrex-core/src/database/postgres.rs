@@ -1104,7 +1104,6 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn update_library_last_scan(&self, uuid: &LibraryID) -> Result<()> {
-
         sqlx::query!(
             "UPDATE libraries SET last_scan = NOW(), updated_at = NOW() WHERE id = $1",
             uuid.as_uuid()
@@ -3918,7 +3917,9 @@ impl MediaDatabaseTrait for PostgresDatabase {
             let media_file_metadata = technical_metadata
                 .map(|tm| serde_json::from_value(tm))
                 .transpose()
-                .map_err(|e| MediaError::Internal(format!("Failed to deserialize metadata: {}", e)))?;
+                .map_err(|e| {
+                    MediaError::Internal(format!("Failed to deserialize metadata: {}", e))
+                })?;
 
             let library_id = LibraryID(row.library_id);
             let media_file = MediaFile {
@@ -3933,7 +3934,9 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
             let details = if let Some(tmdb_json) = row.tmdb_details {
                 match serde_json::from_value::<EnhancedMovieDetails>(tmdb_json) {
-                    Ok(metadata_details) => MediaDetailsOption::Details(TmdbDetails::Movie(metadata_details)),
+                    Ok(metadata_details) => {
+                        MediaDetailsOption::Details(TmdbDetails::Movie(metadata_details))
+                    }
                     Err(e) => {
                         warn!("Failed to deserialize movie metadata: {}", e);
                         MediaDetailsOption::Endpoint(format!("/movie/{}", row.id))

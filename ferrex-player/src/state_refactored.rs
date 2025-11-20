@@ -8,10 +8,6 @@ use crate::domains::auth::AuthDomainState;
 use crate::domains::auth::AuthManager;
 use crate::domains::library::LibraryDomainState;
 use crate::domains::media::MediaDomainState;
-use crate::infrastructure::repository::{
-    accessor::{Accessor, ReadOnly, ReadWrite},
-    repository::MediaRepo,
-};
 use crate::domains::metadata::MetadataDomainState;
 use crate::domains::metadata::image_service::UnifiedImageService;
 use crate::domains::player::PlayerDomain;
@@ -26,6 +22,10 @@ use crate::infrastructure::ServiceBuilder;
 use crate::infrastructure::adapters::ApiClientAdapter;
 use crate::infrastructure::adapters::AuthManagerAdapter;
 use crate::infrastructure::api_client::ApiClient;
+use crate::infrastructure::repository::{
+    accessor::{Accessor, ReadOnly, ReadWrite},
+    repository::MediaRepo,
+};
 use crate::infrastructure::services::settings::SettingsApiAdapter;
 use crate::infrastructure::services::streaming::StreamingApiAdapter;
 use crate::infrastructure::services::user_management::UserAdminApiAdapter;

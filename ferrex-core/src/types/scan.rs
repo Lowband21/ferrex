@@ -21,19 +21,35 @@ pub struct ScanResponse {
 
 impl ScanResponse {
     pub fn new(status: ScanStatus, scan_id: Option<Uuid>, message: String) -> Self {
-        ScanResponse { status, scan_id, message }
+        ScanResponse {
+            status,
+            scan_id,
+            message,
+        }
     }
 
     pub fn new_scan_started(scan_id: Uuid, message: String) -> Self {
-        ScanResponse {status: ScanStatus::Scanning, scan_id: Some(scan_id), message }
+        ScanResponse {
+            status: ScanStatus::Scanning,
+            scan_id: Some(scan_id),
+            message,
+        }
     }
 
     pub fn new_failed(message: String) -> Self {
-        ScanResponse {status: ScanStatus::Failed, scan_id: None, message }
+        ScanResponse {
+            status: ScanStatus::Failed,
+            scan_id: None,
+            message,
+        }
     }
 
     pub fn new_canceled(scan_id: Uuid) -> Self {
-        ScanResponse {status: ScanStatus::Cancelled, scan_id: Some(scan_id), message: "Scan canceled".to_string() }
+        ScanResponse {
+            status: ScanStatus::Cancelled,
+            scan_id: Some(scan_id),
+            message: "Scan canceled".to_string(),
+        }
     }
 }
 

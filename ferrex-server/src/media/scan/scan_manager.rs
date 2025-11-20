@@ -1,4 +1,7 @@
-use crate::{media::{metadata_service::MetadataService, prep::thumbnail_service::ThumbnailService}, MediaDatabase};
+use crate::{
+    MediaDatabase,
+    media::{metadata_service::MetadataService, prep::thumbnail_service::ThumbnailService},
+};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use ferrex_core::{
     providers::TmdbApiProvider, LibraryReference, LibraryType, MediaEvent, MediaID, MediaIDLike,
@@ -16,7 +19,6 @@ use tokio::sync::{
 };
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-
 
 // Progress update channel
 type ProgressSender = mpsc::UnboundedSender<ScanProgress>;
@@ -68,12 +70,31 @@ impl ScanManager {
 
         debug!(
             "Starting scan {} for libraries: [{}]\nuuids:[{}]",
-            scan_id, libraries.iter().map(|library| library.name.clone()).collect::<Vec<String>>().join(", "), libraries.iter().map(|library| library.id.to_string()).collect::<Vec<String>>().join(", ")
+            scan_id,
+            libraries
+                .iter()
+                .map(|library| library.name.clone())
+                .collect::<Vec<String>>()
+                .join(", "),
+            libraries
+                .iter()
+                .map(|library| library.id.to_string())
+                .collect::<Vec<String>>()
+                .join(", ")
         );
 
-        let paths = libraries.iter().flat_map(|library| library.paths.clone()).collect();
-        let library_names = libraries.iter().map(|library| library.name.clone()).collect();
-        let library_ids = libraries.iter().map(|library| library.id.to_string()).collect();
+        let paths = libraries
+            .iter()
+            .flat_map(|library| library.paths.clone())
+            .collect();
+        let library_names = libraries
+            .iter()
+            .map(|library| library.name.clone())
+            .collect();
+        let library_ids = libraries
+            .iter()
+            .map(|library| library.id.to_string())
+            .collect();
 
         // Create initial progress
         let progress = ScanProgress {
@@ -104,10 +125,8 @@ impl ScanManager {
             .insert(scan_id, progress.clone());
 
         // Send media event for scan started
-        self.send_media_event(MediaEvent::ScanStarted {
-            scan_id,
-        })
-        .await;
+        self.send_media_event(MediaEvent::ScanStarted { scan_id })
+            .await;
 
         // Create streaming scanner v2
         let config = StreamingScannerConfig {
@@ -154,7 +173,11 @@ impl ScanManager {
                     .await;
 
                 // Run the scan
-                if let Err(e) = scanner_clone.clone().scan_library(library_ref, output_tx.clone()).await {
+                if let Err(e) = scanner_clone
+                    .clone()
+                    .scan_library(library_ref, output_tx.clone())
+                    .await
+                {
                     error!("Scan failed: {}", e);
                     scan_manager_in
                         .update_progress(&scan_id, |p| {
@@ -167,15 +190,11 @@ impl ScanManager {
             }
         });
 
-
-
-
         // Process scan output events
         let scan_manager_out = Arc::new(self.clone());
         let db_out = self.db.clone();
 
         tokio::spawn(async move {
-
             while let Some(output) = output_rx.recv().await {
                 match output {
                     ScanOutput::MovieFound(movie) => {
@@ -236,23 +255,27 @@ impl ScanManager {
                         let series_id_str = episode.series_id.as_str(&mut buff2);
 
                         // Store episode in database
-                        match db_out.backend().store_episode_reference(&episode).await { Err(e) => {
-                            error!("Failed to store episode reference: {}. Episode: {} S{}E{} for series {}",
-                                  e,
-                                  episode_id_str,
-                                  episode.season_number.value(),
-                                  episode.episode_number.value(),
-                                  series_id_str
-                            );
-                        } _ => {
-                            info!(
-                                "Stored episode {} S{}E{} for series {}",
-                                episode_id_str,
-                                episode.season_number.value(),
-                                episode.episode_number.value(),
-                                series_id_str
-                            );
-                        }}
+                        match db_out.backend().store_episode_reference(&episode).await {
+                            Err(e) => {
+                                error!(
+                                    "Failed to store episode reference: {}. Episode: {} S{}E{} for series {}",
+                                    e,
+                                    episode_id_str,
+                                    episode.season_number.value(),
+                                    episode.episode_number.value(),
+                                    series_id_str
+                                );
+                            }
+                            _ => {
+                                info!(
+                                    "Stored episode {} S{}E{} for series {}",
+                                    episode_id_str,
+                                    episode.season_number.value(),
+                                    episode.episode_number.value(),
+                                    series_id_str
+                                );
+                            }
+                        }
 
                         scan_manager_out
                             .send_media_event(MediaEvent::EpisodeAdded { episode })
@@ -273,14 +296,8 @@ impl ScanManager {
                             })
                             .await;
                     }
-                    ScanOutput::ScanComplete {
-                        duration_secs,
-                        ..
-                    } => {
-                        info!(
-                            "Scan {} completed in {}s",
-                            scan_id, duration_secs
-                        );
+                    ScanOutput::ScanComplete { duration_secs, .. } => {
+                        info!("Scan {} completed in {}s", scan_id, duration_secs);
 
                         scan_manager_out
                             .update_progress(&scan_id, |p| {
@@ -298,11 +315,8 @@ impl ScanManager {
                             .await;
 
                         // Move to history
-                        if let Some(progress) = scan_manager_out
-                            .active_scans
-                            .write()
-                            .await
-                            .remove(&scan_id)
+                        if let Some(progress) =
+                            scan_manager_out.active_scans.write().await.remove(&scan_id)
                         {
                             scan_manager_out.scan_history.write().await.push(progress);
                         }

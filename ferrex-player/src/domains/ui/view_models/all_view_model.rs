@@ -6,12 +6,10 @@ use uuid::Uuid;
 
 use super::{ViewModel, VisibleItems};
 use crate::{
-    domains::{
-        ui::views::carousel::CarouselState,
-    },
+    domains::ui::views::carousel::CarouselState,
     infrastructure::{
-        repository::accessor::{Accessor, ReadOnly},
         api_types::{MediaID, MovieReference, SeriesReference},
+        repository::accessor::{Accessor, ReadOnly},
     },
 };
 

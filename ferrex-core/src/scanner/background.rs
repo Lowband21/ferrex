@@ -135,21 +135,36 @@ impl BackgroundScanner {
                                     debug!("Processing file watch event: {:?}", event);
 
                                     match event.event_type {
-                                        FileWatchEventType::Created | FileWatchEventType::Modified | FileWatchEventType::Moved => {
+                                        FileWatchEventType::Created
+                                        | FileWatchEventType::Modified
+                                        | FileWatchEventType::Moved => {
                                             let path = std::path::Path::new(&event.file_path);
                                             let folder = match library.library_type {
                                                 crate::LibraryType::Movies => {
-                                                    if path.is_file() { path.parent().map(|p| p.to_path_buf()) } else { Some(path.to_path_buf()) }
+                                                    if path.is_file() {
+                                                        path.parent().map(|p| p.to_path_buf())
+                                                    } else {
+                                                        Some(path.to_path_buf())
+                                                    }
                                                 }
-                                                crate::LibraryType::Series => self.find_series_root_folder(path),
+                                                crate::LibraryType::Series => {
+                                                    self.find_series_root_folder(path)
+                                                }
                                             };
-                                            if let Some(f) = folder { targets.insert(f); }
+                                            if let Some(f) = folder {
+                                                targets.insert(f);
+                                            }
 
                                             // If moved, handle deletion of old path
                                             if let FileWatchEventType::Moved = event.event_type {
                                                 if let Some(old_path) = &event.old_path {
-                                                    if let Err(e) = self.handle_file_deletion(old_path).await {
-                                                        error!("Failed to handle old path deletion {}: {}", old_path, e);
+                                                    if let Err(e) =
+                                                        self.handle_file_deletion(old_path).await
+                                                    {
+                                                        error!(
+                                                            "Failed to handle old path deletion {}: {}",
+                                                            old_path, e
+                                                        );
                                                     }
                                                 }
                                             }
@@ -192,14 +207,19 @@ impl BackgroundScanner {
 
                                 // Execute scans per unique folder
                                 for folder in targets {
-                                    if let Err(e) = self.scan_media_folder(&library, &folder.to_string_lossy()).await {
+                                    if let Err(e) = self
+                                        .scan_media_folder(&library, &folder.to_string_lossy())
+                                        .await
+                                    {
                                         error!("Failed to scan media folder {:?}: {}", folder, e);
                                     }
                                 }
 
                                 // Mark events as processed
                                 for event in events {
-                                    if let Err(e) = self.file_watcher.mark_event_processed(event.id).await {
+                                    if let Err(e) =
+                                        self.file_watcher.mark_event_processed(event.id).await
+                                    {
                                         error!("Failed to mark event as processed: {}", e);
                                     }
                                 }

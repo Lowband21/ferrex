@@ -26,7 +26,7 @@ pub enum Message {
     SeekRelative(f64),
     SeekRelease,
     SeekBarPressed,
-    SeekDone,     // Seek operation completed
+    SeekDone, // Seek operation completed
 
     // Volume
     SetVolume(f64),
@@ -76,15 +76,9 @@ pub enum Message {
 
     // External player status messages
     ExternalPlaybackStarted,
-    ExternalPlaybackUpdate {
-        position: f64,
-        duration: f64,
-    },
+    ExternalPlaybackUpdate { position: f64, duration: f64 },
     ExternalPlaybackEnded,
     PollExternalMpv,
-
-    // Periodic progress heartbeat (internal player)
-    ProgressHeartbeat,
 }
 
 impl fmt::Debug for Message {
@@ -94,7 +88,9 @@ impl fmt::Debug for Message {
         match self {
             // Media control
             Message::PlayMedia(media) => write!(f, "PlayMedia({:?})", media),
-            Message::PlayMediaWithId(media, id) => write!(f, "PlayMediaWithId({:?}, {:?})", media, id),
+            Message::PlayMediaWithId(media, id) => {
+                write!(f, "PlayMediaWithId({:?}, {:?})", media, id)
+            }
             Message::NavigateBack => write!(f, "NavigateBack"),
             Message::NavigateHome => write!(f, "NavigateHome"),
 
@@ -161,11 +157,14 @@ impl fmt::Debug for Message {
             Message::CheckControlsVisibility => write!(f, "CheckControlsVisibility"),
             Message::ExternalPlaybackStarted => write!(f, "ExternalPlaybackStarted"),
             Message::ExternalPlaybackUpdate { position, duration } => {
-                write!(f, "ExternalPlaybackUpdate {{ position: {}, duration: {} }}", position, duration)
+                write!(
+                    f,
+                    "ExternalPlaybackUpdate {{ position: {}, duration: {} }}",
+                    position, duration
+                )
             }
             Message::ExternalPlaybackEnded => write!(f, "ExternalPlaybackEnded"),
             Message::PollExternalMpv => write!(f, "PollExternalMpv"),
-            Message::ProgressHeartbeat => write!(f, "ProgressHeartbeat"),
 
             // External MPV player messages
             #[cfg(feature = "external-mpv-player")]

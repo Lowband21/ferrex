@@ -272,7 +272,9 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::M
                 message: format!("{}", e),
             };
             state.domains.player.state.is_loading_video = false;
-            Task::done(crate::domains::player::messages::Message::VideoLoaded(false))
+            Task::done(crate::domains::player::messages::Message::VideoLoaded(
+                false,
+            ))
         }
     }
 }

@@ -10,12 +10,12 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::infrastructure::ApiClient;
 use crate::infrastructure::api_client::SetupStatus;
 use crate::infrastructure::constants::routes;
 use crate::infrastructure::constants::routes::utils::replace_param;
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::api::ApiService;
-use crate::infrastructure::ApiClient;
 use ferrex_core::auth::device::AuthenticatedDevice;
 use ferrex_core::types::library::Library;
 use ferrex_core::user::{AuthToken, User};
@@ -127,21 +127,23 @@ impl ApiService for ApiClientAdapter {
     }
 
     async fn scan_all_libraries(&self, force_refresh: bool) -> RepositoryResult<ScanResponse> {
-        let response: ScanResponse = self
-            .put(
-                &"/libraries/scan",
-                &force_refresh,
-            )
-            .await?;
+        let response: ScanResponse = self.put(&"/libraries/scan", &force_refresh).await?;
 
         Ok(response)
     }
 
-    async fn scan_library(&self, library_id: LibraryID, force_refresh: bool) -> RepositoryResult<ScanResponse> {
+    async fn scan_library(
+        &self,
+        library_id: LibraryID,
+        force_refresh: bool,
+    ) -> RepositoryResult<ScanResponse> {
         let response: ScanResponse = self
             .post(
                 &"/library/scan",
-                &ScanRequest { library_id, force_refresh },
+                &ScanRequest {
+                    library_id,
+                    force_refresh,
+                },
             )
             .await?;
 

@@ -23,6 +23,12 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
             DomainUpdateResult::task(Task::none())
         }
 
+        Message::WatchProgressFetched(_media_id, _resume_position) => {
+            // This message is for future use when we fetch watch progress asynchronously
+            // Currently handled synchronously in PlayMediaWithId
+            DomainUpdateResult::task(Task::none())
+        }
+
         /* TODO: Reimplement this in player domain
         Message::PlayNextEpisode => {
             // Check if current media is an episode and play the next one
@@ -66,7 +72,6 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
             }
             DomainUpdateResult::task(Task::none())
         }*/
-
         // Handle watch progress tracking
         Message::ProgressUpdateSent(id, position, duration) => {
             // Update the last sent position

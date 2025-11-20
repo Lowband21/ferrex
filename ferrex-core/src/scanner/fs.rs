@@ -59,7 +59,7 @@ impl FileSystem for RealFs {
         let md = tokio::fs::metadata(path)
             .await
             .map_err(|e| format!("metadata failed for {:?}: {}", path, e))?;
-Ok(FsMetadata {
+        Ok(FsMetadata {
             is_dir: md.is_dir(),
             is_file: md.is_file(),
             len: md.len(),
@@ -98,7 +98,9 @@ enum Node {
 
 impl InMemoryFs {
     pub fn new() -> Self {
-        Self { nodes: HashMap::new() }
+        Self {
+            nodes: HashMap::new(),
+        }
     }
 
     pub fn add_dir<P: Into<PathBuf>>(&mut self, path: P) {
@@ -107,7 +109,12 @@ impl InMemoryFs {
             return;
         }
         self.ensure_parent_link(&path);
-        self.nodes.insert(path, Node::Dir { children: Vec::new() });
+        self.nodes.insert(
+            path,
+            Node::Dir {
+                children: Vec::new(),
+            },
+        );
     }
 
     pub fn add_file<P: Into<PathBuf>>(&mut self, path: P, len: u64) {
@@ -120,8 +127,12 @@ impl InMemoryFs {
         if let Some(parent) = path.parent() {
             // Ensure parent directory exists
             if !self.nodes.contains_key(parent) {
-                self.nodes
-                    .insert(parent.to_path_buf(), Node::Dir { children: Vec::new() });
+                self.nodes.insert(
+                    parent.to_path_buf(),
+                    Node::Dir {
+                        children: Vec::new(),
+                    },
+                );
                 // Recurse to ensure its parent exists
                 self.ensure_parent_link(parent);
             }
@@ -143,9 +154,9 @@ impl FileSystem for InMemoryFs {
 
     async fn read_dir(&self, path: &Path) -> Result<Box<dyn ReadDirStream + Send>, String> {
         match self.nodes.get(path) {
-            Some(Node::Dir { children }) => {
-                Ok(Box::new(InMemReadDir { queue: children.clone().into() }))
-            }
+            Some(Node::Dir { children }) => Ok(Box::new(InMemReadDir {
+                queue: children.clone().into(),
+            })),
             Some(Node::File { .. }) => Err(format!("read_dir on file: {:?}", path)),
             None => Err(format!("read_dir on missing path: {:?}", path)),
         }
@@ -153,8 +164,18 @@ impl FileSystem for InMemoryFs {
 
     async fn metadata(&self, path: &Path) -> Result<FsMetadata, String> {
         match self.nodes.get(path) {
-Some(Node::Dir { .. }) => Ok(FsMetadata { is_dir: true, is_file: false, len: 0, modified: None }),
-            Some(Node::File { len }) => Ok(FsMetadata { is_dir: false, is_file: true, len: *len, modified: None }),
+            Some(Node::Dir { .. }) => Ok(FsMetadata {
+                is_dir: true,
+                is_file: false,
+                len: 0,
+                modified: None,
+            }),
+            Some(Node::File { len }) => Ok(FsMetadata {
+                is_dir: false,
+                is_file: true,
+                len: *len,
+                modified: None,
+            }),
             None => Err(format!("metadata on missing path: {:?}", path)),
         }
     }

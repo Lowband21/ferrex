@@ -56,7 +56,11 @@ pub trait ApiService: Send + Sync {
     async fn fetch_library_media(&self, library_id: Uuid) -> RepositoryResult<Vec<Media>>;
 
     /// Start a library scan
-    async fn scan_library(&self, library_id: LibraryID, force_refresh: bool) -> RepositoryResult<ScanResponse>;
+    async fn scan_library(
+        &self,
+        library_id: LibraryID,
+        force_refresh: bool,
+    ) -> RepositoryResult<ScanResponse>;
 
     async fn scan_all_libraries(&self, force_refresh: bool) -> RepositoryResult<ScanResponse>;
 

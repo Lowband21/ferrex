@@ -54,14 +54,8 @@ pub use ferrex_core::{
 };
 
 pub use ferrex_core::api_types::{
-    ApiResponse,
-    BatchMediaRequest,
-    BatchMediaResponse,
-    CreateLibraryRequest,
-    FetchMediaRequest,
-    LibraryMediaCache,
-    LibraryMediaResponse,
-    UpdateLibraryRequest,
+    ApiResponse, BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest, FetchMediaRequest,
+    LibraryMediaCache, LibraryMediaResponse, UpdateLibraryRequest,
 };
 
 pub use ferrex_core::types::library::Library;

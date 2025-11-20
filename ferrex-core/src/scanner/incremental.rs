@@ -224,7 +224,10 @@ impl IncrementalScanner {
         }
 
         // Skip full library sweep here; incremental scan processes deltas only
-        info!("Incremental scan completed for library {} (deltas only)", library.name);
+        info!(
+            "Incremental scan completed for library {} (deltas only)",
+            library.name
+        );
         Ok(())
     }
 

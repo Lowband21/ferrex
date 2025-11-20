@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tokio::time::{interval, MissedTickBehavior};
+use tokio::time::{MissedTickBehavior, interval};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -59,7 +59,7 @@ pub struct FolderMonitor {
 }
 
 impl FolderMonitor {
-/// Create a new FolderMonitor instance
+    /// Create a new FolderMonitor instance
     pub fn new(
         database: Arc<dyn MediaDatabaseTrait>,
         libraries: Arc<RwLock<Vec<Library>>>,
@@ -178,17 +178,20 @@ impl FolderMonitor {
                 library.name, library.id, library.library_type
             );
 
-            match self.update_library_inventory(&library).await { Err(e) => {
-                error!(
-                    "Failed to update inventory for library {} (ID: {}): {}",
-                    library.name, library.id, e
-                );
-            } _ => {
-                info!(
-                    "Successfully updated inventory for library: {} (ID: {})",
-                    library.name, library.id
-                );
-            }}
+            match self.update_library_inventory(&library).await {
+                Err(e) => {
+                    error!(
+                        "Failed to update inventory for library {} (ID: {}): {}",
+                        library.name, library.id, e
+                    );
+                }
+                _ => {
+                    info!(
+                        "Successfully updated inventory for library: {} (ID: {})",
+                        library.name, library.id
+                    );
+                }
+            }
 
             // Process folders needing scan
             if let Err(e) = self.process_pending_folders(&library).await {
@@ -262,8 +265,8 @@ impl FolderMonitor {
                 continue;
             }
 
-
-            self.traverse_movie_directory(library.id, path, None).await?;
+            self.traverse_movie_directory(library.id, path, None)
+                .await?;
         }
 
         Ok(())
@@ -277,13 +280,12 @@ impl FolderMonitor {
         parent_id: Option<Uuid>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
-            let mut entries = self
-                .fs
-                .read_dir(dir)
-                .await
-                .map_err(|e| MediaError::Internal(format!("Failed to read directory {:?}: {}", dir, e)))?;
+            let mut entries = self.fs.read_dir(dir).await.map_err(|e| {
+                MediaError::Internal(format!("Failed to read directory {:?}: {}", dir, e))
+            })?;
 
-            let mut video_files: Vec<(std::path::PathBuf, u64, Option<std::time::SystemTime>)> = Vec::new();
+            let mut video_files: Vec<(std::path::PathBuf, u64, Option<std::time::SystemTime>)> =
+                Vec::new();
             let mut subdirs = Vec::new();
 
             while let Some(path) = entries
@@ -291,13 +293,12 @@ impl FolderMonitor {
                 .await
                 .map_err(|e| MediaError::Internal(format!("Failed to read entry: {}", e)))?
             {
-                let metadata = self
-                    .fs
-                    .metadata(&path)
-                    .await
-                    .map_err(|e| MediaError::Internal(format!("Failed to get metadata: {}", e)))?;
+                let metadata =
+                    self.fs.metadata(&path).await.map_err(|e| {
+                        MediaError::Internal(format!("Failed to get metadata: {}", e))
+                    })?;
 
-if metadata.is_dir {
+                if metadata.is_dir {
                     subdirs.push(path);
                 } else if metadata.is_file {
                     if let Some(ext) = path.extension() {
@@ -326,51 +327,74 @@ if metadata.is_dir {
                 .map(|ext| ext.to_string_lossy().to_lowercase())
                 .collect();
             // Compute max modified time across video files
-            let max_mtime = video_files
-                .iter()
-                .filter_map(|(_, _, m)| *m)
-                .max();
+            let max_mtime = video_files.iter().filter_map(|(_, _, m)| *m).max();
             let max_mtime_utc = max_mtime.and_then(|t| {
                 let dur = t.duration_since(std::time::UNIX_EPOCH).ok()?;
-                chrono::DateTime::<chrono::Utc>::from_timestamp(dur.as_secs() as i64, dur.subsec_nanos())
+                chrono::DateTime::<chrono::Utc>::from_timestamp(
+                    dur.as_secs() as i64,
+                    dur.subsec_nanos(),
+                )
             });
 
             // Fetch existing folder (if any) to decide status
             let existing = self.database.get_folder_by_path(library_id, dir).await?;
 
             // Decide processing status and carry-forward fields
-            let (id, processing_status, processed_files, last_processed_at, processing_attempts, next_retry_at, processing_error) =
-                if let Some(existing) = existing {
-                    // Normalize file_types for stable comparison
-                    let mut new_types_vec: Vec<String> = file_types.iter().cloned().collect();
-                    new_types_vec.sort();
-                    let mut existing_types = existing.file_types.clone();
-                    existing_types.sort();
+            let (
+                id,
+                processing_status,
+                processed_files,
+                last_processed_at,
+                processing_attempts,
+                next_retry_at,
+                processing_error,
+            ) = if let Some(existing) = existing {
+                // Normalize file_types for stable comparison
+                let mut new_types_vec: Vec<String> = file_types.iter().cloned().collect();
+                new_types_vec.sort();
+                let mut existing_types = existing.file_types.clone();
+                existing_types.sort();
 
-                    let changed = existing.total_files != video_files.len() as i32
-                        || existing.total_size_bytes != total_size
-                        || existing_types != new_types_vec
-                        || match (max_mtime_utc, existing.last_modified) {
-                            (Some(new_m), Some(old_m)) => new_m > old_m,
-                            (Some(_), None) => true,
-                            _ => false,
-                        };
-                    if changed {
-                        (existing.id, FolderProcessingStatus::Pending, 0, existing.last_processed_at, existing.processing_attempts, None, None)
-                    } else {
-                        (
-                            existing.id,
-                            existing.processing_status,
-                            existing.processed_files,
-                            existing.last_processed_at,
-                            existing.processing_attempts,
-                            existing.next_retry_at,
-                            existing.processing_error,
-                        )
-                    }
+                let changed = existing.total_files != video_files.len() as i32
+                    || existing.total_size_bytes != total_size
+                    || existing_types != new_types_vec
+                    || match (max_mtime_utc, existing.last_modified) {
+                        (Some(new_m), Some(old_m)) => new_m > old_m,
+                        (Some(_), None) => true,
+                        _ => false,
+                    };
+                if changed {
+                    (
+                        existing.id,
+                        FolderProcessingStatus::Pending,
+                        0,
+                        existing.last_processed_at,
+                        existing.processing_attempts,
+                        None,
+                        None,
+                    )
                 } else {
-                    (Uuid::now_v7(), FolderProcessingStatus::Pending, 0, None, 0, None, None)
-                };
+                    (
+                        existing.id,
+                        existing.processing_status,
+                        existing.processed_files,
+                        existing.last_processed_at,
+                        existing.processing_attempts,
+                        existing.next_retry_at,
+                        existing.processing_error,
+                    )
+                }
+            } else {
+                (
+                    Uuid::now_v7(),
+                    FolderProcessingStatus::Pending,
+                    0,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+            };
 
             let folder_inventory = FolderInventory {
                 id,
@@ -417,7 +441,7 @@ if metadata.is_dir {
 
     /// Inventory TV show folders in the library
     async fn inventory_tv_folders(&self, library: &Library) -> Result<()> {
-for path in &library.paths {
+        for path in &library.paths {
             if !self.fs.path_exists(path).await {
                 warn!("Library path does not exist: {}", path.display());
                 continue;
@@ -440,13 +464,12 @@ for path in &library.paths {
         depth: usize,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
-let mut entries = self
-                .fs
-                .read_dir(dir)
-                .await
-                .map_err(|e| MediaError::Internal(format!("Failed to read directory {:?}: {}", dir, e)))?;
+            let mut entries = self.fs.read_dir(dir).await.map_err(|e| {
+                MediaError::Internal(format!("Failed to read directory {:?}: {}", dir, e))
+            })?;
 
-            let mut video_files: Vec<(std::path::PathBuf, u64, Option<std::time::SystemTime>)> = Vec::new();
+            let mut video_files: Vec<(std::path::PathBuf, u64, Option<std::time::SystemTime>)> =
+                Vec::new();
             let mut subdirs = Vec::new();
 
             while let Some(path) = entries
@@ -454,13 +477,12 @@ let mut entries = self
                 .await
                 .map_err(|e| MediaError::Internal(format!("Failed to read entry: {}", e)))?
             {
-                let metadata = self
-                    .fs
-                    .metadata(&path)
-                    .await
-                    .map_err(|e| MediaError::Internal(format!("Failed to get metadata: {}", e)))?;
+                let metadata =
+                    self.fs.metadata(&path).await.map_err(|e| {
+                        MediaError::Internal(format!("Failed to get metadata: {}", e))
+                    })?;
 
-if metadata.is_dir {
+                if metadata.is_dir {
                     subdirs.push(path);
                 } else if metadata.is_file {
                     if let Some(ext) = path.extension() {
@@ -497,51 +519,74 @@ if metadata.is_dir {
                 .map(|ext| ext.to_string_lossy().to_lowercase())
                 .collect();
             // Compute max modified time across video files
-            let max_mtime = video_files
-                .iter()
-                .filter_map(|(_, _, m)| *m)
-                .max();
+            let max_mtime = video_files.iter().filter_map(|(_, _, m)| *m).max();
             let max_mtime_utc = max_mtime.and_then(|t| {
                 let dur = t.duration_since(std::time::UNIX_EPOCH).ok()?;
-                chrono::DateTime::<chrono::Utc>::from_timestamp(dur.as_secs() as i64, dur.subsec_nanos())
+                chrono::DateTime::<chrono::Utc>::from_timestamp(
+                    dur.as_secs() as i64,
+                    dur.subsec_nanos(),
+                )
             });
 
             // Fetch existing folder (if any) to decide status
             let existing = self.database.get_folder_by_path(library_id, dir).await?;
 
             // Decide processing status and carry-forward fields
-            let (id, processing_status, processed_files, last_processed_at, processing_attempts, next_retry_at, processing_error) =
-                if let Some(existing) = existing {
-                    // Normalize file_types for stable comparison
-                    let mut new_types_vec: Vec<String> = file_types.iter().cloned().collect();
-                    new_types_vec.sort();
-                    let mut existing_types = existing.file_types.clone();
-                    existing_types.sort();
+            let (
+                id,
+                processing_status,
+                processed_files,
+                last_processed_at,
+                processing_attempts,
+                next_retry_at,
+                processing_error,
+            ) = if let Some(existing) = existing {
+                // Normalize file_types for stable comparison
+                let mut new_types_vec: Vec<String> = file_types.iter().cloned().collect();
+                new_types_vec.sort();
+                let mut existing_types = existing.file_types.clone();
+                existing_types.sort();
 
-                    let changed = existing.total_files != video_files.len() as i32
-                        || existing.total_size_bytes != total_size
-                        || existing_types != new_types_vec
-                        || match (max_mtime_utc, existing.last_modified) {
-                            (Some(new_m), Some(old_m)) => new_m > old_m,
-                            (Some(_), None) => true,
-                            _ => false,
-                        };
-                    if changed {
-                        (existing.id, FolderProcessingStatus::Pending, 0, existing.last_processed_at, existing.processing_attempts, None, None)
-                    } else {
-                        (
-                            existing.id,
-                            existing.processing_status,
-                            existing.processed_files,
-                            existing.last_processed_at,
-                            existing.processing_attempts,
-                            existing.next_retry_at,
-                            existing.processing_error,
-                        )
-                    }
+                let changed = existing.total_files != video_files.len() as i32
+                    || existing.total_size_bytes != total_size
+                    || existing_types != new_types_vec
+                    || match (max_mtime_utc, existing.last_modified) {
+                        (Some(new_m), Some(old_m)) => new_m > old_m,
+                        (Some(_), None) => true,
+                        _ => false,
+                    };
+                if changed {
+                    (
+                        existing.id,
+                        FolderProcessingStatus::Pending,
+                        0,
+                        existing.last_processed_at,
+                        existing.processing_attempts,
+                        None,
+                        None,
+                    )
                 } else {
-                    (Uuid::new_v4(), FolderProcessingStatus::Pending, 0, None, 0, None, None)
-                };
+                    (
+                        existing.id,
+                        existing.processing_status,
+                        existing.processed_files,
+                        existing.last_processed_at,
+                        existing.processing_attempts,
+                        existing.next_retry_at,
+                        existing.processing_error,
+                    )
+                }
+            } else {
+                (
+                    Uuid::new_v4(),
+                    FolderProcessingStatus::Pending,
+                    0,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+            };
 
             let folder_inventory = FolderInventory {
                 id,

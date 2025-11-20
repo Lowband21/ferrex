@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::{info, warn};
 
-use crate::users::user_service::CreateUserParams;
 use crate::users::UserService;
+use crate::users::user_service::CreateUserParams;
 use crate::{
     errors::{AppError, AppResult},
     AppState,

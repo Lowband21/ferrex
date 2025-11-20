@@ -8,11 +8,11 @@ pub mod library;
 pub mod media;
 pub mod media_id;
 pub mod numbers;
+pub mod scan;
 pub mod titles;
 pub mod transcoding;
 pub mod urls;
 pub mod util_types;
-pub mod scan;
 
 // Re-export everything from submodules
 pub use details::*;
@@ -23,8 +23,8 @@ pub use library::*;
 pub use media::*;
 pub use media_id::*;
 pub use numbers::*;
+pub use scan::*;
 pub use titles::*;
 pub use transcoding::*;
 pub use urls::*;
 pub use util_types::*;
-pub use scan::*;

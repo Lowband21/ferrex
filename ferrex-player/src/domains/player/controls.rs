@@ -198,10 +198,16 @@ impl PlayerDomainState {
 
     /// Build the main control buttons
     fn build_control_buttons(&self) -> Element<Message> {
-        //// Use source duration if available (for HLS this is the full media duration)
-        //let duration = self.source_duration.unwrap_or(self.last_valid_duration);
-        // HLS not currently functional
-        let duration = self.last_valid_duration;
+        // Use source duration if available (for HLS this is the full media duration)
+        let duration = self.source_duration.unwrap_or(self.last_valid_duration);
+
+        //log::debug!(
+        //    "Building control buttons - position: {:.2}s, duration: {:.2}s, source_duration: {:?}",
+        //    self.position,
+        //    self.last_valid_duration,
+        //    self.source_duration
+        //);
+
         {
             // Build a Wayland-only backend toggle element
             let backend_toggle: Element<Message, Theme> =

@@ -128,9 +128,9 @@ pub enum Message {
     AggregateAllLibraries, // Signal to aggregate all libraries
 
     // Library management proxies
-    ShowLibraryForm(Option<ferrex_core::types::library::Library>),// Proxy for Library::ShowLibraryForm
+    ShowLibraryForm(Option<ferrex_core::types::library::Library>), // Proxy for Library::ShowLibraryForm
     HideLibraryForm,                       // Proxy for Library::HideLibraryForm
-    ScanLibrary(LibraryID),               // Proxy for Library::ScanLibrary_
+    ScanLibrary(LibraryID),                // Proxy for Library::ScanLibrary_
     DeleteLibrary(LibraryID),              // Proxy for Library::DeleteLibrary
     UpdateLibraryFormName(String),         // Proxy for Library::UpdateLibraryFormName
     UpdateLibraryFormType(String),         // Proxy for Library::UpdateLibraryFormType

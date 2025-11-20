@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ferrex_core::database::traits::MediaDatabaseTrait;
 use ferrex_core::database::PostgresDatabase;
+use ferrex_core::database::traits::MediaDatabaseTrait;
+use ferrex_core::providers::TmdbApiProvider;
 use ferrex_core::scanner::{
-    apply_plan_to_inmemory_fs, FolderMonitor, FolderMonitorConfig, InMemoryFs, TmdbFolderGenerator,
+    FolderMonitor, FolderMonitorConfig, InMemoryFs, TmdbFolderGenerator, apply_plan_to_inmemory_fs,
 };
 use ferrex_core::scanner::{GeneratedNode, StructurePlan};
-use ferrex_core::providers::TmdbApiProvider;
 use ferrex_core::{Library, LibraryID, LibraryType};
 use tokio::sync::RwLock;
 

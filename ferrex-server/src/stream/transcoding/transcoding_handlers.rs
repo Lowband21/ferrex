@@ -14,7 +14,12 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::{
-    stream::transcoding::{self, job::{JobPriority, JobType}, profiles::{self, TranscodingProfile}, TranscodingService}, AppState
+    AppState,
+    stream::transcoding::{
+        self, TranscodingService,
+        job::{JobPriority, JobType},
+        profiles::{self, TranscodingProfile},
+    },
 };
 
 // HLS Streaming handlers
@@ -560,8 +565,7 @@ pub async fn transcode_status_handler(
 
         // Get latest progress information if available
         // For master jobs, we need to aggregate progress from variant jobs
-        let progress_details = if matches!(&job.job_type, JobType::Master { .. })
-        {
+        let progress_details = if matches!(&job.job_type, JobType::Master { .. }) {
             state
                 .transcoding_service
                 .get_master_job_progress(&job_id)
@@ -585,17 +589,11 @@ pub async fn transcode_status_handler(
                     progress: *progress,
                 }
             }
-            TranscodingStatus::Completed => {
-                ferrex_core::TranscodingStatus::Completed
-            }
-            TranscodingStatus::Failed { error } => {
-                ferrex_core::TranscodingStatus::Failed {
-                    error: error.clone(),
-                }
-            }
-            TranscodingStatus::Cancelled => {
-                ferrex_core::TranscodingStatus::Cancelled
-            }
+            TranscodingStatus::Completed => ferrex_core::TranscodingStatus::Completed,
+            TranscodingStatus::Failed { error } => ferrex_core::TranscodingStatus::Failed {
+                error: error.clone(),
+            },
+            TranscodingStatus::Cancelled => ferrex_core::TranscodingStatus::Cancelled,
         };
 
         // Log progress details for debugging

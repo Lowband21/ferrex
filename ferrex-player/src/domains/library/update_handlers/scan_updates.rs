@@ -20,10 +20,10 @@ pub fn handle_scan_library(
     let api_service = state.api_service.clone();
     Task::perform(
         start_scan_library(api_service, library_id, false),
-        | result | match result {
+        |result| match result {
             Ok(scan_id) => Message::ScanStarted(scan_id),
-            Err(e) => Message::NoOp,//Message::ScanErrored(e.to_string()), // TODO: This is failing silently, we need to handle the error properly with a new message that indicates the failure
-        }
+            Err(e) => Message::NoOp, //Message::ScanErrored(e.to_string()), // TODO: This is failing silently, we need to handle the error properly with a new message that indicates the failure
+        },
     )
 }
 
@@ -34,10 +34,10 @@ pub fn handle_scan_all_libraries(state: &mut State) -> Task<Message> {
 
     Task::perform(
         start_scan_all_libraries(api_service, false),
-        | result | match result {
+        |result| match result {
             Ok(scan_id) => Message::ScanStarted(scan_id),
-            Err(e) => Message::NoOp,//Message::ScanErrored(e.to_string()), // TODO: This is failing silently, we need to handle the error properly with a new message that indicates the failure
-        }
+            Err(e) => Message::NoOp, //Message::ScanErrored(e.to_string()), // TODO: This is failing silently, we need to handle the error properly with a new message that indicates the failure
+        },
     )
 }
 
@@ -50,17 +50,17 @@ pub fn handle_force_rescan(state: &mut State) -> Task<Message> {
         start_scan_all_libraries(api_service, false),
         |result| match result {
             Ok(scan_id) => Message::ScanStarted(scan_id),
-            Err(e) => Message::NoOp,//Message::ScanErrored(e.to_string()), // TODO: This is failing silently, we need to handle the error properly with a new message that indicates the failure
+            Err(e) => Message::NoOp, //Message::ScanErrored(e.to_string()), // TODO: This is failing silently, we need to handle the error properly with a new message that indicates the failure
         },
     )
 }
 
 pub fn handle_scan_started(state: &mut State, scan_id: Uuid) -> Task<Message> {
-            log::info!("Scan started with ID: {}", scan_id);
-            state.domains.library.state.active_scan_id = Some(scan_id);
-            state.domains.library.state.show_scan_progress = true; // Auto-show progress overlay
+    log::info!("Scan started with ID: {}", scan_id);
+    state.domains.library.state.active_scan_id = Some(scan_id);
+    state.domains.library.state.show_scan_progress = true; // Auto-show progress overlay
 
-            Task::none()
+    Task::none()
 }
 
 pub fn handle_scan_progress_update(state: &mut State, progress: ScanProgress) -> Task<Message> {
@@ -75,7 +75,10 @@ pub fn handle_scan_progress_update(state: &mut State, progress: ScanProgress) ->
         progress.series_scanned,
         progress.seasons_scanned,
         progress.episodes_scanned,
-        progress.estimated_time_remaining.unwrap_or(Duration::ZERO).as_secs()
+        progress
+            .estimated_time_remaining
+            .unwrap_or(Duration::ZERO)
+            .as_secs()
     );
     log::info!(
         "Scan progress state - show_scan_progress: {}, active_scan_id: {:?}",
@@ -124,8 +127,8 @@ pub fn handle_scan_progress_update(state: &mut State, progress: ScanProgress) ->
             Task::none()
         }
     } else {
-            Task::none()
-        }
+        Task::none()
+    }
 }
 
 pub fn handle_clear_scan_progress(state: &mut State) -> Task<Message> {

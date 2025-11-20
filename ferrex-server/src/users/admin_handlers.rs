@@ -7,7 +7,7 @@ use ferrex_core::{api_types::ApiResponse, user::User};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{errors::AppResult, users::role_handlers, AppState};
+use crate::{AppState, errors::AppResult, users::role_handlers};
 
 /// Request to assign roles to a user
 #[derive(Debug, Deserialize)]

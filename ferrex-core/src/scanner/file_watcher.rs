@@ -4,14 +4,16 @@ use crate::{
 };
 use chrono::Utc;
 use notify::{Config, Event, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode, Watcher};
-use notify_debouncer_full::{new_debouncer, DebounceEventResult, DebouncedEvent, Debouncer, NoCache};
+use notify_debouncer_full::{
+    DebounceEventResult, DebouncedEvent, Debouncer, NoCache, new_debouncer,
+};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -51,48 +53,49 @@ impl FileWatcher {
             let db = self.db.clone();
 
             // Determine if any path is on a network filesystem
-            let use_poll = library
-                .paths
-                .iter()
-                .any(|p| is_network_filesystem(p));
+            let use_poll = library.paths.iter().any(|p| is_network_filesystem(p));
 
             if use_poll {
-                warn!("Using polling watcher for library {} due to network filesystem", library.name);
+                warn!(
+                    "Using polling watcher for library {} due to network filesystem",
+                    library.name
+                );
 
                 let mut watcher = PollWatcher::new(
                     {
                         let event_tx = event_tx.clone();
                         let db = db.clone();
-                        move |res: std::result::Result<Event, notify::Error>| {
-                            match res {
-                                Ok(event) => {
-                                    if let Some(watch_event) = Self::convert_notify_event(event, library_id)
-                                    {
-                                        debug!("[poll] File watch event: {:?}", watch_event);
+                        move |res: std::result::Result<Event, notify::Error>| match res {
+                            Ok(event) => {
+                                if let Some(watch_event) =
+                                    Self::convert_notify_event(event, library_id)
+                                {
+                                    debug!("[poll] File watch event: {:?}", watch_event);
 
-                                        if let Err(e) = event_tx.send(watch_event.clone()) {
-                                            error!("Failed to send file watch event: {}", e);
-                                        } else {
-                                            let db_clone = db.clone();
-                                            tokio::spawn(async move {
-                                                if let Err(e) = db_clone
-                                                    .backend()
-                                                    .create_file_watch_event(&watch_event)
-                                                    .await
-                                                {
-                                                    error!("Failed to persist file watch event: {}", e);
-                                                }
-                                            });
-                                        }
+                                    if let Err(e) = event_tx.send(watch_event.clone()) {
+                                        error!("Failed to send file watch event: {}", e);
+                                    } else {
+                                        let db_clone = db.clone();
+                                        tokio::spawn(async move {
+                                            if let Err(e) = db_clone
+                                                .backend()
+                                                .create_file_watch_event(&watch_event)
+                                                .await
+                                            {
+                                                error!("Failed to persist file watch event: {}", e);
+                                            }
+                                        });
                                     }
                                 }
-                                Err(e) => error!("Poll watch error: {:?}", e),
                             }
+                            Err(e) => error!("Poll watch error: {:?}", e),
                         }
                     },
                     Config::default().with_poll_interval(Duration::from_secs(600)),
                 )
-                .map_err(|e| crate::MediaError::Internal(format!("Failed to create poll watcher: {}", e)))?;
+                .map_err(|e| {
+                    crate::MediaError::Internal(format!("Failed to create poll watcher: {}", e))
+                })?;
 
                 for path in &library.paths {
                     match watcher.watch(path, RecursiveMode::Recursive) {
@@ -123,7 +126,9 @@ impl FileWatcher {
                             Ok(events) => {
                                 for de in events {
                                     // Try to map debounced event to our model via the underlying notify::Event
-                                    if let Some(watch_event) = Self::convert_debounced_event(&de, library_id) {
+                                    if let Some(watch_event) =
+                                        Self::convert_debounced_event(&de, library_id)
+                                    {
                                         debug!("[debounced] File watch event: {:?}", watch_event);
 
                                         if let Err(e) = event_tx_cb.send(watch_event.clone()) {
@@ -136,7 +141,10 @@ impl FileWatcher {
                                                     .create_file_watch_event(&watch_event)
                                                     .await
                                                 {
-                                                    error!("Failed to persist file watch event: {}", e);
+                                                    error!(
+                                                        "Failed to persist file watch event: {}",
+                                                        e
+                                                    );
                                                 }
                                             });
                                         }
@@ -144,14 +152,18 @@ impl FileWatcher {
                                 }
                             }
                             Err(errors) => {
-                                for e in errors { error!("Debouncer error: {}", e); }
+                                for e in errors {
+                                    error!("Debouncer error: {}", e);
+                                }
                             }
                         }
                     },
                 )
-                .map_err(|e| crate::MediaError::Internal(format!("Failed to create debouncer: {}", e)))?;
+                .map_err(|e| {
+                    crate::MediaError::Internal(format!("Failed to create debouncer: {}", e))
+                })?;
 
-for path in &library.paths {
+                for path in &library.paths {
                     match debouncer.watch(path, RecursiveMode::Recursive) {
                         Ok(_) => info!("Watching path: {}", path.display()),
                         Err(e) => {
@@ -276,7 +288,10 @@ for path in &library.paths {
     }
 
     /// Convert a debounced event (from notify-debouncer-full) to our FileWatchEvent
-    fn convert_debounced_event(event: &DebouncedEvent, library_id: LibraryID) -> Option<FileWatchEvent> {
+    fn convert_debounced_event(
+        event: &DebouncedEvent,
+        library_id: LibraryID,
+    ) -> Option<FileWatchEvent> {
         // Prefer to use the underlying notify::Event when available
         #[allow(deprecated)]
         let notify_event = &event.event;
@@ -366,7 +381,15 @@ fn is_network_filesystem(path: &Path) -> bool {
     if let Some((_mnt, fstype)) = best_match {
         // Common network filesystems
         let net_fs = [
-            "nfs", "nfs4", "cifs", "smbfs", "smb3", "smbfs", "afs", "sshfs", "fuse.sshfs",
+            "nfs",
+            "nfs4",
+            "cifs",
+            "smbfs",
+            "smb3",
+            "smbfs",
+            "afs",
+            "sshfs",
+            "fuse.sshfs",
         ];
         return net_fs.iter().any(|t| &fstype == t);
     }

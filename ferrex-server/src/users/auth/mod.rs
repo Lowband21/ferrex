@@ -3,10 +3,10 @@ pub mod device_simple;
 pub mod device_validation;
 pub mod handlers;
 pub mod jwt;
-pub mod tls;
 pub mod middleware;
 pub mod permission_middleware;
 pub mod pin_handlers;
+pub mod tls;
 pub mod user_preferences;
 
 pub use jwt::{generate_access_token, generate_refresh_token, validate_token, validate_token_sync};

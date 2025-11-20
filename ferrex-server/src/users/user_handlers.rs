@@ -14,7 +14,9 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::{
-    errors::{AppError, AppResult}, users::{user_service::UpdateUserParams, UserService}, AppState
+    AppState,
+    errors::{AppError, AppResult},
+    users::{UserService, user_service::UpdateUserParams},
 };
 
 /// Helper function to get the database pool

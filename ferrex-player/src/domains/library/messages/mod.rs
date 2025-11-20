@@ -2,9 +2,12 @@ pub mod media_events_subscription;
 pub mod scan_subscription;
 pub mod subscriptions;
 
-use crate::infrastructure::{api_types::{Library, Media, MediaID}, repository::RepositoryError};
+use crate::infrastructure::{
+    api_types::{Library, Media, MediaID},
+    repository::RepositoryError,
+};
 use ferrex_core::{
-    api_types::LibraryMediaResponse, LibraryID, MediaFile, MediaIDLike, ScanProgress, ScanResponse
+    LibraryID, MediaFile, MediaIDLike, ScanProgress, api_types::LibraryMediaResponse,
 };
 use rkyv::util::AlignedVec;
 use uuid::Uuid;

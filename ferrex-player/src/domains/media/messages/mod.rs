@@ -1,6 +1,6 @@
-use crate::infrastructure::MediaID;
-use ferrex_core::MediaFile;
+use ferrex_core::player_prelude::MediaID;
 
+pub mod subscriptions;
 
 #[derive(Clone)]
 pub enum Message {
@@ -8,7 +8,9 @@ pub enum Message {
     ProgressUpdateSent(MediaID, f64, f64), // Position that was successfully sent to server
     ProgressUpdateFailed,                  // Failed to send progress update
     SendProgressUpdateWithData(MediaID, f64, f64), // position, duration - captures data at message creation time
+    WatchProgressFetched(MediaID, Option<f32>), // Media ID and resume position
 
+    // No-op message for task chaining
     Noop,
 }
 
@@ -17,9 +19,15 @@ impl std::fmt::Debug for Message {
         match self {
             // Progress tracking
             Self::ProgressUpdateSent(id, pos, dur) => {
-                write!(f, "Message::ProgressUpdateSent({:?}, {}, {})", id, pos, dur)
+                write!(
+                    f,
+                    "Message::ProgressUpdateSent({:?}, {}, {})",
+                    id, pos, dur
+                )
             }
-            Self::ProgressUpdateFailed => write!(f, "Message::ProgressUpdateFailed"),
+            Self::ProgressUpdateFailed => {
+                write!(f, "Message::ProgressUpdateFailed")
+            }
             Self::SendProgressUpdateWithData(id, pos, dur) => {
                 write!(
                     f,
@@ -27,7 +35,9 @@ impl std::fmt::Debug for Message {
                     id, pos, dur
                 )
             }
-
+            Self::WatchProgressFetched(id, pos) => {
+                write!(f, "Message::WatchProgressFetched({:?}, {:?})", id, pos)
+            }
 
             // Internal
             Self::Noop => write!(f, "Message::Noop"),
@@ -42,8 +52,10 @@ impl Message {
             Self::ProgressUpdateSent(_, _, _) => "Media::ProgressUpdateSent",
             Self::ProgressUpdateFailed => "Media::ProgressUpdateFailed",
 
-            Self::SendProgressUpdateWithData(_, _, _) => "Media::SendProgressUpdateWithData",
-
+            Self::SendProgressUpdateWithData(_, _, _) => {
+                "Media::SendProgressUpdateWithData"
+            }
+            Self::WatchProgressFetched(_, _) => "Media::WatchProgressFetched",
 
             // Internal
             Self::Noop => "Media::Noop",

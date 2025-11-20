@@ -105,10 +105,7 @@ pub fn update(state: &mut State, message: DomainMessage) -> Task<DomainMessage> 
         DomainMessage::Media(media_msg) => update_media(state, media_msg),
 
         // Route player messages to the player domain handler
-        DomainMessage::Player(player_msg) => update_player(
-            state,
-            player_msg,
-        ),
+        DomainMessage::Player(player_msg) => update_player(state, player_msg),
 
         // Route metadata messages to the metadata domain handler
         DomainMessage::Metadata(metadata_msg) => update_metadata(state, metadata_msg),

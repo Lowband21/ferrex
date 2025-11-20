@@ -4,36 +4,28 @@ use anyhow::anyhow;
 use ferrex_core::{LibraryID, ScanProgress, ScanStatus};
 use uuid::Uuid;
 
-use crate::{infrastructure::{adapters::ApiClientAdapter, services::api::ApiService}, state_refactored::State};
+use crate::{
+    infrastructure::{adapters::ApiClientAdapter, services::api::ApiService},
+    state_refactored::State,
+};
 
 pub async fn start_scan_all_libraries(
     client: Arc<ApiClientAdapter>,
     force_rescan: bool,
 ) -> Result<Uuid, anyhow::Error> {
     match client.scan_all_libraries(false).await {
-        Ok(scan_response) => {
-            match (scan_response.status, scan_response.scan_id) {
-                (ScanStatus::Scanning, Some(scan_id)) => {
-                    Ok(scan_id)
-                }
-                (ScanStatus::Pending, Some(scan_id)) => {
-                    Ok(scan_id)
-                }
-                (ScanStatus::Completed, _) => {
-                    Err(anyhow!("Scan already completed"))
-                }
-                (ScanStatus::Failed, _) => {
-                    Err(anyhow!("Scan failed"))
-                }
-                (ScanStatus::Cancelled, _) => {
-                    Err(anyhow!("Scan cancelled"))
-                }
-                (_, _) => Err(anyhow!("Scan ID not found for Scanning or Pending scan status"))
-            }
-        }
+        Ok(scan_response) => match (scan_response.status, scan_response.scan_id) {
+            (ScanStatus::Scanning, Some(scan_id)) => Ok(scan_id),
+            (ScanStatus::Pending, Some(scan_id)) => Ok(scan_id),
+            (ScanStatus::Completed, _) => Err(anyhow!("Scan already completed")),
+            (ScanStatus::Failed, _) => Err(anyhow!("Scan failed")),
+            (ScanStatus::Cancelled, _) => Err(anyhow!("Scan cancelled")),
+            (_, _) => Err(anyhow!(
+                "Scan ID not found for Scanning or Pending scan status"
+            )),
+        },
         Err(e) => Err(anyhow!(e.to_string())),
     }
-
 }
 
 // Library-specific scan function
@@ -42,31 +34,18 @@ pub async fn start_scan_library(
     library_id: LibraryID,
     force_rescan: bool,
 ) -> Result<Uuid, anyhow::Error> {
-    log::info!(
-        "Starting library scan library_id: {}",
-        library_id,
-    );
+    log::info!("Starting library scan library_id: {}", library_id,);
     match client.scan_library(library_id, false).await {
-        Ok(scan_response) => {
-            match (scan_response.status, scan_response.scan_id) {
-                (ScanStatus::Scanning, Some(scan_id)) => {
-                    Ok(scan_id)
-                }
-                (ScanStatus::Pending, Some(scan_id)) => {
-                    Ok(scan_id)
-                }
-                (ScanStatus::Completed, _) => {
-                    Err(anyhow!("Scan already completed"))
-                }
-                (ScanStatus::Failed, _) => {
-                    Err(anyhow!("Scan failed"))
-                }
-                (ScanStatus::Cancelled, _) => {
-                    Err(anyhow!("Scan cancelled"))
-                }
-                (_, _) => Err(anyhow!("Scan ID not found for Scanning or Pending scan status"))
-            }
-        }
+        Ok(scan_response) => match (scan_response.status, scan_response.scan_id) {
+            (ScanStatus::Scanning, Some(scan_id)) => Ok(scan_id),
+            (ScanStatus::Pending, Some(scan_id)) => Ok(scan_id),
+            (ScanStatus::Completed, _) => Err(anyhow!("Scan already completed")),
+            (ScanStatus::Failed, _) => Err(anyhow!("Scan failed")),
+            (ScanStatus::Cancelled, _) => Err(anyhow!("Scan cancelled")),
+            (_, _) => Err(anyhow!(
+                "Scan ID not found for Scanning or Pending scan status"
+            )),
+        },
         Err(e) => Err(anyhow!(e.to_string())),
     }
 }

@@ -34,7 +34,12 @@ use axum::extract::ConnectInfo;
 use std::net::SocketAddr;
 
 use crate::{
-    errors::{AppError, AppResult}, users::{user_service::{CreateUserParams, PasswordRequirements}, UserService}, AppState
+    AppState,
+    errors::{AppError, AppResult},
+    users::{
+        UserService,
+        user_service::{CreateUserParams, PasswordRequirements},
+    },
 };
 
 /// Simple in-memory rate limiter for setup endpoints

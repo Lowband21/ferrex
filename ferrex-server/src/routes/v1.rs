@@ -5,7 +5,7 @@ use axum::{
 };
 
 use crate::{
-    dev_handlers,
+    AppState, dev_handlers,
     media::{
         image_handlers,
         library_handlers_v2::{
@@ -14,16 +14,19 @@ use crate::{
         },
         query_handlers,
         scan::{
-            get_folder_inventory, get_scan_progress, scan_handlers::{media_events_sse_handler, scan_all_libraries_handler, scan_library_handler}
+            get_folder_inventory, get_scan_progress,
+            scan_handlers::{
+                media_events_sse_handler, scan_all_libraries_handler, scan_library_handler,
+            },
         },
     },
     stream::{stream_handlers, transcoding::transcoding_handlers},
     users::{
         admin_handlers, auth, role_handlers, session_handlers,
-        setup::setup::{check_setup_status, create_initial_admin}, user_handlers, user_management,
-        watch_status_handlers,
+        setup::setup::{check_setup_status, create_initial_admin},
+        user_handlers, user_management, watch_status_handlers,
     },
-    websocket, AppState,
+    websocket,
 };
 
 /// Create all v1 API routes
@@ -167,14 +170,8 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
             get(watch_status_handlers::is_completed_handler),
         )
         // Folder inventory monitoring and control
-        .route(
-            "/folders/inventory/{library_id}",
-            get(get_folder_inventory),
-        )
-        .route(
-            "/folders/progress/{library_id}",
-            get(get_scan_progress),
-        )
+        .route("/folders/inventory/{library_id}", get(get_folder_inventory))
+        .route("/folders/progress/{library_id}", get(get_scan_progress))
         //.route(
         //    "/folders/rescan/{folder_id}",
         //    post(trigger_folder_rescan),
@@ -227,7 +224,10 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         //    "/sync/sessions/{id}/state",
         //    get(sync_handlers::get_sync_session_state_handler),
         //)
-        .route("/sync/ws", axum::routing::any(websocket::handler::websocket_handler))
+        .route(
+            "/sync/ws",
+            axum::routing::any(websocket::handler::websocket_handler),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,

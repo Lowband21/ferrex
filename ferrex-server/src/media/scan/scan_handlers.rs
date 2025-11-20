@@ -1,22 +1,24 @@
-use crate::{media::scan::scan_manager::{media_events_sse, scan_progress_sse}, AppState};
+use crate::{
+    AppState,
+    media::scan::scan_manager::{media_events_sse, scan_progress_sse},
+};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Json, Sse},
 };
-use ferrex_core::{
-    database::traits::{FolderProcessingStatus, MediaDatabaseTrait},
-    LibraryID, MediaType, ScanRequest, ScanResponse, ScanStatus,
-};
 use ferrex_core::{EpisodeID, MovieID, SeasonID, SeriesID};
+use ferrex_core::{
+    LibraryID, MediaType, ScanRequest, ScanResponse, ScanStatus,
+    database::traits::{FolderProcessingStatus, MediaDatabaseTrait},
+};
 use futures::future::join_all;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
-
 
 /// POST /libraries/scan/pending
 /// Start scans for all libraries that have pending/changed folders
@@ -31,19 +33,24 @@ pub async fn scan_all_libraries_handler(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let ids: Vec<LibraryID> = libraries
+        .clone()
+        .into_iter()
+        .filter(|l| l.enabled)
+        .map(|library| library.id)
+        .collect();
 
-        let ids: Vec<LibraryID> = libraries.clone().into_iter().filter(|l| l.enabled).map(|library| library.id).collect();
-
-        let mut folder_count: usize = 0;
-        for id in &ids {
-            folder_count += pending_folder_count_for_library(&state, *id).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        }
-
+    let mut folder_count: usize = 0;
+    for id in &ids {
+        folder_count += pending_folder_count_for_library(&state, *id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
 
     let scan_result = state
-            .scan_manager
-            .start_library_scan(Arc::new(libraries), force_refresh)
-            .await;
+        .scan_manager
+        .start_library_scan(Arc::new(libraries), force_refresh)
+        .await;
 
     let scan_id = match scan_result {
         Ok(scan_id) => {
@@ -52,16 +59,19 @@ pub async fn scan_all_libraries_handler(
             }
 
             scan_id
-        },
+        }
         Err(e) => {
             error!("Failed to start library scan: {}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR)
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
 
-    Ok(Json(ScanResponse::new(ScanStatus::Scanning, Some(scan_id), "Scan started".to_string())))
+    Ok(Json(ScanResponse::new(
+        ScanStatus::Scanning,
+        Some(scan_id),
+        "Scan started".to_string(),
+    )))
 }
-
 
 // Library scan handler
 #[axum::debug_handler]
@@ -82,27 +92,28 @@ pub async fn scan_library_handler(
 
     // Check if library is enabled
     if !library.enabled {
-        return Ok(Json(ScanResponse::new_failed("Library is disabled".to_string())));
+        return Ok(Json(ScanResponse::new_failed(
+            "Library is disabled".to_string(),
+        )));
     }
 
     let library_name = library.name.clone();
 
     let scan_result = state
-            .scan_manager
-            .start_library_scan(Arc::new(vec![library]), req.force_refresh)
-            .await;
+        .scan_manager
+        .start_library_scan(Arc::new(vec![library]), req.force_refresh)
+        .await;
 
     match scan_result {
         Ok(scan_id) => {
             // Update library last scan time
-            let _ = state
-                .db
-                .backend()
-                .update_library_last_scan(&id)
-                .await;
+            let _ = state.db.backend().update_library_last_scan(&id).await;
 
             info!("Library scan started with ID: {}", scan_id);
-            Ok(Json(ScanResponse::new_scan_started(scan_id, format!("Scan started for library: {}", library_name))))
+            Ok(Json(ScanResponse::new_scan_started(
+                scan_id,
+                format!("Scan started for library: {}", library_name),
+            )))
         }
         Err(e) => {
             error!("Failed to start library scan: {}", e);
@@ -112,23 +123,26 @@ pub async fn scan_library_handler(
 }
 
 /// Count folders needing scan for a single library
-async fn pending_folder_count_for_library(state: &AppState, lib_id: LibraryID) -> Result<usize, anyhow::Error> {
-    let folders = state.database.backend().get_folder_inventory(lib_id).await?;
+async fn pending_folder_count_for_library(
+    state: &AppState,
+    lib_id: LibraryID,
+) -> Result<usize, anyhow::Error> {
+    let folders = state
+        .database
+        .backend()
+        .get_folder_inventory(lib_id)
+        .await?;
     let now = chrono::Utc::now();
     let count = folders
         .into_iter()
         .filter(|f| match f.processing_status {
             FolderProcessingStatus::Pending | FolderProcessingStatus::Queued => true,
-            FolderProcessingStatus::Failed => f
-                .next_retry_at
-                .map(|t| t <= now)
-                .unwrap_or(true),
+            FolderProcessingStatus::Failed => f.next_retry_at.map(|t| t <= now).unwrap_or(true),
             _ => false,
         })
         .count();
     Ok(count)
 }
-
 
 /// GET /libraries/{id}/scan/pending-count
 pub async fn pending_count_for_library_handler(
@@ -218,6 +232,6 @@ pub async fn cancel_scan_handler(
 ) -> ScanResponse {
     match state.scan_manager.cancel_scan(&id).await {
         Ok(_) => ScanResponse::new_canceled(id),
-        Err(e) => ScanResponse::new(ScanStatus::Scanning, Some(id), e.to_string())
+        Err(e) => ScanResponse::new(ScanStatus::Scanning, Some(id), e.to_string()),
     }
 }

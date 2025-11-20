@@ -37,70 +37,29 @@ pub fn update_player(
             // Delegate to PlayMediaWithId with no ID tracking
             update_player(
                 app_state,
-                Message::PlayMediaWithId(media, ferrex_core::MediaID::Movie(
-                    ferrex_core::MovieID::new_uuid()
-                )),
+                Message::PlayMediaWithId(
+                    media,
+                    ferrex_core::MediaID::Movie(ferrex_core::MovieID::new_uuid()),
+                ),
             )
         }
 
         Message::NavigateBack => {
-            let update_task = if let Some(media_id) = state.current_media_id {
-                let position = if let Some(video) = &mut state.video_opt {
-                    video.position().as_secs_f64()
-                } else {
-                    state.last_valid_position
-                };
-                let duration = if let Some(video) = &mut state.video_opt {
-                    video.duration().as_secs_f64()
-                } else {
-                    state.last_valid_duration
-                };
-                Task::done(crate::common::messages::DomainMessage::Media(
-                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
-                        media_id, position, duration,
-                    ),
-                ))
-            } else {
-                Task::none()
-            };
-
-            let tasks = Task::batch(vec![
-                update_task,
-                Task::done(DomainMessage::Player(Message::ResetAfterStop)),
-                Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack)),
-            ]);
-
-            DomainUpdateResult::task(tasks)
+            // Reset player state and navigate back
+            state.reset();
+            // Send direct UI domain message for navigation
+            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                ui::messages::Message::NavigateBack,
+            )))
         }
 
         Message::NavigateHome => {
-            let update_task = if let Some(media_id) = state.current_media_id {
-                let position = if let Some(video) = &mut state.video_opt {
-                    video.position().as_secs_f64()
-                } else {
-                    state.last_valid_position
-                };
-                let duration = if let Some(video) = &mut state.video_opt {
-                    video.duration().as_secs_f64()
-                } else {
-                    state.last_valid_duration
-                };
-                Task::done(crate::common::messages::DomainMessage::Media(
-                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
-                        media_id, position, duration,
-                    ),
-                ))
-            } else {
-                Task::none()
-            };
-
-            let tasks = Task::batch(vec![
-                update_task,
-                Task::done(DomainMessage::Player(Message::ResetAfterStop)),
-                Task::done(DomainMessage::Ui(ui::messages::Message::NavigateHome)),
-            ]);
-
-            DomainUpdateResult::task(tasks)
+            // Reset player state and navigate home
+            state.reset();
+            // Send direct UI domain message for navigation
+            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                ui::messages::Message::NavigateHome,
+            )))
         }
 
         Message::Play => {
@@ -373,7 +332,10 @@ pub fn update_player(
             if use_external {
                 // Start external MPV
                 let is_fullscreen = state.is_fullscreen;
-                let window_size = Some((app_state.window_size.width as u32, app_state.window_size.height as u32));
+                let window_size = Some((
+                    app_state.window_size.width as u32,
+                    app_state.window_size.height as u32,
+                ));
                 let window_position = app_state.window_position.map(|p| (p.x as i32, p.y as i32));
                 let resume_position = state.pending_resume_position;
 
@@ -415,43 +377,50 @@ pub fn update_player(
                 }
             } else {
                 DomainUpdateResult::task(
-                    crate::domains::player::video::load_video(app_state)
-                        .map(DomainMessage::Player),
+                    crate::domains::player::video::load_video(app_state).map(DomainMessage::Player),
                 )
             }
         }
 
         Message::EndOfStream => {
-            log::info!("End of stream - finalizing playback and navigating back");
+            log::info!("End of stream");
 
-            // Capture position and duration for final progress update
+            // Capture position and duration for progress update
             if let Some(media_id) = state.current_media_id {
+                let position = state.last_valid_position;
+                let duration = state.last_valid_duration;
+
+                // Send final progress update with captured data
+                let progress_task = Task::done(crate::common::messages::DomainMessage::Media(
+                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                        media_id, position, duration,
+                    ),
+                ));
+
+                // Check if we should play next episode
+                let next_episode_task = if let Some(media_id) = &state.current_media_id {
+                    // Only auto-play next episode if this is an episode
+                    if let ferrex_core::MediaID::Episode(_) = media_id {
+                        log::info!("Current media is an episode, checking for next episode");
+                        Task::done(crate::common::messages::DomainMessage::Media(
+                            crate::domains::media::messages::Message::PlayNextEpisode,
+                        ))
+                    } else {
+                        Task::none()
+                    }
                 // Prefer backend position if video is still present
                 let (position, duration) = if let Some(video) = &mut state.video_opt {
-                    (video.position().as_secs_f64(), video.duration().as_secs_f64())
+                    (
+                        video.position().as_secs_f64(),
+                        video.duration().as_secs_f64(),
+                    )
                 } else {
-                    (state.last_valid_position, state.last_valid_duration)
+                    Task::none()
                 };
 
-                // Send final progress update, then reset, then navigate back
-                let tasks = Task::batch(vec![
-                    Task::done(crate::common::messages::DomainMessage::Media(
-                        crate::domains::media::messages::Message::SendProgressUpdateWithData(
-                            media_id, position, duration,
-                        ),
-                    )),
-                    Task::done(DomainMessage::Player(Message::ResetAfterStop)),
-                    Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack)),
-                ]);
-
-                DomainUpdateResult::task(tasks)
+                DomainUpdateResult::task(Task::batch(vec![progress_task, next_episode_task]))
             } else {
-                // No media id - just reset and navigate back
-                let tasks = Task::batch(vec![
-                    Task::done(DomainMessage::Player(Message::ResetAfterStop)),
-                    Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack)),
-                ]);
-                DomainUpdateResult::task(tasks)
+                DomainUpdateResult::task(Task::none())
             }
         }
 
@@ -816,7 +785,9 @@ pub fn update_player(
                 if let Some(bit_depth) = metadata.bit_depth {
                     bit_depth > 8
                 } else if let Some(color_transfer) = &metadata.color_transfer {
-                    ["smpte2084", "arib-std-b67", "smpte2086"].iter().any(|t| color_transfer.contains(t))
+                    ["smpte2084", "arib-std-b67", "smpte2086"]
+                        .iter()
+                        .any(|t| color_transfer.contains(t))
                 } else if let Some(color_primaries) = &metadata.color_primaries {
                     color_primaries.contains("bt2020")
                 } else {
@@ -831,12 +802,16 @@ pub fn update_player(
             // Build streaming URL from server_url and encoded media id
             let media_id_string = media.id.to_string();
             let encoded_media_id = urlencoding::encode(&media_id_string);
-            let video_url = format!("{}/api/v1/stream/{}", app_state.server_url, encoded_media_id);
+            let video_url = format!(
+                "{}/api/v1/stream/{}",
+                app_state.server_url, encoded_media_id
+            );
 
             match url::Url::parse(&video_url) {
                 Ok(url) => {
                     state.current_url = Some(url);
-                    app_state.domains.ui.state.view = ui::types::ViewState::LoadingVideo { url: video_url };
+                    app_state.domains.ui.state.view =
+                        ui::types::ViewState::LoadingVideo { url: video_url };
                     app_state.domains.ui.state.error_message = None;
                     // Immediately trigger internal player load (non-HLS path)
                     DomainUpdateResult::task(
@@ -846,16 +821,16 @@ pub fn update_player(
                 }
                 Err(e) => {
                     app_state.domains.ui.state.error_message = Some(format!("Invalid URL: {}", e));
-                    app_state.domains.ui.state.view = ui::types::ViewState::VideoError { message: format!("Invalid URL: {}", e) };
+                    app_state.domains.ui.state.view = ui::types::ViewState::VideoError {
+                        message: format!("Invalid URL: {}", e),
+                    };
                     DomainUpdateResult::task(Task::none())
                 }
             }
         }
 
         // TODO
-        Message::LoadTrack(media_id) => {
-            DomainUpdateResult::task(Task::none())
-        }
+        Message::LoadTrack(media_id) => DomainUpdateResult::task(Task::none()),
 
         // External MPV player messages
         Message::ExternalPlaybackStarted => {
@@ -900,44 +875,16 @@ pub fn update_player(
                 state.external_mpv_handle = None;
                 state.external_mpv_active = false;
 
-                let tasks = Task::batch(vec![
-                    Task::done(DomainMessage::Player(Message::ResetAfterStop)),
-                    Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack)),
-                    progress_task,
-                ]);
-
                 // Emit RestoreWindow event
                 DomainUpdateResult::with_events(
-                    tasks,
+                    progress_task,
                     vec![crate::common::messages::CrossDomainEvent::RestoreWindow(
                         final_fullscreen,
                     )],
                 )
             } else {
-                let tasks = Task::batch(vec![
-                    Task::done(DomainMessage::Player(Message::ResetAfterStop)),
-                    Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack)),
-                ]);
-                DomainUpdateResult::task(tasks)
+                DomainUpdateResult::task(Task::none())
             }
-        }
-
-        Message::ProgressHeartbeat => {
-            // Periodic progress checkpoint from internal player
-            if let (Some(video), Some(media_id)) = (&mut state.video_opt, state.current_media_id) {
-                let position = video.position().as_secs_f64();
-                let duration = video.duration().as_secs_f64();
-                if position > 0.0 && duration > 0.0 {
-                    return DomainUpdateResult::task(Task::done(
-                        crate::common::messages::DomainMessage::Media(
-                            crate::domains::media::messages::Message::SendProgressUpdateWithData(
-                                media_id, position, duration,
-                            ),
-                        ),
-                    ));
-                }
-            }
-            DomainUpdateResult::task(Task::none())
         }
 
         Message::PollExternalMpv => {
@@ -1008,13 +955,19 @@ pub fn update_player(
         Message::PlayExternal => {
             // Switch to external player at runtime
             let is_fullscreen = state.is_fullscreen;
-            let window_size = Some((app_state.window_size.width as u32, app_state.window_size.height as u32));
+            let window_size = Some((
+                app_state.window_size.width as u32,
+                app_state.window_size.height as u32,
+            ));
             let window_position = app_state.window_position.map(|p| (p.x as i32, p.y as i32));
-
             // Ensure handoff starts at the current native player position
             let resume_position = if let Some(video) = state.video_opt.as_ref() {
                 let pos = video.position().as_secs_f64();
-                if pos > 0.0 { Some(pos as f32) } else { state.pending_resume_position }
+                if pos > 0.0 {
+                    Some(pos as f32)
+                } else {
+                    state.pending_resume_position
+                }
             } else if state.last_valid_position > 0.0 {
                 Some(state.last_valid_position as f32)
             } else {
@@ -1041,7 +994,9 @@ pub fn update_player(
                     state.external_mpv_active = true;
                     state.external_mpv_handle = Some(Box::new(handle));
                     app_state.domains.ui.state.view = ui::types::ViewState::Player;
-                    DomainUpdateResult::task(Task::done(DomainMessage::Player(Message::ExternalPlaybackStarted)))
+                    DomainUpdateResult::task(Task::done(DomainMessage::Player(
+                        Message::ExternalPlaybackStarted,
+                    )))
                 }
                 Err(e) => {
                     log::error!("Failed to start external MPV: {}", e);

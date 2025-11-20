@@ -1,11 +1,11 @@
 pub mod cache;
 pub mod config;
-pub mod transcoding_handlers;
 pub mod hardware;
 pub mod job;
 pub mod profiles;
 pub mod queue;
 pub mod segments;
+pub mod transcoding_handlers;
 pub mod worker;
 
 use anyhow::{Context, Result};

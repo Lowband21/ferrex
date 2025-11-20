@@ -155,9 +155,15 @@ pub fn create_scan_progress_overlay<'a>(
                                 text("💾 Stored")
                                     .size(11)
                                     .color(theme::MediaServerTheme::TEXT_DIMMED),
-                                text(format!("Movies: {}, Series: {}, Seasons: {}, Episodes: {}", progress.movies_scanned, progress.series_scanned, progress.seasons_scanned, progress.episodes_scanned))
-                                    .size(13)
-                                    .color(iced::Color::from_rgb(0.0, 0.8, 0.0)),
+                                text(format!(
+                                    "Movies: {}, Series: {}, Seasons: {}, Episodes: {}",
+                                    progress.movies_scanned,
+                                    progress.series_scanned,
+                                    progress.seasons_scanned,
+                                    progress.episodes_scanned
+                                ))
+                                .size(13)
+                                .color(iced::Color::from_rgb(0.0, 0.8, 0.0)),
                             ],
                             Space::with_width(25),
                             column![

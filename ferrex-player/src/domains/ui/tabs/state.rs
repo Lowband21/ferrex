@@ -1,9 +1,9 @@
 //! Tab state definitions for independent tab management
 
-use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
 use crate::domains::ui::view_models::AllViewModel;
 use crate::domains::ui::views::grid::VirtualGridState;
 use crate::infrastructure::api_types::{LibraryType, Media};
+use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
 use ferrex_core::{
     ArchivedLibraryExt, ArchivedMediaID, ArchivedMovieReference, ArchivedSeriesReference,
     LibraryID, MediaOps,
