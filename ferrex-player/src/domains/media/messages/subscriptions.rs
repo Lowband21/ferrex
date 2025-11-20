@@ -8,21 +8,17 @@ use iced::Subscription;
 pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let mut subscriptions = vec![];
 
-    // Check if we're using external MPV player
-    #[cfg(feature = "external-mpv-player")]
-    {
-        if state.domains.player.state.external_mpv_active {
-            // Poll external MPV for position updates every second
-            subscriptions.push(
-                iced::time::every(std::time::Duration::from_secs(1)).map(|_| {
-                    DomainMessage::Player(
-                        crate::domains::player::messages::Message::PollExternalMpv,
-                    )
-                }),
-            );
+    // Poll external MPV cross‑platform when active (no feature gate)
+    if state.domains.player.state.external_mpv_active {
+        subscriptions.push(
+            iced::time::every(std::time::Duration::from_secs(1)).map(|_| {
+                DomainMessage::Player(
+                    crate::domains::player::messages::Message::PollExternalMpv,
+                )
+            }),
+        );
 
-            return Subscription::batch(subscriptions);
-        }
+        return Subscription::batch(subscriptions);
     }
 
     // Only subscribe to player events when we're in player view with a video

@@ -11,6 +11,7 @@ use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, scrollable, text},
 };
+use iced_aw::menu::{Item, Menu, MenuBar};
 use lucide_icons::Icon;
 use rkyv::deserialize;
 use rkyv::option::ArchivedOption;
@@ -164,6 +165,7 @@ pub fn create_backdrop_aspect_button<'a>(
 /// Create an action button row with play button and optional additional buttons
 pub fn create_action_button_row<'a>(
     play_message: Message,
+    play_in_mpv_message: Option<Message>,
     additional_buttons: Vec<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     // Play button with DetailAction style
@@ -176,14 +178,30 @@ pub fn create_action_button_row<'a>(
     .padding([10, 20])
     .style(theme::Button::DetailAction.style());
 
-    // More options button (3-dot menu) with HeaderIcon style
+    // More options menu (3-dot) using iced_aw::Menu
     let more_button = button(icon_text(Icon::Ellipsis))
-        .on_press(Message::NoOp) // TODO: Implement menu
         .padding([10, 20])
         .style(theme::Button::HeaderIcon.style());
 
-    // Build button row starting with play and menu buttons
-    let mut button_row = row![play_button, more_button];
+    // Build menu items
+    let mut items: Vec<Item<'_, Message, iced::Theme, iced::Renderer>> =
+        Vec::new();
+
+    if let Some(mpv_msg) = play_in_mpv_message.clone() {
+        let play_in_mpv_button = button(text("Play in MPV").size(14))
+            .on_press(mpv_msg)
+            .style(theme::Button::HeaderMenuSecondary.style());
+        items.push(Item::new(play_in_mpv_button));
+    }
+
+    let menu = Menu::new(items).max_width(220.0).spacing(0.0).offset(0.0);
+    let menu_bar = MenuBar::new(vec![Item::with_menu(more_button, menu)])
+        .spacing(0.0)
+        .height(Length::Shrink)
+        .close_on_item_click(true);
+
+    // Build button row starting with play and menu
+    let mut button_row = row![play_button, menu_bar];
 
     // Add any additional buttons
     for button in additional_buttons {

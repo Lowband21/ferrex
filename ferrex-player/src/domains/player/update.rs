@@ -403,68 +403,14 @@ pub fn update_player(
 
         Message::VideoReadyToPlay => {
             log::info!(
-                "[Player] Video ready to play - loading video directly in player"
+                "[Player] Video ready to play - loading with internal backend"
             );
-
-            // Runtime option: allow external player; default false for now
-            let use_external = false;
-            if use_external {
-                // Start external MPV
-                let is_fullscreen = state.is_fullscreen;
-                let window_size = Some((
-                    app_state.window_size.width as u32,
-                    app_state.window_size.height as u32,
-                ));
-                let window_position =
-                    app_state.window_position.map(|p| (p.x as i32, p.y as i32));
-                let resume_position = state.pending_resume_position;
-
-                // Activate external mode and set view to Player (internal view hidden if desired later)
-                state.external_mpv_active = true;
-                app_state.domains.ui.state.view = ui::types::ViewState::Player;
-
-                // Kick off external playback and begin polling via PollExternalMpv subscription
-                let handle_task = Task::perform(
-                    async move { /* no-op; start synchronously below */ },
-                    |_| DomainMessage::Player(Message::ExternalPlaybackStarted),
-                );
-
-                // Start external playback immediately
-                let url = state
-                    .current_url
-                    .as_ref()
-                    .map(|u| u.to_string())
-                    .unwrap_or_default();
-                match super::external_mpv::start_external_playback(
-                    &url,
-                    is_fullscreen,
-                    window_size,
-                    window_position,
-                    resume_position,
-                ) {
-                    Ok(handle) => {
-                        state.external_mpv_handle = Some(Box::new(handle));
-                        // Begin polling every second (subscription is wired in player subscriptions; here we just return the started task)
-                        DomainUpdateResult::with_events(handle_task, vec![])
-                    }
-                    Err(e) => {
-                        log::error!("Failed to start external MPV: {}", e);
-                        app_state.domains.ui.state.view =
-                            ui::types::ViewState::VideoError {
-                                message: format!(
-                                    "Failed to start external player: {}",
-                                    e
-                                ),
-                            };
-                        DomainUpdateResult::task(Task::none())
-                    }
-                }
-            } else {
-                DomainUpdateResult::task(
-                    crate::domains::player::video::load_video(app_state)
-                        .map(DomainMessage::Player),
-                )
-            }
+            // Keep VideoReadyToPlay on the internal pipeline; explicit MPV
+            // handoff is triggered via UI::PlayMediaWithIdInMpv / Player::PlayExternal
+            DomainUpdateResult::task(
+                crate::domains::player::video::load_video(app_state)
+                    .map(DomainMessage::Player),
+            )
         }
 
         Message::EndOfStream => {
@@ -1166,68 +1112,79 @@ pub fn update_player(
             }
         }
 
-        Message::PlayExternal => {
-            // Switch to external player at runtime
-            let is_fullscreen = state.is_fullscreen;
-            let window_size = Some((
-                app_state.window_size.width as u32,
-                app_state.window_size.height as u32,
-            ));
-            let window_position =
-                app_state.window_position.map(|p| (p.x as i32, p.y as i32));
+        Message::PlayExternal => start_external_mpv_with_current_url(app_state),
+    }
+}
 
-            // Ensure handoff starts at the current native player position
-            let resume_position = if let Some(video) = state.video_opt.as_ref()
-            {
-                let pos = video.position().as_secs_f64();
-                if pos > 0.0 {
-                    Some(pos as f32)
-                } else {
-                    state.pending_resume_position
-                }
-            } else if state.last_valid_position > 0.0 {
-                Some(state.last_valid_position as f32)
-            } else {
-                state.pending_resume_position
-            };
+/// Start external MPV playback using the current URL and UI/window state.
+/// Falls back to internal playback if MPV cannot be launched.
+fn start_external_mpv_with_current_url(
+    app_state: &mut crate::state::State,
+) -> DomainUpdateResult {
+    use crate::domains::player::messages::Message;
+    use crate::domains::ui;
 
-            let url = state
-                .current_url
-                .as_ref()
-                .map(|u| u.to_string())
-                .unwrap_or_default();
+    let state = &mut app_state.domains.player.state;
 
-            // Stop native playback if running
-            state.stop_native_playback();
+    // Resolve window attributes
+    let is_fullscreen = state.is_fullscreen;
+    let window_size = Some((
+        app_state.window_size.width as u32,
+        app_state.window_size.height as u32,
+    ));
+    let window_position =
+        app_state.window_position.map(|p| (p.x as i32, p.y as i32));
 
-            match super::external_mpv::start_external_playback(
-                &url,
-                is_fullscreen,
-                window_size,
-                window_position,
-                resume_position,
-            ) {
-                Ok(handle) => {
-                    state.external_mpv_active = true;
-                    state.external_mpv_handle = Some(Box::new(handle));
-                    app_state.domains.ui.state.view =
-                        ui::types::ViewState::Player;
-                    DomainUpdateResult::task(Task::done(DomainMessage::Player(
-                        Message::ExternalPlaybackStarted,
-                    )))
-                }
-                Err(e) => {
-                    log::error!("Failed to start external MPV: {}", e);
-                    app_state.domains.ui.state.view =
-                        ui::types::ViewState::VideoError {
-                            message: format!(
-                                "Failed to start external player: {}",
-                                e
-                            ),
-                        };
-                    DomainUpdateResult::task(Task::none())
-                }
-            }
+    // Ensure handoff starts at the current native player position
+    let resume_position = if let Some(video) = state.video_opt.as_ref() {
+        let pos = video.position().as_secs_f64();
+        if pos > 0.0 {
+            Some(pos as f32)
+        } else {
+            state.pending_resume_position
+        }
+    } else if state.last_valid_position > 0.0 {
+        Some(state.last_valid_position as f32)
+    } else {
+        state.pending_resume_position
+    };
+
+    let url = state
+        .current_url
+        .as_ref()
+        .map(|u| u.to_string())
+        .unwrap_or_default();
+
+    // Stop internal playback if running before handoff
+    state.stop_native_playback();
+
+    match super::external_mpv::start_external_playback(
+        &url,
+        is_fullscreen,
+        window_size,
+        window_position,
+        resume_position,
+    ) {
+        Ok(handle) => {
+            state.external_mpv_active = true;
+            state.external_mpv_handle = Some(Box::new(handle));
+            app_state.domains.ui.state.view = ui::types::ViewState::Player;
+
+            DomainUpdateResult::task(Task::done(DomainMessage::Player(
+                Message::ExternalPlaybackStarted,
+            )))
+        }
+        Err(e) => {
+            // Robust fallback: log and start internal pipeline
+            log::error!(
+                "Failed to start external MPV (falling back to internal): {}",
+                e
+            );
+            state.external_mpv_active = false;
+            DomainUpdateResult::task(
+                crate::domains::player::video::load_video(app_state)
+                    .map(DomainMessage::Player),
+            )
         }
     }
 }

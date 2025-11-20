@@ -245,6 +245,7 @@ pub fn view_movie_detail<'a>(
             let button_row =
                 crate::domains::ui::components::create_action_button_row(
                     Message::PlayMediaWithId(media_id),
+                    Some(Message::PlayMediaWithIdInMpv(media_id)),
                     vec![], // No additional buttons yet
                 );
 

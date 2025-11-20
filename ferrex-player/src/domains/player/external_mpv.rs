@@ -2,11 +2,13 @@
 //! This module spawns MPV as a separate process and tracks playback position
 
 use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Command};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[cfg(windows)]
+use std::fs::{File, OpenOptions};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 
@@ -17,6 +19,8 @@ pub struct ExternalMpvHandle {
     socket_path: String,
     #[cfg(unix)]
     connection: Arc<Mutex<BufReader<UnixStream>>>,
+    #[cfg(windows)]
+    writer: Arc<Mutex<File>>, // Windows named pipe writer
     request_id: u64,
     last_position: Arc<Mutex<f64>>,
     last_duration: Arc<Mutex<f64>>,
@@ -33,10 +37,29 @@ impl ExternalMpvHandle {
         window_position: Option<(i32, i32)>,
         resume_position: Option<f32>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        #[cfg(unix)]
         let socket_path = format!("/tmp/ferrex-mpv-{}", std::process::id());
+        #[cfg(windows)]
+        let socket_path =
+            format!(r"\\.\pipe\ferrex-mpv-{}", std::process::id());
+
+        // Resolve log file path for diagnostics
+        let log_path = mpv_log_path();
 
         // Build MPV command with HDR-preserving settings
-        let mut cmd = Command::new("mpv");
+        let mpv_path = resolve_mpv_binary();
+        if let Some(ref p) = mpv_path {
+            log::info!("Using MPV binary at: {}", p.display());
+        } else {
+            log::warn!(
+                "MPV binary not found via PATH/known locations; attempting 'mpv'"
+            );
+        }
+        let mut cmd = if let Some(p) = mpv_path.clone() {
+            Command::new(p)
+        } else {
+            Command::new("mpv")
+        };
 
         // IPC settings
         cmd.arg(format!("--input-ipc-server={}", socket_path))
@@ -88,11 +111,98 @@ impl ExternalMpvHandle {
             .arg("--target-colorspace-hint") // Signal HDR to display
             .arg("--hdr-compute-peak=yes"); // Dynamic tone mapping if needed
 
+        // Enable MPV internal log file when available
+        if let Some(ref p) = log_path {
+            cmd.arg(format!("--log-file={}", p.to_string_lossy()));
+            // Reasonable verbosity for diagnostics without being overwhelming
+            cmd.arg("--msg-level=all=info");
+        }
+
         // Add the URL
         cmd.arg(url);
 
         log::info!("Spawning external MPV with URL: {}", url);
-        let process = cmd.spawn()?;
+        // Pipe stdout/stderr so we can capture diagnostics cross‑platform
+        let mut child = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                format!(
+                    "Failed to spawn 'mpv' (is it installed and in PATH?): {}",
+                    e
+                )
+            })?;
+
+        // Stream MPV stdout/stderr into our logs and persistent file if configured
+        if let Some(mut out) = child.stdout.take() {
+            let log_file = log_path.clone();
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                loop {
+                    match out.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            if let Ok(s) = std::str::from_utf8(&buf[..n]) {
+                                for line in s.lines() {
+                                    log::debug!("mpv(stdout): {}", line);
+                                    if let Some(ref path) = log_file {
+                                        if let Ok(mut f) =
+                                            std::fs::OpenOptions::new()
+                                                .create(true)
+                                                .append(true)
+                                                .open(path)
+                                        {
+                                            let _ = writeln!(
+                                                f,
+                                                "[stdout] {}",
+                                                line
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
+        if let Some(mut err) = child.stderr.take() {
+            let log_file = log_path.clone();
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                loop {
+                    match err.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            if let Ok(s) = std::str::from_utf8(&buf[..n]) {
+                                for line in s.lines() {
+                                    log::warn!("mpv(stderr): {}", line);
+                                    if let Some(ref path) = log_file {
+                                        if let Ok(mut f) =
+                                            std::fs::OpenOptions::new()
+                                                .create(true)
+                                                .append(true)
+                                                .open(path)
+                                        {
+                                            let _ = writeln!(
+                                                f,
+                                                "[stderr] {}",
+                                                line
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
+
+        let process = child;
 
         // Wait a moment for MPV to create the socket
         std::thread::sleep(Duration::from_millis(300));
@@ -105,16 +215,143 @@ impl ExternalMpvHandle {
             stream.set_nonblocking(true)?;
             Arc::new(Mutex::new(BufReader::new(stream)))
         };
+        #[cfg(windows)]
+        let (
+            writer,
+            reader_thread_last_pos,
+            reader_thread_last_dur,
+            reader_thread_last_fullscreen,
+        ): (
+            Arc<Mutex<File>>,
+            Arc<Mutex<f64>>,
+            Arc<Mutex<f64>>,
+            Arc<Mutex<bool>>,
+        ) = {
+            // mpv creates the named pipe asynchronously; wait and retry connects
+            let mut attempts = 0u32;
+            let pipe_file = loop {
+                match OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&socket_path)
+                {
+                    Ok(f) => break f,
+                    Err(e) => {
+                        if attempts > 200 {
+                            let hint = log_path
+                                .as_ref()
+                                .map(|p| p.to_string_lossy().to_string())
+                                .unwrap_or_else(|| "(no log file)".to_string());
+                            return Err(format!(
+                                "Failed to connect to MPV named pipe after retries: {}. \
+IPC may be blocked or mpv failed to start. If antivirus is running, add an exception. \
+See mpv log for details: {}",
+                                e, hint
+                            )
+                            .into());
+                        }
+                        std::thread::sleep(Duration::from_millis(50));
+                        attempts += 1;
+                    }
+                }
+            };
+
+            let writer = Arc::new(Mutex::new(pipe_file));
+
+            // Clone for reader
+            let reader = writer.lock().unwrap().try_clone()?;
+            let last_pos = Arc::new(Mutex::new(0.0));
+            let last_dur = Arc::new(Mutex::new(0.0));
+            let last_fs = Arc::new(Mutex::new(is_fullscreen));
+            let rp = Arc::clone(&last_pos);
+            let rd = Arc::clone(&last_dur);
+            let rfs = Arc::clone(&last_fs);
+
+            let _join = std::thread::spawn(move || {
+                let mut reader = BufReader::new(reader);
+                loop {
+                    let mut line = String::new();
+                    match reader.read_line(&mut line) {
+                        Ok(0) => {
+                            // EOF or no more data; small sleep to avoid spin if pipe is idle
+                            std::thread::sleep(Duration::from_millis(50));
+                        }
+                        Ok(_) => {
+                            if let Ok(msg) =
+                                serde_json::from_str::<Value>(&line)
+                            {
+                                if msg["event"] == "property-change" {
+                                    match msg["name"].as_str() {
+                                        Some("time-pos") => {
+                                            if let Some(pos) =
+                                                msg["data"].as_f64()
+                                            {
+                                                *rp.lock().unwrap() = pos;
+                                            }
+                                        }
+                                        Some("duration") => {
+                                            if let Some(dur) =
+                                                msg["data"].as_f64()
+                                            {
+                                                *rd.lock().unwrap() = dur;
+                                            }
+                                        }
+                                        Some("fullscreen") => {
+                                            if let Some(fs) =
+                                                msg["data"].as_bool()
+                                            {
+                                                *rfs.lock().unwrap() = fs;
+                                            }
+                                        }
+                                        Some("eof-reached") => {
+                                            if let Some(eof) =
+                                                msg["data"].as_bool()
+                                                && eof
+                                            {
+                                                let duration =
+                                                    *rd.lock().unwrap();
+                                                if duration > 0.0 {
+                                                    *rp.lock().unwrap() =
+                                                        duration;
+                                                }
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            // Broken pipe or read error; exit thread
+                            break;
+                        }
+                    }
+                }
+            });
+
+            (writer, last_pos, last_dur, last_fs)
+        };
 
         let mut handle = Self {
             process,
             socket_path: socket_path.clone(),
             #[cfg(unix)]
             connection,
+            #[cfg(windows)]
+            writer,
             request_id: 1,
+            #[cfg(unix)]
             last_position: Arc::new(Mutex::new(0.0)),
+            #[cfg(unix)]
             last_duration: Arc::new(Mutex::new(0.0)),
+            #[cfg(unix)]
             last_fullscreen: Arc::new(Mutex::new(is_fullscreen)),
+            #[cfg(windows)]
+            last_position: reader_thread_last_pos,
+            #[cfg(windows)]
+            last_duration: reader_thread_last_dur,
+            #[cfg(windows)]
+            last_fullscreen: reader_thread_last_fullscreen,
             last_window_size: Arc::new(Mutex::new(window_size)),
         };
 
@@ -145,6 +382,12 @@ impl ExternalMpvHandle {
             writeln!(stream, "{}", command)?;
             stream.flush()?;
         }
+        #[cfg(windows)]
+        {
+            let mut writer = self.writer.lock().unwrap();
+            writeln!(&mut *writer, "{}", command)?;
+            writer.flush()?;
+        }
 
         Ok(())
     }
@@ -167,6 +410,12 @@ impl ExternalMpvHandle {
             let stream = conn.get_mut();
             writeln!(stream, "{}", command)?;
             stream.flush()?;
+        }
+        #[cfg(windows)]
+        {
+            let mut writer = self.writer.lock().unwrap();
+            writeln!(&mut *writer, "{}", command)?;
+            writer.flush()?;
         }
 
         Ok(())
@@ -282,7 +531,10 @@ impl Drop for ExternalMpvHandle {
     fn drop(&mut self) {
         self.kill();
         // Clean up socket file
-        let _ = std::fs::remove_file(&self.socket_path);
+        #[cfg(unix)]
+        {
+            let _ = std::fs::remove_file(&self.socket_path);
+        }
     }
 }
 
@@ -301,4 +553,133 @@ pub fn start_external_playback(
         window_position,
         resume_position,
     )
+}
+
+/// Best‑effort path for persistent MPV logs (per‑user config dir)
+fn mpv_log_path() -> Option<std::path::PathBuf> {
+    if let Some(mut base) = dirs::config_dir() {
+        base.push("ferrex-player");
+        base.push("logs");
+        let _ = std::fs::create_dir_all(&base);
+        let path = base.join("mpv.log");
+        Some(path)
+    } else {
+        None
+    }
+}
+
+#[cfg(windows)]
+fn resolve_mpv_binary() -> Option<std::path::PathBuf> {
+    use std::env;
+    use std::path::{Path, PathBuf};
+
+    // 1) Explicit override
+    if let Ok(p) = env::var("FERREX_MPV_PATH") {
+        let path = PathBuf::from(p);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    // Helper: check if a candidate exists
+    fn probe<P: AsRef<Path>>(p: P) -> Option<PathBuf> {
+        let p = p.as_ref();
+        if p.is_file() {
+            Some(p.to_path_buf())
+        } else {
+            None
+        }
+    }
+
+    // 2) Search PATH by walking dirs
+    if let Some(path) = search_in_path("mpv.exe") {
+        return Some(path);
+    }
+
+    // 3) Use where.exe if available
+    if let Ok(output) = Command::new("where").arg("mpv").output() {
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            if let Some(first) = text
+                .lines()
+                .find(|l| l.trim().to_lowercase().ends_with("mpv.exe"))
+            {
+                if let Some(p) = probe(first.trim()) {
+                    return Some(p);
+                }
+            }
+        }
+    }
+
+    // 4) Common Chocolatey shim
+    if let Some(p) = probe(r"C:\\ProgramData\\chocolatey\\bin\\mpv.exe") {
+        return Some(p);
+    }
+    // 5) Common Chocolatey install location
+    if let Some(p) = probe(
+        r"C:\\ProgramData\\chocolatey\\lib\\mpv.install\\tools\\mpv\\mpv.exe",
+    ) {
+        return Some(p);
+    }
+    // 6) Scoop shims
+    if let Ok(home) = env::var("USERPROFILE") {
+        if let Some(p) = probe(format!("{}\\scoop\\shims\\mpv.exe", home)) {
+            return Some(p);
+        }
+    }
+    // 7) Program Files (heuristics)
+    if let Ok(pf) = env::var("ProgramFiles") {
+        if let Some(p) = probe(format!("{}\\mpv\\mpv.exe", pf)) {
+            return Some(p);
+        }
+        if let Some(p) = probe(format!("{}\\mpv\\player\\mpv.exe", pf)) {
+            return Some(p);
+        }
+    }
+    if let Ok(pfx86) = env::var("ProgramFiles(x86)") {
+        if let Some(p) = probe(format!("{}\\mpv\\mpv.exe", pfx86)) {
+            return Some(p);
+        }
+    }
+
+    // 8) mpv.net (fallback) — supports passing mpv args in most cases
+    if let Some(path) = search_in_path("mpvnet.exe") {
+        return Some(path);
+    }
+    if let Ok(output) = Command::new("where").arg("mpvnet").output() {
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            if let Some(first) = text
+                .lines()
+                .find(|l| l.trim().to_lowercase().ends_with("mpvnet.exe"))
+            {
+                if let Some(p) = probe(first.trim()) {
+                    return Some(p);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(not(windows))]
+fn resolve_mpv_binary() -> Option<std::path::PathBuf> {
+    // Rely on Command::new("mpv") on Unix; no extra probing by default.
+    None
+}
+
+#[cfg(windows)]
+fn search_in_path(exe: &str) -> Option<std::path::PathBuf> {
+    use std::env;
+    use std::path::{Path, PathBuf};
+    if let Some(paths) = env::var_os("PATH") {
+        for entry in env::split_paths(&paths) {
+            let candidate = Path::new(&entry).join(exe);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }

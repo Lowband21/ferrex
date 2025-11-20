@@ -33,8 +33,9 @@ impl AppConfig {
     pub fn from_environment() -> Self {
         // Prefer http by default during local development to avoid TLS surprises.
         // Rationale: release builds do not accept self-signed TLS; http avoids connection failures.
-        let server_url = std::env::var("FERREX_SERVER_URL")
+        let raw = std::env::var("FERREX_SERVER_URL")
             .unwrap_or_else(|_| "http://localhost:3000".to_string());
+        let server_url = sanitize_server_url(&raw);
 
         #[cfg(feature = "demo")]
         {
@@ -85,6 +86,18 @@ impl AppConfig {
     pub fn with_test_stubs(mut self, enabled: bool) -> Self {
         self.use_test_stubs = enabled;
         self
+    }
+}
+
+fn sanitize_server_url(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        trimmed.to_string()
+    } else if trimmed.is_empty() {
+        "http://localhost:3000".to_string()
+    } else {
+        // Default to http if no scheme provided to avoid TLS issues with self-signed
+        format!("http://{}", trimmed)
     }
 }
 

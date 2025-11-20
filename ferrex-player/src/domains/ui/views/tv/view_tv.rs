@@ -231,6 +231,7 @@ pub fn view_series_detail<'a>(
     {
         let button_row = components::create_action_button_row(
             Message::PlayMediaWithId(MediaID::Episode(next_ep_id)),
+            Some(Message::PlayMediaWithIdInMpv(MediaID::Episode(next_ep_id))),
             vec![],
         );
         details = details.push(Space::new().height(10));
@@ -478,6 +479,7 @@ pub fn view_season_detail<'a>(
     {
         let button_row = components::create_action_button_row(
             Message::PlayMediaWithId(MediaID::Episode(next_ep_id)),
+            Some(Message::PlayMediaWithIdInMpv(MediaID::Episode(next_ep_id))),
             vec![],
         );
         details = details.push(Space::new().height(10));
@@ -737,6 +739,9 @@ pub fn view_episode_detail<'a>(
         Message::PlayMediaWithId(MediaID::Episode(EpisodeID(
             episode.id.to_uuid(),
         ))),
+        Some(Message::PlayMediaWithIdInMpv(MediaID::Episode(EpisodeID(
+            episode.id.to_uuid(),
+        )))),
         vec![],
     );
     details = details.push(Space::new().height(10));

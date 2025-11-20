@@ -142,6 +142,10 @@ pub enum Message {
     PinChangeResult(Result<(), String>),
     CancelPinChange,
 
+    // Admin PIN unlock (UI proxy to Auth domain)
+    EnableAdminPinUnlock,
+    DisableAdminPinUnlock,
+
     // Device management - now proxies to cross-domain events
     LoadDevices,
     DevicesLoaded(Result<Vec<settings::device_management::UserDevice>, String>),
@@ -173,6 +177,7 @@ pub enum Message {
     ToggleFullscreen, // Proxy for Media::ToggleFullscreen
     SelectLibrary(Option<LibraryID>), // Proxy for Library::SelectLibrary
     PlayMediaWithId(MediaID), // Proxy for Media::PlayMediaWithId
+    PlayMediaWithIdInMpv(MediaID), // Force play via external MPV
     PlaySeriesNextEpisode(SeriesID), // Play next unwatched/in-progress episode
 
     // TV Show loading
@@ -326,6 +331,10 @@ impl Message {
             Self::PinChangeResult(_) => "UI::PinChangeResult",
             Self::CancelPinChange => "UI::CancelPinChange",
 
+            // Admin PIN unlock
+            Self::EnableAdminPinUnlock => "UI::EnableAdminPinUnlock",
+            Self::DisableAdminPinUnlock => "UI::DisableAdminPinUnlock",
+
             // Device management
             Self::LoadDevices => "UI::LoadDevices",
             Self::DevicesLoaded(_) => "UI::DevicesLoaded",
@@ -358,6 +367,7 @@ impl Message {
             Self::ToggleFullscreen => "UI::ToggleFullscreen",
             Self::SelectLibrary(_) => "UI::SelectLibrary",
             Self::PlayMediaWithId(_) => "UI::PlayMediaWithId",
+            Self::PlayMediaWithIdInMpv(_) => "UI::PlayMediaWithIdInMpv",
             Self::PlaySeriesNextEpisode(_) => "UI::PlaySeriesNextEpisode",
 
             // TV Show loading
@@ -573,6 +583,12 @@ impl std::fmt::Debug for Message {
             Self::SubmitPinChange => write!(f, "UI::SubmitPinChange"),
             Self::PinChangeResult(_) => write!(f, "UI::PinChangeResult"),
             Self::CancelPinChange => write!(f, "UI::CancelPinChange"),
+            Self::EnableAdminPinUnlock => {
+                write!(f, "UI::EnableAdminPinUnlock")
+            }
+            Self::DisableAdminPinUnlock => {
+                write!(f, "UI::DisableAdminPinUnlock")
+            }
             Self::LoadDevices => write!(f, "UI::LoadDevices"),
             Self::DevicesLoaded(result) => match result {
                 Ok(devices) => write!(
@@ -617,6 +633,9 @@ impl std::fmt::Debug for Message {
             }
             Self::PlayMediaWithId(media_id) => {
                 write!(f, "UI::PlayMediaWithId({:?})", media_id)
+            }
+            Self::PlayMediaWithIdInMpv(media_id) => {
+                write!(f, "UI::PlayMediaWithIdInMpv({:?})", media_id)
             }
             Message::PlaySeriesNextEpisode(series_id) => {
                 write!(f, "PlaySeriesNextEpisode({:?})", series_id)
