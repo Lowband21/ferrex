@@ -4,16 +4,15 @@
 
 //pub mod image_pipeline;
 pub mod image_service;
-pub mod image_types;
 pub mod messages;
 pub mod update;
 pub mod update_handlers;
 
 use self::image_service::UnifiedImageService;
-use self::image_types::ImageRequest;
 use self::messages::Message as MetadataMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::{adapters::api_client_adapter::ApiClientAdapter, api_types::Media};
+use ferrex_core::ImageRequest;
 use ferrex_core::MediaID;
 use ferrex_core::permissions::SERVER_MANAGE_TASKS;
 use iced::Task;

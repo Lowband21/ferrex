@@ -55,4 +55,14 @@ pub trait SortKey: Ord + Clone + Send + Sync {
 
     /// Check if this key represents missing data
     fn is_missing(&self) -> bool;
+
+    /// Compare two keys while ensuring missing values always sort last
+    #[inline]
+    fn compare_with_order(&self, other: &Self, reverse: bool) -> std::cmp::Ordering {
+        if reverse {
+            other.cmp(self)
+        } else {
+            self.cmp(other)
+        }
+    }
 }

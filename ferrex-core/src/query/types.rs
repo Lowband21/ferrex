@@ -26,7 +26,7 @@ pub struct MediaFilters {
 }
 
 /// Filter by media type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum MediaTypeFilter {
     Movie,
@@ -54,7 +54,7 @@ impl Default for SortCriteria {
 }
 
 /// Fields available for sorting
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum SortBy {
     Title,
@@ -72,7 +72,7 @@ pub enum SortBy {
 }
 
 /// Sort order
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum SortOrder {
     Ascending,

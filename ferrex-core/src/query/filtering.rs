@@ -25,6 +25,8 @@ use crate::{
     query::types::{MediaTypeFilter, SortBy, SortOrder},
     watch_status::WatchStatusFilter,
 };
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 /// Parameters collected from UI or other client state to build a `FilterIndicesRequest`.
 #[derive(Debug, Clone)]
@@ -107,4 +109,30 @@ pub fn watch_status_to_filter(status: UiWatchStatus) -> Option<WatchStatusFilter
         InProgress => Some(WatchStatusFilter::InProgress),
         Completed => Some(WatchStatusFilter::Completed),
     }
+}
+
+/// Compute a stable hash for a filter specification
+pub fn hash_filter_spec(spec: &FilterIndicesRequest) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    spec.media_type.hash(&mut hasher);
+
+    let mut genres = spec.genres.clone();
+    genres.sort();
+    genres.dedup();
+    genres.hash(&mut hasher);
+
+    spec.year_range.hash(&mut hasher);
+    spec.rating_range.hash(&mut hasher);
+    spec.resolution_range.hash(&mut hasher);
+    spec.watch_status.hash(&mut hasher);
+
+    match spec.search.as_ref() {
+        Some(search) => search.trim().to_lowercase().hash(&mut hasher),
+        None => ().hash(&mut hasher),
+    }
+
+    spec.sort.hash(&mut hasher);
+    spec.order.hash(&mut hasher);
+
+    hasher.finish()
 }

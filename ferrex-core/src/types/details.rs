@@ -108,7 +108,15 @@ pub struct Translation {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+    Default,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct CollectionInfo {
@@ -119,7 +127,15 @@ pub struct CollectionInfo {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+    Default,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq, Hash))]
 pub struct Keyword {

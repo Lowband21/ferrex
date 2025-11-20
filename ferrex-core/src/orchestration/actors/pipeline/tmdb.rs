@@ -303,6 +303,7 @@ impl TmdbMetadataActor {
         jobs: &mut Vec<ImageFetchJob>,
     ) -> Result<()> {
         let mut seen_people = HashSet::new();
+        let mut used_order_indices = HashSet::new();
 
         for (idx, member) in cast.iter().enumerate() {
             if !seen_people.insert(member.id) {
@@ -320,12 +321,26 @@ impl TmdbMetadataActor {
 
             let person_uuid = Self::person_media_uuid(member.id);
 
+            // Prefer the TMDB-provided cast order so the player and server agree on indices.
+            let preferred_order = i32::try_from(member.order).ok();
+            let mut order_index = preferred_order.unwrap_or_else(|| idx as i32);
+
+            // Guard against duplicate order values by falling back to the iteration index.
+            if used_order_indices.contains(&order_index) {
+                order_index = idx as i32;
+                while used_order_indices.contains(&order_index) {
+                    order_index += 1;
+                }
+            }
+
+            used_order_indices.insert(order_index);
+
             self.queue_image_job(
                 library_id,
                 "person",
                 person_uuid,
                 "profile",
-                idx as i32,
+                order_index,
                 Some(path),
                 idx == 0,
                 ImageFetchPriority::Profile,
@@ -684,19 +699,132 @@ impl TmdbMetadataActor {
     }
 
     fn map_series_content_ratings(data: &TvContentRatingResult) -> Vec<ContentRating> {
-        data.results
-            .iter()
-            .map(|entry| ContentRating {
-                iso_3166_1: entry.iso_3166_1.clone(),
-                rating: if entry.rating.trim().is_empty() {
-                    None
-                } else {
-                    Some(entry.rating.trim().to_string())
-                },
+        let mut ratings = Vec::new();
+        let mut index_by_iso = HashMap::new();
+
+        for entry in &data.results {
+            let iso = match Self::normalize_region_code(&entry.iso_3166_1) {
+                Some(code) => code,
+                None => continue,
+            };
+
+            let mut candidate = ContentRating {
+                iso_3166_1: iso.clone(),
+                rating: Self::normalize_rating_value(&entry.rating),
                 rating_system: None,
-                descriptors: entry.descriptors.clone(),
-            })
-            .collect()
+                descriptors: Self::normalize_descriptors(&entry.descriptors),
+            };
+
+            if let Some(&idx) = index_by_iso.get(&iso) {
+                let existing = ratings
+                    .get_mut(idx)
+                    .expect("series rating index should be valid");
+                if Self::should_replace_rating(existing, &candidate) {
+                    Self::merge_descriptors(&mut candidate, &existing.descriptors);
+                    *existing = candidate;
+                } else {
+                    Self::merge_descriptors(existing, &candidate.descriptors);
+                }
+            } else {
+                index_by_iso.insert(iso, ratings.len());
+                ratings.push(candidate);
+            }
+        }
+
+        ratings
+    }
+
+    fn normalize_region_code(raw: &str) -> Option<String> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_uppercase())
+        }
+    }
+
+    fn normalize_rating_value(raw: &str) -> Option<String> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let collapsed = COLLAPSE_WHITESPACE_REGEX.replace_all(trimmed, " ");
+        let normalized = collapsed.trim();
+        if normalized.is_empty() {
+            None
+        } else {
+            Some(normalized.to_string())
+        }
+    }
+
+    fn normalize_descriptors(values: &[String]) -> Vec<String> {
+        let mut normalized = Vec::new();
+        let mut seen = HashSet::new();
+        for value in values {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let collapsed = COLLAPSE_WHITESPACE_REGEX.replace_all(trimmed, " ");
+            let candidate = collapsed.trim().to_string();
+            if candidate.is_empty() {
+                continue;
+            }
+
+            if seen.insert(candidate.clone()) {
+                normalized.push(candidate);
+            }
+        }
+
+        normalized
+    }
+
+    fn should_replace_rating(existing: &ContentRating, candidate: &ContentRating) -> bool {
+        match (&existing.rating, &candidate.rating) {
+            (None, Some(_)) => true,
+            (Some(_), None) => false,
+            (None, None) => candidate.descriptors.len() > existing.descriptors.len(),
+            (Some(existing_value), Some(candidate_value)) => {
+                let existing_key = Self::rating_compare_key(existing_value);
+                let candidate_key = Self::rating_compare_key(candidate_value);
+                if existing_key != candidate_key {
+                    return false;
+                }
+
+                if candidate_value.len() < existing_value.len() {
+                    return true;
+                }
+
+                candidate.descriptors.len() > existing.descriptors.len()
+            }
+        }
+    }
+
+    fn merge_descriptors(target: &mut ContentRating, additional: &[String]) {
+        if additional.is_empty() {
+            return;
+        }
+
+        let mut seen = target
+            .descriptors
+            .iter()
+            .cloned()
+            .collect::<HashSet<String>>();
+        for descriptor in additional {
+            if seen.insert(descriptor.clone()) {
+                target.descriptors.push(descriptor.clone());
+            }
+        }
+    }
+
+    fn rating_compare_key(value: &str) -> String {
+        value
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>()
+            .to_uppercase()
     }
 
     fn map_series_cast(credits: &TVShowAggregateCreditsResult) -> Vec<CastMember> {
@@ -1778,6 +1906,53 @@ impl TmdbMetadataActor {
         }
 
         results.first()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tmdb_api::tvshow::content_rating::ContentRating as TmdbContentRating;
+
+    #[test]
+    fn map_series_content_ratings_normalizes_and_dedupes() {
+        let data = TvContentRatingResult {
+            id: 42,
+            results: vec![
+                TmdbContentRating {
+                    iso_3166_1: "AU ".to_string(),
+                    rating: " R 18+ ".to_string(),
+                    descriptors: vec![" Strong Violence ".to_string()],
+                },
+                TmdbContentRating {
+                    iso_3166_1: "au".to_string(),
+                    rating: "R18+".to_string(),
+                    descriptors: vec![String::new()],
+                },
+                TmdbContentRating {
+                    iso_3166_1: "US".to_string(),
+                    rating: String::new(),
+                    descriptors: vec![],
+                },
+                TmdbContentRating {
+                    iso_3166_1: "US".to_string(),
+                    rating: "TV-MA".to_string(),
+                    descriptors: vec!["drugs".to_string()],
+                },
+            ],
+        };
+
+        let mapped = TmdbMetadataActor::map_series_content_ratings(&data);
+
+        assert_eq!(mapped.len(), 2);
+
+        let au = mapped.iter().find(|r| r.iso_3166_1 == "AU").unwrap();
+        assert_eq!(au.rating.as_deref(), Some("R18+"));
+        assert_eq!(au.descriptors, vec!["Strong Violence".to_string()]);
+
+        let us = mapped.iter().find(|r| r.iso_3166_1 == "US").unwrap();
+        assert_eq!(us.rating.as_deref(), Some("TV-MA"));
+        assert_eq!(us.descriptors, vec!["drugs".to_string()]);
     }
 }
 

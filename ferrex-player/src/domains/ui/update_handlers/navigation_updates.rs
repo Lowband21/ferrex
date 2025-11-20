@@ -4,16 +4,13 @@ use uuid::Uuid;
 
 use super::super::views::carousel::CarouselState;
 use crate::{
-    domains::{
-        metadata::image_types::{ImageRequest, Priority},
-        ui::{ViewState, messages::Message, types, views::grid::macros},
-    },
+    domains::ui::{ViewState, messages::Message, types, views::grid::macros},
     infrastructure::api_types::{Media, MovieReference},
     state_refactored::State,
 };
 use ferrex_core::{
-    EpisodeID, ImageSize, ImageType, MediaFile, MediaID, MediaIDLike, MediaOps, MovieID, MovieLike,
-    SeasonID, SeasonLike, SeriesID, SeriesLike,
+    EpisodeID, ImageRequest, ImageSize, ImageType, MediaFile, MediaID, MediaIDLike, MediaOps,
+    MovieID, MovieLike, Priority, SeasonID, SeasonLike, SeriesID, SeriesLike,
 };
 
 /// Updates background shader depth regions when transitioning to a detail view
@@ -217,14 +214,16 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
             }
 
             // Preload primary cast portraits for the carousel
-            for cast_member in movie_details.cast.iter().take(12) {
+            for (idx, cast_member) in movie_details.cast.iter().take(12).enumerate() {
+                let order = cast_member.order.max((idx as u32).into());
                 let person_uuid = Uuid::new_v5(
                     &Uuid::NAMESPACE_OID,
                     format!("person-{}", cast_member.id).as_bytes(),
                 );
                 let cast_request =
                     ImageRequest::new(person_uuid, ImageSize::Profile, ImageType::Person)
-                        .with_priority(Priority::Preload);
+                        .with_priority(Priority::Preload)
+                        .with_index(order.into());
 
                 if state.image_service.get(&cast_request).is_none() {
                     state.image_service.request_image(cast_request);
@@ -344,14 +343,16 @@ pub fn handle_view_series(state: &mut State, series_id: SeriesID) -> Task<Messag
             }
 
             // Prefetch lead cast portraits for the detail view carousel
-            for cast_member in details.cast.iter().take(12) {
+            for (idx, cast_member) in details.cast.iter().take(12).enumerate() {
+                let order = cast_member.order.max((idx as u32).into());
                 let person_uuid = Uuid::new_v5(
                     &Uuid::NAMESPACE_OID,
                     format!("person-{}", cast_member.id).as_bytes(),
                 );
                 let cast_request =
                     ImageRequest::new(person_uuid, ImageSize::Profile, ImageType::Person)
-                        .with_priority(Priority::Preload);
+                        .with_priority(Priority::Preload)
+                        .with_index(order.into());
 
                 if state.image_service.get(&cast_request).is_none() {
                     state.image_service.request_image(cast_request);

@@ -89,6 +89,9 @@ pub trait AuthService: Send + Sync {
     /// Check if auto-login is enabled for the current user (both server and device preferences)
     async fn is_current_user_auto_login_enabled(&self) -> RepositoryResult<bool>;
 
+    /// Get the identifier for the current device
+    async fn current_device_id(&self) -> RepositoryResult<Uuid>;
+
     /// Authenticate and set current auth state (used after successful login)
     async fn authenticate(
         &self,
@@ -333,6 +336,10 @@ pub mod mock {
 
         async fn is_current_user_auto_login_enabled(&self) -> RepositoryResult<bool> {
             Ok(false)
+        }
+
+        async fn current_device_id(&self) -> RepositoryResult<Uuid> {
+            Ok(Uuid::new_v4())
         }
 
         async fn authenticate(

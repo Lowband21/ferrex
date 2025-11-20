@@ -71,7 +71,7 @@ pub struct QueueConfig {
 impl Default for QueueConfig {
     fn default() -> Self {
         Self {
-            max_parallel_scans: 4,
+            max_parallel_scans: 8,
             max_parallel_analyses: 8,
             max_parallel_metadata: 4,
             max_parallel_index: 4,

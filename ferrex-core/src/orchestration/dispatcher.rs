@@ -357,6 +357,7 @@ where
             discovered_events.push(media.clone());
 
             let analyze_context = serde_json::json!({
+                "library_type": media.context.parent.resolved_type,
                 "media_kind": media.classified_as.as_str(),
                 "parent": media.context.parent,
                 "scan_reason": media.context.reason,

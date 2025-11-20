@@ -173,7 +173,7 @@ impl InProgressItem {
 /// Filter for watch status queries
 ///
 /// Used to filter media by watch status in query operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum WatchStatusFilter {
     /// Media never watched by the user
     Unwatched,

@@ -18,11 +18,10 @@ use ferrex_core::SeriesLike;
 use iced::{Element, widget::column};
 use uuid::Uuid;
 
-use crate::domains::metadata::image_types::{self};
 use crate::{domains::ui::theme, state_refactored::State};
 use std::sync::Arc;
 
-use ferrex_core::MediaIDLike;
+use ferrex_core::{MediaIDLike, Priority};
 
 #[cfg_attr(
     any(
@@ -132,9 +131,9 @@ pub fn movie_reference_card_with_state<'a>(
                             .animation(state.domains.ui.state.default_widget_animation)
                             .placeholder(lucide_icons::Icon::Film)
                             .priority(if is_hovered || is_visible {
-                                image_types::Priority::Visible
+                                Priority::Visible
                             } else {
-                                image_types::Priority::Preload
+                                Priority::Preload
                             })
                             .is_hovered(is_hovered)
                             .into();
@@ -175,9 +174,9 @@ pub fn movie_reference_card_with_state<'a>(
 
     // Determine priority based on visibility and hover state
     let priority = if is_hovered || is_visible {
-        image_types::Priority::Visible
+        Priority::Visible
     } else {
-        image_types::Priority::Preload
+        Priority::Preload
     };
 
     // Create image with watch progress and scroll tier
@@ -323,9 +322,9 @@ pub fn series_reference_card_with_state<'a>(
                             .animation(state.domains.ui.state.default_widget_animation)
                             .placeholder(lucide_icons::Icon::Tv)
                             .priority(if is_hovered || is_visible {
-                                image_types::Priority::Visible
+                                Priority::Visible
                             } else {
-                                image_types::Priority::Preload
+                                Priority::Preload
                             })
                             .is_hovered(is_hovered)
                             .into();
@@ -365,9 +364,9 @@ pub fn series_reference_card_with_state<'a>(
 
     // Determine priority based on visibility and hover state
     let priority = if is_hovered || is_visible {
-        image_types::Priority::Visible
+        Priority::Visible
     } else {
-        image_types::Priority::Preload
+        Priority::Preload
     };
 
     // Create image with scroll tier

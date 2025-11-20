@@ -90,13 +90,7 @@ where
             .collect();
 
         // Sort by keys
-        keys.sort_by(|a, b| {
-            if self.reverse {
-                b.1.cmp(&a.1)
-            } else {
-                a.1.cmp(&b.1)
-            }
-        });
+        keys.sort_by(|a, b| a.1.compare_with_order(&b.1, self.reverse));
 
         // Reorder items based on sorted indices
         let indices: Vec<_> = keys.into_iter().map(|(i, _)| i).collect();
@@ -285,13 +279,7 @@ where
             .map(|(i, item)| (i, item.extract_key(self.field.clone())))
             .collect();
 
-        keys.sort_by(|a, b| {
-            if REVERSE {
-                b.1.cmp(&a.1)
-            } else {
-                a.1.cmp(&b.1)
-            }
-        });
+        keys.sort_by(|a, b| a.1.compare_with_order(&b.1, REVERSE));
 
         let indices: Vec<_> = keys.into_iter().map(|(i, _)| i).collect();
         crate::query::sorting::utils::reorder_by_indices(items, &indices);

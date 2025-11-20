@@ -17,24 +17,12 @@ use iced::Task;
 )]
 pub fn handle_toggle_auto_login(state: &mut State, enabled: bool) -> DomainUpdateResult {
     let auth_service = state.domains.settings.auth_service.clone();
-    let api_service = state.domains.settings.api_service.clone();
-
-    // We need to update both the device-specific setting AND the user preference
+    // We need to update both the device-specific setting and synced preference via auth service
     let task = Task::perform(
         async move {
             // First update the device-specific setting
             auth_service
                 .set_auto_login(enabled)
-                .await
-                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
-
-            // Then update the user preference in the database
-            let request = serde_json::json!({
-                "auto_login_enabled": enabled
-            });
-
-            api_service
-                .put::<serde_json::Value, serde_json::Value>("/users/me/preferences", &request)
                 .await
                 .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -54,6 +42,16 @@ pub fn handle_auto_login_toggled(
         Ok(enabled) => {
             // Update UI state to reflect the change
             state.domains.settings.preferences.auto_login_enabled = enabled;
+            state.domains.auth.state.auto_login_enabled = enabled;
+
+            if let crate::domains::auth::types::AuthenticationFlow::EnteringCredentials {
+                remember_device,
+                ..
+            } = &mut state.domains.auth.state.auth_flow
+            {
+                *remember_device = enabled;
+            }
+
             log::info!(
                 "Auto-login is now {}",
                 if enabled { "enabled" } else { "disabled" }

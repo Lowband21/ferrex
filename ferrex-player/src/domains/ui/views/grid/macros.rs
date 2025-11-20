@@ -410,7 +410,7 @@ macro_rules! media_card {
             };
 
             //// Map priority if provided
-            let priority = $crate::domains::metadata::image_types::Priority::Preload;
+            let priority = ferrex_core::Priority::Preload;
             $(let priority = $priority;)?
 
             // Create the image widget

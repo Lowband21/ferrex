@@ -51,7 +51,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         || poster_anim_active
     {
         subscriptions.push(
-            iced::time::every(std::time::Duration::from_nanos(8333333)) // ~120 FPS
+            iced::time::every(std::time::Duration::from_nanos(8_333_333)) // ~120 FPS
                 .map(|_| DomainMessage::Ui(Message::UpdateTransitions)),
         );
     }

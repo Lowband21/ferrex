@@ -382,7 +382,7 @@ pub struct IndicesResponse {
 }
 
 /// Inclusive range for scalar filters
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ScalarRange<T> {
     pub min: T,
     pub max: T,

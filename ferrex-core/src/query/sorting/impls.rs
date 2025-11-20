@@ -210,52 +210,37 @@ mod tests {
     use crate::query::sorting::fields::{
         DateAddedField, PopularityField, RatingField, ReleaseDateField, RuntimeField, TitleField,
     };
+    use crate::query::sorting::strategy::FieldSort;
     use crate::{EnhancedMovieDetails, LibraryID, MovieID, MovieTitle, MovieURL, UrlLike};
     use uuid::Uuid;
 
     fn create_test_movie_with_details() -> MovieReference {
+        let mut details = EnhancedMovieDetails {
+            id: 12345,
+            title: "Test Movie".to_string(),
+            overview: Some("A test movie".to_string()),
+            release_date: Some("2023-01-15".to_string()),
+            runtime: Some(120),
+            vote_average: Some(7.5f32),
+            vote_count: Some(1000),
+            popularity: Some(85.3f32),
+            content_rating: Some("PG-13".to_string()),
+            ..Default::default()
+        };
+        details
+            .spoken_languages
+            .push(crate::types::details::SpokenLanguage {
+                iso_639_1: Some("en".to_string()),
+                name: "English".to_string(),
+                english_name: Some("English".to_string()),
+            });
+
         MovieReference {
             id: MovieID::new(),
             library_id: LibraryID::new(),
             tmdb_id: 12345,
             title: MovieTitle::new("Test Movie".to_string()).unwrap(),
-            details: MediaDetailsOption::Details(TmdbDetails::Movie(EnhancedMovieDetails {
-                id: 12345,
-                title: "Test Movie".to_string(),
-                overview: Some("A test movie".to_string()),
-                release_date: Some("2023-01-15".to_string()),
-                runtime: Some(120),
-                vote_average: Some(7.5f32),
-                vote_count: Some(1000),
-                popularity: Some(85.3f32),
-                content_rating: None,
-                genres: vec![],
-                production_companies: vec![],
-                poster_path: None,
-                backdrop_path: None,
-                logo_path: None,
-                images: crate::MediaImages::default(),
-                cast: vec![],
-                crew: vec![],
-                videos: vec![],
-                keywords: vec![],
-                external_ids: crate::ExternalIds::default(),
-                original_title: todo!(),
-                content_ratings: todo!(),
-                release_dates: todo!(),
-                spoken_languages: todo!(),
-                production_countries: todo!(),
-                homepage: todo!(),
-                status: todo!(),
-                tagline: todo!(),
-                budget: todo!(),
-                revenue: todo!(),
-                alternative_titles: todo!(),
-                translations: todo!(),
-                collection: todo!(),
-                recommendations: todo!(),
-                similar: todo!(),
-            })),
+            details: MediaDetailsOption::Details(TmdbDetails::Movie(details)),
             endpoint: MovieURL::from_string("/movies/test-movie-1".to_string()),
             file: crate::MediaFile {
                 id: Uuid::new_v4(),
@@ -330,5 +315,22 @@ mod tests {
         let movie = create_test_movie_with_details();
         let key: OptionalFloatKey = movie.extract_key(PopularityField);
         assert!(!key.is_missing());
+    }
+
+    #[test]
+    fn test_missing_optional_values_stay_last_on_desc() {
+        let mut with_details = create_test_movie_with_details();
+        with_details.title = MovieTitle::new("Rated Movie".to_string()).unwrap();
+
+        let mut without_details = create_test_movie_without_details();
+        without_details.title = MovieTitle::new("Unrated Movie".to_string()).unwrap();
+
+        let mut movies = vec![without_details.clone(), with_details.clone()];
+
+        let sorter = FieldSort::<MovieReference, RatingField>::new(RatingField, true);
+        sorter.sort(&mut movies);
+
+        assert_eq!(movies[0].title, with_details.title);
+        assert_eq!(movies[1].title, without_details.title);
     }
 }

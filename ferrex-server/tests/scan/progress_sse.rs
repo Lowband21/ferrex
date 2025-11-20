@@ -666,6 +666,12 @@ impl MediaDatabaseTrait for TestMediaBackend {
     ) -> Result<Option<ferrex_core::auth::AuthenticatedDevice>> {
         self.unsupported("get_device_by_fingerprint")
     }
+    async fn get_device_by_id(
+        &self,
+        device_id: Uuid,
+    ) -> Result<Option<ferrex_core::auth::AuthenticatedDevice>> {
+        self.unsupported("get_device_by_id")
+    }
     async fn get_user_devices(
         &self,
         user_id: Uuid,

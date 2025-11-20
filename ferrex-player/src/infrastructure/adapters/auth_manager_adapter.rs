@@ -168,6 +168,12 @@ impl AuthService for AuthManagerAdapter {
         Ok(self.manager.is_auto_login_enabled().await)
     }
 
+    async fn current_device_id(&self) -> RepositoryResult<Uuid> {
+        self.manager.current_device_id().await.map_err(|e| {
+            RepositoryError::QueryFailed(format!("Get current device id failed: {}", e))
+        })
+    }
+
     async fn validate_session(&self) -> RepositoryResult<(User, UserPermissions)> {
         self.manager
             .validate_session()

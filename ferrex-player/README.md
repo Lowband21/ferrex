@@ -72,6 +72,13 @@ This client uses:
 - **Tokio**: Async runtime for network requests
 - **Profiling**: Puffin/Tracy/Tracing for performance analysis
 
+## Authentication Tokens & "Remember This Device"
+
+- **Password Login (JWT)**: Standard username/password authentication returns a short-lived JWT (15 minutes by default). The server requires the `JWT_SECRET` environment variable in development (e.g. `export JWT_SECRET=dev-secret` before running tests or the server).
+- **Device Sessions (PIN / Remember Device)**: Device-aware login returns a 64-character session token tied to the current device. These tokens are not JWTs and instead rely on a 30-day trust window that refreshes whenever you log in with "Remember this device" enabled.
+- **Auto-login toggle**: The login screen checkbox and the Settings → Preferences toggle are now synchronized. Enabling one enables the other, updates the server-side preference, and persists the device trust window so the player can sign in automatically on next launch.
+- **Device management**: Settings → Device Management lists trusted devices, highlights the current device, and allows revocation. Revoking a device clears its remembered-session window immediately.
+
 ## Performance Profiling
 
 The application includes comprehensive performance profiling infrastructure:

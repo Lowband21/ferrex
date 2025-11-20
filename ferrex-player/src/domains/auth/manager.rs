@@ -13,9 +13,10 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use log::{debug, error, info, warn};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::OnceCell;
+use tokio::sync::{Mutex, OnceCell};
 use uuid::Uuid;
 
 use crate::domains::auth::hardware_fingerprint::generate_hardware_fingerprint;
@@ -165,6 +166,7 @@ pub struct AuthManager {
     device_id: OnceCell<Uuid>,
     device_fingerprint: OnceCell<String>,
     auth_storage: Arc<AuthStorage>,
+    device_trust_expires_at: Arc<Mutex<Option<DateTime<Utc>>>>,
 }
 
 impl AuthManager {
@@ -187,6 +189,7 @@ impl AuthManager {
             device_id: OnceCell::new(),
             device_fingerprint: OnceCell::new(),
             auth_storage,
+            device_trust_expires_at: Arc::new(Mutex::new(None)),
         };
 
         // Set up the refresh callback for automatic token refresh on 401
@@ -254,6 +257,11 @@ impl AuthManager {
                         return Ok(None);
                     }
                     info!("Device trust still valid until {}", device_trust_expires);
+                    let mut guard = self.device_trust_expires_at.lock().await;
+                    *guard = Some(device_trust_expires);
+                } else {
+                    let mut guard = self.device_trust_expires_at.lock().await;
+                    *guard = None;
                 }
 
                 // Check if this is a non-JWT token and calculate actual expiry
@@ -642,32 +650,36 @@ impl AuthManager {
 
     /// Save current auth state to encrypted storage
     pub async fn save_current_auth(&self) -> AuthResult<()> {
-        // Get current state from AuthStateStore
-        let stored_auth = self.auth_state.with_state(|state| match state {
-            AuthState::Authenticated {
-                user,
-                token,
-                permissions,
+        let state_snapshot = self.auth_state.current();
+        let stored_auth = if let AuthState::Authenticated {
+            user,
+            token,
+            permissions,
+            server_url,
+        } = state_snapshot
+        {
+            info!(
+                "Saving auth with token expiring in {} seconds",
+                token.expires_in
+            );
+            let now = Utc::now();
+            let trust_expires_at = {
+                let guard = self.device_trust_expires_at.lock().await;
+                *guard
+            };
+
+            Some(StoredAuth {
+                token: token.clone(),
+                user: user.clone(),
                 server_url,
-            } => {
-                info!(
-                    "Saving auth with token expiring in {} seconds",
-                    token.expires_in
-                );
-                let now = Utc::now();
-                Some(StoredAuth {
-                    token: token.clone(),
-                    user: user.clone(),
-                    server_url: server_url.clone(),
-                    permissions: Some(permissions.clone()),
-                    stored_at: now,
-                    // Set device trust to expire in 30 days
-                    device_trust_expires_at: Some(now + chrono::Duration::days(30)),
-                    refresh_token: Some(token.refresh_token.clone()),
-                })
-            }
-            _ => None,
-        });
+                permissions: Some(permissions.clone()),
+                stored_at: now,
+                device_trust_expires_at: trust_expires_at,
+                refresh_token: Some(token.refresh_token.clone()),
+            })
+        } else {
+            None
+        };
 
         match stored_auth {
             Some(auth) => self.save_to_keychain(&auth).await,
@@ -924,20 +936,40 @@ impl AuthManager {
 
     /// Handle authentication result
     async fn handle_auth_result(&self, result: ServerAuthResult) -> AuthResult<()> {
-        // Extract actual expiry from the JWT token
-        let expires_in = extract_token_expiry(&result.session_token)
-            .and_then(|secs| {
-                info!(
-                    "JWT token expires in {} seconds ({} minutes)",
-                    secs,
-                    secs / 60
-                );
-                u32::try_from(secs).ok()
-            })
-            .unwrap_or_else(|| {
-                warn!("Could not extract token expiry, using default 1 hour");
-                3600
-            });
+        let now = Utc::now();
+        let trust_expires_at = result
+            .device_registration
+            .as_ref()
+            .and_then(|reg| reg.expires_at);
+
+        // Extract actual expiry from the JWT token, falling back to trust expiry when available
+        let mut expires_in = extract_token_expiry(&result.session_token).and_then(|secs| {
+            info!(
+                "JWT token expires in {} seconds ({} minutes)",
+                secs,
+                secs / 60
+            );
+            u32::try_from(secs).ok()
+        });
+
+        if expires_in.is_none() {
+            if let Some(expiry) = trust_expires_at {
+                let seconds = (expiry - now).num_seconds().max(0);
+                if seconds > 0 {
+                    expires_in = u32::try_from(seconds).ok();
+                }
+            }
+        }
+
+        let expires_in = expires_in.unwrap_or_else(|| {
+            warn!("Could not determine token expiry; defaulting to 1 hour");
+            3600
+        });
+
+        {
+            let mut guard = self.device_trust_expires_at.lock().await;
+            *guard = trust_expires_at;
+        }
 
         // Set token in API client
         let token = AuthToken {
@@ -1026,6 +1058,11 @@ impl AuthManager {
         Ok(id)
     }
 
+    /// Expose the current device identifier to callers that need to identify themselves
+    pub async fn current_device_id(&self) -> AuthResult<Uuid> {
+        self.get_or_create_device_id().await
+    }
+
     /// Get current authenticated user
     pub async fn get_current_user(&self) -> Option<User> {
         self.auth_state.with_state(|state| match state {
@@ -1074,6 +1111,41 @@ impl AuthManager {
                     format!("Failed to set auto-login: {}", e),
                 )))
             })?;
+
+        // Update server-side preference so settings stay in sync across devices
+        let request = json!({ "auto_login_enabled": enabled });
+        self.api_client
+            .put::<_, serde_json::Value>("/users/me/preferences", &request)
+            .await
+            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+
+        if !enabled {
+            let mut guard = self.device_trust_expires_at.lock().await;
+            *guard = None;
+        }
+
+        // Update in-memory auth state with the new preference so UI stays consistent
+        if let AuthState::Authenticated {
+            token,
+            permissions,
+            server_url,
+            ..
+        } = self.auth_state.current()
+        {
+            let mut updated_user = user.clone();
+            updated_user.preferences.auto_login_enabled = enabled;
+            self.auth_state.authenticate(
+                updated_user,
+                token.clone(),
+                permissions.clone(),
+                server_url,
+            );
+        }
+
+        // Persist the updated preference to storage so auto-login reflects user intent
+        if let Err(err) = self.save_current_auth().await {
+            warn!("Failed to persist auto-login preference: {}", err);
+        }
 
         Ok(())
     }
@@ -1206,7 +1278,7 @@ impl AuthManager {
         self.handle_auth_result(result.clone()).await?;
 
         // Get user and permissions
-        let user: User = self
+        let mut user: User = self
             .api_client
             .get("/users/me")
             .await
@@ -1216,6 +1288,10 @@ impl AuthManager {
             .get("/users/me/permissions")
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+
+        // Synchronize auto-login preferences based on user selection
+        self.set_auto_login(remember_device).await?;
+        user.preferences.auto_login_enabled = remember_device;
 
         Ok(PlayerAuthResult {
             user,

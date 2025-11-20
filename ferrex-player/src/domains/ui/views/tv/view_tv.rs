@@ -1,19 +1,16 @@
 use crate::domains::ui::components;
 use crate::domains::ui::views::grid::macros::parse_hex_color;
 use crate::{
-    domains::{
-        metadata::image_types::Priority,
-        ui::{
-            messages::Message, theme, views::grid::macros::ThemeColorAccess,
-            widgets::image_for::image_for,
-        },
+    domains::ui::{
+        messages::Message, theme, views::grid::macros::ThemeColorAccess,
+        widgets::image_for::image_for,
     },
     media_card,
     state_refactored::State,
 };
 use ferrex_core::{
     ArchivedMediaDetailsOption, EpisodeID, EpisodeLike, ImageSize, ImageType, MediaID, MediaIDLike,
-    SeasonID, SeasonLike, SeriesDetailsLike, SeriesID, SeriesLike,
+    Priority, SeasonID, SeasonLike, SeriesDetailsLike, SeriesID, SeriesLike,
 };
 use iced::{
     Element, Length,

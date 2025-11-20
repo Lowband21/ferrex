@@ -5,7 +5,6 @@
 
 use crate::domains::ui::widgets::rounded_image_shader::AnimatedPosterBounds;
 use crate::{
-    domains::metadata::image_types::{ImageRequest, Priority},
     domains::ui::messages::Message,
     domains::ui::widgets::{AnimationType, rounded_image_shader},
     infrastructure::api_types::{
@@ -13,7 +12,7 @@ use crate::{
     },
     infrastructure::service_registry,
 };
-use ferrex_core::{ImageSize, ImageType, MediaIDLike};
+use ferrex_core::{ImageRequest, ImageSize, ImageType, MediaIDLike, Priority};
 use iced::{Color, Element, Length, widget::image::Handle};
 use lucide_icons::Icon;
 use std::hash::{Hash, Hasher};
@@ -38,6 +37,7 @@ pub struct ImageFor {
     placeholder_icon: Icon,
     placeholder_text: Option<String>,
     priority: Priority,
+    image_index: u32,
     animation: AnimationType,
     theme_color: Option<Color>,
     is_hovered: bool,
@@ -71,6 +71,7 @@ impl ImageFor {
             placeholder_icon: Icon::FileArchive,
             placeholder_text: None,
             priority: Priority::Preload,
+            image_index: 0,
             // Default; callers (views) should set from UI state
             animation: AnimationType::None,
             theme_color: None,
@@ -138,6 +139,12 @@ impl ImageFor {
     /// Set the loading priority
     pub fn priority(mut self, priority: Priority) -> Self {
         self.priority = priority;
+        self
+    }
+
+    /// Set the image index for multi-image categories (e.g. cast order)
+    pub fn image_index(mut self, index: u32) -> Self {
+        self.image_index = index;
         self
     }
 
@@ -228,18 +235,16 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
         let bounds = AnimatedPosterBounds::new(width, height);
 
         // Create the image request
-        let request = ImageRequest {
-            media_id: image.media_id,
-            size: image.size,
-            image_type: image.image_type,
-            priority: image.priority,
-        };
+        let request = ImageRequest::new(image.media_id, image.size, image.image_type)
+            .with_priority(image.priority)
+            .with_index(image.image_index);
 
         // Calculate request hash for cache invalidation
         let request_hash = {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             request.media_id.hash(&mut hasher);
-            (request.size as u8).hash(&mut hasher);
+            request.size.hash(&mut hasher);
+            request.image_index.hash(&mut hasher);
             //(request.priority as u8).hash(&mut hasher);
             hasher.finish()
         };

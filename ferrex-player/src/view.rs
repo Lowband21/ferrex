@@ -1,7 +1,6 @@
 //! Root-level view composition
 
 use crate::common::messages::DomainMessage;
-use crate::domains::metadata::image_types::ImageRequest;
 use crate::domains::ui::theme;
 use crate::domains::ui::types::ViewState;
 use crate::domains::ui::views::admin::{view_admin_dashboard, view_library_management};
@@ -17,7 +16,7 @@ use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::{BackgroundEffect, background_shader};
 use crate::domains::{player, ui};
 use crate::state_refactored::State;
-use ferrex_core::{ImageSize, ImageType, MediaIDLike};
+use ferrex_core::{ImageRequest, ImageSize, ImageType, MediaIDLike};
 use iced::widget::{Space, Stack, column, container, scrollable};
 use iced::{Element, Font, Length};
 

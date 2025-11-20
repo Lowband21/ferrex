@@ -162,55 +162,59 @@ pub fn handle_device_status_checked(
         result
     );
 
+    let default_remember = state.domains.auth.state.auto_login_enabled;
+    let auth_service = Arc::clone(&state.domains.auth.state.auth_service);
+    let user_id = user.id;
+
     match result {
         Ok(status) => {
             if status.device_registered && status.has_pin {
-                // Device is trusted and has PIN - show PIN entry
                 state.domains.auth.state.auth_flow = AuthenticationFlow::EnteringCredentials {
                     user,
                     input_type: CredentialType::Pin { max_length: 4 },
                     input: SecureCredential::new(String::new()),
                     show_password: false,
-                    remember_device: false,
+                    remember_device: default_remember,
                     error: None,
                     attempts_remaining: Some(status.remaining_attempts.unwrap_or(5)),
                     loading: false,
                 };
-                Task::none()
             } else {
-                // Check if admin has unlocked PIN for all users
-                //let auth_manager = state.domains.auth.state.auth_manager.clone();
-                //let user_clone = user.clone();
-
-                // Device not registered/no PIN - show password entry
                 state.domains.auth.state.auth_flow = AuthenticationFlow::EnteringCredentials {
                     user,
                     input_type: CredentialType::Password,
                     input: SecureCredential::new(String::new()),
                     show_password: false,
-                    remember_device: false,
+                    remember_device: default_remember,
                     error: None,
                     attempts_remaining: None,
                     loading: false,
                 };
-                Task::none()
             }
         }
         Err(_) => {
-            // Error checking device status - default to password entry
             state.domains.auth.state.auth_flow = AuthenticationFlow::EnteringCredentials {
                 user,
                 input_type: CredentialType::Password,
                 input: SecureCredential::new(String::new()),
                 show_password: false,
-                remember_device: false,
+                remember_device: default_remember,
                 error: None,
                 attempts_remaining: None,
                 loading: false,
             };
-            Task::none()
         }
     }
+
+    Task::perform(
+        async move {
+            auth_service
+                .is_auto_login_enabled(&user_id)
+                .await
+                .unwrap_or(false)
+        },
+        auth::Message::RememberDeviceSynced,
+    )
 }
 
 /// Handle enable admin PIN unlock
@@ -550,6 +554,9 @@ pub fn handle_auto_login_check_complete(state: &mut State) -> Task<auth::Message
 pub fn handle_auto_login_successful(state: &mut State, user: User) -> Task<auth::Message> {
     log::info!("[Auth] Auto-login successful for user: {}", user.username);
 
+    state.domains.auth.state.auto_login_enabled = user.preferences.auto_login_enabled;
+    state.domains.settings.preferences.auto_login_enabled = user.preferences.auto_login_enabled;
+
     // Query permissions from auth service
     let auth_service = &state.domains.auth.state.auth_service;
     let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
@@ -685,6 +692,18 @@ pub fn handle_auth_flow_auth_result(
 
     match result {
         Ok(auth_result) => {
+            let auto_login_enabled = auth_result.user.preferences.auto_login_enabled;
+
+            if let AuthenticationFlow::EnteringCredentials {
+                remember_device, ..
+            } = &mut state.domains.auth.state.auth_flow
+            {
+                *remember_device = auto_login_enabled;
+            }
+
+            state.domains.auth.state.auto_login_enabled = auto_login_enabled;
+            state.domains.settings.preferences.auto_login_enabled = auto_login_enabled;
+
             // Mark as authenticated (both top-level and domain state)
             state.is_authenticated = true;
             state.domains.auth.state.is_authenticated = true;
@@ -860,7 +879,25 @@ pub fn handle_auth_flow_toggle_remember_device(state: &mut State) -> Task<auth::
     } = &mut state.domains.auth.state.auth_flow
     {
         *remember_device = !*remember_device;
+        state.domains.auth.state.auto_login_enabled = *remember_device;
+        state.domains.settings.preferences.auto_login_enabled = *remember_device;
     }
+    Task::none()
+}
+
+pub fn handle_remember_device_synced(state: &mut State, enabled: bool) -> Task<auth::Message> {
+    use crate::domains::auth::types::AuthenticationFlow;
+
+    state.domains.auth.state.auto_login_enabled = enabled;
+    state.domains.settings.preferences.auto_login_enabled = enabled;
+
+    if let AuthenticationFlow::EnteringCredentials {
+        remember_device, ..
+    } = &mut state.domains.auth.state.auth_flow
+    {
+        *remember_device = enabled;
+    }
+
     Task::none()
 }
 

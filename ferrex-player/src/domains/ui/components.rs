@@ -74,12 +74,15 @@ fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, Message> {
     );
 
     // Use image_for widget with rounded_image_shader
+    let order = actor.order.to_native();
+
     let profile_image = image_for(person_uuid)
         .size(ImageSize::Profile)
         .image_type(ImageType::Person)
         .width(Length::Fixed(card_width))
         .height(Length::Fixed(image_height))
         .radius(CORNER_RADIUS)
+        .image_index(order)
         .placeholder(Icon::User);
 
     card_content = card_content.push(profile_image);

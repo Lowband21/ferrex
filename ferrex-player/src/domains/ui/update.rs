@@ -15,6 +15,7 @@ use ferrex_core::{
     SortOrder,
 };
 use iced::Task;
+use std::time::Instant;
 
 /// Check if user has PIN - returns a task that sends a Settings message
 fn check_user_has_pin() -> DomainUpdateResult {
@@ -398,7 +399,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
         ui::Message::CheckScrollStopped => {
-            use crate::domains::metadata::image_types::{ImageRequest, Priority};
+            use ferrex_core::{ImageRequest, Priority};
             // Check if scrolling has actually stopped
             if let Some(last_time) = state.domains.ui.state.last_scroll_time {
                 let elapsed = last_time.elapsed();
@@ -430,16 +431,16 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                         let media_type = id.media_type();
                         let uuid = id.to_uuid();
 
-                        let request = ImageRequest {
-                            media_id: uuid,
-                            size: ImageSize::Poster,
-                            image_type: match media_type {
+                        let request = ImageRequest::new(
+                            uuid,
+                            ImageSize::Poster,
+                            match media_type {
                                 MediaType::Movie => ImageType::Movie,
                                 MediaType::Series => ImageType::Series,
                                 _ => ImageType::Movie,
                             },
-                            priority,
-                        };
+                        )
+                        .with_priority(priority);
                         image_service.get().request_image(request);
                     }
 
@@ -948,58 +949,39 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             handle_carousel_navigation(state, carousel_msg).map(DomainMessage::Ui),
         ),
         ui::Message::UpdateTransitions => {
-            // Update all active transitions
-            state
-                .domains
-                .ui
-                .state
-                .background_shader_state
-                .color_transitions
-                .update();
-            state
-                .domains
-                .ui
-                .state
-                .background_shader_state
-                .backdrop_transitions
-                .update();
-            state
-                .domains
-                .ui
-                .state
-                .background_shader_state
-                .gradient_transitions
-                .update();
+            let ui_state = &mut state.domains.ui.state;
+            let now = Instant::now();
+
+            let poster_anim_active = match ui_state.poster_anim_active_until {
+                Some(until) if until > now => true,
+                Some(_) => {
+                    ui_state.poster_anim_active_until = None;
+                    false
+                }
+                None => false,
+            };
+
+            let shader_state = &mut ui_state.background_shader_state;
+            let transitions_active = shader_state.color_transitions.is_transitioning()
+                || shader_state.backdrop_transitions.is_transitioning()
+                || shader_state.gradient_transitions.is_transitioning();
+
+            if !poster_anim_active && !transitions_active {
+                return DomainUpdateResult::task(Task::none());
+            }
+
+            shader_state.color_transitions.update();
+            shader_state.backdrop_transitions.update();
+            shader_state.gradient_transitions.update();
 
             // Update the actual colors based on transition progress
-            let (primary, secondary) = state
-                .domains
-                .ui
-                .state
-                .background_shader_state
-                .color_transitions
-                .get_interpolated_colors();
-            state.domains.ui.state.background_shader_state.primary_color = primary;
-            state
-                .domains
-                .ui
-                .state
-                .background_shader_state
-                .secondary_color = secondary;
+            let (primary, secondary) = shader_state.color_transitions.get_interpolated_colors();
+            shader_state.primary_color = primary;
+            shader_state.secondary_color = secondary;
 
             // Update the gradient center based on transition progress
-            state
-                .domains
-                .ui
-                .state
-                .background_shader_state
-                .gradient_center = state
-                .domains
-                .ui
-                .state
-                .background_shader_state
-                .gradient_transitions
-                .get_interpolated_center();
+            shader_state.gradient_center =
+                shader_state.gradient_transitions.get_interpolated_center();
 
             DomainUpdateResult::task(Task::none())
         }

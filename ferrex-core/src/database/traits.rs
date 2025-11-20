@@ -615,6 +615,12 @@ pub trait MediaDatabaseTrait: Send + Sync {
         fingerprint: &str,
     ) -> Result<Option<crate::auth::AuthenticatedDevice>>;
 
+    /// Get device by id
+    async fn get_device_by_id(
+        &self,
+        device_id: Uuid,
+    ) -> Result<Option<crate::auth::AuthenticatedDevice>>;
+
     /// Get all devices for a user
     async fn get_user_devices(
         &self,

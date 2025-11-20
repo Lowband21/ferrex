@@ -1,7 +1,7 @@
 use super::Message;
 use crate::infrastructure::{adapters::ApiClientAdapter, services::api::ApiService};
 use ferrex_core::api_routes::{utils, v1};
-use ferrex_core::{ImageSize, ImageType};
+use ferrex_core::{ImageRequest, ImageSize, ImageType};
 use futures::stream;
 use iced::Subscription;
 use std::sync::{Arc, Mutex};
@@ -172,13 +172,14 @@ fn image_loader_stream(
                                 ImageSize::Profile => "w185",
                             };
 
+                            let index_str = request.image_index.to_string();
                             let path = utils::replace_params(
                                 v1::images::SERVE,
                                 &[
                                     ("{type}", media_type),
                                     ("{id}", &id),
                                     ("{category}", category),
-                                    ("{index}", "0"),
+                                    ("{index}", index_str.as_str()),
                                 ],
                             );
 

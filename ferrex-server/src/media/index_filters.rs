@@ -271,7 +271,9 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
                 if !self.needs_watch_progress {
                     return Err(FilterQueryError::MissingUserContext("watch progress sort"));
                 }
-                "CASE WHEN uwp.duration > 0 THEN uwp.position / uwp.duration ELSE NULL END"
+                "CASE WHEN uwp.duration > 0 \
+                 THEN (uwp.position::FLOAT8 / NULLIF(uwp.duration::FLOAT8, 0)) \
+                 ELSE NULL END"
             }
             SortBy::LastWatched => {
                 if !(self.needs_watch_progress || self.needs_watch_completed) {
@@ -343,6 +345,9 @@ mod tests {
         let qb = build_filtered_movie_query(Uuid::new_v4(), &spec, Some(Uuid::new_v4())).unwrap();
         let sql = qb.sql();
         assert!(sql.contains("user_watch_progress"));
+        assert!(sql.contains("uwp.position::FLOAT8"));
+        assert!(sql.contains("NULLIF(uwp.duration::FLOAT8, 0)"));
+        assert!(sql.contains("NULLS LAST"));
     }
 
     #[test]

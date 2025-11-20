@@ -2926,6 +2926,40 @@ impl MediaDatabaseTrait for PostgresDatabase {
         }))
     }
 
+    async fn get_device_by_id(
+        &self,
+        device_id: Uuid,
+    ) -> Result<Option<crate::auth::AuthenticatedDevice>> {
+        let row = sqlx::query!(
+            r#"
+            SELECT id, fingerprint, name, platform, app_version, first_authenticated_by,
+                   first_authenticated_at, trusted_until, last_seen_at, revoked,
+                   revoked_by, revoked_at, metadata
+            FROM authenticated_devices
+            WHERE id = $1
+            "#,
+            device_id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| crate::auth::AuthenticatedDevice {
+            id: r.id,
+            fingerprint: r.fingerprint,
+            name: r.name,
+            platform: serde_json::from_str(&r.platform).unwrap_or(crate::auth::Platform::Unknown),
+            app_version: r.app_version,
+            first_authenticated_by: r.first_authenticated_by,
+            first_authenticated_at: r.first_authenticated_at,
+            trusted_until: r.trusted_until,
+            last_seen_at: r.last_seen_at,
+            revoked: r.revoked,
+            revoked_by: r.revoked_by,
+            revoked_at: r.revoked_at,
+            metadata: r.metadata.unwrap_or(serde_json::json!({})),
+        }))
+    }
+
     async fn get_user_devices(
         &self,
         user_id: Uuid,

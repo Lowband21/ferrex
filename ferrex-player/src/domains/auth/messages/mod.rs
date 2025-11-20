@@ -63,6 +63,7 @@ pub enum Message {
     SubmitCredential,
     TogglePasswordVisibility,
     ToggleRememberDevice,
+    RememberDeviceSynced(bool),
     AuthResult(Result<PlayerAuthResult, String>),
     SetupPin,
     UpdatePin(String),
@@ -152,6 +153,9 @@ impl std::fmt::Debug for Message {
             Self::SubmitCredential => write!(f, "SubmitCredential"),
             Self::TogglePasswordVisibility => write!(f, "TogglePasswordVisibility"),
             Self::ToggleRememberDevice => write!(f, "ToggleRememberDevice"),
+            Self::RememberDeviceSynced(value) => {
+                write!(f, "RememberDeviceSynced({})", value)
+            }
             Self::AuthResult(_) => write!(f, "AuthResult(...)"),
             Self::SetupPin => write!(f, "SetupPin"),
             Self::UpdatePin(_) => write!(f, "UpdatePin(***)"),
@@ -273,6 +277,7 @@ impl Message {
             Self::SubmitCredential => "Auth::SubmitCredential",
             Self::TogglePasswordVisibility => "Auth::TogglePasswordVisibility",
             Self::ToggleRememberDevice => "Auth::ToggleRememberDevice",
+            Self::RememberDeviceSynced(_) => "Auth::RememberDeviceSynced",
             Self::AuthResult(_) => "Auth::AuthResult",
             Self::SetupPin => "Auth::SetupPin",
             Self::UpdatePin(_) => "Auth::UpdatePin",

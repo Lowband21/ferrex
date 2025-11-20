@@ -111,8 +111,8 @@ pub fn collect_cached_handles_for_media(
     image_type: ferrex_core::ImageType,
     size: ferrex_core::ImageSize,
 ) -> Vec<Handle> {
-    use crate::domains::metadata::image_types::{ImageRequest, Priority};
     use crate::infrastructure::service_registry;
+    use ferrex_core::{ImageRequest, Priority};
 
     let image_service = service_registry::get_image_service();
     if image_service.is_none() {
@@ -122,12 +122,9 @@ pub fn collect_cached_handles_for_media(
 
     let mut out = Vec::new();
     for id in ids {
-        let request = ImageRequest {
-            media_id: id,
-            size,
-            image_type,
-            priority: Priority::Visible,
-        };
+        let request = ImageRequest::new(id, size, image_type)
+            .with_priority(Priority::Visible)
+            .with_index(0);
         if let Some((handle, _loaded_at)) = image_service.get().get_with_load_time(&request) {
             out.push(handle.clone());
         }

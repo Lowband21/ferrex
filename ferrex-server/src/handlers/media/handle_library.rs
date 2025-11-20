@@ -12,7 +12,10 @@ use ferrex_core::MediaDetailsOption;
 use ferrex_core::MediaEvent;
 use ferrex_core::MediaIDLike;
 use ferrex_core::indices::IndexManager;
-use ferrex_core::query::types::{SortBy, SortOrder};
+use ferrex_core::query::{
+    filtering::hash_filter_spec,
+    types::{SortBy, SortOrder},
+};
 use ferrex_core::user::User;
 use ferrex_core::{
     ApiResponse, CreateLibraryRequest, FetchMediaRequest, Library, LibraryID, LibraryMediaResponse,
@@ -25,6 +28,7 @@ use sqlx::Row;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -32,6 +36,27 @@ use crate::{
     infra::app_state::AppState,
     media::index_filters::{FilterQueryError, build_filtered_movie_query},
 };
+
+use once_cell::sync::Lazy;
+use parking_lot::RwLock;
+
+const FILTER_CACHE_TTL: Duration = Duration::from_secs(30);
+
+static FILTER_CACHE: Lazy<RwLock<HashMap<FilterCacheKey, CachedIndices>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct FilterCacheKey {
+    library_id: Uuid,
+    spec_hash: u64,
+    user_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone)]
+struct CachedIndices {
+    indices: Vec<u32>,
+    stored_at: Instant,
+}
 
 pub async fn get_library_media_util(
     state: &AppState,
@@ -253,22 +278,7 @@ pub async fn get_library_sorted_indices_handler(
         }
     }
 
-    // Compose rkyv response
-    let response = IndicesResponse {
-        content_version: 1,
-        indices: positions,
-    };
-
-    match rkyv::to_bytes::<RkyvError>(&response) {
-        Ok(bytes) => Ok::<_, StatusCode>((
-            [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
-            Bytes::from(bytes.into_vec()),
-        )),
-        Err(e) => {
-            error!("Failed to serialize indices response: {:?}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
-        }
-    }
+    respond_with_indices(positions)
 }
 
 /// Filter indices (movies Phase 1)
@@ -291,6 +301,18 @@ pub async fn post_library_filtered_indices_handler(
     if library_ref.library_type != LibraryType::Movies {
         warn!("Filtered indices currently supports movies only");
         return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+
+    let library_uuid = library_ref.id.as_uuid();
+    let user_scope = requires_user_scope(&spec).then_some(user.id);
+    let cache_key = FilterCacheKey {
+        library_id: library_uuid,
+        spec_hash: hash_filter_spec(&spec),
+        user_id: user_scope,
+    };
+
+    if let Some(indices) = get_cached_indices(&cache_key) {
+        return respond_with_indices(indices);
     }
 
     let index_manager = IndexManager::new(state.db.clone());
@@ -344,13 +366,42 @@ pub async fn post_library_filtered_indices_handler(
         }
     }
 
+    insert_cached_indices(cache_key, positions.clone());
+    respond_with_indices(positions)
+}
+
+fn get_cached_indices(key: &FilterCacheKey) -> Option<Vec<u32>> {
+    let mut guard = FILTER_CACHE.write();
+    if let Some(entry) = guard.get(key) {
+        if entry.stored_at.elapsed() < FILTER_CACHE_TTL {
+            return Some(entry.indices.clone());
+        } else {
+            guard.remove(key);
+        }
+    }
+    None
+}
+
+fn insert_cached_indices(key: FilterCacheKey, indices: Vec<u32>) {
+    FILTER_CACHE.write().insert(
+        key,
+        CachedIndices {
+            indices,
+            stored_at: Instant::now(),
+        },
+    );
+}
+
+fn respond_with_indices(
+    indices: Vec<u32>,
+) -> Result<([(axum::http::header::HeaderName, &'static str); 1], Bytes), StatusCode> {
     let response = IndicesResponse {
         content_version: 1,
-        indices: positions,
+        indices,
     };
 
     match rkyv::to_bytes::<RkyvError>(&response) {
-        Ok(bytes) => Ok::<_, StatusCode>((
+        Ok(bytes) => Ok((
             [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
             Bytes::from(bytes.into_vec()),
         )),
@@ -359,6 +410,17 @@ pub async fn post_library_filtered_indices_handler(
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
+}
+
+fn requires_user_scope(spec: &FilterIndicesRequest) -> bool {
+    spec.watch_status.is_some()
+        || matches!(spec.sort, Some(SortBy::WatchProgress | SortBy::LastWatched))
+}
+
+pub fn invalidate_filter_cache_for(library_id: Uuid) {
+    FILTER_CACHE
+        .write()
+        .retain(|key, _| key.library_id != library_id);
 }
 
 /// Fetch a specific media item with full metadata from database

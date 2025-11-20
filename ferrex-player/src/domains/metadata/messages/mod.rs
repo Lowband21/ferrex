@@ -4,7 +4,7 @@ pub mod subscription;
 pub mod subscriptions;
 
 use crate::infrastructure::api_types::{Media, SeriesReference};
-use ferrex_core::{EpisodeID, MediaFile, MediaID, SeasonID, SeriesID};
+use ferrex_core::{EpisodeID, ImageRequest, MediaFile, MediaID, SeasonID, SeriesID};
 use std::collections::HashMap;
 
 #[derive(Clone)]
@@ -29,11 +29,8 @@ pub enum Message {
 
     // Image loading
     ImageLoaded(String, Result<Vec<u8>, String>), // cache_key, result
-    UnifiedImageLoaded(
-        crate::domains::metadata::image_types::ImageRequest,
-        iced::widget::image::Handle,
-    ),
-    UnifiedImageLoadFailed(crate::domains::metadata::image_types::ImageRequest, String),
+    UnifiedImageLoaded(ImageRequest, iced::widget::image::Handle),
+    UnifiedImageLoadFailed(ImageRequest, String),
 
     NoOp,
 }

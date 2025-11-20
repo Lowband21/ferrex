@@ -7,7 +7,9 @@ use rkyv::rancor::Error;
 use rkyv::util::AlignedVec;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use crate::infrastructure::ApiClient;
@@ -18,6 +20,7 @@ use ferrex_core::api_routes::utils::replace_param;
 use ferrex_core::api_routes::v1;
 use ferrex_core::api_scan::ScanConfig;
 use ferrex_core::auth::device::AuthenticatedDevice;
+use ferrex_core::query::filtering::hash_filter_spec;
 use ferrex_core::types::library::Library;
 use ferrex_core::user::{AuthToken, User};
 use ferrex_core::watch_status::{UpdateProgressRequest, UserWatchState};
@@ -28,16 +31,23 @@ use ferrex_core::{
         ScanCommandAcceptedResponse, ScanCommandRequest, StartScanRequest, UpdateLibraryRequest,
     },
 };
+use parking_lot::RwLock;
+
+const FILTER_INDICES_CACHE_TTL: Duration = Duration::from_secs(30);
 
 /// Adapter that implements ApiService using the existing ApiClient
 #[derive(Debug, Clone)]
 pub struct ApiClientAdapter {
     client: Arc<ApiClient>,
+    filter_indices_cache: Arc<RwLock<HashMap<PlayerFilterCacheKey, CachedPositions>>>,
 }
 
 impl ApiClientAdapter {
     pub fn new(client: Arc<ApiClient>) -> Self {
-        Self { client }
+        Self {
+            client,
+            filter_indices_cache: Arc::new(RwLock::new(HashMap::new())),
+        }
     }
 
     /// Fetch all presorted IDs for a library by paging through /libraries/{id}/sorted-ids
@@ -144,6 +154,15 @@ impl ApiClientAdapter {
         library_id: Uuid,
         spec: &FilterIndicesRequest,
     ) -> RepositoryResult<Vec<u32>> {
+        let cache_key = PlayerFilterCacheKey {
+            library_id,
+            spec_hash: hash_filter_spec(spec),
+        };
+
+        if let Some(indices) = self.lookup_cached_indices(&cache_key) {
+            return Ok(indices);
+        }
+
         let path = replace_param(
             v1::libraries::FILTERED_INDICES,
             "{id}",
@@ -159,6 +178,7 @@ impl ApiClientAdapter {
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
         let decoded: IndicesResponse = rkyv::from_bytes::<IndicesResponse, Error>(&bytes)
             .map_err(|e| RepositoryError::QueryFailed(format!("rkyv decode: {:?}", e)))?;
+        self.store_cached_indices(cache_key, decoded.indices.clone());
         Ok(decoded.indices)
     }
 }
@@ -465,5 +485,41 @@ impl ApiService for ApiClientAdapter {
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
         Ok(wrapped)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct PlayerFilterCacheKey {
+    library_id: Uuid,
+    spec_hash: u64,
+}
+
+#[derive(Debug, Clone)]
+struct CachedPositions {
+    indices: Vec<u32>,
+    stored_at: Instant,
+}
+
+impl ApiClientAdapter {
+    fn lookup_cached_indices(&self, key: &PlayerFilterCacheKey) -> Option<Vec<u32>> {
+        let mut cache = self.filter_indices_cache.write();
+        if let Some(entry) = cache.get(key) {
+            if entry.stored_at.elapsed() < FILTER_INDICES_CACHE_TTL {
+                return Some(entry.indices.clone());
+            } else {
+                cache.remove(key);
+            }
+        }
+        None
+    }
+
+    fn store_cached_indices(&self, key: PlayerFilterCacheKey, indices: Vec<u32>) {
+        self.filter_indices_cache.write().insert(
+            key,
+            CachedPositions {
+                indices,
+                stored_at: Instant::now(),
+            },
+        );
     }
 }

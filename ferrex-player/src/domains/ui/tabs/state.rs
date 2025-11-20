@@ -81,6 +81,50 @@ impl TabState {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::LibraryTabState;
+    use std::collections::HashSet;
+    use uuid::Uuid;
+
+    #[test]
+    fn reconcile_positions_skips_missing_entries() {
+        let positions = vec![0, 1, 2];
+        let uuid_a = Uuid::from_u128(1);
+        let uuid_c = Uuid::from_u128(3);
+        let data = vec![Some(uuid_a), None, Some(uuid_c)];
+
+        let (indices, ids) = LibraryTabState::reconcile_positions(
+            &positions,
+            |idx| data.get(idx).and_then(|opt| opt.clone()),
+            None,
+        );
+
+        assert_eq!(indices, vec![0usize, 2usize]);
+        assert_eq!(ids, vec![uuid_a, uuid_c]);
+    }
+
+    #[test]
+    fn reconcile_positions_respects_allowed_set() {
+        let positions = vec![2, 0, 1];
+        let uuid_a = Uuid::from_u128(10);
+        let uuid_b = Uuid::from_u128(11);
+        let uuid_c = Uuid::from_u128(12);
+        let data = vec![Some(uuid_a), Some(uuid_b), Some(uuid_c)];
+
+        let allowed: HashSet<Uuid> = [uuid_c, uuid_a].into_iter().collect();
+
+        let (indices, ids) = LibraryTabState::reconcile_positions(
+            &positions,
+            |idx| data.get(idx).and_then(|opt| opt.clone()),
+            Some(&allowed),
+        );
+
+        assert_eq!(indices, vec![2usize, 0usize]);
+        assert_eq!(ids, vec![uuid_c, uuid_a]);
+    }
+}
+
 impl LibraryTabState {
     fn extract_media_uuid(media: &ArchivedMedia) -> Option<Uuid> {
         match media {
@@ -249,47 +293,57 @@ impl LibraryTabState {
 
         let slice = yoke.get().media_as_slice();
 
-        let mut filtered_indices = Vec::with_capacity(positions.len());
-        let mut ids = Vec::with_capacity(positions.len());
-
-        for &pos in positions {
-            let idx = pos as usize;
-            if let Some(media) = slice.get(idx) {
-                if let Some(uuid) = Self::extract_media_uuid(media) {
-                    filtered_indices.push(idx);
-                    ids.push(uuid);
+        let authoritative_set = self
+            .accessor
+            .get_sorted_index_by_library(&self.library_id)
+            .ok()
+            .and_then(|ids| {
+                if ids.is_empty() {
+                    None
+                } else {
+                    Some(ids.into_iter().collect::<HashSet<Uuid>>())
                 }
-            }
-        }
+            });
 
-        if let Ok(authoritative_ids) = self.accessor.get_sorted_index_by_library(&self.library_id) {
-            let authoritative_set: HashSet<Uuid> = authoritative_ids.iter().copied().collect();
-
-            let mut trimmed_indices = Vec::with_capacity(filtered_indices.len());
-            let mut trimmed_ids = Vec::with_capacity(ids.len());
-
-            for (idx_value, id_value) in filtered_indices.iter().copied().zip(ids.into_iter()) {
-                if authoritative_set.contains(&id_value) {
-                    trimmed_indices.push(idx_value);
-                    trimmed_ids.push(id_value);
-                }
-            }
-
-            filtered_indices = trimmed_indices;
-            ids = trimmed_ids;
-
-            for id in authoritative_ids {
-                if !ids.contains(&id) {
-                    ids.push(id);
-                }
-            }
-        }
+        let (filtered_indices, ids) = Self::reconcile_positions(
+            positions,
+            |idx| {
+                slice
+                    .get(idx)
+                    .and_then(|media| Self::extract_media_uuid(media))
+            },
+            authoritative_set.as_ref(),
+        );
 
         self.filtered_indices = Some(filtered_indices);
         self.cached_index_ids = ids;
         self.grid_state.total_items = self.cached_index_ids.len();
         self.grid_state.calculate_visible_range();
         self.needs_refresh = false;
+    }
+
+    fn reconcile_positions<F>(
+        positions: &[u32],
+        mut fetch_uuid: F,
+        allowed: Option<&HashSet<Uuid>>,
+    ) -> (Vec<usize>, Vec<Uuid>)
+    where
+        F: FnMut(usize) -> Option<Uuid>,
+    {
+        let mut filtered_indices = Vec::with_capacity(positions.len());
+        let mut ids = Vec::with_capacity(positions.len());
+
+        for &pos in positions {
+            let idx = pos as usize;
+            if let Some(uuid) = fetch_uuid(idx) {
+                if allowed.map_or(true, |set| set.contains(&uuid)) {
+                    filtered_indices.push(idx);
+                    ids.push(uuid);
+                }
+            }
+        }
+
+        (filtered_indices, ids)
     }
 
     /// Refresh cached media from the repo

@@ -2,14 +2,13 @@ use crate::common::ui_utils::{Icon, icon_text};
 use crate::domains::ui::views::grid::macros::parse_hex_color;
 use crate::infrastructure::api_types::{MediaDetailsOption, TmdbDetails};
 use crate::{
-    domains::metadata::image_types::Priority, domains::ui::components,
-    domains::ui::messages::Message, domains::ui::theme, domains::ui::widgets::image_for::image_for,
-    state_refactored::State,
+    domains::ui::components, domains::ui::messages::Message, domains::ui::theme,
+    domains::ui::widgets::image_for::image_for, state_refactored::State,
 };
 
 use ferrex_core::{
     ArchivedMediaDetailsOption, ArchivedTmdbDetails, ImageSize, ImageType, MediaFile, MediaIDLike,
-    MovieID,
+    MovieID, Priority,
 };
 use iced::{
     Element, Length,

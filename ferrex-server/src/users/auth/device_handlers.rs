@@ -10,8 +10,8 @@ use ferrex_core::{
     api_types::ApiResponse,
     auth::{
         AuthError, AuthEvent, AuthEventType, AuthResult, AuthenticatedDevice, DeviceInfo,
-        DeviceRegistration, DeviceUserCredential, Platform, SessionDeviceSession,
-        generate_trust_token,
+        DeviceRegistration, DeviceUpdateParams, DeviceUserCredential, Platform,
+        SessionDeviceSession, generate_trust_token,
     },
     user::User,
 };
@@ -26,11 +26,14 @@ use crate::infra::{
     errors::{AppError, AppResult},
 };
 
+const REMEMBER_DEVICE_DAYS: i64 = 30;
+
 /// Device fingerprint from user agent and other factors
 fn generate_device_fingerprint(
     user_agent: &str,
     platform: &Platform,
     hardware_id: Option<&str>,
+    device_id: &Uuid,
 ) -> String {
     let mut hasher = Sha256::new();
     hasher.update(user_agent.as_bytes());
@@ -38,6 +41,7 @@ fn generate_device_fingerprint(
     if let Some(hw_id) = hardware_id {
         hasher.update(hw_id.as_bytes());
     }
+    hasher.update(device_id.as_bytes());
     format!("{:x}", hasher.finalize())
 }
 
@@ -163,12 +167,15 @@ pub async fn device_login(
 
     // Extract device info
     let device_info = extract_device_info(&headers, request.device_info);
+    let now = Utc::now();
+    let remember_duration = Duration::days(REMEMBER_DEVICE_DAYS);
 
     // Generate device fingerprint
     let fingerprint = generate_device_fingerprint(
         user_agent.as_deref().unwrap_or("Unknown"),
         &device_info.platform,
         device_info.hardware_id.as_deref(),
+        &device_info.device_id,
     );
 
     // Check if device is already registered
@@ -179,7 +186,7 @@ pub async fn device_login(
         .await
         .map_err(|_| AppError::internal("Database error"))?;
 
-    let (device_id, needs_registration) = if let Some(device) = existing_device {
+    let (device_id, trusted_until) = if let Some(device) = existing_device {
         // Check if this device has existing sessions for other users
         // If so, disable auto-login for those users (user switching scenario)
         if let Ok(device_sessions) = state.db.backend().get_device_sessions(device.id).await {
@@ -220,13 +227,37 @@ pub async fn device_login(
             }
         }
 
-        (device.id, false)
+        if device.revoked {
+            return Err(AppError::unauthorized(AuthError::DeviceRevoked.to_string()));
+        }
+
+        let mut updated_trusted_until = device.trusted_until;
+        let mut updates = DeviceUpdateParams {
+            name: None,
+            app_version: Some(device_info.app_version.clone()),
+            last_seen_at: Some(now),
+            trusted_until: None,
+        };
+
+        if request.remember_device {
+            updated_trusted_until = now + remember_duration;
+            updates.trusted_until = Some(updated_trusted_until);
+        }
+
+        state
+            .db
+            .backend()
+            .update_device(device.id, &updates)
+            .await
+            .map_err(|_| AppError::internal("Failed to update device"))?;
+
+        (device.id, updated_trusted_until)
     } else {
         // Register new device
         let trust_duration = if request.remember_device {
-            Duration::days(90)
+            remember_duration
         } else {
-            Duration::days(30)
+            Duration::hours(24)
         };
 
         let device = AuthenticatedDevice {
@@ -236,9 +267,9 @@ pub async fn device_login(
             platform: device_info.platform.clone(),
             app_version: Some(device_info.app_version.clone()),
             first_authenticated_by: user.id,
-            first_authenticated_at: Utc::now(),
-            trusted_until: Utc::now() + trust_duration,
-            last_seen_at: Utc::now(),
+            first_authenticated_at: now,
+            trusted_until: now + trust_duration,
+            last_seen_at: now,
             revoked: false,
             revoked_by: None,
             revoked_at: None,
@@ -273,7 +304,7 @@ pub async fn device_login(
 
         let _ = state.db.backend().log_auth_event(&event).await;
 
-        (device.id, true)
+        (device.id, device.trusted_until)
     };
 
     // Create device session
@@ -283,7 +314,7 @@ pub async fn device_login(
         ip_address,
         user_agent,
         if request.remember_device {
-            Duration::days(30)
+            remember_duration
         } else {
             Duration::hours(24)
         },
@@ -324,11 +355,9 @@ pub async fn device_login(
             app_version: device_info.app_version,
             trust_token: generate_trust_token(),
             pin_hash: credential.and_then(|c| c.pin_hash),
-            registered_at: Utc::now(),
-            last_used_at: Utc::now(),
-            expires_at: Some(
-                Utc::now() + Duration::days(if request.remember_device { 90 } else { 30 }),
-            ),
+            registered_at: now,
+            last_used_at: now,
+            expires_at: Some(trusted_until),
             revoked: false,
             revoked_by: None,
             revoked_at: None,
@@ -355,13 +384,31 @@ pub async fn pin_login(
         .map(|s| s.to_string());
 
     // Get device credential
-    let credential = state
+    let mut credential = state
         .db
         .backend()
         .get_device_credential(request.user_id, request.device_id)
         .await
         .map_err(|_| AppError::internal("Database error"))?
         .ok_or_else(|| AppError::unauthorized("Device not registered for this user"))?;
+
+    if !credential.auto_login_enabled {
+        return Err(AppError::unauthorized(
+            AuthError::DeviceNotTrusted.to_string(),
+        ));
+    }
+
+    let device = state
+        .db
+        .backend()
+        .get_device_by_id(request.device_id)
+        .await
+        .map_err(|_| AppError::internal("Database error"))?
+        .ok_or_else(|| AppError::unauthorized("Device not registered"))?;
+
+    if device.revoked {
+        return Err(AppError::unauthorized(AuthError::DeviceRevoked.to_string()));
+    }
 
     // Check if locked
     if let Some(locked_until) = credential.locked_until {
@@ -376,6 +423,16 @@ pub async fn pin_login(
     }
 
     // Verify PIN
+    let now = Utc::now();
+    let remember_duration = Duration::days(REMEMBER_DEVICE_DAYS);
+
+    if device.trusted_until < now {
+        return Err(AppError::unauthorized(
+            AuthError::DeviceNotTrusted.to_string(),
+        ));
+    }
+
+    let previous_attempts = credential.failed_attempts;
     let pin_valid = if let Some(pin_hash) = &credential.pin_hash {
         verify_pin_with_device_salt(&request.pin, pin_hash, request.user_id, request.device_id)
     } else {
@@ -404,12 +461,31 @@ pub async fn pin_login(
             .map_err(|_| AppError::internal("Database error"))?;
     } else {
         // Reset failed attempts on success
+        credential.failed_attempts = 0;
+        credential.locked_until = None;
+        credential.pin_last_used_at = Some(now);
+        credential.updated_at = now;
+
         state
             .db
             .backend()
-            .update_device_failed_attempts(request.user_id, request.device_id, 0, None)
+            .upsert_device_credential(&credential)
             .await
             .map_err(|_| AppError::internal("Database error"))?;
+
+        let updates = DeviceUpdateParams {
+            name: None,
+            app_version: None,
+            last_seen_at: Some(now),
+            trusted_until: Some(now + remember_duration),
+        };
+
+        state
+            .db
+            .backend()
+            .update_device(request.device_id, &updates)
+            .await
+            .map_err(|_| AppError::internal("Failed to update device trust"))?;
     }
 
     // Log auth event
@@ -431,7 +507,7 @@ pub async fn pin_login(
         ip_address: ip_address.clone(),
         user_agent: user_agent.clone(),
         metadata: serde_json::json!({
-            "attempts": credential.failed_attempts + if !pin_valid { 1 } else { 0 },
+            "attempts": previous_attempts + if !pin_valid { 1 } else { 0 },
         }),
         created_at: Utc::now(),
     };
@@ -454,7 +530,7 @@ pub async fn pin_login(
         request.device_id,
         ip_address,
         user_agent,
-        Duration::hours(24),
+        remember_duration,
     );
 
     // Store session

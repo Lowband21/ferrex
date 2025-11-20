@@ -83,6 +83,21 @@ impl SortKey for OptionalDateKey {
     fn is_missing(&self) -> bool {
         self.0.is_none()
     }
+
+    fn compare_with_order(&self, other: &Self, reverse: bool) -> Ordering {
+        match (self.0.is_none(), other.0.is_none()) {
+            (true, true) => Ordering::Equal,
+            (true, false) => Ordering::Greater,
+            (false, true) => Ordering::Less,
+            (false, false) => {
+                if reverse {
+                    other.cmp(self)
+                } else {
+                    self.cmp(other)
+                }
+            }
+        }
+    }
 }
 
 /// Float key for numeric sorting (rating, progress, etc.)
@@ -122,6 +137,21 @@ impl SortKey for OptionalFloatKey {
     fn is_missing(&self) -> bool {
         self.0.is_none()
     }
+
+    fn compare_with_order(&self, other: &Self, reverse: bool) -> Ordering {
+        match (self.0.is_none(), other.0.is_none()) {
+            (true, true) => Ordering::Equal,
+            (true, false) => Ordering::Greater,
+            (false, true) => Ordering::Less,
+            (false, false) => {
+                if reverse {
+                    other.cmp(self)
+                } else {
+                    self.cmp(other)
+                }
+            }
+        }
+    }
 }
 
 /// Unsigned integer key for counts and durations
@@ -159,6 +189,21 @@ impl SortKey for OptionalU32Key {
     fn is_missing(&self) -> bool {
         self.0.is_none()
     }
+
+    fn compare_with_order(&self, other: &Self, reverse: bool) -> Ordering {
+        match (self.0.is_none(), other.0.is_none()) {
+            (true, true) => Ordering::Equal,
+            (true, false) => Ordering::Greater,
+            (false, true) => Ordering::Less,
+            (false, false) => {
+                if reverse {
+                    other.cmp(self)
+                } else {
+                    self.cmp(other)
+                }
+            }
+        }
+    }
 }
 
 /// Unsigned integer key for large numeric values (file size, bitrate)
@@ -195,6 +240,21 @@ impl SortKey for OptionalU64Key {
 
     fn is_missing(&self) -> bool {
         self.0.is_none()
+    }
+
+    fn compare_with_order(&self, other: &Self, reverse: bool) -> Ordering {
+        match (self.0.is_none(), other.0.is_none()) {
+            (true, true) => Ordering::Equal,
+            (true, false) => Ordering::Greater,
+            (false, true) => Ordering::Less,
+            (false, false) => {
+                if reverse {
+                    other.cmp(self)
+                } else {
+                    self.cmp(other)
+                }
+            }
+        }
     }
 }
 

@@ -238,6 +238,12 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
             )
         }
 
+        auth::Message::RememberDeviceSynced(enabled) => {
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_remember_device_synced(state, enabled)
+            )
+        }
+
         auth::Message::AuthResult(result) => {
             wrap_task!(
                 super::update_handlers::auth_updates::handle_auth_flow_auth_result(state, result)

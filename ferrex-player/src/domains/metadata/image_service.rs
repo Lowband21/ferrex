@@ -1,5 +1,5 @@
-use super::image_types::ImageRequest;
 use dashmap::DashMap;
+use ferrex_core::ImageRequest;
 use iced::widget::image::Handle;
 use priority_queue::PriorityQueue;
 use std::sync::{Arc, Mutex};
@@ -204,16 +204,11 @@ impl UnifiedImageService {
         let retry_count = match self.cache.get_mut(request) {
             Some(mut entry) => {
                 entry.state = LoadState::Failed(error.clone());
-                // For 404 errors, immediately set to max retries to prevent further attempts
-                if is_404 {
-                    entry.retry_count = MAX_RETRY_ATTEMPTS;
-                } else {
-                    entry.retry_count += 1;
-                }
+                entry.retry_count = entry.retry_count.saturating_add(1);
                 entry.retry_count
             }
             _ => {
-                let retry_count = if is_404 { MAX_RETRY_ATTEMPTS } else { 1 };
+                let retry_count = 1;
                 self.cache.insert(
                     request.clone(),
                     ImageEntry {
@@ -229,24 +224,22 @@ impl UnifiedImageService {
 
         // Log permanent failures for metadata aggregation
         if retry_count >= MAX_RETRY_ATTEMPTS {
-            if is_404 {
-                log::info!("Image not found on server (404): {:?}", request.media_id);
-            } else {
-                log::warn!(
-                    "Image permanently failed after {} attempts: {:?} - {}",
-                    retry_count,
-                    request.media_id,
-                    error
-                );
-            }
+            log::warn!(
+                "Image permanently failed after {} attempts: {:?} - {}{}",
+                retry_count,
+                request.media_id,
+                error,
+                if is_404 { " [404]" } else { "" }
+            );
             // TODO: Could aggregate these failures for missing metadata reporting
         } else {
             log::debug!(
-                "Image failed (attempt {}/{}): {:?} - {}",
+                "Image failed (attempt {}/{}): {:?} - {}{}",
                 retry_count,
                 MAX_RETRY_ATTEMPTS,
                 request.media_id,
-                error
+                error,
+                if is_404 { " [404]" } else { "" }
             );
         }
     }

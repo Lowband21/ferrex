@@ -26,9 +26,15 @@ pub fn handle_load_devices(state: &mut State) -> DomainUpdateResult {
 
     // Use trait-based SettingsService for device operations
     let settings_service = state.domains.settings.settings_service.clone();
+    let auth_service = state.domains.settings.auth_service.clone();
 
     let task = Task::perform(
         async move {
+            let current_device_id = auth_service
+                .current_device_id()
+                .await
+                .map_err(|e| e.to_string())?;
+
             match settings_service.list_user_devices().await {
                 Ok(devices) => {
                     // Convert AuthenticatedDevice to UserDevice
@@ -61,7 +67,7 @@ pub fn handle_load_devices(state: &mut State) -> DomainUpdateResult {
                                 device_name: device.name.clone(),
                                 device_type,
                                 last_active: device.last_seen_at,
-                                is_current_device: false, // TODO: Implement proper current device detection
+                                is_current_device: device.id == current_device_id,
                                 location,
                             }
                         })

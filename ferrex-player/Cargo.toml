@@ -25,11 +25,13 @@ iced = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature
     "wgpu",
     "prefer_10bit",
     "web-colors",
-    "high-refresh-rate",
     "batch",
-    "lazy"
+    "lazy",
 ] }
-iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", features = ["image", "batch"] }
+iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", features = [
+    "image",
+    "batch",
+] }
 #iced_aw = { version = "0.12.2", default-features = false, features = ["menu", "quad"] }
 
 # Icons
@@ -146,7 +148,7 @@ profile-with-tracy = [
     #"profiling/profile-with-tracy",
     #"dep:tracy-client",
 ]
-profile-with-tracing = ["dep:profiling"]#"profiling/profile-with-tracing"]
+profile-with-tracing = ["dep:profiling"] #"profiling/profile-with-tracing"]
 
 profiling-stats = ["dep:hdrhistogram"]
 
