@@ -1,11 +1,11 @@
 //! UI/View domain
 //!
-//! Contains all UI-related state and logic moved from the monolithic State
+//! Contains all UI-related state and logic
 
 pub mod background_state;
 pub mod components;
-pub mod kinetic_scroll;
 pub mod messages;
+pub mod motion_controller;
 pub mod scroll_manager;
 pub mod tabs;
 pub mod theme;
@@ -13,16 +13,17 @@ pub mod transitions;
 pub mod types;
 pub mod update;
 pub mod update_handlers;
+pub mod utils;
 pub mod view_models;
 pub mod views;
 pub mod widgets;
 pub mod windows;
 pub mod yoke_cache;
 
-// Re-export primary Kinetic type for convenience in other modules
-pub use kinetic_scroll::KineticScroller;
+pub use motion_controller::MotionController;
 
 use self::views::carousel::CarouselState;
+use self::views::virtual_carousel::{CarouselFocus, CarouselRegistry};
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage},
     domains::ui::{
@@ -112,8 +113,14 @@ pub struct UIDomainState {
     // Keep UI alive while poster flip animations are running
     pub poster_anim_active_until: Option<std::time::Instant>,
 
-    // Kinetic grid scrolling controller
-    pub kinetic_scroll: kinetic_scroll::KineticScroller,
+    // Motion controller
+    pub motion_controller: motion_controller::MotionController,
+
+    // Virtual carousel registry (new module)
+    pub carousel_registry: CarouselRegistry,
+
+    // Carousel focus controller - tracks which carousel receives keyboard events
+    pub carousel_focus: CarouselFocus,
 }
 
 impl UIDomainState {}

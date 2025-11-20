@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::domains::ui::update_handlers::curated;
 use crate::{
     domains::auth::{
         manager::DeviceAuthStatus, messages as auth,
@@ -650,6 +651,9 @@ pub fn handle_watch_status_loaded(
                 watch_state.completed.len()
             );
             state.domains.media.state.user_watch_state = Some(watch_state);
+            // Update curated carousels now that we have watch state
+            curated::recompute_and_init_curated_carousels(state);
+            curated::emit_initial_curated_snapshots(state);
         }
         Err(e) => {
             log::error!("Failed to load watch status: {}", e);

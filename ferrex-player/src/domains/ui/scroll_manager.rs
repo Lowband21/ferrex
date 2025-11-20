@@ -5,7 +5,10 @@
 //! Supports library-aware keys for grid views and efficient state management.
 
 use crate::common::messages::DomainMessage;
-use crate::domains::ui::{types::ViewState, views::grid::VirtualGridState};
+use crate::domains::ui::{
+    types::ViewState, views::grid::VirtualGridState,
+    views::virtual_carousel::types::CarouselKey,
+};
 use ferrex_core::player_prelude::LibraryID;
 use iced::Task;
 use iced::widget::scrollable::Viewport;
@@ -24,6 +27,19 @@ pub struct ScrollState {
     pub columns: Option<usize>,
     /// Visible range for virtual grids (start, end)
     pub visible_range: Option<(usize, usize)>,
+}
+
+/// Carousel-specific scroll state for horizontal carousels
+#[derive(Debug, Clone)]
+pub struct CarouselScrollState {
+    /// Horizontal scroll position in pixels
+    pub scroll_x: f32,
+    /// Item index position (fractional for smooth positioning)
+    pub index_position: f32,
+    /// Reference index (last committed anchor position)
+    pub reference_index: f32,
+    /// Viewport width when saved (for validation on restore)
+    pub viewport_width: f32,
 }
 
 #[cfg_attr(
@@ -170,6 +186,8 @@ impl ViewIdentifier for ViewState {
 pub struct ScrollPositionManager {
     /// Stored scroll states for each view (key format: "view_type[.library_id][.context]")
     states: HashMap<String, ScrollState>,
+    /// Carousel scroll states keyed by CarouselKey
+    carousel_states: HashMap<CarouselKey, CarouselScrollState>,
 }
 
 #[cfg_attr(
@@ -185,6 +203,7 @@ impl ScrollPositionManager {
     pub fn new() -> Self {
         Self {
             states: HashMap::new(),
+            carousel_states: HashMap::new(),
         }
     }
 
@@ -411,6 +430,38 @@ impl ScrollPositionManager {
         } else {
             None
         }
+    }
+
+    // Carousel scroll state management
+
+    /// Save carousel scroll state
+    pub fn save_carousel_scroll(
+        &mut self,
+        key: CarouselKey,
+        state: CarouselScrollState,
+    ) {
+        // Only save if there's meaningful scroll position
+        if state.scroll_x > 0.1 || state.index_position > 0.1 {
+            self.carousel_states.insert(key, state);
+        }
+    }
+
+    /// Get saved carousel scroll state
+    pub fn get_carousel_scroll(
+        &self,
+        key: &CarouselKey,
+    ) -> Option<&CarouselScrollState> {
+        self.carousel_states.get(key)
+    }
+
+    /// Clear carousel scroll state for a specific carousel
+    pub fn clear_carousel_scroll(&mut self, key: &CarouselKey) {
+        self.carousel_states.remove(key);
+    }
+
+    /// Clear all carousel scroll states
+    pub fn clear_all_carousel_scrolls(&mut self) {
+        self.carousel_states.clear();
     }
 }
 

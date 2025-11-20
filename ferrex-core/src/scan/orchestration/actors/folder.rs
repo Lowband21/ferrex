@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
+use crate::domain::media::tv_parser::TvParser;
 use crate::error::{MediaError, Result};
 use crate::scan::orchestration::classification::FolderClassifier;
 use crate::types::ids::LibraryID;
@@ -157,20 +158,24 @@ impl DefaultFolderScanActor {
     ) -> bool {
         match library_type {
             LibraryType::Series => {
-                // Recognize season folders using TvParser and common extras names.
-                if let Some(_) = crate::domain::media::tv_parser::TvParser::parse_season_folder(name) {
+                if TvParser::parse_season_folder(name).is_some() {
                     return true;
                 }
-                let lowered = name.to_ascii_lowercase();
-                lowered == "specials"
-                    || lowered == "special"
-                    || lowered == "extras"
+
+                false
+
+                // Extra parsing disabled until matching and UI catch up
+                // let lowered = name.to_ascii_lowercase();
+                // lowered == "specials"
+                //     || lowered == "special"
+                //     || lowered == "extras"
             }
             LibraryType::Movies => {
-                // Extras, featurettes, behind the scenes
-                name.eq_ignore_ascii_case("extras")
-                    || name.eq_ignore_ascii_case("featurettes")
-                    || name.eq_ignore_ascii_case("behind the scenes")
+                false
+                // Extra parsing disabled until matching and UI catch up
+                // name.eq_ignore_ascii_case("extras")
+                //     || name.eq_ignore_ascii_case("featurettes")
+                //     || name.eq_ignore_ascii_case("behind the scenes")
             }
         }
     }
@@ -486,6 +491,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "extras parsing temporarily disabled"]
     async fn plan_listing_filters_when_parent_metadata_known() {
         let tmp = tempdir().expect("tempdir");
         let extras_folder = tmp.path().join("Extras");

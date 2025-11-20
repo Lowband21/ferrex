@@ -16,14 +16,12 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     // If the main window Id is not known yet (single-window mode),
     // capture the first Opened event and record it.
     if state.windows.get(WindowKind::Main).is_none() {
-        subs.push(
-            iced::window::events().map(|(id, event)| match event {
-                iced::window::Event::Opened { .. } => {
-                    DomainMessage::Ui(UiMessage::MainWindowOpened(id))
-                }
-                _ => DomainMessage::NoOp,
-            }),
-        );
+        subs.push(iced::window::events().map(|(id, event)| match event {
+            iced::window::Event::Opened { .. } => {
+                DomainMessage::Ui(UiMessage::MainWindowOpened(id))
+            }
+            _ => DomainMessage::NoOp,
+        }));
     }
 
     if let Some(main_id) = state.windows.get(WindowKind::Main) {
@@ -39,6 +37,12 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                 }
                 iced::window::Event::Resized(size) if id == tracked_id => {
                     DomainMessage::Ui(UiMessage::WindowResized(size))
+                }
+                iced::window::Event::Focused if id == tracked_id => {
+                    DomainMessage::Ui(UiMessage::MainWindowFocused)
+                }
+                iced::window::Event::Unfocused if id == tracked_id => {
+                    DomainMessage::Ui(UiMessage::MainWindowUnfocused)
                 }
                 _ => DomainMessage::NoOp,
             },

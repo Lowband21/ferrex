@@ -18,3 +18,4 @@ pub use loading::*;
 
 pub mod carousel;
 pub mod components;
+pub mod virtual_carousel;

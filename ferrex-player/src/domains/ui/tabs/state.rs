@@ -3,6 +3,8 @@
 use crate::domains::ui::view_models::AllViewModel;
 use crate::domains::ui::views::grid::VirtualGridState;
 use crate::infra::api_types::{LibraryType, Media};
+// no poster-checking helpers needed; core compare_media handles poster-first
+use super::AllFocusState;
 use crate::infra::repository::accessor::{Accessor, ReadOnly};
 use ferrex_core::player_prelude::{
     ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedMovieReference,
@@ -156,6 +158,20 @@ pub struct AllTabState {
 
     /// Navigation history specific to this tab
     pub navigation_history: Vec<String>,
+
+    /// Curated: combined continue watching across movies and series
+    pub continue_watching: Vec<uuid::Uuid>,
+    /// Curated: recently added movies (by date added desc)
+    pub recent_movies: Vec<uuid::Uuid>,
+    /// Curated: recently added series (by date added desc)
+    pub recent_series: Vec<uuid::Uuid>,
+    /// Curated: recently released movies (by release date desc)
+    pub released_movies: Vec<uuid::Uuid>,
+    /// Curated: recently released series (by release/first_air date desc)
+    pub released_series: Vec<uuid::Uuid>,
+
+    /// Focus and vertical scroll animation state for the All view
+    pub focus: AllFocusState,
 }
 
 impl AllTabState {
@@ -164,6 +180,12 @@ impl AllTabState {
         Self {
             view_model: AllViewModel::new(accessor),
             navigation_history: Vec::new(),
+            continue_watching: Vec::new(),
+            recent_movies: Vec::new(),
+            recent_series: Vec::new(),
+            released_movies: Vec::new(),
+            released_series: Vec::new(),
+            focus: AllFocusState::new(),
         }
     }
 

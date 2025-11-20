@@ -153,6 +153,49 @@ impl MediaRepo {
             }
         }
 
+        impl MediaRepo {
+            /// Locate media by library + uuid and optional media type, returning
+            /// (library_index, media_index) within the archived snapshot. Returns None
+            /// if not found or if the library has no media slice.
+            fn find_media_position(
+                &self,
+                library_id: Uuid,
+                media_uuid: Uuid,
+                media_type: Option<MediaType>,
+            ) -> Option<(usize, usize)> {
+                unsafe {
+                    let archived_libraries =
+                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(
+                            &self.libraries_buffer,
+                        );
+                    for (lib_idx, library) in
+                        archived_libraries.iter().enumerate()
+                    {
+                        if library.get_id().as_uuid() != library_id {
+                            continue;
+                        }
+                        let Some(media_list) = library.media() else {
+                            return None;
+                        };
+                        let mut pos = 0usize;
+                        for media_ref in media_list.iter() {
+                            if media_ref.archived_media_id().to_uuid()
+                                == media_uuid
+                                && media_type.map_or(true, |t| {
+                                    media_ref.media_type() == t
+                                })
+                            {
+                                return Some((lib_idx, pos));
+                            }
+                            pos += 1;
+                        }
+                        return None;
+                    }
+                }
+                None
+            }
+        }
+
         Ok(Self {
             libraries_buffer: buffer,
             libraries_index,
@@ -272,22 +315,30 @@ impl MediaRepo {
         if let Some(&library_id) = self.media_id_index.get(uuid) {
             let media_type = id.media_type();
 
+            // Validate positions to avoid panics during yoke access
+            let (lib_idx, media_idx) = self
+                .find_media_position(library_id, *uuid, Some(media_type))
+                .ok_or_else(|| RepositoryError::NotFound {
+                    entity_type: "media".to_string(),
+                    id: uuid.to_string(),
+                })?;
+
             Ok(MediaYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
-                |data: &AlignedVec| unsafe {
+                move |data: &AlignedVec| unsafe {
                     let archived_libraries = rkyv::access_unchecked::<
                         ArchivedVec<ArchivedLibrary>,
                     >(data);
-                    archived_libraries
+                    let library = archived_libraries
                         .iter()
-                        .find(|l| l.get_id().as_uuid() == library_id)
-                        .unwrap()
-                        .media()
-                        .unwrap()
+                        .nth(lib_idx)
+                        .expect("validated library index");
+                    let media_list =
+                        library.media().expect("validated media list");
+                    media_list
                         .iter()
-                        .filter(|m| m.media_type() == media_type)
-                        .find(|m| m.archived_media_id().as_uuid() == uuid)
-                        .unwrap()
+                        .nth(media_idx)
+                        .expect("validated media index")
                 },
             ))
         } else {
@@ -327,31 +378,32 @@ impl MediaRepo {
 
         // Look up in archived data using index
         if let Some(&library_id) = self.media_id_index.get(uuid) {
-            let media_type = id.media_type();
+            let (lib_idx, media_idx) = self
+                .find_media_position(library_id, *uuid, Some(MediaType::Movie))
+                .ok_or_else(|| RepositoryError::NotFound {
+                    entity_type: "Movie".to_string(),
+                    id: uuid.to_string(),
+                })?;
 
             Ok(MovieYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
-                |data: &AlignedVec| unsafe {
+                move |data: &AlignedVec| unsafe {
                     let archived_libraries = rkyv::access_unchecked::<
                         ArchivedVec<ArchivedLibrary>,
                     >(data);
-                    match archived_libraries
+                    let library = archived_libraries
                         .iter()
-                        .find(|l| l.get_id().as_uuid() == library_id)
-                        .unwrap()
-                        .media()
-                        .unwrap()
+                        .nth(lib_idx)
+                        .expect("validated library index");
+                    let media_list =
+                        library.media().expect("validated media list");
+                    match media_list
                         .iter()
-                        .filter(|m| m.media_type() == media_type)
-                        .find(|m| m.archived_media_id().as_uuid() == uuid)
-                        .unwrap()
+                        .nth(media_idx)
+                        .expect("validated media index")
                     {
                         ArchivedMedia::Movie(movie) => movie,
-                        ArchivedMedia::Series(_)
-                        | ArchivedMedia::Season(_)
-                        | ArchivedMedia::Episode(_) => {
-                            unreachable!("We just checked the media type")
-                        }
+                        _ => unreachable!("validated movie type"),
                     }
                 },
             ))
@@ -392,31 +444,32 @@ impl MediaRepo {
 
         // Look up in archived data using index
         if let Some(&library_id) = self.media_id_index.get(uuid) {
-            let media_type = id.media_type();
+            let (lib_idx, media_idx) = self
+                .find_media_position(library_id, *uuid, Some(MediaType::Series))
+                .ok_or_else(|| RepositoryError::NotFound {
+                    entity_type: "Series".to_string(),
+                    id: uuid.to_string(),
+                })?;
 
             Ok(SeriesYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
-                |data: &AlignedVec| unsafe {
+                move |data: &AlignedVec| unsafe {
                     let archived_libraries = rkyv::access_unchecked::<
                         ArchivedVec<ArchivedLibrary>,
                     >(data);
-                    match archived_libraries
+                    let library = archived_libraries
                         .iter()
-                        .find(|l| l.get_id().as_uuid() == library_id)
-                        .unwrap()
-                        .media()
-                        .unwrap()
+                        .nth(lib_idx)
+                        .expect("validated library index");
+                    let media_list =
+                        library.media().expect("validated media list");
+                    match media_list
                         .iter()
-                        .filter(|m| m.media_type() == media_type)
-                        .find(|m| m.archived_media_id().as_uuid() == uuid)
-                        .unwrap()
+                        .nth(media_idx)
+                        .expect("validated media index")
                     {
                         ArchivedMedia::Series(series) => series,
-                        ArchivedMedia::Movie(_)
-                        | ArchivedMedia::Season(_)
-                        | ArchivedMedia::Episode(_) => {
-                            unreachable!("We just checked the media type")
-                        }
+                        _ => unreachable!("validated series type"),
                     }
                 },
             ))
@@ -454,28 +507,31 @@ impl MediaRepo {
         }
 
         if let Some(&library_id) = self.media_id_index.get(uuid) {
-            let media_type = id.media_type();
+            let (lib_idx, media_idx) = self
+                .find_media_position(library_id, *uuid, Some(MediaType::Season))
+                .ok_or_else(|| RepositoryError::NotFound {
+                    entity_type: "Season".to_string(),
+                    id: uuid.to_string(),
+                })?;
             return Ok(SeasonYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
-                |data: &AlignedVec| unsafe {
+                move |data: &AlignedVec| unsafe {
                     let archived_libraries = rkyv::access_unchecked::<
                         ArchivedVec<ArchivedLibrary>,
                     >(data);
-                    match archived_libraries
+                    let library = archived_libraries
                         .iter()
-                        .find(|l| l.get_id().as_uuid() == library_id)
-                        .unwrap()
-                        .media()
-                        .unwrap()
+                        .nth(lib_idx)
+                        .expect("validated library index");
+                    let media_list =
+                        library.media().expect("validated media list");
+                    match media_list
                         .iter()
-                        .filter(|m| m.media_type() == media_type)
-                        .find(|m| m.archived_media_id().as_uuid() == uuid)
-                        .unwrap()
+                        .nth(media_idx)
+                        .expect("validated media index")
                     {
                         ArchivedMedia::Season(season) => season,
-                        _ => unreachable!(
-                            "We just filtered by media type Season"
-                        ),
+                        _ => unreachable!("validated season type"),
                     }
                 },
             ));
@@ -513,28 +569,35 @@ impl MediaRepo {
         }
 
         if let Some(&library_id) = self.media_id_index.get(uuid) {
-            let media_type = id.media_type();
+            let (lib_idx, media_idx) = self
+                .find_media_position(
+                    library_id,
+                    *uuid,
+                    Some(MediaType::Episode),
+                )
+                .ok_or_else(|| RepositoryError::NotFound {
+                    entity_type: "Episode".to_string(),
+                    id: uuid.to_string(),
+                })?;
             return Ok(EpisodeYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
-                |data: &AlignedVec| unsafe {
+                move |data: &AlignedVec| unsafe {
                     let archived_libraries = rkyv::access_unchecked::<
                         ArchivedVec<ArchivedLibrary>,
                     >(data);
-                    match archived_libraries
+                    let library = archived_libraries
                         .iter()
-                        .find(|l| l.get_id().as_uuid() == library_id)
-                        .unwrap()
-                        .media()
-                        .unwrap()
+                        .nth(lib_idx)
+                        .expect("validated library index");
+                    let media_list =
+                        library.media().expect("validated media list");
+                    match media_list
                         .iter()
-                        .filter(|m| m.media_type() == media_type)
-                        .find(|m| m.archived_media_id().as_uuid() == uuid)
-                        .unwrap()
+                        .nth(media_idx)
+                        .expect("validated media index")
                     {
                         ArchivedMedia::Episode(ep) => ep,
-                        _ => unreachable!(
-                            "We just filtered by media type Episode"
-                        ),
+                        _ => unreachable!("validated episode type"),
                     }
                 },
             ));

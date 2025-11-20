@@ -116,7 +116,7 @@ pub mod virtual_grid {
     pub const BACKGROUND_ROWS_BELOW: usize = 0;
 
     /// Keep-alive duration after scroll (ms) to allow placeholder->texture swaps to complete
-    pub const KEEP_ALIVE_AFTER_SCROLL_MS: u64 = 5000;
+    pub const KEEP_ALIVE_MS: u64 = 50000;
 }
 
 /// Player controls layout constants

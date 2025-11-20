@@ -45,6 +45,9 @@ pub mod scopes {
     pub const LIBRARY_VIEW: &str = "UI::View::Library";
     pub const VIRTUAL_LIST_RENDER: &str = "UI::VirtualList::Render";
     pub const VIRTUAL_LIST_CALC: &str = "UI::VirtualList::Calculate";
+    // Carousel (horizontal virtual list) scopes
+    pub const CAROUSEL_CALC: &str = "UI::Carousel::Calculate";
+    pub const CAROUSEL_SNAPSHOT: &str = "UI::Carousel::Snapshot";
     pub const HEADER_VIEW: &str = "UI::View::Header";
     pub const MOVIE_DETAIL_VIEW: &str = "UI::View::MovieDetail";
     pub const TV_DETAIL_VIEW: &str = "UI::View::TVDetail";

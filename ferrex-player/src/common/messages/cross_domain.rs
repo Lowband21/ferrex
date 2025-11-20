@@ -524,7 +524,8 @@ fn handle_authentication_complete(state: &State) -> Task<DomainMessage> {
                 );
                 return Task::none();
             }
-            LibrariesLoadState::NotStarted | LibrariesLoadState::Failed { .. } => {}
+            LibrariesLoadState::NotStarted
+            | LibrariesLoadState::Failed { .. } => {}
         }
     }
 
@@ -570,7 +571,8 @@ fn handle_library_refresh_request(state: &State) -> Task<DomainMessage> {
     if !state.domains.library.state.repo_accessor.is_initialized() {
         use crate::domains::library::LibrariesLoadState;
         match state.domains.library.state.load_state {
-            LibrariesLoadState::NotStarted | LibrariesLoadState::Failed { .. } => {
+            LibrariesLoadState::NotStarted
+            | LibrariesLoadState::Failed { .. } => {
                 // Reload libraries
                 tasks.push(Task::done(DomainMessage::Library(
                     library::messages::Message::LoadLibraries,

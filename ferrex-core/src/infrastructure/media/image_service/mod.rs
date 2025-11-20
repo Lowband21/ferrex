@@ -239,14 +239,14 @@ impl ImageService {
             MediaError::Internal(format!("Failed to read image data: {}", e))
         })?;
 
-        if let Some(content_len) = expected_len {
-            if bytes.len() as u64 != content_len {
-                return Err(MediaError::Internal(format!(
-                    "Image size mismatch: got {} bytes, expected {}",
-                    bytes.len(),
-                    content_len
-                )));
-            }
+        if let Some(content_len) = expected_len
+            && bytes.len() as u64 != content_len
+        {
+            return Err(MediaError::Internal(format!(
+                "Image size mismatch: got {} bytes, expected {}",
+                bytes.len(),
+                content_len
+            )));
         }
 
         let variant_dir = self
@@ -855,11 +855,11 @@ impl ImageService {
 
         let mut best: Option<&ImageVariant> = None;
         for v in variants.iter().rev() {
-            if let Some(w) = tmdb_variant_to_width_hint(&v.variant) {
-                if w <= target_w {
-                    best = Some(v);
-                    break;
-                }
+            if let Some(w) = tmdb_variant_to_width_hint(&v.variant)
+                && w <= target_w
+            {
+                best = Some(v);
+                break;
             }
         }
         if best.is_none() {

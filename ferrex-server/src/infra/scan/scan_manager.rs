@@ -702,25 +702,22 @@ impl ScanRun {
         if let Some(name) = std::path::Path::new(&chosen)
             .file_name()
             .and_then(|s| s.to_str())
+            && is_non_entity_folder(name)
         {
-            if is_non_entity_folder(name) {
-                let mut cur = std::path::Path::new(&chosen).parent();
-                while let Some(dir) = cur {
-                    if let Some(dir_str) = dir.to_str() {
-                        if scanned.iter().any(|s| s == dir_str) {
-                            // Check if this parent is still non-entity; if so, continue walking up
-                            let parent_name = dir
-                                .file_name()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("");
-                            if !is_non_entity_folder(parent_name) {
-                                chosen = dir_str.to_string();
-                                break;
-                            }
-                        }
+            let mut cur = std::path::Path::new(&chosen).parent();
+            while let Some(dir) = cur {
+                if let Some(dir_str) = dir.to_str()
+                    && scanned.iter().any(|s| s == dir_str)
+                {
+                    // Check if this parent is still non-entity; if so, continue walking up
+                    let parent_name =
+                        dir.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                    if !is_non_entity_folder(parent_name) {
+                        chosen = dir_str.to_string();
+                        break;
                     }
-                    cur = dir.parent();
                 }
+                cur = dir.parent();
             }
         }
 
@@ -1367,10 +1364,10 @@ impl ScanRun {
             let is_root = |path: &str| {
                 let mut cur = std::path::Path::new(path).parent();
                 while let Some(dir) = cur {
-                    if let Some(dir_str) = dir.to_str() {
-                        if scanned_paths.contains(dir_str) {
-                            return false;
-                        }
+                    if let Some(dir_str) = dir.to_str()
+                        && scanned_paths.contains(dir_str)
+                    {
+                        return false;
                     }
                     cur = dir.parent();
                 }
@@ -1380,12 +1377,12 @@ impl ScanRun {
             let mut roots_total = 0u64;
             let mut roots_completed = 0u64;
             for item in state.item_states.values() {
-                if let Some(p) = &item.path_key {
-                    if is_root(p) {
-                        roots_total += 1;
-                        if matches!(item.status, ScanItemStatus::Completed) {
-                            roots_completed += 1;
-                        }
+                if let Some(p) = &item.path_key
+                    && is_root(p)
+                {
+                    roots_total += 1;
+                    if matches!(item.status, ScanItemStatus::Completed) {
+                        roots_completed += 1;
                     }
                 }
             }
@@ -1732,10 +1729,10 @@ impl ScanRunState {
         let is_root_item = |path: &str| -> bool {
             let mut cur = std::path::Path::new(path).parent();
             while let Some(dir) = cur {
-                if let Some(dir_str) = dir.to_str() {
-                    if scanned_paths.contains(dir_str) {
-                        return false;
-                    }
+                if let Some(dir_str) = dir.to_str()
+                    && scanned_paths.contains(dir_str)
+                {
+                    return false;
                 }
                 cur = dir.parent();
             }

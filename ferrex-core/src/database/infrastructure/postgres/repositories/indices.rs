@@ -62,10 +62,13 @@ impl IndicesRepository for PostgresIndicesRepository {
         let (order_column, direction) = map_sort_to_column(sort, order);
 
         let mut qb = QueryBuilder::new(
-            "SELECT (msp.title_pos - 1)::INT4 AS idx FROM movie_sort_positions msp WHERE msp.library_id = ",
+            "SELECT (msp.title_pos - 1)::INT4 AS idx \
+             FROM movie_sort_positions msp \
+             LEFT JOIN movie_metadata mm ON mm.movie_id = msp.movie_id \
+             WHERE msp.library_id = ",
         );
         qb.push_bind(library_id.as_uuid());
-        qb.push(" ORDER BY ");
+        qb.push(" ORDER BY CASE WHEN COALESCE(mm.poster_path, '') = '' THEN 1 ELSE 0 END, ");
         qb.push(order_column);
         qb.push(" ");
         qb.push(direction);
@@ -373,7 +376,8 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
                     SortOrder::Ascending => " ASC NULLS LAST",
                     SortOrder::Descending => " DESC NULLS LAST",
                 };
-                self.qb.push(" ORDER BY CASE WHEN uwp.duration > 0 THEN (uwp.position::FLOAT8 / NULLIF(uwp.duration::FLOAT8, 0)) ELSE NULL END");
+                self.qb.push(" ORDER BY CASE WHEN COALESCE(mm.poster_path, '') = '' THEN 1 ELSE 0 END, ");
+                self.qb.push(" CASE WHEN uwp.duration > 0 THEN (uwp.position::FLOAT8 / NULLIF(uwp.duration::FLOAT8, 0)) ELSE NULL END");
                 self.qb.push(order_suffix);
                 self.qb.push(", msp.title_pos ASC");
             }
@@ -387,14 +391,15 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
                     SortOrder::Ascending => " ASC NULLS LAST",
                     SortOrder::Descending => " DESC NULLS LAST",
                 };
-                self.qb.push(" ORDER BY GREATEST(COALESCE(uwp.last_watched, 0), COALESCE(ucm.completed_at, 0))");
+                self.qb.push(" ORDER BY CASE WHEN COALESCE(mm.poster_path, '') = '' THEN 1 ELSE 0 END, ");
+                self.qb.push(" GREATEST(COALESCE(uwp.last_watched, 0), COALESCE(ucm.completed_at, 0))");
                 self.qb.push(order_suffix);
                 self.qb.push(", msp.title_pos ASC");
             }
             other => {
                 let (order_col, direction) =
                     map_sort_to_column(other, self.order);
-                self.qb.push(" ORDER BY ");
+                self.qb.push(" ORDER BY CASE WHEN COALESCE(mm.poster_path, '') = '' THEN 1 ELSE 0 END, ");
                 self.qb.push(order_col);
                 self.qb.push(" ");
                 self.qb.push(direction);

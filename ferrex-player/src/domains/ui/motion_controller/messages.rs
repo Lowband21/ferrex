@@ -5,7 +5,7 @@ pub enum Direction {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum KineticMessage {
+pub enum MotionMessage {
     Start(Direction),
     Stop(Direction),
     Tick,

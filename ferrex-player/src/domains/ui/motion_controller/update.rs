@@ -1,7 +1,7 @@
 use iced::Task;
 use iced::widget::{operation::scroll_to, scrollable::AbsoluteOffset};
 
-use super::messages::{Direction, KineticMessage};
+use super::messages::{Direction, MotionMessage};
 use crate::domains::ui::messages::Message;
 use crate::domains::ui::tabs::TabState;
 use crate::domains::ui::types::{DisplayMode, ViewState};
@@ -15,12 +15,12 @@ use crate::state::State;
     ),
     profiling::function
 )]
-pub fn update(state: &mut State, msg: KineticMessage) -> Task<Message> {
+pub fn update(state: &mut State, msg: MotionMessage) -> Task<Message> {
     match msg {
-        KineticMessage::Start(dir) => handle_start(state, dir),
-        KineticMessage::Stop(dir) => handle_stop(state, dir),
-        KineticMessage::Tick => handle_tick(state),
-        KineticMessage::SetBoost(active) => handle_boost(state, active),
+        MotionMessage::Start(dir) => handle_start(state, dir),
+        MotionMessage::Stop(dir) => handle_stop(state, dir),
+        MotionMessage::Tick => handle_tick(state),
+        MotionMessage::SetBoost(active) => handle_boost(state, active),
     }
 }
 
@@ -40,7 +40,7 @@ fn handle_start(state: &mut State, dir: Direction) -> Task<Message> {
         Direction::Up => -1,
         Direction::Down => 1,
     };
-    state.domains.ui.state.kinetic_scroll.start(d);
+    state.domains.ui.state.motion_controller.start(d);
     Task::none()
 }
 
@@ -49,12 +49,12 @@ fn handle_stop(state: &mut State, dir: Direction) -> Task<Message> {
         Direction::Up => -1,
         Direction::Down => 1,
     };
-    state.domains.ui.state.kinetic_scroll.stop_holding(d);
+    state.domains.ui.state.motion_controller.stop_holding(d);
     Task::none()
 }
 
 fn handle_boost(state: &mut State, active: bool) -> Task<Message> {
-    state.domains.ui.state.kinetic_scroll.set_boost(active);
+    state.domains.ui.state.motion_controller.set_boost(active);
     Task::none()
 }
 
@@ -80,7 +80,7 @@ fn handle_tick(state: &mut State) -> Task<Message> {
     };
 
     let current = grid.scroll_position;
-    let next = state.domains.ui.state.kinetic_scroll.tick(
+    let next = state.domains.ui.state.motion_controller.tick(
         current,
         grid.row_height.max(1.0),
         max_scroll,

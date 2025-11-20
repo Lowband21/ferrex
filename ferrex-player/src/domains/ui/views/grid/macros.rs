@@ -461,40 +461,27 @@ macro_rules! media_card {
 
         // Create the poster element
         // Always wrap in button for non-hover clicks, but the shader handles its own overlay buttons
-        let poster_element = button(image_with_hover)
+        let poster_element: Element<'_, $crate::domains::ui::messages::Message> = button(image_with_hover)
             .on_press($click_msg)
             .padding(0)
             .style(theme::Button::MediaCard.style())
             .into();
 
-        // Calculate proper container dimensions based on animation type
-        let (container_width, container_height) = if matches!(widget_anim, PosterAnimationType::Flip { .. }) {
-            // For enhanced flip, use expanded dimensions to accommodate animation
-            use $crate::infra::constants::animation;
-            let h_padding = animation::calculate_horizontal_padding(width);
-            let v_padding = animation::calculate_vertical_padding(height);
-            (width + h_padding * 2.0, height + v_padding * 2.0)
-        } else {
-            // For other animations, use standard dimensions
-            (width, height)
-        };
+        // Calculate container dimensions including animation padding so layout width
+        // matches the shader's animated bounds for all animation types.
+        use $crate::infra::constants::animation;
+        let h_padding = animation::calculate_horizontal_padding(width);
+        let v_padding = animation::calculate_vertical_padding(height);
+        let container_width = width + h_padding * 2.0;
+        let container_height = height + v_padding * 2.0;
 
-        // For enhanced flip, we need to center the poster within the container
-        let poster_with_overlay_element = if matches!(widget_anim, PosterAnimationType::Flip { .. }) {
-            // Center the poster within the larger container
-            // The shader handles all hover detection internally based on actual poster bounds
-            let centered_poster: Element<'_, $crate::domains::ui::messages::Message> = container(poster_element)
-                .width(Length::Fixed(container_width))
-                .height(Length::Fixed(container_height))
-                .align_x(iced::alignment::Horizontal::Center)
-                .align_y(iced::alignment::Vertical::Center)
-                .into();
-            centered_poster
-        } else {
-            // For non-animated posters, return directly
-            // The shader handles all hover detection internally
-            poster_element
-        };
+        // Center the poster within the container to account for padding
+        let poster_with_overlay_element: Element<'_, $crate::domains::ui::messages::Message> = container(poster_element)
+            .width(Length::Fixed(container_width))
+            .height(Length::Fixed(container_height))
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .into();
 
         // Calculate max characters based on card width and text size
         // Rough estimate: ~7-8 pixels per character for typical fonts

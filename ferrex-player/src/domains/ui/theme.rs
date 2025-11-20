@@ -72,7 +72,10 @@ impl MediaServerTheme {
     /// - Switches to a transparent background only for the main window
     ///   when showing the Player view with the Subwave Wayland backend
     ///   active (so the video subsurface can render behind the controls).
-    pub fn theme_for_state(state: &State, window: Option<iced::window::Id>) -> Theme {
+    pub fn theme_for_state(
+        state: &State,
+        window: Option<iced::window::Id>,
+    ) -> Theme {
         let mut palette = theme::Palette::DARK;
 
         // Default to opaque background
@@ -87,7 +90,9 @@ impl MediaServerTheme {
             if window.map(|w| w == main_id).unwrap_or(true)
                 && matches!(state.domains.ui.state.view, ViewState::Player)
             {
-                if let Some(video) = state.domains.player.state.video_opt.as_ref() {
+                if let Some(video) =
+                    state.domains.player.state.video_opt.as_ref()
+                {
                     // Only make the background transparent when using Wayland.
                     // Treat any preference other than ForceAppsink on Wayland as Wayland-backed,
                     // which includes PreferWayland.

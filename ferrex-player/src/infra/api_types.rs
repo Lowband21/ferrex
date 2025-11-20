@@ -72,14 +72,12 @@ pub fn extract_poster_url_from_details(
 
 /// Convert TMDB poster path to full URL
 pub fn get_tmdb_image_url(path: &str) -> String {
-    // Check if this is a server endpoint path (legacy data) or actual TMDB path
+    // If the server already provides a cached endpoint, return it directly.
     if path.starts_with("/images/") {
-        // This is a server endpoint, not a TMDB path
-        // Log warning and return empty to trigger fallback
-        log::warn!("Invalid TMDB path detected (server endpoint): {}", path);
-        return String::new();
+        return path.to_string();
     }
-
-    // TMDB image base URL with w500 size (good balance of quality and performance)
+    // Otherwise, construct a TMDB URL (w500 is a good balance of quality/perf)
     format!("https://image.tmdb.org/t/p/w500{}", path)
 }
+
+// Poster presence and ordering are enforced centrally in core/server.

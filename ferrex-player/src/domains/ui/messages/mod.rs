@@ -2,11 +2,15 @@ pub mod subscriptions;
 
 use crate::domains::{
     library::media_root_browser,
-    ui::{DisplayMode, views::carousel::CarouselMessage},
+    ui::{
+        DisplayMode,
+        motion_controller::MotionMessage,
+        views::{settings, virtual_carousel::VirtualCarouselMessage},
+    },
 };
 use ferrex_core::player_prelude::{
-    EpisodeID, Library, LibraryID, MediaID, MediaIDLike, MediaType, MovieID,
-    SeasonID, SeriesID, SortBy, UiDecade, UiGenre, UiResolution, UiWatchStatus,
+    EpisodeID, Library, LibraryID, MediaID, MediaIDLike, MovieID, SeasonID,
+    SeriesID, SortBy, UiDecade, UiGenre, UiResolution, UiWatchStatus,
 };
 use iced::Size;
 use iced::widget::scrollable;
@@ -15,7 +19,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub enum Message {
     // View mode control
-    SetDisplayMode(DisplayMode),     // New library-centric display mode
+    SetDisplayMode(DisplayMode), // New library-centric display mode
     SelectLibraryAndMode(LibraryID), // Select library and set to Library display mode
     ViewDetails(MediaID),
     ViewMovieDetails(MovieID),
@@ -24,8 +28,8 @@ pub enum Message {
     ViewEpisode(EpisodeID),
 
     // Sorting
-    SetSortBy(SortBy),                                      // Change sort field
-    ToggleSortOrder,                                        // Toggle ascending/descending
+    SetSortBy(SortBy), // Change sort field
+    ToggleSortOrder,   // Toggle ascending/descending
     ApplySortedPositions(LibraryID, Option<u64>, Vec<u32>), // Apply position indices with optional cache key
     ApplyFilteredPositions(LibraryID, u64, Vec<u32>), // Apply filtered indices with cache key (Phase 1)
     RequestFilteredPositions, // Trigger fetching filtered positions for active library
@@ -70,8 +74,15 @@ pub enum Message {
     // Scrolling
     TabGridScrolled(scrollable::Viewport), // Unified scroll message for tab system
     DetailViewScrolled(scrollable::Viewport), // Scroll events in detail views
+    // All view vertical scroll + focus navigation
+    AllViewScrolled(scrollable::Viewport),
+    AllFocusNext,
+    AllFocusPrev,
+    AllFocusTick,
     // Kinetic grid scrolling (arrow keys)
-    KineticScroll(crate::domains::ui::kinetic_scroll::messages::KineticMessage),
+    KineticScroll(MotionMessage),
+    // Mouse tracking for focus gating
+    MouseMoved,
 
     // Window events
     WindowResized(Size),
@@ -88,14 +99,16 @@ pub enum Message {
     BeginSearchFromKeyboard(String),
     ExecuteSearch,
     // Search window lifecycle
-    OpenSearchWindow,                     // Open an empty search window
-    OpenSearchWindowWithSeed(String),     // Open search window seeded with text
+    OpenSearchWindow, // Open an empty search window
+    OpenSearchWindowWithSeed(String), // Open search window seeded with text
     SearchWindowOpened(iced::window::Id), // Internal: window created, record Id
-    FocusSearchWindow,                    // Bring search window to front
-    FocusSearchInput,                     // Ensure the search text input has focus
-    CloseSearchWindow,                    // Close search window
+    FocusSearchWindow, // Bring search window to front
+    FocusSearchInput, // Ensure the search text input has focus
+    CloseSearchWindow, // Close search window
     // Main window lifecycle notifications
     MainWindowOpened(iced::window::Id),
+    MainWindowFocused,
+    MainWindowUnfocused,
     // Raw window closed event (id only; we will map to kind)
     RawWindowClosed(iced::window::Id),
     ShowLibraryMenu,
@@ -131,9 +144,7 @@ pub enum Message {
 
     // Device management - now proxies to cross-domain events
     LoadDevices,
-    DevicesLoaded(
-        Result<Vec<crate::domains::ui::views::settings::device_management::UserDevice>, String>,
-    ),
+    DevicesLoaded(Result<Vec<settings::device_management::UserDevice>, String>),
     RevokeDevice(String),                  // device_id
     DeviceRevoked(Result<String, String>), // device_id or error
     RefreshDevices,
@@ -142,8 +153,8 @@ pub enum Message {
     ToggleAutoLogin(bool),
     AutoLoginToggled(Result<bool, String>), // Proxy for Auth::Logout
 
-    // Carousel navigation
-    CarouselNavigation(CarouselMessage),
+    // Virtual carousel events (new module)
+    VirtualCarousel(VirtualCarouselMessage),
 
     // Animation and transition messages
     UpdateTransitions, // Update color and backdrop transitions
@@ -153,16 +164,16 @@ pub enum Message {
     UpdateBackdropHandle(iced::widget::image::Handle),
 
     // View model updates
-    RefreshViewModels,           // Full refresh from MediaStore (expensive)
-    UpdateViewModelFilters,      // Just update filters (lightweight)
-    CheckMediaStoreRefresh,      // Check if MediaStore notifier indicates refresh needed
+    RefreshViewModels, // Full refresh from MediaStore (expensive)
+    UpdateViewModelFilters, // Just update filters (lightweight)
+    CheckMediaStoreRefresh, // Check if MediaStore notifier indicates refresh needed
     QueueVisibleDetailsForFetch, // Queue visible items for background detail fetching
 
     // Cross-domain proxy messages
-    ToggleFullscreen,                 // Proxy for Media::ToggleFullscreen
+    ToggleFullscreen, // Proxy for Media::ToggleFullscreen
     SelectLibrary(Option<LibraryID>), // Proxy for Library::SelectLibrary
-    PlayMediaWithId(MediaID),         // Proxy for Media::PlayMediaWithId
-    PlaySeriesNextEpisode(SeriesID),  // Play next unwatched/in-progress episode
+    PlayMediaWithId(MediaID), // Proxy for Media::PlayMediaWithId
+    PlaySeriesNextEpisode(SeriesID), // Play next unwatched/in-progress episode
 
     // TV Show loading
     //TvShowLoaded(String, Result<TvShowDetails, String>), // series_id, result
@@ -175,19 +186,19 @@ pub enum Message {
     HideLibraryForm,                  // Proxy for Library::HideLibraryForm
     ScanLibrary(LibraryID),           // Proxy for Library::ScanLibrary_
     DeleteLibrary(LibraryID),         // Proxy for Library::DeleteLibrary
-    UpdateLibraryFormName(String),    // Proxy for Library::UpdateLibraryFormName
-    UpdateLibraryFormType(String),    // Proxy for Library::UpdateLibraryFormType
-    UpdateLibraryFormPaths(String),   // Proxy for Library::UpdateLibraryFormPaths
+    UpdateLibraryFormName(String), // Proxy for Library::UpdateLibraryFormName
+    UpdateLibraryFormType(String), // Proxy for Library::UpdateLibraryFormType
+    UpdateLibraryFormPaths(String), // Proxy for Library::UpdateLibraryFormPaths
     UpdateLibraryFormScanInterval(String), // Proxy for Library::UpdateLibraryFormScanInterval
-    ToggleLibraryFormEnabled,         // Proxy for Library::ToggleLibraryFormEnabled
-    ToggleLibraryFormStartScan,       // Proxy for Library::ToggleLibraryFormStartScan
-    SubmitLibraryForm,                // Proxy for Library::SubmitLibraryForm
+    ToggleLibraryFormEnabled, // Proxy for Library::ToggleLibraryFormEnabled
+    ToggleLibraryFormStartScan, // Proxy for Library::ToggleLibraryFormStartScan
+    SubmitLibraryForm,        // Proxy for Library::SubmitLibraryForm
     LibraryMediaRoot(media_root_browser::Message), // Proxy collection for media root browser actions
     PauseLibraryScan(LibraryID, Uuid), // Proxy for Library::PauseScan
     ResumeLibraryScan(LibraryID, Uuid), // Proxy for Library::ResumeScan
     CancelLibraryScan(LibraryID, Uuid), // Proxy for Library::CancelScan
     // Scanner metrics + admin actions
-    FetchScanMetrics,        // Proxy for Library::FetchScanMetrics
+    FetchScanMetrics, // Proxy for Library::FetchScanMetrics
     ResetLibrary(LibraryID), // Proxy for Library::ResetLibrary
 
     // No-op variant for UI elements that are not yet implemented
@@ -253,7 +264,12 @@ impl Message {
             // Scrolling
             Self::TabGridScrolled(_) => "UI::TabGridScrolled",
             Self::DetailViewScrolled(_) => "UI::DetailViewScrolled",
+            Self::AllViewScrolled(_) => "UI::AllViewScrolled",
+            Self::AllFocusNext => "UI::AllFocusNext",
+            Self::AllFocusPrev => "UI::AllFocusPrev",
+            Self::AllFocusTick => "UI::AllFocusTick",
             Self::KineticScroll(_) => "UI::KineticScroll",
+            Self::MouseMoved => "UI::MouseMoved",
 
             // Window events
             Self::WindowResized(_) => "UI::WindowResized",
@@ -276,6 +292,8 @@ impl Message {
             Self::FocusSearchInput => "UI::FocusSearchInput",
             Self::CloseSearchWindow => "UI::CloseSearchWindow",
             Self::MainWindowOpened(_) => "UI::MainWindowOpened",
+            Self::MainWindowFocused => "UI::MainWindowFocused",
+            Self::MainWindowUnfocused => "UI::MainWindowUnfocused",
             Self::RawWindowClosed(_) => "UI::RawWindowClosed",
             Self::ShowLibraryMenu => "UI::ShowLibraryMenu",
             Self::ShowAllLibrariesMenu => "UI::ShowAllLibrariesMenu",
@@ -319,8 +337,7 @@ impl Message {
             Self::ToggleAutoLogin(_) => "UI::ToggleAutoLogin",
             Self::AutoLoginToggled(_) => "UI::AutoLoginToggled",
 
-            // Carousel navigation
-            Self::CarouselNavigation(_) => "UI::CarouselNavigation",
+            Self::VirtualCarousel(_) => "UI::VirtualCarousel",
 
             // Animation and transition messages
             Self::UpdateTransitions => "UI::UpdateTransitions",
@@ -495,7 +512,14 @@ impl std::fmt::Debug for Message {
             Self::DetailViewScrolled(viewport) => {
                 write!(f, "UI::DetailViewScrolled({:?})", viewport)
             }
+            Self::AllViewScrolled(viewport) => {
+                write!(f, "UI::AllViewScrolled({:?})", viewport)
+            }
+            Self::AllFocusNext => write!(f, "UI::AllFocusNext"),
+            Self::AllFocusPrev => write!(f, "UI::AllFocusPrev"),
+            Self::AllFocusTick => write!(f, "UI::AllFocusTick"),
             Self::KineticScroll(_) => write!(f, "UI::KineticScroll"),
+            Self::MouseMoved => write!(f, "UI::MouseMoved"),
             Self::MediaHovered(_) => write!(f, "UI::MediaHovered"),
             Self::MediaUnhovered(_) => write!(f, "UI::MediaUnhovered"),
             Self::NavigateBack => write!(f, "UI::NavigateBack"),
@@ -513,6 +537,8 @@ impl std::fmt::Debug for Message {
             Self::FocusSearchInput => write!(f, "UI::FocusSearchInput"),
             Self::CloseSearchWindow => write!(f, "UI::CloseSearchWindow"),
             Self::MainWindowOpened(_) => write!(f, "UI::MainWindowOpened"),
+            Self::MainWindowFocused => write!(f, "UI::MainWindowFocused"),
+            Self::MainWindowUnfocused => write!(f, "UI::MainWindowUnfocused"),
             Self::RawWindowClosed(_) => write!(f, "UI::RawWindowClosed"),
             Self::ShowLibraryMenu => write!(f, "UI::ShowLibraryMenu"),
             Self::ShowAllLibrariesMenu => write!(f, "UI::ShowAllLibrariesMenu"),
@@ -568,8 +594,8 @@ impl std::fmt::Debug for Message {
             Self::RefreshDevices => write!(f, "UI::RefreshDevices"),
             Self::ToggleAutoLogin(_) => write!(f, "UI::ToggleAutoLogin"),
             Self::AutoLoginToggled(_) => write!(f, "UI::AutoLoginToggled"),
-            Self::CarouselNavigation(carousel_message) => {
-                write!(f, "UI::CarouselNavigation({:?})", carousel_message)
+            Self::VirtualCarousel(msg) => {
+                write!(f, "UI::VirtualCarousel({:?})", msg)
             }
             Self::UpdateTransitions => write!(f, "UI::UpdateTransitions"),
             Self::UpdateBackdropHandle(handle) => {

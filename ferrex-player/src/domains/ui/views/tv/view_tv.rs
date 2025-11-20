@@ -1,6 +1,7 @@
 use crate::domains::media::selectors;
 use crate::domains::ui::components;
 use crate::domains::ui::views::grid::macros::parse_hex_color;
+use crate::domains::ui::views::virtual_carousel::{self, types::CarouselKey};
 use crate::infra::api_types::{
     EpisodeID, ImageSize, ImageType, MediaID, Priority, SeasonID,
     SeasonReference, SeriesID,
@@ -268,23 +269,21 @@ pub fn view_series_detail<'a>(
 
     content = content.push(info_row);
 
-    // Seasons carousel - use the seasons we fetched above
+    // Seasons carousel - virtual carousel module
     if !seasons.is_empty() {
         content = content.push(Space::new().height(20));
-
-        if let Some(carousel_state) =
-            &state.domains.ui.state.show_seasons_carousel
+        let key = CarouselKey::ShowSeasons(series_id.to_uuid());
+        if let Some(vc_state) =
+            state.domains.ui.state.carousel_registry.get(&key)
         {
-            // Build season cards lazily using windowed carousel with media_card!
             let seasons_vec = seasons.clone();
-            let section =
-                crate::domains::ui::views::carousel::windowed_media_carousel(
-                    "show_seasons".to_string(),
-                    "Seasons",
-                    seasons_vec.len(),
-                    carousel_state,
-                    move |idx| {
-                        seasons_vec.get(idx).map(|s| {
+            let section = virtual_carousel::virtual_carousel(
+                key.clone(),
+                "Seasons",
+                seasons_vec.len(),
+                vc_state,
+                move |idx| {
+                    seasons_vec.get(idx).map(|s| {
                         let title_str = if s.season_number.value() == 0 {
                             "Specials".to_string()
                         } else {
@@ -293,7 +292,7 @@ pub fn view_series_detail<'a>(
                         let subtitle_str = s
                             .details()
                             .map(|d| format!("{} episodes", d.episode_count))
-                            .unwrap_or_else(|| String::from("\u{00A0}")); // non-breaking space to keep height
+                            .unwrap_or_else(|| String::from("\u{00A0}"));
 
                         media_card! {
                             type: Season,
@@ -309,17 +308,15 @@ pub fn view_series_detail<'a>(
                                 },
                                 size: Medium,
                                 on_click: Message::ViewSeason(s.series_id, s.id),
-                                // Important: prevent early ButtonPressed play from propagating across views
-                                // to avoid accidental episode autoplay when navigating to a season.
                                 on_play: Message::NoOp,
                                 hover_icon: lucide_icons::Icon::List,
                                 is_hovered: false,
                             }
                         }
                     })
-                    },
-                );
-
+                },
+                false,
+            );
             content = content.push(section);
         }
     }
@@ -521,17 +518,18 @@ pub fn view_season_detail<'a>(
 
     if !episodes.is_empty() {
         content = content.push(Space::new().height(20));
-        if let Some(ep_cs) = &state.domains.ui.state.season_episodes_carousel {
+        let key = CarouselKey::SeasonEpisodes(season_id.to_uuid());
+        if let Some(vc_state) =
+            state.domains.ui.state.carousel_registry.get(&key)
+        {
             let eps_vec = episodes.clone();
-            let ep_section =
-                crate::domains::ui::views::carousel::windowed_media_carousel(
-                    "season_episodes".to_string(),
-                    "Episodes",
-                    eps_vec.len(),
-                    ep_cs,
-                    move |idx| {
-                        eps_vec.get(idx).map(|e| {
-                        // Build episode title/subtitle
+            let ep_section = virtual_carousel::virtual_carousel(
+                key.clone(),
+                "Episodes",
+                eps_vec.len(),
+                vc_state,
+                move |idx| {
+                    eps_vec.get(idx).map(|e| {
                         let title_str = format!(
                             "S{:02}E{:02}",
                             e.season_number.value(),
@@ -562,8 +560,9 @@ pub fn view_season_detail<'a>(
                             }
                         }
                     })
-                    },
-                );
+                },
+                false,
+            );
             content = content.push(ep_section);
         }
     }

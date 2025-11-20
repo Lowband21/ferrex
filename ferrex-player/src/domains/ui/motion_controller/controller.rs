@@ -1,8 +1,10 @@
-use crate::infra::constants::performance_config::scrolling as cfg;
-use std::time::{Duration, Instant};
+use super::config::MotionControllerConfig;
+use std::time::Instant;
 
 #[derive(Debug, Default, Clone)]
-pub struct KineticScroller {
+pub struct MotionController {
+    /// Configuration for the scroller; determines ramp/decay and rates.
+    cfg: MotionControllerConfig,
     /// Whether the scroller is engaged (holding or decaying)
     active: bool,
     /// Whether a key is currently held
@@ -19,9 +21,21 @@ pub struct KineticScroller {
     boost_active: bool,
 }
 
-impl KineticScroller {
+impl MotionController {
+    /// Create with default config tuned for grid (backward compatible).
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            cfg: MotionControllerConfig::default(),
+            ..Default::default()
+        }
+    }
+
+    /// Create with custom kinetic configuration (for carousels or other contexts).
+    pub fn new_with_config(cfg: MotionControllerConfig) -> Self {
+        Self {
+            cfg,
+            ..Default::default()
+        }
     }
 
     pub fn is_active(&self) -> bool {
@@ -54,16 +68,29 @@ impl KineticScroller {
         // keep self.active true; tick() will turn it off when velocity is small
     }
 
+    /// Immediately cancel any kinetic motion and decay.
+    ///
+    /// Useful for contexts that transition to a different motion mode on
+    /// key release (e.g., snapping a carousel to the nearest index), where
+    /// continued kinetic decay would conflict with the follow-up animation.
+    pub fn abort(&mut self) {
+        self.active = false;
+        self.holding = false;
+        self.v = 0.0;
+    }
+
     pub fn set_boost(&mut self, active: bool) {
         self.boost_active = active;
     }
 
     /// Advance the scroller by dt and return the new absolute offset if movement occurs.
     /// Returns None if inactive or no meaningful change.
+    /// Advance the scroller by dt and return the new absolute offset if movement occurs.
+    /// The `unit_size` is the height of a grid row or the width+spacing stride of a carousel item.
     pub fn tick(
         &mut self,
         current_offset: f32,
-        row_height: f32,
+        unit_size: f32,
         max_scroll: f32,
     ) -> Option<f32> {
         if !self.active {
@@ -88,39 +115,39 @@ impl KineticScroller {
                 .hold_started
                 .map(|t| t.elapsed().as_millis() as u64)
                 .unwrap_or(0);
-            let ramp = cfg::KINETIC_RAMP_MS.max(1) as f32;
+            let ramp = self.cfg.ramp_ms.max(1) as f32;
             let mut t = (hold_elapsed_ms as f32 / ramp).clamp(0.0, 1.0);
-            t = apply_easing(t, cfg::KINETIC_EASING_KIND);
-            let max_rps = self
-                .boosted_max_rows_per_s()
-                .max(cfg::KINETIC_BASE_ROWS_PER_S);
-            let target_rps = cfg::KINETIC_BASE_ROWS_PER_S
-                + (max_rps - cfg::KINETIC_BASE_ROWS_PER_S) * t;
-            let target_mag = target_rps * row_height; // DIP/s from rows/s
+            t = apply_easing(t, self.cfg.easing_kind);
+            let max_ups = self
+                .boosted_max_units_per_s()
+                .max(self.cfg.base_units_per_s);
+            let target_ups = self.cfg.base_units_per_s
+                + (max_ups - self.cfg.base_units_per_s) * t;
+            let target_mag = target_ups * unit_size; // DIP/s from units/s
             let target = (self.dir as f32) * target_mag;
 
             // Time-constant filter to smoothly approach target
-            let tau = accel_tau_secs();
+            let tau = self.accel_tau_secs();
             let alpha = 1.0 - (-dt_s / tau).exp();
             self.v += (target - self.v) * alpha;
         } else {
             // Decay exponentially toward zero
-            let tau = (cfg::KINETIC_DECAY_TAU_MS.max(1) as f32) / 1000.0;
+            let tau = (self.cfg.decay_tau_ms.max(1) as f32) / 1000.0;
             let decay = (-dt_s / tau).exp();
             self.v *= decay;
         }
 
-        // Clamp velocity against max allowed DIP/s from rows/s cap
+        // Clamp velocity against max allowed DIP/s from units/s cap
         let max_speed = self
-            .boosted_max_rows_per_s()
-            .max(cfg::KINETIC_BASE_ROWS_PER_S)
-            * row_height;
+            .boosted_max_units_per_s()
+            .max(self.cfg.base_units_per_s)
+            * unit_size;
         if self.v.abs() > max_speed {
             self.v = self.v.signum() * max_speed;
         }
 
         // If very slow, stop completely
-        if self.v.abs() <= (cfg::KINETIC_MIN_ROWS_PER_S_STOP * row_height)
+        if self.v.abs() <= (self.cfg.min_units_per_s_stop * unit_size)
             && !self.holding
         {
             self.active = false;
@@ -175,22 +202,33 @@ fn apply_easing(t: f32, kind: u8) -> f32 {
     }
 }
 
-fn accel_tau_secs() -> f32 {
-    if cfg::KINETIC_ACCEL_TAU_MS > 0 {
-        (cfg::KINETIC_ACCEL_TAU_MS as f32) / 1000.0
-    } else {
-        let ramp_s = (cfg::KINETIC_RAMP_MS.max(1) as f32) / 1000.0;
-        (ramp_s * cfg::KINETIC_ACCEL_TAU_TO_RAMP_RATIO).max(0.05)
+impl MotionController {
+    /// Effective acceleration time constant in seconds.
+    fn accel_tau_secs(&self) -> f32 {
+        if self.cfg.accel_tau_ms > 0 {
+            (self.cfg.accel_tau_ms as f32) / 1000.0
+        } else {
+            let ramp_s = (self.cfg.ramp_ms.max(1) as f32) / 1000.0;
+            (ramp_s * self.cfg.accel_tau_to_ramp_ratio).max(0.05)
+        }
     }
-}
 
-impl KineticScroller {
-    fn boosted_max_rows_per_s(&self) -> f32 {
-        let base_max = cfg::KINETIC_MAX_ROWS_PER_S;
+    fn boosted_max_units_per_s(&self) -> f32 {
+        let base_max = self.cfg.max_units_per_s;
         if self.boost_active {
-            base_max * cfg::KINETIC_BOOST_MULTIPLIER
+            base_max * self.cfg.boost_multiplier
         } else {
             base_max
         }
+    }
+
+    /// Access current config.
+    pub fn config(&self) -> MotionControllerConfig {
+        self.cfg
+    }
+
+    /// Replace configuration at runtime (takes effect on next tick).
+    pub fn set_config(&mut self, cfg: MotionControllerConfig) {
+        self.cfg = cfg;
     }
 }

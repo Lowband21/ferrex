@@ -16,10 +16,15 @@ use crate::{
         settings::SettingsDomainState,
         streaming::StreamingDomainState,
         ui::{
-            UIDomainState,
+            MotionController, UIDomainState,
+            background_state::BackgroundShaderState,
+            scroll_manager::ScrollPositionManager,
             tabs::{TabId, TabManager},
             types::DisplayMode,
-            views::carousel::CarouselState,
+            views::{
+                carousel::CarouselState,
+                virtual_carousel::{CarouselFocus, CarouselRegistry},
+            },
             windows::WindowManager,
         },
         user_management::UserManagementDomainState,
@@ -49,8 +54,11 @@ use ferrex_core::player_prelude::{
 };
 
 use iced::Task;
-use parking_lot::RwLock as StdRwLock;
-use std::sync::Arc;
+use parking_lot::{RwLock as StdRwLock, lock_api::RwLock};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 /// Application state - refactored to use domain-driven architecture
 #[derive(Debug)]
@@ -147,17 +155,27 @@ impl State {
                 match DEFAULT_POSTER_ANIMATION {
                     PosterAnimationKind::None => PosterAnimationType::None,
                     PosterAnimationKind::Fade => PosterAnimationType::Fade {
-                        duration: std::time::Duration::from_millis(DEFAULT_DURATION_MS),
+                        duration: std::time::Duration::from_millis(
+                            DEFAULT_DURATION_MS,
+                        ),
                     },
                     PosterAnimationKind::Flip => PosterAnimationType::flip(),
                 }
             },
             repo_accessor: ui_accessor.clone(),
             // New zero-copy fields
-            movie_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(2048),
-            series_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(256),
-            season_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(512),
-            episode_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(2048),
+            movie_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(
+                2048,
+            ),
+            series_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(
+                256,
+            ),
+            season_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(
+                512,
+            ),
+            episode_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(
+                2048,
+            ),
 
             movies_carousel: CarouselState::new(0),
             tv_carousel: CarouselState::new(0),
@@ -168,14 +186,13 @@ impl State {
             loading: false,
             error_message: None,
             window_size: iced::Size::new(1280.0, 720.0),
-            expanded_shows: std::collections::HashSet::new(),
+            expanded_shows: HashSet::new(),
             hovered_media_id: None,
-            theme_color_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            theme_color_cache: RwLock::new(HashMap::new()),
             current_library_id: None,
             last_prefetch_tick: None,
-            scroll_manager: crate::domains::ui::scroll_manager::ScrollPositionManager::default(),
-            background_shader_state:
-                crate::domains::ui::background_state::BackgroundShaderState::default(),
+            scroll_manager: ScrollPositionManager::default(),
+            background_shader_state: BackgroundShaderState::default(),
             search_query: String::new(),
             show_library_menu: false,
             library_menu_target: None,
@@ -190,7 +207,9 @@ impl State {
             show_clear_database_confirm: false,
             navigation_history: Vec::new(),
             poster_anim_active_until: None,
-            kinetic_scroll: crate::domains::ui::kinetic_scroll::KineticScroller::new(),
+            motion_controller: MotionController::new(),
+            carousel_registry: CarouselRegistry::new(),
+            carousel_focus: CarouselFocus::new(),
         };
 
         // Create settings service adapter

@@ -464,6 +464,21 @@ pub fn handle_view_series(
         cs.update_items_per_page(state.window_size.width);
         state.domains.ui.state.show_seasons_carousel = Some(cs);
 
+        // Initialize virtual carousel registry entry for seasons (trial)
+        {
+            use crate::domains::ui::views::virtual_carousel::types::{
+                CarouselConfig, CarouselKey,
+            };
+            let key = CarouselKey::ShowSeasons(series_id.to_uuid());
+            let config = CarouselConfig::poster_defaults();
+            state.domains.ui.state.carousel_registry.ensure_default(
+                key,
+                total_seasons,
+                state.window_size.width.max(1.0),
+                config,
+            );
+        }
+
         // After constructing the carousel, emit a demand snapshot for visible seasons
         if let (Some(handle), Some(cs)) = (
             state.domains.metadata.state.planner_handle.as_ref(),
@@ -622,7 +637,7 @@ pub fn handle_view_season(
 
         state.domains.ui.state.view = new_view;
 
-        // Initialize episodes carousel for this season
+        // Initialize episodes carousel for this season (legacy state retained for now)
         let total_eps = state
             .domains
             .ui
@@ -637,6 +652,21 @@ pub fn handle_view_season(
         );
         ep_cs.update_items_per_page(state.window_size.width);
         state.domains.ui.state.season_episodes_carousel = Some(ep_cs);
+
+        // Initialize virtual carousel registry entry for season episodes
+        {
+            use crate::domains::ui::views::virtual_carousel::types::{
+                CarouselConfig, CarouselKey,
+            };
+            let key = CarouselKey::SeasonEpisodes(season.id().to_uuid());
+            let config = CarouselConfig::episode_defaults();
+            state.domains.ui.state.carousel_registry.ensure_default(
+                key,
+                total_eps,
+                state.window_size.width.max(1.0),
+                config,
+            );
+        }
 
         // After constructing the episodes carousel, emit a demand snapshot for visible episodes
         if let (Some(handle), Some(cs)) = (

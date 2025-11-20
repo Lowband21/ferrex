@@ -1,20 +1,31 @@
+use std::time::{Duration, Instant};
+
 use super::Message;
-use crate::common::messages::DomainMessage;
-use crate::domains::ui::kinetic_scroll::messages::{
-    Direction as Dir, KineticMessage as KM,
-};
-use crate::domains::ui::tabs::TabId;
-use crate::domains::ui::types::DisplayMode;
-use crate::domains::ui::types::ViewState;
+
 use crate::{
+    common::messages::DomainMessage,
     domains::{
-        search::messages::Message as SearchMessage, ui::windows::WindowKind,
+        search::messages::Message as SearchMessage,
+        ui::{
+            motion_controller::messages::{
+                Direction as Dir, MotionMessage as KM,
+            },
+            tabs::{TabId, TabState},
+            types::{DisplayMode, ViewState},
+            views::virtual_carousel::{
+                messages::VirtualCarouselMessage as VCM, types::CarouselKey,
+            },
+        },
     },
+    infra::constants::{performance_config, virtual_carousel},
     state::State,
 };
-use iced::Subscription;
-use iced::event::{self, Event as RuntimeEvent, Status as EventStatus};
-use iced::keyboard::{self, Key};
+
+use iced::{
+    Subscription,
+    event::{self, Event as RuntimeEvent, Status as EventStatus},
+    keyboard::{self, Key},
+};
 
 #[cfg_attr(
     any(
@@ -60,12 +71,182 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         subscriptions.push(event::listen_with(main_window_grid_key_handler));
     }
 
-    if state.domains.ui.state.kinetic_scroll.is_active() {
+    if state.search_window_id.is_none() {
+        subscriptions.push(event::listen().map(|ev| match ev {
+            RuntimeEvent::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                ..
+            }) => {
+                if modifiers.control() || modifiers.alt() || modifiers.logo() {
+                    return DomainMessage::NoOp;
+                }
+                use iced::keyboard::key::Named;
+                match key {
+                    Key::Named(Named::ArrowRight) => {
+                        if modifiers.shift() {
+                            DomainMessage::Ui(Message::VirtualCarousel(
+                                VCM::NextPageActive,
+                            ))
+                        } else {
+                            // Disable kinetic hold: step by one item with snap
+                            DomainMessage::Ui(Message::VirtualCarousel(
+                                VCM::NextItemActive,
+                            ))
+                        }
+                    }
+                    Key::Named(Named::ArrowLeft) => {
+                        if modifiers.shift() {
+                            DomainMessage::Ui(Message::VirtualCarousel(
+                                VCM::PrevPageActive,
+                            ))
+                        } else {
+                            // Disable kinetic hold: step by one item with snap
+                            DomainMessage::Ui(Message::VirtualCarousel(
+                                VCM::PrevItemActive,
+                            ))
+                        }
+                    }
+                    Key::Named(Named::Shift) => DomainMessage::Ui(
+                        Message::VirtualCarousel(VCM::SetBoostActive(true)),
+                    ),
+                    _ => DomainMessage::NoOp,
+                }
+            }
+            RuntimeEvent::Keyboard(keyboard::Event::KeyReleased {
+                key,
+                modifiers,
+                ..
+            }) => {
+                if modifiers.control() || modifiers.alt() || modifiers.logo() {
+                    return DomainMessage::NoOp;
+                }
+                use iced::keyboard::key::Named;
+                match key {
+                    // With kinetic hold disabled for carousels, ignore Arrow releases
+                    Key::Named(Named::ArrowRight) => DomainMessage::NoOp,
+                    Key::Named(Named::ArrowLeft) => DomainMessage::NoOp,
+                    Key::Named(Named::Shift) => DomainMessage::Ui(
+                        Message::VirtualCarousel(VCM::SetBoostActive(false)),
+                    ),
+                    _ => DomainMessage::NoOp,
+                }
+            }
+            _ => DomainMessage::NoOp,
+        }));
+
+        // Track mouse movement globally to gate hover-driven focus switches
+        subscriptions.push(event::listen().map(|ev| match ev {
+            RuntimeEvent::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
+                DomainMessage::Ui(Message::MouseMoved)
+            }
+            _ => DomainMessage::NoOp,
+        }));
+    }
+
+    // All tab focus navigation (Up/Down to move between carousels)
+    let in_all_curated = state.search_window_id.is_none()
+        && matches!(state.domains.ui.state.display_mode, DisplayMode::Curated)
+        && matches!(state.tab_manager.active_tab_id(), TabId::All);
+    if in_all_curated {
+        subscriptions.push(event::listen().map(|ev| match ev {
+            RuntimeEvent::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                ..
+            }) => {
+                if modifiers.control() || modifiers.alt() || modifiers.logo() {
+                    return DomainMessage::NoOp;
+                }
+                use iced::keyboard::key::Named;
+                match key {
+                    Key::Named(Named::ArrowDown) => {
+                        DomainMessage::Ui(Message::AllFocusNext)
+                    }
+                    Key::Named(Named::ArrowUp) => {
+                        DomainMessage::Ui(Message::AllFocusPrev)
+                    }
+                    _ => DomainMessage::NoOp,
+                }
+            }
+            _ => DomainMessage::NoOp,
+        }));
+    }
+
+    if state.domains.ui.state.motion_controller.is_active() {
         subscriptions.push(
             iced::time::every(std::time::Duration::from_nanos(
-                crate::infra::constants::performance_config::scrolling::KINETIC_TICK_NS,
+                performance_config::scrolling::TICK_NS,
             ))
-            .map(|_| DomainMessage::Ui(Message::KineticScroll(KM::Tick)) ),
+            .map(|_| DomainMessage::Ui(Message::KineticScroll(KM::Tick))),
+        );
+    }
+
+    // Motion ticking for virtual carousels (All view active carousel, seasons/episodes)
+    {
+        use ViewState::*;
+        let mut keys: Vec<CarouselKey> =
+            match state.domains.ui.state.view.clone() {
+                SeriesDetail { series_id, .. } => {
+                    vec![CarouselKey::ShowSeasons(series_id.to_uuid())]
+                }
+                SeasonDetail { season_id, .. } => {
+                    vec![CarouselKey::SeasonEpisodes(season_id.to_uuid())]
+                }
+                _ => Vec::new(),
+            };
+        // If in All view (curated), include its active carousel key
+        if matches!(state.domains.ui.state.display_mode, DisplayMode::Curated)
+            && matches!(state.tab_manager.active_tab_id(), TabId::All)
+            && let Some(TabState::All(all_state)) =
+                state.tab_manager.get_tab(TabId::All)
+            && let Some(k) = all_state.focus.active_carousel.clone()
+        {
+            keys.push(k);
+        }
+        if !keys.is_empty() {
+            let reg = &state.domains.ui.state.carousel_registry;
+            let mut any_active = false;
+            for key in keys {
+                let scroller_active = reg
+                    .get_scroller(&key)
+                    .map(|s| s.is_active())
+                    .unwrap_or(false);
+                let animator_active = reg
+                    .get_animator(&key)
+                    .map(|a| a.is_active())
+                    .unwrap_or(false);
+                if scroller_active || animator_active {
+                    any_active = true;
+                    break;
+                }
+            }
+            if any_active {
+                subscriptions.push(
+                    iced::time::every(std::time::Duration::from_nanos(
+                        virtual_carousel::motion::TICK_NS,
+                    ))
+                    .map(|_| {
+                        DomainMessage::Ui(Message::VirtualCarousel(
+                            VCM::MotionTickActive,
+                        ))
+                    }),
+                );
+            }
+        }
+    }
+
+    // Vertical snapping for All view focus changes and poster keep alive
+    if in_all_curated
+        && let Some(TabState::All(all_state)) =
+            state.tab_manager.get_tab(TabId::All)
+        && all_state.focus.vertical_animator.is_active()
+    {
+        subscriptions.push(
+            iced::time::every(Duration::from_nanos(
+                virtual_carousel::motion::TICK_NS,
+            ))
+            .map(|_| DomainMessage::Ui(Message::AllFocusTick)),
         );
     }
 
@@ -74,8 +255,21 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         .ui
         .state
         .poster_anim_active_until
-        .map(|until| until > std::time::Instant::now())
-        .unwrap_or(false);
+        .map(|until| until >= Instant::now())
+        .unwrap_or(true);
+
+    if poster_anim_active {
+        subscriptions.push(
+            iced::time::every(Duration::from_nanos(
+                virtual_carousel::motion::TICK_NS,
+            ))
+            .map(|_| {
+                DomainMessage::Ui(Message::VirtualCarousel(
+                    VCM::MotionTickActive,
+                ))
+            }),
+        );
+    }
 
     if state
         .domains
@@ -210,3 +404,5 @@ fn main_window_grid_key_handler(
         _ => None,
     }
 }
+
+// No standalone handler needed; we capture the key with event::listen().

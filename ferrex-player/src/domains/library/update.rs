@@ -70,9 +70,7 @@ pub fn update_library(
 
             // Determine current session identity
             let current_user_id = match &state.domains.auth.state.auth_flow {
-                AuthenticationFlow::Authenticated { user, .. } => {
-                    Some(user.id)
-                }
+                AuthenticationFlow::Authenticated { user, .. } => Some(user.id),
                 _ => None,
             };
             let current_server = state.server_url.clone();

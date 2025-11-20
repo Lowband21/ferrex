@@ -1,81 +1,92 @@
-use crate::domains::metadata::demand_planner::DemandSnapshot;
-#[cfg(feature = "demo")]
-use crate::domains::ui::update_handlers::demo_controls;
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
     domains::{
         library,
+        metadata::demand_planner::DemandSnapshot,
+        settings::messages::Message as SettingsMessage,
         ui::{
-            messages as ui,
-            types::{DisplayMode, ViewState},
-            views::carousel::CarouselMessage,
+            messages::Message as UiMessage,
+            tabs::{TabId, TabState},
+            types::{BackdropAspectMode, DisplayMode, ViewState},
+            update_handlers::{
+                emit_initial_all_tab_snapshots_combined,
+                handle_virtual_carousel_message, init_all_tab_view,
+            },
+            utils::bump_keep_alive,
+            windows,
         },
     },
-    infra::api_types::LibraryType,
+    infra::{api_types::LibraryType, constants::layout},
     state::State,
 };
+
 use ferrex_core::{
     player_prelude::{
-        EpisodeLike, ImageRequest, Media, MediaIDLike, MediaType,
-        MediaTypeFilter, MovieLike, PosterKind, PosterSize, Priority,
-        SortOrder, UiResolution, UiWatchStatus,
+        EpisodeLike, Media, MediaTypeFilter, MovieLike, PosterKind, SortOrder,
+        UiResolution, UiWatchStatus,
     },
     query::filtering::{
         FilterRequestParams, build_filter_indices_request, hash_filter_spec,
     },
-    types::image_request::EpisodeStillSize,
 };
-use iced::Task;
-use iced::widget::{operation::scroll_to, scrollable::AbsoluteOffset};
+
+use iced::{
+    Task,
+    widget::{operation::scroll_to, scrollable::AbsoluteOffset},
+};
 use std::time::Instant;
 
-fn check_user_has_pin() -> DomainUpdateResult {
-    DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-        crate::domains::settings::messages::Message::CheckUserHasPin,
-    )))
-}
+#[cfg(feature = "demo")]
+use crate::domains::ui::update_handlers::demo_controls;
 
-pub fn update_ui(
-    state: &mut State,
-    message: ui::Message,
-) -> DomainUpdateResult {
+pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
     match message {
-        ui::Message::OpenSearchWindow => {
-            crate::domains::ui::windows::controller::open_search(state, None)
+        UiMessage::OpenSearchWindow => {
+            windows::controller::open_search(state, None)
         }
-        ui::Message::OpenSearchWindowWithSeed(seed) => {
-            let result = crate::domains::ui::windows::controller::open_search(state, Some(seed));
-            result
+        UiMessage::OpenSearchWindowWithSeed(seed) => {
+            windows::controller::open_search(state, Some(seed))
         }
-        ui::Message::SearchWindowOpened(id) => {
+        UiMessage::SearchWindowOpened(id) => {
             state.search_window_id = Some(id);
-            crate::domains::ui::windows::controller::on_search_opened(state, id)
+            windows::controller::on_search_opened(state, id)
         }
-        ui::Message::MainWindowOpened(id) => {
+        UiMessage::MainWindowOpened(id) => {
             state
                 .windows
-                .set(crate::domains::ui::windows::WindowKind::Main, id);
+                .set(windows::WindowKind::Main, id);
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::RawWindowClosed(id) => {
-            crate::domains::ui::windows::controller::on_raw_window_closed(state, id)
+        UiMessage::MainWindowFocused => {
+            // When regaining focus, re-emit initial snapshots to ensure images load
+            super::update_handlers::all_tab::init_all_tab_view(state);
+            super::update_handlers::all_tab::emit_initial_all_tab_snapshots_combined(state);
+            bump_keep_alive(state);
+            DomainUpdateResult::task(Task::none())
         }
-        ui::Message::FocusSearchWindow => {
-            crate::domains::ui::windows::controller::focus_search(state)
+        UiMessage::MainWindowUnfocused => {
+            // No special handling currently; keep behavior simple
+            DomainUpdateResult::task(Task::none())
         }
-        ui::Message::FocusSearchInput => {
-            crate::domains::ui::windows::controller::focus_search_input(state)
+        UiMessage::RawWindowClosed(id) => {
+            windows::controller::on_raw_window_closed(state, id)
         }
-        ui::Message::CloseSearchWindow => {
-            crate::domains::ui::windows::controller::close_search(state)
+        UiMessage::FocusSearchWindow => {
+            windows::controller::focus_search(state)
         }
-        ui::Message::SetDisplayMode(display_mode) => {
+        UiMessage::FocusSearchInput => {
+            windows::controller::focus_search_input(state)
+        }
+        UiMessage::CloseSearchWindow => {
+            windows::controller::close_search(state)
+        }
+        UiMessage::SetDisplayMode(display_mode) => {
             state.domains.ui.state.display_mode = display_mode;
 
             match display_mode {
                 DisplayMode::Curated => {
                     state.tab_manager.set_active_tab_with_scroll(
-                        crate::domains::ui::tabs::TabId::All,
+                        TabId::All,
                         &mut state.domains.ui.state.scroll_manager,
                         state.window_size.width,
                     );
@@ -85,10 +96,35 @@ pub fn update_ui(
                     );
                     log::info!("Tab activated: All (Curated mode)");
 
-                    // Note: All tab uses carousel view, not scrollable grid, so no scroll restoration needed
-
                     // Show all libraries in curated view
                     state.domains.ui.state.current_library_id = None;
+
+                    // Initialize All tab (curated + per-library) and emit initial snapshots
+                    init_all_tab_view(state);
+                    emit_initial_all_tab_snapshots_combined(state);
+
+                    // Build focus order and set initial active carousel (no mutable borrow)
+                    let ordered = super::tabs::ordered_keys_for_all_view(state);
+                    if let Some(TabState::All(all_state)) = state.tab_manager.get_tab_mut(TabId::All) {
+                        all_state.focus.ordered_keys = ordered;
+                        if all_state.focus.active_carousel.is_none() {
+                            all_state.focus.active_carousel = all_state.focus.ordered_keys.first().cloned();
+                        }
+                        // Initialize carousel keyboard focus to match the initial All focus, so highlight/keys work without hover
+                        if state.domains.ui.state.carousel_focus.get_active_key().is_none() {
+                            if let Some(k) = all_state.focus.active_carousel.clone() {
+                                state.domains.ui.state.carousel_focus.set_keyboard_active(Some(k));
+                            }
+                        }
+                    }
+
+                    // Keep UI alive while initial poster fetch/uploads start
+                    bump_keep_alive(state);
+
+                    // Restore horizontal scroll positions for All-tab carousels (if saved)
+                    let restore_task = super::update_handlers::virtual_carousel_helpers::restore_all_tab_carousel_scroll_positions(state)
+                        .map(DomainMessage::Ui);
+                    return DomainUpdateResult::task(restore_task);
 
                 }
                 DisplayMode::Library => {
@@ -97,7 +133,7 @@ pub fn update_ui(
 
                     if let Some(lib_id) = library_id {
                         state.tab_manager.set_active_tab_with_scroll(
-                            crate::domains::ui::tabs::TabId::Library(lib_id),
+                            TabId::Library(lib_id),
                             &mut state.domains.ui.state.scroll_manager,
                             state.window_size.width,
                         );
@@ -109,8 +145,7 @@ pub fn update_ui(
 
                         if let Some(handle) =
                             state.domains.metadata.state.planner_handle.as_ref()
-                        {
-                            if let crate::domains::ui::tabs::TabState::Library(
+                            && let TabState::Library(
                                 lib_state,
                             ) = state.tab_manager.active_tab()
                             {
@@ -125,7 +160,7 @@ pub fn update_ui(
                                         .extend(slice.iter().copied());
                                 }
                                 let pr = lib_state.grid_state
-                                    .get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+                                    .get_preload_range(layout::virtual_grid::PREFETCH_ROWS_ABOVE);
                                 let mut prefetch_ids: Vec<uuid::Uuid> =
                                     Vec::new();
                                 if let Some(slice) =
@@ -137,8 +172,8 @@ pub fn update_ui(
                                 prefetch_ids
                                     .retain(|id| !visible_ids.contains(id));
                                 let br = lib_state.grid_state.get_background_range(
-                                    crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE,
-                                    crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
+                                    layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                                    layout::virtual_grid::BACKGROUND_ROWS_BELOW,
                                 );
                                 let mut background_ids: Vec<uuid::Uuid> =
                                     Vec::new();
@@ -169,13 +204,9 @@ pub fn update_ui(
                                     poster_kind,
                                 });
                             }
-                        }
 
                         return DomainUpdateResult::task(Task::none());
                     }
-
-                    // Update AllViewModel with library filter
-                    //state.all_view_model.set_library_filter(library_id);
                 }
                 _ => {
                     // Other modes not implemented yet
@@ -209,10 +240,10 @@ pub fn update_ui(
             }
 
         }
-        ui::Message::SelectLibraryAndMode(library_id) => {
+        UiMessage::SelectLibraryAndMode(library_id) => {
 
             state.tab_manager.set_active_tab_with_scroll(
-                crate::domains::ui::tabs::TabId::Library(library_id),
+                TabId::Library(library_id),
                 &mut state.domains.ui.state.scroll_manager,
                 state.window_size.width,
             );
@@ -225,9 +256,9 @@ pub fn update_ui(
             // Create scroll restoration task for the newly active tab
             // Note: We ignore the scroll_to result since it returns () and we just need to trigger the scroll
             let scroll_task = {
-                let tab_id = crate::domains::ui::tabs::TabId::Library(library_id);
+                let tab_id = TabId::Library(library_id);
                 if let Some(tab) = state.tab_manager.get_tab(tab_id) {
-                    if let crate::domains::ui::tabs::TabState::Library(lib_state) = tab {
+                    if let TabState::Library(lib_state) = tab {
                         // Restore scroll position (or snap to 0 if no position stored)
                         let scroll_position = lib_state.grid_state.scroll_position;
                         let scrollable_id = lib_state.grid_state.scrollable_id.clone();
@@ -260,34 +291,35 @@ pub fn update_ui(
                 vec![CrossDomainEvent::LibrarySelected(library_id)],
             )
         }
-        ui::Message::ViewDetails(media) => {
+        UiMessage::ViewDetails(media) => {
             let task =
                 super::update_handlers::navigation_updates::handle_view_details(state, media);
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
-        ui::Message::ViewMovieDetails(movie_ref) => {
+        UiMessage::ViewMovieDetails(movie_ref) => {
             let task = super::update_handlers::navigation_updates::handle_view_movie_details(
                 state, movie_ref,
             );
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
-        ui::Message::ViewTvShow(series_id) => {
+        UiMessage::ViewTvShow(series_id) => {
             let task =
                 super::update_handlers::navigation_updates::handle_view_series(state, series_id);
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
-        ui::Message::ViewSeason(series_id, season_id) => {
+        UiMessage::ViewSeason(series_id, season_id) => {
             let task = super::update_handlers::navigation_updates::handle_view_season(
                 state, series_id, season_id,
             );
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
-        ui::Message::ViewEpisode(episode_id) => {
+        UiMessage::ViewEpisode(episode_id) => {
             let task =
                 super::update_handlers::navigation_updates::handle_view_episode(state, episode_id);
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
-        ui::Message::SetSortBy(sort_by) => {
+        UiMessage::SetSortBy(sort_by) => {
+            bump_keep_alive(state);
             // Update UI sort state and immediately refresh the active tab
             // to keep the grid populated while filtered indices are fetched.
             state.domains.ui.state.sort_by = sort_by;
@@ -300,10 +332,10 @@ pub fn update_ui(
 
 
             let fetch_task = Task::done(DomainMessage::Ui(
-                ui::Message::RequestFilteredPositions,
+                UiMessage::RequestFilteredPositions,
             ));
-            if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref() {
-                if let crate::domains::ui::tabs::TabState::Library(lib_state) = state.tab_manager.active_tab() {
+            if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref()
+                && let TabState::Library(lib_state) = state.tab_manager.active_tab() {
                     let now = std::time::Instant::now();
                     let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
                     let vr = lib_state.grid_state.visible_range.clone();
@@ -312,15 +344,15 @@ pub fn update_ui(
                     }
                     let pr = lib_state
                         .grid_state
-                        .get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+                        .get_preload_range(layout::virtual_grid::PREFETCH_ROWS_ABOVE);
                     let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
                     if let Some(slice) = lib_state.cached_index_ids.get(pr) {
                         prefetch_ids.extend(slice.iter().copied());
                     }
                     prefetch_ids.retain(|id| !visible_ids.contains(id));
                     let br = lib_state.grid_state.get_background_range(
-                        crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE,
-                        crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
+                        layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                        layout::virtual_grid::BACKGROUND_ROWS_BELOW,
                     );
                     let mut background_ids: Vec<uuid::Uuid> = Vec::new();
                     if let Some(slice) = lib_state.cached_index_ids.get(br) {
@@ -336,10 +368,10 @@ pub fn update_ui(
                     };
                     handle.send(DemandSnapshot { visible_ids, prefetch_ids, background_ids, timestamp: now, context: None, poster_kind });
                 }
-            }
             DomainUpdateResult::task(fetch_task)
         }
-        ui::Message::ToggleSortOrder => {
+        UiMessage::ToggleSortOrder => {
+            bump_keep_alive(state);
             // Toggle sort order and refresh the active tab immediately so the grid stays visible.
             state.domains.ui.state.sort_order = match state.domains.ui.state.sort_order {
                 SortOrder::Ascending => SortOrder::Descending,
@@ -355,10 +387,10 @@ pub fn update_ui(
 
 
             let fetch_task = Task::done(DomainMessage::Ui(
-                ui::Message::RequestFilteredPositions,
+                UiMessage::RequestFilteredPositions,
             ));
-            if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref() {
-                if let crate::domains::ui::tabs::TabState::Library(lib_state) = state.tab_manager.active_tab() {
+            if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref()
+                && let TabState::Library(lib_state) = state.tab_manager.active_tab() {
                     let now = std::time::Instant::now();
                     let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
                     let vr = lib_state.grid_state.visible_range.clone();
@@ -367,15 +399,15 @@ pub fn update_ui(
                     }
                     let pr = lib_state
                         .grid_state
-                        .get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+                        .get_preload_range(layout::virtual_grid::PREFETCH_ROWS_ABOVE);
                     let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
                     if let Some(slice) = lib_state.cached_index_ids.get(pr) {
                         prefetch_ids.extend(slice.iter().copied());
                     }
                     prefetch_ids.retain(|id| !visible_ids.contains(id));
                     let br = lib_state.grid_state.get_background_range(
-                        crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE,
-                        crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
+                        layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                        layout::virtual_grid::BACKGROUND_ROWS_BELOW,
                     );
                     let mut background_ids: Vec<uuid::Uuid> = Vec::new();
                     if let Some(slice) = lib_state.cached_index_ids.get(br) {
@@ -391,25 +423,25 @@ pub fn update_ui(
                     };
                     handle.send(DemandSnapshot { visible_ids, prefetch_ids, background_ids, timestamp: now, context: None, poster_kind });
                 }
-            }
             DomainUpdateResult::task(fetch_task)
         }
-        ui::Message::ApplyFilteredPositions(library_id, cache_key, positions) => {
+        UiMessage::ApplyFilteredPositions(library_id, cache_key, positions) => {
+            bump_keep_alive(state);
             // Apply server-provided positions directly to the active library tab.
             // Do NOT call refresh_active_tab() here; it would clear the applied positions
             // and briefly reset the grid, causing it to appear empty.
             let mut applied = false;
             if let Some(tab) = state
                 .tab_manager
-                .get_tab_mut(crate::domains::ui::tabs::TabId::Library(library_id))
-                && let crate::domains::ui::tabs::TabState::Library(lib_state) = tab
+                .get_tab_mut(TabId::Library(library_id))
+                && let TabState::Library(lib_state) = tab
             {
                 lib_state.apply_sorted_positions(&positions, Some(cache_key));
                 applied = true;
             }
             if applied {
-                if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref() {
-                    if let crate::domains::ui::tabs::TabState::Library(lib_state) = state.tab_manager.active_tab() {
+                if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref()
+                    && let TabState::Library(lib_state) = state.tab_manager.active_tab() {
                         let now = std::time::Instant::now();
                         let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
                         let vr = lib_state.grid_state.visible_range.clone();
@@ -418,15 +450,15 @@ pub fn update_ui(
                         }
                         let pr = lib_state
                             .grid_state
-                            .get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+                            .get_preload_range(layout::virtual_grid::PREFETCH_ROWS_ABOVE);
                         let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
                         if let Some(slice) = lib_state.cached_index_ids.get(pr) {
                             prefetch_ids.extend(slice.iter().copied());
                         }
                         prefetch_ids.retain(|id| !visible_ids.contains(id));
                         let br = lib_state.grid_state.get_background_range(
-                            crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE,
-                            crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
+                            layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                            layout::virtual_grid::BACKGROUND_ROWS_BELOW,
                         );
                         let mut background_ids: Vec<uuid::Uuid> =
                             Vec::new();
@@ -445,14 +477,14 @@ pub fn update_ui(
                         };
                         handle.send(DemandSnapshot { visible_ids, prefetch_ids, background_ids, timestamp: now, context: None, poster_kind });
                     }
-                }
 
                 DomainUpdateResult::task(Task::none())
             } else {
                 DomainUpdateResult::task(Task::none())
             }
         }
-        ui::Message::RequestFilteredPositions => {
+        UiMessage::RequestFilteredPositions => {
+            bump_keep_alive(state);
             // Build a FilterIndicesRequest from current UI filters (Phase 1: movies only)
             let api = state.api_service.clone();
             let active_lib = state.tab_manager.active_tab_id().library_id();
@@ -513,13 +545,13 @@ pub fn update_ui(
                     let spec_hash = hash_filter_spec(&spec);
                     let spec_for_request = spec.clone();
 
-                    if let crate::domains::ui::tabs::TabState::Library(lib_state) =
+                    if let TabState::Library(lib_state) =
                         state.tab_manager.get_active_tab()
                         && let Some(cached) = lib_state.cached_positions_for_hash(spec_hash)
                     {
                         let cached_positions = cached.clone();
                         return DomainUpdateResult::task(Task::done(DomainMessage::Ui(
-                            ui::Message::ApplySortedPositions(
+                            UiMessage::ApplySortedPositions(
                                 lib_id,
                                 Some(spec_hash),
                                 cached_positions,
@@ -533,10 +565,10 @@ pub fn update_ui(
                                 .fetch_filtered_indices(lib_id.to_uuid(), &spec_for_request)
                                 .await
                             {
-                                Ok(positions) => ui::Message::ApplyFilteredPositions(
+                                Ok(positions) => UiMessage::ApplyFilteredPositions(
                                     lib_id, spec_hash, positions,
                                 ),
-                                Err(e) => ui::Message::SortedIndexFailed(e.to_string()),
+                                Err(e) => UiMessage::SortedIndexFailed(e.to_string()),
                             }
                         },
                         DomainMessage::Ui,
@@ -553,11 +585,11 @@ pub fn update_ui(
                 DomainUpdateResult::task(Task::none())
             }
         }
-        ui::Message::ToggleFilterPanel => {
+        UiMessage::ToggleFilterPanel => {
             state.domains.ui.state.show_filter_panel = !state.domains.ui.state.show_filter_panel;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::ToggleFilterGenre(g) => {
+        UiMessage::ToggleFilterGenre(g) => {
             if let Some(pos) = state
                 .domains
                 .ui
@@ -572,48 +604,50 @@ pub fn update_ui(
             }
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::SetFilterDecade(d) => {
+        UiMessage::SetFilterDecade(d) => {
             state.domains.ui.state.selected_decade = Some(d);
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::ClearFilterDecade => {
+        UiMessage::ClearFilterDecade => {
             state.domains.ui.state.selected_decade = None;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::SetFilterResolution(r) => {
+        UiMessage::SetFilterResolution(r) => {
             state.domains.ui.state.selected_resolution = r;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::SetFilterWatchStatus(ws) => {
+        UiMessage::SetFilterWatchStatus(ws) => {
             state.domains.ui.state.selected_watch_status = ws;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::ApplyFilters => {
+        UiMessage::ApplyFilters => {
+            bump_keep_alive(state);
             // Reuse RequestFilteredPositions path; it will read current UI fields
             DomainUpdateResult::task(Task::done(DomainMessage::Ui(
-                ui::Message::RequestFilteredPositions,
+                UiMessage::RequestFilteredPositions,
             )))
         }
-        ui::Message::ClearFilters => {
+        UiMessage::ClearFilters => {
+            bump_keep_alive(state);
             state.domains.ui.state.selected_genres.clear();
             state.domains.ui.state.selected_decade = None;
             state.domains.ui.state.selected_resolution = UiResolution::Any;
             state.domains.ui.state.selected_watch_status = UiWatchStatus::Any;
             DomainUpdateResult::task(Task::done(DomainMessage::Ui(
-                ui::Message::RequestFilteredPositions,
+                UiMessage::RequestFilteredPositions,
             )))
         }
-        ui::Message::ShowAdminDashboard => {
+        UiMessage::ShowAdminDashboard => {
             state.domains.ui.state.view = ViewState::AdminDashboard;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::ApplySortedPositions(library_id, cache_key, positions) => {
-            // Update the active Library tab: apply positions -> reorder ID index and refresh
-            let mut applied = false;
+        UiMessage::ApplySortedPositions(library_id, cache_key, positions) => {
+            bump_keep_alive(state);
+
             if let Some(tab) = state
                 .tab_manager
-                .get_tab_mut(crate::domains::ui::tabs::TabId::Library(library_id))
-                && let crate::domains::ui::tabs::TabState::Library(lib_state) = tab
+                .get_tab_mut(TabId::Library(library_id))
+                && let TabState::Library(lib_state) = tab
             {
                 let count = positions.len();
                 let first = positions.first().copied();
@@ -626,22 +660,21 @@ pub fn update_ui(
                     last
                 );
                 lib_state.apply_sorted_positions(&positions, cache_key);
-                applied = true;
             }
             // Do not refresh here; keep applied positions intact.
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::SortedIndexFailed(err) => {
+        UiMessage::SortedIndexFailed(err) => {
             log::warn!("Sorted index fetch failed: {}", err);
             state.domains.ui.state.error_message =
                 Some(format!("Unable to apply sort/filter: {}", err));
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::HideAdminDashboard => {
+        UiMessage::HideAdminDashboard => {
             state.domains.ui.state.view = ViewState::Library;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::ShowUserManagement => {
+        UiMessage::ShowUserManagement => {
             // Save current view to navigation history
             state
                 .domains
@@ -658,19 +691,19 @@ pub fn update_ui(
             ));
             DomainUpdateResult::task(task)
         }
-        ui::Message::HideUserManagement => {
+        UiMessage::HideUserManagement => {
             // Return to Admin Dashboard
             state.domains.ui.state.view = ViewState::AdminDashboard;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::UserAdminDelete(user_id) => {
+        UiMessage::UserAdminDelete(user_id) => {
             // Proxy to user_management domain delete confirm action
             let task = Task::done(DomainMessage::UserManagement(
                 crate::domains::user_management::messages::Message::DeleteUserConfirm(user_id),
             ));
             DomainUpdateResult::task(task)
         }
-        ui::Message::ShowLibraryManagement => {
+        UiMessage::ShowLibraryManagement => {
             // Save current view to navigation history
             state
                 .domains
@@ -706,7 +739,7 @@ pub fn update_ui(
                 DomainUpdateResult::task(combined_task)
             }
         }
-        ui::Message::HideLibraryManagement => {
+        UiMessage::HideLibraryManagement => {
             state.domains.ui.state.view = ViewState::Library;
             state.domains.library.state.show_library_management = false;
             state.domains.library.state.library_form_data = None; // Clear form when leaving management view
@@ -714,63 +747,88 @@ pub fn update_ui(
             DomainUpdateResult::task(Task::none())
         }
         #[cfg(feature = "demo")]
-        ui::Message::DemoMoviesTargetChanged(value) => {
+        UiMessage::DemoMoviesTargetChanged(value) => {
             demo_controls::handle_movies_input(state, value)
         }
         #[cfg(feature = "demo")]
-        ui::Message::DemoSeriesTargetChanged(value) => {
+        UiMessage::DemoSeriesTargetChanged(value) => {
             demo_controls::handle_series_input(state, value)
         }
         #[cfg(feature = "demo")]
-        ui::Message::DemoApplySizing => demo_controls::handle_apply_sizing(state),
+        UiMessage::DemoApplySizing => demo_controls::handle_apply_sizing(state),
         #[cfg(feature = "demo")]
-        ui::Message::DemoRefreshStatus => demo_controls::handle_refresh_status(state),
-        ui::Message::ShowClearDatabaseConfirm => {
+        UiMessage::DemoRefreshStatus => demo_controls::handle_refresh_status(state),
+        UiMessage::ShowClearDatabaseConfirm => {
             state.domains.ui.state.show_clear_database_confirm = true;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::HideClearDatabaseConfirm => {
+        UiMessage::HideClearDatabaseConfirm => {
             state.domains.ui.state.show_clear_database_confirm = false;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::ClearDatabase => {
+        UiMessage::ClearDatabase => {
             let task = crate::common::clear_database::handle_clear_database(state);
             DomainUpdateResult::task(task)
         }
-        ui::Message::DatabaseCleared(result) => {
+        UiMessage::DatabaseCleared(result) => {
             let task = crate::common::clear_database::handle_database_cleared(state, result);
             DomainUpdateResult::task(task)
         }
-        ui::Message::ClearError => {
+        UiMessage::ClearError => {
             state.domains.ui.state.error_message = None;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::TabGridScrolled(viewport) => {
-            let task =
-                super::update_handlers::scroll_updates::handle_tab_grid_scrolled(state, viewport);
+        UiMessage::TabGridScrolled(viewport) => {
+            bump_keep_alive(state);
+            let task = super::update_handlers::scroll_updates::handle_tab_grid_scrolled(state, viewport);
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
-        ui::Message::KineticScroll(inner) => {
-            let task = super::kinetic_scroll::update::update(state, inner);
+        UiMessage::KineticScroll(inner) => {
+            let task = super::motion_controller::update::update(state, inner);
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
-        ui::Message::DetailViewScrolled(viewport) => DomainUpdateResult::task(
+        UiMessage::DetailViewScrolled(viewport) => DomainUpdateResult::task(
             super::update_handlers::scroll_updates::handle_detail_view_scrolled(state, viewport)
                 .map(DomainMessage::Ui),
         ),
-        ui::Message::WindowResized(size) => DomainUpdateResult::task(
+        UiMessage::AllViewScrolled(viewport) => DomainUpdateResult::task(
+            super::update_handlers::all_focus::handle_all_view_scrolled(state, viewport)
+                .map(DomainMessage::Ui),
+        ),
+        UiMessage::AllFocusNext => DomainUpdateResult::task(
+            super::update_handlers::all_focus::handle_all_focus_next(state)
+                .map(DomainMessage::Ui),
+        ),
+        UiMessage::AllFocusPrev => DomainUpdateResult::task(
+            super::update_handlers::all_focus::handle_all_focus_prev(state)
+                .map(DomainMessage::Ui),
+        ),
+        UiMessage::AllFocusTick => DomainUpdateResult::task(
+            super::update_handlers::all_focus::handle_all_focus_tick(state)
+                .map(DomainMessage::Ui),
+        ),
+        UiMessage::WindowResized(size) => DomainUpdateResult::task(
             super::update_handlers::window_update::handle_window_resized(state, size)
                 .map(DomainMessage::Ui),
         ),
-        ui::Message::WindowMoved(position) => DomainUpdateResult::task(
+        UiMessage::WindowMoved(position) => DomainUpdateResult::task(
             super::update_handlers::window_update::handle_window_moved(state, position)
                 .map(DomainMessage::Ui),
         ),
-        ui::Message::MediaHovered(media_id) => {
+        UiMessage::MouseMoved => {
+            state
+                .domains
+                .ui
+                .state
+                .carousel_focus
+                .record_mouse_move(Instant::now());
+            DomainUpdateResult::task(Task::none())
+        }
+        UiMessage::MediaHovered(media_id) => {
             state.domains.ui.state.hovered_media_id = Some(media_id);
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::MediaUnhovered(media_id) => {
+        UiMessage::MediaUnhovered(media_id) => {
             // Only clear hover state if it matches the media being unhovered
             // This prevents race conditions when quickly moving between posters
             if state.domains.ui.state.hovered_media_id.as_ref() == Some(&media_id) {
@@ -778,7 +836,7 @@ pub fn update_ui(
             }
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::NavigateHome => {
+        UiMessage::NavigateHome => {
             let library_id = state
                 .domains
                 .library
@@ -793,7 +851,7 @@ pub fn update_ui(
 
             // For curated mode (All libraries), activate the All tab with scroll restoration
             state.tab_manager.set_active_tab_with_scroll(
-                crate::domains::ui::tabs::TabId::All,
+                TabId::All,
                 &mut state.domains.ui.state.scroll_manager,
                 state.window_size.width,
             );
@@ -828,9 +886,25 @@ pub fn update_ui(
                     library_id,
                 );
 
+            // Initialize All tab (curated + per-library) and emit initial snapshots
+            init_all_tab_view(state);
+            emit_initial_all_tab_snapshots_combined(state);
+
+            // Build focus order and set initial active carousel
+            let ordered = super::tabs::ordered_keys_for_all_view(state);
+            if let Some(super::tabs::TabState::All(all_state)) = state.tab_manager.get_tab_mut(super::tabs::TabId::All) {
+                all_state.focus.ordered_keys = ordered;
+                if all_state.focus.active_carousel.is_none() {
+                    all_state.focus.active_carousel = all_state.focus.ordered_keys.first().cloned();
+                }
+            }
+
+            // Keep UI alive while initial poster fetch/uploads start
+            bump_keep_alive(state);
+
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::NavigateBack => {
+        UiMessage::NavigateBack => {
             // Navigate to the previous view in history
             let library_id = state
                 .domains
@@ -857,9 +931,9 @@ pub fn update_ui(
 
                             // Restore scroll state through TabManager with ScrollPositionManager
                             let tab_id = if let Some(lib_id) = library_id {
-                                crate::domains::ui::tabs::TabId::Library(lib_id)
+                                TabId::Library(lib_id)
                             } else {
-                                crate::domains::ui::tabs::TabId::All
+                                TabId::All
                             };
 
                             // Use the scroll-aware tab switching which automatically restores position
@@ -1006,40 +1080,40 @@ pub fn update_ui(
                 }
             }
         }
-        ui::Message::UpdateSearchQuery(query) => {
+        UiMessage::UpdateSearchQuery(query) => {
             let mut result = super::update_handlers::update_search_query(state, query);
 
             if state
                 .windows
-                .get(crate::domains::ui::windows::WindowKind::Search)
+                .get(windows::WindowKind::Search)
                 .is_none()
             {
-                let open = crate::domains::ui::windows::controller::open_search(state, None);
+                let open = windows::controller::open_search(state, None);
                 result.task = Task::batch([result.task, open.task]);
                 result.events.extend(open.events);
             }
 
             result
         }
-        ui::Message::BeginSearchFromKeyboard(seed) => {
-            crate::domains::ui::windows::controller::open_search(state, Some(seed))
+        UiMessage::BeginSearchFromKeyboard(seed) => {
+            windows::controller::open_search(state, Some(seed))
         }
-        ui::Message::ExecuteSearch => {
+        UiMessage::ExecuteSearch => {
             // Forward directly to search domain
             DomainUpdateResult::task(Task::done(DomainMessage::Search(
                 crate::domains::search::messages::Message::ExecuteSearch,
             )))
         }
-        ui::Message::ShowLibraryMenu => {
+        UiMessage::ShowLibraryMenu => {
             state.domains.ui.state.show_library_menu = !state.domains.ui.state.show_library_menu;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::ShowAllLibrariesMenu => {
+        UiMessage::ShowAllLibrariesMenu => {
             state.domains.ui.state.show_library_menu = !state.domains.ui.state.show_library_menu;
             state.domains.ui.state.library_menu_target = None;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::ShowProfile => {
+        UiMessage::ShowProfile => {
             // Save current view to navigation history
             state
                 .domains
@@ -1060,32 +1134,34 @@ pub fn update_ui(
                             .await
                             .unwrap_or(false)
                     },
-                    |enabled| ui::Message::AutoLoginToggled(Ok(enabled)),
+                    |enabled| UiMessage::AutoLoginToggled(Ok(enabled)),
                 )
                 .map(DomainMessage::Ui),
             )
         }
 
-        ui::Message::ShowUserProfile => {
+        UiMessage::ShowUserProfile => {
             state.domains.settings.current_view =
                 crate::domains::settings::state::SettingsView::Profile;
             DomainUpdateResult::task(Task::none())
         }
 
-        ui::Message::ShowUserPreferences => {
+        UiMessage::ShowUserPreferences => {
             state.domains.settings.current_view =
                 crate::domains::settings::state::SettingsView::Preferences;
             DomainUpdateResult::task(Task::none())
         }
 
-        ui::Message::ShowUserSecurity => {
+        UiMessage::ShowUserSecurity => {
             state.domains.settings.current_view =
                 crate::domains::settings::state::SettingsView::Security;
-            // Check if user has PIN when entering security settings
-            check_user_has_pin()
+
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::CheckUserHasPin,
+            )))
         }
 
-        ui::Message::ShowDeviceManagement => {
+        UiMessage::ShowDeviceManagement => {
             state.domains.settings.current_view =
                 crate::domains::settings::state::SettingsView::DeviceManagement;
             // Load devices when the view is shown - send direct message to Settings domain
@@ -1094,7 +1170,7 @@ pub fn update_ui(
             )))
         }
 
-        ui::Message::BackToSettings => {
+        UiMessage::BackToSettings => {
             state.domains.ui.state.view = ViewState::UserSettings;
             state.domains.settings.current_view =
                 crate::domains::settings::state::SettingsView::Main;
@@ -1104,134 +1180,133 @@ pub fn update_ui(
         }
 
         // Security settings handlers - emit cross-domain events to Settings domain
-        ui::Message::ShowChangePassword => {
+        UiMessage::ShowChangePassword => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                 crate::domains::settings::messages::Message::ShowChangePassword,
             )))
         }
 
-        ui::Message::UpdatePasswordCurrent(value) => {
+        UiMessage::UpdatePasswordCurrent(value) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                 crate::domains::settings::messages::Message::UpdatePasswordCurrent(value),
             )))
         }
 
-        ui::Message::UpdatePasswordNew(value) => {
+        UiMessage::UpdatePasswordNew(value) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                 crate::domains::settings::messages::Message::UpdatePasswordNew(value),
             )))
         }
 
-        ui::Message::UpdatePasswordConfirm(value) => {
+        UiMessage::UpdatePasswordConfirm(value) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                 crate::domains::settings::messages::Message::UpdatePasswordConfirm(value),
             )))
         }
 
-        ui::Message::TogglePasswordVisibility => {
+        UiMessage::TogglePasswordVisibility => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                 crate::domains::settings::messages::Message::TogglePasswordVisibility,
             )))
         }
 
-        ui::Message::SubmitPasswordChange => {
+        UiMessage::SubmitPasswordChange => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                 crate::domains::settings::messages::Message::SubmitPasswordChange,
             )))
         }
 
-        ui::Message::PasswordChangeResult(result) => {
+        // TODO: PASSWORD CHANGE UNIMPLEMENTED
+        UiMessage::PasswordChangeResult(_result) => {
             // UI handles displaying the result
             DomainUpdateResult::task(Task::none())
         }
 
-        ui::Message::CancelPasswordChange => {
+        UiMessage::CancelPasswordChange => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                 crate::domains::settings::messages::Message::CancelPasswordChange,
             )))
         }
 
-        ui::Message::ShowSetPin => DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+        UiMessage::ShowSetPin => DomainUpdateResult::task(Task::done(DomainMessage::Settings(
             crate::domains::settings::messages::Message::ShowSetPin,
         ))),
 
-        ui::Message::ShowChangePin => DomainUpdateResult::task(Task::done(
+        UiMessage::ShowChangePin => DomainUpdateResult::task(Task::done(
             DomainMessage::Settings(crate::domains::settings::messages::Message::ShowChangePin),
         )),
 
-        ui::Message::UpdatePinCurrent(value) => {
+        UiMessage::UpdatePinCurrent(value) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                 crate::domains::settings::messages::Message::UpdatePinCurrent(value),
             )))
         }
 
-        ui::Message::UpdatePinNew(value) => {
+        UiMessage::UpdatePinNew(value) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                 crate::domains::settings::messages::Message::UpdatePinNew(value),
             )))
         }
 
-        ui::Message::UpdatePinConfirm(value) => {
+        UiMessage::UpdatePinConfirm(value) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                 crate::domains::settings::messages::Message::UpdatePinConfirm(value),
             )))
         }
 
-        ui::Message::SubmitPinChange => DomainUpdateResult::task(Task::done(
+        UiMessage::SubmitPinChange => DomainUpdateResult::task(Task::done(
             DomainMessage::Settings(crate::domains::settings::messages::Message::SubmitPinChange),
         )),
 
-        ui::Message::PinChangeResult(result) => {
-            // UI handles displaying the result
+        // TODO: PIN CHANGE UNIMPLEMENTED
+        UiMessage::PinChangeResult(_result) => {
             DomainUpdateResult::task(Task::none())
         }
 
-        ui::Message::CancelPinChange => DomainUpdateResult::task(Task::done(
-            DomainMessage::Settings(crate::domains::settings::messages::Message::CancelPinChange),
+        UiMessage::CancelPinChange => DomainUpdateResult::task(Task::done(
+            DomainMessage::Settings(SettingsMessage::CancelPinChange),
         )),
 
-        // User preferences - emit cross-domain events to Settings domain
-        ui::Message::ToggleAutoLogin(enabled) => {
+
+        UiMessage::ToggleAutoLogin(enabled) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::ToggleAutoLogin(enabled),
+                SettingsMessage::ToggleAutoLogin(enabled),
             )))
         }
 
-        ui::Message::AutoLoginToggled(result) => {
-            // UI handles displaying the result
+        // TODO: DEAD MESSAGE VARIANT?
+        UiMessage::AutoLoginToggled(_result) => {
             DomainUpdateResult::task(Task::none())
         }
 
-        // Device management - send direct messages to Settings domain
-        ui::Message::LoadDevices => {
-            // Send direct message to Settings domain to load devices
+        // TODO: LOAD DEVICES NOT WORKING
+        UiMessage::LoadDevices => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::LoadDevices,
+                SettingsMessage::LoadDevices,
             )))
         }
 
-        ui::Message::DevicesLoaded(result) => {
+        // TODO: DEAD MESSAGE VARIANT
+        UiMessage::DevicesLoaded(_result) => {
             // This message should now come from settings domain, but kept for compatibility
             log::warn!("DevicesLoaded should now come from settings domain via cross-domain event");
             DomainUpdateResult::task(Task::none())
         }
 
-        ui::Message::RefreshDevices => {
-            // Send direct message to Settings domain to refresh devices
+        UiMessage::RefreshDevices => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                 crate::domains::settings::messages::Message::RefreshDevices,
             )))
         }
 
-        ui::Message::RevokeDevice(device_id) => {
-            // Send direct message to Settings domain to revoke device
+        UiMessage::RevokeDevice(device_id) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                 crate::domains::settings::messages::Message::RevokeDevice(device_id),
             )))
         }
 
-        ui::Message::DeviceRevoked(result) => {
-            // This message should now come from settings domain, but kept for compatibility
+        // TODO: DEAD MESSAGE VARIANT
+        UiMessage::DeviceRevoked(_result) => {
             log::warn!("DeviceRevoked should now come from settings domain via cross-domain event");
             DomainUpdateResult::task(Task::none())
         }
@@ -1239,16 +1314,21 @@ pub fn update_ui(
         // Logout: delegate to Auth domain so it performs a secure logout
         // flow and then reloads users. This avoids getting stuck on the
         // auth view's fallback "loading users" state without any tasks.
-        ui::Message::Logout => {
+        UiMessage::Logout => {
             use crate::domains::auth::messages as auth;
             DomainUpdateResult::task(Task::done(DomainMessage::Auth(
                 auth::Message::Logout,
             )))
         }
-        ui::Message::CarouselNavigation(carousel_msg) => DomainUpdateResult::task(
-            handle_carousel_navigation(state, carousel_msg).map(DomainMessage::Ui),
-        ),
-        ui::Message::UpdateTransitions => {
+
+        UiMessage::VirtualCarousel(vc_msg) => {
+            bump_keep_alive(state);
+            DomainUpdateResult::task(
+                handle_virtual_carousel_message(state, vc_msg)
+                    .map(DomainMessage::Ui),
+            )
+        }
+        UiMessage::UpdateTransitions => {
             let ui_state = &mut state.domains.ui.state;
             let now = Instant::now();
 
@@ -1285,7 +1365,7 @@ pub fn update_ui(
 
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::ToggleBackdropAspectMode => {
+        UiMessage::ToggleBackdropAspectMode => {
             state
                 .domains
                 .ui
@@ -1298,21 +1378,21 @@ pub fn update_ui(
                 .background_shader_state
                 .backdrop_aspect_mode
             {
-                crate::domains::ui::background_state::BackdropAspectMode::Auto => {
-                    crate::domains::ui::background_state::BackdropAspectMode::Force21x9
+                BackdropAspectMode::Auto => {
+                    BackdropAspectMode::Force21x9
                 }
-                crate::domains::ui::background_state::BackdropAspectMode::Force21x9 => {
-                    crate::domains::ui::background_state::BackdropAspectMode::Auto
+                BackdropAspectMode::Force21x9 => {
+                    BackdropAspectMode::Auto
                 }
             };
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::UpdateBackdropHandle(_handle) => {
+        UiMessage::UpdateBackdropHandle(_handle) => {
             // Deprecated - backdrops are now pulled reactively from image service
             // This message handler kept for compatibility but does nothing
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::CheckMediaStoreRefresh => {
+        UiMessage::CheckMediaStoreRefresh => {
             // Check if MediaStore notifier indicates a refresh is needed
             /*
             if state.media_store_notifier.should_refresh() {
@@ -1320,13 +1400,14 @@ pub fn update_ui(
                     "[MediaStoreNotifier] ViewModels refresh needed - triggering RefreshViewModels"
                 );
                 DomainUpdateResult::task(
-                    Task::done(ui::Message::RefreshViewModels).map(DomainMessage::Ui),
+                    Task::done(UiMessage::RefreshViewModels).map(DomainMessage::Ui),
                 )
             } else { */
             DomainUpdateResult::task(Task::none())
             //}
         }
-        ui::Message::RefreshViewModels => {
+        UiMessage::RefreshViewModels => {
+            bump_keep_alive(state);
             // Refresh view models - pull latest data from MediaStore
             log::info!(
                 "[MediaStoreNotifier] RefreshViewModels triggered - updating view models with latest MediaStore data"
@@ -1369,9 +1450,19 @@ pub fn update_ui(
             state.tab_manager.refresh_active_tab();
             log::info!("TabManager: All tabs refreshed with sorted data from MediaStore");
 
+            // After view models refresh, if we're in All (Curated) mode,
+            // (re)initialize carousels and emit initial snapshots so images load immediately.
+            if matches!(state.domains.ui.state.display_mode, DisplayMode::Curated)
+                && matches!(state.tab_manager.active_tab_id(), TabId::All)
+            {
+                super::update_handlers::all_tab::init_all_tab_view(state);
+                super::update_handlers::all_tab::emit_initial_all_tab_snapshots_combined(state);
+            }
+
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::UpdateViewModelFilters => {
+        UiMessage::UpdateViewModelFilters => {
+            bump_keep_alive(state);
             // Lightweight update - just change filters without re-reading from MediaStore
             let library_filter = match state.domains.ui.state.display_mode {
                 DisplayMode::Library => state.domains.ui.state.current_library_id,
@@ -1399,21 +1490,21 @@ pub fn update_ui(
             DomainUpdateResult::task(Task::none()) // View will update on next frame
         }
 
-        ui::Message::QueueVisibleDetailsForFetch => {
+        UiMessage::QueueVisibleDetailsForFetch => {
             // TODO: Implement queue visible details for fetch
             log::debug!("Queue visible details for fetch requested");
             DomainUpdateResult::task(Task::none())
         }
 
         // Cross-domain proxy messages
-        ui::Message::ToggleFullscreen => {
+        UiMessage::ToggleFullscreen => {
             // Forward to media domain
             DomainUpdateResult::with_events(
                 Task::none(),
                 vec![CrossDomainEvent::MediaToggleFullscreen],
             )
         }
-        ui::Message::SelectLibrary(library_id) => {
+        UiMessage::SelectLibrary(library_id) => {
             // Forward to library domain via cross-domain event
             log::info!(
                 "UI: SelectLibrary({:?}) - emitting cross-domain event",
@@ -1432,7 +1523,7 @@ pub fn update_ui(
                 )
             }
         }
-        ui::Message::PlayMediaWithId(media_id) => {
+        UiMessage::PlayMediaWithId(media_id) => {
             match state.domains.ui.state.repo_accessor.get(&media_id) {
                 Ok(media) => match media {
                     Media::Movie(movie) => DomainUpdateResult::with_events(
@@ -1454,7 +1545,7 @@ pub fn update_ui(
                 }
             }
         }
-        ui::Message::PlaySeriesNextEpisode(series_id) => {
+        UiMessage::PlaySeriesNextEpisode(_series_id) => {
             /*
             // Use series progress service to find next episode
             use crate::domains::media::services::SeriesProgressService;
@@ -1496,84 +1587,84 @@ pub fn update_ui(
         }
 
         // Library management proxies
-        ui::Message::ShowLibraryForm(library) => {
+        UiMessage::ShowLibraryForm(library) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::ShowLibraryForm(library),
             )))
         }
-        ui::Message::HideLibraryForm => {
+        UiMessage::HideLibraryForm => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::HideLibraryForm,
             )))
         }
-        ui::Message::ScanLibrary(library_id) => {
+        UiMessage::ScanLibrary(library_id) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::ScanLibrary(library_id),
             )))
         }
-        ui::Message::DeleteLibrary(library_id) => {
+        UiMessage::DeleteLibrary(library_id) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::DeleteLibrary(library_id),
             )))
         }
-        ui::Message::UpdateLibraryFormName(name) => {
+        UiMessage::UpdateLibraryFormName(name) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::UpdateLibraryFormName(name),
             )))
         }
-        ui::Message::UpdateLibraryFormType(library_type) => {
+        UiMessage::UpdateLibraryFormType(library_type) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::UpdateLibraryFormType(library_type),
             )))
         }
-        ui::Message::UpdateLibraryFormPaths(paths) => {
+        UiMessage::UpdateLibraryFormPaths(paths) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::UpdateLibraryFormPaths(paths),
             )))
         }
-        ui::Message::UpdateLibraryFormScanInterval(interval) => {
+        UiMessage::UpdateLibraryFormScanInterval(interval) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::UpdateLibraryFormScanInterval(interval),
             )))
         }
-        ui::Message::ToggleLibraryFormEnabled => {
+        UiMessage::ToggleLibraryFormEnabled => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::ToggleLibraryFormEnabled,
             )))
         }
-        ui::Message::ToggleLibraryFormStartScan => {
+        UiMessage::ToggleLibraryFormStartScan => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::ToggleLibraryFormStartScan,
             )))
         }
-        ui::Message::SubmitLibraryForm => {
+        UiMessage::SubmitLibraryForm => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::SubmitLibraryForm,
             )))
         }
-        ui::Message::LibraryMediaRoot(message) => DomainUpdateResult::task(
+        UiMessage::LibraryMediaRoot(message) => DomainUpdateResult::task(
             Task::done(DomainMessage::Library(
                 library::messages::Message::MediaRootBrowser(message),
             )),
         ),
-        ui::Message::PauseLibraryScan(library_id, scan_id) => DomainUpdateResult::task(Task::done(
+        UiMessage::PauseLibraryScan(library_id, scan_id) => DomainUpdateResult::task(Task::done(
             DomainMessage::Library(library::messages::Message::PauseScan {
                 library_id,
                 scan_id,
             }),
         )),
-        ui::Message::ResumeLibraryScan(library_id, scan_id) => {
+        UiMessage::ResumeLibraryScan(library_id, scan_id) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::ResumeScan {
                     library_id,
@@ -1581,7 +1672,7 @@ pub fn update_ui(
                 },
             )))
         }
-        ui::Message::CancelLibraryScan(library_id, scan_id) => {
+        UiMessage::CancelLibraryScan(library_id, scan_id) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::CancelScan {
                     library_id,
@@ -1589,15 +1680,15 @@ pub fn update_ui(
                 },
             )))
         }
-        ui::Message::FetchScanMetrics => DomainUpdateResult::task(Task::done(
+        UiMessage::FetchScanMetrics => DomainUpdateResult::task(Task::done(
             DomainMessage::Library(library::messages::Message::FetchScanMetrics),
         )),
-        ui::Message::ResetLibrary(library_id) => DomainUpdateResult::task(Task::done(
+        UiMessage::ResetLibrary(library_id) => DomainUpdateResult::task(Task::done(
             DomainMessage::Library(library::messages::Message::ResetLibrary(library_id)),
         )),
 
         // Aggregate all libraries
-        ui::Message::AggregateAllLibraries => {
+        UiMessage::AggregateAllLibraries => {
             // Emit cross-domain event to trigger library aggregation
             DomainUpdateResult::with_events(
                 Task::none(),
@@ -1606,528 +1697,6 @@ pub fn update_ui(
         }
 
         // No-op
-        ui::Message::NoOp => DomainUpdateResult::task(Task::none()),
-    }
-}
-
-/// Handle carousel navigation messages
-fn handle_carousel_navigation(
-    state: &mut State,
-    message: CarouselMessage,
-) -> Task<ui::Message> {
-    use crate::domains::metadata::demand_planner::{
-        DemandContext, DemandRequestKind, DemandSnapshot,
-    };
-    use ferrex_core::player_prelude::{PosterKind, PosterSize};
-
-    match message {
-        CarouselMessage::Next(carousel_id) => {
-            log::debug!("Carousel {} next", carousel_id);
-            if carousel_id == "show_seasons" {
-                if let Some(cs) =
-                    state.domains.ui.state.show_seasons_carousel.as_mut()
-                {
-                    cs.next_page();
-                    // Smoothly scroll to the computed offset
-                    let scroll_task = scroll_to::<ui::Message>(
-                        cs.scrollable_id.clone(),
-                        cs.get_scroll_offset(),
-                    );
-
-                    // Emit snapshot for visible seasons
-                    if let Some(handle) =
-                        state.domains.metadata.state.planner_handle.as_ref()
-                    {
-                        if let crate::domains::ui::ViewState::SeriesDetail {
-                            series_id,
-                            ..
-                        } = state.domains.ui.state.view
-                        {
-                            if let Ok(seasons) = state
-                                .domains
-                                .ui
-                                .state
-                                .repo_accessor
-                                .get_series_seasons(&series_id)
-                            {
-                                let total = seasons.len();
-                                let vr = cs.get_visible_range();
-                                let mut visible_ids: Vec<uuid::Uuid> = seasons
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(i, _)| vr.contains(i))
-                                    .map(|(_, s)| s.id.to_uuid())
-                                    .collect();
-                                let prefetch_start = vr.end.min(total);
-                                let prefetch_end = (prefetch_start
-                                    + cs.items_per_page)
-                                    .min(total);
-                                let mut prefetch_ids: Vec<uuid::Uuid> = seasons
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(i, _)| {
-                                        *i >= prefetch_start
-                                            && *i < prefetch_end
-                                    })
-                                    .map(|(_, s)| s.id.to_uuid())
-                                    .collect();
-                                let mut background_ids: Vec<uuid::Uuid> =
-                                    seasons
-                                        .iter()
-                                        .enumerate()
-                                        .filter(|(i, _)| {
-                                            !vr.contains(i)
-                                                && !(*i >= prefetch_start
-                                                    && *i < prefetch_end)
-                                        })
-                                        .map(|(_, s)| s.id.to_uuid())
-                                        .collect();
-                                prefetch_ids
-                                    .retain(|id| !visible_ids.contains(id));
-                                background_ids.retain(|id| {
-                                    !visible_ids.contains(id)
-                                        && !prefetch_ids.contains(id)
-                                });
-
-                                handle.send(DemandSnapshot {
-                                    visible_ids,
-                                    prefetch_ids,
-                                    background_ids,
-                                    timestamp: std::time::Instant::now(),
-                                    context: None,
-                                    poster_kind: Some(PosterKind::Season),
-                                });
-                            }
-                        }
-                    }
-
-                    return scroll_task;
-                }
-            } else if carousel_id == "season_episodes" {
-                if let Some(cs) =
-                    state.domains.ui.state.season_episodes_carousel.as_mut()
-                {
-                    cs.next_page();
-                    let scroll_task = scroll_to::<ui::Message>(
-                        cs.scrollable_id.clone(),
-                        cs.get_scroll_offset(),
-                    );
-
-                    // Emit snapshot for visible episodes with still overrides
-                    if let Some(handle) =
-                        state.domains.metadata.state.planner_handle.as_ref()
-                    {
-                        if let crate::domains::ui::ViewState::SeasonDetail {
-                            season_id,
-                            ..
-                        } = state.domains.ui.state.view
-                        {
-                            let episodes = state
-                                .domains
-                                .ui
-                                .state
-                                .repo_accessor
-                                .get_season_episodes(&season_id)
-                                .unwrap_or_default();
-                            let total = episodes.len();
-                            let vr = cs.get_visible_range();
-                            let mut visible_ids: Vec<uuid::Uuid> = episodes
-                                .iter()
-                                .enumerate()
-                                .filter(|(i, _)| vr.contains(i))
-                                .map(|(_, e)| e.id.to_uuid())
-                                .collect();
-                            let prefetch_start = vr.end.min(total);
-                            let prefetch_end =
-                                (prefetch_start + cs.items_per_page).min(total);
-                            let mut prefetch_ids: Vec<uuid::Uuid> = episodes
-                                .iter()
-                                .enumerate()
-                                .filter(|(i, _)| {
-                                    *i >= prefetch_start && *i < prefetch_end
-                                })
-                                .map(|(_, e)| e.id.to_uuid())
-                                .collect();
-                            let mut background_ids: Vec<uuid::Uuid> = episodes
-                                .iter()
-                                .enumerate()
-                                .filter(|(i, _)| {
-                                    !vr.contains(i)
-                                        && !(*i >= prefetch_start
-                                            && *i < prefetch_end)
-                                })
-                                .map(|(_, e)| e.id.to_uuid())
-                                .collect();
-                            prefetch_ids.retain(|id| !visible_ids.contains(id));
-                            background_ids.retain(|id| {
-                                !visible_ids.contains(id)
-                                    && !prefetch_ids.contains(id)
-                            });
-
-                            let mut context = DemandContext::default();
-                            for id in visible_ids
-                                .iter()
-                                .chain(prefetch_ids.iter())
-                                .chain(background_ids.iter())
-                            {
-                                context.override_request(
-                                    *id,
-                                    DemandRequestKind::EpisodeStill {
-                                        size: EpisodeStillSize::Standard,
-                                    },
-                                );
-                            }
-
-                            handle.send(DemandSnapshot {
-                                visible_ids,
-                                prefetch_ids,
-                                background_ids,
-                                timestamp: std::time::Instant::now(),
-                                context: Some(context),
-                                poster_kind: None,
-                            });
-                        }
-                    }
-
-                    return scroll_task;
-                }
-            }
-            Task::none()
-        }
-        CarouselMessage::Previous(carousel_id) => {
-            log::debug!("Carousel {} previous", carousel_id);
-            if carousel_id == "show_seasons" {
-                if let Some(cs) =
-                    state.domains.ui.state.show_seasons_carousel.as_mut()
-                {
-                    cs.previous_page();
-                    let scroll_task = scroll_to::<ui::Message>(
-                        cs.scrollable_id.clone(),
-                        cs.get_scroll_offset(),
-                    );
-
-                    // Emit snapshot for visible seasons
-                    if let Some(handle) =
-                        state.domains.metadata.state.planner_handle.as_ref()
-                    {
-                        if let crate::domains::ui::ViewState::SeriesDetail {
-                            series_id,
-                            ..
-                        } = state.domains.ui.state.view
-                        {
-                            if let Ok(seasons) = state
-                                .domains
-                                .ui
-                                .state
-                                .repo_accessor
-                                .get_series_seasons(&series_id)
-                            {
-                                let total = seasons.len();
-                                let vr = cs.get_visible_range();
-                                let mut visible_ids: Vec<uuid::Uuid> = seasons
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(i, _)| vr.contains(i))
-                                    .map(|(_, s)| s.id.to_uuid())
-                                    .collect();
-                                let prefetch_start = vr.end.min(total);
-                                let prefetch_end = (prefetch_start
-                                    + cs.items_per_page)
-                                    .min(total);
-                                let mut prefetch_ids: Vec<uuid::Uuid> = seasons
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(i, _)| {
-                                        *i >= prefetch_start
-                                            && *i < prefetch_end
-                                    })
-                                    .map(|(_, s)| s.id.to_uuid())
-                                    .collect();
-                                let mut background_ids: Vec<uuid::Uuid> =
-                                    seasons
-                                        .iter()
-                                        .enumerate()
-                                        .filter(|(i, _)| {
-                                            !vr.contains(i)
-                                                && !(*i >= prefetch_start
-                                                    && *i < prefetch_end)
-                                        })
-                                        .map(|(_, s)| s.id.to_uuid())
-                                        .collect();
-                                prefetch_ids
-                                    .retain(|id| !visible_ids.contains(id));
-                                background_ids.retain(|id| {
-                                    !visible_ids.contains(id)
-                                        && !prefetch_ids.contains(id)
-                                });
-
-                                handle.send(DemandSnapshot {
-                                    visible_ids,
-                                    prefetch_ids,
-                                    background_ids,
-                                    timestamp: std::time::Instant::now(),
-                                    context: None,
-                                    poster_kind: Some(PosterKind::Season),
-                                });
-                            }
-                        }
-                    }
-
-                    return scroll_task;
-                }
-            } else if carousel_id == "season_episodes" {
-                if let Some(cs) =
-                    state.domains.ui.state.season_episodes_carousel.as_mut()
-                {
-                    cs.previous_page();
-                    let scroll_task = scroll_to::<ui::Message>(
-                        cs.scrollable_id.clone(),
-                        cs.get_scroll_offset(),
-                    );
-
-                    if let Some(handle) =
-                        state.domains.metadata.state.planner_handle.as_ref()
-                    {
-                        if let crate::domains::ui::ViewState::SeasonDetail {
-                            season_id,
-                            ..
-                        } = state.domains.ui.state.view
-                        {
-                            let episodes = state
-                                .domains
-                                .ui
-                                .state
-                                .repo_accessor
-                                .get_season_episodes(&season_id)
-                                .unwrap_or_default();
-                            let total = episodes.len();
-                            let vr = cs.get_visible_range();
-                            let mut visible_ids: Vec<uuid::Uuid> = episodes
-                                .iter()
-                                .enumerate()
-                                .filter(|(i, _)| vr.contains(i))
-                                .map(|(_, e)| e.id.to_uuid())
-                                .collect();
-                            let prefetch_start = vr.end.min(total);
-                            let prefetch_end =
-                                (prefetch_start + cs.items_per_page).min(total);
-                            let mut prefetch_ids: Vec<uuid::Uuid> = episodes
-                                .iter()
-                                .enumerate()
-                                .filter(|(i, _)| {
-                                    *i >= prefetch_start && *i < prefetch_end
-                                })
-                                .map(|(_, e)| e.id.to_uuid())
-                                .collect();
-                            let mut background_ids: Vec<uuid::Uuid> = episodes
-                                .iter()
-                                .enumerate()
-                                .filter(|(i, _)| {
-                                    !vr.contains(i)
-                                        && !(*i >= prefetch_start
-                                            && *i < prefetch_end)
-                                })
-                                .map(|(_, e)| e.id.to_uuid())
-                                .collect();
-                            prefetch_ids.retain(|id| !visible_ids.contains(id));
-                            background_ids.retain(|id| {
-                                !visible_ids.contains(id)
-                                    && !prefetch_ids.contains(id)
-                            });
-
-                            let mut context = DemandContext::default();
-                            for id in visible_ids
-                                .iter()
-                                .chain(prefetch_ids.iter())
-                                .chain(background_ids.iter())
-                            {
-                                context.override_request(
-                                    *id,
-                                    DemandRequestKind::EpisodeStill {
-                                        size: EpisodeStillSize::Standard,
-                                    },
-                                );
-                            }
-
-                            handle.send(DemandSnapshot {
-                                visible_ids,
-                                prefetch_ids,
-                                background_ids,
-                                timestamp: std::time::Instant::now(),
-                                context: Some(context),
-                                poster_kind: None,
-                            });
-                        }
-                    }
-
-                    return scroll_task;
-                }
-            }
-            Task::none()
-        }
-        CarouselMessage::Scrolled(section_id, viewport) => {
-            log::debug!(
-                "Carousel {} scrolled: offset={:?}",
-                section_id,
-                viewport.absolute_offset()
-            );
-            if section_id == "show_seasons" {
-                if let Some(cs) =
-                    state.domains.ui.state.show_seasons_carousel.as_mut()
-                {
-                    cs.scroll_position = viewport.absolute_offset().x;
-                    cs.update_visible_range_from_scroll();
-
-                    if let Some(handle) =
-                        state.domains.metadata.state.planner_handle.as_ref()
-                    {
-                        if let crate::domains::ui::ViewState::SeriesDetail {
-                            series_id,
-                            ..
-                        } = state.domains.ui.state.view
-                        {
-                            if let Ok(seasons) = state
-                                .domains
-                                .ui
-                                .state
-                                .repo_accessor
-                                .get_series_seasons(&series_id)
-                            {
-                                let total = seasons.len();
-                                let vr = cs.get_visible_range();
-                                let mut visible_ids: Vec<uuid::Uuid> = seasons
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(i, _)| vr.contains(i))
-                                    .map(|(_, s)| s.id.to_uuid())
-                                    .collect();
-                                let prefetch_start = vr.end.min(total);
-                                let prefetch_end = (prefetch_start
-                                    + cs.items_per_page)
-                                    .min(total);
-                                let mut prefetch_ids: Vec<uuid::Uuid> = seasons
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(i, _)| {
-                                        *i >= prefetch_start
-                                            && *i < prefetch_end
-                                    })
-                                    .map(|(_, s)| s.id.to_uuid())
-                                    .collect();
-                                let mut background_ids: Vec<uuid::Uuid> =
-                                    seasons
-                                        .iter()
-                                        .enumerate()
-                                        .filter(|(i, _)| {
-                                            !vr.contains(i)
-                                                && !(*i >= prefetch_start
-                                                    && *i < prefetch_end)
-                                        })
-                                        .map(|(_, s)| s.id.to_uuid())
-                                        .collect();
-                                prefetch_ids
-                                    .retain(|id| !visible_ids.contains(id));
-                                background_ids.retain(|id| {
-                                    !visible_ids.contains(id)
-                                        && !prefetch_ids.contains(id)
-                                });
-
-                                handle.send(DemandSnapshot {
-                                    visible_ids,
-                                    prefetch_ids,
-                                    background_ids,
-                                    timestamp: std::time::Instant::now(),
-                                    context: None,
-                                    poster_kind: Some(PosterKind::Season),
-                                });
-                            }
-                        }
-                    }
-                }
-            } else if section_id == "season_episodes" {
-                if let Some(cs) =
-                    state.domains.ui.state.season_episodes_carousel.as_mut()
-                {
-                    cs.scroll_position = viewport.absolute_offset().x;
-                    cs.update_visible_range_from_scroll();
-
-                    if let Some(handle) =
-                        state.domains.metadata.state.planner_handle.as_ref()
-                    {
-                        if let crate::domains::ui::ViewState::SeasonDetail {
-                            season_id,
-                            ..
-                        } = state.domains.ui.state.view
-                        {
-                            let episodes = state
-                                .domains
-                                .ui
-                                .state
-                                .repo_accessor
-                                .get_season_episodes(&season_id)
-                                .unwrap_or_default();
-                            let total = episodes.len();
-                            let vr = cs.get_visible_range();
-                            let mut visible_ids: Vec<uuid::Uuid> = episodes
-                                .iter()
-                                .enumerate()
-                                .filter(|(i, _)| vr.contains(i))
-                                .map(|(_, e)| e.id.to_uuid())
-                                .collect();
-                            let prefetch_start = vr.end.min(total);
-                            let prefetch_end =
-                                (prefetch_start + cs.items_per_page).min(total);
-                            let mut prefetch_ids: Vec<uuid::Uuid> = episodes
-                                .iter()
-                                .enumerate()
-                                .filter(|(i, _)| {
-                                    *i >= prefetch_start && *i < prefetch_end
-                                })
-                                .map(|(_, e)| e.id.to_uuid())
-                                .collect();
-                            let mut background_ids: Vec<uuid::Uuid> = episodes
-                                .iter()
-                                .enumerate()
-                                .filter(|(i, _)| {
-                                    !vr.contains(i)
-                                        && !(*i >= prefetch_start
-                                            && *i < prefetch_end)
-                                })
-                                .map(|(_, e)| e.id.to_uuid())
-                                .collect();
-                            prefetch_ids.retain(|id| !visible_ids.contains(id));
-                            background_ids.retain(|id| {
-                                !visible_ids.contains(id)
-                                    && !prefetch_ids.contains(id)
-                            });
-
-                            let mut context = DemandContext::default();
-                            for id in visible_ids
-                                .iter()
-                                .chain(prefetch_ids.iter())
-                                .chain(background_ids.iter())
-                            {
-                                context.override_request(
-                                    *id,
-                                    DemandRequestKind::EpisodeStill {
-                                        size: EpisodeStillSize::Standard,
-                                    },
-                                );
-                            }
-
-                            handle.send(DemandSnapshot {
-                                visible_ids,
-                                prefetch_ids,
-                                background_ids,
-                                timestamp: std::time::Instant::now(),
-                                context: Some(context),
-                                poster_kind: None,
-                            });
-                        }
-                    }
-                }
-            }
-            Task::none()
-        }
+        UiMessage::NoOp => DomainUpdateResult::task(Task::none()),
     }
 }

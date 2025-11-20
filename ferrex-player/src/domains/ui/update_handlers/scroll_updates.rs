@@ -105,19 +105,6 @@ pub fn handle_tab_grid_scrolled(
     // Track timing for planner snapshots and yoke prefetch throttling
     let now = Instant::now();
 
-    // Keep UI rendering alive briefly after scroll to allow poster placeholders to swap to textures
-    // This avoids visible stalls while atlas uploads complete
-    {
-        use std::time::Duration;
-        let until = now
-            + Duration::from_millis(
-                (crate::infra::constants::animation::DEFAULT_DURATION_MS as f64
-                    * 1.25) as u64,
-            );
-        let ui_until = &mut state.domains.ui.state.poster_anim_active_until;
-        *ui_until = Some(ui_until.map(|u| u.max(until)).unwrap_or(until));
-    }
-
     // Emit a planner snapshot for the active library tab (visible + prefetch)
     if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref() {
         if let crate::domains::ui::tabs::TabState::Library(lib_state) =

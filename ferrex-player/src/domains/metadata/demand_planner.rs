@@ -70,25 +70,67 @@ pub fn start_planner(
 
     let join = tokio::spawn(async move {
         loop {
-            // Coalesce: drain and keep latest snapshot
+            // Drain all pending snapshots and process them as a single union
             let first = rx.recv().await;
-            let Some(mut latest) = first else { break };
+            let Some(first_snap) = first else { break };
+            let mut snapshots = Vec::with_capacity(4);
+            snapshots.push(first_snap);
             while let Ok(next) = rx.try_recv() {
-                latest = next;
+                snapshots.push(next);
             }
 
-            let desired = build_desired_set(
-                latest.visible_ids.iter().copied(),
-                latest.prefetch_ids.iter().copied(),
-                latest.background_ids.iter().copied(),
-                latest.poster_kind,
-                latest.context.as_ref(),
-            );
+            // Build a union of desired requests across all drained snapshots,
+            // preserving insertion order and upgrading priorities when repeated.
+            let mut union_desired: Vec<(ImageRequest, Priority)> = Vec::new();
+            let mut positions: HashMap<ImageRequest, usize> = HashMap::new();
+            let mut total_visible = 0usize;
+            let mut total_prefetch = 0usize;
+            let mut total_background = 0usize;
 
+            // Helper to insert/upgrade priority while preserving order
+            let mut push_or_update =
+                |req: ImageRequest,
+                 prio: Priority,
+                 out: &mut Vec<(ImageRequest, Priority)>,
+                 pos: &mut HashMap<ImageRequest, usize>| {
+                    if let Some(i) = pos.get(&req) {
+                        if prio.weight() > out[*i].1.weight() {
+                            out[*i].1 = prio;
+                        }
+                    } else {
+                        pos.insert(req.clone(), out.len());
+                        out.push((req, prio));
+                    }
+                };
+
+            for snap in snapshots.iter() {
+                total_visible += snap.visible_ids.len();
+                total_prefetch += snap.prefetch_ids.len();
+                total_background += snap.background_ids.len();
+
+                let desired = build_desired_set(
+                    snap.visible_ids.iter().copied(),
+                    snap.prefetch_ids.iter().copied(),
+                    snap.background_ids.iter().copied(),
+                    snap.poster_kind,
+                    snap.context.as_ref(),
+                );
+
+                for (req, prio) in desired.into_iter() {
+                    push_or_update(
+                        req,
+                        prio,
+                        &mut union_desired,
+                        &mut positions,
+                    );
+                }
+            }
+
+            // Proceed with existing planner logic against the union of desired requests
             let state = image_service.snapshot_state();
             let mut desired_requests: HashSet<ImageRequest> =
-                HashSet::with_capacity(desired.len());
-            for (req, prio) in desired.iter() {
+                HashSet::with_capacity(union_desired.len());
+            for (req, prio) in union_desired.iter() {
                 desired_requests.insert(req.clone());
                 if state.loaded.contains(req) {
                     continue;
@@ -137,10 +179,11 @@ pub fn start_planner(
             }
 
             log::trace!(
-                "Planner snapshot processed (visible={}, prefetch={}, background={})",
-                latest.visible_ids.len(),
-                latest.prefetch_ids.len(),
-                latest.background_ids.len()
+                "Planner snapshots processed (union) (visible_total={}, prefetch_total={}, background_total={}, desired_unique={})",
+                total_visible,
+                total_prefetch,
+                total_background,
+                desired_requests.len()
             );
         }
     });

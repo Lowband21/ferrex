@@ -122,6 +122,25 @@ pub fn movie_reference_card_with_state<'a>(
                         arc
                     }
                     Err(e) => {
+                        // If this UUID actually belongs to a Series, gracefully fall back
+                        // to the series card builder to avoid a dangling placeholder and
+                        // to ensure images/types flow correctly without panics.
+                        if let Ok(_) = state
+                            .domains
+                            .ui
+                            .state
+                            .repo_accessor
+                            .get_series_yoke(&MediaID::Series(SeriesID(uuid)))
+                        {
+                            return series_reference_card_with_state(
+                                state,
+                                SeriesID(uuid),
+                                is_hovered,
+                                is_visible,
+                                watch_progress,
+                            );
+                        }
+
                         log::warn!(
                             "Failed to fetch movie yoke for {}: {:?}",
                             uuid,
@@ -265,12 +284,12 @@ pub fn movie_reference_card_with_state<'a>(
     let text_content = column![
         text(title)
             .align_x(Alignment::Center)
-            .width(Length::Fixed(330.0))
+            .width(Length::Fixed(200.0))
             .size(13)
             .wrapping(Wrapping::None),
         text(movie.release_year().unwrap_or("932").to_string())
             .align_x(Alignment::Center)
-            .width(Length::Fixed(330.0))
+            .width(Length::Fixed(200.0))
             .size(12)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
     ]
@@ -280,7 +299,7 @@ pub fn movie_reference_card_with_state<'a>(
         poster_element,
         container(text_content)
             .padding([5, 0])
-            .width(Length::Fixed(330.0))
+            .width(Length::Fixed(200.0))
             .height(Length::Fixed(60.0))
     ]
     .spacing(5)
@@ -327,6 +346,24 @@ pub fn series_reference_card_with_state<'a>(
                         arc
                     }
                     Err(e) => {
+                        // If this UUID actually belongs to a Movie, gracefully fall back
+                        // to the movie card builder.
+                        if let Ok(_) = state
+                            .domains
+                            .ui
+                            .state
+                            .repo_accessor
+                            .get_movie_yoke(&MediaID::Movie(MovieID(uuid)))
+                        {
+                            return movie_reference_card_with_state(
+                                state,
+                                MovieID(uuid),
+                                is_hovered,
+                                is_visible,
+                                _watch_status,
+                            );
+                        }
+
                         log::warn!(
                             "Failed to fetch series yoke for {}: {:?}",
                             uuid,

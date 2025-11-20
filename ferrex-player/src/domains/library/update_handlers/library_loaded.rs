@@ -1,15 +1,24 @@
-use std::sync::Arc;
-use std::time::Instant;
+use crate::{
+    domains::{
+        auth::types::AuthenticationFlow,
+        library::{LibrariesLoadState, messages::Message},
+        ui::{
+            update_handlers::{
+                emit_initial_all_tab_snapshots_combined, init_all_tab_view,
+            },
+            utils::bump_keep_alive,
+        },
+    },
+    infra::{repository::repository::MediaRepo, services::api::ApiService},
+    state::State,
+};
 
-use crate::domains::auth::types::AuthenticationFlow;
-use crate::domains::library::messages::Message;
-use crate::domains::library::LibrariesLoadState;
-use crate::infra::repository::repository::MediaRepo;
-use crate::infra::services::api::ApiService;
-use crate::state::State;
 use ferrex_core::api::routes::v1;
+
 use iced::Task;
 use rkyv::util::AlignedVec;
+use std::sync::Arc;
+use std::time::Instant;
 
 /// Fetch all libraries
 pub async fn fetch_libraries(
@@ -79,6 +88,12 @@ pub fn handle_libraries_loaded(
                                 .unwrap_or(0)
                         );
                     }
+
+                    // Initialize All-tab (curated + per-library) and emit initial snapshots
+                    init_all_tab_view(state);
+                    emit_initial_all_tab_snapshots_combined(state);
+                    // Keep UI active briefly to ensure initial poster loads/animations are processed
+                    bump_keep_alive(state);
 
                     // Refresh the All tab
                     state.tab_manager.refresh_active_tab();

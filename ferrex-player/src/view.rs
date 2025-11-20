@@ -66,7 +66,8 @@ pub fn view(
 
         bg_shader = bg_shader.effect(BackgroundEffect::Gradient);
 
-        let bg_shader_element: Element<ui::messages::Message> = bg_shader.into();
+        let bg_shader_element: Element<ui::messages::Message> =
+            bg_shader.into();
         let bg_shader_mapped: Element<DomainMessage> =
             bg_shader_element.map(DomainMessage::from);
 

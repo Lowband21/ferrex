@@ -8,6 +8,35 @@ use crate::{
 use chrono::{DateTime, NaiveDate, Utc};
 use std::cmp::Ordering;
 
+fn has_poster(media: &Media) -> bool {
+    match media {
+        Media::Movie(m) => m
+            .details
+            .as_movie()
+            .and_then(|d| d.poster_path.as_deref())
+            .map(|p| !p.is_empty())
+            .unwrap_or(false),
+        Media::Series(s) => s
+            .details
+            .as_series()
+            .and_then(|d| d.poster_path.as_deref())
+            .map(|p| !p.is_empty())
+            .unwrap_or(false),
+        Media::Season(season) => season
+            .details
+            .as_season()
+            .and_then(|d| d.poster_path.as_deref())
+            .map(|p| !p.is_empty())
+            .unwrap_or(false),
+        Media::Episode(e) => e
+            .details
+            .as_episode()
+            .and_then(|d| d.still_path.as_deref())
+            .map(|p| !p.is_empty())
+            .unwrap_or(false),
+    }
+}
+
 /// Compare two media items using the provided sort field and order.
 /// Returns `None` when the comparison cannot be evaluated (e.g. user-context fields).
 pub fn compare_media(
@@ -16,6 +45,13 @@ pub fn compare_media(
     sort_by: SortBy,
     sort_order: SortOrder,
 ) -> Option<Ordering> {
+    // Always push items without posters to the end, regardless of the active sort.
+    let a_has = has_poster(a);
+    let b_has = has_poster(b);
+    if a_has != b_has {
+        return Some(if a_has { Ordering::Less } else { Ordering::Greater });
+    }
+
     let ord = match sort_by {
         SortBy::Title => {
             let a_title = get_title(a).to_lowercase();

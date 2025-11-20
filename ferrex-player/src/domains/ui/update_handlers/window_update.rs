@@ -1,9 +1,13 @@
 use iced::{Size, Task};
 
 use crate::domains::metadata::demand_planner::DemandSnapshot;
+use crate::domains::ui::views::virtual_carousel::{
+    planner, types::CarouselKey,
+};
 use crate::infra::api_types::LibraryType;
 use crate::{domains::ui::messages::Message, state::State};
 use ferrex_core::player_prelude::PosterKind;
+use ferrex_model::SeasonID;
 
 #[cfg_attr(
     any(
@@ -101,6 +105,105 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<Message> {
             };
             handle.send(snapshot);
         }
+    }
+
+    // Update virtual carousels with new width (trial support)
+    // Recompute items/page and max scroll for all registered carousels.
+    {
+        let reg = &mut state.domains.ui.state.carousel_registry;
+        for key in reg.keys() {
+            if let Some(vc) = reg.get_mut(&key) {
+                vc.update_dimensions(size.width.max(1.0));
+            }
+        }
+    }
+
+    // After resizing, re-emit snapshots for carousels to refresh visible/prefetch windows.
+    // Covers All-tab (curated + per-library) and active detail carousels.
+    // All view (Curated): re-emit combined snapshots so posters stay up to date after width change
+    if matches!(
+        state.domains.ui.state.display_mode,
+        crate::domains::ui::types::DisplayMode::Curated
+    ) && matches!(
+        state.tab_manager.active_tab_id(),
+        crate::domains::ui::tabs::TabId::All
+    ) {
+        super::all_tab::emit_initial_all_tab_snapshots_combined(state);
+    }
+
+    // Detail views: re-emit for the active carousel key
+    match state.domains.ui.state.view.clone() {
+        crate::domains::ui::types::ViewState::SeriesDetail {
+            series_id,
+            ..
+        } => {
+            let key = CarouselKey::ShowSeasons(series_id.to_uuid());
+            if let Some(vc) = state.domains.ui.state.carousel_registry.get(&key)
+            {
+                if let Ok(seasons) = state
+                    .domains
+                    .ui
+                    .state
+                    .repo_accessor
+                    .get_series_seasons(&series_id)
+                {
+                    let total = seasons.len();
+                    let snap = planner::snapshot_for_visible(
+                        vc,
+                        total,
+                        |i| seasons.get(i).map(|s| s.id.to_uuid()),
+                        Some(ferrex_core::player_prelude::PosterKind::Season),
+                        None,
+                    );
+                    if let Some(handle) =
+                        state.domains.metadata.state.planner_handle.as_ref()
+                    {
+                        handle.send(snap);
+                    }
+                }
+            }
+        }
+        crate::domains::ui::types::ViewState::SeasonDetail {
+            season_id,
+            ..
+        } => {
+            let key = CarouselKey::SeasonEpisodes(season_id.to_uuid());
+            if let Some(vc) = state.domains.ui.state.carousel_registry.get(&key)
+            {
+                let episodes = state
+                    .domains
+                    .ui
+                    .state
+                    .repo_accessor
+                    .get_season_episodes(&SeasonID(season_id.to_uuid()))
+                    .unwrap_or_else(|_| Vec::new());
+                let total = episodes.len();
+                let (vis, mut pre, mut back) =
+                    planner::collect_ranges_ids(vc, total, |i| {
+                        episodes.get(i).map(|e| e.id.to_uuid())
+                    });
+                pre.retain(|id| !vis.contains(id));
+                back.retain(|id| !vis.contains(id) && !pre.contains(id));
+                let mut all = vis.clone();
+                all.extend(pre.iter().copied());
+                all.extend(back.iter().copied());
+                let ctx = planner::build_episode_still_context(&all);
+                let snap = DemandSnapshot {
+                    visible_ids: vis,
+                    prefetch_ids: pre,
+                    background_ids: back,
+                    timestamp: std::time::Instant::now(),
+                    context: Some(ctx),
+                    poster_kind: None,
+                };
+                if let Some(handle) =
+                    state.domains.metadata.state.planner_handle.as_ref()
+                {
+                    handle.send(snap);
+                }
+            }
+        }
+        _ => {}
     }
 
     Task::none()
