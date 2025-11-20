@@ -9,5 +9,10 @@ fi
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-# Run push-stage hooks. pre-commit will determine files/commits for push.
-exec pre-commit run --hook-stage pre-push
+# Capture Git's pre-push STDIN (ref updates) and forward to pre-commit,
+# along with the original args: <remote-name> <remote-url>.
+stdin_file=$(mktemp -t pre-commit-pre-push.XXXXXX)
+trap 'rm -f "$stdin_file"' EXIT
+cat >"$stdin_file"
+
+exec pre-commit run --hook-stage pre-push --remote-name "${1:-}" --remote-url "${2:-}" <"$stdin_file"

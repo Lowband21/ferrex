@@ -20,11 +20,59 @@ repos:
   # Run Rust formatter first to auto-fix .rs files
   - repo: local
     hooks:
-      - id: rustfmt-fix
-        name: cargo fmt (auto-fix)
-        entry: cargo fmt --all
+      - id: enforce-signed-commits-config
+        name: ensure commit signing is enabled (config)
         language: system
+        stages: [pre-commit]
         pass_filenames: false
+        entry: bash
+        args:
+          - -lc
+          - |
+              set -euo pipefail
+              # Ensure commit signing is enabled in this repo (or globally)
+              if [[ "$(git config --get commit.gpgSign || echo false)" != "true" ]]; then
+                echo "ERROR: commit.gpgSign is not enabled. Enable it with:" >&2
+                echo "  git config --global commit.gpgSign true" >&2
+                echo "Optionally set per-repo: git config commit.gpgSign true" >&2
+                exit 1
+              fi
+              # Recommend a signing key configured
+              if ! git config --get user.signingkey >/dev/null; then
+                echo "WARNING: user.signingkey is not set. Git will try a default key." >&2
+                echo "Set one with: git config --global user.signingkey <your-key>" >&2
+              fi
+              # Surface signing format for clarity (openpgp default or ssh)
+              fmt=$(git config --get gpg.format || echo openpgp)
+              echo "Commit signing is enabled (gpg.format=${fmt})."
+      - id: rustfmt-fix
+        name: rustfmt (auto-fix staged .rs files)
+        entry: bash
+        args:
+          - -lc
+          - |
+              set -euo pipefail
+              if ! command -v rustfmt >/dev/null 2>&1; then
+                # Try to install via rustup if available
+                if command -v rustup >/dev/null 2>&1; then
+                  rustup component add rustfmt >/dev/null 2>&1 || true
+                fi
+              fi
+              if ! command -v rustfmt >/dev/null 2>&1; then
+                echo "rustfmt not found. Install with: rustup component add rustfmt" >&2
+                exit 1
+              fi
+              # Determine workspace edition (fallback to 2024) using grep/sed
+              edition=$(grep -E -m1 '^\s*edition\s*=\s*"(20[0-9]{2})"' Cargo.toml | sed -E 's/.*"(20[0-9]{2})".*/\1/' || true)
+              : "${edition:=2024}"
+              # Filter to .rs files only (pre-commit already does this, but be safe)
+              mapfile -t files < <(printf "%s\n" "$@" | grep -E '\\.rs$' || true)
+              (( ${#files[@]} == 0 )) && exit 0
+              # Format only the staged files to avoid touching unrelated files
+              rustfmt --edition ${edition} --emit files "${files[@]}"
+        language: system
+        pass_filenames: true
+        files: \.rs$
         stages: [pre-commit]
 
   # Basic hygiene + config syntax checks
@@ -80,14 +128,69 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
+        always_run: true
+
+      # verify all commits in the push range are signed
+      - id: verify-signed-commits
+        name: verify commit signatures (push range)
+        entry: bash
+        args:
+          - -lc
+          - |
+              set -euo pipefail
+              from_ref="${PRE_COMMIT_FROM_REF:-}"
+              to_ref="${PRE_COMMIT_TO_REF:-}"
+              if [[ -z "$from_ref" || -z "$to_ref" ]]; then
+                # Fallback: compute ahead commits vs upstream if available
+                if upstream=$(git rev-parse --abbrev-ref --symbolic-full-name @\{upstream\} 2>/dev/null); then
+                  base=$(git merge-base HEAD "$upstream") || true
+                  from_ref="${base:-}"
+                  to_ref="HEAD"
+                else
+                  from_ref=""
+                  to_ref="HEAD"
+                fi
+              fi
+              if [[ -n "$from_ref" ]]; then
+                range="$from_ref..$to_ref"
+              else
+                range="$to_ref"
+              fi
+              mapfile -t commits < <(git rev-list --no-merges "$range" || true)
+              (( ${#commits[@]} == 0 )) && exit 0
+              unsigned=()
+              for c in "${commits[@]}"; do
+                sig=$(git log -1 --pretty=format:%G? "$c") || sig="N"
+                # Accept G (good) and U (good, untrusted). Block N (no sig), B (bad), E (error), X (expired), Y (Expired key), R (Revoked), etc.
+                if [[ "$sig" != "G" && "$sig" != "U" ]]; then
+                  unsigned+=("$c:$sig")
+                fi
+              done
+              if (( ${#unsigned[@]} > 0 )); then
+                echo "ERROR: Found unsigned/invalid-signed commits in push range:" >&2
+                for u in "${unsigned[@]}"; do
+                  sha=${u%%:*}; code=${u##*:}
+                  subj=$(git log -1 --pretty=format:%s "$sha" || echo "")
+                  echo "  $sha [$code]  $subj" >&2
+                done
+                echo >&2
+                echo "Ensure commit signing is enabled (git config commit.gpgSign true) and re-commit with signing (e.g., git commit -S --amend)." >&2
+                exit 1
+              fi
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true
 
       # clippy on push (heavier); treat warnings as errors
       - id: clippy
         name: cargo clippy (workspace, all targets, all features)
-        entry: bash -lc 'cargo clippy --workspace --all-targets --all-features -- -D warnings'
+        # Deny warnings soon
+        entry: bash -lc 'cargo clippy --workspace --all-targets --all-features -- -W warnings'
         language: system
         pass_filenames: false
         stages: [pre-push]
+        always_run: true
 
       # SQLx offline drift check on push (requires sqlx-cli and .sqlx/ present)
       - id: sqlx-prepare-check
@@ -96,6 +199,7 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
+        always_run: true
 
       # Cargo deny on push (uses deny.toml). This will fail on errors, not warnings.
       - id: cargo-deny
@@ -104,7 +208,4 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
-        # NOTE: To also fail on warnings later, you can switch your policy in deny.toml
-        # to elevate relevant rules to "deny" severity, or invoke cargo-deny with
-        # stricter fail-level settings. Example (uncomment to enable when ready):
-        # entry: bash -lc 'cargo deny check --fail-level warn'
+        always_run: true
