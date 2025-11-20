@@ -1532,10 +1532,26 @@ mod tests {
             done_w.store(true, Ordering::SeqCst);
         });
 
-        // While the writer is running, final file should not appear; temp file may exist
+        // While the writer is running, the final file should not be visible
+        // before the atomic rename. There is, however, a tiny window where the
+        // rename may complete before the `done` flag is observed as true on
+        // this thread. To avoid a racy assertion, break as soon as the final
+        // path appears (indicating the rename has happened) or the writer is
+        // marked done.
         let start = Instant::now();
         while !done.load(Ordering::SeqCst) {
-            assert!(!out.exists(), "final path should not exist until rename");
+            if out.exists() {
+                // Final path appeared, meaning rename completed; validate it isn't partial.
+                let data =
+                    std::fs::read(&out).expect("read final during writer");
+                assert!(!data.is_empty(), "jpeg not empty during writer");
+                let img = image::load_from_memory(&data)
+                    .expect("decode final jpeg during writer");
+                assert_eq!(img.width(), width);
+                assert_eq!(img.height(), height);
+                // Stop polling once validated.
+                break;
+            }
             // tmp file may appear during write; don't assert either way
             if start.elapsed() > Duration::from_secs(5) {
                 break; // encoding might be fast in CI; avoid spinning too long

@@ -510,6 +510,15 @@ impl ApiService for TestApiService {
     async fn get_token(&self) -> Option<AuthToken> {
         self.inner.read().expect("lock poisoned").auth_token.clone()
     }
+
+    async fn fetch_playback_ticket(
+        &self,
+        _media_id: &str,
+    ) -> RepositoryResult<String> {
+        Err(RepositoryError::QueryFailed(
+            "TestApiService::fetch_playback_ticket not implemented".into(),
+        ))
+    }
 }
 
 fn sample_library(name: &str) -> Library {
