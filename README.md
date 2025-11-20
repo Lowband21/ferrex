@@ -7,20 +7,22 @@ A high-performance, self-hosted media server written in Rust with native cross-p
 Rusty Media Server provides a complete media server solution with:
 - High-performance streaming server built with Axum
 - Native desktop client using Iced (no Electron!)
-- Smart media organization and metadata extraction
-- Hardware-accelerated video playback
-- Automatic media library scanning
-- Real-time streaming with range request support
+- Smart media organization with TMDB metadata integration
+- Hardware-accelerated video playback with GStreamer
+- Automatic media library scanning and poster fetching
+- Real-time streaming with HTTP range request support
+- Netflix-style UI with horizontal scrolling categories
 
 ## ✨ Features
 
 - 🚀 **High Performance**: Built entirely in Rust for maximum speed and efficiency
-- 🎬 **Smart Organization**: Automatic media detection, categorization, and metadata extraction
+- 🎬 **Smart Organization**: Automatic media detection, categorization, and TMDB metadata
 - 🖥️ **Native Desktop Client**: GPU-accelerated playback without web browser overhead
-- 📂 **Server-Managed Library**: Plex-like media management - just point to your media folders
-- 🎯 **Automatic Metadata**: Extracts video codec, resolution, duration, and more using FFmpeg
+- 📂 **Rich Media Library**: Beautiful poster display with detailed media information
+- 🎯 **Advanced Playback**: Variable speed with pitch correction, seeking, volume control
 - 🔄 **Smart Streaming**: HTTP range request support for instant seeking
-- 🗄️ **Modern Database**: SurrealDB for flexible media queries
+- 🎨 **Modern UI**: Netflix-style interface with smooth scrolling and animations
+- 🔍 **Metadata Integration**: Automatic poster and plot fetching from TMDB
 
 ## Project Structure
 
@@ -36,6 +38,8 @@ Rusty Media Server provides a complete media server solution with:
 
 - Rust 1.75+ with cargo
 - FFmpeg libraries installed
+- GStreamer 1.0+ (for desktop client)
+- TMDB API key (optional, for metadata)
 - Linux/macOS/Windows
 
 ### Quick Start
@@ -47,18 +51,35 @@ cd rusty_media_server
 
 # Set up environment
 cp .env.example .env
-# Edit .env and set MEDIA_ROOT to your media directory
+# Edit .env and set:
+# - MEDIA_ROOT to your media directory
+# - TMDB_API_KEY for poster fetching (optional)
 
 # Run the server
-cd server
-MEDIA_ROOT=/path/to/your/media cargo run
+cargo run --bin rusty-media-server
 
 # Run the desktop client (in another terminal)
-cd desktop_iced
-cargo run
+cargo run --bin rusty-media-player
 ```
 
 Click "Scan Media Library" in the client to index your media!
+
+### macOS Specific Instructions
+
+On macOS, you'll need to install dependencies via Homebrew and use special scripts for the desktop client:
+
+```bash
+# Install dependencies
+brew install ffmpeg gstreamer pkg-config
+
+# Set up environment
+source ./setup_env.sh
+
+# Run the desktop client with proper library paths
+./run_desktop.sh
+```
+
+**Note**: For best experience, run the desktop client in release mode: `./run_desktop.sh --release`
 
 ## 🎮 Usage
 
@@ -68,22 +89,31 @@ The server uses environment variables for configuration:
 
 - `MEDIA_ROOT`: Path to your media files directory
 - `SERVER_PORT`: Port to run the server on (default: 3000)
-- `DATABASE_URL`: Optional PostgreSQL connection string (uses in-memory DB by default)
+- `TMDB_API_KEY`: TMDB API key for fetching movie/TV metadata
+- `CACHE_DIR`: Directory for poster cache (default: ./cache)
 - `RUST_LOG`: Log level (default: debug)
 
 ### Desktop Client Features
 
-- **Library View**: Browse all your media files in a grid layout
-- **Scan Button**: Trigger server-side media scanning
-- **Video Player**: Built-in player with play/pause, seeking, and volume controls
-- **Automatic Refresh**: Library updates automatically after scanning
+- **Library View**: Netflix-style horizontal scrolling categories with poster art
+- **Detail View**: See plot, cast, ratings, and technical information
+- **Video Player**: Advanced controls including:
+  - Seeking with preview
+  - Variable playback speed (0.5x - 2x) with pitch correction
+  - Volume control and mute
+  - Fullscreen mode
+  - Keyboard shortcuts
+- **Metadata System**: Automatic poster and information fetching from TMDB
+- **Smart Categories**: Automatic grouping into Movies, TV Shows, etc.
 
 ## 🛠️ API Endpoints
 
 - `GET /ping` - Health check
 - `POST /library/scan-and-store` - Scan media directory and update database
-- `GET /library` - Get all media files  
+- `GET /library` - Get all media files with metadata
 - `GET /stream/{id}` - Stream a specific media file with range request support
+- `POST /metadata/fetch/{id}` - Fetch metadata for a media item
+- `GET /poster/{id}` - Get cached poster image
 
 ## 📦 Supported Media Formats
 
@@ -96,14 +126,16 @@ The server automatically detects and indexes these video formats:
 
 ### Server
 - **Web Framework**: Axum for high-performance async HTTP
-- **Database**: SurrealDB (embedded mode for easy deployment)
 - **Media Processing**: FFmpeg for metadata extraction
+- **Metadata Provider**: TMDB integration for movie/TV information
 - **Streaming**: HTTP range requests for efficient video delivery
+- **Caching**: Disk-based poster cache for performance
 
 ### Desktop Client
 - **UI Framework**: Iced - native Rust GUI with GPU acceleration
-- **Video Playback**: GStreamer integration via iced_video_player
+- **Video Playback**: GStreamer integration with custom enhancements
 - **HTTP Client**: reqwest for API communication
+- **UI Design**: Netflix-inspired with smooth scrolling and animations
 
 ## 🤝 Contributing
 
@@ -118,4 +150,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Built with [Axum](https://github.com/tokio-rs/axum) web framework
 - Desktop UI powered by [Iced](https://github.com/iced-rs/iced)
 - Media processing with [FFmpeg](https://ffmpeg.org/)
-- Database powered by [SurrealDB](https://surrealdb.com/)
+- Video playback with [GStreamer](https://gstreamer.freedesktop.org/)
+- Metadata from [TMDB](https://www.themoviedb.org/)

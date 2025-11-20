@@ -70,6 +70,45 @@ coverage/
 tarpaulin-report.html
 
 # Reference libraries
-iced_video_player_cosmic
-iced_video_player_normal
-cosmic-player
+reference_repos/
+
+# Cache
+cache/
+
+# Development notes and troubleshooting files
+*_NOTES.md
+*_FIX.md
+*_PLAN.md
+*_DEBUG*.md
+*_TROUBLESHOOTING.md
+*_IMPLEMENTATION.md
+*_ANALYSIS.md
+*_COMPLETE.md
+*_SUMMARY.md
+*_ISSUE*.md
+ALTERNATIVE_*.md
+COSMIC_*.md
+DESKTOP_*.md
+FLOATING_*.md
+HTTP_*.md
+ICED_*.md
+MACOS_*.md
+METADATA_*.md
+PITCH_*.md
+PLAYER_*.md
+SCROLLABLE_*.md
+SEEKING_*.md
+TEST_*.md
+UI_*.md
+VIDEO_*.md
+VOLUME_*.md
+
+# Test scripts (keep some, ignore others)
+test_*.sh
+!test_metadata_flow.sh
+
+# Fork directories (managed separately)
+iced_video_player_fork/
+
+# Reference repositories
+reference_repos/

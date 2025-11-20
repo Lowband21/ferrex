@@ -36,6 +36,12 @@ ffmpeg-next.workspace = true
 # Regex
 regex.workspace = true
 
+# HTTP Client
+reqwest.workspace = true
+
+# Async traits
+async-trait.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 tokio.workspace = true

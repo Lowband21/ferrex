@@ -1,3 +1,6 @@
+mod config;
+mod metadata_service;
+
 use axum::{
     extract::{Path, Query, State},
     http::{header, HeaderMap, StatusCode},
@@ -14,11 +17,19 @@ use tokio_util::io::ReaderStream;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use config::Config;
+
+#[derive(Clone)]
+struct AppState {
+    db: Arc<MediaDatabase>,
+    config: Arc<Config>,
+    metadata_service: Arc<metadata_service::MetadataService>,
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Load .env file if present
-    dotenv::dotenv().ok();
+    // Load configuration from environment
+    let config = Arc::new(Config::from_env()?);
     
     tracing_subscriber::registry()
         .with(
@@ -28,23 +39,56 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // Create shared database instance
-    let db = Arc::new(MediaDatabase::new_memory().await?);
+    // Log configuration
+    info!("Server configuration loaded");
+    if let Some(media_root) = &config.media_root {
+        info!("Media root: {}", media_root.display());
+    } else {
+        warn!("No MEDIA_ROOT configured - will require path parameter for scans");
+    }
+    
+    // Ensure cache directories exist
+    config.ensure_directories()?;
+    info!("Cache directories created");
+
+    // Create database instance
+    let db = if let Some(db_url) = &config.database_url {
+        info!("Connecting to database: {}", db_url);
+        // TODO: Implement PostgreSQL connection
+        Arc::new(MediaDatabase::new_memory().await?)
+    } else {
+        info!("Using in-memory database");
+        Arc::new(MediaDatabase::new_memory().await?)
+    };
+    
     if let Err(e) = db.initialize_schema().await {
         warn!("Failed to initialize database schema: {}", e);
     }
     info!("Database initialized successfully");
 
-    let app = create_app(db);
+    // Initialize metadata service
+    let tmdb_api_key = std::env::var("TMDB_API_KEY").ok();
+    match &tmdb_api_key {
+        Some(key) => info!("TMDB API key configured (length: {})", key.len()),
+        None => warn!("TMDB_API_KEY not set - metadata fetching will be limited"),
+    }
+    let metadata_service = Arc::new(
+        metadata_service::MetadataService::new(
+            tmdb_api_key,
+            config.cache_dir.clone(),
+        )
+    );
 
-    let host = std::env::var("SERVER_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let port = std::env::var("SERVER_PORT")
-        .unwrap_or_else(|_| "3000".to_string())
-        .parse::<u16>()
-        .unwrap_or(3000);
+    let state = AppState {
+        db,
+        config: config.clone(),
+        metadata_service,
+    };
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    info!("Starting Rusty Media Server on {}:{}", host, port);
+    let app = create_app(state);
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
+    info!("Starting Rusty Media Server on {}:{}", config.server_host, config.server_port);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
@@ -52,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn create_app(db: Arc<MediaDatabase>) -> Router {
+fn create_app(state: AppState) -> Router {
     Router::new()
         .route("/ping", get(ping_handler))
         .route("/scan", post(scan_handler))
@@ -61,9 +105,12 @@ fn create_app(db: Arc<MediaDatabase>) -> Router {
         .route("/library", get(library_get_handler).post(library_post_handler))
         .route("/library/scan-and-store", post(scan_and_store_handler))
         .route("/stream/:id", get(stream_handler))
+        .route("/config", get(config_handler))
+        .route("/metadata/fetch/:id", post(fetch_metadata_handler))
+        .route("/poster/:id", get(poster_handler))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
-        .with_state(db)
+        .with_state(state)
 }
 
 #[derive(Deserialize)]
@@ -202,19 +249,19 @@ async fn metadata_handler(Json(request): Json<MetadataRequest>) -> Result<Json<V
 }
 
 async fn library_get_handler(
-    State(db): State<Arc<MediaDatabase>>,
+    State(state): State<AppState>,
     Query(filters): Query<LibraryFilters>
 ) -> Result<Json<Value>, StatusCode> {
     info!("Library GET request with filters: {:?}", filters);
-    library_handler_impl(db, filters).await
+    library_handler_impl(state.db, filters).await
 }
 
 async fn library_post_handler(
-    State(db): State<Arc<MediaDatabase>>,
+    State(state): State<AppState>,
     Json(filters): Json<LibraryFilters>
 ) -> Result<Json<Value>, StatusCode> {
     info!("Library POST request with filters: {:?}", filters);
-    library_handler_impl(db, filters).await
+    library_handler_impl(state.db, filters).await
 }
 
 async fn library_handler_impl(db: Arc<MediaDatabase>, filters: LibraryFilters) -> Result<Json<Value>, StatusCode> {
@@ -249,7 +296,7 @@ async fn library_handler_impl(db: Arc<MediaDatabase>, filters: LibraryFilters) -
 
 
 async fn scan_and_store_handler(
-    State(db): State<Arc<MediaDatabase>>,
+    State(state): State<AppState>,
     Json(request): Json<ScanAndStoreRequest>
 ) -> Result<Json<Value>, StatusCode> {
     // Use provided path or fall back to MEDIA_ROOT
@@ -320,7 +367,7 @@ async fn scan_and_store_handler(
         }
         
         // Store in database
-        match db.store_media(media_file).await {
+        match state.db.store_media(media_file).await {
             Ok(_) => {
                 stored_count += 1;
             }
@@ -345,7 +392,7 @@ async fn scan_and_store_handler(
 }
 
 async fn stream_handler(
-    State(db): State<Arc<MediaDatabase>>,
+    State(state): State<AppState>,
     Path(id): Path<String>, 
     headers: HeaderMap
 ) -> Result<Response, StatusCode> {
@@ -359,7 +406,7 @@ async fn stream_handler(
     };
     
     // Get media file from database
-    let media_file = match db.get_media(&db_id).await {
+    let media_file = match state.db.get_media(&db_id).await {
         Ok(Some(media)) => media,
         Ok(None) => {
             warn!("Media file not found: {}", id);
@@ -513,6 +560,120 @@ fn parse_range_header(range_str: &str, file_size: u64) -> Option<ByteRange> {
     }
 }
 
+async fn config_handler(
+    State(state): State<AppState>
+) -> Result<Json<Value>, StatusCode> {
+    info!("Config request");
+    
+    Ok(Json(json!({
+        "status": "success",
+        "config": {
+            "server_host": state.config.server_host,
+            "server_port": state.config.server_port,
+            "media_root": state.config.media_root.as_ref().map(|p| p.display().to_string()),
+            "dev_mode": state.config.dev_mode,
+            "database_configured": state.config.database_url.is_some(),
+            "redis_configured": state.config.redis_url.is_some(),
+            "transcode_cache_dir": state.config.transcode_cache_dir.display().to_string(),
+            "thumbnail_cache_dir": state.config.thumbnail_cache_dir.display().to_string(),
+        }
+    })))
+}
+
+async fn fetch_metadata_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>
+) -> Result<Json<Value>, StatusCode> {
+    info!("Metadata fetch request for media ID: {}", id);
+    
+    // Format ID for database lookup
+    let db_id = if id.starts_with("media:") {
+        id.clone()
+    } else {
+        format!("media:{}", id)
+    };
+    
+    // Get media file from database
+    let media_file = match state.db.get_media(&db_id).await {
+        Ok(Some(media)) => media,
+        Ok(None) => {
+            warn!("Media file not found: {}", id);
+            return Err(StatusCode::NOT_FOUND);
+        }
+        Err(e) => {
+            warn!("Database error: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    
+    // Fetch metadata
+    match state.metadata_service.fetch_metadata(&media_file).await {
+        Ok(detailed_info) => {
+            info!("Metadata fetched successfully for: {}", id);
+            
+            // Update the media file with external info
+            let mut updated_media = media_file.clone();
+            if let Some(ref mut metadata) = updated_media.metadata {
+                metadata.external_info = Some(detailed_info.external_info.clone());
+            }
+            
+            // Store updated media file
+            if let Err(e) = state.db.store_media(updated_media).await {
+                warn!("Failed to update media with metadata: {}", e);
+            }
+            
+            // Download poster if available
+            if let Some(poster_path) = &detailed_info.external_info.poster_url {
+                match state.metadata_service.cache_poster(poster_path, &id).await {
+                    Ok(path) => info!("Poster cached at: {:?}", path),
+                    Err(e) => warn!("Failed to cache poster: {}", e),
+                }
+            }
+            
+            Ok(Json(json!({
+                "status": "success",
+                "metadata": detailed_info
+            })))
+        }
+        Err(e) => {
+            warn!("Metadata fetch failed for {}: {}", id, e);
+            Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
+async fn poster_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>
+) -> Result<Response, StatusCode> {
+    info!("Poster request for media ID: {}", id);
+    
+    // Check for cached poster
+    if let Some(poster_path) = state.metadata_service.get_cached_poster(&id) {
+        // Serve the cached poster file
+        match tokio::fs::read(&poster_path).await {
+            Ok(bytes) => {
+                let mut response = Response::new(bytes.into());
+                response.headers_mut().insert(
+                    header::CONTENT_TYPE,
+                    header::HeaderValue::from_static("image/jpeg")
+                );
+                Ok(response)
+            }
+            Err(e) => {
+                warn!("Failed to read poster file: {}", e);
+                Err(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        }
+    } else {
+        // No cached poster available
+        Err(StatusCode::NOT_FOUND)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,8 +683,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_ping_endpoint() {
+        let config = Arc::new(Config::from_env().unwrap());
         let db = Arc::new(MediaDatabase::new_memory().await.unwrap());
-        let app = create_app(db);
+        let metadata_service = Arc::new(
+            metadata_service::MetadataService::new(None, config.cache_dir.clone())
+        );
+        let state = AppState { db, config, metadata_service };
+        let app = create_app(state);
 
         let response = app
             .oneshot(Request::builder().uri("/ping").body(Body::empty()).unwrap())
