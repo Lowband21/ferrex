@@ -21,7 +21,10 @@ use std::{
     collections::HashSet,
     fmt,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 use tokio::sync::{Mutex, Notify, Semaphore};
 use tracing::{debug, info, warn};
@@ -50,6 +53,9 @@ pub struct ImageService {
     in_flight_variants:
         Arc<Mutex<std::collections::HashMap<String, Arc<Notify>>>>,
     permits: Arc<Semaphore>,
+    // Diagnostics: counts of singleflight leaders/waiters for variants
+    sf_variant_leaders: Arc<AtomicU64>,
+    sf_variant_waiters: Arc<AtomicU64>,
 }
 
 impl fmt::Debug for ImageService {
@@ -70,6 +76,14 @@ impl fmt::Debug for ImageService {
             .field("http_client", &self.http_client)
             .field("in_flight_requests", &in_flight)
             .field("permits_available", &self.permits.available_permits())
+            .field(
+                "sf_variant_leaders",
+                &self.sf_variant_leaders.load(Ordering::Relaxed),
+            )
+            .field(
+                "sf_variant_waiters",
+                &self.sf_variant_waiters.load(Ordering::Relaxed),
+            )
             .finish()
     }
 }
@@ -114,6 +128,8 @@ impl ImageService {
             )),
             // Cap concurrent variant work; configurable via server wiring.
             permits: Arc::new(Semaphore::new(download_concurrency.max(1))),
+            sf_variant_leaders: Arc::new(AtomicU64::new(0)),
+            sf_variant_waiters: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -268,7 +284,10 @@ impl ImageService {
 
         // Write atomically: write to a temporary file, fsync, then rename.
         // This prevents readers from observing partial files during concurrent access.
-        let tmp_path = file_path.with_extension("tmp");
+        // Use a unique temp name to avoid collisions when concurrent writers target
+        // the same destination path (e.g., orchestrator + on-demand request).
+        let tmp_path = file_path
+            .with_extension(format!("tmp.{}", uuid::Uuid::new_v4().simple()));
         {
             use tokio::io::AsyncWriteExt;
             let mut f = tokio::fs::File::create(&tmp_path)
@@ -279,14 +298,19 @@ impl ImageService {
             f.sync_all().await.map_err(MediaError::Io)?;
         }
         // Best-effort: fsync the parent directory to persist the rename operation
-        if let Some(parent) = file_path.parent() {
-            if let Ok(dir) = tokio::fs::File::open(parent).await {
-                let _ = dir.sync_all().await; // ignore errors; rename below is still atomic
-            }
+        if let Some(parent) = file_path.parent()
+            && let Ok(dir) = tokio::fs::File::open(parent).await
+        {
+            let _ = dir.sync_all().await; // ignore errors; rename below is still atomic
         }
-        tokio::fs::rename(&tmp_path, &file_path)
-            .await
-            .map_err(MediaError::Io)?;
+        match tokio::fs::rename(&tmp_path, &file_path).await {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                // Another concurrent writer won the race; discard our temp file and use the existing one.
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+            }
+            Err(e) => return Err(MediaError::Io(e)),
+        }
 
         let (width, height) = match self.get_image_dimensions(&bytes) {
             Ok((w, h)) => (Some(w as i32), Some(h as i32)),
@@ -495,6 +519,25 @@ impl ImageService {
             })?;
 
         let video_path = media.path.clone();
+        // Per-variant singleflight to avoid duplicate thumbnail generation
+        let vkey =
+            format!("{}:{}", image_record.id.as_hyphenated(), &variant_name);
+        let (is_leader, notify) = self.subscribe_variant(&vkey).await;
+        if !is_leader {
+            notify.notified().await;
+            if let Some(existing) = self
+                .images
+                .get_image_variant(image_record.id, &variant_name)
+                .await?
+            {
+                return Ok(PathBuf::from(existing.file_path));
+            } else {
+                return Err(MediaError::Internal(
+                    "thumbnail singleflight finished but variant missing"
+                        .into(),
+                ));
+            }
+        }
 
         let variant_dir = self.cache_dir.join(image_folder).join(&variant_name);
         tokio::fs::create_dir_all(&variant_dir)
@@ -511,13 +554,20 @@ impl ImageService {
 
         let output_path = file_path.clone();
         let video_path_string = video_path.to_string_lossy().to_string();
-        tokio::task::spawn_blocking(move || {
+        let gen_result = tokio::task::spawn_blocking(move || {
             extract_frame_at_percentage(&video_path_string, &output_path, 0.3)
         })
         .await
         .map_err(|err| {
             MediaError::Internal(format!("Failed to join ffmpeg task: {err}"))
-        })??;
+        })?;
+        if let Err(e) = gen_result {
+            // Notify waiters on failure to avoid indefinite waits
+            self.complete_variant(&vkey).await;
+            return Err(e);
+        }
+        // Signal completion after successful extraction; DB rows will follow.
+        self.complete_variant(&vkey).await;
 
         let bytes =
             tokio::fs::read(&file_path).await.map_err(MediaError::Io)?;
@@ -565,6 +615,8 @@ impl ImageService {
                     )
                     .await?;
 
+                // Notify any waiters that thumbnail is ready
+                self.complete_variant(&vkey).await;
                 return Ok(PathBuf::from(&existing_variant.file_path));
             }
 
@@ -600,6 +652,9 @@ impl ImageService {
                 None,
             )
             .await?;
+
+        // Notify any waiters that thumbnail is ready
+        self.complete_variant(&vkey).await;
 
         Ok(file_path)
     }
@@ -896,10 +951,24 @@ impl ImageService {
     async fn subscribe_variant(&self, vkey: &str) -> (bool, Arc<Notify>) {
         let mut map = self.in_flight_variants.lock().await;
         if let Some(n) = map.get(vkey) {
+            let waiters =
+                self.sf_variant_waiters.fetch_add(1, Ordering::Relaxed) + 1;
+            let leaders = self.sf_variant_leaders.load(Ordering::Relaxed);
+            debug!(
+                "singleflight-variant wait: key={}, leaders={}, waiters={}",
+                vkey, leaders, waiters
+            );
             return (false, Arc::clone(n));
         }
         let notify = Arc::new(Notify::new());
         map.insert(vkey.to_string(), Arc::clone(&notify));
+        let leaders =
+            self.sf_variant_leaders.fetch_add(1, Ordering::Relaxed) + 1;
+        let waiters = self.sf_variant_waiters.load(Ordering::Relaxed);
+        debug!(
+            "singleflight-variant lead: key={}, leaders={}, waiters={}",
+            vkey, leaders, waiters
+        );
         (true, notify)
     }
 
@@ -910,6 +979,7 @@ impl ImageService {
         };
         if let Some(n) = notify {
             n.notify_waiters();
+            debug!("singleflight-variant complete: key={}", vkey);
         }
     }
 
@@ -1352,8 +1422,8 @@ fn extract_frame_at_percentage(
         },
     );
 
-    buffer
-        .save(output_path)
+    // Encode as JPEG and write atomically: write to temp file, fsync, then rename
+    atomic_write_jpeg_rgb8(output_path, width, height, buffer.into_raw())
         .map_err(|e| MediaError::Io(std::io::Error::other(e)))
 }
 
@@ -1366,4 +1436,171 @@ fn extract_frame_at_percentage(
     Err(MediaError::Internal(
         "FFmpeg support is required for thumbnail generation".into(),
     ))
+}
+
+/// Atomically write an RGB8 image as JPEG to the given output path.
+///
+/// Strategy:
+/// - Write the encoded JPEG to a sibling temp file (same directory, .tmp extension)
+/// - fsync the temp file to ensure contents are durable
+/// - Rename the temp file over the destination path (atomic on POSIX filesystems)
+/// - Best-effort fsync the parent directory to persist the rename metadata
+fn atomic_write_jpeg_rgb8(
+    output_path: &Path,
+    width: u32,
+    height: u32,
+    rgb_bytes: Vec<u8>,
+) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use image::ColorType;
+    use image::codecs::jpeg::JpegEncoder;
+    use std::fs::File;
+    use std::io::Write;
+
+    // Ensure parent directory exists
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let tmp_path = output_path
+        .with_extension(format!("tmp.{}", uuid::Uuid::new_v4().simple()));
+    {
+        let mut file = File::create(&tmp_path)?;
+        let mut encoder = JpegEncoder::new_with_quality(&mut file, 85);
+        encoder.encode(&rgb_bytes, width, height, ColorType::Rgb8.into())?;
+        file.flush()?;
+        file.sync_all()?;
+    }
+
+    match std::fs::rename(&tmp_path, output_path) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            // Another concurrent writer won; remove our temp and proceed.
+            let _ = std::fs::remove_file(&tmp_path);
+        }
+        Err(e) => return Err(Box::new(e)),
+    }
+
+    // Best-effort fsync of parent directory to persist rename metadata
+    if let Some(parent) = output_path.parent()
+        && let Ok(dir) = File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::atomic_write_jpeg_rgb8;
+
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn atomic_jpeg_write_does_not_expose_partial_file() {
+        // Large-ish buffer to make encoding take noticeable time
+        let width = 2000u32;
+        let height = 2000u32;
+        let mut rgb = Vec::with_capacity((width * height * 3) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                // simple gradient pattern
+                rgb.push((x % 256) as u8);
+                rgb.push((y % 256) as u8);
+                rgb.push(((x + y) % 256) as u8);
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let out = dir.path().join("test_atomic.jpg");
+        let tmp = out.with_extension("tmp");
+
+        // Marker for completion
+        let done = Arc::new(AtomicBool::new(false));
+        let done_w = done.clone();
+
+        // Start writer on a separate thread
+        let out_w = out.clone();
+        let rgb_w = rgb.clone();
+        let handle = std::thread::spawn(move || {
+            atomic_write_jpeg_rgb8(&out_w, width, height, rgb_w)
+                .expect("atomic write ok");
+            done_w.store(true, Ordering::SeqCst);
+        });
+
+        // While the writer is running, final file should not appear; temp file may exist
+        let start = Instant::now();
+        while !done.load(Ordering::SeqCst) {
+            assert!(!out.exists(), "final path should not exist until rename");
+            // tmp file may appear during write; don't assert either way
+            if start.elapsed() > Duration::from_secs(5) {
+                break; // encoding might be fast in CI; avoid spinning too long
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        // Join and verify results
+        handle.join().expect("writer thread");
+        assert!(out.exists(), "final file should exist after write");
+        assert!(!tmp.exists(), "temp file should be gone after rename");
+
+        // Basic sanity: resulting file is a JPEG with non-zero size
+        let meta = std::fs::metadata(&out).expect("metadata");
+        assert!(meta.len() > 0, "jpeg size should be > 0");
+    }
+
+    #[test]
+    fn concurrent_atomic_writes_to_same_output_do_not_corrupt() {
+        // Prepare two distinct RGB buffers (different colors/patterns)
+        let width = 800u32;
+        let height = 600u32;
+
+        let mut rgb_a = vec![0u8; (width * height * 3) as usize];
+        for i in (0..rgb_a.len()).step_by(3) {
+            rgb_a[i] = 255; // R
+            rgb_a[i + 1] = 0; // G
+            rgb_a[i + 2] = 0; // B
+        }
+
+        let mut rgb_b = vec![0u8; (width * height * 3) as usize];
+        for i in (0..rgb_b.len()).step_by(3) {
+            rgb_b[i] = 0; // R
+            rgb_b[i + 1] = 0; // G
+            rgb_b[i + 2] = 255; // B
+        }
+
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let out = dir.path().join("race.jpg");
+
+        // Launch two writers concurrently to the same destination
+        let out_a = out.clone();
+        let handle_a = std::thread::spawn(move || {
+            atomic_write_jpeg_rgb8(&out_a, width, height, rgb_a)
+                .expect("atomic write A ok");
+        });
+
+        let out_b = out.clone();
+        let handle_b = std::thread::spawn(move || {
+            atomic_write_jpeg_rgb8(&out_b, width, height, rgb_b)
+                .expect("atomic write B ok");
+        });
+
+        handle_a.join().expect("join A");
+        handle_b.join().expect("join B");
+
+        // Final file must exist and be decodable as JPEG
+        assert!(out.exists(), "final image should exist");
+
+        let data = std::fs::read(&out).expect("read");
+        assert!(!data.is_empty(), "jpeg not empty");
+
+        // Decode image; this fails if the file is corrupt/partial
+        let img = image::load_from_memory(&data).expect("decode jpeg");
+        assert_eq!(img.width(), width);
+        assert_eq!(img.height(), height);
+    }
 }

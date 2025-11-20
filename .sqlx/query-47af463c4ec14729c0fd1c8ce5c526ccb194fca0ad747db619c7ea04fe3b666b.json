@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO movie_alternative_titles (movie_id, iso_3166_1, title, title_type)\n               VALUES ($1, $2, $3, $4)\n               ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "47af463c4ec14729c0fd1c8ce5c526ccb194fca0ad747db619c7ea04fe3b666b"
+}

@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO movie_release_dates (\n                    movie_id, iso_3166_1, iso_639_1, certification,\n                    release_date, release_type, note, descriptors\n                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n                ON CONFLICT (movie_id, iso_3166_1, release_type, release_date) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Int2",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9a4c1379ba51985377c426b2ade4d9b0549c408d2577d6f5f13ee0b1ef40a905"
+}

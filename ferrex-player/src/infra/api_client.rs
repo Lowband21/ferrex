@@ -567,13 +567,14 @@ impl ApiClient {
                 let bytes = response.bytes().await?;
                 if let Some(expected) = cl {
                     if expected != bytes.len() {
-                        log::warn!(
-                            "[ApiClient] Content-Length mismatch for {}: header={} actual={} encoding={:?}",
+                        // Treat mismatches as hard errors to avoid decoding partial/corrupt images.
+                        return Err(anyhow::anyhow!(
+                            "Content-Length mismatch for {}: header={} actual={} encoding={:?}",
                             url,
                             expected,
                             bytes.len(),
                             encoding
-                        );
+                        ));
                     }
                 }
                 Ok(bytes.to_vec())

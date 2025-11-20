@@ -202,34 +202,44 @@ fn image_loader_stream_concurrent(
                                         );
                                     }
 
-                                    // Target on-screen widget dimensions so the server returns
-                                    // the nearest TMDB bucket >= requested width, and we then
-                                    // resize exactly to the widget size before uploading to the GPU.
-                                    // This keeps textures aligned with UI widget dimensions.
+                                    // Use a single source of truth for target pixel dimensions
+                                    // from ferrex-model's ImageSize::dimensions().
+                                    // Exceptions:
+                                    // - Episode still thumbnails are 16:9 (override to 400x225)
+                                    // - If dimensions() returns (0,0) (dynamic), fall back to legacy defaults
                                     let (target_w, target_h): (u32, u32) = {
                                         match (
                                             request_for_fetch.image_type,
                                             size,
                                         ) {
-                                            // Episode stills are 16:9 even when requested as Thumbnail
+                                            // Episode stills are wide thumbnails (16:9)
                                             (
                                                 ImageType::Episode,
                                                 ImageSize::Thumbnail,
                                             ) => (400, 225),
-                                            // Default mappings
-                                            (_, ImageSize::Thumbnail) => {
-                                                (150, 225)
-                                            } // small cards (2:3)
-                                            (_, ImageSize::Poster) => {
-                                                (185, 278)
-                                            } // standard posters (2:3)
-                                            (_, ImageSize::Full) => (300, 450), // hero/detail posters (2:3)
-                                            (_, ImageSize::Backdrop) => {
-                                                (400, 225)
-                                            } // wide cards / stills (16:9)
-                                            (_, ImageSize::Profile) => {
-                                                (120, 180)
-                                            } // cast/profile thumbs (2:3)
+                                            // Default: derive from model dimensions
+                                            _ => {
+                                                let (w, h) = size.dimensions();
+                                                let (mut wi, mut hi) =
+                                                    (w as u32, h as u32);
+                                                if wi == 0 || hi == 0 {
+                                                    // Legacy fallbacks for dynamic sizes
+                                                    match size {
+                                                        ImageSize::Full => {
+                                                            wi = 300;
+                                                            hi = 450;
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
+                                                // As a safety net, ensure non-zero
+                                                if wi == 0 || hi == 0 {
+                                                    // Conservative generic 2:3 default
+                                                    (185, 278)
+                                                } else {
+                                                    (wi, hi)
+                                                }
+                                            }
                                         }
                                     };
 
@@ -278,6 +288,72 @@ fn image_loader_stream_concurrent(
                                                     request_for_fetch,
                                                     msg,
                                                 );
+                                            }
+
+                                            // Quick header sniff: reject bodies that do not look like common image formats
+                                            // to avoid attempting to decode corrupt/partial data.
+                                            fn looks_like_supported_image(
+                                                b: &[u8],
+                                            ) -> bool
+                                            {
+                                                // JPEG: FF D8 FF
+                                                if b.len() >= 3
+                                                    && b[0] == 0xFF
+                                                    && b[1] == 0xD8
+                                                    && b[2] == 0xFF
+                                                {
+                                                    return true;
+                                                }
+                                                // PNG: 89 50 4E 47 0D 0A 1A 0A
+                                                if b.len() >= 8
+                                                    && b[0..8]
+                                                        == [
+                                                            0x89, 0x50, 0x4E,
+                                                            0x47, 0x0D, 0x0A,
+                                                            0x1A, 0x0A,
+                                                        ]
+                                                {
+                                                    return true;
+                                                }
+                                                // WebP: RIFF....WEBP
+                                                if b.len() >= 12
+                                                    && &b[0..4] == b"RIFF"
+                                                    && &b[8..12] == b"WEBP"
+                                                {
+                                                    return true;
+                                                }
+                                                // AVIF (ISOBMFF): ftyp + avif/avis brand
+                                                if b.len() >= 12
+                                                    && &b[4..8] == b"ftyp"
+                                                    && (&b[8..12] == b"avif"
+                                                        || &b[8..12] == b"avis")
+                                                {
+                                                    return true;
+                                                }
+                                                false
+                                            }
+
+                                            if !looks_like_supported_image(
+                                                &bytes,
+                                            ) {
+                                                let msg = format!(
+                                                    "Response does not look like a supported image for path {} ({} bytes)",
+                                                    path, byte_len
+                                                );
+                                                log::error!("{}", msg);
+                                                let full_url = format!(
+                                                    "{}{}?w={}",
+                                                    srv, path, target_w
+                                                );
+                                                crate::infra::image_log::log_fetch_failure_once(
+                                                    request_for_fetch.media_id,
+                                                    category,
+                                                    size,
+                                                    target_w,
+                                                    &full_url,
+                                                    &msg,
+                                                );
+                                                return Message::UnifiedImageLoadFailed(request_for_fetch, msg);
                                             }
 
                                             // Decode and resize to exact widget dimensions before creating the handle.

@@ -18,11 +18,10 @@ use ferrex_core::{
     types::{
         ids::{EpisodeID, MovieID, SeasonID, SeriesID},
         image_request::{
-            BackdropKind, BackdropSize, ImageRequest, PosterKind, PosterSize,
-            Priority, ProfileSize,
+            ImageRequest, PosterKind, PosterSize, Priority, ProfileSize,
         },
         media_id::MediaID,
-        util_types::ImageSize,
+        util_types::{ImageSize, ImageType},
     },
 };
 
@@ -213,10 +212,10 @@ pub fn handle_view_movie_details(
         // Queue image requests if not in cache
         if let Some(movie_details) = movie.details() {
             if movie_details.backdrop_path.is_some() {
-                let request = ImageRequest::backdrop(
+                let request = ImageRequest::new(
                     movie.id.to_uuid(),
-                    BackdropKind::Movie,
-                    BackdropSize::Quality,
+                    ImageSize::Backdrop,
+                    ImageType::Movie,
                 );
                 if state.image_service.get(&request).is_none() {
                     state.image_service.request_image(request);
@@ -379,10 +378,10 @@ pub fn handle_view_series(
         // Queue request if not in cache
         if let Some(details) = series.details() {
             if details.backdrop_path.is_some() {
-                let request = ImageRequest::backdrop(
+                let request = ImageRequest::new(
                     series.id.to_uuid(),
-                    BackdropKind::Series,
-                    BackdropSize::Quality,
+                    ImageSize::Backdrop,
+                    ImageType::Series,
                 );
                 if state.image_service.get(&request).is_none() {
                     state.image_service.request_image(request);
@@ -625,10 +624,10 @@ pub fn handle_view_season(
         if let Some(details) = season.details()
             && (details.poster_path.is_some() || !details.name.is_empty())
         {
-            let request = ImageRequest::backdrop(
+            let request = ImageRequest::new(
                 season.id().to_uuid(),
-                BackdropKind::Season,
-                BackdropSize::Quality,
+                ImageSize::Backdrop,
+                ImageType::Season,
             );
             if state.image_service.get(&request).is_none() {
                 state.image_service.request_image(request);

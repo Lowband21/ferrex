@@ -1,0 +1,130 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                ec.person_tmdb_id,\n                ec.credit_id,\n                COALESCE(ec.character, '') AS \"character!\",\n                ec.order_index,\n                p.name,\n                p.original_name,\n                p.profile_path,\n                p.gender,\n                p.known_for_department,\n                p.adult,\n                p.popularity,\n                p.imdb_id,\n                p.facebook_id,\n                p.instagram_id,\n                p.twitter_id,\n                p.wikidata_id,\n                p.tiktok_id,\n                p.youtube_id,\n                COALESCE(alias_data.aliases, ARRAY[]::TEXT[]) AS \"aliases!: Vec<String>\"\n            FROM episode_cast ec\n            JOIN persons p ON p.tmdb_id = ec.person_tmdb_id\n            LEFT JOIN (\n                SELECT tmdb_id, ARRAY_AGG(alias ORDER BY alias) AS aliases\n                FROM person_aliases\n                GROUP BY tmdb_id\n            ) alias_data ON alias_data.tmdb_id = ec.person_tmdb_id\n            WHERE ec.episode_id = $1\n            ORDER BY ec.order_index",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "person_tmdb_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "credit_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "character!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "order_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "original_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "profile_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "gender",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 8,
+        "name": "known_for_department",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "adult",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "popularity",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 11,
+        "name": "imdb_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "facebook_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "instagram_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "twitter_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "wikidata_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "tiktok_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "youtube_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "aliases!: Vec<String>",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      null,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "25546431c84a6092e92555b714d9142e7acb9223af781cef3f548beec0bab0f7"
+}

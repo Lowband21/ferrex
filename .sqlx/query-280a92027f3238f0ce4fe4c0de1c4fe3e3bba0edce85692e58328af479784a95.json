@@ -1,0 +1,118 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            tmdb_id,\n            season_number,\n            episode_number,\n            name,\n            overview,\n            air_date,\n            runtime,\n            still_path,\n            vote_average,\n            vote_count,\n            production_code,\n            imdb_id,\n            tvdb_id,\n            facebook_id,\n            instagram_id,\n            twitter_id,\n            wikidata_id\n        FROM episode_metadata\n        WHERE episode_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tmdb_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "season_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "episode_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "air_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 6,
+        "name": "runtime",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "still_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "vote_average",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 9,
+        "name": "vote_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "production_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "imdb_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "tvdb_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "facebook_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "instagram_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "twitter_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "wikidata_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "280a92027f3238f0ce4fe4c0de1c4fe3e3bba0edce85692e58328af479784a95"
+}

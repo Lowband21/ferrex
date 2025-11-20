@@ -19,7 +19,7 @@ use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::BackgroundEffect;
 use crate::domains::{player, ui};
 use crate::state::State;
-use ferrex_core::player_prelude::{BackdropKind, BackdropSize, ImageRequest};
+use ferrex_core::player_prelude::{ImageRequest, ImageSize, ImageType};
 use iced::widget::{Space, Stack, column, container, scrollable};
 use iced::{Element, Font, Length, Theme};
 
@@ -221,26 +221,26 @@ pub fn view(
 
         let backdrop_handle = match &state.domains.ui.state.view {
             ViewState::MovieDetail { movie_id, .. } => {
-                let request = ImageRequest::backdrop(
+                let request = ImageRequest::new(
                     movie_id.to_uuid(),
-                    BackdropKind::Movie,
-                    BackdropSize::Quality,
+                    ImageSize::Backdrop,
+                    ImageType::Movie,
                 );
                 state.image_service.get(&request)
             }
             ViewState::SeriesDetail { series_id, .. } => {
-                let request = ImageRequest::backdrop(
+                let request = ImageRequest::new(
                     series_id.to_uuid(),
-                    BackdropKind::Series,
-                    BackdropSize::Quality,
+                    ImageSize::Backdrop,
+                    ImageType::Series,
                 );
                 state.image_service.get(&request)
             }
             ViewState::SeasonDetail { season_id, .. } => {
-                let request = ImageRequest::backdrop(
+                let request = ImageRequest::new(
                     season_id.to_uuid(),
-                    BackdropKind::Season,
-                    BackdropSize::Quality,
+                    ImageSize::Backdrop,
+                    ImageType::Season,
                 );
                 state.image_service.get(&request)
             }

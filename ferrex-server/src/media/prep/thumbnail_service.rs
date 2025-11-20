@@ -562,7 +562,8 @@ fn save_frame_as_jpeg(
     use image::codecs::jpeg::JpegEncoder;
     use std::fs::{self, File};
 
-    let tmp_path = output_path.with_extension("tmp");
+    let tmp_path = output_path
+        .with_extension(format!("tmp.{}", uuid::Uuid::new_v4().simple()));
 
     // Write to a temporary file first
     {
@@ -578,9 +579,18 @@ fn save_frame_as_jpeg(
     }
 
     // fsync parent directory best-effort after rename
-    fs::rename(&tmp_path, &output_path).with_context(|| {
-        format!("Failed to rename temp file to {:?}", output_path)
-    })?;
+    // Rename; if another writer already produced the file, discard our temp file
+    match fs::rename(&tmp_path, &output_path) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let _ = fs::remove_file(&tmp_path);
+        }
+        Err(e) => {
+            return Err(e).with_context(|| {
+                format!("Failed to rename temp file to {:?}", output_path)
+            });
+        }
+    }
     if let Some(parent) = output_path.parent() {
         if let Ok(dir) = File::open(parent) {
             let _ = dir.sync_all();

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        UPDATE orchestrator_jobs\n                        SET priority = $1,\n                            available_at = LEAST(available_at, NOW()),\n                            updated_at = NOW()\n                        WHERE id = $2 AND state IN ('ready','deferred')\n                        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int2",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cfee8ca55dbc264a97ce1cbb26f5c51f93fa392762171defae1bff2c0531bcfa"
+}

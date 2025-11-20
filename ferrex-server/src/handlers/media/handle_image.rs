@@ -14,6 +14,7 @@ use std::io::ErrorKind;
 use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -152,15 +153,37 @@ pub async fn serve_image_handler(
                 (fallback_path, fallback_variant)
             }
             Ok(None) => {
-                warn!(
-                    "No fallback available: {}/{}/{}/{}",
-                    media_type,
-                    media_id,
-                    category_kind.as_str(),
-                    index
-                );
-                IMAGE_RESP_404.fetch_add(1, Ordering::Relaxed);
-                return Err(StatusCode::NOT_FOUND);
+                // Harden backdrop behavior: synchronously fetch and serve original on first request.
+                if matches!(category_kind, MediaImageKind::Backdrop) {
+                    let desired = plan
+                        .lookup_variant
+                        .clone()
+                        .unwrap_or_else(|| "original".to_string());
+                    match redownload_variant(&state, &params, &desired).await {
+                        Ok(new_path) => (new_path, desired),
+                        Err(_) => {
+                            warn!(
+                                "No fallback available and on-demand fetch failed: {}/{}/{}/{}",
+                                media_type,
+                                media_id,
+                                category_kind.as_str(),
+                                index
+                            );
+                            IMAGE_RESP_404.fetch_add(1, Ordering::Relaxed);
+                            return Err(StatusCode::NOT_FOUND);
+                        }
+                    }
+                } else {
+                    warn!(
+                        "No fallback available: {}/{}/{}/{}",
+                        media_type,
+                        media_id,
+                        category_kind.as_str(),
+                        index
+                    );
+                    IMAGE_RESP_404.fetch_add(1, Ordering::Relaxed);
+                    return Err(StatusCode::NOT_FOUND);
+                }
             }
             Err(e) => {
                 error!("Failed to select fallback: {}", e);
@@ -174,8 +197,23 @@ pub async fn serve_image_handler(
         let normalized =
             normalize_image_path(&image_path, state.config().cache_root());
 
-        match tokio::fs::metadata(&normalized).await {
-            Ok(meta) => {
+        // Open the file first, then obtain metadata from the open handle.
+        // This guarantees Content-Length and streamed bytes refer to the same inode,
+        // avoiding races where a concurrent rename swaps in a different file.
+        match File::open(&normalized).await {
+            Ok(file) => {
+                let mut file = file;
+                let meta = match file.metadata().await {
+                    Ok(m) => m,
+                    Err(e) => {
+                        error!(
+                            "Failed to read metadata for open image file {:?}: {}",
+                            normalized, e
+                        );
+                        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                    }
+                };
+
                 let file_size = meta.len();
                 let modified = match meta.modified() {
                     Ok(t) => t,
@@ -230,7 +268,7 @@ pub async fn serve_image_handler(
                     let resp = Response::builder()
                         .status(StatusCode::NOT_MODIFIED)
                         .header(header::ETAG, &etag_value)
-                        .header(header::LAST_MODIFIED, &last_modified)
+                        .header(header::LAST_MODIFIED, last_modified)
                         .header(
                             header::CACHE_CONTROL,
                             "public, max-age=604800, immutable",
@@ -247,79 +285,123 @@ pub async fn serve_image_handler(
                     return Ok::<_, StatusCode>(resp);
                 }
 
-                // Determine content type based on file extension
-                let content_type = match normalized
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| ext.to_lowercase())
-                    .as_deref()
-                {
-                    Some("jpg") | Some("jpeg") => "image/jpeg",
-                    Some("png") => "image/png",
-                    Some("webp") => "image/webp",
-                    Some("avif") => "image/avif",
-                    _ => "image/jpeg",
+                // Determine content type by sniffing file header (filenames are extension-less)
+                // Use a separate short-lived handle for sniffing so the streaming handle's
+                // cursor is never advanced (avoids truncated responses on failed rewind).
+                let content_type = {
+                    let mut head = [0u8; 16];
+                    match File::open(&normalized).await {
+                        Ok(mut sniff) => {
+                            let _ = sniff.read(&mut head).await; // best-effort
+                            sniff_mime_from_header(&head)
+                        }
+                        Err(_) => {
+                            // Fall back to default if we cannot open a second handle
+                            "image/jpeg"
+                        }
+                    }
                 };
 
                 // Stream file to avoid buffering entire image in memory
-                match File::open(&normalized).await {
-                    Ok(file) => {
-                        let stream = ReaderStream::new(file);
-                        let body = Body::from_stream(stream);
-                        let elapsed = t_start.elapsed().as_millis().to_string();
-                        let resp = Response::builder()
-                            .status(StatusCode::OK)
-                            .header(header::CONTENT_TYPE, content_type)
-                            .header(
-                                header::CONTENT_LENGTH,
-                                file_size.to_string(),
-                            )
-                            .header(header::ETAG, etag_value)
-                            .header(header::LAST_MODIFIED, last_modified)
-                            .header(
-                                header::CACHE_CONTROL,
-                                "public, max-age=604800, immutable",
-                            )
-                            .header("X-Variant-Served", served_variant.as_str())
-                            .header(
-                                "X-Variant-Requested",
-                                requested_header_value.as_str(),
-                            )
-                            .header("X-Serve-Latency-Ms", elapsed)
-                            .body(body)
-                            .unwrap();
-                        IMAGE_RESP_200.fetch_add(1, Ordering::Relaxed);
-                        return Ok::<_, StatusCode>(resp);
-                    }
-                    Err(e)
-                        if e.kind() == ErrorKind::NotFound
-                            && !fetch_attempted =>
-                    {
-                        fetch_attempted = true;
-                        match redownload_variant(
-                            &state,
-                            &params,
-                            &served_variant,
-                        )
-                        .await
-                        {
-                            Ok(new_path) => {
-                                image_path = new_path;
-                                continue;
-                            }
-                            Err(status) => return Err(status),
-                        }
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed to open image file for streaming {:?}: {}",
-                            normalized, e
-                        );
-                        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-                    }
-                }
+                let stream = ReaderStream::new(file);
+                let body = Body::from_stream(stream);
+                let elapsed = t_start.elapsed().as_millis().to_string();
+                let resp = Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, content_type)
+                    .header(header::CONTENT_LENGTH, file_size.to_string())
+                    .header(header::ETAG, etag_value)
+                    .header(header::LAST_MODIFIED, last_modified)
+                    .header(
+                        header::CACHE_CONTROL,
+                        "public, max-age=604800, immutable",
+                    )
+                    .header("X-Variant-Served", served_variant.as_str())
+                    .header(
+                        "X-Variant-Requested",
+                        requested_header_value.as_str(),
+                    )
+                    .header("X-Serve-Latency-Ms", elapsed)
+                    .body(body)
+                    .unwrap();
+                IMAGE_RESP_200.fetch_add(1, Ordering::Relaxed);
+                return Ok::<_, StatusCode>(resp);
             }
             Err(e) if e.kind() == ErrorKind::NotFound && !fetch_attempted => {
+                // First, retry open briefly to ride out rename races from the scanner/fetcher.
+                let mut reopened: Option<File> = None;
+                let mut delay = std::time::Duration::from_millis(3);
+                for _ in 0..6 {
+                    if let Ok(f) = File::open(&normalized).await {
+                        reopened = Some(f);
+                        break;
+                    }
+                    tokio::time::sleep(delay).await;
+                    // exponential backoff up to ~100ms total
+                    delay = delay.saturating_mul(2);
+                }
+                if let Some(file) = reopened {
+                    // Found the file after retry; proceed to stream like the Ok branch
+                    let mut file = file;
+                    let meta = match file.metadata().await {
+                        Ok(m) => m,
+                        Err(e) => {
+                            error!(
+                                "Failed to read metadata after reopen for {:?}: {}",
+                                normalized, e
+                            );
+                            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                        }
+                    };
+                    let file_size = meta.len();
+                    let modified = match meta.modified() {
+                        Ok(t) => t,
+                        Err(e) => {
+                            warn!(
+                                "No modified time for {:?}: {}",
+                                image_path, e
+                            );
+                            std::time::SystemTime::UNIX_EPOCH
+                        }
+                    };
+                    let last_modified = fmt_http_date(modified);
+                    // Build ETag
+                    let secs = modified
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+                        .as_secs();
+                    let etag_value = format!("W/\"{}-{}\"", file_size, secs);
+                    // Sniff content type
+                    let mut head = [0u8; 16];
+                    let _ = file.read(&mut head).await;
+                    let _ = file.rewind().await;
+                    let content_type = sniff_mime_from_header(&head);
+                    let stream = ReaderStream::new(file);
+                    let body = Body::from_stream(stream);
+                    let elapsed = t_start.elapsed().as_millis().to_string();
+                    let resp = Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, content_type)
+                        .header(header::CONTENT_LENGTH, file_size.to_string())
+                        .header(header::ETAG, etag_value)
+                        .header(header::LAST_MODIFIED, last_modified)
+                        .header(
+                            header::CACHE_CONTROL,
+                            "public, max-age=604800, immutable",
+                        )
+                        .header("X-Variant-Served", served_variant.as_str())
+                        .header(
+                            "X-Variant-Requested",
+                            requested_header_value.as_str(),
+                        )
+                        .header("X-Serve-Latency-Ms", elapsed)
+                        .body(body)
+                        .unwrap();
+                    IMAGE_RESP_200.fetch_add(1, Ordering::Relaxed);
+                    return Ok::<_, StatusCode>(resp);
+                }
+
+                // If still not found, fall back to one synchronous fetch attempt.
                 fetch_attempted = true;
                 match redownload_variant(&state, &params, &served_variant).await
                 {
@@ -331,10 +413,112 @@ pub async fn serve_image_handler(
                 }
             }
             Err(e) => {
-                error!("Failed to stat image file {:?}: {}", normalized, e);
+                error!(
+                    "Failed to open image file for streaming {:?}: {}",
+                    normalized, e
+                );
                 return Err(StatusCode::INTERNAL_SERVER_ERROR);
             }
         }
+    }
+}
+
+// Simple MIME sniffer for common image formats used by TMDB/CDNs.
+// Falls back to image/jpeg to preserve prior behavior.
+fn sniff_mime_from_header(head: &[u8]) -> &'static str {
+    // JPEG: FF D8 FF
+    if head.len() >= 3 && head[0] == 0xFF && head[1] == 0xD8 && head[2] == 0xFF
+    {
+        return "image/jpeg";
+    }
+    // PNG: 89 50 4E 47 0D 0A 1A 0A
+    if head.len() >= 8
+        && head[0..8] == [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+    {
+        return "image/png";
+    }
+    // WebP (RIFF....WEBP)
+    if head.len() >= 12 && &head[0..4] == b"RIFF" && &head[8..12] == b"WEBP" {
+        return "image/webp";
+    }
+    // AVIF (ISOBMFF) heuristic: ftyp box with brand avif/avis at bytes 4..8
+    if head.len() >= 12
+        && &head[4..8] == b"ftyp"
+        && (&head[8..12] == b"avif" || &head[8..12] == b"avis")
+    {
+        return "image/avif";
+    }
+    "image/jpeg"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncReadExt;
+
+    // Verify that opening a file first and then reading metadata yields a stable
+    // content-length that matches the bytes read even if the on-disk path is
+    // concurrently replaced via atomic rename.
+    #[tokio::test]
+    async fn open_first_yields_consistent_length_on_concurrent_rename() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let path = tmp.path().join("race.jpg");
+
+        // Initial content A (128 KiB)
+        let initial = vec![b'A'; 128 * 1024];
+        std::fs::write(&path, &initial).expect("write initial");
+
+        // Open the file first
+        let mut file = File::open(&path).await.expect("open initial");
+        let meta = file.metadata().await.expect("metadata for open file");
+        let announced_len = meta.len() as usize;
+
+        // Concurrently replace the file on disk with different content B (256 KiB)
+        let path2 = path.clone();
+        let handle = tokio::task::spawn_blocking(move || {
+            let replacement = vec![b'B'; 256 * 1024];
+            let tmpfile = path2.with_extension("tmp-replacement");
+            std::fs::write(&tmpfile, &replacement).expect("write replacement");
+            std::fs::rename(&tmpfile, &path2).expect("rename replacement");
+        });
+
+        handle.await.expect("rename task");
+
+        // Read all bytes from the originally opened handle
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).await.expect("read to end");
+
+        assert_eq!(announced_len, buf.len(), "length matches bytes read");
+        assert_eq!(buf.first().copied(), Some(b'A'));
+        assert_eq!(buf.last().copied(), Some(b'A'));
+    }
+
+    #[test]
+    fn sniff_mime_recognizes_common_formats() {
+        // JPEG
+        assert_eq!(
+            sniff_mime_from_header(&[0xFF, 0xD8, 0xFF, 0xDB]),
+            "image/jpeg"
+        );
+        // PNG
+        assert_eq!(
+            sniff_mime_from_header(&[
+                0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0
+            ]),
+            "image/png"
+        );
+        // WebP: RIFF....WEBP
+        let mut webp = [0u8; 12];
+        webp[0..4].copy_from_slice(b"RIFF");
+        webp[8..12].copy_from_slice(b"WEBP");
+        assert_eq!(sniff_mime_from_header(&webp), "image/webp");
+        // AVIF: ....ftypavif
+        let mut avif = [0u8; 12];
+        avif[4..8].copy_from_slice(b"ftyp");
+        avif[8..12].copy_from_slice(b"avif");
+        assert_eq!(sniff_mime_from_header(&avif), "image/avif");
+        // Fallback
+        assert_eq!(sniff_mime_from_header(&[0u8; 0]), "image/jpeg");
     }
 }
 
