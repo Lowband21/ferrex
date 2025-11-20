@@ -1,14 +1,22 @@
+#![cfg(feature = "database")]
+
+use std::any::type_name_of_val;
+use std::fmt;
 use std::sync::Arc;
 
+#[cfg(feature = "database")]
 use crate::database::ports::{
     folder_inventory::FolderInventoryRepository,
     images::ImageRepository,
+    indices::IndicesRepository,
     library::LibraryRepository,
     media_files::{MediaFilesReadPort, MediaFilesWritePort},
     media_references::MediaReferencesRepository,
     processing_status::ProcessingStatusRepository,
     query::QueryRepository,
     rbac::RbacRepository,
+    security_settings::SecuritySettingsRepository,
+    setup_claims::SetupClaimsRepository,
     sync_sessions::SyncSessionsRepository,
     users::UsersRepository,
     watch_metrics::WatchMetricsReadPort,
@@ -17,9 +25,10 @@ use crate::database::ports::{
 #[cfg(feature = "database")]
 use crate::database::{
     infrastructure::postgres::{
-        PostgresFolderInventoryRepository, PostgresImageRepository, PostgresLibraryRepository,
-        PostgresMediaReferencesRepository, PostgresMediaRepository,
+        PostgresFolderInventoryRepository, PostgresImageRepository, PostgresIndicesRepository,
+        PostgresLibraryRepository, PostgresMediaReferencesRepository, PostgresMediaRepository,
         PostgresProcessingStatusRepository, PostgresQueryRepository, PostgresRbacRepository,
+        PostgresSecuritySettingsRepository, PostgresSetupClaimsRepository,
         PostgresSyncSessionsRepository, PostgresUsersRepository, PostgresWatchMetricsRepository,
         PostgresWatchStatusRepository,
     },
@@ -41,6 +50,8 @@ pub struct AppUnitOfWork {
 
     pub users: Arc<dyn UsersRepository>,
     pub rbac: Arc<dyn RbacRepository>,
+    pub security_settings: Arc<dyn SecuritySettingsRepository>,
+    pub setup_claims: Arc<dyn SetupClaimsRepository>,
 
     pub watch_status: Arc<dyn WatchStatusRepository>,
     pub watch_metrics: Arc<dyn WatchMetricsReadPort>,
@@ -49,6 +60,57 @@ pub struct AppUnitOfWork {
 
     pub folder_inventory: Arc<dyn FolderInventoryRepository>,
     pub processing_status: Arc<dyn ProcessingStatusRepository>,
+    pub indices: Arc<dyn IndicesRepository>,
+}
+
+impl fmt::Debug for AppUnitOfWork {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AppUnitOfWork")
+            .field("libraries", &type_name_of_val(self.libraries.as_ref()))
+            .field("media_refs", &type_name_of_val(self.media_refs.as_ref()))
+            .field(
+                "media_files_read",
+                &type_name_of_val(self.media_files_read.as_ref()),
+            )
+            .field(
+                "media_files_write",
+                &type_name_of_val(self.media_files_write.as_ref()),
+            )
+            .field("images", &type_name_of_val(self.images.as_ref()))
+            .field("query", &type_name_of_val(self.query.as_ref()))
+            .field("users", &type_name_of_val(self.users.as_ref()))
+            .field("rbac", &type_name_of_val(self.rbac.as_ref()))
+            .field(
+                "security_settings",
+                &type_name_of_val(self.security_settings.as_ref()),
+            )
+            .field(
+                "setup_claims",
+                &type_name_of_val(self.setup_claims.as_ref()),
+            )
+            .field(
+                "watch_status",
+                &type_name_of_val(self.watch_status.as_ref()),
+            )
+            .field(
+                "watch_metrics",
+                &type_name_of_val(self.watch_metrics.as_ref()),
+            )
+            .field(
+                "sync_sessions",
+                &type_name_of_val(self.sync_sessions.as_ref()),
+            )
+            .field(
+                "folder_inventory",
+                &type_name_of_val(self.folder_inventory.as_ref()),
+            )
+            .field(
+                "processing_status",
+                &type_name_of_val(self.processing_status.as_ref()),
+            )
+            .field("indices", &type_name_of_val(self.indices.as_ref()))
+            .finish()
+    }
 }
 
 pub struct AppUnitOfWorkBuilder {
@@ -61,6 +123,8 @@ pub struct AppUnitOfWorkBuilder {
 
     users: Option<Arc<dyn UsersRepository>>,
     rbac: Option<Arc<dyn RbacRepository>>,
+    security_settings: Option<Arc<dyn SecuritySettingsRepository>>,
+    setup_claims: Option<Arc<dyn SetupClaimsRepository>>,
 
     watch_status: Option<Arc<dyn WatchStatusRepository>>,
     watch_metrics: Option<Arc<dyn WatchMetricsReadPort>>,
@@ -69,6 +133,30 @@ pub struct AppUnitOfWorkBuilder {
 
     folder_inventory: Option<Arc<dyn FolderInventoryRepository>>,
     processing_status: Option<Arc<dyn ProcessingStatusRepository>>,
+    indices: Option<Arc<dyn IndicesRepository>>,
+}
+
+impl fmt::Debug for AppUnitOfWorkBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AppUnitOfWorkBuilder")
+            .field("libraries", &self.libraries.is_some())
+            .field("media_refs", &self.media_refs.is_some())
+            .field("media_files_read", &self.media_files_read.is_some())
+            .field("media_files_write", &self.media_files_write.is_some())
+            .field("images", &self.images.is_some())
+            .field("query", &self.query.is_some())
+            .field("users", &self.users.is_some())
+            .field("rbac", &self.rbac.is_some())
+            .field("security_settings", &self.security_settings.is_some())
+            .field("setup_claims", &self.setup_claims.is_some())
+            .field("watch_status", &self.watch_status.is_some())
+            .field("watch_metrics", &self.watch_metrics.is_some())
+            .field("sync_sessions", &self.sync_sessions.is_some())
+            .field("folder_inventory", &self.folder_inventory.is_some())
+            .field("processing_status", &self.processing_status.is_some())
+            .field("indices", &self.indices.is_some())
+            .finish()
+    }
 }
 
 impl Default for AppUnitOfWorkBuilder {
@@ -82,11 +170,14 @@ impl Default for AppUnitOfWorkBuilder {
             query: None,
             users: None,
             rbac: None,
+            security_settings: None,
+            setup_claims: None,
             watch_status: None,
             watch_metrics: None,
             sync_sessions: None,
             folder_inventory: None,
             processing_status: None,
+            indices: None,
         }
     }
 }
@@ -128,6 +219,10 @@ impl AppUnitOfWorkBuilder {
         self.rbac = Some(repo);
         self
     }
+    pub fn with_setup_claims(mut self, repo: Arc<dyn SetupClaimsRepository>) -> Self {
+        self.setup_claims = Some(repo);
+        self
+    }
     pub fn with_watch_status(mut self, repo: Arc<dyn WatchStatusRepository>) -> Self {
         self.watch_status = Some(repo);
         self
@@ -146,6 +241,10 @@ impl AppUnitOfWorkBuilder {
     }
     pub fn with_processing_status(mut self, repo: Arc<dyn ProcessingStatusRepository>) -> Self {
         self.processing_status = Some(repo);
+        self
+    }
+    pub fn with_indices(mut self, repo: Arc<dyn IndicesRepository>) -> Self {
+        self.indices = Some(repo);
         self
     }
 
@@ -177,6 +276,12 @@ impl AppUnitOfWorkBuilder {
             rbac: self
                 .rbac
                 .ok_or_else(|| "missing RbacRepository".to_string())?,
+            security_settings: self
+                .security_settings
+                .ok_or_else(|| "missing SecuritySettingsRepository".to_string())?,
+            setup_claims: self
+                .setup_claims
+                .ok_or_else(|| "missing SetupClaimsRepository".to_string())?,
             watch_status: self
                 .watch_status
                 .ok_or_else(|| "missing WatchStatusRepository".to_string())?,
@@ -192,6 +297,9 @@ impl AppUnitOfWorkBuilder {
             processing_status: self
                 .processing_status
                 .ok_or_else(|| "missing ProcessingStatusRepository".to_string())?,
+            indices: self
+                .indices
+                .ok_or_else(|| "missing IndicesRepository".to_string())?,
         })
     }
 }
@@ -234,6 +342,14 @@ impl AppUnitOfWorkBuilder {
         let rbac: Arc<dyn RbacRepository> = Arc::new(PostgresRbacRepository::new(pool.clone()));
         self.rbac = Some(rbac);
 
+        let security: Arc<dyn SecuritySettingsRepository> =
+            Arc::new(PostgresSecuritySettingsRepository::new(pool.clone()));
+        self.security_settings = Some(security);
+
+        let setup_claims: Arc<dyn SetupClaimsRepository> =
+            Arc::new(PostgresSetupClaimsRepository::new(pool.clone()));
+        self.setup_claims = Some(setup_claims);
+
         let watch_status: Arc<dyn WatchStatusRepository> =
             Arc::new(PostgresWatchStatusRepository::new(pool.clone()));
         self.watch_status = Some(watch_status);
@@ -249,6 +365,10 @@ impl AppUnitOfWorkBuilder {
         let folder_inventory: Arc<dyn FolderInventoryRepository> =
             Arc::new(PostgresFolderInventoryRepository::new(pool.clone()));
         self.folder_inventory = Some(folder_inventory);
+
+        let indices: Arc<dyn IndicesRepository> =
+            Arc::new(PostgresIndicesRepository::new(pool.clone()));
+        self.indices = Some(indices);
 
         let processing_status: Arc<dyn ProcessingStatusRepository> =
             Arc::new(PostgresProcessingStatusRepository::new(pool));

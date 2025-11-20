@@ -1,5 +1,5 @@
 use anyhow::{Context, anyhow};
-use ferrex_core::orchestration::config::OrchestratorConfig;
+use ferrex_core::{orchestration::config::OrchestratorConfig, scanner::settings};
 use serde::Deserialize;
 use std::{
     env, fs,
@@ -117,6 +117,10 @@ impl Config {
     }
 }
 
+fn default_video_extensions() -> Vec<String> {
+    settings::default_video_file_extensions_vec()
+}
+
 /// Top-level scanner settings. Use these to tune how quickly new folders are
 /// queued, how many workers run in parallel, and when a bulk scan is considered
 /// finished.
@@ -136,6 +140,11 @@ pub struct ScannerConfig {
     /// declares the bulk scan complete. Shorter windows flip to maintenance
     /// faster; longer windows help when the filesystem reports changes slowly.
     pub quiescence_window_ms: u64,
+    /// File extensions treated as video assets by the filesystem watcher.
+    /// Defaults mirror the core's built-in allow-list so future user overrides
+    /// can flow through without diverging behaviour.
+    #[serde(default = "default_video_extensions")]
+    pub video_extensions: Vec<String>,
 }
 
 impl Default for ScannerConfig {
@@ -150,6 +159,7 @@ impl Default for ScannerConfig {
             // Should make this num_cpus?
             library_actor_max_outstanding_jobs: 32,
             quiescence_window_ms: 5_000,
+            video_extensions: default_video_extensions(),
         }
     }
 }

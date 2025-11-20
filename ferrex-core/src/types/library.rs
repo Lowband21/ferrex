@@ -5,9 +5,12 @@ use rkyv::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::types::Media;
+use crate::types::media::Media;
 
-use super::{ArchivedLibraryID, ArchivedMedia, ArchivedMovieReference, LibraryID};
+use super::{
+    ids::{ArchivedLibraryID, LibraryID},
+    media::{ArchivedMedia, ArchivedMovieReference},
+};
 
 /// Read-only operations for library-like types
 pub trait LibraryLike {

@@ -11,7 +11,7 @@ use crate::infrastructure::repository::{Accessor, ReadWrite};
 use crate::infrastructure::{
     adapters::api_client_adapter::ApiClientAdapter, api_types::UserWatchState,
 };
-use ferrex_core::{InProgressItem, MediaID, MediaIDLike, SeasonDetails};
+use ferrex_core::player_prelude::{InProgressItem, MediaID, MediaIDLike, SeasonDetails};
 use iced::Task;
 use std::sync::Arc;
 
@@ -21,7 +21,7 @@ pub struct MediaDomainState {
     // Media management state
     pub user_watch_state: Option<UserWatchState>,
     pub current_season_details: Option<SeasonDetails>,
-    pub current_media_id: Option<ferrex_core::MediaID>,
+    pub current_media_id: Option<MediaID>,
     pub pending_resume_position: Option<f32>, // Resume position for next media to play
     pub last_ui_refresh_for_progress: Option<std::time::Instant>, // Track last UI refresh for debouncing
 

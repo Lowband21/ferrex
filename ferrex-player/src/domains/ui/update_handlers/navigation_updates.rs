@@ -8,9 +8,18 @@ use crate::{
     state_refactored::State,
 };
 use ferrex_core::{
-    BackdropKind, BackdropSize, EpisodeID, ImageRequest, MediaID, MediaIDLike, MediaOps, MovieID,
-    MovieLike, PosterKind, PosterSize, Priority, ProfileSize, SeasonID, SeasonLike, SeriesID,
-    SeriesLike,
+    traits::{
+        id::MediaIDLike,
+        media_ops::MediaOps,
+        sub_like::{MovieLike, SeasonLike, SeriesLike},
+    },
+    types::{
+        ids::{EpisodeID, MovieID, SeasonID, SeriesID},
+        image_request::{
+            BackdropKind, BackdropSize, ImageRequest, PosterKind, PosterSize, Priority, ProfileSize,
+        },
+        media_id::MediaID,
+    },
 };
 
 /// Updates background shader depth regions when transitioning to a detail view
@@ -77,9 +86,9 @@ pub fn handle_view_details(state: &mut State, media: MediaID) -> Task<Message> {
         };
     } else {
         // NEW ARCHITECTURE: Find movie in MediaStore
-        let movie_id = ferrex_core::MovieID::new(media.id.clone())
-            .unwrap_or_else(|_| ferrex_core::MovieID::new("unknown".to_string()).unwrap());
-        let media_id = ferrex_core::MediaID::Movie(movie_id);
+        let movie_id = MovieID::new(media.id.clone())
+            .unwrap_or_else(|_| MovieID::new("unknown".to_string()).unwrap());
+        let media_id = MediaID::Movie(movie_id);
 
         if let Ok(store) = state.domains.media.state.media_store.read() {
             // TODO: Media state reference outside of media domain

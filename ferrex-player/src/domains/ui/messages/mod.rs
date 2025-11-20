@@ -1,9 +1,9 @@
 pub mod subscriptions;
 
 use crate::domains::ui::{DisplayMode, views::carousel::CarouselMessage};
-use ferrex_core::{
-    EpisodeID, LibraryID, MediaID, MediaIDLike, MovieID, SeasonID, SeriesID, SortBy, UiDecade,
-    UiGenre, UiResolution, UiWatchStatus,
+use ferrex_core::player_prelude::{
+    EpisodeID, Library, LibraryID, MediaID, MediaIDLike, MovieID, SeasonID, SeriesID, SortBy,
+    UiDecade, UiGenre, UiResolution, UiWatchStatus,
 };
 use iced::Size;
 use iced::widget::scrollable;
@@ -134,7 +134,7 @@ pub enum Message {
     ToggleFullscreen,                 // Proxy for Media::ToggleFullscreen
     SelectLibrary(Option<LibraryID>), // Proxy for Library::SelectLibrary
     PlayMediaWithId(MediaID),         // Proxy for Media::PlayMediaWithId
-    PlaySeriesNextEpisode(ferrex_core::SeriesID), // Play next unwatched/in-progress episode
+    PlaySeriesNextEpisode(SeriesID),  // Play next unwatched/in-progress episode
 
     // TV Show loading
     //TvShowLoaded(String, Result<TvShowDetails, String>), // series_id, result
@@ -143,20 +143,20 @@ pub enum Message {
     AggregateAllLibraries, // Signal to aggregate all libraries
 
     // Library management proxies
-    ShowLibraryForm(Option<ferrex_core::types::library::Library>), // Proxy for Library::ShowLibraryForm
-    HideLibraryForm,                       // Proxy for Library::HideLibraryForm
-    ScanLibrary(LibraryID),                // Proxy for Library::ScanLibrary_
-    DeleteLibrary(LibraryID),              // Proxy for Library::DeleteLibrary
-    UpdateLibraryFormName(String),         // Proxy for Library::UpdateLibraryFormName
-    UpdateLibraryFormType(String),         // Proxy for Library::UpdateLibraryFormType
-    UpdateLibraryFormPaths(String),        // Proxy for Library::UpdateLibraryFormPaths
+    ShowLibraryForm(Option<Library>), // Proxy for Library::ShowLibraryForm
+    HideLibraryForm,                  // Proxy for Library::HideLibraryForm
+    ScanLibrary(LibraryID),           // Proxy for Library::ScanLibrary_
+    DeleteLibrary(LibraryID),         // Proxy for Library::DeleteLibrary
+    UpdateLibraryFormName(String),    // Proxy for Library::UpdateLibraryFormName
+    UpdateLibraryFormType(String),    // Proxy for Library::UpdateLibraryFormType
+    UpdateLibraryFormPaths(String),   // Proxy for Library::UpdateLibraryFormPaths
     UpdateLibraryFormScanInterval(String), // Proxy for Library::UpdateLibraryFormScanInterval
-    ToggleLibraryFormEnabled,              // Proxy for Library::ToggleLibraryFormEnabled
-    ToggleLibraryFormStartScan,            // Proxy for Library::ToggleLibraryFormStartScan
-    SubmitLibraryForm,                     // Proxy for Library::SubmitLibraryForm
-    PauseLibraryScan(LibraryID, Uuid),     // Proxy for Library::PauseScan
-    ResumeLibraryScan(LibraryID, Uuid),    // Proxy for Library::ResumeScan
-    CancelLibraryScan(LibraryID, Uuid),    // Proxy for Library::CancelScan
+    ToggleLibraryFormEnabled,         // Proxy for Library::ToggleLibraryFormEnabled
+    ToggleLibraryFormStartScan,       // Proxy for Library::ToggleLibraryFormStartScan
+    SubmitLibraryForm,                // Proxy for Library::SubmitLibraryForm
+    PauseLibraryScan(LibraryID, Uuid), // Proxy for Library::PauseScan
+    ResumeLibraryScan(LibraryID, Uuid), // Proxy for Library::ResumeScan
+    CancelLibraryScan(LibraryID, Uuid), // Proxy for Library::CancelScan
     // Scanner metrics + admin actions
     FetchScanMetrics,        // Proxy for Library::FetchScanMetrics
     ResetLibrary(LibraryID), // Proxy for Library::ResetLibrary

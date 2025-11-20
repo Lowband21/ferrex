@@ -1,7 +1,8 @@
-use crate::database::PostgresDatabase;
+use crate::database::ports::rbac::RbacRepository;
 use crate::database::ports::users::UsersRepository;
-use crate::ports::rbac::RbacRepository;
-use crate::{Result, User, UserSession};
+use crate::error::Result;
+use crate::user::UserSession;
+use crate::{database::PostgresDatabase, user::User};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 

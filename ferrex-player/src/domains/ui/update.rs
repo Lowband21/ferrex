@@ -11,7 +11,14 @@ use crate::{
     infrastructure::api_types::LibraryType,
     state_refactored::State,
 };
-use ferrex_core::{EpisodeLike, Media, MediaIDLike, MediaLike, MediaType, MovieLike, SortOrder};
+use ferrex_core::{
+    player_prelude::{
+        EpisodeLike, ImageRequest, Media, MediaIDLike, MediaType, MediaTypeFilter, MovieLike,
+        PosterKind, PosterSize, Priority, SortOrder, UiResolution, UiWatchStatus,
+    },
+    query::filtering::{FilterRequestParams, build_filter_indices_request, hash_filter_spec},
+    types::image_request::EpisodeStillSize,
+};
 use iced::Task;
 use iced::widget::{operation::scroll_to, scrollable::AbsoluteOffset};
 use std::time::Instant;
@@ -215,10 +222,6 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         }
         ui::Message::RequestFilteredPositions => {
             // Build a FilterIndicesRequest from current UI filters (Phase 1: movies only)
-            use ferrex_core::query::{
-                filtering::{FilterRequestParams, build_filter_indices_request, hash_filter_spec},
-                types::MediaTypeFilter,
-            };
             let api = state.api_service.clone();
             let active_lib = state.tab_manager.active_tab_id().library_id();
             let active_type = state.tab_manager.active_tab_type().cloned();
@@ -230,9 +233,8 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                         let ui = &state.domains.ui.state;
                         let has_genres = !ui.selected_genres.is_empty();
                         let has_decade = ui.selected_decade.is_some();
-                        let has_resolution =
-                            ui.selected_resolution != ferrex_core::UiResolution::Any;
-                        let has_watch = ui.selected_watch_status != ferrex_core::UiWatchStatus::Any;
+                        let has_resolution = ui.selected_resolution != UiResolution::Any;
+                        let has_watch = ui.selected_watch_status != UiWatchStatus::Any;
                         let has_search = !ui.search_query.trim().is_empty();
                         has_genres || has_decade || has_resolution || has_watch || has_search
                     };
@@ -364,8 +366,8 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         ui::Message::ClearFilters => {
             state.domains.ui.state.selected_genres.clear();
             state.domains.ui.state.selected_decade = None;
-            state.domains.ui.state.selected_resolution = ferrex_core::UiResolution::Any;
-            state.domains.ui.state.selected_watch_status = ferrex_core::UiWatchStatus::Any;
+            state.domains.ui.state.selected_resolution = UiResolution::Any;
+            state.domains.ui.state.selected_watch_status = UiWatchStatus::Any;
             DomainUpdateResult::task(Task::done(DomainMessage::Ui(
                 ui::Message::RequestFilteredPositions,
             )))
@@ -466,7 +468,6 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
         ui::Message::CheckScrollStopped => {
-            use ferrex_core::{EpisodeStillSize, ImageRequest, PosterKind, PosterSize, Priority};
             // Check if scrolling has actually stopped
             if let Some(last_time) = state.domains.ui.state.last_scroll_time {
                 let elapsed = last_time.elapsed();
@@ -1213,29 +1214,24 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         ui::Message::PlayMediaWithId(media_id) => {
             match state.domains.ui.state.repo_accessor.get(&media_id) {
                 Ok(media) => match media {
-                    Media::Movie(movie) => {
-                        return DomainUpdateResult::with_events(
-                            Task::none(),
-                            vec![CrossDomainEvent::MediaPlayWithId(movie.file(), media_id)],
-                        );
-                    }
-                    Media::Episode(episode) => {
-                        return DomainUpdateResult::with_events(
-                            Task::none(),
-                            vec![CrossDomainEvent::MediaPlayWithId(episode.file(), media_id)],
-                        );
-                    }
+                    Media::Movie(movie) => DomainUpdateResult::with_events(
+                        Task::none(),
+                        vec![CrossDomainEvent::MediaPlayWithId(movie.file(), media_id)],
+                    ),
+                    Media::Episode(episode) => DomainUpdateResult::with_events(
+                        Task::none(),
+                        vec![CrossDomainEvent::MediaPlayWithId(episode.file(), media_id)],
+                    ),
                     _ => {
                         log::error!("Media not playable type {}", media_id);
-                        return DomainUpdateResult::task(Task::none());
+                        DomainUpdateResult::task(Task::none())
                     }
                 },
                 Err(_) => {
                     log::error!("Failed to get media with id {}", media_id);
-                    return DomainUpdateResult::task(Task::none());
+                    DomainUpdateResult::task(Task::none())
                 }
             }
-            DomainUpdateResult::task(Task::none())
         }
         ui::Message::PlaySeriesNextEpisode(series_id) => {
             /*
@@ -1254,7 +1250,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 // Convert episode to MediaFile
                 let media_file =
                     crate::domains::media::library::MediaFile::from(episode.file.clone());
-                let media_id = ferrex_core::MediaID::Episode(episode.id.clone());
+                let media_id = MediaID::Episode(episode.id.clone());
 
                 // Store resume position if available
                 if let Some(resume_pos) = resume_position {

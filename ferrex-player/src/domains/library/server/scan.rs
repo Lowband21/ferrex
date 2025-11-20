@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use ferrex_core::LibraryID;
-use ferrex_core::api_types::{
-    ActiveScansResponse, LatestProgressResponse, ScanCommandAcceptedResponse, ScanCommandRequest,
-    ScanSnapshotDto, StartScanRequest,
+use ferrex_core::player_prelude::{
+    ActiveScansResponse, LatestProgressResponse, LibraryID, ScanCommandAcceptedResponse,
+    ScanCommandRequest, ScanSnapshotDto, StartScanRequest,
 };
 use uuid::Uuid;
 

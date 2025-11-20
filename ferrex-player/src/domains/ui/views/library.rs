@@ -12,7 +12,7 @@ use crate::{
     },
     state_refactored::State,
 };
-use ferrex_core::{ImageSize, ImageType};
+use ferrex_core::player_prelude::{ImageSize, ImageType};
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, text},

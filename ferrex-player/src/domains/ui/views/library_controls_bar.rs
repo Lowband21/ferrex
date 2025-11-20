@@ -2,16 +2,13 @@ use crate::{
     domains::ui::{
         messages::Message,
         tabs::{TabId, TabState},
-        widgets::{filter_button, library_sort_filter_menu, sort_dropdown, sort_order_toggle},
+        widgets::library_sort_filter_menu,
     },
     infrastructure::constants::layout::header::HEIGHT,
     state_refactored::State,
 };
-use ferrex_core::LibraryID;
-use iced::{
-    Element, Length,
-    widget::{Space, container, row, text},
-};
+use ferrex_core::player_prelude::{LibraryID, UiResolution, UiWatchStatus};
+use iced::{Element, Length, widget::container};
 use uuid::Uuid;
 
 /// Creates the library controls bar that appears below the header
@@ -55,12 +52,12 @@ pub fn view_library_controls_bar<'a>(
 
     let active_filter_count = ui_state.selected_genres.len()
         + ui_state.selected_decade.iter().count()
-        + if ui_state.selected_resolution != ferrex_core::UiResolution::Any {
+        + if ui_state.selected_resolution != UiResolution::Any {
             1
         } else {
             0
         }
-        + if ui_state.selected_watch_status != ferrex_core::UiWatchStatus::Any {
+        + if ui_state.selected_watch_status != UiWatchStatus::Any {
             1
         } else {
             0

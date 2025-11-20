@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use ferrex_core::{
-    ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, EpisodeReference, LibraryID, Media,
-    MediaIDLike, MediaLike, MediaType, SeasonID, SeasonReference, SeriesID, SortBy, SortOrder,
+use ferrex_core::player_prelude::{
+    ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, EpisodeReference, Library, LibraryID,
+    Media, MediaIDLike, MediaLike, MediaType, SeasonID, SeasonReference, SeriesID, SortBy,
+    SortOrder,
 };
 use rkyv::{deserialize, rancor::Error, to_bytes, util::AlignedVec, vec::ArchivedVec};
 use uuid::Uuid;
@@ -652,7 +653,7 @@ impl MediaRepo {
     }*/
 
     /// Get all libraries
-    pub(super) fn get_libraries_internal(&self) -> Vec<ferrex_core::Library> {
+    pub(super) fn get_libraries_internal(&self) -> Vec<Library> {
         let archived_libraries = unsafe {
             // SAFETY: We hold the buffer through Arc, it won't be dropped while we're using it
             rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&self.libraries_buffer)
@@ -662,8 +663,7 @@ impl MediaRepo {
             .iter()
             .map(|archived| {
                 // Deserialize to owned Library
-                deserialize::<ferrex_core::Library, Error>(archived)
-                    .expect("Failed to deserialize library")
+                deserialize::<Library, Error>(archived).expect("Failed to deserialize library")
             })
             .collect()
     }
@@ -672,7 +672,7 @@ impl MediaRepo {
     /// Get all archived libraries
     pub(super) fn get_archived_libraries_yoke_internal(
         &self,
-    ) -> Yoke<&'static ArchivedVec<ferrex_core::ArchivedLibrary>, Arc<AlignedVec>> {
+    ) -> Yoke<&'static ArchivedVec<ArchivedLibrary>, Arc<AlignedVec>> {
         Yoke::<&'static ArchivedVec<ArchivedLibrary>, Arc<AlignedVec>>::attach_to_cart(
             Arc::clone(&self.libraries_buffer),
             |data: &AlignedVec| unsafe {
@@ -684,7 +684,7 @@ impl MediaRepo {
     /// Get all archived libraries
     pub(super) fn get_archived_libraries_yoke_internal(
         &self,
-    ) -> Vec<Yoke<&'static ferrex_core::ArchivedLibrary, Arc<AlignedVec>>> {
+    ) -> Vec<Yoke<&'static ArchivedLibrary, Arc<AlignedVec>>> {
         let num_libraries = self.libraries_index.len();
         let mut yokes = Vec::with_capacity(num_libraries);
 
@@ -713,10 +713,7 @@ impl MediaRepo {
     }
 
     /// Get a specific library by ID
-    pub(super) fn get_library_internal(
-        &self,
-        library_id: &LibraryID,
-    ) -> Option<ferrex_core::Library> {
+    pub(super) fn get_library_internal(&self, library_id: &LibraryID) -> Option<Library> {
         let archived_libraries = unsafe {
             // SAFETY: We hold the buffer through Arc, it won't be dropped while we're using it
             rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&self.libraries_buffer)
@@ -724,7 +721,7 @@ impl MediaRepo {
 
         for library in archived_libraries.iter() {
             if library.get_id().as_uuid() == library_id.as_uuid() {
-                return deserialize::<ferrex_core::Library, Error>(library).ok();
+                return deserialize::<Library, Error>(library).ok();
             }
         }
         None

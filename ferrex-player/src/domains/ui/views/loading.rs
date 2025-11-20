@@ -4,7 +4,7 @@ use crate::{
     domains::ui::theme,
     state_refactored::State,
 };
-use ferrex_core::TranscodingStatus;
+use ferrex_core::player_prelude::TranscodingStatus;
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, progress_bar, row, text},

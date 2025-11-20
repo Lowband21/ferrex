@@ -1,13 +1,15 @@
+use crate::error::{MediaError, Result};
+#[cfg(feature = "ffmpeg")]
+use crate::metadata::MetadataExtractor;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::path::PathBuf;
 use uuid::Uuid;
 
 use super::LibraryID;
 
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
-)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct MediaFile {
     pub id: Uuid,
@@ -38,9 +40,7 @@ impl Default for MediaFile {
     }
 }
 
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
-)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct MediaFileMetadata {
     // Technical metadata from FFmpeg
@@ -61,6 +61,52 @@ pub struct MediaFileMetadata {
 
     // Parsed from filename
     pub parsed_info: Option<ParsedMediaInfo>,
+}
+
+impl fmt::Debug for MediaFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MediaFile")
+            .field("id", &self.id)
+            .field("filename", &self.filename)
+            .field("path", &self.path)
+            .field("size", &self.size)
+            .field("discovered_at", &self.discovered_at)
+            .field("created_at", &self.created_at)
+            .field("has_metadata", &self.media_file_metadata.is_some())
+            .field("metadata", &self.media_file_metadata.as_ref())
+            .field("library_id", &self.library_id)
+            .finish()
+    }
+}
+
+impl fmt::Debug for MediaFileMetadata {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let resolution = self.width.zip(self.height);
+        let parsed_kind = self.parsed_info.as_ref().map(|info| match info {
+            ParsedMediaInfo::Movie(_) => "Movie",
+            ParsedMediaInfo::Episode(_) => "Episode",
+        });
+
+        f.debug_struct("MediaFileMetadata")
+            .field("duration", &self.duration)
+            .field("resolution", &resolution)
+            .field("video_codec", &self.video_codec)
+            .field("audio_codec", &self.audio_codec)
+            .field("bitrate", &self.bitrate)
+            .field("framerate", &self.framerate)
+            .field("file_size", &self.file_size)
+            .field(
+                "hdr",
+                &(
+                    &self.color_primaries,
+                    &self.color_transfer,
+                    &self.color_space,
+                    &self.bit_depth,
+                ),
+            )
+            .field("parsed_info_kind", &parsed_kind)
+            .finish()
+    }
 }
 #[derive(
     Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
@@ -130,14 +176,14 @@ impl std::fmt::Display for ExtraType {
 }
 
 impl MediaFile {
-    pub fn new(path: PathBuf, library_id: LibraryID) -> crate::Result<Self> {
+    pub fn new(path: PathBuf, library_id: LibraryID) -> Result<Self> {
         let filename = path
             .file_name()
-            .ok_or_else(|| crate::MediaError::InvalidMedia("Invalid file path".to_string()))?
+            .ok_or_else(|| MediaError::InvalidMedia("Invalid file path".to_string()))?
             .to_string_lossy()
             .to_string();
 
-        let metadata = path.metadata().map_err(crate::MediaError::Io)?;
+        let metadata = path.metadata().map_err(MediaError::Io)?;
 
         // Get actual file creation time from filesystem metadata
         let created_at = metadata
@@ -166,11 +212,26 @@ impl MediaFile {
                     .unwrap_or_else(chrono::Utc::now)
             });
 
+        let size = metadata.len();
+
+        #[cfg(feature = "demo")]
+        let allow_zero_length = crate::demo::policy()
+            .map(|policy| policy.allow_zero_length_files)
+            .unwrap_or(false);
+        #[cfg(not(feature = "demo"))]
+        let allow_zero_length = false;
+
+        if size == 0 && !allow_zero_length {
+            return Err(MediaError::InvalidMedia(
+                "Zero-length media files are not supported".to_string(),
+            ));
+        }
+
         Ok(Self {
             id: Uuid::now_v7(),
             path,
             filename,
-            size: metadata.len(),
+            size,
             // discovered_at represents when we discovered the file in the library (row creation time)
             // DB provides a default NOW(); set it here for in-memory consistency
             discovered_at: chrono::Utc::now(),
@@ -182,8 +243,8 @@ impl MediaFile {
 
     /// Extract full metadata for this media file
     #[cfg(feature = "ffmpeg")]
-    pub fn extract_metadata(&mut self) -> crate::Result<()> {
-        let mut extractor = crate::MetadataExtractor::new();
+    pub fn extract_metadata(&mut self) -> Result<()> {
+        let mut extractor = MetadataExtractor::new();
         let metadata = extractor.extract_metadata(&self.path)?;
         self.media_file_metadata = Some(metadata);
         Ok(())

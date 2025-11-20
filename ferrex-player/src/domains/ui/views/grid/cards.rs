@@ -5,8 +5,9 @@
 //! and loading states.
 
 use crate::infrastructure::repository::MaybeYoked;
-use ferrex_core::{
-    ImageSize, ImageType, MediaDetailsOptionLike, MediaOps, MovieID, MovieLike, SeriesID,
+use ferrex_core::player_prelude::{
+    ImageSize, ImageType, MediaDetailsOptionLike, MediaID, MediaIDLike, MediaOps, MovieID,
+    MovieLike, Priority, SeriesID, SeriesLike,
 };
 use iced::widget::text::Wrapping;
 use iced::widget::{button, container, mouse_area, text};
@@ -17,14 +18,11 @@ use crate::domains::ui::views::grid::macros::parse_hex_color;
 use crate::domains::ui::widgets::image_for;
 use crate::infrastructure::api_types::WatchProgress;
 use crate::infrastructure::constants::poster::CORNER_RADIUS;
-use ferrex_core::SeriesLike;
 use iced::{Element, widget::column};
 use uuid::Uuid;
 
 use crate::{domains::ui::theme, state_refactored::State};
 use std::sync::Arc;
-
-use ferrex_core::{MediaIDLike, Priority};
 
 #[cfg_attr(
     any(
@@ -111,7 +109,7 @@ pub fn movie_reference_card_with_state<'a>(
                     .ui
                     .state
                     .repo_accessor
-                    .get_movie_yoke(&ferrex_core::MediaID::Movie(movie_id))
+                    .get_movie_yoke(&MediaID::Movie(movie_id))
                 {
                     Ok(yoke) => {
                         let arc = Arc::new(yoke);
@@ -304,7 +302,7 @@ pub fn series_reference_card_with_state<'a>(
                     .ui
                     .state
                     .repo_accessor
-                    .get_series_yoke(&ferrex_core::MediaID::Series(series_id))
+                    .get_series_yoke(&MediaID::Series(series_id))
                 {
                     Ok(yoke) => {
                         let arc = Arc::new(yoke);
@@ -533,7 +531,7 @@ pub fn season_reference_card_with_state<'a, Season: MaybeYoked>(
         type: Season,
         data: season,
         {
-            id: ferrex_core::MediaID::Season(season_id),
+            id: MediaID::Season(season_id),
             title: season_name,
             //subtitle: &subtitle,
             subtitle: "Blank",
@@ -590,11 +588,11 @@ pub fn episode_reference_card_with_state<'a, Episode: MediaOps + EpisodeLike>(
         s.domains
             .media
             .state
-            .get_media_progress(&ferrex_core::MediaID::Episode(episode.id.clone()))
+            .get_media_progress(&MediaID::Episode(episode.id.clone()))
     });
 
     // Create image element
-    let mut image_element = image_for(ferrex_core::MediaID::Episode(episode.id.clone()))
+    let mut image_element = image_for(MediaID::Episode(episode.id.clone()))
         .size(ImageSize::Thumbnail)
         .rounded(radius)
         .width(Length::Fixed(width))
@@ -614,7 +612,7 @@ pub fn episode_reference_card_with_state<'a, Episode: MediaOps + EpisodeLike>(
     let poster_button = button(image_element)
         .on_press(Message::PlayMediaWithId(
             episode.file.clone(),
-            ferrex_core::MediaID::Episode(episode.id.clone()),
+            MediaID::Episode(episode.id.clone()),
         ))
         .padding(0)
         .style(theme::Button::MediaCard.style());
@@ -630,7 +628,7 @@ pub fn episode_reference_card_with_state<'a, Episode: MediaOps + EpisodeLike>(
             {
                 center: (lucide_icons::Icon::Play, Message::PlayMediaWithId(
                     episode.file.clone(),
-                    ferrex_core::MediaID::Episode(episode.id.clone())
+                    MediaID::Episode(episode.id.clone())
                 )),
                 top_left: (lucide_icons::Icon::Circle, Message::NoOp),
                 bottom_left: (lucide_icons::Icon::Pencil, Message::NoOp),

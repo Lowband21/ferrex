@@ -1,6 +1,6 @@
 //! ViewModel for the "All" view that shows carousels
 
-use ferrex_core::{Media, MovieID, SeriesID};
+use ferrex_core::player_prelude::{Media, MovieID, SeriesID};
 use uuid::Uuid;
 
 use super::{ViewModel, VisibleItems};

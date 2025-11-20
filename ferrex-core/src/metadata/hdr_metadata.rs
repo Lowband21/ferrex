@@ -1,6 +1,7 @@
-use crate::{MediaError, Result};
 use std::path::Path;
 use std::process::Command;
+
+use crate::error::{MediaError, Result};
 
 #[derive(Debug, Default)]
 pub struct HdrInfo {
@@ -10,6 +11,7 @@ pub struct HdrInfo {
     pub color_space: Option<String>,
 }
 
+#[derive(Debug)]
 pub struct HdrMetadataExtractor;
 
 impl HdrMetadataExtractor {

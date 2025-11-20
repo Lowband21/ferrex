@@ -1,8 +1,15 @@
+use crate::error::{MediaError, Result};
+use crate::player_prelude::Media;
 use crate::{
-    LibraryID, Media, MediaDetailsOption, Result, TmdbDetails,
     database::ports::media_references::MediaReferencesRepository,
     database::ports::watch_metrics::{ProgressEntry as WatchProgressEntry, WatchMetricsReadPort},
-    query::{SortBy, SortOrder},
+    query::types::{SortBy, SortOrder},
+    traits::prelude::MediaIDLike,
+    types::{
+        details::{MediaDetailsOption, TmdbDetails},
+        ids::LibraryID,
+        library::LibraryType,
+    },
 };
 use std::{any::type_name_of_val, collections::HashMap, fmt, sync::Arc};
 use uuid::Uuid;
@@ -39,7 +46,7 @@ impl IndexManager {
     pub async fn sort_media_ids_for_library(
         &self,
         library_id: LibraryID,
-        library_type: crate::LibraryType,
+        library_type: LibraryType,
         sort_field: SortBy,
         sort_order: SortOrder,
         user_id: Option<Uuid>,
@@ -50,7 +57,7 @@ impl IndexManager {
             .await?;
         let watch_data = if matches!(sort_field, SortBy::WatchProgress | SortBy::LastWatched) {
             let user_id = user_id.ok_or_else(|| {
-                crate::MediaError::InvalidMedia(
+                MediaError::InvalidMedia(
                     "watch-based sorting requires an authenticated user".to_string(),
                 )
             })?;
@@ -68,7 +75,7 @@ impl IndexManager {
     pub async fn compute_title_position_map(
         &self,
         library_id: LibraryID,
-        library_type: crate::LibraryType,
+        library_type: LibraryType,
     ) -> Result<HashMap<Uuid, u32>> {
         // Get media items directly from database - they're already ordered by title
         let media_items = self
@@ -338,7 +345,6 @@ impl IndexManager {
     }
 
     fn get_media_id(media: &Media) -> Uuid {
-        use crate::MediaIDLike;
         match media {
             Media::Movie(m) => m.id.to_uuid(),
             Media::Series(s) => s.id.to_uuid(),
@@ -386,6 +392,15 @@ impl IndexManager {
 struct WatchData {
     progress: HashMap<Uuid, WatchProgressEntry>,
     completed: HashMap<Uuid, i64>,
+}
+
+impl fmt::Debug for WatchData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WatchData")
+            .field("progress_entries", &self.progress.len())
+            .field("completed_entries", &self.completed.len())
+            .finish()
+    }
 }
 
 impl WatchData {

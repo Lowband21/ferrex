@@ -1,6 +1,9 @@
-use crate::database::PostgresDatabase;
-use crate::ports::watch_status::WatchStatusRepository;
-use crate::{InProgressItem, Result, UpdateProgressRequest, UserWatchState};
+use crate::error::Result;
+use crate::watch_status::{InProgressItem, UserWatchState};
+use crate::{
+    database::PostgresDatabase, playback::ports::WatchStatusRepository,
+    watch_status::UpdateProgressRequest,
+};
 use uuid::Uuid;
 
 impl PostgresDatabase {

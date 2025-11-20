@@ -15,7 +15,7 @@ use iced::{Color, Point, Rectangle as LayoutRect};
 use iced_wgpu::primitive::{
     PrepareContext, PrimitiveBatchState, RenderContext, buffer_manager::InstanceBufferManager,
 };
-use iced_wgpu::{AtlasRegion, core, wgpu};
+use iced_wgpu::wgpu;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;

@@ -1,5 +1,5 @@
 use crate::{
-    MediaIDLike,
+    traits::prelude::MediaIDLike,
     types::{
         ids::{
             ArchivedEpisodeID, ArchivedMovieID, ArchivedSeasonID, ArchivedSeriesID, EpisodeID,

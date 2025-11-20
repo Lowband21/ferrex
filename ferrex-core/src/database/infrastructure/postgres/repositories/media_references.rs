@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -5,9 +6,11 @@ use async_trait::async_trait;
 use crate::database::ports::media_references::MediaReferencesRepository;
 use crate::database::postgres::PostgresDatabase;
 use crate::database::traits::MediaDatabaseTrait;
-use crate::{
-    EpisodeID, EpisodeReference, LibraryID, LibraryType, Media, MovieID, MovieReference, Result,
-    SeasonID, SeasonReference, SeriesID, SeriesReference,
+use crate::error::Result;
+use crate::types::ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID};
+use crate::types::library::LibraryType;
+use crate::types::media::{
+    EpisodeReference, Media, MovieReference, SeasonReference, SeriesReference,
 };
 
 #[derive(Clone)]
@@ -18,6 +21,16 @@ pub struct PostgresMediaReferencesRepository {
 impl PostgresMediaReferencesRepository {
     pub fn new(db: Arc<PostgresDatabase>) -> Self {
         Self { db }
+    }
+}
+
+impl fmt::Debug for PostgresMediaReferencesRepository {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let pool = self.db.pool();
+        f.debug_struct("PostgresMediaReferencesRepository")
+            .field("pool_size", &pool.size())
+            .field("idle_connections", &pool.num_idle())
+            .finish()
     }
 }
 

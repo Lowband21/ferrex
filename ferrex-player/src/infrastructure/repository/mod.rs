@@ -6,7 +6,7 @@ pub use repository::*;
 
 use std::sync::Arc;
 
-use ferrex_core::{
+use ferrex_core::player_prelude::{
     ArchivedEpisodeReference, ArchivedLibrary, ArchivedMedia, ArchivedMovieReference,
     ArchivedSeasonReference, ArchivedSeriesReference, Media, MediaOps, MovieReference,
     SeriesReference,

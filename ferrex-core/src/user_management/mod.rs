@@ -1,16 +1,13 @@
-//! User Management Domain Module
+//! User Management Module
 //!
-//! This module provides domain-driven design components for user management,
-//! including user CRUD operations, role management, and user lifecycle events.
-//!
-//! ## Domain Structure
-//!
-//! - **Aggregates**: Core domain entities that enforce business rules
-//! - **Value Objects**: Immutable types representing domain concepts
-//! - **Repositories**: Interfaces for data persistence
-//! - **Services**: Domain services for complex business logic
-//! - **Events**: Domain events for decoupled communication
+//! This module provides components for managing users including domain models,
+//! validation helpers, and application services for administrative workflows.
 
+pub mod application;
 pub mod domain;
 
+pub use application::{
+    CreateUserCommand, DeleteUserCommand, ListUsersOptions, PaginatedUsers, UpdateUserCommand,
+    UserAdminError, UserAdminRecord, UserAdministrationService,
+};
 pub use domain::*;

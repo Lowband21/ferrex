@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 
-use crate::{Library, LibraryID, LibraryReference, Result};
+use crate::error::Result;
+use crate::types::details::LibraryReference;
+use crate::types::ids::LibraryID;
+use crate::types::library::Library;
 
 /// Repository port for library management within the catalog bounded context.
 ///

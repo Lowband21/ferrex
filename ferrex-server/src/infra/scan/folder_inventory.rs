@@ -6,10 +6,10 @@ use axum::{
     response::Json,
 };
 use chrono::{DateTime, Utc};
-use ferrex_core::User;
 use ferrex_core::{
-    LibraryID,
     database::traits::{FolderInventory, FolderProcessingStatus},
+    types::LibraryID,
+    user::User,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

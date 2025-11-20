@@ -6,6 +6,10 @@ use axum::{
 };
 use ferrex_core::{
     api_types::ApiResponse,
+    auth::domain::{
+        services::{AuthenticationError, PasswordChangeActor, PasswordChangeRequest},
+        value_objects::DeviceFingerprint,
+    },
     user::{User, UserUpdateRequest},
 };
 use serde::Deserialize;
@@ -13,17 +17,13 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::{
+    application::auth::AuthFacadeError,
     infra::{
         app_state::AppState,
         errors::{AppError, AppResult},
     },
     users::{UserService, user_service::UpdateUserParams},
 };
-
-/// Helper function to get the database pool
-fn get_pool(state: &AppState) -> Result<&sqlx::PgPool, AppError> {
-    Ok(state.postgres.pool())
-}
 
 /// List users for selection screen (rate-limited public endpoint)
 ///
@@ -51,74 +51,36 @@ pub async fn list_users_handler(
         ));
     }
 
-    // Check if this is a known/trusted device (optional enhancement)
-    let is_known_device = sqlx::query_scalar!(
-        "SELECT EXISTS(SELECT 1 FROM auth_device_sessions WHERE device_fingerprint = $1)",
-        device_fingerprint
-    )
-    .fetch_one(get_pool(&state)?)
-    .await
-    .ok()
-    .and_then(|opt| opt)
-    .unwrap_or(false);
+    let fingerprint = DeviceFingerprint::from_hash(device_fingerprint.to_string())
+        .map_err(|_| AppError::bad_request("Invalid device fingerprint".to_string()))?;
 
-    // For unknown devices, return limited information
-    if !is_known_device {
-        // Return only usernames without UUIDs or other sensitive info
-        let users = sqlx::query!(
-            r#"
-            SELECT username, display_name, avatar_url
-            FROM users
-            -- No soft delete check needed
-            ORDER BY username
-            LIMIT 50
-            "#
-        )
-        .fetch_all(get_pool(&state)?)
+    let (is_known_device, mut users, pin_map) = state
+        .auth_facade
+        .device_user_listing(&fingerprint)
         .await
-        .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
+        .map_err(map_facade_error)?;
 
-        // Create anonymized user list (no UUIDs, no activity info)
-        let user_list: Vec<UserListItemDto> = users
+    // Sort deterministically to ensure stable ordering regardless of backend defaults.
+    users.sort_by(|a, b| a.username.cmp(&b.username));
+
+    if !is_known_device {
+        let mut limited = users;
+        limited.truncate(50);
+
+        let user_list: Vec<UserListItemDto> = limited
             .into_iter()
             .map(|user| UserListItemDto {
-                // Use a deterministic but non-reversible hash of username as ID
-                // This allows consistent selection without exposing real UUIDs
                 id: Uuid::new_v5(&Uuid::NAMESPACE_DNS, user.username.as_bytes()),
                 username: user.username,
                 display_name: user.display_name,
                 avatar_url: user.avatar_url,
-                has_pin: false,   // Never reveal PIN status to unknown devices
-                last_login: None, // Never reveal activity patterns
+                has_pin: false,
+                last_login: None,
             })
             .collect();
 
         return Ok(Json(ApiResponse::success(user_list)));
     }
-
-    // For known devices, return slightly more information (but still limited)
-    let users = sqlx::query!(
-        r#"
-        SELECT
-            u.id,
-            u.username,
-            u.display_name,
-            u.avatar_url,
-            EXISTS(
-                SELECT 1 FROM auth_device_sessions ads
-                WHERE ads.user_id = u.id
-                AND ads.device_fingerprint = $1
-                AND ads.pin_hash IS NOT NULL
-            ) as has_pin_on_device
-        FROM users u
-        -- No soft delete check needed
-        ORDER BY u.username
-        "#,
-        device_fingerprint
-    )
-    .fetch_all(get_pool(&state)?)
-    .await
-    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
 
     let user_list: Vec<UserListItemDto> = users
         .into_iter()
@@ -127,8 +89,8 @@ pub async fn list_users_handler(
             username: user.username,
             display_name: user.display_name,
             avatar_url: user.avatar_url,
-            has_pin: user.has_pin_on_device.unwrap_or(false),
-            last_login: None, // Still don't reveal activity patterns
+            has_pin: pin_map.get(&user.id).copied().unwrap_or(false),
+            last_login: None,
         })
         .collect();
 
@@ -141,7 +103,7 @@ pub async fn list_users_handler(
 /// for administrative purposes or authenticated device management.
 pub async fn list_users_authenticated_handler(
     State(state): State<AppState>,
-    Extension(user): Extension<ferrex_core::user::User>,
+    Extension(user): Extension<User>,
     Extension(device_id): Extension<Option<Uuid>>,
 ) -> AppResult<Json<ApiResponse<Vec<UserListItemDto>>>> {
     // Check if user has permission to list all users
@@ -164,25 +126,27 @@ pub async fn list_users_authenticated_handler(
         ]
     };
 
-    // Get device information for PIN status - already extracted as Extension
+    // Resolve the current device session once for per-user PIN checks.
+    let device_session = if let Some(device_id) = device_id {
+        Some(
+            state
+                .auth_facade
+                .get_device_by_id(device_id)
+                .await
+                .map_err(map_facade_error)?,
+        )
+    } else {
+        None
+    };
 
     let mut user_list = Vec::new();
     for user in users {
         // Check if user has PIN on current device
-        let has_pin = if let Some(device_id) = device_id {
-            sqlx::query_scalar!(
-                "SELECT EXISTS(SELECT 1 FROM auth_device_sessions WHERE user_id = $1 AND id = $2 AND pin_hash IS NOT NULL)",
-                user.id,
-                device_id
-            )
-            .fetch_one(get_pool(&state)?)
-            .await
-            .ok()
-            .and_then(|opt| opt)
-            .unwrap_or(false)
-        } else {
-            false
-        };
+        let has_pin = device_session
+            .as_ref()
+            .filter(|session| session.user_id() == user.id)
+            .map(|session| session.has_pin())
+            .unwrap_or(false);
 
         user_list.push(UserListItemDto {
             id: user.id,
@@ -206,6 +170,25 @@ pub struct UserListItemDto {
     pub avatar_url: Option<String>,
     pub has_pin: bool,
     pub last_login: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+fn map_facade_error(err: AuthFacadeError) -> AppError {
+    match err {
+        AuthFacadeError::UserNotFound => AppError::not_found("User not found".to_string()),
+        AuthFacadeError::Storage(inner) => AppError::from(inner),
+        AuthFacadeError::Authentication(inner) => match inner {
+            AuthenticationError::InvalidCredentials => {
+                AppError::bad_request("Invalid credentials".to_string())
+            }
+            AuthenticationError::UserNotFound => AppError::not_found("User not found".to_string()),
+            AuthenticationError::TooManyFailedAttempts => {
+                AppError::forbidden("Too many failed attempts".to_string())
+            }
+            other => AppError::internal(other.to_string()),
+        },
+        AuthFacadeError::DeviceTrust(inner) => AppError::internal(inner.to_string()),
+        AuthFacadeError::PinManagement(inner) => AppError::internal(inner.to_string()),
+    }
 }
 
 /// Get user profile by ID
@@ -236,15 +219,28 @@ pub async fn update_user_handler(
     Path(user_id): Path<Uuid>,
     Json(request): Json<UserUpdateRequest>,
 ) -> AppResult<Json<User>> {
-    // Users can only update their own profile
-    if current_user.id != user_id {
-        return Err(AppError::forbidden("You can only update your own profile"));
-    }
-
-    // Validate the update request
     request.validate()?;
 
-    // Get current user data
+    let is_self = current_user.id == user_id;
+    let actor = if is_self {
+        PasswordChangeActor::UserInitiated
+    } else {
+        let is_admin = state
+            .unit_of_work
+            .rbac
+            .user_has_role(current_user.id, "admin")
+            .await
+            .map_err(|e| AppError::internal(format!("Failed to verify admin role: {e}")))?;
+        if !is_admin {
+            return Err(AppError::forbidden(
+                "You do not have permission to modify this user",
+            ));
+        }
+        PasswordChangeActor::AdminInitiated {
+            admin_user_id: current_user.id,
+        }
+    };
+
     let mut user = state
         .unit_of_work
         .users
@@ -252,54 +248,51 @@ pub async fn update_user_handler(
         .await?
         .ok_or_else(|| AppError::not_found("User not found"))?;
 
-    // Update fields that are provided
     if let Some(ref display_name) = request.display_name {
         user.display_name = display_name.clone();
     }
 
-    // Update password if provided
-    if request.new_password.is_some() {
-        // Verify current password first
-        if let Some(current_password) = request.current_password {
-            use argon2::{
-                Argon2,
-                password_hash::{PasswordHash, PasswordVerifier},
-            };
+    let UserUpdateRequest {
+        display_name,
+        current_password,
+        new_password,
+    } = request;
 
-            // Get password hash from credentials table
-            let password_hash = state
-                .unit_of_work
-                .users
-                .get_user_password_hash(user.id)
-                .await
-                .map_err(|_| AppError::internal("Failed to get password hash"))?
-                .ok_or_else(|| AppError::bad_request("No password set"))?;
-
-            let parsed_hash = PasswordHash::new(&password_hash)
-                .map_err(|_| AppError::internal("Invalid password hash"))?;
-
-            let argon2 = Argon2::default();
-            if argon2
-                .verify_password(current_password.as_bytes(), &parsed_hash)
-                .is_err()
-            {
-                return Err(AppError::bad_request("Current password is incorrect"));
+    if let Some(new_password) = new_password {
+        let supplied_current = match (&actor, current_password) {
+            (PasswordChangeActor::UserInitiated, Some(value)) => Some(value),
+            (PasswordChangeActor::UserInitiated, None) => {
+                return Err(AppError::bad_request(
+                    "Current password is required to change password",
+                ));
             }
-        } else {
-            return Err(AppError::bad_request(
-                "Current password is required to change password",
-            ));
-        }
+            (PasswordChangeActor::AdminInitiated { .. }, _) => None,
+        };
+
+        state
+            .auth_facade
+            .change_password(PasswordChangeRequest {
+                user_id,
+                new_password,
+                current_password: supplied_current,
+                actor,
+                context: None,
+            })
+            .await
+            .map_err(map_facade_error)?;
     }
 
-    // Use UserService to update the user
     let user_service = UserService::new(&state);
     let updated_user = user_service
         .update_user(
             user_id,
             UpdateUserParams {
-                display_name: request.display_name,
-                password: request.new_password,
+                display_name,
+                email: None,
+                avatar_url: None,
+                is_active: None,
+                role_ids: None,
+                updated_by: current_user.id,
             },
         )
         .await?;
@@ -338,40 +331,17 @@ pub async fn change_password_handler(
     Extension(current_user): Extension<User>,
     Json(request): Json<ChangePasswordRequest>,
 ) -> AppResult<StatusCode> {
-    use argon2::{Argon2, PasswordHash, PasswordVerifier};
-
-    // Get the user's password hash from the database
-    let password_hash = state
-        .unit_of_work
-        .users
-        .get_user_password_hash(current_user.id)
+    state
+        .auth_facade
+        .change_password(PasswordChangeRequest {
+            user_id: current_user.id,
+            new_password: request.new_password,
+            current_password: Some(request.current_password),
+            actor: PasswordChangeActor::UserInitiated,
+            context: None,
+        })
         .await
-        .map_err(|_| AppError::internal("Failed to get password hash"))?
-        .ok_or_else(|| AppError::bad_request("Cannot change password for user without password"))?;
-
-    // Verify current password
-    let parsed_hash = PasswordHash::new(&password_hash)
-        .map_err(|_| AppError::internal("Invalid password hash"))?;
-
-    let argon2 = Argon2::default();
-    if argon2
-        .verify_password(request.current_password.as_bytes(), &parsed_hash)
-        .is_err()
-    {
-        return Err(AppError::bad_request("Current password is incorrect"));
-    }
-
-    // Update password
-    let user_service = UserService::new(&state);
-    user_service
-        .update_user(
-            current_user.id,
-            UpdateUserParams {
-                display_name: None,
-                password: Some(request.new_password),
-            },
-        )
-        .await?;
+        .map_err(map_facade_error)?;
 
     info!("User {} changed their password", current_user.username);
 

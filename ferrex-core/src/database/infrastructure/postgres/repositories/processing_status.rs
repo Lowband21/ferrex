@@ -1,12 +1,16 @@
 use async_trait::async_trait;
 use std::path::PathBuf;
 
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::database::ports::processing_status::ProcessingStatusRepository;
-use crate::database::traits::MediaProcessingStatus;
-use crate::{LibraryID, MediaError, MediaFile, MediaFileMetadata, Result};
+use crate::{
+    database::{
+        ports::processing_status::ProcessingStatusRepository, traits::MediaProcessingStatus,
+    },
+    error::{MediaError, Result},
+    types::{files::MediaFile, ids::LibraryID},
+};
 
 #[derive(Clone, Debug)]
 pub struct PostgresProcessingStatusRepository {

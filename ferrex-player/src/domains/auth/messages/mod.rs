@@ -1,4 +1,7 @@
-use ferrex_core::{rbac::UserPermissions, user::User};
+use ferrex_core::{
+    api_types::setup::{ConfirmClaimResponse, StartClaimResponse},
+    player_prelude::{User, UserPermissions, UserWatchState},
+};
 use uuid::Uuid;
 
 use crate::domains::auth::dto::UserListItemDto;
@@ -17,6 +20,7 @@ pub enum SetupField {
     ConfirmPassword(String),
     DisplayName(String),
     SetupToken(String),
+    ClaimToken(String),
 }
 
 #[derive(Clone)]
@@ -45,7 +49,7 @@ pub enum Message {
 
     // Login results
     LoginSuccess(User, UserPermissions),
-    WatchStatusLoaded(Result<ferrex_core::watch_status::UserWatchState, String>),
+    WatchStatusLoaded(Result<UserWatchState, String>),
     Logout,
     LogoutComplete,
 
@@ -79,6 +83,14 @@ pub enum Message {
     SubmitSetup,
     SetupComplete(String, String), // access_token, refresh_token
     SetupError(String),
+    UpdateClaimDeviceName(String),
+    StartSetupClaim,
+    SetupClaimStarted(StartClaimResponse),
+    SetupClaimFailed(String),
+    ConfirmSetupClaim,
+    SetupClaimConfirmed(ConfirmClaimResponse),
+    SetupClaimConfirmFailed(String),
+    ResetSetupClaim,
 
     // Admin PIN unlock management
     EnableAdminPinUnlock,
@@ -164,11 +176,26 @@ impl std::fmt::Debug for Message {
                     write!(f, "UpdateSetupField(ConfirmPassword(***)")
                 }
                 SetupField::SetupToken(t) => write!(f, "UpdateSetupField(SetupToken({}))", t),
+                SetupField::ClaimToken(_) => {
+                    write!(f, "UpdateSetupField(ClaimToken(***)")
+                }
             },
             Self::ToggleSetupPasswordVisibility => write!(f, "ToggleSetupPasswordVisibility"),
             Self::SubmitSetup => write!(f, "SubmitSetup"),
             Self::SetupComplete(_, _) => write!(f, "SetupComplete(***, ***)"),
             Self::SetupError(error) => write!(f, "SetupError({})", error),
+            Self::UpdateClaimDeviceName(name) => {
+                write!(f, "UpdateClaimDeviceName({})", name)
+            }
+            Self::StartSetupClaim => write!(f, "StartSetupClaim"),
+            Self::SetupClaimStarted(_) => write!(f, "SetupClaimStarted(...)"),
+            Self::SetupClaimFailed(error) => write!(f, "SetupClaimFailed({})", error),
+            Self::ConfirmSetupClaim => write!(f, "ConfirmSetupClaim"),
+            Self::SetupClaimConfirmed(_) => write!(f, "SetupClaimConfirmed(...)"),
+            Self::SetupClaimConfirmFailed(error) => {
+                write!(f, "SetupClaimConfirmFailed({})", error)
+            }
+            Self::ResetSetupClaim => write!(f, "ResetSetupClaim"),
 
             // Admin PIN unlock management
             Self::EnableAdminPinUnlock => write!(f, "EnableAdminPinUnlock"),
@@ -196,6 +223,9 @@ impl Message {
             }
             Self::UpdateSetupField(SetupField::ConfirmPassword(_)) => {
                 "UpdateSetupField(ConfirmPassword(***)".to_string()
+            }
+            Self::UpdateSetupField(SetupField::ClaimToken(_)) => {
+                "UpdateSetupField(ClaimToken(***)".to_string()
             }
 
             // Non-sensitive messages - show full debug representation
@@ -263,6 +293,14 @@ impl Message {
             Self::SubmitSetup => "Auth::SubmitSetup",
             Self::SetupComplete(_, _) => "Auth::SetupComplete",
             Self::SetupError(_) => "Auth::SetupError",
+            Self::UpdateClaimDeviceName(_) => "Auth::UpdateClaimDeviceName",
+            Self::StartSetupClaim => "Auth::StartSetupClaim",
+            Self::SetupClaimStarted(_) => "Auth::SetupClaimStarted",
+            Self::SetupClaimFailed(_) => "Auth::SetupClaimFailed",
+            Self::ConfirmSetupClaim => "Auth::ConfirmSetupClaim",
+            Self::SetupClaimConfirmed(_) => "Auth::SetupClaimConfirmed",
+            Self::SetupClaimConfirmFailed(_) => "Auth::SetupClaimConfirmFailed",
+            Self::ResetSetupClaim => "Auth::ResetSetupClaim",
 
             // Admin PIN unlock
             Self::EnableAdminPinUnlock => "Auth::EnableAdminPinUnlock",
@@ -281,6 +319,6 @@ impl Message {
 pub enum AuthEvent {
     UserAuthenticated(User, UserPermissions),
     UserLoggedOut,
-    WatchStatusUpdated(ferrex_core::watch_status::UserWatchState),
+    WatchStatusUpdated(UserWatchState),
     RequireSetup,
 }

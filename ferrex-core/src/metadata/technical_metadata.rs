@@ -1,7 +1,9 @@
-use crate::{MediaError, Result};
+use crate::error::Result;
 use ffmpeg_next as ffmpeg;
 use std::path::Path;
 use tracing::{debug, info};
+
+use crate::error::MediaError;
 
 #[derive(Debug, Default)]
 pub struct TechnicalMetadata {

@@ -9,7 +9,7 @@ use axum::{
 };
 use ferrex_core::{
     api_types::ApiResponse,
-    rbac::{OverridePermissionRequest, Permission, Role},
+    rbac::{OverridePermissionRequest, Permission, Role, UserPermissions},
     user::User,
 };
 use serde::Serialize;
@@ -87,7 +87,7 @@ pub async fn get_user_permissions_handler(
     State(state): State<AppState>,
     Path(user_id): Path<Uuid>,
     Extension(current_user): Extension<User>,
-) -> AppResult<Json<ApiResponse<ferrex_core::rbac::UserPermissions>>> {
+) -> AppResult<Json<ApiResponse<UserPermissions>>> {
     // Users can always view their own permissions
     // Otherwise requires users:read permission (checked by middleware)
     if current_user.id != user_id {

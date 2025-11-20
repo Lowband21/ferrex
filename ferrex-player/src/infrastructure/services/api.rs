@@ -5,15 +5,15 @@
 
 use crate::infrastructure::repository::RepositoryResult;
 use async_trait::async_trait;
-use ferrex_core::api_types::{
-    ActiveScansResponse, CreateLibraryRequest, LatestProgressResponse, ScanCommandAcceptedResponse,
-    ScanCommandRequest, StartScanRequest, UpdateLibraryRequest,
+use ferrex_core::{
+    api_types::setup::{ConfirmClaimResponse, StartClaimResponse},
+    player_prelude::{
+        ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
+        LatestProgressResponse, Library, LibraryID, Media, MediaQuery, MediaWithStatus,
+        ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics, StartScanRequest,
+        UpdateLibraryRequest, UpdateProgressRequest, User, UserWatchState,
+    },
 };
-use ferrex_core::auth::device::AuthenticatedDevice;
-use ferrex_core::types::library::Library;
-use ferrex_core::user::AuthToken;
-use ferrex_core::watch_status::{UpdateProgressRequest, UserWatchState};
-use ferrex_core::{LibraryID, Media};
 use rkyv::util::AlignedVec;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -109,10 +109,10 @@ pub trait ApiService: Send + Sync {
     ) -> RepositoryResult<LatestProgressResponse>;
 
     /// Fetch scanner metrics (queue depths, active scan counts)
-    async fn fetch_scan_metrics(&self) -> RepositoryResult<ferrex_core::api_scan::ScanMetrics>;
+    async fn fetch_scan_metrics(&self) -> RepositoryResult<ScanMetrics>;
 
     /// Fetch orchestrator configuration currently in effect
-    async fn fetch_scan_config(&self) -> RepositoryResult<ferrex_core::api_scan::ScanConfig>;
+    async fn fetch_scan_config(&self) -> RepositoryResult<ScanConfig>;
 
     /// Check server health
     async fn health_check(&self) -> RepositoryResult<bool>;
@@ -132,10 +132,7 @@ pub trait ApiService: Send + Sync {
     async fn revoke_device(&self, device_id: Uuid) -> RepositoryResult<()>;
 
     /// Query media with complex filters
-    async fn query_media(
-        &self,
-        query: ferrex_core::query::MediaQuery,
-    ) -> RepositoryResult<Vec<ferrex_core::query::MediaWithStatus>>;
+    async fn query_media(&self, query: MediaQuery) -> RepositoryResult<Vec<MediaWithStatus>>;
 
     /// Check if setup is required
     async fn check_setup_status(
@@ -149,7 +146,20 @@ pub trait ApiService: Send + Sync {
         password: String,
         display_name: Option<String>,
         setup_token: Option<String>,
-    ) -> RepositoryResult<(ferrex_core::user::User, AuthToken)>;
+        claim_token: Option<String>,
+    ) -> RepositoryResult<(User, AuthToken)>;
+
+    /// Start the secure setup claim workflow and retrieve a claim code.
+    async fn start_setup_claim(
+        &self,
+        device_name: Option<String>,
+    ) -> RepositoryResult<StartClaimResponse>;
+
+    /// Confirm an existing setup claim and receive the setup token.
+    async fn confirm_setup_claim(
+        &self,
+        claim_code: String,
+    ) -> RepositoryResult<ConfirmClaimResponse>;
 
     /// Make a GET request to a public endpoint (no auth)
     async fn get_public<T: for<'de> Deserialize<'de>>(&self, path: &str) -> RepositoryResult<T>;

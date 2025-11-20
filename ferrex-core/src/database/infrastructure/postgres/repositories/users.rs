@@ -7,7 +7,10 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::database::ports::users::UsersRepository;
-use crate::{MediaError, Result, User, UserSession};
+use crate::{
+    error::{MediaError, Result},
+    user::{User, UserSession},
+};
 
 /// PostgreSQL-backed implementation of the `UsersRepository` port.
 #[derive(Clone, Debug)]

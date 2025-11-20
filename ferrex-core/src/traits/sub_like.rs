@@ -1,12 +1,18 @@
 use rkyv::{deserialize, option::ArchivedOption, rancor::Error};
 
-use crate::{
+use super::{
+    details_like::{MediaDetails, SeasonDetailsLike, SeriesDetailsLike},
+    media_ops::MediaOps,
+};
+use crate::types::details::{
     ArchivedEnhancedMovieDetails, ArchivedEnhancedSeriesDetails, ArchivedEpisodeDetails,
-    ArchivedEpisodeReference, ArchivedMediaDetailsOption, ArchivedMovieReference,
-    ArchivedSeasonDetails, ArchivedSeasonReference, ArchivedSeriesReference, ArchivedTmdbDetails,
-    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeReference, MediaDetails,
-    MediaDetailsOption, MediaFile, MediaOps, MovieReference, SeasonDetails, SeasonDetailsLike,
-    SeasonReference, SeriesDetailsLike, SeriesReference, TmdbDetails,
+    ArchivedMediaDetailsOption, ArchivedSeasonDetails, ArchivedTmdbDetails, EnhancedMovieDetails,
+    EnhancedSeriesDetails, EpisodeDetails, MediaDetailsOption, SeasonDetails, TmdbDetails,
+};
+use crate::types::files::MediaFile;
+use crate::types::media::{
+    ArchivedEpisodeReference, ArchivedMovieReference, ArchivedSeasonReference,
+    ArchivedSeriesReference, EpisodeReference, MovieReference, SeasonReference, SeriesReference,
 };
 
 pub trait MovieLike: MediaOps {

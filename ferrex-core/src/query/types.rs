@@ -1,6 +1,7 @@
 use crate::{
     api_types::{RatingValue, ScalarRange},
-    watch_status::WatchStatusFilter,
+    types::media::Media,
+    watch_status::{InProgressItem, WatchStatusFilter},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -143,8 +144,8 @@ pub struct QueryEndpoint {
 /// Combined media reference with user watch status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaWithStatus {
-    pub media: crate::Media,
-    pub watch_status: Option<crate::watch_status::InProgressItem>,
+    pub media: Media,
+    pub watch_status: Option<InProgressItem>,
     pub is_completed: bool,
 }
 

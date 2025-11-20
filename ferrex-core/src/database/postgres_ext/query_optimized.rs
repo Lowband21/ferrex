@@ -1,11 +1,21 @@
 use crate::{
-    EpisodeID, EpisodeNumber, EpisodeURL, LibraryID, MediaDetailsOption, MediaError, MediaFile,
-    MediaIDLike, MovieID, MovieTitle, MovieURL, Result, SeasonID, SeasonNumber, SeasonURL,
-    SeriesID, SeriesTitle, SeriesURL, UrlLike,
     api_types::{RATING_DECIMAL_SCALE, RatingValue},
     database::{postgres::PostgresDatabase, traits::MediaDatabaseTrait},
-    query::*,
-    types::media::{Media, *},
+    error::{MediaError, Result},
+    query::types::{
+        MediaQuery, MediaTypeFilter, MediaWithStatus, SearchField, SearchQuery, SortBy,
+        SortCriteria, SortOrder,
+    },
+    traits::prelude::MediaIDLike,
+    types::{
+        details::MediaDetailsOption,
+        files::MediaFile,
+        ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID},
+        media::{EpisodeReference, Media, MovieReference, SeasonReference, SeriesReference},
+        numbers::{EpisodeNumber, SeasonNumber},
+        titles::{MovieTitle, SeriesTitle},
+        urls::{EpisodeURL, MovieURL, SeasonURL, SeriesURL, UrlLike},
+    },
     watch_status::{InProgressItem, WatchStatusFilter},
 };
 use sqlx::types::BigDecimal;

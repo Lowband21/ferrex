@@ -1,11 +1,12 @@
 use std::collections::HashMap;
+use std::fmt;
 
 use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::database::ports::watch_metrics::{ProgressEntry, WatchMetricsReadPort};
-use crate::{MediaError, Result};
+use crate::error::{MediaError, Result};
 
 #[derive(Clone)]
 pub struct PostgresWatchMetricsRepository {
@@ -19,6 +20,15 @@ impl PostgresWatchMetricsRepository {
 
     fn pool(&self) -> &PgPool {
         &self.pool
+    }
+}
+
+impl fmt::Debug for PostgresWatchMetricsRepository {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PostgresWatchMetricsRepository")
+            .field("pool_size", &self.pool.size())
+            .field("idle_connections", &self.pool.num_idle())
+            .finish()
     }
 }
 

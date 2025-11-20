@@ -1,10 +1,10 @@
-use crate::MediaImages;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-use super::LibraryID;
+use super::{ids::LibraryID, image::MediaImages, library::LibraryType};
 
 #[derive(
     Debug,
@@ -246,9 +246,7 @@ pub enum TmdbDetails {
 }
 
 /// Enhanced metadata that includes images, credits, and additional information
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
-)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct EnhancedMovieDetails {
     // Basic details
@@ -307,9 +305,7 @@ pub struct EnhancedMovieDetails {
     pub similar: Vec<RelatedMediaRef>,
 }
 
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
-)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct EnhancedSeriesDetails {
     // Basic details
@@ -374,9 +370,7 @@ pub struct EnhancedSeriesDetails {
     pub similar: Vec<RelatedMediaRef>,
 }
 
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
-)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct SeasonDetails {
     pub id: u64,
@@ -399,9 +393,7 @@ pub struct SeasonDetails {
     pub translations: Vec<Translation>,
 }
 
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
-)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct EpisodeDetails {
     pub id: u64,
@@ -432,6 +424,110 @@ pub struct EpisodeDetails {
     pub crew: Vec<CrewMember>,
     #[serde(default)]
     pub content_ratings: Vec<ContentRating>,
+}
+
+impl fmt::Debug for EnhancedMovieDetails {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EnhancedMovieDetails")
+            .field("id", &self.id)
+            .field("title", &self.title)
+            .field("release_date", &self.release_date)
+            .field("runtime", &self.runtime)
+            .field("vote_average", &self.vote_average)
+            .field("vote_count", &self.vote_count)
+            .field("popularity", &self.popularity)
+            .field("content_rating", &self.content_rating)
+            .field("collection", &self.collection.as_ref().map(|c| &c.name))
+            .field("genre_count", &self.genres.len())
+            .field("spoken_language_count", &self.spoken_languages.len())
+            .field("production_company_count", &self.production_companies.len())
+            .field("production_country_count", &self.production_countries.len())
+            .field("cast_count", &self.cast.len())
+            .field("crew_count", &self.crew.len())
+            .field("video_count", &self.videos.len())
+            .field("keyword_count", &self.keywords.len())
+            .field("alternative_title_count", &self.alternative_titles.len())
+            .field("translation_count", &self.translations.len())
+            .field("recommendation_count", &self.recommendations.len())
+            .field("similar_count", &self.similar.len())
+            .field("images", &self.images)
+            .finish()
+    }
+}
+
+impl fmt::Debug for EnhancedSeriesDetails {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EnhancedSeriesDetails")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("first_air_date", &self.first_air_date)
+            .field("last_air_date", &self.last_air_date)
+            .field("season_count", &self.number_of_seasons)
+            .field("episode_count", &self.number_of_episodes)
+            .field("vote_average", &self.vote_average)
+            .field("vote_count", &self.vote_count)
+            .field("popularity", &self.popularity)
+            .field("content_rating", &self.content_rating)
+            .field("genre_count", &self.genres.len())
+            .field("network_count", &self.networks.len())
+            .field("origin_country_count", &self.origin_countries.len())
+            .field("spoken_language_count", &self.spoken_languages.len())
+            .field("production_company_count", &self.production_companies.len())
+            .field("production_country_count", &self.production_countries.len())
+            .field("cast_count", &self.cast.len())
+            .field("crew_count", &self.crew.len())
+            .field("video_count", &self.videos.len())
+            .field("keyword_count", &self.keywords.len())
+            .field("alternative_title_count", &self.alternative_titles.len())
+            .field("translation_count", &self.translations.len())
+            .field("episode_group_count", &self.episode_groups.len())
+            .field("recommendation_count", &self.recommendations.len())
+            .field("similar_count", &self.similar.len())
+            .field("images", &self.images)
+            .finish()
+    }
+}
+
+impl fmt::Debug for SeasonDetails {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let has_external_ids = self.external_ids != ExternalIds::default();
+        f.debug_struct("SeasonDetails")
+            .field("id", &self.id)
+            .field("season_number", &self.season_number)
+            .field("episode_count", &self.episode_count)
+            .field("runtime", &self.runtime)
+            .field("air_date", &self.air_date)
+            .field("poster_path", &self.poster_path)
+            .field("has_external_ids", &has_external_ids)
+            .field("images", &self.images)
+            .field("video_count", &self.videos.len())
+            .field("keyword_count", &self.keywords.len())
+            .field("translation_count", &self.translations.len())
+            .finish()
+    }
+}
+
+impl fmt::Debug for EpisodeDetails {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let has_external_ids = self.external_ids != ExternalIds::default();
+        f.debug_struct("EpisodeDetails")
+            .field("id", &self.id)
+            .field("season_number", &self.season_number)
+            .field("episode_number", &self.episode_number)
+            .field("air_date", &self.air_date)
+            .field("runtime", &self.runtime)
+            .field("vote_average", &self.vote_average)
+            .field("vote_count", &self.vote_count)
+            .field("still_path", &self.still_path)
+            .field("has_external_ids", &has_external_ids)
+            .field("guest_star_count", &self.guest_stars.len())
+            .field("crew_count", &self.crew.len())
+            .field("keyword_count", &self.keywords.len())
+            .field("translation_count", &self.translations.len())
+            .field("content_rating_count", &self.content_ratings.len())
+            .field("images", &self.images)
+            .finish()
+    }
 }
 
 #[derive(
@@ -532,7 +628,7 @@ pub struct ExternalIds {
 pub struct LibraryReference {
     pub id: LibraryID,
     pub name: String,
-    pub library_type: crate::LibraryType,
+    pub library_type: LibraryType,
     #[rkyv(with = crate::rkyv_wrappers::VecPathBuf)]
     pub paths: Vec<PathBuf>,
 }

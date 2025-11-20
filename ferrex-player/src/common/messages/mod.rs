@@ -13,8 +13,7 @@ use crate::domains::ui;
 use crate::domains::search;
 use crate::domains::user_management;
 
-use ferrex_core::LibraryID;
-use ferrex_core::MediaFile;
+use ferrex_core::player_prelude::{LibraryID, MediaFile, MediaID, User, UserPermissions};
 use iced::Task;
 
 /// Result of a domain update operation
@@ -251,7 +250,7 @@ impl std::fmt::Debug for DomainMessage {
 #[derive(Clone, Debug)]
 pub enum CrossDomainEvent {
     // Auth events
-    UserAuthenticated(ferrex_core::user::User, ferrex_core::rbac::UserPermissions),
+    UserAuthenticated(User, UserPermissions),
     UserLoggedOut,
     AuthenticationComplete, // Signals auth flow is complete and app should proceed
     AuthConfigurationChanged, // Auth settings/configuration was changed
@@ -273,11 +272,11 @@ pub enum CrossDomainEvent {
     MediaStartedPlaying(MediaFile),
     MediaStopped,
     MediaPaused,
-    MediaToggleFullscreen,                            // Toggle fullscreen mode
-    MediaPlayWithId(MediaFile, ferrex_core::MediaID), // Play media with tracking ID
+    MediaToggleFullscreen,               // Toggle fullscreen mode
+    MediaPlayWithId(MediaFile, MediaID), // Play media with tracking ID
 
     // Player coordination events
-    MediaStarted(ferrex_core::MediaID), // Player notifies media domain of started playback
+    MediaStarted(MediaID), // Player notifies media domain of started playback
     #[deprecated(note = "Transcoding is now handled within streaming domain")]
     RequestTranscoding(MediaFile),
     #[deprecated(note = "Transcoding is now handled within streaming domain")]
@@ -295,7 +294,7 @@ pub enum CrossDomainEvent {
     // NOTE: Navigation events moved to direct UI messages in Task 2.3
 
     // Metadata events
-    MetadataUpdated(ferrex_core::MediaID),
+    MetadataUpdated(MediaID),
     BatchMetadataReady(Vec<crate::infrastructure::api_types::Media>),
     RequestBatchMetadataFetch(Vec<(uuid::Uuid, Vec<crate::infrastructure::api_types::Media>)>), // Request batch metadata fetching
     MediaLoaded, // Media has been loaded and is ready

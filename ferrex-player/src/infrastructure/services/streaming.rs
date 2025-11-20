@@ -52,6 +52,6 @@ impl StreamingApiService for StreamingApiAdapter {
 
     async fn get_master_playlist(&self, media_id: &str) -> Result<String> {
         let stream_path = utils::replace_param(v1::stream::PLAY, "{id}", media_id);
-        Ok(self.client.build_url(&stream_path, false))
+        Ok(self.client.build_url(&stream_path))
     }
 }

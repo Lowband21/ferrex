@@ -4,10 +4,9 @@
 //! only valid state transitions can be compiled. It uses phantom types to encode
 //! states at the type level and const generics for configuration.
 
-use crate::AuthToken;
 use crate::auth::device::DeviceRegistration;
 use crate::rbac::UserPermissions;
-use crate::user::User;
+use crate::user::{AuthToken, User};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::marker::PhantomData;
@@ -562,6 +561,9 @@ impl<S: AuthState, const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
 
 #[cfg(test)]
 mod tests {
+    use crate::auth::domain::value_objects::SessionScope;
+    use crate::user::UserPreferences;
+
     use super::*;
 
     #[test]
@@ -586,7 +588,7 @@ mod tests {
             username: "testuser".to_string(),
             last_login: Some(chrono::Utc::now()),
             is_active: true,
-            preferences: crate::UserPreferences::default(),
+            preferences: UserPreferences::default(),
             display_name: "Test User".to_string(),
             email: Some("test@example.com".to_string()),
         };
@@ -598,6 +600,7 @@ mod tests {
             session_id: None,
             device_session_id: None,
             user_id: None,
+            scope: SessionScope::Full,
         };
 
         let permissions = UserPermissions::default();

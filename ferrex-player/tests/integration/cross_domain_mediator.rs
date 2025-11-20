@@ -3,7 +3,7 @@
 //! These tests verify the actual behavior of the mediator (update function)
 //! in routing cross-domain events between domains.
 
-use ferrex_core::LibraryID;
+use ferrex_core::player_prelude::LibraryID;
 use ferrex_core::rbac::UserPermissions;
 use ferrex_player::common::messages::{CrossDomainEvent, DomainUpdateResult};
 use ferrex_player::state_refactored::State;

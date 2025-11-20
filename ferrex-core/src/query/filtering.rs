@@ -20,9 +20,9 @@
 //! desktop player and the server can build SQL predicates using the same expectations.
 
 use crate::{
-    UiDecade, UiResolution, UiWatchStatus,
     api_types::{FilterIndicesRequest, RatingValue, ScalarRange},
     query::types::{MediaTypeFilter, SortBy, SortOrder},
+    types::filter_types::{UiDecade, UiResolution, UiWatchStatus},
     watch_status::WatchStatusFilter,
 };
 use std::collections::hash_map::DefaultHasher;

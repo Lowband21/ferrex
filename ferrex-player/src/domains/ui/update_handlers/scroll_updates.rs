@@ -5,7 +5,7 @@ use crate::{
     infrastructure::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS,
     state_refactored::State,
 };
-use ferrex_core::{MediaID, MediaIDLike};
+use ferrex_core::player_prelude::{MediaID, MediaIDLike};
 use iced::{Task, widget::scrollable::Viewport};
 
 #[cfg_attr(
@@ -130,11 +130,9 @@ pub fn handle_tab_grid_scrolled(state: &mut State, viewport: Viewport) -> Task<M
         let mut prefetched = 0usize;
         for archived_id in visible_items.iter() {
             // Deserialize archived ID to runtime MediaID
-            if let Ok(media_id) =
-                rkyv::deserialize::<ferrex_core::MediaID, rkyv::rancor::Error>(archived_id)
-            {
+            if let Ok(media_id) = rkyv::deserialize::<MediaID, rkyv::rancor::Error>(archived_id) {
                 match media_id {
-                    ferrex_core::MediaID::Movie(mid) => {
+                    MediaID::Movie(mid) => {
                         let uuid = mid.to_uuid();
                         // Skip if already cached
                         if state.domains.ui.state.movie_yoke_cache.contains_key(&uuid) {
@@ -161,7 +159,7 @@ pub fn handle_tab_grid_scrolled(state: &mut State, viewport: Viewport) -> Task<M
                             }
                         }
                     }
-                    ferrex_core::MediaID::Series(mid) => {
+                    MediaID::Series(mid) => {
                         let uuid = mid.to_uuid();
                         if state.domains.ui.state.series_yoke_cache.contains_key(&uuid) {
                             continue;

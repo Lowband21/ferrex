@@ -426,19 +426,23 @@ impl UserAuthentication {
     pub fn last_login(&self) -> Option<DateTime<Utc>> {
         self.last_login
     }
+
+    pub fn max_devices(&self) -> usize {
+        self.max_devices
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
-    use ring::rand::{SecureRandom, SystemRandom};
+    use argon2::{
+        Argon2, PasswordHasher,
+        password_hash::{SaltString, rand_core::OsRng},
+    };
 
     fn hash_password(password: &str) -> String {
-        let rng = SystemRandom::new();
-        let mut salt_bytes = [0u8; 16];
-        rng.fill(&mut salt_bytes).unwrap();
-        let salt = SaltString::encode_b64(&salt_bytes).unwrap();
+        let mut rng = OsRng;
+        let salt = SaltString::generate(&mut rng);
 
         let argon2 = Argon2::default();
         argon2

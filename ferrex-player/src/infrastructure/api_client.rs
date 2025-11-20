@@ -1,8 +1,14 @@
 use anyhow::Result;
-use ferrex_core::api_routes::v1;
-use ferrex_core::api_types::ApiResponse;
-use ferrex_core::user::AuthToken;
-use ferrex_core::watch_status::{UpdateProgressRequest, UserWatchState};
+use ferrex_core::{
+    api_routes::v1,
+    api_types::setup::{
+        ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest, StartClaimResponse,
+    },
+    player_prelude::{
+        ApiResponse, AuthToken, AuthenticatedDevice, MediaQuery, MediaWithStatus,
+        UpdateProgressRequest, UserWatchState,
+    },
+};
 use log::{info, warn};
 use reqwest::{Client, RequestBuilder, StatusCode};
 use rkyv::util::AlignedVec;
@@ -81,7 +87,7 @@ impl ApiClient {
     }
 
     /// Build a versioned API URL
-    pub fn build_url(&self, path: impl AsRef<str>, legacy: bool) -> String {
+    pub fn build_url(&self, path: impl AsRef<str>) -> String {
         let p = path.as_ref();
         if p.starts_with("http://") || p.starts_with("https://") {
             return p.to_string();
@@ -303,7 +309,7 @@ impl ApiClient {
 
     /// POST request with authentication
     pub async fn post<T: Serialize, R: DeserializeOwned>(&self, path: &str, body: &T) -> Result<R> {
-        let url = self.build_url(path, false);
+        let url = self.build_url(path);
 
         let request = self.client.post(&url).json(body);
         let request = self.build_request(request).await;
@@ -312,7 +318,7 @@ impl ApiClient {
 
     /// POST request for endpoints that return 204 No Content
     pub async fn post_no_content<T: Serialize>(&self, path: &str, body: &T) -> Result<()> {
-        let url = self.build_url(path, false);
+        let url = self.build_url(path);
 
         let request = self.client.post(&url).json(body);
         let request = self.build_request(request).await;
@@ -378,7 +384,7 @@ impl ApiClient {
 
     /// GET request with authentication, returns raw rkyv bytes (structured data only)
     pub async fn get_rkyv(&self, path: &str, query: Option<(&str, &str)>) -> Result<AlignedVec> {
-        let url = self.build_url(path, false);
+        let url = self.build_url(path);
 
         // Debug logging
         log::debug!("GET rkyv request to: {}", url);
@@ -441,7 +447,7 @@ impl ApiClient {
 
     /// GET request with authentication, returns raw bytes (for images)
     pub async fn get_bytes(&self, path: &str, query: Option<(&str, &str)>) -> Result<Vec<u8>> {
-        let url = self.build_url(path, false);
+        let url = self.build_url(path);
 
         log::debug!("GET (bytes) request to: {}", url);
 
@@ -481,7 +487,7 @@ impl ApiClient {
 
     /// GET request with authentication
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
-        let url = self.build_url(path, false);
+        let url = self.build_url(path);
 
         // Debug logging
         log::debug!("GET request to: {}", url);
@@ -494,7 +500,7 @@ impl ApiClient {
 
     /// GET request for public endpoints (no authentication)
     pub async fn get_public<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
-        let url = self.build_url(path, false);
+        let url = self.build_url(path);
 
         log::debug!("[ApiClient] GET (public) request to: {}", url);
 
@@ -505,7 +511,7 @@ impl ApiClient {
 
     /// PUT request
     pub async fn put<T: Serialize, R: DeserializeOwned>(&self, path: &str, body: &T) -> Result<R> {
-        let url = self.build_url(path, false);
+        let url = self.build_url(path);
 
         let request = self.client.put(&url).json(body);
         let request = self.build_request(request).await;
@@ -514,7 +520,7 @@ impl ApiClient {
 
     /// DELETE request
     pub async fn delete<R: DeserializeOwned>(&self, path: &str) -> Result<R> {
-        let url = self.build_url(path, false);
+        let url = self.build_url(path);
 
         let request = self.client.delete(&url);
         let request = self.build_request(request).await;
@@ -542,6 +548,7 @@ impl ApiClient {
         password: String,
         display_name: Option<String>,
         setup_token: Option<String>,
+        claim_token: Option<String>,
     ) -> Result<AuthToken> {
         #[derive(Serialize)]
         struct AdminSetupRequest {
@@ -549,6 +556,7 @@ impl ApiClient {
             password: String,
             display_name: Option<String>,
             setup_token: Option<String>,
+            claim_token: Option<String>,
         }
 
         let request = AdminSetupRequest {
@@ -556,9 +564,27 @@ impl ApiClient {
             password,
             display_name,
             setup_token,
+            claim_token,
         };
 
         self.post(v1::setup::CREATE_ADMIN, &request).await
+    }
+
+    /// Start the secure claim flow for first-run binding
+    pub async fn start_setup_claim(
+        &self,
+        device_name: Option<String>,
+    ) -> Result<StartClaimResponse> {
+        let request = StartClaimRequest { device_name };
+        self.post(v1::setup::CLAIM_START, &request).await
+    }
+
+    /// Confirm a secure claim using the provided claim code
+    pub async fn confirm_setup_claim(&self, claim_code: &str) -> Result<ConfirmClaimResponse> {
+        let request = ConfirmClaimRequest {
+            claim_code: claim_code.to_string(),
+        };
+        self.post(v1::setup::CLAIM_CONFIRM, &request).await
     }
 
     /// Get auth header for the current session
@@ -571,9 +597,7 @@ impl ApiClient {
     }
 
     /// List user devices
-    pub async fn list_user_devices(
-        &self,
-    ) -> Result<Vec<ferrex_core::auth::device::AuthenticatedDevice>> {
+    pub async fn list_user_devices(&self) -> Result<Vec<AuthenticatedDevice>> {
         self.get(v1::auth::device::LIST).await
     }
 
@@ -592,10 +616,7 @@ impl ApiClient {
     }
 
     /// Execute a media query
-    pub async fn query_media(
-        &self,
-        query: ferrex_core::query::MediaQuery,
-    ) -> Result<Vec<ferrex_core::query::MediaWithStatus>> {
+    pub async fn query_media(&self, query: MediaQuery) -> Result<Vec<MediaWithStatus>> {
         // Server endpoint is at /media/query, not /api/v1/media/query
         self.post(v1::media::QUERY, &query).await
     }

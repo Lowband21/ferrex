@@ -2,7 +2,7 @@ use super::messages::Message;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::infrastructure::services::api::ApiService;
 use crate::state_refactored::State;
-use ferrex_core::{MediaIDLike, UpdateProgressRequest};
+use ferrex_core::player_prelude::{MediaIDLike, UpdateProgressRequest, UserWatchState};
 use iced::Task;
 
 /// Handle media domain messages - focused on media management, not playback
@@ -31,7 +31,7 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
         Message::PlayNextEpisode => {
             // Check if current media is an episode and play the next one
             if let Some(current_media_id) = &state.domains.media.state.current_media_id {
-                if let ferrex_core::MediaID::Episode(episode_id) = current_media_id {
+                if let MediaID::Episode(episode_id) = current_media_id {
                     // Use series progress service to find next episode
                     //use crate::domains::media::services::SeriesProgressService;
 
@@ -49,7 +49,7 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                         let media_file = crate::domains::media::library::MediaFile::from(
                             next_episode.file.clone(),
                         );
-                        let media_id = ferrex_core::MediaID::Episode(next_episode.id.clone());
+                        let media_id = MediaID::Episode(next_episode.id.clone());
 
                         // Clear any pending resume position for fresh start of next episode
                         state.domains.media.state.pending_resume_position = None;
@@ -88,8 +88,7 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                 } else {
                     // Ensure we have a local watch state cache to update
                     if state.domains.media.state.user_watch_state.is_none() {
-                        state.domains.media.state.user_watch_state =
-                            Some(ferrex_core::watch_status::UserWatchState::new());
+                        state.domains.media.state.user_watch_state = Some(UserWatchState::new());
                     }
 
                     if let Some(watch_state) = &mut state.domains.media.state.user_watch_state {

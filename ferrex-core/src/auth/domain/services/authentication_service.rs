@@ -1,19 +1,22 @@
 use anyhow::Result;
-use chrono::Duration;
+use chrono::{DateTime, Duration, Utc};
+use serde_json::json;
 use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use super::{AuthEventContext, map_domain_events};
 use crate::auth::AuthCrypto;
 use crate::auth::domain::aggregates::{
     DeviceSession, DeviceSessionError, UserAuthentication, UserAuthenticationError,
 };
+use crate::auth::domain::events::AuthEvent;
 use crate::auth::domain::repositories::{
-    AuthSessionRepository, DeviceSessionRepository, RefreshTokenRecord, RefreshTokenRepository,
+    AuthEventRepository, AuthSessionRepository, DeviceSessionRepository, RefreshTokenRepository,
     UserAuthenticationRepository,
 };
 use crate::auth::domain::value_objects::{
-    DeviceFingerprint, PinPolicy, RefreshToken, SessionToken,
+    DeviceFingerprint, PinPolicy, RefreshToken, RevocationReason, SessionScope, SessionToken,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -42,6 +45,16 @@ pub struct AuthenticationService {
     refresh_repo: Arc<dyn RefreshTokenRepository>,
     session_store: Arc<dyn AuthSessionRepository>,
     crypto: Arc<AuthCrypto>,
+    event_repo: Option<Arc<dyn AuthEventRepository>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ValidatedSession {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub device_session_id: Option<Uuid>,
+    pub expires_at: DateTime<Utc>,
+    pub scope: SessionScope,
 }
 
 #[derive(Debug)]
@@ -52,6 +65,38 @@ pub struct TokenBundle {
     pub refresh_record_id: Uuid,
     pub device_session_id: Option<Uuid>,
     pub user_id: Uuid,
+    pub scope: SessionScope,
+}
+
+#[derive(Debug, Clone)]
+pub enum PasswordChangeActor {
+    UserInitiated,
+    AdminInitiated { admin_user_id: Uuid },
+}
+
+impl PasswordChangeActor {
+    fn revocation_reason(&self) -> RevocationReason {
+        match self {
+            Self::UserInitiated => RevocationReason::PasswordChange,
+            Self::AdminInitiated { .. } => RevocationReason::AdminPasswordReset,
+        }
+    }
+
+    fn describe(&self) -> (&'static str, Option<Uuid>) {
+        match self {
+            Self::UserInitiated => ("user", None),
+            Self::AdminInitiated { admin_user_id } => ("admin", Some(*admin_user_id)),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PasswordChangeRequest {
+    pub user_id: Uuid,
+    pub new_password: String,
+    pub current_password: Option<String>,
+    pub actor: PasswordChangeActor,
+    pub context: Option<AuthEventContext>,
 }
 
 impl fmt::Debug for AuthenticationService {
@@ -63,6 +108,10 @@ impl fmt::Debug for AuthenticationService {
             .field(
                 "session_store_refs",
                 &Arc::strong_count(&self.session_store),
+            )
+            .field(
+                "event_repo_refs",
+                &self.event_repo.as_ref().map(Arc::strong_count),
             )
             .finish()
     }
@@ -82,7 +131,149 @@ impl AuthenticationService {
             refresh_repo,
             session_store,
             crypto,
+            event_repo: None,
         }
+    }
+
+    pub fn with_event_repository(mut self, event_repo: Arc<dyn AuthEventRepository>) -> Self {
+        self.event_repo = Some(event_repo);
+        self
+    }
+
+    pub async fn change_password(
+        &self,
+        request: PasswordChangeRequest,
+    ) -> Result<(), AuthenticationError> {
+        let PasswordChangeRequest {
+            user_id,
+            new_password,
+            current_password,
+            actor,
+            context,
+        } = request;
+
+        let mut user = self
+            .user_repo
+            .find_by_id(user_id)
+            .await
+            .map_err(AuthenticationError::from)?
+            .ok_or(AuthenticationError::UserNotFound)?;
+
+        let requires_current = matches!(actor, PasswordChangeActor::UserInitiated);
+        if requires_current && current_password.is_none() {
+            return Err(AuthenticationError::InvalidCredentials);
+        }
+
+        if let Some(current) = current_password.as_ref() {
+            let verified = self
+                .crypto
+                .verify_password(current, user.password_hash())
+                .map_err(|err| {
+                    AuthenticationError::DatabaseError(anyhow::anyhow!(err.to_string()))
+                })?;
+            if !verified {
+                return Err(AuthenticationError::InvalidCredentials);
+            }
+        }
+
+        let password_hash = self
+            .crypto
+            .hash_password(&new_password)
+            .map_err(|err| AuthenticationError::DatabaseError(anyhow::anyhow!(err.to_string())))?;
+
+        user.update_password(password_hash);
+
+        let mut base_context = context.unwrap_or_default();
+        let (label, admin_id) = actor.describe();
+        base_context.insert_metadata("initiator", json!(label));
+        if let Some(admin) = admin_id {
+            base_context.insert_metadata("admin_user_id", json!(admin));
+        }
+
+        let user_events = user.take_events();
+        self.user_repo
+            .save(&user)
+            .await
+            .map_err(AuthenticationError::from)?;
+        self.publish_events(user_events, base_context.clone())
+            .await?;
+
+        let mut sessions = self
+            .session_repo
+            .find_by_user_id(user_id)
+            .await
+            .map_err(AuthenticationError::from)?;
+
+        for session in sessions.iter_mut() {
+            if session.is_revoked() {
+                continue;
+            }
+
+            if let Err(err) = session.revoke() {
+                if !matches!(err, DeviceSessionError::DeviceRevoked) {
+                    return Err(AuthenticationError::DatabaseError(anyhow::anyhow!(
+                        err.to_string()
+                    )));
+                }
+            }
+
+            let events = session.take_events();
+            self.session_repo
+                .save(session)
+                .await
+                .map_err(AuthenticationError::from)?;
+
+            if !events.is_empty() {
+                self.publish_events(events, base_context.clone()).await?;
+            }
+        }
+
+        let reason = actor.revocation_reason();
+        self.session_store
+            .revoke_by_user(user_id, reason)
+            .await
+            .map_err(AuthenticationError::from)?;
+        self.refresh_repo
+            .revoke_for_user(user_id, reason)
+            .await
+            .map_err(AuthenticationError::from)?;
+
+        Ok(())
+    }
+
+    pub async fn validate_session_token(
+        &self,
+        token: &str,
+    ) -> Result<ValidatedSession, AuthenticationError> {
+        let token_hash = self.crypto.hash_token(token);
+
+        let record = self
+            .session_store
+            .find_by_hash(&token_hash)
+            .await
+            .map_err(AuthenticationError::from)?
+            .ok_or(AuthenticationError::SessionExpired)?;
+
+        if record.revoked {
+            return Err(AuthenticationError::SessionExpired);
+        }
+
+        if record.expires_at < Utc::now() {
+            return Err(AuthenticationError::SessionExpired);
+        }
+
+        self.session_store
+            .touch(record.id)
+            .await
+            .map_err(AuthenticationError::from)?;
+
+        Ok(ValidatedSession {
+            session_id: record.id,
+            user_id: record.user_id,
+            device_session_id: record.device_session_id,
+            expires_at: record.expires_at,
+            scope: record.scope,
+        })
     }
 
     pub async fn authenticate_user(
@@ -96,15 +287,15 @@ impl AuthenticationService {
             .await?
             .ok_or(AuthenticationError::UserNotFound)?;
 
-        match user.authenticate_password(password, &self.crypto) {
-            Ok(()) => {
-                self.user_repo.save(&user).await?;
-                Ok(user)
-            }
-            Err(err) => {
-                self.user_repo.save(&user).await?;
-                Err(map_user_auth_error(err))
-            }
+        let result = user.authenticate_password(password, &self.crypto);
+        let events = user.take_events();
+        self.user_repo.save(&user).await?;
+        self.publish_events(events, AuthEventContext::default())
+            .await?;
+
+        match result {
+            Ok(()) => Ok(user),
+            Err(err) => Err(map_user_auth_error(err)),
         }
     }
 
@@ -117,7 +308,8 @@ impl AuthenticationService {
     ) -> Result<SessionToken, AuthenticationError> {
         let bundle = self
             .authenticate_device_with_pin(user_id, device_fingerprint, pin)
-            .await?;
+            .await
+            .map_err(AuthenticationError::from)?;
 
         Ok(bundle.session_token)
     }
@@ -134,11 +326,13 @@ impl AuthenticationService {
         })?;
 
         let session_hash = self.crypto.hash_token(session_token.as_str());
+        let session_scope = SessionScope::Full;
         let session_record_id = self
             .session_store
             .insert_session(
                 user.user_id(),
                 None,
+                session_scope,
                 &session_hash,
                 session_token.created_at(),
                 session_token.expires_at(),
@@ -175,6 +369,7 @@ impl AuthenticationService {
             refresh_record_id,
             device_session_id: None,
             user_id: user.user_id(),
+            scope: session_scope,
         })
     }
 
@@ -184,27 +379,25 @@ impl AuthenticationService {
         device_fingerprint: &DeviceFingerprint,
         pin: &str,
     ) -> Result<TokenBundle, AuthenticationError> {
-        // Find the device session
         let mut session = self
             .session_repo
             .find_by_user_and_fingerprint(user_id, device_fingerprint)
             .await?
             .ok_or(AuthenticationError::DeviceNotFound)?;
 
-        // Authenticate with PIN using domain logic
-        let session_token = session
-            .authenticate_with_pin(pin, 3, Duration::hours(24))
-            .map_err(|e| match e {
-                DeviceSessionError::DeviceNotTrusted => AuthenticationError::DeviceNotTrusted,
-                DeviceSessionError::InvalidPin => AuthenticationError::InvalidPin,
-                DeviceSessionError::TooManyFailedAttempts => {
-                    AuthenticationError::TooManyFailedAttempts
-                }
-                _ => AuthenticationError::InvalidCredentials,
-            })?;
+        let auth_result = session.authenticate_with_pin(pin, 3, Duration::hours(24));
 
-        // Hash the token for storage and replace the in-memory representation so
-        // the repository can persist the correct digest.
+        let session_token = match auth_result {
+            Ok(token) => token,
+            Err(err) => {
+                let events = session.take_events();
+                self.session_repo.save(&session).await?;
+                self.publish_events(events, AuthEventContext::default())
+                    .await?;
+                return Err(map_device_pin_error(err));
+            }
+        };
+
         let persisted_hash = self.crypto.hash_token(session_token.as_str());
         let persisted_token = SessionToken::from_value(
             persisted_hash,
@@ -218,12 +411,16 @@ impl AuthenticationService {
         })?;
         session.set_persisted_token(Some(persisted_token));
 
-        // Save the updated session and capture the auth_sessions row id
+        let events = session.take_events();
+
         let session_record_id = self.session_repo.save(&session).await?.ok_or_else(|| {
             AuthenticationError::DatabaseError(anyhow::anyhow!("failed to persist session token"))
         })?;
 
-        // Issue a refresh token bound to the same device session
+        let mut context = AuthEventContext::default();
+        context.auth_session_id = Some(session_record_id);
+        self.publish_events(events, context).await?;
+
         let refresh_token = RefreshToken::generate(Duration::days(30)).map_err(|_| {
             AuthenticationError::DatabaseError(anyhow::anyhow!("failed to generate refresh token"))
         })?;
@@ -254,6 +451,7 @@ impl AuthenticationService {
             refresh_record_id,
             device_session_id: Some(session.id()),
             user_id,
+            scope: SessionScope::Playback,
         })
     }
 
@@ -269,15 +467,29 @@ impl AuthenticationService {
             .await?
             .ok_or(AuthenticationError::SessionExpired)?;
 
-        if record.revoked || record.token.is_expired() {
+        if record.revoked {
+            let reused_after_rotation = record.used_count > 0
+                && matches!(
+                    record.revoked_reason.as_deref(),
+                    Some(reason) if reason == RevocationReason::Rotation.as_str()
+                );
+
+            if reused_after_rotation {
+                self.refresh_repo
+                    .revoke_family(record.token.family_id(), RevocationReason::ReuseDetected)
+                    .await?;
+            }
+
             return Err(AuthenticationError::SessionExpired);
         }
 
-        let device_session_id = record
-            .device_session_id
-            .ok_or(AuthenticationError::DeviceNotFound)?;
+        if record.token.is_expired() {
+            return Err(AuthenticationError::SessionExpired);
+        }
 
-        self.refresh_repo.mark_used(record.id, "rotation").await?;
+        self.refresh_repo
+            .mark_used(record.id, RevocationReason::Rotation)
+            .await?;
 
         if let Some(device_session_id) = record.device_session_id {
             let mut session = self
@@ -303,11 +515,17 @@ impl AuthenticationService {
             })?;
             session.set_persisted_token(Some(persisted_token));
 
+            let events = session.take_events();
+
             let session_record_id = self.session_repo.save(&session).await?.ok_or_else(|| {
                 AuthenticationError::DatabaseError(anyhow::anyhow!(
                     "failed to persist refreshed session token"
                 ))
             })?;
+
+            let mut context = AuthEventContext::default();
+            context.auth_session_id = Some(session_record_id);
+            self.publish_events(events, context).await?;
 
             let refresh_token = record.token.rotate(Duration::days(30)).map_err(|_| {
                 AuthenticationError::DatabaseError(anyhow::anyhow!(
@@ -343,6 +561,7 @@ impl AuthenticationService {
                 refresh_record_id,
                 device_session_id: Some(device_session_id),
                 user_id: record.user_id,
+                scope: SessionScope::Playback,
             })
         } else {
             let session_token = SessionToken::generate(Duration::hours(24)).map_err(|_| {
@@ -357,6 +576,7 @@ impl AuthenticationService {
                 .insert_session(
                     record.user_id,
                     None,
+                    SessionScope::Full,
                     &session_hash,
                     session_token.created_at(),
                     session_token.expires_at(),
@@ -397,6 +617,7 @@ impl AuthenticationService {
                 refresh_record_id,
                 device_session_id: None,
                 user_id: record.user_id,
+                scope: SessionScope::Full,
             })
         }
     }
@@ -414,16 +635,18 @@ impl AuthenticationService {
 
         let user_id = session.user_id();
 
-        let session_token = session
-            .authenticate_with_pin(pin, 3, Duration::hours(24))
-            .map_err(|e| match e {
-                DeviceSessionError::DeviceNotTrusted => AuthenticationError::DeviceNotTrusted,
-                DeviceSessionError::InvalidPin => AuthenticationError::InvalidPin,
-                DeviceSessionError::TooManyFailedAttempts => {
-                    AuthenticationError::TooManyFailedAttempts
-                }
-                _ => AuthenticationError::InvalidCredentials,
-            })?;
+        let auth_result = session.authenticate_with_pin(pin, 3, Duration::hours(24));
+
+        let session_token = match auth_result {
+            Ok(token) => token,
+            Err(err) => {
+                let events = session.take_events();
+                self.session_repo.save(&session).await?;
+                self.publish_events(events, AuthEventContext::default())
+                    .await?;
+                return Err(map_device_pin_error(err));
+            }
+        };
 
         let persisted_hash = self.crypto.hash_token(session_token.as_str());
         let persisted_token = SessionToken::from_value(
@@ -438,9 +661,15 @@ impl AuthenticationService {
         })?;
         session.set_persisted_token(Some(persisted_token));
 
+        let events = session.take_events();
+
         let session_record_id = self.session_repo.save(&session).await?.ok_or_else(|| {
             AuthenticationError::DatabaseError(anyhow::anyhow!("failed to persist session token"))
         })?;
+
+        let mut context = AuthEventContext::default();
+        context.auth_session_id = Some(session_record_id);
+        self.publish_events(events, context).await?;
 
         let refresh_token = RefreshToken::generate(Duration::days(30)).map_err(|_| {
             AuthenticationError::DatabaseError(anyhow::anyhow!("failed to generate refresh token"))
@@ -472,6 +701,7 @@ impl AuthenticationService {
             refresh_record_id,
             device_session_id: Some(device_session_id),
             user_id,
+            scope: SessionScope::Playback,
         })
     }
 
@@ -501,8 +731,10 @@ impl AuthenticationService {
             .set_pin(pin, &policy)
             .map_err(|_| AuthenticationError::InvalidPin)?;
 
-        // Save the session
-        let _ = self.session_repo.save(&session).await?;
+        let events = session.take_events();
+        self.session_repo.save(&session).await?;
+        self.publish_events(events, AuthEventContext::default())
+            .await?;
 
         Ok(session)
     }
@@ -520,13 +752,21 @@ impl AuthenticationService {
             .await?
             .ok_or(AuthenticationError::DeviceNotFound)?;
 
-        // Revoke the device using domain logic
         session
             .revoke()
             .map_err(|_| AuthenticationError::InvalidCredentials)?;
 
-        // Save the updated session
-        let _ = self.session_repo.save(&session).await?;
+        let events = session.take_events();
+        self.session_repo.save(&session).await?;
+        self.publish_events(events, AuthEventContext::default())
+            .await?;
+
+        self.session_store
+            .revoke_by_device(session.id(), RevocationReason::DeviceRevoked)
+            .await?;
+        self.refresh_repo
+            .revoke_for_device(session.id(), RevocationReason::DeviceRevoked)
+            .await?;
 
         Ok(())
     }
@@ -554,6 +794,31 @@ impl AuthenticationService {
             Some(_) => Err(AuthenticationError::SessionExpired),
             None => Err(AuthenticationError::SessionExpired),
         }
+    }
+
+    async fn publish_events(
+        &self,
+        events: Vec<AuthEvent>,
+        context: AuthEventContext,
+    ) -> Result<(), AuthenticationError> {
+        if let Some(repo) = self.event_repo.as_ref() {
+            let logs = map_domain_events(events, &context);
+            if !logs.is_empty() {
+                repo.record(logs).await.map_err(AuthenticationError::from)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn map_device_pin_error(err: DeviceSessionError) -> AuthenticationError {
+    match err {
+        DeviceSessionError::DeviceNotTrusted | DeviceSessionError::DeviceRevoked => {
+            AuthenticationError::DeviceNotTrusted
+        }
+        DeviceSessionError::InvalidPin => AuthenticationError::InvalidPin,
+        DeviceSessionError::TooManyFailedAttempts => AuthenticationError::TooManyFailedAttempts,
+        _ => AuthenticationError::InvalidCredentials,
     }
 }
 

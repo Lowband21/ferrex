@@ -1,6 +1,9 @@
 use chrono::Utc;
 use ferrex_core::rbac::UserPermissions;
-use ferrex_core::user::{AuthToken, User, UserPreferences};
+use ferrex_core::{
+    auth::domain::value_objects::SessionScope,
+    user::{AuthToken, User, UserPreferences},
+};
 use ferrex_player::domains::auth::storage::{AuthStorage, StoredAuth};
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -40,6 +43,7 @@ fn sample_auth(expires_in: u32) -> StoredAuth {
         session_id: None,
         device_session_id: None,
         user_id: None,
+        scope: SessionScope::Full,
     },
         user,
         server_url: "http://localhost:3000".into(),

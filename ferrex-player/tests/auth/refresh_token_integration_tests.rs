@@ -9,8 +9,11 @@
 use ferrex_player::domains::auth::manager::AuthManager;
 use ferrex_player::domains::auth::storage::{AuthStorage, StoredAuth};
 use ferrex_player::infrastructure::api_client::ApiClient;
-use ferrex_core::user::{AuthToken, User};
-use ferrex_core::rbac::UserPermissions;
+use ferrex_core::{
+    auth::domain::value_objects::SessionScope,
+    rbac::UserPermissions,
+    user::{AuthToken, User},
+};
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 use tempfile::TempDir;
@@ -33,13 +36,13 @@ fn create_test_user() -> User {
 
 fn create_test_token(expires_in: i64, refresh_token: String) -> AuthToken {
     AuthToken {
-        access_token: format!("access_token_{,
+        access_token: format!("access_token_{}", Uuid::now_v7()),
+        refresh_token,
+        expires_in: expires_in.max(0) as u32, // Convert to u32, ensuring non-negative
         session_id: None,
         device_session_id: None,
         user_id: None,
-    }", Uuid::now_v7()),
-        refresh_token,
-        expires_in: expires_in.max(0) as u32, // Convert to u32, ensuring non-negative
+        scope: SessionScope::Full,
     }
 }
 
@@ -182,6 +185,7 @@ async fn test_missing_refresh_token_clears_auth() {
         session_id: None,
         device_session_id: None,
         user_id: None,
+        scope: SessionScope::Full,
     };
     
     // Create stored auth without refresh token

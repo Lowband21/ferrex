@@ -1,4 +1,5 @@
-use crate::{MediaID, MediaType};
+use crate::types::media_id::MediaID;
+use crate::types::util_types::MediaType;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

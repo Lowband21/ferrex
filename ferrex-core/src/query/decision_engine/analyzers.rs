@@ -2,7 +2,8 @@
 
 use crate::query::decision_engine::types::QueryContext;
 use crate::query::types::{MediaQuery, SortBy};
-use crate::{Media, MediaDetailsOption, MovieReference, SeriesReference};
+use crate::types::details::MediaDetailsOption;
+use crate::types::media::{Media, MovieReference, SeriesReference};
 
 /// Levels of data completeness
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
@@ -225,7 +226,18 @@ impl QueryComplexityAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LibraryID, MediaFile, MovieID, MovieTitle, MovieURL, UrlLike};
+    use crate::{
+        api_types::ScalarRange,
+        query::types::{MediaTypeFilter, SearchField, SearchQuery},
+        types::{
+            details::{EnhancedMovieDetails, TmdbDetails},
+            files::MediaFile,
+            ids::{LibraryID, MovieID},
+            titles::MovieTitle,
+            urls::{MovieURL, UrlLike},
+        },
+        watch_status::WatchStatusFilter,
+    };
     use std::path::PathBuf;
     use uuid::Uuid;
 
@@ -236,45 +248,43 @@ mod tests {
             tmdb_id: 123,
             title: MovieTitle::new("Test Movie".to_string()).unwrap(),
             details: if has_details {
-                MediaDetailsOption::Details(crate::TmdbDetails::Movie(
-                    crate::EnhancedMovieDetails {
-                        id: 123,
-                        title: "Test Movie".to_string(),
-                        overview: Some("A test movie".to_string()),
-                        release_date: Some("2023-01-15".to_string()),
-                        runtime: Some(120),
-                        vote_average: Some(7.5),
-                        vote_count: Some(100),
-                        popularity: Some(50.0),
-                        content_rating: None,
-                        content_ratings: Vec::new(),
-                        release_dates: Vec::new(),
-                        genres: vec![],
-                        spoken_languages: vec![],
-                        production_companies: vec![],
-                        production_countries: vec![],
-                        homepage: None,
-                        status: None,
-                        tagline: None,
-                        budget: None,
-                        revenue: None,
-                        poster_path: None,
-                        backdrop_path: None,
-                        logo_path: None,
-                        images: Default::default(),
-                        cast: vec![],
-                        crew: vec![],
-                        videos: vec![],
-                        keywords: vec![],
-                        external_ids: Default::default(),
-                        alternative_titles: Vec::new(),
-                        translations: Vec::new(),
-                        collection: None,
-                        recommendations: Vec::new(),
-                        similar: Vec::new(),
-                        original_title: None,
-                    },
-                ))
+                MediaDetailsOption::Details(TmdbDetails::Movie(EnhancedMovieDetails {
+                    id: 123,
+                    title: "Test Movie".to_string(),
+                    overview: Some("A test movie".to_string()),
+                    release_date: Some("2023-01-15".to_string()),
+                    runtime: Some(120),
+                    vote_average: Some(7.5),
+                    vote_count: Some(100),
+                    popularity: Some(50.0),
+                    content_rating: None,
+                    content_ratings: Vec::new(),
+                    release_dates: Vec::new(),
+                    genres: vec![],
+                    spoken_languages: vec![],
+                    production_companies: vec![],
+                    production_countries: vec![],
+                    homepage: None,
+                    status: None,
+                    tagline: None,
+                    budget: None,
+                    revenue: None,
+                    poster_path: None,
+                    backdrop_path: None,
+                    logo_path: None,
+                    images: Default::default(),
+                    cast: vec![],
+                    crew: vec![],
+                    videos: vec![],
+                    keywords: vec![],
+                    external_ids: Default::default(),
+                    alternative_titles: Vec::new(),
+                    translations: Vec::new(),
+                    collection: None,
+                    recommendations: Vec::new(),
+                    similar: Vec::new(),
+                    original_title: None,
+                }))
             } else {
                 MediaDetailsOption::Endpoint("/movie/123".to_string())
             },
@@ -341,7 +351,7 @@ mod tests {
         moderate_query.sort.primary = SortBy::Title;
         moderate_query.sort.secondary = Some(SortBy::Rating);
         moderate_query.filters.library_ids = vec![Uuid::now_v7()];
-        moderate_query.filters.media_type = Some(crate::query::types::MediaTypeFilter::Movie);
+        moderate_query.filters.media_type = Some(MediaTypeFilter::Movie);
 
         assert_eq!(
             QueryComplexityAnalyzer::analyze(&moderate_query),
@@ -352,10 +362,10 @@ mod tests {
         let mut complex_query = moderate_query.clone();
         complex_query.filters.genres = vec!["Action".to_string()];
         complex_query.filters.year_range = Some(ScalarRange::new(2020, 2024));
-        complex_query.filters.watch_status = Some(crate::WatchStatusFilter::InProgress);
-        complex_query.search = Some(crate::query::types::SearchQuery {
+        complex_query.filters.watch_status = Some(WatchStatusFilter::InProgress);
+        complex_query.search = Some(SearchQuery {
             text: "test".to_string(),
-            fields: vec![],
+            fields: vec![SearchField::Title],
             fuzzy: false,
         });
 

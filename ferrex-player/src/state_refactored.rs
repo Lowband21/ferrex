@@ -34,9 +34,7 @@ use crate::infrastructure::repository::{
 use crate::infrastructure::services::settings::SettingsApiAdapter;
 use crate::infrastructure::services::streaming::StreamingApiAdapter;
 use crate::infrastructure::services::user_management::UserAdminApiAdapter;
-use ferrex_core::LibraryID;
-use ferrex_core::SortBy;
-use ferrex_core::SortOrder;
+use ferrex_core::player_prelude::{LibraryID, SortBy, SortOrder, UiResolution, UiWatchStatus};
 use parking_lot::RwLock as StdRwLock;
 use std::sync::Arc;
 
@@ -158,8 +156,8 @@ impl State {
             show_filter_panel: false,
             selected_genres: Vec::new(),
             selected_decade: None,
-            selected_resolution: ferrex_core::UiResolution::Any,
-            selected_watch_status: ferrex_core::UiWatchStatus::Any,
+            selected_resolution: UiResolution::Any,
+            selected_watch_status: UiWatchStatus::Any,
             show_seasons_carousel: None,
             season_episodes_carousel: None,
             show_clear_database_confirm: false,

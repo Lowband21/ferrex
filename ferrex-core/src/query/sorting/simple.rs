@@ -1,5 +1,10 @@
-use crate::query::types::{SortBy, SortOrder};
-use crate::{Media, MediaDetailsOption, TmdbDetails};
+use crate::{
+    query::types::{SortBy, SortOrder},
+    types::{
+        details::{MediaDetailsOption, TmdbDetails},
+        media::Media,
+    },
+};
 use chrono::{DateTime, NaiveDate, Utc};
 use std::cmp::Ordering;
 

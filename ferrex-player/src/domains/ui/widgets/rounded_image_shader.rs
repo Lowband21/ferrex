@@ -11,8 +11,8 @@ use bytemuck::{Pod, Zeroable};
 use iced::advanced::graphics::Viewport;
 use iced::wgpu;
 use iced::widget::image::Handle;
+use iced::widget::shader::Primitive;
 use iced::widget::shader::Program;
-use iced::widget::shader::{Primitive, Storage};
 use iced::{Color, Element, Event, Length, Point, Rectangle, Size, mouse};
 use iced_wgpu::AtlasRegion;
 use iced_wgpu::primitive::{

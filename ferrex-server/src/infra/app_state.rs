@@ -8,14 +8,22 @@ use uuid::Uuid;
 
 #[cfg(feature = "demo")]
 use crate::demo::DemoCoordinator;
-use crate::infra::config::Config;
 use crate::infra::scan::scan_manager::ScanControlPlane;
 use crate::infra::websocket::ConnectionManager;
 use crate::media::prep::thumbnail_service::ThumbnailService;
-use ferrex_core::ImageService;
+use crate::{application::auth::AuthApplicationFacade, infra::config::Config};
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
-use ferrex_core::auth::{AuthCrypto, domain::services::AuthenticationService};
+use ferrex_core::auth::{
+    AuthCrypto,
+    domain::{
+        services::{AuthenticationService, DeviceTrustService, PinManagementService},
+        value_objects::SessionScope,
+    },
+};
 use ferrex_core::database::PostgresDatabase;
+use ferrex_core::database::ports::setup_claims::SetupClaimsRepository;
+use ferrex_core::image_service::ImageService;
+use ferrex_core::setup::SetupClaimService;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -28,8 +36,9 @@ pub struct AppState {
     pub thumbnail_service: Arc<ThumbnailService>,
     pub image_service: Arc<ImageService>,
     pub websocket_manager: Arc<ConnectionManager>,
-    pub auth_service: Arc<AuthenticationService>,
+    pub auth_facade: Arc<AuthApplicationFacade>,
     pub auth_crypto: Arc<AuthCrypto>,
+    pub setup_claim_service: Arc<SetupClaimService<dyn SetupClaimsRepository>>,
     /// Track admin sessions per device for PIN authentication eligibility
     pub admin_sessions: Arc<Mutex<HashMap<Uuid, AdminSessionInfo>>>,
     #[cfg(feature = "demo")]
@@ -69,6 +78,22 @@ impl AdminSessionInfo {
 }
 
 impl AppState {
+    pub fn auth_service(&self) -> Arc<AuthenticationService> {
+        self.auth_facade.auth_service()
+    }
+
+    pub fn device_trust_service(&self) -> Arc<DeviceTrustService> {
+        self.auth_facade.device_trust_service()
+    }
+
+    pub fn pin_management_service(&self) -> Arc<PinManagementService> {
+        self.auth_facade.pin_management_service()
+    }
+
+    pub fn setup_claim_service(&self) -> Arc<SetupClaimService<dyn SetupClaimsRepository>> {
+        self.setup_claim_service.clone()
+    }
+
     pub async fn is_admin_authenticated_on_device(&self, device_id: Uuid) -> bool {
         let admin_sessions = self.admin_sessions.lock().await;
         admin_sessions
@@ -93,6 +118,32 @@ impl AppState {
 
         // TODO: Add proper admin role checking once role system is implemented
         // For now, assume the caller has already verified admin status
+
+        // Validate the provided session token belongs to the admin and has full scope
+        let validated_session = self
+            .auth_service()
+            .validate_session_token(&session_token)
+            .await
+            .map_err(|err| anyhow!("Failed to validate admin session: {err}"))?;
+
+        if validated_session.user_id != user_id {
+            return Err(anyhow!("Session token does not belong to requesting admin"));
+        }
+
+        if validated_session.scope != SessionScope::Full {
+            return Err(anyhow!(
+                "Session scope '{}' is not permitted for admin PIN registration",
+                validated_session.scope
+            ));
+        }
+
+        if let Some(bound_device) = validated_session.device_session_id {
+            if bound_device != device_id {
+                return Err(anyhow!(
+                    "Session is bound to a different device (expected {device_id}, got {bound_device})"
+                ));
+            }
+        }
 
         let mut admin_sessions = self.admin_sessions.lock().await;
         let session_info = AdminSessionInfo::new(user_id, device_id, session_token);

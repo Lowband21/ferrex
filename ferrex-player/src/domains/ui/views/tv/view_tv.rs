@@ -9,8 +9,18 @@ use crate::{
     state_refactored::State,
 };
 use ferrex_core::{
-    EpisodeID, EpisodeLike, ImageSize, ImageType, MediaID, MediaIDLike, Priority, SeasonID,
-    SeasonLike, SeriesDetailsLike, SeriesID, SeriesLike,
+    traits::{
+        details_like::SeriesDetailsLike,
+        id::MediaIDLike,
+        sub_like::{EpisodeLike, SeasonLike, SeriesLike},
+    },
+    types::{
+        ids::{EpisodeID, SeasonID, SeriesID},
+        image_request::Priority,
+        media::SeasonReference,
+        media_id::MediaID,
+        util_types::{ImageSize, ImageType},
+    },
 };
 use iced::{
     Element, Length,
@@ -42,7 +52,7 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
                 .ui
                 .state
                 .repo_accessor
-                .get_series_yoke(&ferrex_core::MediaID::Series(series_id))
+                .get_series_yoke(&MediaID::Series(series_id))
             {
                 Ok(yoke) => {
                     let arc = std::sync::Arc::new(yoke);
@@ -130,7 +140,7 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
     let series_details_opt = series.details();
 
     // Fetch seasons for this series
-    let seasons: Vec<ferrex_core::SeasonReference> = match state
+    let seasons: Vec<SeasonReference> = match state
         .domains
         .ui
         .state
@@ -324,7 +334,7 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
                     .padding([10, 20])
                     .on_press(Message::PlayMediaWithId(
                         legacy_file,
-                        ferrex_core::MediaID::Episode(first_ep.id.clone()),
+                        MediaID::Episode(first_ep.id.clone()),
                     ))
                     .style(theme::Button::Secondary.style())
                     .into(),
@@ -355,7 +365,7 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
             .padding([10, 20])
             .on_press(Message::PlayMediaWithId(
                 legacy_file,
-                ferrex_core::MediaID::Episode(first_ep.id.clone()),
+                MediaID::Episode(first_ep.id.clone()),
             ))
             .style(theme::Button::Primary.style())
             .into(),
@@ -523,7 +533,7 @@ pub fn view_season_detail<'a>(
             .ui
             .state
             .repo_accessor
-            .get_season_yoke(&ferrex_core::MediaID::Season(*season_id))
+            .get_season_yoke(&MediaID::Season(*season_id))
         {
             Ok(yoke) => {
                 let arc = std::sync::Arc::new(yoke);
@@ -658,7 +668,11 @@ pub fn view_season_detail<'a>(
                 move |idx| {
                     eps_vec.get(idx).map(|e| {
                         // Build episode title/subtitle
-                        let title_str = format!("S{:02}E{:02}", e.season_number.value(), e.episode_number.value());
+                        let title_str = format!(
+                            "S{:02}E{:02}",
+                            e.season_number.value(),
+                            e.episode_number.value()
+                        );
                         let subtitle_str = e
                             .details()
                             .map(|d| d.name.as_str())
@@ -677,8 +691,8 @@ pub fn view_season_detail<'a>(
                                     fallback: "🎞",
                                 },
                                 size: Wide,
-                                on_click: Message::PlayMediaWithId(ferrex_core::MediaID::Episode(e.id)),
-                                on_play: Message::PlayMediaWithId(ferrex_core::MediaID::Episode(e.id)),
+                                on_click: Message::PlayMediaWithId(MediaID::Episode(e.id)),
+                                on_play: Message::PlayMediaWithId(MediaID::Episode(e.id)),
                                 hover_icon: lucide_icons::Icon::Play,
                                 is_hovered: false,
                             }
@@ -689,39 +703,6 @@ pub fn view_season_detail<'a>(
             content = content.push(ep_section);
         }
     }
-
-    // Create the main content container
-    let content_container = container(content).width(Length::Fill);
-
-    // Calculate backdrop dimensions
-    let window_width = state.window_size.width;
-    let window_height = state.window_size.height;
-    let display_aspect = state
-        .domains
-        .ui
-        .state
-        .background_shader_state
-        .calculate_display_aspect(window_width, window_height);
-    let backdrop_height = window_width / display_aspect;
-
-    // Create aspect ratio toggle button
-    let aspect_button = crate::domains::ui::components::create_backdrop_aspect_button(state);
-
-    // Position the button at bottom-right of backdrop with small margin
-    let button_container = container(aspect_button)
-        .padding([0, 20])
-        .width(Length::Fill)
-        .height(Length::Fixed(backdrop_height - 22.5))
-        .align_x(iced::alignment::Horizontal::Right)
-        .align_y(iced::alignment::Vertical::Bottom);
-
-    // Layer the button over the content using Stack
-    return Stack::new()
-        .push(content_container)
-        .push(button_container)
-        .into();
-
-    // Create the main content container
 
     // Create the main content container
     let content_container = container(content).width(Length::Fill);
@@ -776,7 +757,7 @@ pub fn view_episode_detail<'a>(
             .ui
             .state
             .repo_accessor
-            .get_episode_yoke(&ferrex_core::MediaID::Episode(*episode_id))
+            .get_episode_yoke(&MediaID::Episode(*episode_id))
         {
             Ok(yoke) => {
                 let arc = std::sync::Arc::new(yoke);

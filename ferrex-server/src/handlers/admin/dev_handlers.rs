@@ -8,7 +8,7 @@ use crate::infra::app_state::AppState;
 use crate::infra::errors::{AppError, AppResult};
 use axum::{Extension, Json, extract::State};
 use ferrex_core::types::library::Library;
-use ferrex_core::{LibraryID, LibraryType};
+use ferrex_core::types::{LibraryID, LibraryType};
 use ferrex_core::{api_types::ApiResponse, user::User};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -283,6 +283,10 @@ pub async fn seed_database(
                 username: "testadmin".to_string(),
                 display_name: "Test Admin".to_string(),
                 password: "AdminPass123".to_string(),
+                email: None,
+                avatar_url: None,
+                role_ids: Vec::new(),
+                is_active: true,
                 created_by: None,
             })
             .await
@@ -310,6 +314,10 @@ pub async fn seed_database(
                     username: format!("testuser{}", i),
                     display_name: format!("Test User {}", i),
                     password: format!("{:04}", i), // 4-digit PIN
+                    email: None,
+                    avatar_url: None,
+                    role_ids: Vec::new(),
+                    is_active: true,
                     created_by: Some(admin_id),
                 })
                 .await

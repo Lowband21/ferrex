@@ -27,7 +27,7 @@ futures-util = "^0.3"
 # Serialization
 serde = { version = "^1.0", default-features = false, features = ["std", "derive"] }
 serde_json = "^1.0"
-rkyv = { version = "^0.8.11", default-features = false, features = ["std", "alloc", "bytecheck", "little_endian", "aligned", "pointer_width_32", "uuid-1"] }
+rkyv = { version = "^0.8.12", default-features = false, features = ["std", "alloc", "bytecheck", "little_endian", "aligned", "pointer_width_32", "uuid-1"] }
 
 # Error handling
 anyhow = "^1.0"
@@ -42,7 +42,7 @@ log = "^0.4"
 chrono = { version = "^0.4", default-features = false, features = ["alloc", "std", "clock", "now", "serde"] }
 
 # HTTP/Web
-axum = { version = "^0.8", features = ["ws", "macros"] }
+axum = { version = "^0.8.6", features = ["ws", "macros"] }
 axum-server = { version = "^0.7", features = ["tls-rustls"] }
 axum-extra = { version = "^0.10", features = ["typed-header"] }
 tower = { version = "^0.5", features = ["util"] }
@@ -69,6 +69,7 @@ sqlx = { version = "0.8.6", features = [
     "json"
 ] }
 redis = { version = "^0.32", features = ["tokio-comp", "connection-manager", "aio"] }
+ipnetwork = "^0.20"
 
 # Media processing
 ffmpeg-next = "^8.0"
@@ -87,7 +88,6 @@ rustls = "^0.23"
 rustls-pemfile = "^2.2"
 rustls-pki-types = "^1.12"
 rand = "^0.9"
-ring = "^0.17.14"
 
 # Memory zeroization for secure credentials
 zeroize = { version = "^1.8.1", features = ["zeroize_derive"] }
@@ -159,7 +159,7 @@ missing_crate_level_docs = "allow"
 [workspace.lints.rust]
 # Still need to add docs
 missing_docs = "allow"
-missing_debug_implementations = "warn"
+missing_debug_implementations = "deny"
 
 [patch.crates-io]
 iced = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced" }

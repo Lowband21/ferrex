@@ -1,4 +1,4 @@
-use ferrex_core::user::User;
+use ferrex_core::player_prelude::User;
 use uuid::Uuid;
 
 #[derive(Clone)]

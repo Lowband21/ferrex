@@ -1,6 +1,6 @@
 //! Common UI types moved from monolithic state
 
-use ferrex_core::{EpisodeID, MovieID, SeasonID, SeriesID};
+use ferrex_core::player_prelude::{EpisodeID, MovieID, SeasonID, SeriesID};
 
 /// View state representing which screen/page is currently shown
 #[derive(Debug, Clone, Default)]

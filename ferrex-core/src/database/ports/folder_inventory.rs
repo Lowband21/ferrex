@@ -3,7 +3,8 @@ use std::path::Path;
 use uuid::Uuid;
 
 use crate::database::traits::{FolderInventory, FolderProcessingStatus, FolderScanFilters};
-use crate::{LibraryID, Result};
+use crate::error::Result;
+use crate::types::ids::LibraryID;
 
 #[async_trait]
 pub trait FolderInventoryRepository: Send + Sync {

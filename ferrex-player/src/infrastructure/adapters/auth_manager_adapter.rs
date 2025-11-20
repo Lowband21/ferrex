@@ -10,8 +10,7 @@ use crate::domains::auth::manager::{AuthManager, AutoLoginScope};
 use crate::domains::auth::storage::StoredAuth;
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::auth::AuthService;
-use ferrex_core::rbac::UserPermissions;
-use ferrex_core::user::{AuthToken, User};
+use ferrex_core::player_prelude::{AuthToken, User, UserPermissions};
 
 /// Adapter that implements AuthService using the existing AuthManager
 pub struct AuthManagerAdapter {

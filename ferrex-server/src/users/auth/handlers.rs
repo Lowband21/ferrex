@@ -2,7 +2,10 @@ use axum::{Extension, Json, extract::State, http::StatusCode};
 use chrono::Utc;
 use ferrex_core::{
     api_types::ApiResponse,
-    auth::domain::services::{AuthenticationError, TokenBundle},
+    auth::{
+        domain::services::{AuthenticationError, TokenBundle},
+        policy::PasswordPolicyRule,
+    },
     error::MediaError,
     user::{AuthError, AuthToken, LoginRequest, RegisterRequest, User},
 };
@@ -26,6 +29,38 @@ pub async fn register(
     request
         .validate()
         .map_err(|e| AppError::bad_request(format!("Validation error: {}", e)))?;
+
+    if request.password.is_empty() {
+        return Err(AppError::bad_request("Password cannot be empty"));
+    }
+    if request.password.len() > 128 {
+        return Err(AppError::bad_request(
+            "Password cannot exceed 128 characters",
+        ));
+    }
+
+    let security_repo = state.unit_of_work.security_settings.clone();
+    let security_settings = security_repo
+        .get_settings()
+        .await
+        .map_err(|e| AppError::internal(format!("Failed to load security settings: {}", e)))?;
+
+    let user_policy = security_settings.user_password_policy.clone();
+    let policy_check = user_policy.check(&request.password);
+
+    if user_policy.enforce && !policy_check.is_satisfied() {
+        return Err(AppError::bad_request(format!(
+            "Password does not meet the required policy: {}",
+            describe_policy_failures(&policy_check.failures)
+        )));
+    }
+
+    if !user_policy.enforce && !policy_check.is_satisfied() {
+        tracing::info!(
+            "User registration proceeding with relaxed password policy (failures: {})",
+            describe_policy_failures(&policy_check.failures)
+        );
+    }
 
     // Check if username already exists
     if let Ok(Some(_)) = state
@@ -69,7 +104,7 @@ pub async fn register(
         })?;
 
     let token_bundle = state
-        .auth_service
+        .auth_service()
         .authenticate_with_password(&user.username, &request.password)
         .await
         .map_err(map_auth_error)?;
@@ -84,7 +119,7 @@ pub async fn login(
     Json(request): Json<LoginRequest>,
 ) -> AppResult<Json<ApiResponse<AuthToken>>> {
     let token_bundle = state
-        .auth_service
+        .auth_service()
         .authenticate_with_password(&request.username, &request.password)
         .await
         .map_err(map_auth_error)?;
@@ -99,7 +134,7 @@ pub async fn refresh(
     Json(request): Json<RefreshRequest>,
 ) -> AppResult<Json<ApiResponse<AuthToken>>> {
     let token_bundle = state
-        .auth_service
+        .auth_service()
         .refresh_session(&request.refresh_token)
         .await
         .map_err(map_auth_error)?;
@@ -169,6 +204,7 @@ fn bundle_to_auth_token(bundle: TokenBundle) -> AuthToken {
         session_id: Some(bundle.session_record_id),
         device_session_id: bundle.device_session_id,
         user_id: Some(bundle.user_id),
+        scope: bundle.scope,
     }
 }
 
@@ -191,4 +227,16 @@ fn map_auth_error(err: AuthenticationError) -> AppError {
             AppError::internal(format!("Authentication failed: {e}"))
         }
     }
+}
+
+fn describe_policy_failures(failures: &[PasswordPolicyRule]) -> String {
+    if failures.is_empty() {
+        return "no failures".to_string();
+    }
+
+    failures
+        .iter()
+        .map(|rule| rule.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }

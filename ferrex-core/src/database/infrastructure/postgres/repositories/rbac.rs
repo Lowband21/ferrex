@@ -1,11 +1,11 @@
 use async_trait::async_trait;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::database::ports::rbac::RbacRepository;
-use crate::rbac::{Permission, Role, UserPermissions};
-use crate::{MediaError, Result};
+use crate::error::{MediaError, Result};
+use crate::rbac::{Permission, PermissionCategory, Role, UserPermissions};
 
 /// PostgreSQL-backed implementation of RBAC repository operations.
 #[derive(Clone, Debug)]
@@ -366,5 +366,82 @@ impl RbacRepository for PostgresRbacRepository {
         .map_err(|e| MediaError::Internal(format!("Failed to get users with role: {}", e)))?;
 
         Ok(user_ids)
+    }
+
+    async fn upsert_role(
+        &self,
+        role_id: Uuid,
+        name: &str,
+        description: &str,
+        is_system: bool,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO roles (id, name, description, is_system)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (name) DO UPDATE
+            SET description = EXCLUDED.description,
+                is_system = EXCLUDED.is_system
+            "#,
+        )
+        .bind(role_id)
+        .bind(name)
+        .bind(description)
+        .bind(is_system)
+        .execute(self.pool())
+        .await
+        .map_err(|e| MediaError::Internal(format!("Failed to upsert role '{}': {}", name, e)))?;
+
+        Ok(())
+    }
+
+    async fn upsert_permission(
+        &self,
+        name: &str,
+        category: PermissionCategory,
+        description: &str,
+    ) -> Result<Uuid> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO permissions (name, category, description)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (name) DO UPDATE
+            SET category = EXCLUDED.category,
+                description = EXCLUDED.description
+            RETURNING id
+            "#,
+        )
+        .bind(name)
+        .bind(category.as_str())
+        .bind(description)
+        .fetch_one(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to upsert permission '{}': {}", name, e))
+        })?;
+
+        Ok(row.try_get("id")?)
+    }
+
+    async fn assign_permission_to_role(&self, role_id: Uuid, permission_id: Uuid) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO role_permissions (role_id, permission_id)
+            VALUES ($1, $2)
+            ON CONFLICT (role_id, permission_id) DO NOTHING
+            "#,
+        )
+        .bind(role_id)
+        .bind(permission_id)
+        .execute(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to assign permission {} to role {}: {}",
+                permission_id, role_id, e
+            ))
+        })?;
+
+        Ok(())
     }
 }

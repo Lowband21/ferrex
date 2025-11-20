@@ -13,6 +13,7 @@ use crate::{
     },
     state_refactored::State,
 };
+use ferrex_core::player_prelude::{UiDecade, UiGenre, UiResolution, UiWatchStatus};
 
 const GENRES_PER_ROW: usize = 4;
 
@@ -21,7 +22,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
 
     let mut genre_groups = column![].spacing(8).width(Length::Fill);
 
-    for chunk in ferrex_core::UiGenre::all().chunks(GENRES_PER_ROW) {
+    for chunk in UiGenre::all().chunks(GENRES_PER_ROW) {
         let mut chunk_row = row![].spacing(8).align_y(Alignment::Center);
 
         for genre in chunk {
@@ -41,7 +42,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
     }
 
     // Decade dropdown
-    let decades = ferrex_core::UiDecade::all();
+    let decades = UiDecade::all();
     let selected_decade = ui_state.selected_decade;
     let decade_pick = pick_list(decades, selected_decade, |opt| {
         Message::SetFilterDecade(opt)
@@ -50,7 +51,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
     .width(Length::Fixed(140.0));
 
     // Resolution dropdown
-    let resolutions = ferrex_core::UiResolution::all();
+    let resolutions = UiResolution::all();
     let res_pick = pick_list(resolutions, Some(ui_state.selected_resolution), |opt| {
         Message::SetFilterResolution(opt)
     })
@@ -58,7 +59,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
     .width(Length::Fixed(140.0));
 
     // Watch status dropdown
-    let watch_statuses = ferrex_core::UiWatchStatus::all();
+    let watch_statuses = UiWatchStatus::all();
     let ws_pick = pick_list(
         watch_statuses,
         Some(ui_state.selected_watch_status),

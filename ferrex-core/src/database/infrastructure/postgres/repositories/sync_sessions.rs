@@ -6,7 +6,11 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::database::ports::sync_sessions::SyncSessionsRepository;
-use crate::{MediaError, MediaType, Participant, PlaybackState, Result, SyncSession};
+use crate::{
+    error::{MediaError, Result},
+    sync_session::{Participant, PlaybackState, SyncSession},
+    types::util_types::MediaType,
+};
 
 #[derive(Clone, Debug)]
 pub struct PostgresSyncSessionsRepository {

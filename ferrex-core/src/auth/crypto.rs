@@ -32,7 +32,13 @@ pub enum AuthCryptoError {
     #[error("invalid Argon2 parameters: {0}")]
     InvalidArgon2Params(String),
     #[error("password hashing error: {0}")]
-    PasswordHash(#[from] PasswordHashError),
+    PasswordHash(String),
+}
+
+impl From<PasswordHashError> for AuthCryptoError {
+    fn from(err: PasswordHashError) -> Self {
+        AuthCryptoError::PasswordHash(err.to_string())
+    }
 }
 
 impl AuthCrypto {

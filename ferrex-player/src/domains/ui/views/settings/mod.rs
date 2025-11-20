@@ -15,6 +15,7 @@ use crate::{
     },
     state_refactored::State,
 };
+use ferrex_core::player_prelude::User;
 
 pub mod device_management;
 pub mod preferences;
@@ -49,7 +50,7 @@ pub fn view_user_settings<'a>(state: &'a State) -> Element<'a, Message> {
 )]
 fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
     // RUS-136: Get current user from auth domain state instead of auth_manager
-    let current_user: Option<ferrex_core::user::User> = match &state.domains.auth.state.auth_flow {
+    let current_user: Option<User> = match &state.domains.auth.state.auth_flow {
         crate::domains::auth::types::AuthenticationFlow::Authenticated { user, .. } => {
             Some(user.clone())
         }

@@ -1,8 +1,9 @@
+use crate::MediaImageKind;
 use crate::database::ports::images::ImageRepository;
 use crate::database::ports::media_files::MediaFilesReadPort;
 use crate::database::traits::{ImageLookupParams, ImageRecord, ImageVariant};
+use crate::error::{MediaError, Result};
 use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
-use crate::{MediaError, MediaImageKind, Result};
 use chrono::Utc;
 use sha2::{Digest, Sha256};
 use std::any::type_name_of_val;

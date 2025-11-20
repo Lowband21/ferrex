@@ -1,7 +1,7 @@
 use crate::common::messages::{CrossDomainEvent, DomainUpdateResult};
 
 use crate::state_refactored::State;
-use ferrex_core::LibraryID;
+use ferrex_core::player_prelude::LibraryID;
 use iced::Task;
 
 pub fn handle_select_library(

@@ -51,7 +51,9 @@ iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", features = [
 # ] }
 
 # iced_aw = { git = "https://github.com/iced-rs/iced_aw.git", default-features = false, features = ["menu"] }
-iced_aw = { path = "../../../iced_aw", default-features = false, features = ["menu"] }
+iced_aw = { path = "../../../iced_aw", default-features = false, features = [
+    "menu",
+] }
 
 # Icons
 lucide-icons = { path = "../../../lucide_icons_iced_0.14", features = ["iced"] }
@@ -110,6 +112,7 @@ lazy_static = "^1.5"
 thiserror.workspace = true
 anyhow.workspace = true
 uuid.workspace = true
+zxcvbn = "3.1"
 
 # GPU utilities
 bytemuck = { version = "^1.23", features = ["derive"] }

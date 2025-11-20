@@ -6,8 +6,11 @@
 use ferrex_player::domains::auth::manager::AuthManager;
 use ferrex_player::domains::auth::errors::{AuthError, TokenError};
 use ferrex_player::infrastructure::api_client::ApiClient;
-use ferrex_core::user::{AuthToken, User};
-use ferrex_core::rbac::UserPermissions;
+use ferrex_core::{
+    auth::domain::value_objects::SessionScope,
+    rbac::UserPermissions,
+    user::{AuthToken, User},
+};
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 use std::sync::Arc;
@@ -74,13 +77,13 @@ impl MockAuthServer {
             
             // Generate new tokens
             Ok(AuthToken {
-                access_token: format!("new_access_token_{,
-        session_id: None,
-        device_session_id: None,
-        user_id: None,
-    }", *count),
+                access_token: format!("new_access_token_{}", *count),
                 refresh_token: format!("new_refresh_token_{}", *count),
                 expires_in: 900, // 15 minutes
+                session_id: None,
+                device_session_id: None,
+                user_id: None,
+                scope: SessionScope::Full,
             })
         } else {
             Err("Refresh token not found".to_string())
@@ -123,6 +126,7 @@ pub fn create_expired_token() -> AuthToken {
         session_id: None,
         device_session_id: None,
         user_id: None,
+        scope: SessionScope::Full,
     }
 }
 
@@ -135,6 +139,7 @@ pub fn create_valid_token() -> AuthToken {
         session_id: None,
         device_session_id: None,
         user_id: None,
+        scope: SessionScope::Full,
     }
 }
 
@@ -147,5 +152,6 @@ pub fn create_expiring_token() -> AuthToken {
         session_id: None,
         device_session_id: None,
         user_id: None,
+        scope: SessionScope::Full,
     }
 }

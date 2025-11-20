@@ -11,10 +11,8 @@ use crate::{
     infrastructure::repository::accessor::{Accessor, ReadOnly},
     state_refactored::State,
 };
-use ferrex_core::{
-    ArchivedLibraryType, LibraryID,
-    api_types::{ScanLifecycleStatus, ScanSnapshotDto},
-    types::library::{ArchivedLibrary, Library},
+use ferrex_core::player_prelude::{
+    ArchivedLibrary, ArchivedLibraryType, Library, LibraryID, ScanLifecycleStatus, ScanSnapshotDto,
 };
 use iced::{
     Element, Length,

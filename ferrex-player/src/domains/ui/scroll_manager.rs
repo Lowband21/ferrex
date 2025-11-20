@@ -5,7 +5,7 @@
 //! Supports library-aware keys for grid views and efficient state management.
 
 use crate::domains::ui::{types::ViewState, views::grid::VirtualGridState};
-use ferrex_core::{LibraryID, MediaIDLike};
+use ferrex_core::player_prelude::{LibraryID, MediaIDLike};
 use iced::widget::scrollable::Viewport;
 use std::collections::HashMap;
 use uuid::Uuid;

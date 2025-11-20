@@ -39,6 +39,7 @@ uuid.workspace = true
 surrealdb = { workspace = true, optional = true }
 sqlx = { workspace = true, optional = true }
 redis = { workspace = true, optional = true }
+ipnetwork = { workspace = true, optional = true }
 
 # File system
 walkdir.workspace = true
@@ -89,7 +90,6 @@ image = { workspace = true, optional = true }
 # Cryptography
 sha2 = { workspace = true }
 argon2 = { workspace = true }
-ring.workspace = true
 zeroize.workspace = true
 base64.workspace = true
 hmac = "0.12"
@@ -101,14 +101,34 @@ constant_time_eq = "0.4.2"
 tokio-util.workspace = true
 
 [features]
-default = ["ffmpeg", "database", "compat"]
+default = ["ffmpeg", "database", "compat", "scan-runtime"]
 ffmpeg = ["dep:ffmpeg-next"]
-database = ["dep:sqlx", "dep:surrealdb", "dep:redis", "dep:image", "dep:notify", "dep:notify-debouncer-full"]
+database = [
+    "dep:sqlx",
+    "dep:surrealdb",
+    "dep:redis",
+    "dep:ipnetwork",
+    "dep:image",
+    "dep:notify",
+    "dep:notify-debouncer-full",
+]
 compat = []
 demo = []
+
+# Bundles the queue, watcher, and scan orchestrator runtime. Keeping this behind its own flag lets
+# us eventually build a lean `ffi` profile without pulling in SQLx or notify.
+scan-runtime = ["database"]
+
+# Placeholder profile for future FFI exports—currently empty but helps document intent.
+ffi = []
 
 [dev-dependencies]
 tempfile.workspace = true
 tokio.workspace = true
 env_logger = "0.11"
-sqlx = { workspace = true, features = ["runtime-tokio", "postgres", "migrate", "derive"] }
+sqlx = { workspace = true, features = [
+    "runtime-tokio",
+    "postgres",
+    "migrate",
+    "derive",
+] }

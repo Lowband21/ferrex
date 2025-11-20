@@ -10,7 +10,9 @@ use crate::database::ports::media_files::{
     Page, SortDirection, UpsertOutcome,
 };
 use crate::database::traits::{MediaFilters, MediaStats};
-use crate::{LibraryID, MediaError, MediaFile, MediaFileMetadata, Result};
+use crate::error::{MediaError, Result};
+use crate::types::files::{MediaFile, MediaFileMetadata};
+use crate::types::ids::LibraryID;
 
 #[derive(Clone, Debug)]
 pub struct PostgresMediaRepository {

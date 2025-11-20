@@ -4,8 +4,9 @@ use axum::{
     http::StatusCode,
 };
 use ferrex_core::{
-    MediaType, User,
     api_types::ApiResponse,
+    types::MediaType,
+    user::User,
     watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
 };
 use serde::{Deserialize, Serialize};

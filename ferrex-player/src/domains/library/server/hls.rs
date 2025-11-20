@@ -1,3 +1,4 @@
+use ferrex_core::player_prelude::TranscodingJobResponse;
 use reqwest::Client;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -158,7 +159,7 @@ impl HlsClient {
     pub async fn check_transcoding_status(
         &self,
         job_id: &str,
-    ) -> Result<ferrex_core::TranscodingJobResponse, String> {
+    ) -> Result<TranscodingJobResponse, String> {
         let url = format!("{}/transcode/status/{}", self.server_url, job_id);
 
         log::debug!("Checking transcoding status for job: {}", job_id);
@@ -175,7 +176,7 @@ impl HlsClient {
             return Err(format!("Status check failed: {}", response.status()));
         }
 
-        let job_response: ferrex_core::TranscodingJobResponse = response
+        let job_response: TranscodingJobResponse = response
             .json()
             .await
             .map_err(|e| format!("Failed to parse status: {}", e))?;

@@ -24,8 +24,12 @@ use axum::{extract::State, Json};
 use chrono::{DateTime, Duration, Utc};
 use ferrex_core::{
     api_types::ApiResponse,
-    auth::domain::services::{AuthenticationError, TokenBundle},
+    auth::{
+        domain::services::{AuthenticationError, TokenBundle},
+        policy::{PasswordPolicy, PasswordPolicyRule},
+    },
     rbac::roles,
+    setup::SetupClaimError,
     user::AuthToken,
 };
 use serde::{Deserialize, Serialize};
@@ -33,7 +37,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
-use uuid::Uuid;
 
 use axum::extract::ConnectInfo;
 use std::net::SocketAddr;
@@ -43,10 +46,7 @@ use crate::{
         app_state::AppState,
         errors::{AppError, AppResult},
     },
-    users::{
-        UserService,
-        user_service::{CreateUserParams, PasswordRequirements},
-    },
+    users::{UserService, user_service::CreateUserParams},
 };
 
 /// Simple in-memory rate limiter for setup endpoints
@@ -111,6 +111,12 @@ impl SetupRateLimiter {
         let mut attempts = self.attempts.write().await;
         attempts.remove(ip);
     }
+
+    #[doc(hidden)]
+    pub async fn reset(&self) {
+        let mut attempts = self.attempts.write().await;
+        attempts.clear();
+    }
 }
 
 // Global rate limiter instance
@@ -131,6 +137,33 @@ pub struct SetupStatus {
     pub user_count: usize,
     /// Total number of libraries
     pub library_count: usize,
+    /// Current password policy for admin flows
+    pub admin_password_policy: PasswordPolicyResponse,
+    /// Current password policy for regular users
+    pub user_password_policy: PasswordPolicyResponse,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct PasswordPolicyResponse {
+    pub enforce: bool,
+    pub min_length: u16,
+    pub require_uppercase: bool,
+    pub require_lowercase: bool,
+    pub require_number: bool,
+    pub require_special: bool,
+}
+
+impl From<&PasswordPolicy> for PasswordPolicyResponse {
+    fn from(value: &PasswordPolicy) -> Self {
+        Self {
+            enforce: value.enforce,
+            min_length: value.min_length,
+            require_uppercase: value.require_uppercase,
+            require_lowercase: value.require_lowercase,
+            require_number: value.require_number,
+            require_special: value.require_special,
+        }
+    }
 }
 
 /// Request to create the initial admin user
@@ -145,6 +178,9 @@ pub struct CreateAdminRequest {
     /// Optional setup token (can be set via FERREX_SETUP_TOKEN env var)
     #[serde(default)]
     pub setup_token: Option<String>,
+    /// Claim token returned from the secure claim confirmation flow
+    #[serde(default)]
+    pub claim_token: Option<String>,
 }
 
 impl CreateAdminRequest {
@@ -161,8 +197,12 @@ impl CreateAdminRequest {
             return Err("Display name cannot exceed 64 characters".to_string());
         }
 
-        // Use admin password requirements
-        UserService::validate_password(&self.password, &PasswordRequirements::admin())?;
+        if self.password.is_empty() {
+            return Err("Password cannot be empty".to_string());
+        }
+        if self.password.len() > 128 {
+            return Err("Password cannot exceed 128 characters".to_string());
+        }
 
         Ok(())
     }
@@ -193,11 +233,21 @@ pub async fn check_setup_status(
         .await
         .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
 
+    let security_repo = state.unit_of_work.security_settings.clone();
+    let security_settings = security_repo
+        .get_settings()
+        .await
+        .map_err(|e| AppError::internal(format!("Failed to load security settings: {}", e)))?;
+
     let status = SetupStatus {
         needs_setup,
         has_admin: !needs_setup,
         user_count: users.len(),
         library_count: libraries.len(),
+        admin_password_policy: PasswordPolicyResponse::from(
+            &security_settings.admin_password_policy,
+        ),
+        user_password_policy: PasswordPolicyResponse::from(&security_settings.user_password_policy),
     };
 
     Ok(Json(ApiResponse::success(status)))
@@ -264,6 +314,48 @@ pub async fn create_initial_admin(
         ));
     }
 
+    let claim_service = state.setup_claim_service();
+    let claim_token = request
+        .claim_token
+        .as_ref()
+        .map(|token| token.trim())
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| AppError::forbidden("Secure claim token required before admin setup"))?
+        .to_string();
+
+    claim_service
+        .validate_claim_token(&claim_token)
+        .await
+        .map_err(map_claim_error)?;
+
+    let security_repo = state.unit_of_work.security_settings.clone();
+    let security_settings = security_repo
+        .get_settings()
+        .await
+        .map_err(|e| AppError::internal(format!("Failed to load security settings: {}", e)))?;
+
+    let admin_policy = security_settings.admin_password_policy.clone();
+    let policy_check = admin_policy.check(&request.password);
+
+    if admin_policy.enforce && !policy_check.is_satisfied() {
+        let failures = describe_policy_failures(&policy_check.failures);
+        warn!(
+            "Admin setup rejected due to password policy from IP {}",
+            client_ip
+        );
+        return Err(AppError::bad_request(format!(
+            "Password does not meet the required policy: {}",
+            failures
+        )));
+    }
+
+    if !admin_policy.enforce && !policy_check.is_satisfied() {
+        tracing::info!(
+            "Admin setup proceeding with relaxed password (failures: {})",
+            describe_policy_failures(&policy_check.failures)
+        );
+    }
+
     // Create user using UserService
     let user_service = UserService::new(&state);
     // Ensure the built-in 'admin' role exists before assignment
@@ -275,6 +367,10 @@ pub async fn create_initial_admin(
             username: request.username,
             display_name: request.display_name,
             password: request.password,
+            email: None,
+            avatar_url: None,
+            role_ids: Vec::new(),
+            is_active: true,
             created_by: None, // First admin creates themselves
         })
         .await?;
@@ -296,7 +392,7 @@ pub async fn create_initial_admin(
 
     // Generate tokens via authentication service
     let token_bundle = state
-        .auth_service
+        .auth_service()
         .authenticate_with_password(&user.username, &password_clone)
         .await
         .map_err(auth_error_to_app)?;
@@ -306,6 +402,13 @@ pub async fn create_initial_admin(
         "Initial admin user created: {} ({}) from IP: {}",
         user.username, user.id, client_ip
     );
+
+    if let Err(err) = claim_service.consume_claim_token(&claim_token).await {
+        warn!(
+            error = %err,
+            "Failed to mark claim token as consumed after admin setup"
+        );
+    }
 
     // Clear rate limit for this IP after successful setup
     get_rate_limiter().clear_ip(&client_ip).await;
@@ -332,11 +435,21 @@ async fn check_setup_status_internal(state: &AppState) -> AppResult<SetupStatus>
         .await
         .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
 
+    let security_repo = state.unit_of_work.security_settings.clone();
+    let security_settings = security_repo
+        .get_settings()
+        .await
+        .map_err(|e| AppError::internal(format!("Failed to load security settings: {}", e)))?;
+
     Ok(SetupStatus {
         needs_setup,
         has_admin: !needs_setup,
         user_count: users.len(),
         library_count: libraries.len(),
+        admin_password_policy: PasswordPolicyResponse::from(
+            &security_settings.admin_password_policy,
+        ),
+        user_password_policy: PasswordPolicyResponse::from(&security_settings.user_password_policy),
     })
 }
 
@@ -376,5 +489,32 @@ fn bundle_to_auth_token(bundle: TokenBundle) -> AuthToken {
         session_id: Some(bundle.session_record_id),
         device_session_id: bundle.device_session_id,
         user_id: Some(bundle.user_id),
+        scope: bundle.scope,
+    }
+}
+
+fn describe_policy_failures(failures: &[PasswordPolicyRule]) -> String {
+    if failures.is_empty() {
+        return "no failures".to_string();
+    }
+
+    failures
+        .iter()
+        .map(|rule| rule.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn map_claim_error(error: SetupClaimError) -> AppError {
+    match error {
+        SetupClaimError::InvalidCode => AppError::bad_request("Invalid claim code"),
+        SetupClaimError::InvalidToken => AppError::forbidden("Invalid claim token"),
+        SetupClaimError::Expired { .. } => AppError::gone("Claim token has expired"),
+        SetupClaimError::ActiveClaimPending { .. } => {
+            AppError::conflict("A claim is still pending; restart the flow")
+        }
+        SetupClaimError::Storage(err) => {
+            AppError::internal(format!("Claim persistence failure: {err}"))
+        }
     }
 }

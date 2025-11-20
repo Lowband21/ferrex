@@ -4,7 +4,7 @@ use crate::{
     domains::ui::types::ViewState,
     state_refactored::State,
 };
-use ferrex_core::TranscodingStatus;
+use ferrex_core::player_prelude::TranscodingStatus;
 use iced::Task;
 
 /// Handle transcoding started event

@@ -170,6 +170,43 @@ impl DeviceSession {
             timestamp: Utc::now(),
         });
 
+        self.last_activity = Utc::now();
+
+        Ok(())
+    }
+
+    /// Verify the stored PIN without issuing a session token.
+    pub fn verify_pin(
+        &mut self,
+        pin_value: &str,
+        max_attempts: u8,
+    ) -> Result<(), DeviceSessionError> {
+        self.ensure_pin_is_valid(pin_value, max_attempts)?;
+        Ok(())
+    }
+
+    /// Remove the configured PIN and return the device to a pending state.
+    pub fn clear_pin(&mut self) -> Result<(), DeviceSessionError> {
+        if self.status == DeviceStatus::Revoked {
+            return Err(DeviceSessionError::DeviceRevoked);
+        }
+
+        if self.pin.is_none() {
+            return Ok(());
+        }
+
+        self.pin = None;
+        self.status = DeviceStatus::Pending;
+        self.session_token = None;
+        self.failed_attempts = 0;
+        self.last_activity = Utc::now();
+
+        self.add_event(AuthEvent::PinRemoved {
+            session_id: self.id,
+            user_id: self.user_id,
+            timestamp: Utc::now(),
+        });
+
         Ok(())
     }
 
@@ -180,39 +217,7 @@ impl DeviceSession {
         max_attempts: u8,
         session_lifetime: Duration,
     ) -> Result<SessionToken, DeviceSessionError> {
-        // Check device status
-        match self.status {
-            DeviceStatus::Revoked => return Err(DeviceSessionError::DeviceRevoked),
-            DeviceStatus::Pending => return Err(DeviceSessionError::DeviceNotTrusted),
-            DeviceStatus::Trusted => {}
-        }
-
-        // Check if PIN is set
-        let pin = self.pin.as_ref().ok_or(DeviceSessionError::PinNotSet)?;
-
-        // Check failed attempts
-        if self.failed_attempts >= max_attempts {
-            return Err(DeviceSessionError::TooManyFailedAttempts);
-        }
-
-        // Verify PIN
-        let valid = pin
-            .verify(pin_value)
-            .map_err(|_| DeviceSessionError::InvalidPin)?;
-
-        if !valid {
-            self.failed_attempts += 1;
-            self.add_event(AuthEvent::AuthenticationFailed {
-                session_id: self.id,
-                user_id: self.user_id,
-                reason: "Invalid PIN".to_string(),
-                timestamp: Utc::now(),
-            });
-            return Err(DeviceSessionError::InvalidPin);
-        }
-
-        // Reset failed attempts
-        self.failed_attempts = 0;
+        self.ensure_pin_is_valid(pin_value, max_attempts)?;
 
         // Generate new session token
         let token = SessionToken::generate(session_lifetime)
@@ -341,6 +346,16 @@ impl DeviceSession {
         self.session_token.as_ref()
     }
 
+    /// Whether the device session is currently trusted.
+    pub fn is_trusted(&self) -> bool {
+        self.status == DeviceStatus::Trusted
+    }
+
+    /// Whether the device session has been revoked.
+    pub fn is_revoked(&self) -> bool {
+        self.status == DeviceStatus::Revoked
+    }
+
     /// Replace the in-memory session token (typically with the persisted hash)
     pub fn set_persisted_token(&mut self, token: Option<SessionToken>) {
         self.session_token = token;
@@ -349,6 +364,44 @@ impl DeviceSession {
     /// Get the hashed PIN if one is stored
     pub fn pin_hash(&self) -> Option<&str> {
         self.pin.as_ref().map(|p| p.hash())
+    }
+
+    fn ensure_pin_is_valid(
+        &mut self,
+        pin_value: &str,
+        max_attempts: u8,
+    ) -> Result<(), DeviceSessionError> {
+        match self.status {
+            DeviceStatus::Revoked => return Err(DeviceSessionError::DeviceRevoked),
+            DeviceStatus::Pending => return Err(DeviceSessionError::DeviceNotTrusted),
+            DeviceStatus::Trusted => {}
+        }
+
+        let pin = self.pin.as_ref().ok_or(DeviceSessionError::PinNotSet)?;
+
+        if self.failed_attempts >= max_attempts {
+            return Err(DeviceSessionError::TooManyFailedAttempts);
+        }
+
+        let valid = pin
+            .verify(pin_value)
+            .map_err(|_| DeviceSessionError::InvalidPin)?;
+
+        if !valid {
+            self.failed_attempts += 1;
+            self.add_event(AuthEvent::AuthenticationFailed {
+                session_id: self.id,
+                user_id: self.user_id,
+                reason: "Invalid PIN".to_string(),
+                timestamp: Utc::now(),
+            });
+            return Err(DeviceSessionError::InvalidPin);
+        }
+
+        self.failed_attempts = 0;
+        self.last_activity = Utc::now();
+
+        Ok(())
     }
 }
 
@@ -387,6 +440,12 @@ mod tests {
             .authenticate_with_pin("5823", 3, Duration::hours(1))
             .unwrap();
         assert!(token.is_valid());
+
+        session.verify_pin("5823", 3).unwrap();
+
+        session.clear_pin().unwrap();
+        assert_eq!(session.status(), DeviceStatus::Pending);
+        assert!(!session.has_pin());
 
         // Revoke
         session.revoke().unwrap();

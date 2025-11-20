@@ -8,6 +8,7 @@ use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::domains::ui::scroll_manager::ScrollStateExt;
 use crate::domains::{auth, library, player, ui};
 use crate::state_refactored::State;
+use ferrex_core::player_prelude::MediaIDLike;
 use iced::Task;
 
 #[cfg_attr(

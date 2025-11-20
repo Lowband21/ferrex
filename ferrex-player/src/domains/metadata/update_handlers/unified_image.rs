@@ -1,6 +1,6 @@
 use crate::domains::metadata::messages::Message;
 use crate::state_refactored::State;
-use ferrex_core::{ImageRequest, ImageSize};
+use ferrex_core::player_prelude::{ImageRequest, ImageSize};
 use iced::{Task, widget::image::Handle};
 
 /// Handle successful image load from the unified image service
@@ -36,7 +36,7 @@ pub fn handle_unified_image_loaded(
     let should_refresh = match (&state.domains.ui.state.view, &request.media_id, &request.size) {
         (
             crate::domains::ui::types::ViewState::MovieDetail { movie, .. },
-            ferrex_core::MediaID::Movie(id),
+            MediaID::Movie(id),
             ImageSize::Backdrop,
         ) if &movie.id == id => {
             log::info!("Loaded backdrop for current movie detail view");
@@ -44,7 +44,7 @@ pub fn handle_unified_image_loaded(
         }
         (
             crate::domains::ui::types::ViewState::TvShowDetail { series_id, .. },
-            ferrex_core::MediaID::Series(id),
+            MediaID::Series(id),
             ImageSize::Backdrop,
         ) if series_id == id => {
             log::info!("Loaded backdrop for current TV show detail view");
@@ -52,7 +52,7 @@ pub fn handle_unified_image_loaded(
         }
         (
             crate::domains::ui::types::ViewState::SeasonDetail { season_id, .. },
-            ferrex_core::MediaID::Season(id),
+            MediaID::Season(id),
             ImageSize::Backdrop,
         ) if season_id == id => {
             log::info!("Loaded backdrop for current season detail view");

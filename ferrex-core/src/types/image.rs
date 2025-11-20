@@ -1,3 +1,5 @@
+use std::fmt;
+
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
@@ -25,15 +27,7 @@ pub struct ImageWithMetadata {
 }
 
 #[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Default,
-    PartialEq,
-    Archive,
-    RkyvSerialize,
-    RkyvDeserialize,
+    Clone, Serialize, Deserialize, Default, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct MediaImages {
@@ -41,4 +35,15 @@ pub struct MediaImages {
     pub backdrops: Vec<ImageWithMetadata>,
     pub logos: Vec<ImageWithMetadata>,
     pub stills: Vec<ImageWithMetadata>,
+}
+
+impl fmt::Debug for MediaImages {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MediaImages")
+            .field("poster_count", &self.posters.len())
+            .field("backdrop_count", &self.backdrops.len())
+            .field("logo_count", &self.logos.len())
+            .field("still_count", &self.stills.len())
+            .finish()
+    }
 }

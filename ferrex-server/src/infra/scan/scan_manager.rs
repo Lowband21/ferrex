@@ -2,17 +2,20 @@ use axum::http::StatusCode;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use ferrex_core::api_types::{ScanLifecycleStatus as ApiScanLifecycleStatus, ScanSnapshotDto};
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
+use ferrex_core::error::MediaError;
 use ferrex_core::orchestration::actors::pipeline::{IndexingChange, IndexingOutcome};
+use ferrex_core::orchestration::{
+    JobEvent, LibraryActorCommand, PostgresCursorRepository, StartMode,
+};
+use ferrex_core::orchestration::{
+    events::{JobEventPayload, ScanEvent},
+    job::{JobId, JobKind},
+    scan_cursor::{ScanCursor, ScanCursorId, ScanCursorRepository},
+};
+use ferrex_core::types::events::ScanSseEventType;
 use ferrex_core::types::ids::{EpisodeID, MovieID, SeasonID, SeriesID};
-use ferrex_core::{
-    JobEvent, LibraryActorCommand, LibraryID, Media, MediaError, MediaEvent,
-    PostgresCursorRepository, ScanEventMetadata, ScanProgressEvent, ScanSseEventType,
-    ScanStageLatencySummary, StartMode,
-    orchestration::{
-        events::{JobEventPayload, ScanEvent},
-        job::{JobId, JobKind},
-        scan_cursor::{ScanCursor, ScanCursorId, ScanCursorRepository},
-    },
+use ferrex_core::types::{
+    LibraryID, Media, MediaEvent, ScanEventMetadata, ScanProgressEvent, ScanStageLatencySummary,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
@@ -299,18 +302,23 @@ impl ScanControlPlaneInner {
 
         // Rebuild precomputed sort positions for the completed library scan
         if snapshot.status == ScanLifecycleStatus::Completed {
-            let lib = snapshot.library_id.as_uuid();
-            if let Err(e) = sqlx::query!("SELECT rebuild_movie_sort_positions($1)", lib)
-                .execute(self.postgres.pool())
+            let library_id = snapshot.library_id;
+            if let Err(err) = self
+                .unit_of_work
+                .indices
+                .rebuild_movie_sort_positions(library_id)
                 .await
             {
                 tracing::warn!(
                     "failed to rebuild movie_sort_positions for library {}: {}",
-                    lib,
-                    e
+                    library_id.as_uuid(),
+                    err
                 );
             } else {
-                tracing::info!("rebuilt precomputed movie positions for library {}", lib);
+                tracing::info!(
+                    "rebuilt precomputed movie positions for library {}",
+                    library_id.as_uuid()
+                );
             }
         }
     }
@@ -2095,11 +2103,11 @@ impl ScanRunAggregatorInner {
 
         let path_owned = path_norm.to_string();
         let job_id = match &event.payload {
-            JobEventPayload::Completed { job_id, .. } => Some(*job_id),
-            JobEventPayload::DeadLettered { job_id, .. } => Some(*job_id),
+            JobEventPayload::Completed { job_id, .. } => Some(job_id.clone()),
+            JobEventPayload::DeadLettered { job_id, .. } => Some(job_id.clone()),
             JobEventPayload::Failed {
                 job_id, retryable, ..
-            } if !retryable => Some(*job_id),
+            } if !retryable => Some(job_id.clone()),
             _ => None,
         };
 

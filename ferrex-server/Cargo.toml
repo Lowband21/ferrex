@@ -105,7 +105,6 @@ rustls.workspace = true
 rustls-pemfile.workspace = true
 rustls-pki-types.workspace = true
 rand.workspace = true
-ring.workspace = true
 
 # Internal dependencies
 ferrex-core = { path = "../ferrex-core" }

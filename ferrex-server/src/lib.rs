@@ -1,3 +1,4 @@
+pub mod application;
 #[cfg(feature = "demo")]
 pub mod demo;
 pub mod handlers;

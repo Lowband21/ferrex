@@ -12,7 +12,10 @@ use super::messages::Message;
 use iced::Task;
 use std::collections::{HashMap, HashSet};
 
-use ferrex_core::{ImageRequest, ImageSize, ImageType, LibraryID, MediaIDLike, MediaOps, Priority};
+use ferrex_core::player_prelude::{
+    ImageRequest, ImageSize, ImageType, LibraryID, MediaIDLike, MediaOps, Priority,
+    ScanLifecycleStatus, ScanSnapshotDto,
+};
 
 #[cfg_attr(
     any(
@@ -287,10 +290,10 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
 
             state.domains.library.state.active_scans.insert(
                 scan_id,
-                ferrex_core::api_types::ScanSnapshotDto {
+                ScanSnapshotDto {
                     scan_id,
                     library_id,
-                    status: ferrex_core::api_types::ScanLifecycleStatus::Running,
+                    status: ScanLifecycleStatus::Running,
                     completed_items: 0,
                     total_items: 0,
                     retrying_items: 0,
@@ -365,14 +368,14 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
                                 movie.tmdb_id == 0
                                     || matches!(
                                         movie.details,
-                                        ferrex_core::MediaDetailsOption::Endpoint(_)
+                                        MediaDetailsOption::Endpoint(_)
                                     )
                             }
                             crate::infrastructure::api_types::Media::Series(series) => {
                                 series.tmdb_id == 0
                                     || matches!(
                                         series.details,
-                                        ferrex_core::MediaDetailsOption::Endpoint(_)
+                                        MediaDetailsOption::Endpoint(_)
                                     )
                             }
                             _ => false,

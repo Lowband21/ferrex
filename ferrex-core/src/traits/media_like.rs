@@ -1,8 +1,11 @@
-use crate::{
-    ArchivedEpisodeReference, ArchivedMedia, ArchivedMediaID, ArchivedMovieReference,
-    ArchivedSeasonReference, ArchivedSeriesReference, EpisodeReference, Media, MediaID,
-    MediaIDLike, MediaOps, MediaType, MovieReference, SeasonReference, SeriesReference,
+use super::{id::MediaIDLike, media_ops::MediaOps};
+use crate::types::media::{
+    ArchivedEpisodeReference, ArchivedMedia, ArchivedMovieReference, ArchivedSeasonReference,
+    ArchivedSeriesReference, EpisodeReference, Media, MovieReference, SeasonReference,
+    SeriesReference,
 };
+use crate::types::media_id::{ArchivedMediaID, MediaID};
+use crate::types::util_types::MediaType;
 
 // A trait that allows us to treat archived and non-archived media references as the same type
 pub trait MediaLike {

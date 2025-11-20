@@ -2,8 +2,9 @@ use crate::domains::library::messages::Message;
 use crate::domains::library::server;
 use crate::infrastructure::services::api::ApiService;
 use crate::state_refactored::State;
-use ferrex_core::LibraryID;
-use ferrex_core::api_types::{ScanProgressEvent, ScanSnapshotDto};
+use ferrex_core::player_prelude::{
+    LibraryID, ScanLifecycleStatus, ScanProgressEvent, ScanSnapshotDto,
+};
 use iced::Task;
 use uuid::Uuid;
 
@@ -145,9 +146,9 @@ pub fn apply_active_scan_snapshot(state: &mut State, snapshots: Vec<ScanSnapshot
     for snapshot in snapshots {
         if matches!(
             snapshot.status,
-            ferrex_core::api_types::ScanLifecycleStatus::Completed
-                | ferrex_core::api_types::ScanLifecycleStatus::Failed
-                | ferrex_core::api_types::ScanLifecycleStatus::Canceled
+            ScanLifecycleStatus::Completed
+                | ScanLifecycleStatus::Failed
+                | ScanLifecycleStatus::Canceled
         ) {
             continue;
         }

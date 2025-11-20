@@ -1,4 +1,4 @@
-use ferrex_core::MediaFile;
+use ferrex_core::player_prelude::{MediaFile, MediaID};
 use iced::ContentFit;
 use std::time::{Duration, Instant};
 use subwave_core::video::types::{AudioTrack, SubtitleTrack};
@@ -12,7 +12,7 @@ pub const SEEK_BAR_CLICK_TOLERANCE_MULTIPLIER: f32 = 7.0; // Allow clicks within
 pub struct PlayerDomainState {
     // Current media
     pub current_media: Option<MediaFile>,
-    pub current_media_id: Option<ferrex_core::MediaID>,
+    pub current_media_id: Option<MediaID>,
     pub current_url: Option<url::Url>,
 
     // Video instance (unified)

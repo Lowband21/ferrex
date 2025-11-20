@@ -7,7 +7,9 @@ use ferrex_core::database::postgres_ext::processing_status::ProcessingStatusRepo
 use ferrex_core::database::traits::{
     FolderProcessingStatus, FolderScanFilters, MediaDatabaseTrait, MediaProcessingStatus,
 };
-use ferrex_core::{LibraryID, MediaDetailsOption, MediaError, MediaIDLike, MovieID};
+use ferrex_core::error::MediaError;
+use ferrex_core::player_prelude::MediaIDLike;
+use ferrex_core::types::{LibraryID, MediaDetailsOption, MovieID};
 use sqlx::PgPool;
 use uuid::Uuid;
 

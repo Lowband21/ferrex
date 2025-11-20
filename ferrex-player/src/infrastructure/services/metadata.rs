@@ -5,8 +5,10 @@
 
 use crate::infrastructure::repository::RepositoryResult;
 use async_trait::async_trait;
-use ferrex_core::{EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, SeasonDetails};
-use ferrex_core::{MovieReference, SeriesReference};
+use ferrex_core::player_prelude::{
+    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, MovieReference, SeasonDetails,
+    SeriesReference,
+};
 
 /// Search result from metadata provider
 #[derive(Debug, Clone)]
@@ -85,6 +87,9 @@ pub enum ImageSize {
 #[cfg(test)]
 pub mod mock {
     use super::*;
+    use ferrex_core::player_prelude::{
+        GenreInfo, NetworkInfo, ProductionCompany, ProductionCountry, SpokenLanguage,
+    };
     use std::sync::Arc;
     use tokio::sync::RwLock;
 
@@ -141,20 +146,20 @@ pub mod mock {
                 content_rating: None,
                 content_ratings: Vec::new(),
                 release_dates: Vec::new(),
-                genres: vec![ferrex_core::GenreInfo {
+                genres: vec![GenreInfo {
                     id: 1,
                     name: "Action".to_string(),
                 }],
-                spoken_languages: vec![ferrex_core::SpokenLanguage {
+                spoken_languages: vec![SpokenLanguage {
                     iso_639_1: Some("en".to_string()),
                     name: "English".to_string(),
                 }],
-                production_companies: vec![ferrex_core::ProductionCompany {
+                production_companies: vec![ProductionCompany {
                     id: 1,
                     name: "Test Studio".to_string(),
                     origin_country: Some("US".to_string()),
                 }],
-                production_countries: vec![ferrex_core::ProductionCountry {
+                production_countries: vec![ProductionCountry {
                     iso_3166_1: "US".to_string(),
                     name: "United States".to_string(),
                 }],
@@ -199,17 +204,17 @@ pub mod mock {
                 content_rating: None,
                 content_ratings: Vec::new(),
                 release_dates: Vec::new(),
-                genres: vec![ferrex_core::GenreInfo {
+                genres: vec![GenreInfo {
                     id: 18,
                     name: "Drama".to_string(),
                 }],
-                networks: vec![ferrex_core::NetworkInfo {
+                networks: vec![NetworkInfo {
                     id: 1,
                     name: "Test Network".to_string(),
                     origin_country: Some("US".to_string()),
                 }],
                 origin_countries: vec!["US".to_string()],
-                spoken_languages: vec![ferrex_core::SpokenLanguage {
+                spoken_languages: vec![SpokenLanguage {
                     iso_639_1: Some("en".to_string()),
                     name: "English".to_string(),
                 }],

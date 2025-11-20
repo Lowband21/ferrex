@@ -1,8 +1,23 @@
-use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
 use crate::{
-    EpisodeID, EpisodeReference, Library, LibraryID, LibraryReference, LibraryType, Media,
-    MediaFile, MediaFileMetadata, MediaImageKind, MovieID, MovieReference, Result, SeasonID,
-    SeasonReference, SeriesID, SeriesReference,
+    auth::device::{AuthenticatedDevice, DeviceUpdateParams},
+    auth::{AuthEvent, DeviceUserCredential, SessionDeviceSession},
+    error::Result,
+    image::{
+        MediaImageKind,
+        records::{MediaImageVariantKey, MediaImageVariantRecord},
+    },
+    query::types::{MediaQuery, MediaWithStatus},
+    rbac::{Permission, Role, UserPermissions},
+    sync_session::{Participant, PlaybackState, SyncSession},
+    types::{
+        details::LibraryReference,
+        files::{MediaFile, MediaFileMetadata},
+        ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID},
+        library::{Library, LibraryType},
+        media::{EpisodeReference, Media, MovieReference, SeasonReference, SeriesReference},
+    },
+    user::{User, UserSession},
+    watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -503,11 +518,11 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn cleanup_old_events(&self, days_to_keep: i32) -> Result<u32>;
 
     // User management methods
-    async fn create_user(&self, user: &crate::User) -> Result<()>;
-    async fn get_user_by_id(&self, id: Uuid) -> Result<Option<crate::User>>;
-    async fn get_user_by_username(&self, username: &str) -> Result<Option<crate::User>>;
-    async fn get_all_users(&self) -> Result<Vec<crate::User>>;
-    async fn update_user(&self, user: &crate::User) -> Result<()>;
+    async fn create_user(&self, user: &User) -> Result<()>;
+    async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>>;
+    async fn get_user_by_username(&self, username: &str) -> Result<Option<User>>;
+    async fn get_all_users(&self) -> Result<Vec<User>>;
+    async fn update_user(&self, user: &User) -> Result<()>;
     async fn delete_user(&self, id: Uuid) -> Result<()>;
 
     // User password management
@@ -518,9 +533,9 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn delete_user_atomic(&self, user_id: Uuid, check_last_admin: bool) -> Result<()>;
 
     // RBAC methods
-    async fn get_user_permissions(&self, user_id: Uuid) -> Result<crate::rbac::UserPermissions>;
-    async fn get_all_roles(&self) -> Result<Vec<crate::rbac::Role>>;
-    async fn get_all_permissions(&self) -> Result<Vec<crate::rbac::Permission>>;
+    async fn get_user_permissions(&self, user_id: Uuid) -> Result<UserPermissions>;
+    async fn get_all_roles(&self) -> Result<Vec<Role>>;
+    async fn get_all_permissions(&self) -> Result<Vec<Permission>>;
     async fn assign_user_role(&self, user_id: Uuid, role_id: Uuid, granted_by: Uuid) -> Result<()>;
     async fn remove_user_role(&self, user_id: Uuid, role_id: Uuid) -> Result<()>;
     async fn remove_user_role_atomic(
@@ -559,93 +574,72 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn delete_user_refresh_tokens(&self, user_id: Uuid) -> Result<()>;
 
     // Session management
-    async fn create_session(&self, session: &crate::UserSession) -> Result<()>;
-    async fn get_user_sessions(&self, user_id: Uuid) -> Result<Vec<crate::UserSession>>;
+    async fn create_session(&self, session: &UserSession) -> Result<()>;
+    async fn get_user_sessions(&self, user_id: Uuid) -> Result<Vec<UserSession>>;
     async fn delete_session(&self, session_id: Uuid) -> Result<()>;
 
     // Watch status methods
     async fn update_watch_progress(
         &self,
         user_id: Uuid,
-        progress: &crate::UpdateProgressRequest,
+        progress: &UpdateProgressRequest,
     ) -> Result<()>;
-    async fn get_user_watch_state(&self, user_id: Uuid) -> Result<crate::UserWatchState>;
+    async fn get_user_watch_state(&self, user_id: Uuid) -> Result<UserWatchState>;
     async fn get_continue_watching(
         &self,
         user_id: Uuid,
         limit: usize,
-    ) -> Result<Vec<crate::InProgressItem>>;
+    ) -> Result<Vec<InProgressItem>>;
     async fn clear_watch_progress(&self, user_id: Uuid, media_id: &Uuid) -> Result<()>;
     async fn is_media_completed(&self, user_id: Uuid, media_id: &Uuid) -> Result<bool>;
 
     // Sync session methods
-    async fn create_sync_session(&self, session: &crate::SyncSession) -> Result<()>;
-    async fn get_sync_session_by_code(&self, room_code: &str)
-    -> Result<Option<crate::SyncSession>>;
-    async fn get_sync_session(&self, id: Uuid) -> Result<Option<crate::SyncSession>>;
-    async fn update_sync_session_state(&self, id: Uuid, state: &crate::PlaybackState)
+    async fn create_sync_session(&self, session: &SyncSession) -> Result<()>;
+    async fn get_sync_session_by_code(&self, room_code: &str) -> Result<Option<SyncSession>>;
+    async fn get_sync_session(&self, id: Uuid) -> Result<Option<SyncSession>>;
+    async fn update_sync_session_state(&self, id: Uuid, state: &PlaybackState) -> Result<()>;
+    async fn update_sync_session(&self, id: Uuid, session: &SyncSession) -> Result<()>;
+    async fn add_sync_participant(&self, session_id: Uuid, participant: &Participant)
     -> Result<()>;
-    async fn update_sync_session(&self, id: Uuid, session: &crate::SyncSession) -> Result<()>;
-    async fn add_sync_participant(
-        &self,
-        session_id: Uuid,
-        participant: &crate::Participant,
-    ) -> Result<()>;
     async fn remove_sync_participant(&self, session_id: Uuid, user_id: Uuid) -> Result<()>;
     async fn delete_sync_session(&self, id: Uuid) -> Result<()>;
     async fn end_sync_session(&self, id: Uuid) -> Result<()>;
     async fn cleanup_expired_sync_sessions(&self) -> Result<u32>;
 
     // Query system
-    async fn query_media(
-        &self,
-        query: &crate::query::MediaQuery,
-    ) -> Result<Vec<crate::query::MediaWithStatus>>;
+    async fn query_media(&self, query: &MediaQuery) -> Result<Vec<MediaWithStatus>>;
 
     // Device authentication methods
     /// Register a new authenticated device
-    async fn register_device(&self, device: &crate::auth::AuthenticatedDevice) -> Result<()>;
+    async fn register_device(&self, device: &AuthenticatedDevice) -> Result<()>;
 
     /// Get device by fingerprint
     async fn get_device_by_fingerprint(
         &self,
         fingerprint: &str,
-    ) -> Result<Option<crate::auth::AuthenticatedDevice>>;
+    ) -> Result<Option<AuthenticatedDevice>>;
 
     /// Get device by id
-    async fn get_device_by_id(
-        &self,
-        device_id: Uuid,
-    ) -> Result<Option<crate::auth::AuthenticatedDevice>>;
+    async fn get_device_by_id(&self, device_id: Uuid) -> Result<Option<AuthenticatedDevice>>;
 
     /// Get all devices for a user
-    async fn get_user_devices(
-        &self,
-        user_id: Uuid,
-    ) -> Result<Vec<crate::auth::AuthenticatedDevice>>;
+    async fn get_user_devices(&self, user_id: Uuid) -> Result<Vec<AuthenticatedDevice>>;
 
     /// Update device information
-    async fn update_device(
-        &self,
-        device_id: Uuid,
-        updates: &crate::auth::DeviceUpdateParams,
-    ) -> Result<()>;
+    async fn update_device(&self, device_id: Uuid, updates: &DeviceUpdateParams) -> Result<()>;
 
     /// Revoke a device
     async fn revoke_device(&self, device_id: Uuid, revoked_by: Uuid) -> Result<()>;
 
     /// Create or update device-user credential
-    async fn upsert_device_credential(
-        &self,
-        credential: &crate::auth::DeviceUserCredential,
-    ) -> Result<()>;
+    async fn upsert_device_credential(&self, credential: &DeviceUserCredential) -> Result<()>;
 
     /// Get device credential for user
     async fn get_device_credential(
         &self,
         user_id: Uuid,
         device_id: Uuid,
-    ) -> Result<Option<crate::auth::DeviceUserCredential>>;
+    ) -> Result<Option<DeviceUserCredential>>;
 
     /// Update PIN for device-user
     async fn update_device_pin(&self, user_id: Uuid, device_id: Uuid, pin_hash: &str)
@@ -661,36 +655,23 @@ pub trait MediaDatabaseTrait: Send + Sync {
     ) -> Result<()>;
 
     /// Create device session
-    async fn create_device_session(
-        &self,
-        session: &crate::auth::SessionDeviceSession,
-    ) -> Result<()>;
+    async fn create_device_session(&self, session: &SessionDeviceSession) -> Result<()>;
 
     /// Get sessions by device
-    async fn get_device_sessions(
-        &self,
-        device_id: Uuid,
-    ) -> Result<Vec<crate::auth::SessionDeviceSession>>;
+    async fn get_device_sessions(&self, device_id: Uuid) -> Result<Vec<SessionDeviceSession>>;
 
     /// Revoke all sessions for a device
     async fn revoke_device_sessions(&self, device_id: Uuid) -> Result<()>;
 
     /// Log authentication event
-    async fn log_auth_event(&self, event: &crate::auth::AuthEvent) -> Result<()>;
+    async fn log_auth_event(&self, event: &AuthEvent) -> Result<()>;
 
     /// Get authentication events for user
-    async fn get_user_auth_events(
-        &self,
-        user_id: Uuid,
-        limit: usize,
-    ) -> Result<Vec<crate::auth::AuthEvent>>;
+    async fn get_user_auth_events(&self, user_id: Uuid, limit: usize) -> Result<Vec<AuthEvent>>;
 
     /// Get authentication events for device
-    async fn get_device_auth_events(
-        &self,
-        device_id: Uuid,
-        limit: usize,
-    ) -> Result<Vec<crate::auth::AuthEvent>>;
+    async fn get_device_auth_events(&self, device_id: Uuid, limit: usize)
+    -> Result<Vec<AuthEvent>>;
 
     // Folder inventory management methods
     /// Get folders that need scanning based on filters

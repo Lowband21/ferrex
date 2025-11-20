@@ -3,8 +3,7 @@
 //! This module provides a type-safe state machine for authentication
 //! that avoids the Arc<RwLock<Option<T>>> anti-pattern.
 
-use ferrex_core::rbac::UserPermissions;
-use ferrex_core::user::{AuthToken, User};
+use ferrex_core::player_prelude::{AuthToken, User, UserPermissions};
 use std::sync::Arc;
 use tokio::sync::watch;
 

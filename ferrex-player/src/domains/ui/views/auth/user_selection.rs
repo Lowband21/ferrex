@@ -4,6 +4,7 @@ use super::components::{auth_card, auth_container, error_message, spacing, title
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::dto::UserListItemDto;
 use crate::domains::auth::messages as auth;
+use ferrex_core::player_prelude::UserPermissions;
 use iced::{
     Alignment, Element, Length, Theme,
     widget::{Space, button, column, container, row, scrollable, text},
@@ -20,7 +21,7 @@ use iced::{
 pub fn view_user_selection<'a>(
     users: &'a [UserListItemDto],
     error: Option<&'a str>,
-    user_permissions: Option<&'a ferrex_core::rbac::UserPermissions>,
+    user_permissions: Option<&'a UserPermissions>,
 ) -> Element<'a, DomainMessage> {
     view_user_selection_with_admin_state(users, error, false, user_permissions)
 }
@@ -37,7 +38,7 @@ pub fn view_user_selection_with_admin_state<'a>(
     users: &'a [UserListItemDto],
     error: Option<&'a str>,
     admin_pin_unlock_enabled: bool,
-    user_permissions: Option<&'a ferrex_core::rbac::UserPermissions>,
+    user_permissions: Option<&'a UserPermissions>,
 ) -> Element<'a, DomainMessage> {
     let mut content = column![
         title("Select User"),

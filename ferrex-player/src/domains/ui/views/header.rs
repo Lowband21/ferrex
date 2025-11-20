@@ -5,7 +5,7 @@ use crate::{
     infrastructure::constants::layout::header::HEIGHT,
     state_refactored::State,
 };
-use ferrex_core::LibraryID;
+use ferrex_core::player_prelude::LibraryID;
 use iced::widget::Id;
 use iced::{
     Element, Length,

@@ -9,7 +9,7 @@ pub mod update_handlers;
 use self::messages::Message as StreamingMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
-use ferrex_core::LibraryID;
+use ferrex_core::player_prelude::{LibraryID, TranscodingStatus};
 use iced::Task;
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ pub struct StreamingDomainState {
 
     // Streaming state moved from PlayerState
     pub using_hls: bool,
-    pub transcoding_status: Option<ferrex_core::TranscodingStatus>,
+    pub transcoding_status: Option<TranscodingStatus>,
     pub transcoding_job_id: Option<String>,
     pub transcoding_duration: Option<f64>, // Duration from transcoding job
     pub transcoding_check_count: u32,      // Number of status checks performed

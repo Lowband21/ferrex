@@ -4,7 +4,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::Response,
 };
-use ferrex_core::{MediaType, User, watch_status::UpdateProgressRequest};
+use ferrex_core::{types::MediaType, user::User, watch_status::UpdateProgressRequest};
 use serde::Deserialize;
 use tokio_util::io::ReaderStream;
 use tracing::{debug, info, warn};

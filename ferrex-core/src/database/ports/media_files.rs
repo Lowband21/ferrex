@@ -1,10 +1,14 @@
+use crate::{
+    database::traits::MediaStats,
+    error::{MediaError, Result},
+    types::files::MediaFileMetadata,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::{
-    LibraryID, MediaError, MediaFile, MediaFileMetadata, Result, database::traits::MediaStats,
-};
+use crate::types::files::MediaFile;
+use crate::types::ids::LibraryID;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaFileSortField {

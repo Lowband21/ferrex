@@ -7,8 +7,7 @@ use crate::domains::auth::manager::AutoLoginScope;
 use crate::domains::auth::storage::StoredAuth;
 use crate::infrastructure::repository::RepositoryResult;
 use async_trait::async_trait;
-use ferrex_core::rbac::UserPermissions;
-use ferrex_core::user::{AuthToken, User};
+use ferrex_core::player_prelude::{AuthToken, User, UserPermissions};
 use uuid::Uuid;
 
 /// Authentication service trait for managing user authentication

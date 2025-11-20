@@ -15,7 +15,7 @@ use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::BackgroundEffect;
 use crate::domains::{player, ui};
 use crate::state_refactored::State;
-use ferrex_core::{BackdropKind, BackdropSize, ImageRequest, MediaIDLike};
+use ferrex_core::player_prelude::{BackdropKind, BackdropSize, ImageRequest, MediaIDLike};
 use iced::widget::{Space, Stack, column, container, scrollable};
 use iced::{Element, Font, Length};
 

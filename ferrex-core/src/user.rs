@@ -38,6 +38,8 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+use crate::auth::domain::value_objects::SessionScope;
 use uuid::Uuid;
 
 /// Core user type for authentication and profile management
@@ -280,6 +282,26 @@ pub struct AuthToken {
     /// Optional user id for convenience in single-request flows
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<Uuid>,
+    /// Scope describing the effective permissions granted to the session
+    #[serde(default)]
+    pub scope: SessionScope,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_token_scope_defaults_to_full() {
+        let raw = r#"{
+            "access_token": "<REDACTED>",
+            "refresh_token": "refresh",
+            "expires_in": 3600
+        }"#;
+
+        let token: AuthToken = serde_json::from_str(raw).expect("token deserializes");
+        assert_eq!(token.scope, SessionScope::Full);
+    }
 }
 
 /// User session for tracking active devices

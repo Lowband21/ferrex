@@ -1,6 +1,8 @@
+use std::fmt;
+
 use argon2::{
     Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 use constant_time_eq::constant_time_eq;
 use serde::{Deserialize, Serialize};
@@ -75,6 +77,12 @@ pub struct PinCode {
 /// Temporary PIN holder that zeros memory on drop
 #[derive(Zeroize, ZeroizeOnDrop)]
 struct PinValue(String);
+
+impl fmt::Debug for PinValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("PinValue").field(&"<redacted>").finish()
+    }
+}
 
 impl PinCode {
     /// Create a new PIN code with validation
@@ -170,14 +178,8 @@ impl PinCode {
 
     /// Hash a PIN using Argon2id
     fn hash_pin(pin: &str) -> Result<String, PinCodeError> {
-        use ring::rand::{SecureRandom, SystemRandom};
-
-        let rng = SystemRandom::new();
-        let mut salt_bytes = [0u8; 16];
-        rng.fill(&mut salt_bytes)
-            .map_err(|_| PinCodeError::HashingFailed)?;
-
-        let salt = SaltString::encode_b64(&salt_bytes).map_err(|_| PinCodeError::HashingFailed)?;
+        let mut rng = OsRng;
+        let salt = SaltString::generate(&mut rng);
 
         let argon2 = Argon2::default();
         let hash = argon2

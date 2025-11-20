@@ -9,7 +9,7 @@ pub mod update;
 use self::messages::Message as SettingsMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
-use ferrex_core::rbac::UserPermissions;
+use ferrex_core::player_prelude::UserPermissions;
 use iced::Task;
 
 /// Settings domain state - moved from monolithic State

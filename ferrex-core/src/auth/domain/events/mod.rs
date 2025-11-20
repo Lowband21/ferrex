@@ -48,6 +48,13 @@ pub enum AuthEvent {
         timestamp: DateTime<Utc>,
     },
 
+    /// PIN was removed from the device, returning it to pending status
+    PinRemoved {
+        session_id: Uuid,
+        user_id: Uuid,
+        timestamp: DateTime<Utc>,
+    },
+
     /// A new session was created
     SessionCreated {
         session_id: Uuid,
@@ -113,6 +120,7 @@ impl AuthEvent {
             Self::DeviceRevoked { timestamp, .. } => *timestamp,
             Self::AllDevicesRevoked { timestamp, .. } => *timestamp,
             Self::PinSet { timestamp, .. } => *timestamp,
+            Self::PinRemoved { timestamp, .. } => *timestamp,
             Self::SessionCreated { timestamp, .. } => *timestamp,
             Self::SessionRefreshed { timestamp, .. } => *timestamp,
             Self::AuthenticationFailed { timestamp, .. } => *timestamp,
@@ -132,6 +140,7 @@ impl AuthEvent {
             Self::DeviceRevoked { user_id, .. } => *user_id,
             Self::AllDevicesRevoked { user_id, .. } => *user_id,
             Self::PinSet { user_id, .. } => *user_id,
+            Self::PinRemoved { user_id, .. } => *user_id,
             Self::SessionCreated { user_id, .. } => *user_id,
             Self::SessionRefreshed { user_id, .. } => *user_id,
             Self::AuthenticationFailed { user_id, .. } => *user_id,
@@ -151,6 +160,7 @@ impl AuthEvent {
             Self::DeviceRevoked { .. } => "device_revoked",
             Self::AllDevicesRevoked { .. } => "all_devices_revoked",
             Self::PinSet { .. } => "pin_set",
+            Self::PinRemoved { .. } => "pin_removed",
             Self::SessionCreated { .. } => "session_created",
             Self::SessionRefreshed { .. } => "session_refreshed",
             Self::AuthenticationFailed { .. } => "authentication_failed",

@@ -1,6 +1,6 @@
 //! Library domain types
 
-use ferrex_core::LibraryID;
+use ferrex_core::player_prelude::LibraryID;
 
 /// Library form data for creating/editing libraries
 #[derive(Debug, Clone)]

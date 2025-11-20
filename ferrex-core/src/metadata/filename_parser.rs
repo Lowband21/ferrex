@@ -1,5 +1,10 @@
 use crate::{
-    ExtrasParser, LibraryType, ParsedEpisodeInfo, ParsedMediaInfo, ParsedMovieInfo, TvParser,
+    extras_parser::ExtrasParser,
+    tv_parser::TvParser,
+    types::{
+        files::{ParsedEpisodeInfo, ParsedMediaInfo, ParsedMovieInfo},
+        library::LibraryType,
+    },
 };
 use regex::Regex;
 use std::path::Path;

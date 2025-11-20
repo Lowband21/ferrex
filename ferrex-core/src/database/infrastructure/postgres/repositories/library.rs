@@ -4,8 +4,15 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::database::ports::library::LibraryRepository;
-use crate::{Library, LibraryID, LibraryReference, LibraryType, MediaError, Result};
+use crate::{
+    database::ports::library::LibraryRepository,
+    error::{MediaError, Result},
+    types::{
+        details::LibraryReference,
+        ids::LibraryID,
+        library::{Library, LibraryType},
+    },
+};
 
 #[derive(Clone, Debug)]
 pub struct PostgresLibraryRepository {

@@ -109,24 +109,29 @@ pub mod indices;
 /// Role-Based Access Control (RBAC) system
 pub mod rbac;
 
-/// Public scanner interface (wraps streaming_scanner_v2)
-#[cfg(feature = "database")]
-#[cfg_attr(docsrs, doc(cfg(feature = "database")))]
-pub mod scanner;
-
 /// Demo-mode helpers for quickly seeding fake media libraries.
 #[cfg(feature = "demo")]
 pub mod demo;
 
+/// Scan domain entrypoint bundling orchestrator, filesystem watch, and helper modules.
+#[cfg(feature = "scan-runtime")]
+#[cfg_attr(docsrs, doc(cfg(feature = "scan-runtime")))]
+pub mod scan;
+
 /// Scan orchestrator domain scaffolding
-#[cfg(feature = "database")]
-#[cfg_attr(docsrs, doc(cfg(feature = "database")))]
+#[cfg(feature = "scan-runtime")]
+#[cfg_attr(docsrs, doc(cfg(feature = "scan-runtime")))]
 pub mod orchestration;
 
 /// Filesystem watch adapters feeding the orchestrator actors
-#[cfg(feature = "database")]
-#[cfg_attr(docsrs, doc(cfg(feature = "database")))]
+#[cfg(feature = "scan-runtime")]
+#[cfg_attr(docsrs, doc(cfg(feature = "scan-runtime")))]
 pub mod fs_watch;
+
+/// Public scanner interface (legacy helpers and fixtures).
+#[cfg(feature = "scan-runtime")]
+#[cfg_attr(docsrs, doc(cfg(feature = "scan-runtime")))]
+pub mod scanner;
 
 /// Synchronized playback session management
 pub mod sync_session;
@@ -146,6 +151,10 @@ pub mod user;
 /// Enhanced authentication with device trust and PIN support
 pub mod auth;
 
+/// First-run setup flows (claim codes, binding)
+#[cfg(feature = "database")]
+pub mod setup;
+
 /// User management domain module with CRUD operations
 pub mod user_management;
 
@@ -160,81 +169,85 @@ pub mod api;
 pub mod catalog;
 pub mod identity;
 pub mod playback;
+pub mod player_prelude;
 
-#[cfg(feature = "compat")]
-mod compat {
-    pub use super::api_scan::*;
-    pub use super::api_types::*;
-    #[cfg(feature = "database")]
-    pub use super::database::*;
-    pub use super::error::*;
-    pub use super::extras_parser::ExtrasParser;
-    #[cfg(feature = "database")]
-    pub use super::fs_watch::*;
-    #[cfg(feature = "database")]
-    pub use super::image_service::{ImageService, TmdbImageSize};
-    #[cfg(feature = "ffmpeg")]
-    pub use super::metadata::*;
-    #[cfg(feature = "database")]
-    pub use super::orchestration::events::stable_path_key;
-    #[cfg(feature = "database")]
-    pub use super::orchestration::events::{
-        DomainEvent, DomainEventPublisher, EventBus, EventMeta, JobEvent, JobEventPayload,
-        JobEventPublisher, ManualEnqueueRequest, ManualEnqueueResponse,
-    };
-    #[cfg(feature = "database")]
-    pub use super::orchestration::{
-        actors::*, budget::*, classification::*, config::*, correlation::*, dispatcher::*, job::*,
-        lease::*, persistence::*, queue::*, runtime::*, scan_cursor::*, scheduler::*, series::*,
-    };
-    pub use super::providers::{ProviderError, TmdbApiProvider};
-    pub use super::query::*;
-    pub use super::rbac::*;
-    pub use super::sync_session::*;
-    pub use super::tv_parser::{EpisodeInfo, TvParser};
-    pub use super::types::library::*;
-    pub use super::types::transcoding::{
-        TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,
-    };
+/// Query helper exports grouped for UI/search crates
+pub use query::prelude as query_prelude;
 
-    // Authentication exports
-    pub use super::auth::AuthError as DeviceAuthError;
-    #[cfg(feature = "database")]
-    pub use super::auth::infrastructure::*;
-    #[cfg(feature = "database")]
-    pub use super::auth::pin::*;
-    pub use super::auth::rate_limit::*;
-    pub use super::auth::session::{
-        CreateSessionRequest, CreateSessionResponse, DeviceSession as SessionDeviceSession,
-        ListSessionsRequest, RevokeSessionRequest, SessionActivity, SessionConfig, SessionSummary,
-        SessionValidationResult, generate_session_token,
-    };
-    pub use super::auth::state::{
-        AuthEvent as DeviceAuthEvent, AuthState as DeviceAuthState,
-        TransitionResult as DeviceAuthTransitionResult,
-    };
-    pub use super::auth::state_machine::AuthState as AuthStateTrait;
-    pub use super::auth::state_machine::TransitionResult as AuthStateMachineResult;
-    pub use super::auth::state_machine::{
-        AuthConfig, AuthStateMachine, AuthTransitionError, Authenticated, AwaitingPassword,
-        AwaitingPin, Refreshing, SerializedAuthState, SettingUpPin, Unauthenticated, UserSelected,
-    };
-    pub use super::auth::{
-        AuthContext, AuthEvent, AuthEventType, AuthResult, AuthenticationMethod,
-    };
+// #[cfg(feature = "compat")]
+// mod compat {
+//     pub use super::api_scan::*;
+//     pub use super::api_types::*;
+//     #[cfg(feature = "database")]
+//     pub use super::database::*;
+//     pub use super::error::*;
+//     pub use super::extras_parser::ExtrasParser;
+//     #[cfg(feature = "database")]
+//     pub use super::fs_watch::*;
+//     #[cfg(feature = "database")]
+//     pub use super::image_service::{ImageService, TmdbImageSize};
+//     #[cfg(feature = "ffmpeg")]
+//     pub use super::metadata::*;
+//     #[cfg(feature = "database")]
+//     pub use super::orchestration::events::stable_path_key;
+//     #[cfg(feature = "database")]
+//     pub use super::orchestration::events::{
+//         DomainEvent, DomainEventPublisher, EventBus, EventMeta, JobEvent, JobEventPayload,
+//         JobEventPublisher, ManualEnqueueRequest, ManualEnqueueResponse,
+//     };
+//     #[cfg(feature = "database")]
+//     pub use super::orchestration::{
+//         actors::*, budget::*, classification::*, config::*, correlation::*, dispatcher::*, job::*,
+//         lease::*, persistence::*, queue::*, runtime::*, scan_cursor::*, scheduler::*, series::*,
+//     };
+//     pub use super::providers::{ProviderError, TmdbApiProvider};
+//     pub use super::query::*;
+//     pub use super::rbac::*;
+//     pub use super::sync_session::*;
+//     pub use super::tv_parser::{EpisodeInfo, TvParser};
+//     pub use super::types::library::*;
+//     pub use super::types::transcoding::{
+//         TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,
+//     };
 
-    // Core exports
-    pub use super::traits::*;
-    pub use super::types::*;
-    pub use super::user::AuthError as UserAuthError;
-    pub use super::user::{
-        AuthToken, Claims, GridSize, LoginRequest, PlaybackPreferences, PlaybackQuality,
-        RegisterRequest, ResumeBehavior, SubtitlePreferences, ThemePreference, UiPreferences, User,
-        UserPreferences, UserSession, UserUpdateRequest, ValidationError,
-    };
-    pub use super::watch_status::*;
-    // user_management is available as a module but not re-exported to avoid conflicts
-}
+//     // Authentication exports
+//     pub use super::auth::AuthError as DeviceAuthError;
+//     #[cfg(feature = "database")]
+//     pub use super::auth::infrastructure::*;
+//     #[cfg(feature = "database")]
+//     pub use super::auth::pin::*;
+//     pub use super::auth::rate_limit::*;
+//     pub use super::auth::session::{
+//         CreateSessionRequest, CreateSessionResponse, DeviceSession as SessionDeviceSession,
+//         ListSessionsRequest, RevokeSessionRequest, SessionActivity, SessionConfig, SessionSummary,
+//         SessionValidationResult, generate_session_token,
+//     };
+//     pub use super::auth::state::{
+//         AuthEvent as DeviceAuthEvent, AuthState as DeviceAuthState,
+//         TransitionResult as DeviceAuthTransitionResult,
+//     };
+//     pub use super::auth::state_machine::AuthState as AuthStateTrait;
+//     pub use super::auth::state_machine::TransitionResult as AuthStateMachineResult;
+//     pub use super::auth::state_machine::{
+//         AuthConfig, AuthStateMachine, AuthTransitionError, Authenticated, AwaitingPassword,
+//         AwaitingPin, Refreshing, SerializedAuthState, SettingUpPin, Unauthenticated, UserSelected,
+//     };
+//     pub use super::auth::{
+//         AuthContext, AuthEvent, AuthEventType, AuthResult, AuthenticationMethod,
+//     };
 
-#[cfg(feature = "compat")]
-pub use compat::*;
+//     // Core exports
+//     pub use super::traits::*;
+//     pub use super::types::*;
+//     pub use super::user::AuthError as UserAuthError;
+//     pub use super::user::{
+//         AuthToken, Claims, GridSize, LoginRequest, PlaybackPreferences, PlaybackQuality,
+//         RegisterRequest, ResumeBehavior, SubtitlePreferences, ThemePreference, UiPreferences, User,
+//         UserPreferences, UserSession, UserUpdateRequest, ValidationError,
+//     };
+//     pub use super::watch_status::*;
+//     // user_management is available as a module but not re-exported to avoid conflicts
+// }
+
+// #[cfg(feature = "compat")]
+// pub use compat::*;

@@ -3,7 +3,7 @@
 pub mod all_view_model;
 
 pub use all_view_model::AllViewModel;
-use ferrex_core::Media;
+use ferrex_core::player_prelude::Media;
 
 //use crate::domains::metadata::service::FetchPriority;
 

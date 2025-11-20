@@ -33,8 +33,11 @@ use crate::{
     },
     stream::stream_handlers,
     users::{
-        admin_handlers, auth, role_handlers, session_handlers,
-        setup::setup::{check_setup_status, create_initial_admin},
+        admin_handlers, auth, role_handlers, security_settings_handlers, session_handlers,
+        setup::{
+            claim::{confirm_secure_claim, start_secure_claim},
+            setup::{check_setup_status, create_initial_admin},
+        },
         user_handlers, user_management, watch_status_handlers,
     },
 };
@@ -61,7 +64,6 @@ pub fn create_v1_router(state: AppState) -> Router<AppState> {
             get(auth::device_handlers::check_device_status),
         )
         // Public user endpoints (for user selection screen)
-        .route(v1::users::COLLECTION, get(user_management::list_users))
         .route(
             v1::users::PUBLIC_LIST,
             get(user_handlers::list_users_handler),
@@ -69,6 +71,8 @@ pub fn create_v1_router(state: AppState) -> Router<AppState> {
         // Public setup endpoints (for first-run)
         .route(v1::setup::STATUS, get(check_setup_status))
         .route(v1::setup::CREATE_ADMIN, post(create_initial_admin))
+        .route(v1::setup::CLAIM_START, post(start_secure_claim))
+        .route(v1::setup::CLAIM_CONFIRM, post(confirm_secure_claim))
         .route(
             v1::stream::PLAY,
             get(stream_handlers::stream_with_progress_handler),
@@ -151,6 +155,7 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
             get(user_handlers::list_users_authenticated_handler),
         )
         // User management endpoints (admin)
+        .route(v1::users::COLLECTION, get(user_management::list_users))
         .route(v1::users::COLLECTION, post(user_management::create_user))
         .route(v1::users::ITEM, put(user_management::update_user))
         .route(
@@ -342,6 +347,11 @@ fn create_admin_routes(state: AppState) -> Router<AppState> {
         .route(
             v1::admin::sessions::REMOVE,
             axum::routing::delete(auth::pin_handlers::remove_admin_session),
+        )
+        .route(
+            v1::admin::security::SETTINGS,
+            get(security_settings_handlers::get_security_settings)
+                .put(security_settings_handlers::update_security_settings),
         )
         .route(v1::admin::dev::SEED, post(dev_handlers::seed_database));
 

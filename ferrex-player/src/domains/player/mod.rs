@@ -17,7 +17,7 @@ use self::messages::Message;
 use self::state::PlayerDomainState;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
-use ferrex_core::LibraryID;
+use ferrex_core::player_prelude::LibraryID;
 use iced::Task;
 use std::sync::Arc;
 

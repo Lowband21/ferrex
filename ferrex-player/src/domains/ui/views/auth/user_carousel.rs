@@ -4,6 +4,7 @@ use super::components::{auth_card, auth_container, error_message, spacing, title
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::messages as auth;
 use crate::domains::ui::views::carousel::CarouselState;
+use ferrex_core::player_prelude::UserPermissions;
 
 use iced::{
     Alignment, Element, Length, Theme,
@@ -90,7 +91,7 @@ pub enum UserCarouselMessage {
 /// Shows the user selection carousel
 pub fn view_user_carousel<'a>(
     state: &'a UserCarouselState,
-    user_permissions: Option<&'a ferrex_core::rbac::UserPermissions>,
+    user_permissions: Option<&'a UserPermissions>,
 ) -> Element<'a, DomainMessage> {
     let mut content = column![title("Select User"), spacing(),];
 
@@ -127,7 +128,7 @@ pub fn view_user_carousel<'a>(
 pub fn view_user_selection_with_carousel<'a>(
     users: &'a Vec<crate::domains::auth::dto::UserListItemDto>,
     error: Option<&'a str>,
-    user_permissions: Option<&'a ferrex_core::rbac::UserPermissions>,
+    user_permissions: Option<&'a UserPermissions>,
 ) -> Element<'a, DomainMessage> {
     // Create a static carousel state that will persist between renders
     static CAROUSEL_STATE: std::sync::OnceLock<std::sync::Mutex<CarouselState>> =
@@ -178,7 +179,7 @@ pub fn view_user_selection_with_carousel<'a>(
 /// Create the user carousel component
 fn create_user_carousel<'a>(
     state: &'a UserCarouselState,
-    user_permissions: Option<&'a ferrex_core::rbac::UserPermissions>,
+    user_permissions: Option<&'a UserPermissions>,
 ) -> Element<'a, DomainMessage> {
     let carousel_state = &state.carousel_state;
 
@@ -282,7 +283,7 @@ fn create_user_carousel<'a>(
 /// Create the user carousel component from raw data
 fn create_user_carousel_from_data<'a>(
     users: &'a Vec<crate::domains::auth::dto::UserListItemDto>,
-    user_permissions: Option<&'a ferrex_core::rbac::UserPermissions>,
+    user_permissions: Option<&'a UserPermissions>,
 ) -> Element<'a, DomainMessage> {
     // Create a simple carousel without state management
     let mut user_row = row![].spacing(20.0);

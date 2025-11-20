@@ -3,12 +3,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::database::MediaDatabase;
 use crate::database::ports::images::ImageRepository;
 use crate::database::traits::{
     ImageLookupParams, ImageRecord, ImageVariant, MediaDatabaseTrait, MediaImage,
 };
+use crate::error::Result;
+use crate::image::MediaImageKind;
 use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
-use crate::{MediaDatabase, MediaImageKind, Result};
 
 /// Temporary adapter that exposes the legacy `MediaDatabase` implementation
 /// through the `ImageRepository` port while services migrate away from the

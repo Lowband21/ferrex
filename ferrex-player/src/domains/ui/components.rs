@@ -4,7 +4,7 @@ use crate::domains::ui::widgets::{AnimationType, image_for};
 use crate::infrastructure::constants::poster::CORNER_RADIUS;
 use crate::{domains::ui::theme, state_refactored::State};
 
-use ferrex_core::{ArchivedCastMember, ImageSize, ImageType};
+use ferrex_core::player_prelude::{ArchivedCastMember, ImageSize, ImageType};
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, scrollable, text},

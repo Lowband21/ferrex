@@ -1,15 +1,14 @@
-use crate::ArchivedEpisodeReference;
-use crate::ArchivedMedia;
-use crate::ArchivedMovieReference;
-use crate::ArchivedSeasonReference;
-use crate::ArchivedSeriesReference;
-use crate::types::ArchivedMediaID;
-use crate::types::Media;
-use crate::{
-    EpisodeID, EpisodeReference, LibraryID, MediaDetailsOption, MediaDetailsOptionLike, MediaFile,
-    MediaID, MediaIDLike, MovieID, MovieReference, SeasonID, SeasonReference, SeriesID,
-    SeriesReference, TmdbDetails, UrlLike,
+use super::id::MediaIDLike;
+use crate::types::details::{MediaDetailsOption, MediaDetailsOptionLike, TmdbDetails};
+use crate::types::files::MediaFile;
+use crate::types::ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID};
+use crate::types::media::{
+    ArchivedEpisodeReference, ArchivedMedia, ArchivedMovieReference, ArchivedSeasonReference,
+    ArchivedSeriesReference, EpisodeReference, Media, MovieReference, SeasonReference,
+    SeriesReference,
 };
+use crate::types::media_id::{ArchivedMediaID, MediaID};
+use crate::types::urls::UrlLike;
 use std::time::Duration;
 
 // ===== Media Trait System =====

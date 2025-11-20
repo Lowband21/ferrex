@@ -5,8 +5,10 @@ use crate::infrastructure::{
     services::api::ApiService,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use ferrex_core::api_routes::v1;
-use ferrex_core::{MediaEvent, MediaIDLike, MediaSseEventType};
+use ferrex_core::{
+    api_routes::v1, player_prelude::MediaEvent, traits::id::MediaIDLike,
+    types::events::MediaSseEventType,
+};
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 use iced::Subscription;
@@ -378,7 +380,7 @@ fn decode_media_event(payload: &str) -> Result<MediaEvent, String> {
 mod tests {
     use super::*;
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-    use ferrex_core::{MediaID, MovieID};
+    use ferrex_core::player_prelude::{MediaID, MovieID};
     use rkyv::rancor::Error as RkyvError;
     use rkyv::to_bytes;
 

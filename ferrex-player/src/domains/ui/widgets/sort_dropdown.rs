@@ -1,14 +1,14 @@
 pub use self::sort_option::SortOption;
 
 use crate::domains::ui::{messages::Message, theme::MediaServerTheme};
-use ferrex_core::SortBy;
+use ferrex_core::player_prelude::SortBy;
 use iced::{
     Background, Border, Color, Element, Length,
     widget::{container, pick_list},
 };
 
 mod sort_option {
-    use ferrex_core::SortBy;
+    use ferrex_core::player_prelude::SortBy;
 
     /// Display labels for sort options
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

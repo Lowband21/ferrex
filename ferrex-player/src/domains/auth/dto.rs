@@ -6,6 +6,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use ferrex_core::player_prelude as core;
+
 /// Client-side user representation
 /// This is what the UI works with, not the server's User model
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,7 +98,7 @@ pub struct UserListItemDto {
 /// Converters from server models to DTOs
 impl UserDto {
     /// Convert from server User model
-    pub fn from_server_model(user: ferrex_core::user::User, is_admin: bool) -> Self {
+    pub fn from_server_model(user: core::User, is_admin: bool) -> Self {
         Self {
             id: user.id,
             username: user.username,
@@ -110,12 +112,12 @@ impl UserDto {
 
 impl UserPreferencesDto {
     /// Convert from server preferences
-    pub fn from_server_model(prefs: ferrex_core::user::UserPreferences) -> Self {
+    pub fn from_server_model(prefs: core::UserPreferences) -> Self {
         Self {
             theme: match prefs.theme {
-                ferrex_core::user::ThemePreference::Light => ThemePreference::Light,
-                ferrex_core::user::ThemePreference::Dark => ThemePreference::Dark,
-                ferrex_core::user::ThemePreference::System => ThemePreference::System,
+                core::ThemePreference::Light => ThemePreference::Light,
+                core::ThemePreference::Dark => ThemePreference::Dark,
+                core::ThemePreference::System => ThemePreference::System,
             },
             language: prefs.language,
             auto_login_enabled: prefs.auto_login_enabled,
@@ -129,12 +131,12 @@ impl UserPreferencesDto {
                 SubtitleSize::Medium
             },
             playback_quality: match prefs.playback_preferences.preferred_quality {
-                ferrex_core::user::PlaybackQuality::Auto => PlaybackQuality::Auto,
-                ferrex_core::user::PlaybackQuality::Original => PlaybackQuality::Original,
-                ferrex_core::user::PlaybackQuality::High4K => PlaybackQuality::UHD4K,
-                ferrex_core::user::PlaybackQuality::High1080p => PlaybackQuality::FHD1080p,
-                ferrex_core::user::PlaybackQuality::Medium720p => PlaybackQuality::HD720p,
-                ferrex_core::user::PlaybackQuality::Low480p => PlaybackQuality::SD480p,
+                core::PlaybackQuality::Auto => PlaybackQuality::Auto,
+                core::PlaybackQuality::Original => PlaybackQuality::Original,
+                core::PlaybackQuality::High4K => PlaybackQuality::UHD4K,
+                core::PlaybackQuality::High1080p => PlaybackQuality::FHD1080p,
+                core::PlaybackQuality::Medium720p => PlaybackQuality::HD720p,
+                core::PlaybackQuality::Low480p => PlaybackQuality::SD480p,
             },
         }
     }

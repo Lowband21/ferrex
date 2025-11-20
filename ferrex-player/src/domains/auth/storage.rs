@@ -17,8 +17,7 @@ use argon2::password_hash::SaltString;
 use argon2::{Argon2, Params};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
-use ferrex_core::rbac::UserPermissions;
-use ferrex_core::user::{AuthToken, User};
+use ferrex_core::player_prelude::{AuthToken, User, UserPermissions};
 use uuid::Uuid;
 
 const AUTH_CACHE_FILE: &str = "auth_cache.enc";
@@ -418,6 +417,7 @@ impl AuthStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrex_core::auth::domain::value_objects::SessionScope;
     use tempfile::TempDir;
     use uuid::Uuid;
 
@@ -430,6 +430,7 @@ mod tests {
                 session_id: None,
                 device_session_id: None,
                 user_id: None,
+                scope: SessionScope::Full,
             },
             user: User {
                 id: Uuid::now_v7(),

@@ -7,14 +7,24 @@ use sqlx::{PgPool, Postgres, Row, Transaction, postgres::PgRow};
 use uuid::Uuid;
 
 use crate::{
-    AlternativeTitle, CastMember, CollectionInfo, ContentRating, CrewMember, EnhancedMovieDetails,
-    EnhancedSeriesDetails, EpisodeDetails, EpisodeGroupMembership, EpisodeID, EpisodeNumber,
-    EpisodeReference, EpisodeURL, ExternalIds, GenreInfo, Keyword, LibraryID, MediaDetailsOption,
-    MediaError, MediaFile, MediaIDLike, MovieID, MovieReference, MovieTitle, MovieURL, NetworkInfo,
-    PersonExternalIds, ProductionCompany, ProductionCountry, RelatedMediaRef, ReleaseDateEntry,
-    ReleaseDatesByCountry, Result, SeasonDetails, SeasonID, SeasonNumber, SeasonReference,
-    SeasonURL, SeriesID, SeriesReference, SeriesTitle, SeriesURL, SpokenLanguage, TmdbDetails,
-    Translation, UrlLike, Video,
+    error::{MediaError, Result},
+    traits::prelude::MediaIDLike,
+    types::{
+        details::{
+            AlternativeTitle, CastMember, CollectionInfo, ContentRating, CrewMember,
+            EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeGroupMembership,
+            ExternalIds, GenreInfo, Keyword, MediaDetailsOption, NetworkInfo, PersonExternalIds,
+            ProductionCompany, ProductionCountry, RelatedMediaRef, ReleaseDateEntry,
+            ReleaseDatesByCountry, SeasonDetails, SpokenLanguage, TmdbDetails, Translation, Video,
+        },
+        files::{MediaFile, MediaFileMetadata},
+        ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID},
+        image::MediaImages,
+        media::{EpisodeReference, MovieReference, SeasonReference, SeriesReference},
+        numbers::{EpisodeNumber, SeasonNumber},
+        titles::{MovieTitle, SeriesTitle},
+        urls::{EpisodeURL, MovieURL, SeasonURL, SeriesURL, UrlLike},
+    },
 };
 
 /// Primary entrypoint for TMDB metadata persistence.
@@ -195,7 +205,7 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         Ok(SeriesReference {
             id: SeriesID(series_id),
-            library_id: crate::LibraryID(library_id),
+            library_id: LibraryID(library_id),
             tmdb_id: tmdb_id.unwrap_or_default() as u64,
             title: SeriesTitle::new(title.clone()).map_err(|e| {
                 MediaError::Internal(format!("Invalid stored series title '{}': {}", title, e))
@@ -2203,9 +2213,9 @@ fn hydrate_media_file_row(row: &PgRow) -> Result<MediaFile> {
     let media_file_metadata: Option<serde_json::Value> = row.try_get("technical_metadata").ok();
     let parsed = media_file_metadata
         .as_ref()
-        .and_then(|tm| serde_json::from_value::<crate::MediaFileMetadata>(tm.clone()).ok());
+        .and_then(|tm| serde_json::from_value::<MediaFileMetadata>(tm.clone()).ok());
 
-    let library_id = crate::LibraryID(row.try_get("library_id")?);
+    let library_id = LibraryID(row.try_get("library_id")?);
 
     Ok(MediaFile {
         id: row.try_get("file_id")?,
@@ -2499,7 +2509,7 @@ async fn load_series_details(
         poster_path: row.poster_path.clone(),
         backdrop_path: row.backdrop_path.clone(),
         logo_path: row.logo_path.clone(),
-        images: crate::MediaImages::default(),
+        images: MediaImages::default(),
         cast,
         crew,
         videos,
@@ -2770,7 +2780,7 @@ async fn load_movie_details(pool: &PgPool, movie_id: Uuid) -> Result<Option<Enha
         poster_path: row.poster_path.clone(),
         backdrop_path: row.backdrop_path.clone(),
         logo_path: row.logo_path.clone(),
-        images: crate::MediaImages::default(),
+        images: MediaImages::default(),
         cast,
         crew,
         videos,
@@ -2916,7 +2926,7 @@ async fn load_season_details(pool: &PgPool, season_id: Uuid) -> Result<Option<Se
             freebase_id: None,
             freebase_mid: None,
         },
-        images: crate::MediaImages::default(),
+        images: MediaImages::default(),
         videos,
         keywords,
         translations,
@@ -3281,7 +3291,7 @@ async fn load_episode_details(pool: &PgPool, episode_id: Uuid) -> Result<Option<
             freebase_id: None,
             freebase_mid: None,
         },
-        images: crate::MediaImages::default(),
+        images: MediaImages::default(),
         videos,
         keywords,
         translations,

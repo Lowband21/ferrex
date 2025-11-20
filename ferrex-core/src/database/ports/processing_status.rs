@@ -1,9 +1,11 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::LibraryID;
-use crate::database::traits::MediaProcessingStatus;
-use crate::{MediaFile, Result};
+use crate::{
+    database::traits::MediaProcessingStatus,
+    error::Result,
+    types::{files::MediaFile, ids::LibraryID},
+};
 
 #[async_trait]
 pub trait ProcessingStatusRepository: Send + Sync {

@@ -47,6 +47,8 @@ pub mod v1 {
     pub mod setup {
         pub const STATUS: &str = v1_path!("/setup/status");
         pub const CREATE_ADMIN: &str = v1_path!("/setup/admin");
+        pub const CLAIM_START: &str = v1_path!("/setup/claim/start");
+        pub const CLAIM_CONFIRM: &str = v1_path!("/setup/claim/confirm");
     }
 
     pub mod media {
@@ -136,6 +138,10 @@ pub mod v1 {
         pub mod sessions {
             pub const REGISTER: &str = v1_path!("/admin/sessions/register");
             pub const REMOVE: &str = v1_path!("/admin/sessions/{device_id}");
+        }
+
+        pub mod security {
+            pub const SETTINGS: &str = v1_path!("/admin/security/password-policy");
         }
     }
 

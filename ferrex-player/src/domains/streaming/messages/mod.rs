@@ -1,4 +1,4 @@
-use ferrex_core::TranscodingStatus;
+use ferrex_core::player_prelude::TranscodingStatus;
 
 #[derive(Clone)]
 pub enum Message {

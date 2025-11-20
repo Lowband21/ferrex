@@ -1,7 +1,7 @@
 use super::Message;
 use crate::infrastructure::{adapters::ApiClientAdapter, services::api::ApiService};
 use ferrex_core::api_routes::{utils, v1};
-use ferrex_core::{ImageSize, ImageType};
+use ferrex_core::player_prelude::{ImageSize, ImageType};
 use futures::stream;
 use iced::Subscription;
 use std::sync::{Arc, Mutex};

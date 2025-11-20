@@ -6,37 +6,37 @@
 
 use std::{collections::HashMap, fmt, sync::Arc};
 
-use ferrex_core::QueueService;
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
+use ferrex_core::database::PostgresDatabase;
+use ferrex_core::error::{MediaError, Result};
+use ferrex_core::fs_watch::{FsWatchConfig, FsWatchService, NoopFsWatchObserver};
 use ferrex_core::image_service::ImageService;
-use ferrex_core::orchestration::actors::folder::FolderScanActor;
-use ferrex_core::orchestration::actors::pipeline::{
-    DefaultImageFetchActor, ImageFetchActor, IndexerActor, MediaAnalyzeActor, MetadataActor,
-    TmdbMetadataActor,
-};
-use ferrex_core::{LibraryID, LibraryRootsId};
-use ferrex_core::{
-    MediaError, PostgresCursorRepository, PostgresDatabase, PostgresQueueService, Result,
-    fs_watch::{FsWatchConfig, FsWatchService, NoopFsWatchObserver},
-    orchestration::{
-        actors::{
-            DefaultFolderScanActor, DefaultIndexerActor, DefaultLibraryActor,
-            DefaultMediaAnalyzeActor, LibraryActorCommand, LibraryActorConfig, NoopActorObserver,
+use ferrex_core::orchestration::{
+    actors::{
+        DefaultFolderScanActor, DefaultIndexerActor, DefaultLibraryActor, DefaultMediaAnalyzeActor,
+        LibraryActorCommand, LibraryActorConfig, LibraryRootsId, NoopActorObserver,
+        folder::FolderScanActor,
+        pipeline::{
+            DefaultImageFetchActor, ImageFetchActor, IndexerActor, MediaAnalyzeActor,
+            MetadataActor, TmdbMetadataActor,
         },
-        budget::InMemoryBudget,
-        config::OrchestratorConfig,
-        correlation::CorrelationCache,
-        dispatcher::{DefaultJobDispatcher, DispatcherActors, JobDispatcher},
-        events::{JobEvent, JobEventPayload, JobEventPublisher, ScanEvent, stable_path_key},
-        job::{EnqueueRequest, JobHandle, JobKind, JobPriority, JobValidator},
-        lease::{DequeueRequest, JobLease},
-        runtime::{
-            InProcJobEventBus, LibraryActorHandle, OrchestratorRuntime, OrchestratorRuntimeBuilder,
-        },
-        scheduler::ReadyCountEntry,
     },
-    providers::TmdbApiProvider,
+    budget::InMemoryBudget,
+    config::OrchestratorConfig,
+    correlation::CorrelationCache,
+    dispatcher::{DefaultJobDispatcher, DispatcherActors, JobDispatcher},
+    events::{JobEvent, JobEventPayload, JobEventPublisher, ScanEvent, stable_path_key},
+    job::{EnqueueRequest, JobHandle, JobKind, JobPriority, JobValidator},
+    lease::{DequeueRequest, JobLease},
+    persistence::{PostgresCursorRepository, PostgresQueueService},
+    queue::QueueService,
+    runtime::{
+        InProcJobEventBus, LibraryActorHandle, OrchestratorRuntime, OrchestratorRuntimeBuilder,
+    },
+    scheduler::ReadyCountEntry,
 };
+use ferrex_core::providers::TmdbApiProvider;
+use ferrex_core::types::LibraryID;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
 
@@ -161,21 +161,29 @@ impl ScanOrchestrator {
         fields(library_id = %config.library.id, root_count = config.root_paths.len()),
         err
     )]
-    pub async fn register_library(&self, config: LibraryActorConfig) -> Result<()> {
+    pub async fn register_library(
+        &self,
+        config: LibraryActorConfig,
+        watch_for_changes: bool,
+    ) -> Result<()> {
         let queue = self.runtime.queue();
         let actor = self.actors.make_library_actor(config.clone(), queue);
         self.runtime
             .register_library_actor(config.library.id, Arc::clone(&actor))
             .await?;
-        let roots = config
-            .root_paths
-            .iter()
-            .enumerate()
-            .map(|(idx, path)| (LibraryRootsId(idx as u16), path.clone()))
-            .collect();
-        self.watchers
-            .register_library(config.library.id, roots, actor)
-            .await?;
+        if watch_for_changes {
+            let roots = config
+                .root_paths
+                .iter()
+                .enumerate()
+                .map(|(idx, path)| (LibraryRootsId(idx as u16), path.clone()))
+                .collect();
+            self.watchers
+                .register_library(config.library.id, roots, actor)
+                .await?;
+        } else {
+            debug!(library_id = %config.library.id, "skipping watcher registration (disabled)");
+        }
         Ok(())
     }
 

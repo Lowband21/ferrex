@@ -4,12 +4,13 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use ferrex_core::api_types::ApiResponse;
-use ferrex_core::rbac::UserPermissions;
-use ferrex_core::user::User;
-use uuid::Uuid;
+use ferrex_core::{
+    api_types::ApiResponse, auth::domain::value_objects::SessionScope, rbac::UserPermissions,
+    user::User,
+};
 
 use crate::infra::app_state::AppState;
+use ferrex_core::auth::domain::services::AuthenticationError;
 
 pub async fn auth_middleware(
     State(state): State<AppState>,
@@ -17,9 +18,21 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     let token = extract_bearer_token(&request)?;
-    let (user, device_id) = validate_and_get_user(&state, &token).await?;
 
-    // Load user permissions
+    let session = state
+        .auth_service()
+        .validate_session_token(&token)
+        .await
+        .map_err(map_authentication_error_to_status)?;
+
+    let user = state
+        .unit_of_work
+        .users
+        .get_user_by_id(session.user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
     let permissions = state
         .unit_of_work
         .rbac
@@ -29,7 +42,9 @@ pub async fn auth_middleware(
 
     request.extensions_mut().insert(user);
     request.extensions_mut().insert(permissions);
-    request.extensions_mut().insert(device_id); // Add device_id as Option<Uuid>
+    request.extensions_mut().insert(session.device_session_id);
+    request.extensions_mut().insert(session.scope);
+
     Ok(next.run(request).await)
 }
 
@@ -39,24 +54,27 @@ pub async fn optional_auth_middleware(
     next: Next,
 ) -> Response {
     if let Ok(token) = extract_bearer_token(&request)
-        && let Ok((user, device_id)) = validate_and_get_user(&state, &token).await
+        && let Ok(session) = state.auth_service().validate_session_token(&token).await
     {
-        // Also load permissions when user is authenticated
-        if let Ok(permissions) = state.unit_of_work.rbac.get_user_permissions(user.id).await {
-            request.extensions_mut().insert(permissions);
+        if let Ok(Some(user)) = state
+            .unit_of_work
+            .users
+            .get_user_by_id(session.user_id)
+            .await
+        {
+            if let Ok(permissions) = state.unit_of_work.rbac.get_user_permissions(user.id).await {
+                request.extensions_mut().insert(permissions);
+            }
+            request.extensions_mut().insert(user);
+            request.extensions_mut().insert(session.device_session_id);
+            request.extensions_mut().insert(session.scope);
         }
-        request.extensions_mut().insert(user);
-        request.extensions_mut().insert(device_id); // Add device_id as Option<Uuid>
     }
 
     next.run(request).await
 }
 
-/// Middleware that ensures the user is authenticated and has admin privileges
-/// This middleware must be run AFTER auth_middleware in the layer stack
-/// DEPRECATED: Use require_permission from permission_middleware instead
 pub async fn admin_middleware(request: Request, next: Next) -> Response {
-    // Extract the user from extensions (set by auth_middleware)
     let user = match request.extensions().get::<User>() {
         Some(user) => user,
         None => {
@@ -70,7 +88,6 @@ pub async fn admin_middleware(request: Request, next: Next) -> Response {
         }
     };
 
-    // Extract permissions from extensions (set by auth_middleware)
     let permissions = match request.extensions().get::<UserPermissions>() {
         Some(perms) => perms,
         None => {
@@ -84,7 +101,10 @@ pub async fn admin_middleware(request: Request, next: Next) -> Response {
         }
     };
 
-    // Check if user has admin role or all user management permissions
+    if let Err(response) = ensure_admin_scope(request.extensions().get::<SessionScope>()) {
+        return response;
+    }
+
     if !permissions.has_role("admin")
         && !permissions.has_all_permissions(&[
             "users:read",
@@ -120,73 +140,62 @@ fn extract_bearer_token(request: &Request) -> Result<String, StatusCode> {
     Ok(auth_header[7..].to_string())
 }
 
-async fn validate_and_get_user(
-    state: &AppState,
-    token: &str,
-) -> Result<(User, Option<Uuid>), StatusCode> {
-    validate_session_token(state, token).await
+fn map_authentication_error_to_status(err: AuthenticationError) -> StatusCode {
+    match err {
+        AuthenticationError::InvalidCredentials
+        | AuthenticationError::InvalidPin
+        | AuthenticationError::TooManyFailedAttempts
+        | AuthenticationError::DeviceNotFound
+        | AuthenticationError::DeviceNotTrusted
+        | AuthenticationError::SessionExpired
+        | AuthenticationError::UserNotFound => StatusCode::UNAUTHORIZED,
+        AuthenticationError::DatabaseError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 
-async fn validate_session_token(
-    state: &AppState,
-    token: &str,
-) -> Result<(User, Option<Uuid>), StatusCode> {
-    use chrono::Utc;
-
-    // Hash the token consistently with the authentication service
-    let token_hash = state.auth_crypto.hash_token(token);
-
-    // Access the PostgresDatabase pool directly
-    use ferrex_core::database::postgres::PostgresDatabase;
-    let pool = state.postgres.pool();
-
-    // Query the auth_sessions table including device_session_id
-    let session_row = sqlx::query!(
-        r#"
-        SELECT user_id, device_session_id, expires_at, revoked
-        FROM auth_sessions
-        WHERE session_token_hash = $1
-        "#,
-        token_hash
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Database error validating session token: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    // Check if session is revoked
-    if session_row.revoked {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
-    // Check if session is expired
-    if session_row.expires_at < Utc::now() {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
-    // Get the user
-    let user = state
-        .unit_of_work
-        .users
-        .get_user_by_id(session_row.user_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    // Update last activity (fire-and-forget)
-    let pool_clone = pool.clone();
-    let token_hash_clone = token_hash.clone();
-    tokio::spawn(async move {
-        let _ = sqlx::query!(
-            "UPDATE auth_sessions SET last_activity = NOW() WHERE session_token_hash = $1",
-            token_hash_clone
+fn ensure_admin_scope(scope: Option<&SessionScope>) -> Result<(), Response> {
+    let scope = scope.ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(ApiResponse::<()>::error(
+                "Authentication scope missing".to_string(),
+            )),
         )
-        .execute(&pool_clone)
-        .await;
-    });
+            .into_response()
+    })?;
 
-    Ok((user, session_row.device_session_id))
+    if *scope != SessionScope::Full {
+        return Err((
+            StatusCode::FORBIDDEN,
+            axum::Json(ApiResponse::<()>::error(
+                "Full authentication required for admin actions".to_string(),
+            )),
+        )
+            .into_response());
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_scope_returns_unauthorized() {
+        let response = ensure_admin_scope(None).expect_err("expected unauthorized");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn playback_scope_is_rejected() {
+        let response = ensure_admin_scope(Some(&SessionScope::Playback))
+            .expect_err("playback scope should be rejected");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn full_scope_is_allowed() {
+        ensure_admin_scope(Some(&SessionScope::Full)).expect("full scope should pass");
+    }
 }

@@ -6,6 +6,8 @@ use axum::{
 use serde_json::json;
 use std::fmt;
 
+use ferrex_core::error::MediaError;
+
 pub type AppResult<T> = Result<T, AppError>;
 
 #[derive(Debug)]
@@ -49,6 +51,10 @@ impl AppError {
     pub fn rate_limited(message: impl Into<String>) -> Self {
         Self::new(StatusCode::TOO_MANY_REQUESTS, message)
     }
+
+    pub fn gone(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::GONE, message)
+    }
 }
 
 impl fmt::Display for AppError {
@@ -73,9 +79,8 @@ impl IntoResponse for AppError {
 }
 
 // Convert from various error types
-impl From<ferrex_core::MediaError> for AppError {
-    fn from(err: ferrex_core::MediaError) -> Self {
-        use ferrex_core::MediaError;
+impl From<MediaError> for AppError {
+    fn from(err: MediaError) -> Self {
         match err {
             MediaError::NotFound(msg) => Self::not_found(msg),
             MediaError::Internal(msg) => Self::internal(msg),

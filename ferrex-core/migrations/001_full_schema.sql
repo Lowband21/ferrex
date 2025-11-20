@@ -1726,6 +1726,146 @@ COMMENT ON COLUMN public.auth_refresh_tokens.token_hash IS 'SHA256 hex-encoded h
 
 
 --
+-- Name: auth_security_settings; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.auth_security_settings (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    admin_password_policy jsonb NOT NULL,
+    user_password_policy jsonb NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by uuid,
+    CONSTRAINT auth_security_settings_pkey PRIMARY KEY (id)
+);
+
+
+--
+-- Name: TABLE auth_security_settings; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.auth_security_settings IS 'Authentication policy settings allowing admins to opt into stricter password rules.';
+
+
+--
+-- Name: COLUMN auth_security_settings.admin_password_policy; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.auth_security_settings.admin_password_policy IS 'JSON payload describing password policy for admin accounts (including first-run binding).';
+
+
+--
+-- Name: COLUMN auth_security_settings.user_password_policy; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.auth_security_settings.user_password_policy IS 'JSON payload describing password policy for regular user accounts.';
+
+
+--
+-- Name: COLUMN auth_security_settings.updated_by; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.auth_security_settings.updated_by IS 'Admin user who last changed the security settings (nullable during first run).';
+
+
+--
+-- Name: setup_claims; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.setup_claims (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    code_hash character varying(64) NOT NULL,
+    claim_token_hash character varying(64),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    confirmed_at timestamp with time zone,
+    client_name text,
+    client_ip inet,
+    attempts integer DEFAULT 0 NOT NULL,
+    last_attempt_at timestamp with time zone,
+    revoked_at timestamp with time zone,
+    revoked_reason text,
+    CONSTRAINT setup_claims_pkey PRIMARY KEY (id)
+);
+
+
+--
+-- Name: TABLE setup_claims; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.setup_claims IS 'One-time setup claim codes used to bind first-run setup to a LAN client.';
+
+
+--
+-- Name: COLUMN setup_claims.code_hash; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.setup_claims.code_hash IS 'HMAC-SHA-256 digest of the short claim code presented to the user.';
+
+
+--
+-- Name: COLUMN setup_claims.claim_token_hash; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.setup_claims.claim_token_hash IS 'HMAC-SHA-256 digest of the long-lived claim token returned after confirmation.';
+
+
+--
+-- Name: COLUMN setup_claims.expires_at; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.setup_claims.expires_at IS 'Expiration timestamp; codes become invalid after this moment even if unconfirmed.';
+
+
+--
+-- Name: COLUMN setup_claims.confirmed_at; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.setup_claims.confirmed_at IS 'Timestamp when the claim was successfully confirmed and a claim token issued.';
+
+
+--
+-- Name: COLUMN setup_claims.client_name; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.setup_claims.client_name IS 'Friendly label supplied by the client requesting the claim (e.g., device name).';
+
+
+--
+-- Name: COLUMN setup_claims.client_ip; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.setup_claims.client_ip IS 'IP address of the client that initiated the claim; used for LAN enforcement and auditing.';
+
+
+--
+-- Name: COLUMN setup_claims.attempts; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.setup_claims.attempts IS 'Number of confirmation attempts recorded for this claim.';
+
+
+--
+-- Name: COLUMN setup_claims.last_attempt_at; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.setup_claims.last_attempt_at IS 'Timestamp of the most recent confirmation attempt (successful or not).';
+
+
+--
+-- Name: COLUMN setup_claims.revoked_at; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.setup_claims.revoked_at IS 'Timestamp when an operator explicitly revoked the claim (via CLI).';
+
+
+--
+-- Name: COLUMN setup_claims.revoked_reason; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.setup_claims.revoked_reason IS 'Optional descriptive reason provided when revoking a claim.';
+
+
+--
 -- Name: role_permissions; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -2265,6 +2405,7 @@ CREATE TABLE public.auth_sessions (
     id uuid DEFAULT uuidv7() NOT NULL,
     user_id uuid NOT NULL,
     device_session_id uuid,
+    scope text DEFAULT 'full'::text NOT NULL,
     session_token_hash text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     expires_at timestamp with time zone NOT NULL,
@@ -2276,7 +2417,8 @@ CREATE TABLE public.auth_sessions (
     revoked_reason text,
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     CONSTRAINT auth_sessions_expires_after_created CHECK ((expires_at > created_at)),
-    CONSTRAINT auth_sessions_token_hash_length CHECK ((char_length(session_token_hash) = 64))
+    CONSTRAINT auth_sessions_token_hash_length CHECK ((char_length(session_token_hash) = 64)),
+    CONSTRAINT auth_sessions_scope_valid CHECK ((scope = 'full'::text) OR (scope = 'playback'::text))
 );
 
 
@@ -2292,6 +2434,13 @@ COMMENT ON TABLE public.auth_sessions IS 'Active authentication sessions keyed b
 --
 
 COMMENT ON COLUMN public.auth_sessions.session_token_hash IS 'SHA256 hex-encoded hash of the bearer session token';
+
+
+--
+-- Name: COLUMN auth_sessions.scope; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.auth_sessions.scope IS 'Session scope controlling access level (full or playback)';
 
 
 --
@@ -3411,6 +3560,20 @@ CREATE INDEX idx_auth_sessions_expires_at ON public.auth_sessions USING btree (e
 --
 
 CREATE INDEX idx_auth_sessions_last_activity ON public.auth_sessions USING btree (last_activity DESC);
+
+
+--
+-- Name: idx_setup_claims_active_code; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE UNIQUE INDEX idx_setup_claims_active_code ON public.setup_claims USING btree (code_hash) WHERE ((confirmed_at IS NULL) AND (revoked_at IS NULL));
+
+
+--
+-- Name: idx_setup_claims_expires_at; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_setup_claims_expires_at ON public.setup_claims USING btree (expires_at);
 
 
 --
@@ -4781,6 +4944,13 @@ CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON public.users FOR EACH RO
 
 ALTER TABLE ONLY public.admin_actions
     ADD CONSTRAINT admin_actions_admin_id_fkey FOREIGN KEY (admin_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+--
+-- Name: auth_security_settings auth_security_settings_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.auth_security_settings
+    ADD CONSTRAINT auth_security_settings_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(id) ON DELETE SET NULL;
 
 
 --

@@ -1,11 +1,12 @@
 use async_trait::async_trait;
-use std::path::Path;
+use std::{fmt, path::Path};
 
 use crate::database::ports::folder_inventory::FolderInventoryRepository;
 use crate::database::traits::{
     FolderDiscoverySource, FolderInventory, FolderProcessingStatus, FolderScanFilters, FolderType,
 };
-use crate::{LibraryID, MediaError, Result};
+use crate::error::{MediaError, Result};
+use crate::types::ids::LibraryID;
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, QueryBuilder};
 use tracing::info;
@@ -574,6 +575,66 @@ struct FolderInventoryRow {
     metadata: serde_json::Value,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+}
+
+impl fmt::Debug for FolderInventoryRow {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let file_types: Vec<String> = self
+            .file_types
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|value| value.as_str().map(ToOwned::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let metadata_summary = match &self.metadata {
+            serde_json::Value::Null => "null".to_string(),
+            serde_json::Value::Bool(value) => format!("bool({value})"),
+            serde_json::Value::Number(_) => "number".to_string(),
+            serde_json::Value::String(value) => {
+                format!("string(len={})", value.len())
+            }
+            serde_json::Value::Array(values) => format!("array(len={})", values.len()),
+            serde_json::Value::Object(map) => format!("object(keys={})", map.len()),
+        };
+
+        let processing_error = self.processing_error.as_ref().map(|msg| {
+            const MAX_CHARS: usize = 120;
+            if msg.chars().count() > MAX_CHARS {
+                let mut truncated: String = msg.chars().take(MAX_CHARS).collect();
+                truncated.push('…');
+                truncated
+            } else {
+                msg.clone()
+            }
+        });
+
+        f.debug_struct("FolderInventoryRow")
+            .field("id", &self.id)
+            .field("library_id", &self.library_id)
+            .field("folder_path", &self.folder_path)
+            .field("folder_type", &self.folder_type)
+            .field("parent_folder_id", &self.parent_folder_id)
+            .field("discovered_at", &self.discovered_at)
+            .field("last_seen_at", &self.last_seen_at)
+            .field("discovery_source", &self.discovery_source)
+            .field("processing_status", &self.processing_status)
+            .field("last_processed_at", &self.last_processed_at)
+            .field("processing_error", &processing_error)
+            .field("processing_attempts", &self.processing_attempts)
+            .field("next_retry_at", &self.next_retry_at)
+            .field("total_files", &self.total_files)
+            .field("processed_files", &self.processed_files)
+            .field("total_size_bytes", &self.total_size_bytes)
+            .field("file_types", &file_types)
+            .field("metadata", &metadata_summary)
+            .field("last_modified", &self.last_modified)
+            .field("created_at", &self.created_at)
+            .field("updated_at", &self.updated_at)
+            .finish()
+    }
 }
 
 impl From<FolderInventoryRow> for FolderInventory {

@@ -1,7 +1,10 @@
 // Test token expiry extraction from JWT tokens
 
 use chrono::Utc;
-use ferrex_core::user::AuthToken;
+use ferrex_core::{
+    auth::domain::value_objects::SessionScope,
+    user::AuthToken,
+};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +42,7 @@ async fn test_token_expiry_extraction() {
         session_id: None,
         device_session_id: None,
         user_id: None,
+        scope: SessionScope::Full,
     };
         
         // The AuthManager should extract ~3600 seconds from this token
@@ -61,6 +65,7 @@ async fn test_token_expiry_extraction() {
         session_id: None,
         device_session_id: None,
         user_id: None,
+        scope: SessionScope::Full,
     };
         
         println!("Created token expiring in ~300 seconds");
@@ -81,6 +86,7 @@ async fn test_token_expiry_extraction() {
         session_id: None,
         device_session_id: None,
         user_id: None,
+        scope: SessionScope::Full,
     };
         
         println!("Created token expiring in ~30 seconds");
@@ -101,6 +107,7 @@ async fn test_token_expiry_extraction() {
         session_id: None,
         device_session_id: None,
         user_id: None,
+        scope: SessionScope::Full,
     };
         
         println!("Created already expired token");

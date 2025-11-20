@@ -1,7 +1,8 @@
+use crate::error::Result;
+use crate::sync_session::{Participant, PlaybackState, SyncSession};
+
 use async_trait::async_trait;
 use uuid::Uuid;
-
-use crate::{Participant, PlaybackState, Result, SyncSession};
 
 #[async_trait]
 pub trait SyncSessionsRepository: Send + Sync {

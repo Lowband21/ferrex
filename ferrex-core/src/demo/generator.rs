@@ -1,9 +1,10 @@
-use crate::MediaError;
-use crate::Result;
-use crate::demo::config::{DemoLibraryOptions, DemoSeedOptions};
-use crate::providers::TmdbApiProvider;
-use crate::scanner::{GeneratedNode, StructurePlan, TmdbFolderGenerator};
-use crate::types::library::LibraryType;
+use crate::{
+    demo::config::{DemoLibraryOptions, DemoSeedOptions},
+    error::{MediaError, Result},
+    providers::TmdbApiProvider,
+    scanner::{GeneratedNode, StructurePlan, TmdbFolderGenerator},
+    types::library::LibraryType,
+};
 use rand::Rng;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -166,6 +167,50 @@ pub fn apply_plan(plan: &DemoSeedPlan) -> Result<()> {
     Ok(())
 }
 
+/// Remove library roots that are no longer part of the plan and ensure
+/// upcoming roots are clean before materialisation. This keeps the demo tree
+/// deterministic between resets and avoids leftover structures skewing scans.
+pub fn prepare_plan_roots(previous: Option<&DemoSeedPlan>, next: &DemoSeedPlan) -> Result<()> {
+    let mut next_roots: HashSet<PathBuf> = HashSet::new();
+    for library in &next.libraries {
+        next_roots.insert(library.root_path.clone());
+    }
+
+    if let Some(prev) = previous {
+        for library in &prev.libraries {
+            if next_roots.contains(&library.root_path) {
+                continue;
+            }
+
+            if library.root_path.exists() {
+                std::fs::remove_dir_all(&library.root_path).map_err(|err| {
+                    MediaError::Io(std::io::Error::new(
+                        err.kind(),
+                        format!(
+                            "failed to remove stale demo root {}: {}",
+                            library.root_path.display(),
+                            err
+                        ),
+                    ))
+                })?;
+            }
+        }
+    }
+
+    for root in next_roots {
+        if root.exists() {
+            std::fs::remove_dir_all(&root).map_err(|err| {
+                MediaError::Io(std::io::Error::new(
+                    err.kind(),
+                    format!("failed to reset demo root {}: {}", root.display(), err),
+                ))
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
 fn slug_name(value: &str) -> String {
     let mut out = value
         .chars()
@@ -315,5 +360,60 @@ fn extract_number(name: &str) -> Option<u32> {
         None
     } else {
         digits.parse().ok()
+    }
+}
+
+#[cfg(all(test, feature = "demo"))]
+mod tests {
+    use super::*;
+    use std::{fs, io::Write};
+    use tempfile::tempdir;
+
+    #[test]
+    fn prepare_plan_roots_removes_obsolete_directories() {
+        let tempdir = tempdir().expect("tempdir");
+        let root = tempdir.path().to_path_buf();
+
+        let old_library_root = root.join("lib-old");
+        let old_file = old_library_root.join("movie.mkv");
+        fs::create_dir_all(&old_library_root).expect("create old root");
+        fs::File::create(&old_file)
+            .and_then(|mut file| file.write_all(b"old"))
+            .expect("seed old file");
+
+        let previous = DemoSeedPlan {
+            root: root.clone(),
+            libraries: vec![DemoLibraryPlan {
+                name: "Old".into(),
+                library_type: LibraryType::Movies,
+                root_path: old_library_root.clone(),
+                directories: vec![old_library_root.clone()],
+                files: vec![old_file.clone()],
+            }],
+        };
+
+        let new_library_root = root.join("lib-new");
+        let new_file = new_library_root.join("feature.mkv");
+        let next = DemoSeedPlan {
+            root: root.clone(),
+            libraries: vec![DemoLibraryPlan {
+                name: "New".into(),
+                library_type: LibraryType::Movies,
+                root_path: new_library_root.clone(),
+                directories: vec![new_library_root.clone()],
+                files: vec![new_file.clone()],
+            }],
+        };
+
+        prepare_plan_roots(Some(&previous), &next).expect("prepare roots");
+
+        assert!(
+            !old_library_root.exists(),
+            "stale demo library directory should be removed"
+        );
+
+        apply_plan(&next).expect("apply new plan");
+        assert!(new_library_root.exists());
+        assert!(new_file.exists());
     }
 }

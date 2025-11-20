@@ -12,9 +12,9 @@ use self::types::LibraryFormData;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use crate::infrastructure::repository::accessor::{Accessor, ReadWrite};
-use ferrex_core::LibraryID;
-use ferrex_core::api_scan::{ScanConfig, ScanMetrics};
-use ferrex_core::api_types::{LibraryMediaCache, ScanProgressEvent, ScanSnapshotDto};
+use ferrex_core::player_prelude::{
+    LibraryID, LibraryMediaCache, ScanConfig, ScanMetrics, ScanProgressEvent, ScanSnapshotDto,
+};
 use iced::Task;
 use std::collections::HashMap;
 use std::sync::Arc;

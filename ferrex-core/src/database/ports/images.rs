@@ -1,12 +1,10 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::MediaImageKind;
+use crate::database::traits::{ImageLookupParams, ImageRecord, ImageVariant, MediaImage};
+use crate::error::Result;
+use crate::image::MediaImageKind;
 use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
-use crate::{
-    Result,
-    database::traits::{ImageLookupParams, ImageRecord, ImageVariant, MediaImage},
-};
 
 /// Repository port for image persistence and media-image associations.
 ///

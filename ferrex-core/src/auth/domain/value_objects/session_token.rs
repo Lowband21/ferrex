@@ -1,6 +1,7 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
 use constant_time_eq::constant_time_eq;
+use rand::{TryRngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;
@@ -40,12 +41,10 @@ pub struct SessionToken {
 impl SessionToken {
     /// Generate a new session token with the specified lifetime
     pub fn generate(lifetime: Duration) -> Result<Self, SessionTokenError> {
-        use ring::rand::{SecureRandom, SystemRandom};
-
-        let rng = SystemRandom::new();
+        let mut rng = OsRng;
         let mut token_bytes = [0u8; 32]; // 256 bits
 
-        rng.fill(&mut token_bytes)
+        rng.try_fill_bytes(&mut token_bytes)
             .map_err(|_| SessionTokenError::GenerationFailed)?;
 
         let value = URL_SAFE_NO_PAD.encode(token_bytes);

@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use ferrex_core::database::ports::media_files::MediaFilesReadPort;
 use ffmpeg_next as ffmpeg;
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::{env, fmt};
 use tokio::fs;
 use uuid::Uuid;
 
@@ -23,8 +23,14 @@ impl fmt::Debug for ThumbnailService {
 
 impl ThumbnailService {
     pub fn new(cache_dir: PathBuf, media_files: Arc<dyn MediaFilesReadPort>) -> Result<Self> {
-        // Initialize ffmpeg
-        ffmpeg::init().context("Failed to initialize ffmpeg")?;
+        // Initialize ffmpeg unless explicitly disabled (useful for tests)
+        let ffmpeg_disabled = env::var("FERREX_DISABLE_FFMPEG")
+            .map(|value| value == "1")
+            .unwrap_or(false);
+
+        if !ffmpeg_disabled {
+            ffmpeg::init().context("Failed to initialize ffmpeg")?;
+        }
 
         Ok(Self {
             cache_dir,

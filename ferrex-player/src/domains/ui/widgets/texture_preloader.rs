@@ -5,9 +5,10 @@ use iced::{Rectangle, mouse};
 use iced_wgpu::primitive::{
     BatchEncodeContext, BatchPrimitive, PrepareContext, PrimitiveBatchState, RenderContext,
 };
-use iced_wgpu::{ImageCache, wgpu};
+use iced_wgpu::wgpu;
 
 use crate::domains::ui::messages::Message;
+use ferrex_core::player_prelude::{ImageRequest, ImageSize, ImageType, Priority};
 
 /// A minimal shader program that preloads a set of image handles into the Iced atlas.
 /// It does not render anything; it only triggers atlas uploads during the prepare pass.
@@ -183,11 +184,10 @@ pub fn texture_preloader(handles: Vec<Handle>, max_per_frame: usize) -> Element<
 /// This does not trigger network requests; it only returns handles that are already available.
 pub fn collect_cached_handles_for_media(
     ids: impl IntoIterator<Item = uuid::Uuid>,
-    image_type: ferrex_core::ImageType,
-    size: ferrex_core::ImageSize,
+    image_type: ImageType,
+    size: ImageSize,
 ) -> Vec<Handle> {
     use crate::infrastructure::service_registry;
-    use ferrex_core::{ImageRequest, Priority};
 
     let image_service = service_registry::get_image_service();
     if image_service.is_none() {

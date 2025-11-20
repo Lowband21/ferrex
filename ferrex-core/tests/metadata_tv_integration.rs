@@ -1,5 +1,7 @@
-use ferrex_core::metadata::FilenameParser;
-use ferrex_core::{LibraryType, ParsedMediaInfo};
+use ferrex_core::{
+    metadata::FilenameParser,
+    types::{LibraryType, ParsedMediaInfo},
+};
 use std::path::PathBuf;
 
 #[test]

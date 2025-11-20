@@ -1,14 +1,16 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use std::{fmt, sync::Arc};
 use uuid::Uuid;
 
 use crate::auth::AuthCrypto;
 use crate::auth::domain::aggregates::{DeviceSession, DeviceStatus};
-use crate::auth::domain::repositories::DeviceSessionRepository;
-use crate::auth::domain::value_objects::{DeviceFingerprint, PinCode, SessionToken};
+use crate::auth::domain::repositories::{DevicePinStatus, DeviceSessionRepository};
+use crate::auth::domain::value_objects::{
+    DeviceFingerprint, PinCode, RevocationReason, SessionScope, SessionToken,
+};
 
 #[derive(sqlx::FromRow, Debug)]
 struct DeviceSessionRecord {
@@ -256,16 +258,18 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
         let mut persisted_session_id = None;
 
         if matches!(session.status(), DeviceStatus::Revoked) {
+            let reason = RevocationReason::DeviceRevoked.as_str();
             sqlx::query!(
                 r#"
                 UPDATE auth_sessions
                 SET revoked = TRUE,
                     revoked_at = NOW(),
-                    revoked_reason = COALESCE(revoked_reason, 'device_revoked')
+                    revoked_reason = COALESCE(revoked_reason, $2)
                 WHERE device_session_id = $1
                   AND revoked = FALSE
                 "#,
-                session.id()
+                session.id(),
+                reason
             )
             .execute(&self.pool)
             .await?;
@@ -281,11 +285,12 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 UPDATE auth_sessions
                 SET revoked = TRUE,
                     revoked_at = NOW(),
-                    revoked_reason = COALESCE(revoked_reason, 'replaced_by_new_token')
+                    revoked_reason = COALESCE(revoked_reason, $2)
                 WHERE device_session_id = $1
                   AND revoked = FALSE
                 "#,
-                session.id()
+                session.id(),
+                RevocationReason::SessionReplaced.as_str()
             )
             .execute(&self.pool)
             .await?;
@@ -295,16 +300,18 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 INSERT INTO auth_sessions (
                     user_id,
                     device_session_id,
+                    scope,
                     session_token_hash,
                     created_at,
                     expires_at,
                     last_activity,
                     metadata
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, '{}'::jsonb)
                 ON CONFLICT (session_token_hash) DO UPDATE
                 SET expires_at = EXCLUDED.expires_at,
                     last_activity = EXCLUDED.last_activity,
+                    scope = EXCLUDED.scope,
                     revoked = FALSE,
                     revoked_at = NULL,
                     revoked_reason = NULL,
@@ -313,6 +320,7 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 "#,
                 session.user_id(),
                 session.id(),
+                SessionScope::Playback.as_str(),
                 token_hash,
                 token.created_at(),
                 token.expires_at(),
@@ -325,6 +333,50 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
         }
 
         Ok(persisted_session_id)
+    }
+
+    async fn exists_by_fingerprint(&self, fingerprint: &DeviceFingerprint) -> Result<bool> {
+        let exists = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM auth_device_sessions
+                WHERE device_fingerprint = $1
+            )
+            "#,
+        )
+        .bind(fingerprint.as_str())
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(exists)
+    }
+
+    async fn pin_status_by_fingerprint(
+        &self,
+        fingerprint: &DeviceFingerprint,
+    ) -> Result<Vec<DevicePinStatus>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                user_id,
+                (pin_hash IS NOT NULL) AS has_pin
+            FROM auth_device_sessions
+            WHERE device_fingerprint = $1
+            "#,
+        )
+        .bind(fingerprint.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut statuses = Vec::with_capacity(rows.len());
+        for row in rows {
+            let user_id: Uuid = row.try_get("user_id")?;
+            let has_pin: bool = row.try_get("has_pin")?;
+            statuses.push(DevicePinStatus { user_id, has_pin });
+        }
+
+        Ok(statuses)
     }
 }
 

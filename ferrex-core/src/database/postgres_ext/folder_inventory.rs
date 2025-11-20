@@ -1,9 +1,10 @@
 use std::path::Path;
 
 use crate::database::PostgresDatabase;
+use crate::database::ports::folder_inventory::FolderInventoryRepository;
 use crate::database::traits::{FolderInventory, FolderProcessingStatus, FolderScanFilters};
-use crate::ports::folder_inventory::FolderInventoryRepository;
-use crate::{LibraryID, Result};
+use crate::error::Result;
+use crate::types::ids::LibraryID;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 

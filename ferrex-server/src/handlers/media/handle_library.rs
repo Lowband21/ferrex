@@ -4,33 +4,32 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
-use ferrex_core::LibraryActorConfig;
-use ferrex_core::LibraryType;
-use ferrex_core::Media;
-use ferrex_core::MediaDetailsOption;
+use ferrex_core::error::MediaError;
 use ferrex_core::query::{
     filtering::hash_filter_spec,
     types::{SortBy, SortOrder},
 };
+use ferrex_core::types::{
+    Library, LibraryID, LibraryReference, Media, MediaDetailsOption, MediaID,
+};
 use ferrex_core::user::User;
 use ferrex_core::{
-    ApiResponse, CreateLibraryRequest, FetchMediaRequest, Library, LibraryID, LibraryMediaResponse,
-    LibraryReference, MediaID, UpdateLibraryRequest,
+    api_types::{
+        ApiResponse, CreateLibraryRequest, FetchMediaRequest, FilterIndicesRequest,
+        IndicesResponse, LibraryMediaResponse, UpdateLibraryRequest,
+    },
+    orchestration::LibraryActorConfig,
+    types::LibraryType,
 };
-use ferrex_core::{FilterIndicesRequest, IndicesResponse};
 use rkyv::rancor::Error as RkyvError;
 use serde::Deserialize;
-use sqlx::Row;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::{
-    infra::app_state::AppState,
-    media::index_filters::{FilterQueryError, build_filtered_movie_query},
-};
+use crate::infra::app_state::AppState;
 
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
@@ -229,74 +228,29 @@ pub async fn get_library_sorted_indices_handler(
         return Err(StatusCode::NOT_IMPLEMENTED);
     }
 
-    // Build SQL that uses precomputed positions from movie_sort_positions
-    let pool = state.postgres.pool();
-
-    let (order_col, order_direction) = match (sort_field, sort_order) {
-        (SortBy::Title, SortOrder::Ascending) => ("msp.title_pos", "ASC"),
-        (SortBy::Title, SortOrder::Descending) => ("msp.title_pos_desc", "ASC"),
-        (SortBy::DateAdded, SortOrder::Ascending) => ("msp.date_added_pos", "ASC"),
-        (SortBy::DateAdded, SortOrder::Descending) => ("msp.date_added_pos_desc", "ASC"),
-        (SortBy::CreatedAt, SortOrder::Ascending) => ("msp.created_at_pos", "ASC"),
-        (SortBy::CreatedAt, SortOrder::Descending) => ("msp.created_at_pos_desc", "ASC"),
-        (SortBy::ReleaseDate, SortOrder::Ascending) => ("msp.release_date_pos", "ASC"),
-        (SortBy::ReleaseDate, SortOrder::Descending) => ("msp.release_date_pos_desc", "ASC"),
-        (SortBy::Rating, SortOrder::Ascending) => ("msp.rating_pos", "ASC"),
-        (SortBy::Rating, SortOrder::Descending) => ("msp.rating_pos_desc", "ASC"),
-        (SortBy::Runtime, SortOrder::Ascending) => ("msp.runtime_pos", "ASC"),
-        (SortBy::Runtime, SortOrder::Descending) => ("msp.runtime_pos_desc", "ASC"),
-        (SortBy::Popularity, SortOrder::Ascending) => ("msp.popularity_pos", "ASC"),
-        (SortBy::Popularity, SortOrder::Descending) => ("msp.popularity_pos_desc", "ASC"),
-        (SortBy::Bitrate, SortOrder::Ascending) => ("msp.bitrate_pos", "ASC"),
-        (SortBy::Bitrate, SortOrder::Descending) => ("msp.bitrate_pos_desc", "ASC"),
-        (SortBy::FileSize, SortOrder::Ascending) => ("msp.file_size_pos", "ASC"),
-        (SortBy::FileSize, SortOrder::Descending) => ("msp.file_size_pos_desc", "ASC"),
-        (SortBy::ContentRating, SortOrder::Ascending) => ("msp.content_rating_pos", "ASC"),
-        (SortBy::ContentRating, SortOrder::Descending) => ("msp.content_rating_pos_desc", "ASC"),
-        (SortBy::Resolution, SortOrder::Ascending) => ("msp.resolution_pos", "ASC"),
-        (SortBy::Resolution, SortOrder::Descending) => ("msp.resolution_pos_desc", "ASC"),
-        // Fallback to title
-        _ => ("msp.title_pos", "ASC"),
-    };
-
-    let mut qb = sqlx::QueryBuilder::new(
-        "SELECT (msp.title_pos - 1)::INT4 AS idx FROM movie_sort_positions msp WHERE msp.library_id = ",
-    );
-    qb.push_bind(library_ref.id.as_uuid());
-    qb.push(" ORDER BY ");
-    qb.push(order_col);
-    qb.push(" ");
-    qb.push(order_direction);
-
-    if let Some(offset) = params.offset {
-        qb.push(" OFFSET ");
-        qb.push_bind(offset as i64);
-    }
-    if let Some(limit) = params.limit {
-        qb.push(" LIMIT ");
-        qb.push_bind(limit as i64);
-    }
-
-    let rows = match qb.build().fetch_all(pool).await {
-        Ok(rows) => rows,
-        Err(e) => {
+    let indices = match state
+        .unit_of_work
+        .indices
+        .fetch_sorted_movie_indices(
+            library_ref.id,
+            sort_field,
+            sort_order,
+            params.offset,
+            params.limit,
+        )
+        .await
+    {
+        Ok(indices) => indices,
+        Err(err) => {
             error!(
-                "Failed to query precomputed positions for library {}: {}",
-                library_id, e
+                "Failed to fetch precomputed positions for library {}: {}",
+                library_id, err
             );
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
 
-    let mut positions = Vec::with_capacity(rows.len());
-    for row in rows {
-        let idx: i32 = row.get("idx");
-        if idx >= 0 {
-            positions.push(idx as u32);
-        }
-    }
-
-    respond_with_indices(positions)
+    respond_with_indices(indices)
 }
 
 /// Filter indices (movies Phase 1)
@@ -326,8 +280,6 @@ pub async fn post_library_filtered_indices_handler(
         return Err(StatusCode::NOT_IMPLEMENTED);
     }
 
-    let pool = state.postgres.pool();
-
     let library_uuid = library_ref.id.as_uuid();
     let user_scope = requires_user_scope(&spec).then_some(user.id);
     // Check short-lived in-process cache first
@@ -340,35 +292,28 @@ pub async fn post_library_filtered_indices_handler(
         return respond_with_indices(indices);
     }
 
-    let mut qb = match build_filtered_movie_query(library_ref.id.as_uuid(), &spec, Some(user.id)) {
-        Ok(builder) => builder,
-        Err(err) => {
-            warn!("Rejected filtered indices request: {}", err);
-            return Err(match err {
-                FilterQueryError::MissingUserContext(_) => StatusCode::BAD_REQUEST,
-                FilterQueryError::UnsupportedMediaType(_) => StatusCode::NOT_IMPLEMENTED,
-                FilterQueryError::InvalidNumeric(_) => StatusCode::BAD_REQUEST,
-            });
+    let indices = match state
+        .unit_of_work
+        .indices
+        .fetch_filtered_movie_indices(library_ref.id, &spec, Some(user.id))
+        .await
+    {
+        Ok(indices) => indices,
+        Err(MediaError::InvalidMedia(msg)) => {
+            warn!("Rejected filtered indices request: {}", msg);
+            if msg.contains("unsupported media type") {
+                return Err(StatusCode::NOT_IMPLEMENTED);
+            }
+            return Err(StatusCode::BAD_REQUEST);
         }
-    };
-    let rows = match qb.build().fetch_all(pool).await {
-        Ok(rows) => rows,
-        Err(e) => {
-            error!("Failed to execute filtered indices query: {}", e);
+        Err(err) => {
+            error!("Failed to execute filtered indices query: {}", err);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
 
-    let mut positions = Vec::with_capacity(rows.len());
-    for row in rows {
-        let idx: i32 = row.get("idx");
-        if idx >= 0 {
-            positions.push(idx as u32);
-        }
-    }
-
-    insert_cached_indices(cache_key, positions.clone());
-    respond_with_indices(positions)
+    insert_cached_indices(cache_key, indices.clone());
+    respond_with_indices(indices)
 }
 
 fn get_cached_indices(key: &FilterCacheKey) -> Option<Vec<u32>> {
@@ -666,7 +611,10 @@ pub async fn create_library_handler(
                 max_outstanding_jobs: 8,
             };
 
-            if let Err(err) = orchestrator.register_library(actor_config).await {
+            if let Err(err) = orchestrator
+                .register_library(actor_config, library.watch_for_changes)
+                .await
+            {
                 error!(
                     "Failed to register library {} with orchestrator: {}",
                     library.id, err

@@ -1,208 +1,105 @@
-//! Device trust validation endpoints
-//!
-//! Provides server-side validation of device trust status,
-//! allowing clients to verify their device registration and
-//! trust expiration without relying on local storage.
+//! Device trust validation endpoints backed by the auth domain services.
 
 use axum::{
     Extension, Json,
     extract::{Query, State},
 };
-use chrono::Utc;
-use ferrex_core::{api_types::ApiResponse, user::User};
+use chrono::{DateTime, Utc};
+use ferrex_core::{
+    api_types::ApiResponse,
+    auth::{
+        AuthError,
+        domain::{
+            aggregates::{DeviceSession, DeviceStatus},
+            services::{AuthenticationError, DeviceTrustError, PinManagementError},
+        },
+    },
+    user::User,
+};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::infra::{
-    app_state::AppState,
-    errors::{AppError, AppResult},
+use crate::{
+    application::auth::AuthFacadeError,
+    infra::{
+        app_state::AppState,
+        errors::{AppError, AppResult},
+    },
 };
 
-/// Device trust validation query parameters
 #[derive(Debug, Deserialize)]
 pub struct DeviceTrustQuery {
-    /// Optional device ID to validate (defaults to current device)
     pub device_id: Option<Uuid>,
-    /// Optional device fingerprint for additional validation
     pub fingerprint: Option<String>,
 }
 
-/// Helper function to get the database pool
-fn get_pool(state: &AppState) -> Result<&sqlx::PgPool, AppError> {
-    Ok(state.postgres.pool())
-}
-
-/// Device trust validation response
 #[derive(Debug, Serialize)]
 pub struct DeviceTrustStatus {
-    /// Whether the device is currently trusted
     pub is_trusted: bool,
-    /// When the device trust expires (if trusted)
-    pub trusted_until: Option<chrono::DateTime<chrono::Utc>>,
-    /// Device name (if registered)
+    pub trusted_until: Option<DateTime<Utc>>,
     pub device_name: Option<String>,
-    /// Device registration date
-    pub registered_at: Option<chrono::DateTime<chrono::Utc>>,
-    /// Reason if not trusted
+    pub registered_at: Option<DateTime<Utc>>,
     pub reason: Option<String>,
 }
 
-/// Validate device trust status
-///
-/// This endpoint allows clients to verify their device trust status
-/// against server records, ensuring consistency between client and
-/// server state.
+#[derive(Debug, Serialize)]
+pub struct TrustedDevice {
+    pub device_id: Uuid,
+    pub device_name: String,
+    pub platform: String,
+    pub trusted_until: Option<DateTime<Utc>>,
+    pub last_seen: DateTime<Utc>,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RevokeDeviceRequest {
+    pub device_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExtendTrustRequest {
+    pub device_id: Option<Uuid>,
+    pub days: Option<i64>,
+}
+
 pub async fn validate_device_trust(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Extension(device_id_ext): Extension<Option<Uuid>>,
     Query(params): Query<DeviceTrustQuery>,
 ) -> AppResult<Json<ApiResponse<DeviceTrustStatus>>> {
-    let user_id = user.id;
-
-    // Determine which device to check
     let device_id = params
         .device_id
         .or(device_id_ext)
         .ok_or_else(|| AppError::bad_request("Device ID required".to_string()))?;
 
-    info!(
-        "Validating device trust for user {} device {}",
-        user_id, device_id
-    );
-
-    // Query device trust from database
-    let device_record = sqlx::query!(
-        r#"
-        SELECT 
-            ads.id,
-            ads.device_name,
-            ads.device_fingerprint as fingerprint,
-            ads.created_at,
-            ads.trusted_until,
-            ads.last_activity as last_seen,
-            ads.status
-        FROM auth_device_sessions ads
-        WHERE ads.id = $1 
-            AND ads.user_id = $2
-        LIMIT 1
-        "#,
-        device_id,
-        user_id
-    )
-    .fetch_optional(get_pool(&state)?)
-    .await
-    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
-
-    let status = match device_record {
-        Some(record) => {
-            let device_status = record.status.as_deref().unwrap_or("pending");
-
-            if device_status == "revoked" {
-                DeviceTrustStatus {
-                    is_trusted: false,
-                    trusted_until: None,
-                    device_name: Some(record.device_name),
-                    registered_at: Some(record.created_at),
-                    reason: Some("Device has been revoked".to_string()),
-                }
-            } else if device_status != "trusted" {
-                DeviceTrustStatus {
-                    is_trusted: false,
-                    trusted_until: None,
-                    device_name: Some(record.device_name),
-                    registered_at: Some(record.created_at),
-                    reason: Some("Device is not trusted".to_string()),
-                }
-            }
-            // Check if device trust has expired
-            else if let Some(trusted_until) = record.trusted_until {
-                let now = Utc::now();
-                if trusted_until > now {
-                    // Optionally validate fingerprint if provided
-                    if let Some(ref client_fingerprint) = params.fingerprint {
-                        let stored_fingerprint = &record.fingerprint;
-                        if client_fingerprint != stored_fingerprint {
-                            warn!(
-                                "Device fingerprint mismatch for device {}: client={}, stored={}",
-                                device_id, client_fingerprint, stored_fingerprint
-                            );
-                            return Ok(Json(ApiResponse::success(DeviceTrustStatus {
-                                is_trusted: false,
-                                trusted_until: None,
-                                device_name: Some(record.device_name),
-                                registered_at: Some(record.created_at),
-                                reason: Some("Device fingerprint mismatch".to_string()),
-                            })));
-                        }
-                    }
-
-                    // Update last seen timestamp
-                    let _ = sqlx::query!(
-                        "UPDATE auth_device_sessions SET last_activity = $1 WHERE id = $2 AND user_id = $3",
-                        Utc::now(),
-                        device_id,
-                        user_id
-                    )
-                    .execute(get_pool(&state)?)
-                    .await
-                    .map_err(|e| AppError::internal(format!("Database error: {}", e)));
-
-                    DeviceTrustStatus {
-                        is_trusted: true,
-                        trusted_until: Some(trusted_until),
-                        device_name: Some(record.device_name),
-                        registered_at: Some(record.created_at),
-                        reason: None,
-                    }
-                } else {
-                    DeviceTrustStatus {
-                        is_trusted: false,
-                        trusted_until: Some(trusted_until),
-                        device_name: Some(record.device_name),
-                        registered_at: Some(record.created_at),
-                        reason: Some("Device trust has expired".to_string()),
-                    }
-                }
-            } else {
-                // Device exists but has no active trust session
-                DeviceTrustStatus {
-                    is_trusted: true,
-                    trusted_until: None,
-                    device_name: Some(record.device_name),
-                    registered_at: Some(record.created_at),
-                    reason: None,
-                }
-            }
+    let facade = state.auth_facade.clone();
+    let status = match facade.get_device_by_id(device_id).await {
+        Ok(session) if session.user_id() == user.id => {
+            validate_session(session, params.fingerprint.as_deref())?
         }
-        None => {
-            // Device not found or doesn't belong to user
-            DeviceTrustStatus {
-                is_trusted: false,
-                trusted_until: None,
-                device_name: None,
-                registered_at: None,
-                reason: Some("Device not registered".to_string()),
-            }
-        }
+        Ok(_) => DeviceTrustStatus {
+            is_trusted: false,
+            trusted_until: None,
+            device_name: None,
+            registered_at: None,
+            reason: Some("Device not registered for this user".to_string()),
+        },
+        Err(AuthFacadeError::DeviceTrust(DeviceTrustError::DeviceNotFound))
+        | Err(AuthFacadeError::UserNotFound) => DeviceTrustStatus {
+            is_trusted: false,
+            trusted_until: None,
+            device_name: None,
+            registered_at: None,
+            reason: Some("Device not registered".to_string()),
+        },
+        Err(err) => return Err(map_facade_error(err)),
     };
 
-    info!(
-        "Device trust validation result for device {}: trusted={}",
-        device_id, status.is_trusted
-    );
-
+    info!(user_id = %user.id, device_id = %device_id, trusted = status.is_trusted);
     Ok(Json(ApiResponse::success(status)))
-}
-
-/// Revoke device trust
-///
-/// Allows users to revoke trust for a specific device,
-/// forcing re-authentication on that device.
-#[derive(Debug, Deserialize)]
-pub struct RevokeDeviceRequest {
-    pub device_id: Uuid,
 }
 
 pub async fn revoke_device_trust(
@@ -210,119 +107,54 @@ pub async fn revoke_device_trust(
     Extension(user): Extension<User>,
     Json(request): Json<RevokeDeviceRequest>,
 ) -> AppResult<Json<ApiResponse<()>>> {
-    let user_id = user.id;
+    let facade = state.auth_facade.clone();
+    let session = facade
+        .get_device_by_id(request.device_id)
+        .await
+        .map_err(map_facade_error)?;
 
-    info!(
-        "Revoking device trust for user {} device {}",
-        user_id, request.device_id
-    );
-
-    // Verify device belongs to user
-    let device_exists = sqlx::query!(
-        "SELECT id FROM auth_device_sessions WHERE id = $1 AND user_id = $2",
-        request.device_id,
-        user_id
-    )
-    .fetch_optional(get_pool(&state)?)
-    .await
-    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?
-    .is_some();
-
-    if !device_exists {
-        return Err(AppError::not_found("Device not found".to_string()));
+    if session.user_id() != user.id {
+        return Err(AppError::forbidden(
+            "Device not registered for this user".to_string(),
+        ));
     }
 
-    // Revoke all sessions for this device
-    sqlx::query!(
-        "UPDATE auth_device_sessions SET status = 'revoked', revoked_at = NOW() WHERE id = $1 AND user_id = $2",
-        request.device_id,
-        user_id
-    )
-    .execute(get_pool(&state)?)
-    .await
-    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
-
-    // Optionally, also invalidate all active sessions for this device
-    sqlx::query!(
-        "UPDATE sessions SET expires_at = $1 WHERE device_id = $2 AND user_id = $3",
-        Utc::now(),
-        request.device_id,
-        user_id
-    )
-    .execute(get_pool(&state)?)
-    .await
-    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
-
-    info!(
-        "Successfully revoked device trust for device {}",
-        request.device_id
-    );
+    facade
+        .revoke_device(
+            user.id,
+            session.device_fingerprint(),
+            Some("user_initiated".to_string()),
+            None,
+        )
+        .await
+        .map_err(map_facade_error)?;
 
     Ok(Json(ApiResponse::success(())))
-}
-
-/// List trusted devices for the current user
-#[derive(Debug, Serialize)]
-pub struct TrustedDevice {
-    pub device_id: Uuid,
-    pub device_name: String,
-    pub platform: String,
-    pub trusted_until: chrono::DateTime<chrono::Utc>,
-    pub last_seen: chrono::DateTime<chrono::Utc>,
-    pub is_current: bool,
 }
 
 pub async fn list_trusted_devices(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Extension(device_id_ext): Extension<Option<Uuid>>,
+    Extension(current_device): Extension<Option<Uuid>>,
 ) -> AppResult<Json<ApiResponse<Vec<TrustedDevice>>>> {
-    let user_id = user.id;
-    let current_device = device_id_ext.unwrap_or_default();
-
-    info!("Listing trusted devices for user {}", user_id);
-
-    let devices = sqlx::query!(
-        r#"
-        SELECT 
-            ads.id as device_id,
-            ads.device_name,
-            NULL::text as platform,
-            ads.trusted_until,
-            ads.last_activity as last_seen
-        FROM auth_device_sessions ads
-        WHERE ads.user_id = $1 
-            AND ads.trusted_until > $2
-            AND ads.status = 'trusted'
-        ORDER BY ads.last_activity DESC
-        "#,
-        user_id,
-        Utc::now()
-    )
-    .fetch_all(get_pool(&state)?)
-    .await
-    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?
-    .into_iter()
-    .map(|row| TrustedDevice {
-        device_id: row.device_id,
-        device_name: row.device_name,
-        platform: row.platform.unwrap_or_else(|| "unknown".to_string()),
-        trusted_until: row.trusted_until.unwrap_or_else(Utc::now),
-        last_seen: row.last_seen,
-        is_current: row.device_id == current_device,
-    })
-    .collect();
+    let facade = state.auth_facade.clone();
+    let devices = facade
+        .list_user_devices(user.id)
+        .await
+        .map_err(map_facade_error)?
+        .into_iter()
+        .filter(|session| matches!(session.status(), DeviceStatus::Trusted))
+        .map(|session| TrustedDevice {
+            device_id: session.id(),
+            device_name: session.device_name().to_string(),
+            platform: "unknown".to_string(),
+            trusted_until: None,
+            last_seen: session.last_activity(),
+            is_current: current_device.map_or(false, |id| id == session.id()),
+        })
+        .collect();
 
     Ok(Json(ApiResponse::success(devices)))
-}
-
-/// Extend device trust period
-///
-/// Allows extending the trust period for a device that's about to expire
-#[derive(Debug, Deserialize)]
-pub struct ExtendTrustRequest {
-    pub device_id: Option<Uuid>,
-    pub days: Option<i64>,
 }
 
 pub async fn extend_device_trust(
@@ -331,72 +163,144 @@ pub async fn extend_device_trust(
     Extension(device_id_ext): Extension<Option<Uuid>>,
     Json(request): Json<ExtendTrustRequest>,
 ) -> AppResult<Json<ApiResponse<DeviceTrustStatus>>> {
-    let user_id = user.id;
     let device_id = request
         .device_id
         .or(device_id_ext)
         .ok_or_else(|| AppError::bad_request("Device ID required".to_string()))?;
-    let extension_days = request.days.unwrap_or(30).min(90); // Max 90 days
 
-    info!(
-        "Extending device trust for user {} device {} by {} days",
-        user_id, device_id, extension_days
-    );
+    let facade = state.auth_facade.clone();
+    let session = facade
+        .get_device_by_id(device_id)
+        .await
+        .map_err(map_facade_error)?;
 
-    // Verify device belongs to user and has active trust
-    let current_trust = sqlx::query!(
-        r#"
-        SELECT 
-            ads.trusted_until,
-            ads.device_name,
-            ads.created_at
-        FROM auth_device_sessions ads
-        WHERE ads.id = $1 
-            AND ads.user_id = $2
-            AND ads.status = 'trusted'
-        ORDER BY ads.created_at DESC
-        LIMIT 1
-        "#,
-        device_id,
-        user_id
-    )
-    .fetch_optional(get_pool(&state)?)
-    .await
-    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
+    if session.user_id() != user.id {
+        return Err(AppError::forbidden(
+            "Device not registered for this user".to_string(),
+        ));
+    }
 
-    match current_trust {
-        Some(record) if record.trusted_until.is_some_and(|t| t > Utc::now()) => {
-            // Extend from current expiry or from now if less than 7 days remaining
-            let current_expiry = record.trusted_until.unwrap();
-            let days_remaining = (current_expiry - Utc::now()).num_days();
+    let status = DeviceTrustStatus {
+        is_trusted: matches!(session.status(), DeviceStatus::Trusted),
+        trusted_until: None,
+        device_name: Some(session.device_name().to_string()),
+        registered_at: Some(session.created_at()),
+        reason: Some("Device trust does not expire".to_string()),
+    };
 
-            let new_expiry = if days_remaining < 7 {
-                Utc::now() + chrono::Duration::days(extension_days)
-            } else {
-                current_expiry + chrono::Duration::days(extension_days)
-            };
+    Ok(Json(ApiResponse::success(status)))
+}
 
-            // Update trust expiry
-            sqlx::query!(
-                "UPDATE auth_device_sessions SET trusted_until = $1 WHERE id = $2 AND user_id = $3",
-                new_expiry,
-                device_id,
-                user_id
-            )
-            .execute(get_pool(&state)?)
-            .await
-            .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
-
-            Ok(Json(ApiResponse::success(DeviceTrustStatus {
-                is_trusted: true,
-                trusted_until: Some(new_expiry),
-                device_name: Some(record.device_name),
-                registered_at: Some(record.created_at),
-                reason: None,
-            })))
+fn validate_session(
+    session: DeviceSession,
+    expected_fingerprint: Option<&str>,
+) -> Result<DeviceTrustStatus, AppError> {
+    if let Some(expected) = expected_fingerprint {
+        let stored = session.device_fingerprint().as_str();
+        if stored != expected {
+            warn!(
+                "Device fingerprint mismatch: expected {}, got {}",
+                expected, stored
+            );
+            return Ok(DeviceTrustStatus {
+                is_trusted: false,
+                trusted_until: None,
+                device_name: Some(session.device_name().to_string()),
+                registered_at: Some(session.created_at()),
+                reason: Some("Device fingerprint mismatch".to_string()),
+            });
         }
-        _ => Err(AppError::bad_request(
-            "Device not found or trust already expired".to_string(),
-        )),
+    }
+
+    let status = match session.status() {
+        DeviceStatus::Trusted => DeviceTrustStatus {
+            is_trusted: true,
+            trusted_until: None,
+            device_name: Some(session.device_name().to_string()),
+            registered_at: Some(session.created_at()),
+            reason: None,
+        },
+        DeviceStatus::Pending => DeviceTrustStatus {
+            is_trusted: false,
+            trusted_until: None,
+            device_name: Some(session.device_name().to_string()),
+            registered_at: Some(session.created_at()),
+            reason: Some("Device is pending trust".to_string()),
+        },
+        DeviceStatus::Revoked => DeviceTrustStatus {
+            is_trusted: false,
+            trusted_until: None,
+            device_name: Some(session.device_name().to_string()),
+            registered_at: Some(session.created_at()),
+            reason: Some("Device has been revoked".to_string()),
+        },
+    };
+
+    Ok(status)
+}
+
+fn map_facade_error(err: AuthFacadeError) -> AppError {
+    match err {
+        AuthFacadeError::Authentication(err) => map_authentication_error(err),
+        AuthFacadeError::DeviceTrust(err) => map_device_trust_error(err),
+        AuthFacadeError::PinManagement(err) => map_pin_error(err),
+        AuthFacadeError::UserNotFound => AppError::not_found("User not found".to_string()),
+        AuthFacadeError::Storage(err) => AppError::internal(format!("Storage error: {err}")),
+    }
+}
+
+fn map_authentication_error(err: AuthenticationError) -> AppError {
+    match err {
+        AuthenticationError::InvalidCredentials | AuthenticationError::InvalidPin => {
+            AppError::unauthorized(AuthError::InvalidCredentials.to_string())
+        }
+        AuthenticationError::TooManyFailedAttempts => {
+            AppError::rate_limited("Too many failed authentication attempts".to_string())
+        }
+        AuthenticationError::SessionExpired => {
+            AppError::unauthorized(AuthError::SessionExpired.to_string())
+        }
+        AuthenticationError::DeviceNotFound | AuthenticationError::DeviceNotTrusted => {
+            AppError::forbidden("Device not eligible for authentication".to_string())
+        }
+        AuthenticationError::UserNotFound => AppError::not_found("User not found".to_string()),
+        AuthenticationError::DatabaseError(e) => {
+            AppError::internal(format!("Authentication failed: {e}"))
+        }
+    }
+}
+
+fn map_device_trust_error(err: DeviceTrustError) -> AppError {
+    use DeviceTrustError as E;
+    match err {
+        E::UserNotFound => AppError::not_found("User not found".to_string()),
+        E::UserInactive | E::UserLocked => {
+            AppError::forbidden("User is not allowed to authenticate".to_string())
+        }
+        E::DeviceNotFound => AppError::not_found("Device not found".to_string()),
+        E::DeviceAlreadyTrusted => AppError::conflict("Device already trusted".to_string()),
+        E::DeviceRevoked => AppError::forbidden("Device has been revoked".to_string()),
+        E::TooManyDevices { .. } => AppError::conflict("Too many devices registered".to_string()),
+        E::DeviceNotTrusted => AppError::forbidden("Device is not trusted".to_string()),
+        E::DatabaseError(e) => AppError::internal(format!("Device trust error: {e}")),
+    }
+}
+
+fn map_pin_error(err: PinManagementError) -> AppError {
+    use PinManagementError as E;
+    match err {
+        E::UserNotFound => AppError::not_found("User not found".to_string()),
+        E::UserInactive | E::UserLocked => {
+            AppError::forbidden("User is not allowed to update PIN".to_string())
+        }
+        E::DeviceNotFound => AppError::not_found("Device not found".to_string()),
+        E::DeviceRevoked => AppError::forbidden("Device has been revoked".to_string()),
+        E::PinNotSet => AppError::not_found("PIN is not configured".to_string()),
+        E::InvalidPinFormat => AppError::bad_request("Invalid PIN format".to_string()),
+        E::PinVerificationFailed => AppError::unauthorized("PIN verification failed".to_string()),
+        E::TooManyFailedAttempts => {
+            AppError::rate_limited("Too many failed PIN attempts".to_string())
+        }
+        E::DatabaseError(e) => AppError::internal(format!("PIN management error: {e}")),
     }
 }

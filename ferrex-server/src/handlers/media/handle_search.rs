@@ -1,5 +1,8 @@
 use axum::{Extension, Json, extract::State};
-use ferrex_core::{MediaWithStatus, query::MediaQuery, user::User};
+use ferrex_core::{
+    query::types::{MediaQuery, MediaWithStatus},
+    user::User,
+};
 
 use crate::infra::{app_state::AppState, errors::AppResult};
 

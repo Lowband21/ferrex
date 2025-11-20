@@ -5,13 +5,11 @@ use axum::{
     response::{IntoResponse, Json, Sse},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use ferrex_core::{
-    LibraryID, MediaEvent, ScanProgressEvent,
-    api_types::{
-        ActiveScansResponse, ApiResponse, LatestProgressResponse, ScanCommandAcceptedResponse,
-        ScanCommandRequest, ScanSnapshotDto, StartScanRequest,
-    },
+use ferrex_core::api_types::{
+    ActiveScansResponse, ApiResponse, LatestProgressResponse, ScanCommandAcceptedResponse,
+    ScanCommandRequest, ScanSnapshotDto, StartScanRequest,
 };
+use ferrex_core::types::{LibraryID, MediaEvent, ScanProgressEvent};
 use rkyv::{rancor::Error as RkyvError, to_bytes};
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};

@@ -9,7 +9,10 @@ pub use cache::RedisCache;
 pub use postgres::{PoolStats, PostgresDatabase};
 pub use traits::MediaDatabaseTrait;
 
-use crate::{LibraryID, MovieID, Result, SeriesID};
+use crate::error::Result;
+use crate::query::complexity_guard::QueryComplexityGuard;
+use crate::query::types::{MediaQuery, MediaWithStatus};
+use crate::types::ids::{LibraryID, MovieID, SeriesID};
 use std::{fmt, sync::Arc};
 
 #[derive(Clone)]
@@ -66,10 +69,9 @@ impl MediaDatabase {
     /// Execute a media query with caching support
     pub async fn query_media_with_cache(
         &self,
-        query: &crate::query::MediaQuery,
+        query: &MediaQuery,
         library_id: LibraryID,
-    ) -> Result<Vec<crate::query::MediaWithStatus>> {
-        use crate::query::QueryComplexityGuard;
+    ) -> Result<Vec<MediaWithStatus>> {
         use cache::CacheKeys;
         use tracing::{debug, warn};
 
@@ -91,10 +93,7 @@ impl MediaDatabase {
             // Clone the Arc to get a mutable reference inside
             let mut cache_conn = cache.as_ref().clone();
 
-            match cache_conn
-                .get::<Vec<crate::query::MediaWithStatus>>(&cache_key)
-                .await
-            {
+            match cache_conn.get::<Vec<MediaWithStatus>>(&cache_key).await {
                 Ok(Some(cached_results)) => {
                     debug!("Query cache hit for key: {}", cache_key);
                     return Ok(cached_results);
@@ -131,7 +130,7 @@ impl MediaDatabase {
     }
 
     /// Calculate appropriate cache TTL based on query characteristics
-    fn calculate_cache_ttl(&self, query: &crate::query::MediaQuery) -> std::time::Duration {
+    fn calculate_cache_ttl(&self, query: &MediaQuery) -> std::time::Duration {
         use std::time::Duration;
 
         // Base TTL is 5 minutes

@@ -1,38 +1,58 @@
 use super::traits::*;
-use crate::database::ports::folder_inventory::FolderInventoryRepository;
-use crate::database::ports::library::LibraryRepository;
-use crate::database::ports::processing_status::ProcessingStatusRepository;
-use crate::database::ports::rbac::RbacRepository;
-use crate::database::ports::sync_sessions::SyncSessionsRepository;
-use crate::database::ports::users::UsersRepository;
-use crate::database::ports::watch_status::WatchStatusRepository;
-use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
 use crate::{
-    EnhancedMovieDetails, EpisodeReference, LibraryReference, MediaDetailsOption, MediaIDLike,
-    MovieReference, MovieTitle, MovieURL, SeasonReference, SeriesReference, SeriesTitle, SeriesURL,
-    TmdbDetails, UrlLike,
-    database::infrastructure::postgres::repositories::{
-        folder_inventory::PostgresFolderInventoryRepository, library::PostgresLibraryRepository,
-        media::PostgresMediaRepository, processing_status::PostgresProcessingStatusRepository,
-        rbac::PostgresRbacRepository, sync_sessions::PostgresSyncSessionsRepository,
-        users::PostgresUsersRepository, watch_status::PostgresWatchStatusRepository,
+    auth::{
+        AuthEvent, AuthEventType, DeviceUserCredential, SessionDeviceSession,
+        device::{AuthDeviceStatus, AuthenticatedDevice, DeviceUpdateParams, Platform},
     },
-    database::postgres_ext::tmdb_metadata::TmdbMetadataRepository,
+    database::{
+        infrastructure::postgres::repositories::{
+            folder_inventory::PostgresFolderInventoryRepository,
+            library::PostgresLibraryRepository, media::PostgresMediaRepository,
+            processing_status::PostgresProcessingStatusRepository, rbac::PostgresRbacRepository,
+            sync_sessions::PostgresSyncSessionsRepository, users::PostgresUsersRepository,
+            watch_status::PostgresWatchStatusRepository,
+        },
+        ports::{
+            folder_inventory::FolderInventoryRepository, library::LibraryRepository,
+            processing_status::ProcessingStatusRepository, rbac::RbacRepository,
+            sync_sessions::SyncSessionsRepository, users::UsersRepository,
+            watch_status::WatchStatusRepository,
+        },
+        postgres_ext::tmdb_metadata::TmdbMetadataRepository,
+    },
+    error::{MediaError, Result},
     fs_watch::event_bus::PostgresFileChangeEventBus,
-};
-use crate::{
-    EpisodeID, Library, LibraryID, LibraryType, Media, MediaError, MediaFile, MediaFileMetadata,
-    MediaImageKind, MovieID, Result, SeasonID, SeriesID,
+    image::{
+        MediaImageKind,
+        records::{MediaImageVariantKey, MediaImageVariantRecord},
+    },
+    query::types::{MediaQuery, MediaWithStatus},
+    rbac::{Permission, Role, UserPermissions},
+    sync_session::{Participant, PlaybackState, SyncSession},
+    traits::prelude::MediaIDLike,
+    types::{
+        details::{EnhancedMovieDetails, LibraryReference, MediaDetailsOption, TmdbDetails},
+        files::{MediaFile, MediaFileMetadata},
+        ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID},
+        library::{Library, LibraryType},
+        media::{EpisodeReference, Media, MovieReference, SeasonReference, SeriesReference},
+        titles::{MovieTitle, SeriesTitle},
+        urls::{MovieURL, SeriesURL, UrlLike},
+    },
+    user::{User, UserSession},
+    watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rayon::iter::{IntoParallelIterator, ParallelExtend, ParallelIterator};
 use serde_json::{self};
-use sqlx::{PgPool, Row, postgres::PgPoolOptions};
-use std::collections::HashMap;
+use sqlx::{
+    PgPool, Row,
+    postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
+};
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use tracing::{info, warn};
+use std::{collections::HashMap, fmt};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Statistics about the connection pool
@@ -44,7 +64,7 @@ pub struct PoolStats {
     pub min_idle: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PostgresDatabase {
     pool: PgPool,
     max_connections: u32,
@@ -57,6 +77,20 @@ pub struct PostgresDatabase {
     libraries: PostgresLibraryRepository,
     media: PostgresMediaRepository,
     processing_status: PostgresProcessingStatusRepository,
+}
+
+impl fmt::Debug for PostgresDatabase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let pool_size = self.pool.size();
+        let idle = self.pool.num_idle();
+
+        f.debug_struct("PostgresDatabase")
+            .field("pool_size", &pool_size)
+            .field("idle_connections", &idle)
+            .field("max_connections", &self.max_connections)
+            .field("min_connections", &self.min_connections)
+            .finish()
+    }
 }
 
 impl PostgresDatabase {
@@ -2065,7 +2099,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     // ==================== User Management Methods ====================
 
-    async fn create_user(&self, _user: &crate::User) -> Result<()> {
+    async fn create_user(&self, _user: &User) -> Result<()> {
         // The trait method doesn't include password_hash, so we can't create a user through this interface
         // Users should be created through the authentication system which has access to the password
         Err(MediaError::Internal(
@@ -2073,19 +2107,19 @@ impl MediaDatabaseTrait for PostgresDatabase {
         ))
     }
 
-    async fn get_user_by_id(&self, id: Uuid) -> Result<Option<crate::User>> {
+    async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>> {
         self.users.get_user_by_id(id).await
     }
 
-    async fn get_user_by_username(&self, username: &str) -> Result<Option<crate::User>> {
+    async fn get_user_by_username(&self, username: &str) -> Result<Option<User>> {
         self.users.get_user_by_username(username).await
     }
 
-    async fn get_all_users(&self) -> Result<Vec<crate::User>> {
+    async fn get_all_users(&self) -> Result<Vec<User>> {
         self.users.get_all_users().await
     }
 
-    async fn update_user(&self, user: &crate::User) -> Result<()> {
+    async fn update_user(&self, user: &User) -> Result<()> {
         self.users.update_user(user).await
     }
 
@@ -2111,15 +2145,15 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     // ==================== RBAC Methods ====================
 
-    async fn get_user_permissions(&self, user_id: Uuid) -> Result<crate::rbac::UserPermissions> {
+    async fn get_user_permissions(&self, user_id: Uuid) -> Result<UserPermissions> {
         self.rbac.get_user_permissions(user_id).await
     }
 
-    async fn get_all_roles(&self) -> Result<Vec<crate::rbac::Role>> {
+    async fn get_all_roles(&self) -> Result<Vec<Role>> {
         self.rbac.get_all_roles().await
     }
 
-    async fn get_all_permissions(&self) -> Result<Vec<crate::rbac::Permission>> {
+    async fn get_all_permissions(&self) -> Result<Vec<Permission>> {
         self.rbac.get_all_permissions().await
     }
 
@@ -2200,11 +2234,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     // ==================== Session Management ====================
 
-    async fn create_session(&self, session: &crate::UserSession) -> Result<()> {
+    async fn create_session(&self, session: &UserSession) -> Result<()> {
         self.users.create_session(session).await
     }
 
-    async fn get_user_sessions(&self, user_id: Uuid) -> Result<Vec<crate::UserSession>> {
+    async fn get_user_sessions(&self, user_id: Uuid) -> Result<Vec<UserSession>> {
         self.users.get_user_sessions(user_id).await
     }
 
@@ -2217,14 +2251,14 @@ impl MediaDatabaseTrait for PostgresDatabase {
     async fn update_watch_progress(
         &self,
         user_id: Uuid,
-        progress: &crate::UpdateProgressRequest,
+        progress: &UpdateProgressRequest,
     ) -> Result<()> {
         self.watch_status
             .update_watch_progress(user_id, progress)
             .await
     }
 
-    async fn get_user_watch_state(&self, user_id: Uuid) -> Result<crate::UserWatchState> {
+    async fn get_user_watch_state(&self, user_id: Uuid) -> Result<UserWatchState> {
         self.watch_status.get_user_watch_state(user_id).await
     }
 
@@ -2232,7 +2266,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         &self,
         user_id: Uuid,
         limit: usize,
-    ) -> Result<Vec<crate::InProgressItem>> {
+    ) -> Result<Vec<InProgressItem>> {
         self.watch_status
             .get_continue_watching(user_id, limit)
             .await
@@ -2252,26 +2286,19 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     // ==================== Sync Session Methods ====================
 
-    async fn create_sync_session(&self, session: &crate::SyncSession) -> Result<()> {
+    async fn create_sync_session(&self, session: &SyncSession) -> Result<()> {
         self.sync_sessions.create_sync_session(session).await
     }
 
-    async fn get_sync_session_by_code(
-        &self,
-        room_code: &str,
-    ) -> Result<Option<crate::SyncSession>> {
+    async fn get_sync_session_by_code(&self, room_code: &str) -> Result<Option<SyncSession>> {
         self.sync_sessions.get_sync_session_by_code(room_code).await
     }
 
-    async fn get_sync_session(&self, id: Uuid) -> Result<Option<crate::SyncSession>> {
+    async fn get_sync_session(&self, id: Uuid) -> Result<Option<SyncSession>> {
         self.sync_sessions.get_sync_session(id).await
     }
 
-    async fn update_sync_session_state(
-        &self,
-        id: Uuid,
-        state: &crate::PlaybackState,
-    ) -> Result<()> {
+    async fn update_sync_session_state(&self, id: Uuid, state: &PlaybackState) -> Result<()> {
         self.sync_sessions
             .update_sync_session_state(id, state)
             .await
@@ -2280,7 +2307,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     async fn add_sync_participant(
         &self,
         session_id: Uuid,
-        participant: &crate::Participant,
+        participant: &Participant,
     ) -> Result<()> {
         self.sync_sessions
             .add_sync_participant(session_id, participant)
@@ -2297,7 +2324,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         self.sync_sessions.delete_sync_session(id).await
     }
 
-    async fn update_sync_session(&self, id: Uuid, session: &crate::SyncSession) -> Result<()> {
+    async fn update_sync_session(&self, id: Uuid, session: &SyncSession) -> Result<()> {
         self.sync_sessions.update_sync_session(id, session).await
     }
 
@@ -2309,16 +2336,13 @@ impl MediaDatabaseTrait for PostgresDatabase {
         self.sync_sessions.cleanup_expired_sync_sessions().await
     }
 
-    async fn query_media(
-        &self,
-        query: &crate::query::MediaQuery,
-    ) -> Result<Vec<crate::query::MediaWithStatus>> {
+    async fn query_media(&self, query: &MediaQuery) -> Result<Vec<MediaWithStatus>> {
         <PostgresDatabase>::query_media(self, query).await
     }
 
     // Device authentication methods
 
-    async fn register_device(&self, device: &crate::auth::AuthenticatedDevice) -> Result<()> {
+    async fn register_device(&self, device: &AuthenticatedDevice) -> Result<()> {
         sqlx::query!(
             r#"
             INSERT INTO auth_device_sessions
@@ -2412,7 +2436,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     async fn get_device_by_fingerprint(
         &self,
         fingerprint: &str,
-    ) -> Result<Option<crate::auth::AuthenticatedDevice>> {
+    ) -> Result<Option<AuthenticatedDevice>> {
         let row = sqlx::query!(
             r#"
             SELECT
@@ -2423,7 +2447,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 platform::text AS "platform?",
                 app_version,
                 hardware_id,
-                status as "status!: crate::auth::AuthDeviceStatus",
+                status as "status!: AuthDeviceStatus",
                 pin_hash,
                 pin_set_at,
                 pin_last_used_at,
@@ -2449,14 +2473,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|r| crate::auth::AuthenticatedDevice {
+        Ok(row.map(|r| AuthenticatedDevice {
             id: r.id,
             user_id: r.user_id,
             fingerprint: r.device_fingerprint,
             name: r.device_name,
-            platform: crate::auth::Platform::from_str(
-                &r.platform.unwrap_or_else(|| "unknown".to_string()),
-            ),
+            platform: Platform::from_str(&r.platform.unwrap_or_else(|| "unknown".to_string())),
             app_version: r.app_version,
             hardware_id: r.hardware_id,
             status: r.status,
@@ -2480,10 +2502,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         }))
     }
 
-    async fn get_device_by_id(
-        &self,
-        device_id: Uuid,
-    ) -> Result<Option<crate::auth::AuthenticatedDevice>> {
+    async fn get_device_by_id(&self, device_id: Uuid) -> Result<Option<AuthenticatedDevice>> {
         let row = sqlx::query!(
             r#"
             SELECT
@@ -2494,7 +2513,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 platform::text AS "platform?",
                 app_version,
                 hardware_id,
-                status as "status!: crate::auth::AuthDeviceStatus",
+                status as "status!: AuthDeviceStatus",
                 pin_hash,
                 pin_set_at,
                 pin_last_used_at,
@@ -2520,14 +2539,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|r| crate::auth::AuthenticatedDevice {
+        Ok(row.map(|r| AuthenticatedDevice {
             id: r.id,
             user_id: r.user_id,
             fingerprint: r.device_fingerprint,
             name: r.device_name,
-            platform: crate::auth::Platform::from_str(
-                &r.platform.unwrap_or_else(|| "unknown".to_string()),
-            ),
+            platform: Platform::from_str(&r.platform.unwrap_or_else(|| "unknown".to_string())),
             app_version: r.app_version,
             hardware_id: r.hardware_id,
             status: r.status,
@@ -2551,10 +2568,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         }))
     }
 
-    async fn get_user_devices(
-        &self,
-        user_id: Uuid,
-    ) -> Result<Vec<crate::auth::AuthenticatedDevice>> {
+    async fn get_user_devices(&self, user_id: Uuid) -> Result<Vec<AuthenticatedDevice>> {
         let rows = sqlx::query!(
             r#"
             SELECT
@@ -2565,7 +2579,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 platform::text AS "platform?",
                 app_version,
                 hardware_id,
-                status as "status!: crate::auth::AuthDeviceStatus",
+                status as "status!: AuthDeviceStatus",
                 pin_hash,
                 pin_set_at,
                 pin_last_used_at,
@@ -2595,14 +2609,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         Ok(rows
             .into_iter()
-            .map(|r| crate::auth::AuthenticatedDevice {
+            .map(|r| AuthenticatedDevice {
                 id: r.id,
                 user_id: r.user_id,
                 fingerprint: r.device_fingerprint,
                 name: r.device_name,
-                platform: crate::auth::Platform::from_str(
-                    &r.platform.unwrap_or_else(|| "unknown".to_string()),
-                ),
+                platform: Platform::from_str(&r.platform.unwrap_or_else(|| "unknown".to_string())),
                 app_version: r.app_version,
                 hardware_id: r.hardware_id,
                 status: r.status,
@@ -2627,11 +2639,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             .collect())
     }
 
-    async fn update_device(
-        &self,
-        device_id: Uuid,
-        updates: &crate::auth::DeviceUpdateParams,
-    ) -> Result<()> {
+    async fn update_device(&self, device_id: Uuid, updates: &DeviceUpdateParams) -> Result<()> {
         let mut query_builder = sqlx::QueryBuilder::new("UPDATE auth_device_sessions SET ");
         let mut first = true;
 
@@ -2780,10 +2788,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         Ok(())
     }
 
-    async fn upsert_device_credential(
-        &self,
-        credential: &crate::auth::DeviceUserCredential,
-    ) -> Result<()> {
+    async fn upsert_device_credential(&self, credential: &DeviceUserCredential) -> Result<()> {
         sqlx::query!(
             r#"
             UPDATE auth_device_sessions
@@ -2816,7 +2821,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         &self,
         user_id: Uuid,
         device_id: Uuid,
-    ) -> Result<Option<crate::auth::DeviceUserCredential>> {
+    ) -> Result<Option<DeviceUserCredential>> {
         let row = sqlx::query!(
             r#"
             SELECT
@@ -2839,7 +2844,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|r| crate::auth::DeviceUserCredential {
+        Ok(row.map(|r| DeviceUserCredential {
             user_id: r.user_id,
             device_id: r.device_id,
             pin_hash: r.pin_hash,
@@ -2905,10 +2910,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         Ok(())
     }
 
-    async fn create_device_session(
-        &self,
-        session: &crate::auth::SessionDeviceSession,
-    ) -> Result<()> {
+    async fn create_device_session(&self, session: &SessionDeviceSession) -> Result<()> {
         // Token is already hashed by the caller
         sqlx::query!(
             r#"
@@ -2937,10 +2939,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         Ok(())
     }
 
-    async fn get_device_sessions(
-        &self,
-        device_id: Uuid,
-    ) -> Result<Vec<crate::auth::SessionDeviceSession>> {
+    async fn get_device_sessions(&self, device_id: Uuid) -> Result<Vec<SessionDeviceSession>> {
         let rows = sqlx::query!(
             r#"
             SELECT id,
@@ -2966,7 +2965,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         Ok(rows
             .into_iter()
-            .map(|r| crate::auth::SessionDeviceSession {
+            .map(|r| SessionDeviceSession {
                 id: r.id,
                 user_id: r.user_id,
                 device_session_id: r.device_session_id,
@@ -3001,7 +3000,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         Ok(())
     }
 
-    async fn log_auth_event(&self, event: &crate::auth::AuthEvent) -> Result<()> {
+    async fn log_auth_event(&self, event: &AuthEvent) -> Result<()> {
         sqlx::query!(
             r#"
             INSERT INTO auth_events
@@ -3027,18 +3026,14 @@ impl MediaDatabaseTrait for PostgresDatabase {
         Ok(())
     }
 
-    async fn get_user_auth_events(
-        &self,
-        user_id: Uuid,
-        limit: usize,
-    ) -> Result<Vec<crate::auth::AuthEvent>> {
+    async fn get_user_auth_events(&self, user_id: Uuid, limit: usize) -> Result<Vec<AuthEvent>> {
         let rows = sqlx::query!(
             r#"
             SELECT id,
                    user_id,
                    device_session_id AS "device_session_id?",
                    session_id,
-                   event_type as "event_type!: crate::auth::AuthEventType",
+                   event_type as "event_type!: AuthEventType",
                    success,
                    failure_reason,
                    ip_address::text AS ip_address,
@@ -3058,7 +3053,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         Ok(rows
             .into_iter()
-            .map(|r| crate::auth::AuthEvent {
+            .map(|r| AuthEvent {
                 id: r.id,
                 user_id: r.user_id,
                 device_session_id: r.device_session_id,
@@ -3078,14 +3073,14 @@ impl MediaDatabaseTrait for PostgresDatabase {
         &self,
         device_id: Uuid,
         limit: usize,
-    ) -> Result<Vec<crate::auth::AuthEvent>> {
+    ) -> Result<Vec<AuthEvent>> {
         let rows = sqlx::query!(
             r#"
             SELECT id,
                    user_id,
                    device_session_id AS "device_session_id?",
                    session_id,
-                   event_type as "event_type!: crate::auth::AuthEventType",
+                   event_type as "event_type!: AuthEventType",
                    success,
                    failure_reason,
                    ip_address::text AS ip_address,
@@ -3105,7 +3100,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         Ok(rows
             .into_iter()
-            .map(|r| crate::auth::AuthEvent {
+            .map(|r| AuthEvent {
                 id: r.id,
                 user_id: r.user_id,
                 device_session_id: r.device_session_id,

@@ -6,10 +6,11 @@ use crate::domains::auth::state_types::{AuthState, AuthStateStore};
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
 use ferrex_core::api_routes::v1;
-use ferrex_core::api_types::ApiResponse;
-use ferrex_core::auth::{AuthResult as ServerAuthResult, DeviceInfo, Platform};
-use ferrex_core::rbac::UserPermissions;
-use ferrex_core::user::{AuthToken, LoginRequest, RegisterRequest, User};
+use ferrex_core::auth::domain::value_objects::SessionScope;
+use ferrex_core::auth::{AuthResult as ServerAuthResult, DeviceInfo};
+use ferrex_core::player_prelude::{
+    ApiResponse, AuthToken, LoginRequest, Platform, RegisterRequest, User, UserPermissions,
+};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use log::{debug, error, info, warn};
 use reqwest::StatusCode;
@@ -517,7 +518,7 @@ impl AuthManager {
     where
         T: DeserializeOwned,
     {
-        let url = self.api_client.build_url(path, false);
+        let url = self.api_client.build_url(path);
         let request = self.api_client.client.get(&url);
         let request = self.api_client.build_request(request).await;
         let response = request
@@ -616,6 +617,7 @@ impl AuthManager {
                     session_id: None,
                     device_session_id: None,
                     user_id: None,
+                    scope: SessionScope::Full,
                 }))
                 .await;
 
@@ -995,6 +997,7 @@ impl AuthManager {
             session_id: None,
             device_session_id: None,
             user_id: None,
+            scope: SessionScope::Full,
         };
         self.api_client.set_token(Some(token.clone())).await;
 
@@ -1013,7 +1016,7 @@ impl AuthManager {
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         // Get server URL
-        let server_url = self.api_client.build_url("", false);
+        let server_url = self.api_client.build_url("");
 
         // Update auth state using AuthStateStore
         self.auth_state.authenticate(
@@ -1229,7 +1232,7 @@ impl AuthManager {
             }
 
             response
-                .json::<ferrex_core::api_types::ApiResponse<Vec<UserListItemDto>>>()
+                .json::<ApiResponse<Vec<UserListItemDto>>>()
                 .await
                 .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?
                 .data

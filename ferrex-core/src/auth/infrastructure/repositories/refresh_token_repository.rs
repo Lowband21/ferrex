@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::auth::domain::repositories::{RefreshTokenRecord, RefreshTokenRepository};
 use crate::auth::domain::value_objects::RefreshToken;
+use crate::auth::domain::value_objects::RevocationReason;
 
 pub struct PostgresRefreshTokenRepository {
     pool: PgPool,
@@ -128,7 +129,7 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
             .transpose()?)
     }
 
-    async fn mark_used(&self, token_id: Uuid, reason: &str) -> Result<()> {
+    async fn mark_used(&self, token_id: Uuid, reason: RevocationReason) -> Result<()> {
         sqlx::query!(
             r#"
             UPDATE auth_refresh_tokens
@@ -140,7 +141,7 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
             WHERE id = $1
             "#,
             token_id,
-            reason
+            reason.as_str()
         )
         .execute(&self.pool)
         .await?;
@@ -148,7 +149,7 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
         Ok(())
     }
 
-    async fn revoke_family(&self, family_id: Uuid, reason: &str) -> Result<()> {
+    async fn revoke_family(&self, family_id: Uuid, reason: RevocationReason) -> Result<()> {
         sqlx::query!(
             r#"
             UPDATE auth_refresh_tokens
@@ -158,7 +159,49 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
             WHERE family_id = $1 AND revoked = FALSE
             "#,
             family_id,
-            reason
+            reason.as_str()
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn revoke_for_user(&self, user_id: Uuid, reason: RevocationReason) -> Result<()> {
+        sqlx::query!(
+            r#"
+            UPDATE auth_refresh_tokens
+            SET revoked = TRUE,
+                revoked_at = NOW(),
+                revoked_reason = COALESCE(revoked_reason, $2)
+            WHERE user_id = $1
+              AND revoked = FALSE
+            "#,
+            user_id,
+            reason.as_str()
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn revoke_for_device(
+        &self,
+        device_session_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<()> {
+        sqlx::query!(
+            r#"
+            UPDATE auth_refresh_tokens
+            SET revoked = TRUE,
+                revoked_at = NOW(),
+                revoked_reason = COALESCE(revoked_reason, $2)
+            WHERE device_session_id = $1
+              AND revoked = FALSE
+            "#,
+            device_session_id,
+            reason.as_str()
         )
         .execute(&self.pool)
         .await?;

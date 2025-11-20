@@ -1,6 +1,6 @@
 use rkyv::option::ArchivedOption;
 
-use crate::{
+use crate::types::details::{
     ArchivedCastMember, ArchivedCrewMember, ArchivedEnhancedSeriesDetails, ArchivedExternalIds,
     ArchivedSeasonDetails, CastMember, CrewMember, EnhancedMovieDetails, EnhancedSeriesDetails,
     EpisodeDetails, ExternalIds, SeasonDetails, TmdbDetails,

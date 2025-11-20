@@ -1,17 +1,20 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::MediaImageKind;
-use crate::Result;
-use crate::database::ports::images::ImageRepository;
-use crate::database::postgres::PostgresDatabase;
-use crate::database::traits::{
-    ImageLookupParams, ImageRecord, ImageVariant, MediaDatabaseTrait, MediaImage,
+use crate::{
+    database::ports::images::ImageRepository,
+    database::postgres::PostgresDatabase,
+    database::traits::{
+        ImageLookupParams, ImageRecord, ImageVariant, MediaDatabaseTrait, MediaImage,
+    },
+    error::Result,
+    image::MediaImageKind,
+    image::records::{MediaImageVariantKey, MediaImageVariantRecord},
 };
-use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
 
 #[derive(Clone)]
 pub struct PostgresImageRepository {
@@ -21,6 +24,16 @@ pub struct PostgresImageRepository {
 impl PostgresImageRepository {
     pub fn new(db: Arc<PostgresDatabase>) -> Self {
         Self { db }
+    }
+}
+
+impl fmt::Debug for PostgresImageRepository {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let pool = self.db.pool();
+        f.debug_struct("PostgresImageRepository")
+            .field("pool_size", &pool.size())
+            .field("idle_connections", &pool.num_idle())
+            .finish()
     }
 }
 

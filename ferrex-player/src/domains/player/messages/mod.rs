@@ -1,6 +1,6 @@
 pub mod subscriptions;
 
-use ferrex_core::MediaFile;
+use ferrex_core::player_prelude::{MediaFile, MediaID};
 use iced::ContentFit;
 use std::fmt;
 use std::time::Duration;
@@ -9,7 +9,7 @@ use std::time::Duration;
 pub enum Message {
     // Media control
     PlayMedia(MediaFile),
-    PlayMediaWithId(MediaFile, ferrex_core::MediaID),
+    PlayMediaWithId(MediaFile, MediaID),
     NavigateBack, // Navigate to previous view
     NavigateHome, // Navigate to home/library view
 

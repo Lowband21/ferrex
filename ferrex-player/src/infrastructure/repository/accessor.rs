@@ -3,10 +3,10 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use ferrex_core::{
-    ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, Library, LibraryID, Media, MediaID,
-    MediaIDLike, MediaLike, MediaOps, MediaType, MovieID, SeasonID, SeasonLike, SeasonReference,
-    SeriesID, SortBy, SortOrder,
+use ferrex_core::player_prelude::{
+    ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, EpisodeReference, Library, LibraryID,
+    LibraryType, Media, MediaID, MediaIDLike, MediaLike, MediaOps, MediaType, MovieID, SeasonID,
+    SeasonLike, SeasonReference, SeriesID, SortBy, SortOrder,
 };
 use parking_lot::RwLock;
 use rkyv::{util::AlignedVec, vec::ArchivedVec};
@@ -20,7 +20,7 @@ use super::{
     repository::{MediaRepo, RuntimeMediaEntry},
 };
 
-use ferrex_core::query::sorting::compare_media;
+use ferrex_core::player_prelude::compare_media;
 
 /// Marker types for capability roles
 #[derive(Debug, Clone, Copy)]
@@ -200,21 +200,21 @@ impl<R: ReadCap> Accessor<R> {
     }
 
     /// Get all libraries
-    pub fn get_libraries(&self) -> RepositoryResult<Vec<ferrex_core::Library>> {
+    pub fn get_libraries(&self) -> RepositoryResult<Vec<Library>> {
         self.with_repo(|repo| Ok(repo.get_libraries_internal()))
     }
 
     /*
     pub fn get_archived_libraries<'a>(
         &self,
-    ) -> RepositoryResult<Yoke<&'static ArchivedVec<ferrex_core::ArchivedLibrary>, Arc<AlignedVec>>>
+    ) -> RepositoryResult<Yoke<&'static ArchivedVec<ArchivedLibrary>, Arc<AlignedVec>>>
     {
         self.infallible_with_repo(|repo| repo.get_archived_libraries_yoke_internal())
     } */
 
     pub fn get_archived_libraries<'a>(
         &self,
-    ) -> RepositoryResult<Vec<Yoke<&'static ferrex_core::ArchivedLibrary, Arc<AlignedVec>>>> {
+    ) -> RepositoryResult<Vec<Yoke<&'static ArchivedLibrary, Arc<AlignedVec>>>> {
         self.infallible_with_repo(|repo| repo.get_archived_libraries_yoke_internal())
     }
 
@@ -287,14 +287,14 @@ impl<R: ReadCap> Accessor<R> {
                 let slice = archived.media_as_slice();
 
                 match owned_lib.library_type {
-                    ferrex_core::LibraryType::Movies => slice
+                    LibraryType::Movies => slice
                         .iter()
                         .filter_map(|m| match m {
                             ArchivedMedia::Movie(movie) => Some(movie.id.0),
                             _ => None,
                         })
                         .collect(),
-                    ferrex_core::LibraryType::Series => slice
+                    LibraryType::Series => slice
                         .iter()
                         .filter_map(|m| match m {
                             ArchivedMedia::Series(series) => Some(series.id.0),
@@ -324,8 +324,8 @@ impl<R: ReadCap> Accessor<R> {
                     };
 
                     let matches_library = match (&owned_lib.library_type, entry.media_type()) {
-                        (ferrex_core::LibraryType::Movies, MediaType::Movie) => true,
-                        (ferrex_core::LibraryType::Series, MediaType::Series) => true,
+                        (LibraryType::Movies, MediaType::Movie) => true,
+                        (LibraryType::Series, MediaType::Series) => true,
                         _ => false,
                     };
 
@@ -371,12 +371,8 @@ impl<R: ReadCap> Accessor<R> {
 
                     for &base_id in &ids {
                         let base_media = match owned_lib.library_type {
-                            ferrex_core::LibraryType::Movies => {
-                                repo.get_internal(&MovieID(base_id))?
-                            }
-                            ferrex_core::LibraryType::Series => {
-                                repo.get_internal(&SeriesID(base_id))?
-                            }
+                            LibraryType::Movies => repo.get_internal(&MovieID(base_id))?,
+                            LibraryType::Series => repo.get_internal(&SeriesID(base_id))?,
                         };
 
                         while let Some((runtime_id, runtime_media)) = pending_runtime.as_ref() {
@@ -437,7 +433,7 @@ impl<R: ReadCap> Accessor<R> {
     pub fn get_season_episodes(
         &self,
         season_id: &SeasonID,
-    ) -> RepositoryResult<Vec<ferrex_core::EpisodeReference>> {
+    ) -> RepositoryResult<Vec<EpisodeReference>> {
         self.with_repo(|repo| repo.get_season_episodes_internal(season_id))
     }
 

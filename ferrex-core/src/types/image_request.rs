@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 
 use uuid::Uuid;
 
-use crate::{ImageSize, ImageType};
+use super::util_types::{ImageSize, ImageType};
 
 /// Domain-specific categories for poster imagery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

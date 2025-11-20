@@ -1,4 +1,4 @@
-use ferrex_core::rbac::UserPermissions;
+use ferrex_core::player_prelude::UserPermissions;
 use iced::Task;
 use log::{debug, error, info};
 
@@ -88,13 +88,13 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
         }
 
         Message::CreateUserFormUpdateUsername(username) => {
-            debug!("Updating create user form username");
+            debug!("Updating create user form username: {}", username);
             // TODO: Update form state
             DomainUpdateResult::task(Task::none())
         }
 
         Message::CreateUserFormUpdateDisplayName(display_name) => {
-            debug!("Updating create user form display name");
+            debug!("Updating create user form display name: {}", display_name);
             // TODO: Update form state
             DomainUpdateResult::task(Task::none())
         }
@@ -153,13 +153,13 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
         }
 
         Message::UpdateUserFormUpdateUsername(username) => {
-            debug!("Updating user update form username");
+            debug!("Updating user update form username: {}", username);
             // TODO: Update form state
             DomainUpdateResult::task(Task::none())
         }
 
         Message::UpdateUserFormUpdateDisplayName(display_name) => {
-            debug!("Updating user update form display name");
+            debug!("Updating user update form display name: {}", display_name);
             // TODO: Update form state
             DomainUpdateResult::task(Task::none())
         }
@@ -271,13 +271,13 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
         }
 
         Message::FirstRunUpdateUsername(username) => {
-            debug!("Updating first-run username");
+            debug!("Updating first-run username: {}", username);
             // TODO: Update first-run form state
             DomainUpdateResult::task(Task::none())
         }
 
         Message::FirstRunUpdateDisplayName(display_name) => {
-            debug!("Updating first-run display name");
+            debug!("Updating first-run display name: {}", display_name);
             // TODO: Update first-run form state
             DomainUpdateResult::task(Task::none())
         }

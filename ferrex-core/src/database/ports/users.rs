@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::{Result, User, UserSession};
+use crate::error::Result;
+use crate::user::{User, UserSession};
 
 // User management and credentials (authentication-adjacent) repository
 #[async_trait]

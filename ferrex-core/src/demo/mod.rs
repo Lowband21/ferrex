@@ -10,15 +10,20 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use crate::types::library::{Library, LibraryType};
-use crate::{LibraryID, Result};
+use crate::{
+    error::{MediaError, Result},
+    types::{
+        ids::LibraryID,
+        library::{Library, LibraryType},
+    },
+};
 
 pub mod config;
 pub mod generator;
 pub mod policy;
 
 pub use config::{DemoLibraryOptions, DemoSeedOptions};
-pub use generator::{DemoLibraryPlan, DemoSeedPlan, apply_plan, generate_plan};
+pub use generator::{DemoLibraryPlan, DemoSeedPlan, apply_plan, generate_plan, prepare_plan_roots};
 pub use policy::{DemoPolicy, DemoRuntimeMetadata};
 
 static DEMO_CONTEXT: OnceCell<DemoContext> = OnceCell::new();
@@ -65,7 +70,7 @@ impl DemoContext {
 pub fn init_demo_context(root: PathBuf, policy: DemoPolicy) -> Result<()> {
     DEMO_CONTEXT
         .set(DemoContext::new(root, policy))
-        .map_err(|_| crate::MediaError::Internal("demo context already initialised".into()))
+        .map_err(|_| MediaError::Internal("demo context already initialised".into()))
 }
 
 /// Fetch the global demo context if demo mode is active.

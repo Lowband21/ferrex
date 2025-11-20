@@ -1,7 +1,6 @@
 //! Tab manager for coordinating multiple independent tab states
 
-use ferrex_core::ArchivedMediaID;
-use ferrex_core::{LibraryID, SortBy, SortOrder};
+use ferrex_core::player_prelude::{ArchivedMediaID, LibraryID, SortBy, SortOrder};
 use std::collections::HashMap;
 
 use super::{TabId, TabState};

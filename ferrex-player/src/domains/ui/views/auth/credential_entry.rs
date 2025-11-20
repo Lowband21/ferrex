@@ -7,7 +7,7 @@ use crate::common::messages::DomainMessage;
 use crate::domains::auth::messages as auth;
 use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::auth::types::CredentialType;
-use ferrex_core::user::User;
+use ferrex_core::player_prelude::User;
 use iced::{
     Alignment, Element, Length, Theme,
     widget::{Space, button, checkbox, column, container, row, text, text_input},

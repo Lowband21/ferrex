@@ -1,5 +1,8 @@
 use chrono::Utc;
-use ferrex_core::user::AuthToken;
+use ferrex_core::{
+    auth::domain::value_objects::SessionScope,
+    user::AuthToken,
+};
 use ferrex_player::domains::auth::manager::is_token_expired;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
@@ -32,6 +35,7 @@ fn opaque_token_uses_expires_in_field() {
         session_id: None,
         device_session_id: None,
         user_id: None,
+        scope: SessionScope::Full,
     };
     assert!(!is_token_expired(&token));
 
@@ -42,6 +46,7 @@ fn opaque_token_uses_expires_in_field() {
         session_id: None,
         device_session_id: None,
         user_id: None,
+        scope: SessionScope::Full,
     };
     assert!(is_token_expired(&short_lived));
 }
@@ -55,6 +60,7 @@ fn jwt_token_with_comfortable_margin_is_valid() {
         session_id: None,
         device_session_id: None,
         user_id: None,
+        scope: SessionScope::Full,
     };
     assert!(!is_token_expired(&token));
 }
@@ -68,6 +74,7 @@ fn jwt_token_inside_refresh_buffer_is_treated_as_expired() {
         session_id: None,
         device_session_id: None,
         user_id: None,
+        scope: SessionScope::Full,
     };
     assert!(is_token_expired(&token));
 }

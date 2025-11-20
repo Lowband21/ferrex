@@ -6,7 +6,11 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::database::ports::watch_status::WatchStatusRepository;
-use crate::{InProgressItem, MediaError, MediaType, Result, UpdateProgressRequest, UserWatchState};
+use crate::{
+    error::{MediaError, Result},
+    types::util_types::MediaType,
+    watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
+};
 
 #[derive(Clone, Debug)]
 pub struct PostgresWatchStatusRepository {

@@ -1,7 +1,9 @@
-use crate::{
-    LibraryID, MediaDetailsOption, MovieID, MovieReference, MovieTitle, MovieURL, SeriesID,
-    SeriesReference, SeriesTitle, SeriesURL,
-};
+use crate::types::details::MediaDetailsOption;
+use crate::types::files::MediaFile;
+use crate::types::ids::{LibraryID, MovieID, SeriesID};
+use crate::types::media::{MovieReference, SeriesReference};
+use crate::types::titles::{MovieTitle, SeriesTitle};
+use crate::types::urls::{MovieURL, SeriesURL};
 use std::collections::HashSet;
 use std::fmt;
 
@@ -188,7 +190,7 @@ impl TmdbApiProvider {
                 title: MovieTitle::new(r.inner.title).unwrap(),
                 details: MediaDetailsOption::Endpoint(format!("/movie/{}", r.inner.id)),
                 endpoint: MovieURL::from(format!("/stream/movie/{}", r.inner.id)),
-                file: crate::MediaFile::default(), // Placeholder - will be filled during scan
+                file: MediaFile::default(), // Placeholder - will be filled during scan
                 theme_color: None,
             })
             .collect())

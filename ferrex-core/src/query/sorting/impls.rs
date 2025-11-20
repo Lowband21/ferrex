@@ -8,7 +8,8 @@ use super::{
     SeriesFieldSet, SortFieldMarker, SortKey, SortableEntity, StringKey,
 };
 
-use crate::{MediaDetailsOption, MovieReference, SeriesReference, TmdbDetails};
+use crate::types::details::{MediaDetailsOption, TmdbDetails};
+use crate::types::media::{MovieReference, SeriesReference};
 
 /// Implementation of SortableEntity for MovieReference
 impl SortableEntity for MovieReference {
@@ -211,10 +212,12 @@ mod tests {
         DateAddedField, PopularityField, RatingField, ReleaseDateField, RuntimeField, TitleField,
     };
     use crate::query::sorting::strategy::{FieldSort, SortStrategy};
-    use crate::{
-        EnhancedMovieDetails, ExternalIds, LibraryID, MediaImages, MovieID, MovieTitle, MovieURL,
-        SpokenLanguage, UrlLike,
-    };
+    use crate::types::details::{EnhancedMovieDetails, ExternalIds, SpokenLanguage};
+    use crate::types::files::MediaFile;
+    use crate::types::ids::{LibraryID, MovieID};
+    use crate::types::image::MediaImages;
+    use crate::types::titles::MovieTitle;
+    use crate::types::urls::{MovieURL, UrlLike};
     use uuid::Uuid;
 
     fn create_test_movie_with_details() -> MovieReference {
@@ -267,7 +270,7 @@ mod tests {
             title: MovieTitle::new("Test Movie".to_string()).unwrap(),
             details: MediaDetailsOption::Details(TmdbDetails::Movie(details)),
             endpoint: MovieURL::from_string("/movies/test-movie-1".to_string()),
-            file: crate::MediaFile {
+            file: MediaFile {
                 id: Uuid::now_v7(),
                 path: std::path::PathBuf::from("/movies/test.mp4"),
                 filename: "test.mp4".to_string(),

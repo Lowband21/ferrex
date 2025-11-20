@@ -4,11 +4,10 @@ use crate::domains::ui::view_models::AllViewModel;
 use crate::domains::ui::views::grid::VirtualGridState;
 use crate::infrastructure::api_types::{LibraryType, Media};
 use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
-use ferrex_core::query::sorting::compare_media;
-use ferrex_core::{
+use ferrex_core::player_prelude::{
     ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedMovieReference,
     ArchivedSeriesReference, LibraryID, MediaID, MediaIDLike, MediaOps, MovieID, SeriesID, SortBy,
-    SortOrder,
+    SortOrder, compare_media,
 };
 use iced::widget::Id;
 use std::cmp::Ordering;
@@ -586,14 +585,14 @@ impl LibraryTabState {
         }
 
         // Fallback: filter top-level media according to library type and slice by visible range
-        let filtered: Vec<&ferrex_core::ArchivedMedia> = match self.library_type {
+        let filtered: Vec<&ArchivedMedia> = match self.library_type {
             LibraryType::Movies => slice
                 .iter()
-                .filter(|m| matches!(m, ferrex_core::ArchivedMedia::Movie(_)))
+                .filter(|m| matches!(m, ArchivedMedia::Movie(_)))
                 .collect(),
             LibraryType::Series => slice
                 .iter()
-                .filter(|m| matches!(m, ferrex_core::ArchivedMedia::Series(_)))
+                .filter(|m| matches!(m, ArchivedMedia::Series(_)))
                 .collect(),
         };
 

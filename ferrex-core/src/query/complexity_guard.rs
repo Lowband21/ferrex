@@ -1,7 +1,6 @@
-use crate::{
-    MediaError, Result,
-    query::{MediaQuery, decision_engine::QueryComplexityAnalyzer},
-};
+use crate::error::{MediaError, Result};
+use crate::query::decision_engine::QueryComplexityAnalyzer;
+use crate::query::types::{MediaQuery, SortBy};
 use tracing::{debug, warn};
 
 /// Configuration for query complexity limits
@@ -153,17 +152,15 @@ impl QueryComplexityGuard {
 
         // Sort complexity
         score += match query.sort.primary {
-            crate::query::SortBy::Title
-            | crate::query::SortBy::DateAdded
-            | crate::query::SortBy::CreatedAt => 1,
-            crate::query::SortBy::ReleaseDate | crate::query::SortBy::Rating => 2,
-            crate::query::SortBy::Runtime => 2,
-            crate::query::SortBy::LastWatched | crate::query::SortBy::WatchProgress => 5,
-            crate::query::SortBy::Popularity
-            | crate::query::SortBy::Bitrate
-            | crate::query::SortBy::FileSize
-            | crate::query::SortBy::ContentRating
-            | crate::query::SortBy::Resolution => 3,
+            SortBy::Title | SortBy::DateAdded | SortBy::CreatedAt => 1,
+            SortBy::ReleaseDate | SortBy::Rating => 2,
+            SortBy::Runtime => 2,
+            SortBy::LastWatched | SortBy::WatchProgress => 5,
+            SortBy::Popularity
+            | SortBy::Bitrate
+            | SortBy::FileSize
+            | SortBy::ContentRating
+            | SortBy::Resolution => 3,
         };
 
         if query.sort.secondary.is_some() {
@@ -242,7 +239,9 @@ impl Default for QueryComplexityGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::*;
+    use crate::api_types::ScalarRange;
+    use crate::query::types::SortOrder;
+    use crate::query_prelude::{MediaFilters, Pagination, SearchField, SearchQuery, SortCriteria};
     use uuid::Uuid;
 
     #[test]

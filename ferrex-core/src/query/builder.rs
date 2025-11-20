@@ -1,5 +1,6 @@
 use super::types::*;
-use crate::{LibraryID, api_types::ScalarRange, watch_status::WatchStatusFilter};
+use crate::types::ids::LibraryID;
+use crate::{api_types::ScalarRange, watch_status::WatchStatusFilter};
 use uuid::Uuid;
 
 /// Fluent API for building media queries

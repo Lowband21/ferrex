@@ -5,7 +5,7 @@
 use crate::domains::ui::messages::Message;
 use crate::domains::ui::theme;
 use crate::state_refactored::State;
-use ferrex_core::user::{GridSize, PlaybackQuality, ResumeBehavior};
+use ferrex_core::player_prelude::{GridSize, PlaybackQuality, ResumeBehavior};
 use iced::widget::{Space, button, column, container, pick_list, row, slider, text, toggler};
 use iced::{Element, Length};
 

@@ -5,9 +5,10 @@
 
 use crate::domains::auth::errors::{AuthError, AuthResult, DeviceError};
 use chrono::Utc;
-use ferrex_core::auth::device::{DeviceRegistration, Platform};
-use ferrex_core::rbac::{Role, UserPermissions};
-use ferrex_core::user::{User, UserPreferences};
+use ferrex_core::player_prelude::{
+    DeviceRegistration, Platform, Role, User, UserPermissions, UserPreferences,
+    generate_trust_token,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -443,7 +444,7 @@ impl AuthService {
             device_name: device_id.clone(),
             platform: Platform::Unknown,
             app_version: "1.0.0".to_string(),
-            trust_token: ferrex_core::auth::device::generate_trust_token(),
+            trust_token: generate_trust_token(),
             pin_hash: None,
             registered_at: now,
             last_used_at: now,

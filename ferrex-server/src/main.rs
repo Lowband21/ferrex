@@ -30,19 +30,34 @@ use axum::{
     response::{Json, Response},
     routing::get,
 };
+use chrono::Utc;
 use clap::Parser;
+use ferrex_core::application::unit_of_work::AppUnitOfWork;
+use ferrex_core::auth::{
+    AuthCrypto,
+    domain::repositories::{
+        AuthEventRepository, AuthSessionRepository, DeviceSessionRepository,
+        RefreshTokenRepository, UserAuthenticationRepository,
+    },
+    domain::services::{AuthenticationService, DeviceTrustService, PinManagementService},
+    infrastructure::repositories::{
+        PostgresAuthEventRepository, PostgresAuthSessionRepository,
+        PostgresDeviceSessionRepository, PostgresRefreshTokenRepository,
+        PostgresUserAuthRepository,
+    },
+};
 use ferrex_core::database::ports::media_files::{
-    MediaFileFilter, MediaFileSort, MediaFileSortField, Page, SortDirection,
+    MediaFileFilter, MediaFileSort, MediaFileSortField, Page,
 };
-use ferrex_core::{
-    LibraryActorConfig, LibraryReference,
-    application::unit_of_work::AppUnitOfWork,
-    auth::{AuthCrypto, domain::services::create_authentication_service},
-    database::PostgresDatabase,
-};
+use ferrex_core::database::{PostgresDatabase, traits::MediaDatabaseTrait};
+use ferrex_core::image_service::ImageService;
+use ferrex_core::orchestration::LibraryActorConfig;
+use ferrex_core::setup::SetupClaimService;
+use ferrex_core::types::LibraryReference;
 #[cfg(feature = "demo")]
-use ferrex_server::demo::{DemoCoordinator, derive_demo_database_url};
+use ferrex_server::demo::{DemoCoordinator, prepare_demo_database};
 use ferrex_server::{
+    application::auth::AuthApplicationFacade,
     infra::{
         app_state::AppState,
         config::Config,
@@ -88,6 +103,10 @@ struct Args {
     /// Server host (overrides config)
     #[arg(long, env = "SERVER_HOST")]
     host: Option<String>,
+
+    /// Reset any pending setup claim codes and exit
+    #[arg(long, env = "FERREX_RESET_CLAIMS", default_value_t = false)]
+    claim_reset: bool,
 
     /// Enable demo mode with synthetic media, demo database, and default user
     #[cfg(feature = "demo")]
@@ -171,6 +190,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Create database instance based on configuration
+    #[allow(unused_mut)]
     let (mut database_url, mut url_source) = match config
         .database_url
         .as_deref()
@@ -191,7 +211,7 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(feature = "demo")]
     if demo_coordinator.is_some() {
-        database_url = derive_demo_database_url(&database_url)?;
+        database_url = prepare_demo_database(&database_url).await?;
         url_source = "demo";
         config.database_url = Some(database_url.clone());
     }
@@ -254,7 +274,7 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to initialize thumbnail service"),
     );
 
-    let image_service = Arc::new(ferrex_core::ImageService::new(
+    let image_service = Arc::new(ImageService::new(
         unit_of_work.media_files_read.clone(),
         unit_of_work.images.clone(),
         config.cache_dir.clone(),
@@ -295,7 +315,7 @@ async fn main() -> anyhow::Result<()> {
         };
 
         orchestrator
-            .register_library(actor_config)
+            .register_library(actor_config, library.watch_for_changes)
             .await
             .with_context(|| format!("failed to register library {}", library.name))?;
     }
@@ -352,14 +372,58 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(PostgresRefreshTokenRepository::new(postgres_pool.clone()));
     let auth_sessions: Arc<dyn AuthSessionRepository> =
         Arc::new(PostgresAuthSessionRepository::new(postgres_pool.clone()));
+    let auth_event_repo: Arc<dyn AuthEventRepository> =
+        Arc::new(PostgresAuthEventRepository::new(postgres_pool.clone()));
 
-    let auth_service = Arc::new(AuthenticationService::new(
+    let auth_service = Arc::new(
+        AuthenticationService::new(
+            user_auth_repository.clone(),
+            device_sessions.clone(),
+            refresh_tokens.clone(),
+            auth_sessions.clone(),
+            auth_crypto.clone(),
+        )
+        .with_event_repository(auth_event_repo.clone()),
+    );
+
+    let device_trust_service = Arc::new(DeviceTrustService::new(
         user_auth_repository.clone(),
         device_sessions.clone(),
-        refresh_tokens.clone(),
+        auth_event_repo.clone(),
         auth_sessions.clone(),
+        refresh_tokens.clone(),
+    ));
+
+    let pin_management_service = Arc::new(PinManagementService::new(
+        user_auth_repository.clone(),
+        device_sessions.clone(),
+        auth_event_repo.clone(),
+    ));
+
+    let auth_facade = Arc::new(AuthApplicationFacade::new(
+        auth_service.clone(),
+        device_trust_service,
+        pin_management_service,
+        unit_of_work.clone(),
+    ));
+
+    let setup_claim_service = Arc::new(SetupClaimService::new(
+        unit_of_work.setup_claims.clone(),
         auth_crypto.clone(),
     ));
+
+    if args.claim_reset {
+        let revoked = setup_claim_service
+            .revoke_all(Some("operator reset"))
+            .await
+            .context("failed to revoke setup claim records")?;
+        let purged = setup_claim_service
+            .purge_stale(Utc::now())
+            .await
+            .context("failed to purge stale setup claim records")?;
+        info!(revoked, purged, "setup claim records reset");
+        return Ok(());
+    }
 
     let state = AppState {
         unit_of_work: unit_of_work.clone(),
@@ -371,8 +435,9 @@ async fn main() -> anyhow::Result<()> {
         //transcoding_service,
         image_service,
         websocket_manager,
-        auth_service,
+        auth_facade,
         auth_crypto: auth_crypto.clone(),
+        setup_claim_service: setup_claim_service.clone(),
         admin_sessions: Arc::new(Mutex::new(HashMap::new())),
         #[cfg(feature = "demo")]
         demo: demo_coordinator.clone(),
@@ -611,5 +676,3 @@ async fn health_handler(State(state): State<AppState>) -> Result<Json<Value>, St
         Ok(Json(health_status))
     }
 }
-
-// Note: legacy v0 compatibility handlers now live in `archive/ferrex_server_legacy_handlers.rs`.

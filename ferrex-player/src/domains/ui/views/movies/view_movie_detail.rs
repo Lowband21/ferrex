@@ -8,8 +8,13 @@ use crate::{
 };
 
 use ferrex_core::{
-    ArchivedMediaDetailsOption, ArchivedTmdbDetails, ImageSize, ImageType, MediaIDLike, MovieID,
-    Priority,
+    traits::id::MediaIDLike,
+    types::{
+        details::{ArchivedMediaDetailsOption, ArchivedTmdbDetails},
+        ids::MovieID,
+        image_request::Priority,
+        util_types::{ImageSize, ImageType},
+    },
 };
 use iced::{
     Element, Length,

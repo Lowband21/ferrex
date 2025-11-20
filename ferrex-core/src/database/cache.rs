@@ -1,5 +1,8 @@
-use crate::LibraryID;
-use crate::{MediaError, Result, query::MediaQuery};
+use crate::{
+    error::{MediaError, Result},
+    query::types::MediaQuery,
+    types::ids::LibraryID,
+};
 use redis::{AsyncCommands, aio::ConnectionManager};
 use serde::{Serialize, de::DeserializeOwned};
 use std::collections::hash_map::DefaultHasher;

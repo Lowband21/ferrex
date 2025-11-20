@@ -4,10 +4,17 @@
 
 mod authentication_service;
 mod device_trust_service;
+mod event_context;
 mod pin_management_service;
 
-pub use authentication_service::{AuthenticationError, AuthenticationService, TokenBundle};
+pub(crate) use event_context::map_domain_events;
+
+pub use authentication_service::{
+    AuthenticationError, AuthenticationService, PasswordChangeActor, PasswordChangeRequest,
+    TokenBundle, ValidatedSession,
+};
 pub use device_trust_service::{DeviceTrustError, DeviceTrustService};
+pub use event_context::AuthEventContext;
 pub use pin_management_service::{PinManagementError, PinManagementService};
 
 /// Factory function to create an AuthenticationService with PostgreSQL repositories

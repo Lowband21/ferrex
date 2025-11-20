@@ -1,5 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use ferrex_core::player_prelude::AuthenticatedDevice;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -7,9 +8,7 @@ use crate::infrastructure::api_client::ApiClient;
 
 #[async_trait]
 pub trait SettingsService: Send + Sync {
-    async fn list_user_devices(
-        &self,
-    ) -> Result<Vec<ferrex_core::auth::device::AuthenticatedDevice>>;
+    async fn list_user_devices(&self) -> Result<Vec<AuthenticatedDevice>>;
     async fn revoke_device(&self, device_id: Uuid) -> Result<()>;
 }
 
@@ -26,9 +25,7 @@ impl SettingsApiAdapter {
 
 #[async_trait]
 impl SettingsService for SettingsApiAdapter {
-    async fn list_user_devices(
-        &self,
-    ) -> Result<Vec<ferrex_core::auth::device::AuthenticatedDevice>> {
+    async fn list_user_devices(&self) -> Result<Vec<AuthenticatedDevice>> {
         self.client.list_user_devices().await
     }
 

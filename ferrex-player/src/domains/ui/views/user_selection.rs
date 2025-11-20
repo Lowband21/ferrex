@@ -2,7 +2,7 @@ use crate::{
     domains::auth::messages::Message,
     domains::ui::theme::{FerrexTheme, button_style, container_style},
 };
-use ferrex_core::user::User;
+use ferrex_core::player_prelude::User;
 use iced::{
     Alignment, Element, Length, Theme,
     widget::{Space, button, column, container, row, scrollable, text},

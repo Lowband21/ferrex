@@ -2,6 +2,7 @@ use super::messages::Message;
 use super::state::PlayerDomainState;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::ui;
+use ferrex_core::player_prelude::{MediaID, MovieID};
 use iced::Task;
 use std::time::Duration;
 
@@ -37,10 +38,7 @@ pub fn update_player(
             // Delegate to PlayMediaWithId with no ID tracking
             update_player(
                 app_state,
-                Message::PlayMediaWithId(
-                    media,
-                    ferrex_core::MediaID::Movie(ferrex_core::MovieID::new_uuid()),
-                ),
+                Message::PlayMediaWithId(media, MediaID::Movie(MovieID::new_uuid())),
             )
         }
 

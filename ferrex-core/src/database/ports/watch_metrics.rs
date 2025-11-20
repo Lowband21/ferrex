@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::Result;
+use crate::error::Result;
 
 /// Lightweight watch metrics used by ranking/sorting.
 #[derive(Debug, Clone, Copy)]

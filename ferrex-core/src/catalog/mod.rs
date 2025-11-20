@@ -16,7 +16,8 @@ pub mod types {
 }
 
 pub mod query {
-    pub use crate::query::*;
+    pub use crate::query::complexity_guard::{ComplexityConfig, QueryComplexityGuard};
+    pub use crate::query::prelude::*;
 }
 
 #[cfg(feature = "database")]

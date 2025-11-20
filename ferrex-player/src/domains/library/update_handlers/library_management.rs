@@ -5,7 +5,10 @@ use crate::state_refactored::State;
 use crate::{domains::library::messages::Message, infrastructure::services::api::ApiService};
 
 use chrono::Utc;
-use ferrex_core::{LibraryID, LibraryType};
+use ferrex_core::{
+    api_types::{CreateLibraryRequest, UpdateLibraryRequest},
+    types::{ids::LibraryID, library::LibraryType},
+};
 use iced::Task;
 
 pub fn handle_create_library(
@@ -14,7 +17,7 @@ pub fn handle_create_library(
     start_scan: bool,
     _server_url: String,
 ) -> Task<Message> {
-    let req = ferrex_core::api_types::CreateLibraryRequest {
+    let req = CreateLibraryRequest {
         name: library.name.clone(),
         library_type: library.library_type,
         paths: library
@@ -70,7 +73,7 @@ pub fn handle_update_library(
     library: Library,
     _server_url: String,
 ) -> Task<Message> {
-    let req = ferrex_core::api_types::UpdateLibraryRequest {
+    let req = UpdateLibraryRequest {
         name: Some(library.name.clone()),
         paths: Some(
             library

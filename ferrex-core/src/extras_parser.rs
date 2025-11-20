@@ -1,4 +1,4 @@
-use crate::ExtraType;
+use crate::types::files::ExtraType;
 use regex::Regex;
 use std::path::Path;
 use tracing::debug;
@@ -335,9 +335,9 @@ impl ExtrasParser {
 
 #[cfg(test)]
 mod tests {
-    use tmdb_api::common::MediaType;
-
     use super::*;
+    use crate::types::library::LibraryType;
+    use crate::types::util_types::MediaType;
     use std::path::PathBuf;
 
     #[test]
@@ -433,7 +433,7 @@ mod tests {
 
     #[test]
     fn test_media_type_determination() {
-        let _movie_lib = crate::LibraryType::Movies;
+        let _movie_lib = LibraryType::Movies;
 
         let test_cases = vec![("/movies/The Matrix (1999).mkv", MediaType::Movie)];
 

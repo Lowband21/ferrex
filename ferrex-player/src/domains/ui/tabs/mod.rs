@@ -4,7 +4,7 @@
 //! and the "All" view have completely independent state, including
 //! scroll positions, grid states, and cached content.
 
-use ferrex_core::LibraryID;
+use ferrex_core::player_prelude::LibraryID;
 use std::fmt;
 
 pub mod manager;

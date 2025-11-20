@@ -1,6 +1,7 @@
 use crate::database::PostgresDatabase;
 use crate::database::ports::sync_sessions::SyncSessionsRepository;
-use crate::{Participant, PlaybackState, Result, SyncSession};
+use crate::error::Result;
+use crate::sync_session::{Participant, PlaybackState, SyncSession};
 use uuid::Uuid;
 
 impl PostgresDatabase {

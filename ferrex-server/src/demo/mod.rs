@@ -1,13 +1,14 @@
 #![cfg(feature = "demo")]
 
 use anyhow::{Context, Result, anyhow};
-use ferrex_core::LibraryID;
+use async_trait::async_trait;
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
-use ferrex_core::database::ports::library::LibraryRepository;
 use ferrex_core::demo::{self, DemoSeedOptions};
 use ferrex_core::providers::TmdbApiProvider;
 use ferrex_core::rbac::roles;
+use ferrex_core::types::LibraryID;
 use ferrex_core::types::library::LibraryType;
+use sqlx::{Connection, PgConnection};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -17,7 +18,38 @@ use crate::infra::config::Config;
 use crate::users::UserService;
 use crate::users::user_service::CreateUserParams;
 
-#[derive(Debug)]
+#[async_trait]
+pub trait DemoPlanProvider: Send + Sync {
+    async fn generate_plan(
+        &self,
+        root: &Path,
+        options: &DemoSeedOptions,
+    ) -> Result<demo::DemoSeedPlan>;
+}
+
+pub struct TmdbPlanProvider {
+    tmdb: Arc<TmdbApiProvider>,
+}
+
+impl TmdbPlanProvider {
+    pub fn new(tmdb: Arc<TmdbApiProvider>) -> Self {
+        Self { tmdb }
+    }
+}
+
+#[async_trait]
+impl DemoPlanProvider for TmdbPlanProvider {
+    async fn generate_plan(
+        &self,
+        root: &Path,
+        options: &DemoSeedOptions,
+    ) -> Result<demo::DemoSeedPlan> {
+        demo::generate_plan(root, options, self.tmdb.clone())
+            .await
+            .context("failed to plan demo structure via TMDB")
+    }
+}
+
 pub struct DemoCoordinator {
     options: DemoSeedOptions,
     plan: Mutex<demo::DemoSeedPlan>,
@@ -25,19 +57,49 @@ pub struct DemoCoordinator {
     pub username: String,
     pub password: String,
     library_ids: Mutex<Vec<LibraryID>>,
-    tmdb: Arc<TmdbApiProvider>,
+    plan_provider: Arc<dyn DemoPlanProvider>,
+}
+
+impl std::fmt::Debug for DemoCoordinator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DemoCoordinator")
+            .field("root", &self.root)
+            .field("username", &self.username)
+            .finish()
+    }
 }
 
 impl DemoCoordinator {
     pub async fn bootstrap(config: &mut Config, tmdb: Arc<TmdbApiProvider>) -> Result<Self> {
+        if std::env::var("TMDB_API_KEY")
+            .map(|value| value.trim().is_empty())
+            .unwrap_or(true)
+        {
+            return Err(anyhow!(
+                "TMDB_API_KEY must be configured to materialise demo media. Supply a key or stub the provider before enabling demo mode."
+            ));
+        }
+
         let options = DemoSeedOptions::from_env();
+        let provider = Arc::new(TmdbPlanProvider::new(tmdb));
+        Self::bootstrap_with_provider(config, options, provider).await
+    }
+
+    pub async fn bootstrap_with_provider(
+        config: &mut Config,
+        options: DemoSeedOptions,
+        plan_provider: Arc<dyn DemoPlanProvider>,
+    ) -> Result<Self> {
         let root = resolve_root(&options, config);
 
         std::fs::create_dir_all(&root).context("failed to create demo root directory")?;
 
-        let plan = demo::generate_plan(&root, &options, tmdb.clone())
+        let plan = plan_provider
+            .generate_plan(&root, &options)
             .await
-            .context("failed to plan demo structure via TMDB")?;
+            .context("failed to plan demo structure")?;
+        demo::prepare_plan_roots(None, &plan)
+            .context("failed to prepare demo filesystem for bootstrap")?;
         demo::apply_plan(&plan).context("failed to materialise demo file tree")?;
 
         // Ensure server points at the demo root
@@ -56,7 +118,7 @@ impl DemoCoordinator {
             username,
             password,
             library_ids: Mutex::new(Vec::new()),
-            tmdb,
+            plan_provider,
         })
     }
 
@@ -106,20 +168,25 @@ impl DemoCoordinator {
     }
 
     pub async fn reset(&self, unit_of_work: Arc<AppUnitOfWork>) -> Result<()> {
-        let ids = self.library_ids.lock().await.clone();
-        for id in ids {
-            unit_of_work
-                .libraries
-                .delete_library(id)
-                .await
-                .context("failed to delete demo library")?;
-        }
+        let previous_plan = {
+            let guard = self.plan.lock().await;
+            guard.clone()
+        };
 
-        let new_plan = demo::generate_plan(&self.root, &self.options, self.tmdb.clone())
+        let new_plan = self
+            .plan_provider
+            .generate_plan(&self.root, &self.options)
             .await
             .context("failed to regenerate demo plan")?;
+
+        demo::prepare_plan_roots(Some(&previous_plan), &new_plan)
+            .context("failed to prepare demo filesystem for reset")?;
         demo::apply_plan(&new_plan).context("failed to reapply demo folder structure")?;
-        *self.plan.lock().await = new_plan;
+
+        {
+            let mut guard = self.plan.lock().await;
+            *guard = new_plan;
+        }
 
         self.sync_database(unit_of_work).await.map(|_| ())
     }
@@ -168,6 +235,10 @@ impl DemoCoordinator {
                 username: self.username.clone(),
                 display_name: "Demo User".into(),
                 password: self.password.clone(),
+                email: None,
+                avatar_url: None,
+                role_ids: Vec::new(),
+                is_active: true,
                 created_by: None,
             })
             .await
@@ -222,7 +293,7 @@ impl DemoStatus {
 }
 
 pub fn derive_demo_database_url(base: &str) -> Result<String> {
-    let mut url = url::Url::parse(base).context("invalid PostgreSQL URL")?;
+    let mut url = Url::parse(base).context("invalid PostgreSQL URL")?;
     let current_path = url.path().trim_start_matches('/');
     if current_path.is_empty() {
         return Err(anyhow!("database URL must include database name"));
@@ -233,4 +304,70 @@ pub fn derive_demo_database_url(base: &str) -> Result<String> {
     let new_name = format!("{}_demo", current_path);
     url.set_path(&format!("/{}", new_name));
     Ok(url.into())
+}
+
+/// Drop and recreate the demo database derived from the provided base URL before use.
+///
+/// Ensures every demo boot starts from a clean database while leaving the user's
+/// primary database untouched.
+pub async fn prepare_demo_database(base: &str) -> Result<String> {
+    let base_url = Url::parse(base).context("invalid PostgreSQL URL")?;
+    let base_name = base_url.path().trim_start_matches('/');
+    if base_name.is_empty() {
+        return Err(anyhow!("database URL must include database name"));
+    }
+    if base_name.ends_with("_demo") {
+        return Err(anyhow!(
+            "Refusing to prepare demo database because the base URL already points at a demo database"
+        ));
+    }
+
+    let demo_url = derive_demo_database_url(base)?;
+    let demo_name = Url::parse(&demo_url)
+        .context("invalid derived demo database URL")?
+        .path()
+        .trim_start_matches('/')
+        .to_string();
+
+    let mut admin_url = base_url.clone();
+    admin_url.set_path("/postgres");
+    let admin_url = admin_url.into_string();
+
+    let mut connection = PgConnection::connect(&admin_url)
+        .await
+        .with_context(|| format!("failed to connect to admin database via {}", admin_url))?;
+
+    sqlx::query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1")
+        .bind(&demo_name)
+        .execute(&mut connection)
+        .await
+        .context("failed to terminate active demo connections")?;
+
+    let quoted_name = quote_ident(&demo_name);
+    let drop_stmt = format!("DROP DATABASE IF EXISTS {}", quoted_name);
+    sqlx::query(&drop_stmt)
+        .execute(&mut connection)
+        .await
+        .context("failed to drop existing demo database")?;
+
+    let create_stmt = format!("CREATE DATABASE {}", quoted_name);
+    sqlx::query(&create_stmt)
+        .execute(&mut connection)
+        .await
+        .context("failed to create demo database")?;
+
+    Ok(demo_url)
+}
+
+fn quote_ident(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        if ch == '"' {
+            out.push('"');
+        }
+        out.push(ch);
+    }
+    out.push('"');
+    out
 }

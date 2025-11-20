@@ -1,4 +1,4 @@
-use crate::MediaImageKind;
+use crate::image::MediaImageKind;
 use crate::rkyv_wrappers::{DateTimeWrapper, OptionDateTime};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};

@@ -1,3 +1,4 @@
+use super::update_handlers::*;
 use crate::common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult};
 use crate::domains::auth::messages as auth;
 use crate::state_refactored::State;
@@ -23,98 +24,69 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
     match message {
         // Core auth flow
         auth::Message::CheckAuthStatus => {
-            wrap_task!(super::update_handlers::auth_updates::handle_check_auth_status(state))
+            wrap_task!(handle_check_auth_status(state))
         }
 
         auth::Message::AuthStatusConfirmedWithPin => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_auth_status_confirmed_with_pin(state)
-            )
+            wrap_task!(handle_auth_status_confirmed_with_pin(state))
         }
 
         auth::Message::CheckSetupStatus => {
-            wrap_task!(super::update_handlers::auth_updates::handle_check_setup_status(state))
+            wrap_task!(handle_check_setup_status(state))
         }
 
         auth::Message::SetupStatusChecked(needs_setup) => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_setup_status_checked(
-                    state,
-                    needs_setup
-                )
-            )
+            wrap_task!(handle_setup_status_checked(state, needs_setup,))
         }
 
         auth::Message::AutoLoginCheckComplete => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_auto_login_check_complete(state)
-            )
+            wrap_task!(handle_auto_login_check_complete(state))
         }
 
         auth::Message::AutoLoginSuccessful(user) => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_auto_login_successful(state, user)
-            )
+            wrap_task!(handle_auto_login_successful(state, user))
         }
 
         // User management
-        auth::Message::LoadUsers => wrap_task!(
-            super::update_handlers::auth_updates::handle_load_users(state)
-        ),
+        auth::Message::LoadUsers => wrap_task!(handle_load_users(state)),
 
         auth::Message::UsersLoaded(result) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_users_loaded(
-                state, result
-            ))
+            wrap_task!(handle_users_loaded(state, result,))
         }
 
         auth::Message::SelectUser(user_id) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_select_user(
-                state, user_id
-            ))
+            wrap_task!(handle_select_user(state, user_id))
         }
 
         auth::Message::ShowCreateUser => {
-            wrap_task!(super::update_handlers::auth_updates::handle_show_create_user(state))
+            wrap_task!(handle_show_create_user(state))
         }
 
         auth::Message::BackToUserSelection => {
-            wrap_task!(super::update_handlers::auth_updates::handle_back_to_user_selection(state))
+            wrap_task!(handle_back_to_user_selection(state))
         }
 
         // PIN authentication
         auth::Message::ShowPinEntry(user) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_show_pin_entry(
-                state, user
-            ))
+            wrap_task!(handle_show_pin_entry(state, user))
         }
 
         auth::Message::PinDigitPressed(digit) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_pin_digit_pressed(state, digit))
+            wrap_task!(handle_pin_digit_pressed(state, digit))
         }
 
         auth::Message::PinBackspace => {
-            wrap_task!(super::update_handlers::auth_updates::handle_pin_backspace(
-                state
-            ))
+            wrap_task!(handle_pin_backspace(state))
         }
 
-        auth::Message::PinClear => wrap_task!(
-            super::update_handlers::auth_updates::handle_pin_clear(state)
-        ),
+        auth::Message::PinClear => wrap_task!(handle_pin_clear(state)),
 
-        auth::Message::PinSubmit => wrap_task!(
-            super::update_handlers::auth_updates::handle_pin_submit(state)
-        ),
+        auth::Message::PinSubmit => wrap_task!(handle_pin_submit(state)),
 
         // Login results
         auth::Message::LoginSuccess(user, permissions) => {
             // Handle login success with cross-domain events
-            let task = super::update_handlers::auth_updates::handle_login_success(
-                state,
-                user.clone(),
-                permissions.clone(),
-            );
+            let task = handle_login_success(state, user.clone(), permissions.clone());
             let events = vec![
                 CrossDomainEvent::UserAuthenticated(user, permissions),
                 CrossDomainEvent::AuthenticationComplete,
@@ -123,10 +95,7 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
         }
 
         auth::Message::WatchStatusLoaded(result) => {
-            let task = super::update_handlers::auth_updates::handle_watch_status_loaded(
-                state,
-                result.clone(),
-            );
+            let task = handle_watch_status_loaded(state, result.clone());
 
             // For successful manual login, emit AuthenticationComplete to trigger library loading
             // This only happens after manual auth (not auto-login which goes through LoginSuccess)
@@ -143,12 +112,12 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
         }
 
         auth::Message::Logout => {
-            wrap_task!(super::update_handlers::auth_updates::handle_logout(state))
+            wrap_task!(handle_logout(state))
         }
 
         auth::Message::LogoutComplete => {
             // Handle logout complete with cross-domain events
-            let task = super::update_handlers::auth_updates::handle_logout_complete(state);
+            let task = handle_logout_complete(state);
             let events = vec![
                 CrossDomainEvent::ClearMediaStore,
                 CrossDomainEvent::ClearLibraries,
@@ -160,94 +129,56 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
 
         // Password login
         auth::Message::ShowPasswordLogin(username) => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_show_password_login(state, username)
-            )
+            wrap_task!(handle_show_password_login(state, username))
         }
 
         auth::Message::PasswordLoginUpdateUsername(username) => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_password_login_update_username(
-                    state, username,
-                )
-            )
+            wrap_task!(handle_password_login_update_username(state, username,))
         }
 
         auth::Message::PasswordLoginUpdatePassword(password) => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_password_login_update_password(
-                    state, password,
-                )
-            )
+            wrap_task!(handle_password_login_update_password(state, password,))
         }
 
         auth::Message::PasswordLoginToggleVisibility => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_password_login_toggle_visibility(
-                    state
-                )
-            )
+            wrap_task!(handle_password_login_toggle_visibility(state))
         }
 
         auth::Message::PasswordLoginToggleRemember => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_password_login_toggle_remember(state)
-            )
+            wrap_task!(handle_password_login_toggle_remember(state))
         }
 
         auth::Message::PasswordLoginSubmit => {
-            wrap_task!(super::update_handlers::auth_updates::handle_password_login_submit(state))
+            wrap_task!(handle_password_login_submit(state))
         }
 
         // Device auth flow
         auth::Message::DeviceStatusChecked(user, result) => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_device_status_checked(
-                    state, user, result
-                )
-            )
+            wrap_task!(handle_device_status_checked(state, user, result))
         }
 
         auth::Message::UpdateCredential(input) => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_auth_flow_update_credential(
-                    state, input
-                )
-            )
+            wrap_task!(handle_auth_flow_update_credential(state, input))
         }
 
         auth::Message::SubmitCredential => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_auth_flow_submit_credential(state)
-            )
+            wrap_task!(handle_auth_flow_submit_credential(state))
         }
 
         auth::Message::TogglePasswordVisibility => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_auth_flow_toggle_password_visibility(
-                    state
-                )
-            )
+            wrap_task!(handle_auth_flow_toggle_password_visibility(state))
         }
 
         auth::Message::ToggleRememberDevice => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_auth_flow_toggle_remember_device(
-                    state
-                )
-            )
+            wrap_task!(handle_auth_flow_toggle_remember_device(state))
         }
 
         auth::Message::RememberDeviceSynced(enabled) => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_remember_device_synced(state, enabled)
-            )
+            wrap_task!(handle_remember_device_synced(state, enabled))
         }
 
         auth::Message::AuthResult(result) => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_auth_flow_auth_result(state, result)
-            )
+            wrap_task!(handle_auth_flow_auth_result(state, result))
         }
 
         auth::Message::SetupPin => {
@@ -263,13 +194,11 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
         }
 
         auth::Message::SubmitPin => {
-            wrap_task!(super::update_handlers::auth_updates::handle_auth_flow_submit_pin(state))
+            wrap_task!(handle_auth_flow_submit_pin(state))
         }
 
         auth::Message::PinSet(result) => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_auth_flow_pin_set(state, result)
-            )
+            wrap_task!(handle_auth_flow_pin_set(state, result))
         }
 
         auth::Message::Retry => {
@@ -282,54 +211,68 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
 
         // Admin PIN unlock management
         auth::Message::EnableAdminPinUnlock => {
-            wrap_task!(super::update_handlers::auth_updates::handle_enable_admin_pin_unlock(state))
+            wrap_task!(handle_enable_admin_pin_unlock(state))
         }
 
         auth::Message::DisableAdminPinUnlock => {
-            wrap_task!(super::update_handlers::auth_updates::handle_disable_admin_pin_unlock(state))
+            wrap_task!(handle_disable_admin_pin_unlock(state))
         }
 
         auth::Message::AdminPinUnlockToggled(result) => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_admin_pin_unlock_toggled(
-                    state, result
-                )
-            )
+            wrap_task!(handle_admin_pin_unlock_toggled(state, result))
         }
 
         // Admin setup flow
         auth::Message::UpdateSetupField(field) => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_update_setup_field(state, field)
-            )
+            wrap_task!(handle_update_setup_field(state, field))
         }
 
         auth::Message::ToggleSetupPasswordVisibility => {
-            wrap_task!(
-                super::update_handlers::auth_updates::handle_toggle_setup_password_visibility(
-                    state
-                )
-            )
+            wrap_task!(handle_toggle_setup_password_visibility(state))
         }
 
         auth::Message::SubmitSetup => {
-            wrap_task!(super::update_handlers::auth_updates::handle_submit_setup(
-                state
-            ))
+            wrap_task!(handle_submit_setup(state))
         }
 
         auth::Message::SetupComplete(access_token, refresh_token) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_setup_complete(
-                state,
-                access_token,
-                refresh_token,
-            ))
+            wrap_task!(handle_setup_complete(state, access_token, refresh_token,))
         }
 
         auth::Message::SetupError(error) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_setup_error(
-                state, error
-            ))
+            wrap_task!(handle_setup_error(state, error))
+        }
+
+        auth::Message::UpdateClaimDeviceName(name) => {
+            wrap_task!(handle_update_claim_device_name(state, name))
+        }
+
+        auth::Message::StartSetupClaim => {
+            wrap_task!(handle_start_setup_claim(state))
+        }
+
+        auth::Message::SetupClaimStarted(response) => {
+            wrap_task!(handle_setup_claim_started(state, response))
+        }
+
+        auth::Message::SetupClaimFailed(error) => {
+            wrap_task!(handle_setup_claim_failed(state, error))
+        }
+
+        auth::Message::ConfirmSetupClaim => {
+            wrap_task!(handle_confirm_setup_claim(state))
+        }
+
+        auth::Message::SetupClaimConfirmed(response) => {
+            wrap_task!(handle_setup_claim_confirmed(state, response))
+        }
+
+        auth::Message::SetupClaimConfirmFailed(error) => {
+            wrap_task!(handle_setup_claim_confirm_failed(state, error))
+        }
+
+        auth::Message::ResetSetupClaim => {
+            wrap_task!(handle_reset_setup_claim(state))
         }
 
         // Command execution

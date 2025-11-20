@@ -1,64 +1,58 @@
-//! User Management API Endpoints
-//!
-//! Centralized API handlers for user management operations.
-//! These endpoints provide a clean interface for user CRUD operations
-//! with proper authentication, authorization, and validation.
+//! Administrative user management endpoints.
 
+use axum::http::StatusCode;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
-    http::StatusCode,
 };
-use ferrex_core::{api_types::ApiResponse, user::User};
+use ferrex_core::{
+    api_types::ApiResponse,
+    rbac::{self, UserPermissions},
+    user::User,
+    user_management::{ListUsersOptions, UserAdminRecord},
+};
 use serde::{Deserialize, Serialize};
+use tracing::info;
 use uuid::Uuid;
 
-use crate::infra::{app_state::AppState, errors::AppResult};
+use crate::infra::{
+    app_state::AppState,
+    errors::{AppError, AppResult},
+};
+use crate::users::{CreateUserParams, UpdateUserParams, UserService};
 
-/// Query parameters for user listing
 #[derive(Debug, Deserialize)]
 pub struct ListUsersQuery {
-    /// Filter by role name
     pub role: Option<String>,
-    /// Search in username and display name
     pub search: Option<String>,
-    /// Maximum number of users to return (default: 50, max: 1000)
     pub limit: Option<i64>,
-    /// Number of users to skip for pagination
     pub offset: Option<i64>,
-    /// Include inactive users (default: false)
-    pub include_inactive: Option<bool>,
+    #[serde(default)]
+    pub include_inactive: bool,
 }
 
-/// Request payload for creating a new user
 #[derive(Debug, Deserialize)]
 pub struct CreateUserRequest {
-    /// Unique username (3-32 chars, alphanumeric + underscore/hyphen)
     pub username: String,
-    /// Display name shown in UI
     pub display_name: String,
-    /// Initial password (will be hashed)
     pub password: String,
-    /// Optional email address
     pub email: Option<String>,
-    /// Initial role assignments (role IDs)
-    pub role_ids: Option<Vec<Uuid>>,
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub role_ids: Vec<Uuid>,
+    #[serde(default = "default_true")]
+    pub is_active: bool,
 }
 
-/// Request payload for updating a user
 #[derive(Debug, Deserialize)]
 pub struct UpdateUserRequest {
-    /// New display name
     pub display_name: Option<String>,
-    /// New email address
     pub email: Option<String>,
-    /// Account status (active/inactive)
+    pub avatar_url: Option<String>,
     pub is_active: Option<bool>,
-    /// Role assignments (complete replacement)
     pub role_ids: Option<Vec<Uuid>>,
 }
 
-/// Response format for user details
 #[derive(Debug, Serialize)]
 pub struct UserResponse {
     pub id: Uuid,
@@ -71,217 +65,219 @@ pub struct UserResponse {
     pub last_login: Option<i64>,
     pub is_active: bool,
     pub roles: Vec<String>,
-    pub session_count: i64,
+    pub session_count: usize,
 }
 
-// ============================================================================
-// API Endpoint Handlers
-// ============================================================================
+#[derive(Debug, Serialize)]
+pub struct UserListResponse {
+    pub total: usize,
+    pub limit: usize,
+    pub offset: usize,
+    pub users: Vec<UserResponse>,
+}
 
-/// List users with filtering and pagination
-///
-/// GET /api/users
-///
-/// Query parameters:
-/// - role: Filter by role name
-/// - search: Search in username/display_name
-/// - limit: Max results (default: 50, max: 1000)
-/// - offset: Skip results for pagination
-/// - include_inactive: Include inactive users
-///
-/// Requires: `user.list` permission or admin role
+fn default_true() -> bool {
+    true
+}
+
 pub async fn list_users(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Extension(_current_user): Extension<User>,
-    Query(_query): Query<ListUsersQuery>,
-) -> AppResult<Json<ApiResponse<Vec<UserResponse>>>> {
-    // TODO: Implement user listing with proper filtering and pagination
-    // TODO: Check user.list permission or admin role
-    // TODO: Apply search filters and role filters
-    // TODO: Implement pagination with limit/offset
-    // TODO: Convert User entities to UserResponse format
-    // TODO: Include role information and session counts
+    Extension(permissions): Extension<UserPermissions>,
+    Query(query): Query<ListUsersQuery>,
+) -> AppResult<Json<ApiResponse<UserListResponse>>> {
+    require_permission(&permissions, &[rbac::permissions::USERS_READ])?;
 
-    // Placeholder response
-    let users = Vec::new();
-    Ok(Json(ApiResponse::success(users)))
+    let options = ListUsersOptions {
+        role: query.role.clone(),
+        search: query.search.clone(),
+        include_inactive: query.include_inactive,
+        limit: query.limit,
+        offset: query.offset,
+    };
+
+    let service = UserService::new(&state);
+    let paged = service.list_users(options).await?;
+
+    let users = paged
+        .users
+        .into_iter()
+        .map(user_record_to_response)
+        .collect();
+
+    let payload = UserListResponse {
+        total: paged.total,
+        limit: paged.limit,
+        offset: paged.offset,
+        users,
+    };
+
+    Ok(Json(ApiResponse::success(payload)))
 }
 
-/// Create a new user
-///
-/// POST /api/users
-///
-/// Request body: CreateUserRequest
-///
-/// Requires: `user.create` permission or admin role
 pub async fn create_user(
-    State(_state): State<AppState>,
-    Extension(_current_user): Extension<User>,
-    Json(_request): Json<CreateUserRequest>,
+    State(state): State<AppState>,
+    Extension(current_user): Extension<User>,
+    Extension(permissions): Extension<UserPermissions>,
+    Json(request): Json<CreateUserRequest>,
 ) -> AppResult<Json<ApiResponse<UserResponse>>> {
-    // TODO: Check user.create permission or admin role
-    // TODO: Validate username uniqueness
-    // TODO: Validate email format and uniqueness (if provided)
-    // TODO: Validate password strength requirements
-    // TODO: Validate role assignments (ensure roles exist and user can assign them)
-    // TODO: Use UserService to create user with proper validation
-    // TODO: Assign initial roles if specified
-    // TODO: Log user creation activity
-    // TODO: Return created user in UserResponse format
+    require_permission(&permissions, &[rbac::permissions::USERS_CREATE])?;
 
-    // Placeholder response
-    let user_response = UserResponse {
-        id: Uuid::now_v7(),
-        username: "placeholder".to_string(),
-        display_name: "Placeholder User".to_string(),
-        email: None,
-        avatar_url: None,
-        created_at: chrono::Utc::now().timestamp(),
-        updated_at: chrono::Utc::now().timestamp(),
-        last_login: None,
-        is_active: true,
-        roles: vec![],
+    let service = UserService::new(&state);
+    let user = service
+        .create_user(CreateUserParams {
+            username: request.username,
+            display_name: request.display_name,
+            password: request.password,
+            email: request.email,
+            avatar_url: request.avatar_url,
+            role_ids: request.role_ids,
+            is_active: request.is_active,
+            created_by: Some(current_user.id),
+        })
+        .await?;
+
+    let roles = state
+        .unit_of_work
+        .rbac
+        .get_user_permissions(user.id)
+        .await?
+        .roles
+        .into_iter()
+        .map(|role| role.name)
+        .collect::<Vec<_>>();
+
+    let response = UserResponse {
+        id: user.id,
+        username: user.username.clone(),
+        display_name: user.display_name.clone(),
+        email: user.email.clone(),
+        avatar_url: user.avatar_url.clone(),
+        created_at: user.created_at.timestamp(),
+        updated_at: user.updated_at.timestamp(),
+        last_login: user.last_login.map(|ts| ts.timestamp()),
+        is_active: user.is_active,
+        roles,
         session_count: 0,
     };
 
-    Ok(Json(ApiResponse::success(user_response)))
+    info!(
+        target: "user.admin",
+        user_id = %user.id,
+        username = %user.username,
+        action = "create"
+    );
+
+    Ok(Json(ApiResponse::success(response)))
 }
 
-/// Update an existing user's profile and settings
-///
-/// PUT /api/users/:id
-///
-/// Path parameters:
-/// - id: User UUID to update
-///
-/// Request body: UpdateUserRequest
-///
-/// Requires: `user.update` permission for any user, or ownership of the user account
 pub async fn update_user(
-    State(_state): State<AppState>,
-    Extension(_current_user): Extension<User>,
-    Path(_user_id): Path<Uuid>,
-    Json(_request): Json<UpdateUserRequest>,
+    State(state): State<AppState>,
+    Extension(current_user): Extension<User>,
+    Extension(permissions): Extension<UserPermissions>,
+    Path(user_id): Path<Uuid>,
+    Json(request): Json<UpdateUserRequest>,
 ) -> AppResult<Json<ApiResponse<UserResponse>>> {
-    // TODO: Check user.update permission or user ownership
-    // TODO: Verify target user exists
-    // TODO: Validate email format if being updated
-    // TODO: Handle role assignments with proper permission checks
-    // TODO: Prevent users from removing their own admin role (if applicable)
-    // TODO: Use UserService to update user with proper validation
-    // TODO: Log user update activity
-    // TODO: Return updated user in UserResponse format
+    require_permission(&permissions, &[rbac::permissions::USERS_UPDATE])?;
 
-    // Placeholder response
-    let user_response = UserResponse {
-        id: Uuid::now_v7(),
-        username: "placeholder".to_string(),
-        display_name: "Updated User".to_string(),
-        email: None,
-        avatar_url: None,
-        created_at: chrono::Utc::now().timestamp(),
-        updated_at: chrono::Utc::now().timestamp(),
-        last_login: None,
-        is_active: true,
-        roles: vec![],
-        session_count: 0,
+    let service = UserService::new(&state);
+    let user = service
+        .update_user(
+            user_id,
+            UpdateUserParams {
+                display_name: request.display_name.clone(),
+                email: request.email.clone(),
+                avatar_url: request.avatar_url.clone(),
+                is_active: request.is_active,
+                role_ids: request.role_ids.clone(),
+                updated_by: current_user.id,
+            },
+        )
+        .await?;
+
+    let permissions = state
+        .unit_of_work
+        .rbac
+        .get_user_permissions(user.id)
+        .await?;
+
+    let sessions = state.unit_of_work.users.get_user_sessions(user.id).await?;
+
+    let response = UserResponse {
+        id: user.id,
+        username: user.username.clone(),
+        display_name: user.display_name.clone(),
+        email: user.email.clone(),
+        avatar_url: user.avatar_url.clone(),
+        created_at: user.created_at.timestamp(),
+        updated_at: user.updated_at.timestamp(),
+        last_login: user.last_login.map(|ts| ts.timestamp()),
+        is_active: user.is_active,
+        roles: permissions
+            .roles
+            .into_iter()
+            .map(|role| role.name)
+            .collect(),
+        session_count: sessions.len(),
     };
 
-    Ok(Json(ApiResponse::success(user_response)))
+    info!(
+        target: "user.admin",
+        user_id = %user.id,
+        username = %user.username,
+        action = "update"
+    );
+
+    Ok(Json(ApiResponse::success(response)))
 }
 
-/// Delete a user account and all associated data
-///
-/// DELETE /api/users/:id
-///
-/// Path parameters:
-/// - id: User UUID to delete
-///
-/// Requires: `user.delete` permission or admin role
-/// Note: Users cannot delete their own accounts through this endpoint
 pub async fn delete_user(
-    State(_state): State<AppState>,
-    Extension(_current_user): Extension<User>,
-    Path(_user_id): Path<Uuid>,
+    State(state): State<AppState>,
+    Extension(current_user): Extension<User>,
+    Extension(permissions): Extension<UserPermissions>,
+    Path(user_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
-    // TODO: Check user.delete permission or admin role
-    // TODO: Verify target user exists
-    // TODO: Prevent deletion of own account
-    // TODO: Prevent deletion of last admin user
-    // TODO: Handle cascade deletion of user data:
-    //       - User sessions
-    //       - Watch status/progress
-    //       - User preferences
-    //       - Role assignments
-    //       - Device registrations
-    // TODO: Use UserService.delete_user for atomic deletion
-    // TODO: Log user deletion activity
-    // TODO: Return 204 No Content on success
+    require_permission(&permissions, &[rbac::permissions::USERS_DELETE])?;
+
+    if current_user.id == user_id {
+        return Err(AppError::bad_request(
+            "Administrators cannot delete their own account",
+        ));
+    }
+
+    let service = UserService::new(&state);
+    service.delete_user(user_id, current_user.id).await?;
+
+    info!(
+        target: "user.admin",
+        user_id = %user_id,
+        actor = %current_user.id,
+        action = "delete"
+    );
 
     Ok(StatusCode::NO_CONTENT)
 }
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/// Convert a User entity to UserResponse format
-///
-/// This helper function enriches the base User entity with additional
-/// information like roles and session counts for API responses.
-async fn _user_to_response(_state: &AppState, _user: User) -> AppResult<UserResponse> {
-    // TODO: Get user roles from database
-    // TODO: Get active session count
-    // TODO: Convert timestamps to Unix timestamps
-    // TODO: Build and return UserResponse
-
-    Ok(UserResponse {
-        id: _user.id,
-        username: _user.username,
-        display_name: _user.display_name,
-        email: _user.email,
-        avatar_url: _user.avatar_url,
-        created_at: _user.created_at.timestamp(),
-        updated_at: _user.updated_at.timestamp(),
-        last_login: _user.last_login.map(|dt| dt.timestamp()),
-        is_active: _user.is_active,
-        roles: vec![],    // TODO: Fetch from database
-        session_count: 0, // TODO: Fetch from database
-    })
+fn user_record_to_response(record: UserAdminRecord) -> UserResponse {
+    UserResponse {
+        id: record.user.id,
+        username: record.user.username.clone(),
+        display_name: record.user.display_name.clone(),
+        email: record.user.email.clone(),
+        avatar_url: record.user.avatar_url.clone(),
+        created_at: record.user.created_at.timestamp(),
+        updated_at: record.user.updated_at.timestamp(),
+        last_login: record.user.last_login.map(|dt| dt.timestamp()),
+        is_active: record.user.is_active,
+        roles: record.roles.into_iter().map(|role| role.name).collect(),
+        session_count: record.session_count,
+    }
 }
 
-/// Validate that the current user has permission to perform user management operations
-///
-/// This helper checks for specific permissions or admin role membership.
-async fn _check_user_management_permission(
-    _state: &AppState,
-    _user: &User,
-    _permission: &str,
-) -> AppResult<bool> {
-    // TODO: Check for specific permission (e.g., "user.list", "user.create", etc.)
-    // TODO: Check for admin role as fallback
-    // TODO: Return true if user has permission, false otherwise
-
-    Ok(false) // Placeholder
-}
-
-/// Apply search filters to user list
-///
-/// Filters users by username and display name using case-insensitive search.
-fn _apply_search_filter(users: &mut Vec<User>, search: &str) {
-    let search_lower = search.to_lowercase();
-    users.retain(|user| {
-        user.username.to_lowercase().contains(&search_lower)
-            || user.display_name.to_lowercase().contains(&search_lower)
-    });
-}
-
-/// Apply pagination to user list
-///
-/// Applies offset and limit to the user list for pagination.
-fn _apply_pagination<T>(items: Vec<T>, offset: Option<i64>, limit: Option<i64>) -> Vec<T> {
-    let offset = offset.unwrap_or(0).max(0) as usize;
-    let limit = limit.unwrap_or(50).max(1).min(1000) as usize;
-
-    items.into_iter().skip(offset).take(limit).collect()
+fn require_permission(perms: &UserPermissions, required: &[&str]) -> AppResult<()> {
+    if perms.has_role("admin") || perms.has_all_permissions(required) {
+        Ok(())
+    } else {
+        Err(AppError::forbidden("Insufficient permissions"))
+    }
 }

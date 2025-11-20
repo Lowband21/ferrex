@@ -1,14 +1,27 @@
-use crate::database::{
-    PostgresDatabase,
-    ports::processing_status::ProcessingStatusRepository as ProcessingStatusRepositoryTrait,
-    traits::MediaProcessingStatus,
+use std::fmt;
+
+use crate::{
+    database::{
+        PostgresDatabase,
+        ports::processing_status::ProcessingStatusRepository as ProcessingStatusRepositoryTrait,
+        traits::MediaProcessingStatus,
+    },
+    error::Result,
+    types::{LibraryID, MediaFile},
 };
 
-use crate::{LibraryID, MediaFile, Result};
 use uuid::Uuid;
 
 pub struct ProcessingStatusRepository<'a> {
     db: &'a PostgresDatabase,
+}
+
+impl<'a> fmt::Debug for ProcessingStatusRepository<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProcessingStatusRepository")
+            .field("db", &"PostgresDatabase")
+            .finish()
+    }
 }
 
 impl<'a> ProcessingStatusRepository<'a> {

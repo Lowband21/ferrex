@@ -25,7 +25,9 @@ use crate::domains::ui::scroll_manager::ScrollPositionManager;
 use crate::domains::ui::types::{DisplayMode, ViewState};
 use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
 use crate::infrastructure::repository::{EpisodeYoke, MovieYoke, SeasonYoke, SeriesYoke};
-use ferrex_core::{LibraryID, SortBy, SortOrder, UiGenre};
+use ferrex_core::player_prelude::{
+    LibraryID, SortBy, SortOrder, UiDecade, UiGenre, UiResolution, UiWatchStatus,
+};
 use iced::Task;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -80,9 +82,9 @@ pub struct UIDomainState {
     // Filter panel state (enum-based)
     pub show_filter_panel: bool,
     pub selected_genres: Vec<UiGenre>,
-    pub selected_decade: Option<ferrex_core::UiDecade>,
-    pub selected_resolution: ferrex_core::UiResolution,
-    pub selected_watch_status: ferrex_core::UiWatchStatus,
+    pub selected_decade: Option<UiDecade>,
+    pub selected_resolution: UiResolution,
+    pub selected_watch_status: UiWatchStatus,
 
     // Carousel states
     pub show_seasons_carousel: Option<CarouselState>,
@@ -119,7 +121,7 @@ impl UIDomain {
     }
 
     /// Update function - delegates to existing update_ui logic
-    pub fn update(&mut self, message: UIMessage) -> Task<DomainMessage> {
+    pub fn update(&mut self, _message: UIMessage) -> Task<DomainMessage> {
         // This will call the existing update_ui function
         // For now, we return Task::none() to make it compile
         Task::none()

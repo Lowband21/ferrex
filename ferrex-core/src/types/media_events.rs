@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use uuid::Uuid;
 
 use super::{
@@ -17,9 +18,7 @@ pub struct ScanStageLatencySummary {
     pub index: u64,
 }
 
-#[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
-)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct ScanProgressEvent {
     pub version: String,
@@ -42,6 +41,26 @@ pub struct ScanProgressEvent {
     pub retrying_items: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dead_lettered_items: Option<u64>,
+}
+
+impl fmt::Debug for ScanProgressEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ScanProgressEvent")
+            .field("scan_id", &self.scan_id)
+            .field("library_id", &self.library_id)
+            .field("status", &self.status)
+            .field("completed_items", &self.completed_items)
+            .field("total_items", &self.total_items)
+            .field("sequence", &self.sequence)
+            .field("current_path", &self.current_path)
+            .field("retrying_items", &self.retrying_items)
+            .field("dead_lettered_items", &self.dead_lettered_items)
+            .field("correlation_id", &self.correlation_id)
+            .field("idempotency_key", &self.idempotency_key)
+            .field("p95_stage_latencies_ms", &self.p95_stage_latencies_ms)
+            .field("emitted_at", &self.emitted_at)
+            .finish()
+    }
 }
 
 #[derive(

@@ -1,10 +1,12 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::types::library::LibraryType;
 use crate::{
-    EpisodeID, EpisodeReference, LibraryID, Media, MovieID, MovieReference, Result, SeasonID,
-    SeasonReference, SeriesID, SeriesReference,
+    error::Result,
+    types::{
+        EpisodeID, EpisodeReference, LibraryID, Media, MovieID, MovieReference, SeasonID,
+        SeasonReference, SeriesID, SeriesReference, library::LibraryType,
+    },
 };
 
 /// Repository port for media references in the catalog context.

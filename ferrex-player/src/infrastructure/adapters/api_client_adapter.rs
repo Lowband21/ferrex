@@ -15,21 +15,16 @@ use crate::infrastructure::ApiClient;
 use crate::infrastructure::api_client::SetupStatus;
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::api::ApiService;
-use ferrex_core::api_routes::utils::replace_param;
-use ferrex_core::api_routes::v1;
-use ferrex_core::api_scan::ScanConfig;
-use ferrex_core::auth::device::AuthenticatedDevice;
-use ferrex_core::query::filtering::hash_filter_spec;
-use ferrex_core::types::library::Library;
-use ferrex_core::user::{AuthToken, User};
-use ferrex_core::watch_status::{UpdateProgressRequest, UserWatchState};
-use ferrex_core::{
-    FilterIndicesRequest, IndicesResponse, LibraryID, Media, MediaIDLike, SortBy, SortOrder,
-    api_types::{
-        ActiveScansResponse, CreateLibraryRequest, LatestProgressResponse,
-        ScanCommandAcceptedResponse, ScanCommandRequest, StartScanRequest, UpdateLibraryRequest,
-    },
+use ferrex_core::api_routes::{utils::replace_param, v1};
+use ferrex_core::api_types::setup::{ConfirmClaimResponse, StartClaimResponse};
+use ferrex_core::player_prelude::{
+    ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
+    FilterIndicesRequest, IndicesResponse, LatestProgressResponse, Library, LibraryID,
+    LibraryMediaResponse, Media, MediaID, MediaQuery, MediaWithStatus, ScanCommandAcceptedResponse,
+    ScanCommandRequest, ScanConfig, ScanMetrics, SortBy, SortOrder, StartScanRequest,
+    UpdateLibraryRequest, UpdateProgressRequest, User, UserWatchState,
 };
+use ferrex_core::player_prelude::{MediaIDLike, hash_filter_spec};
 use parking_lot::RwLock;
 
 const FILTER_INDICES_CACHE_TTL: Duration = Duration::from_secs(30);
@@ -61,7 +56,7 @@ impl ApiClientAdapter {
             total: usize,
             offset: usize,
             limit: usize,
-            ids: Vec<ferrex_core::MediaID>,
+            ids: Vec<MediaID>,
         }
 
         let mut all_ids: Vec<Uuid> = Vec::new();
@@ -89,7 +84,7 @@ impl ApiClientAdapter {
             // Map MediaID to raw UUIDs (movies-only for now)
             for mid in resp.ids {
                 match mid {
-                    ferrex_core::MediaID::Movie(m) => all_ids.push(m.to_uuid()),
+                    MediaID::Movie(m) => all_ids.push(m.to_uuid()),
                     // Ignore non-movie entries for now
                     _ => {}
                 }
@@ -135,8 +130,8 @@ impl ApiClientAdapter {
             SortBy::Resolution => "resolution",
         };
         let order_str = match order {
-            ferrex_core::query::types::SortOrder::Ascending => "asc",
-            ferrex_core::query::types::SortOrder::Descending => "desc",
+            SortOrder::Ascending => "asc",
+            SortOrder::Descending => "desc",
         };
         let url = format!("{}?sort={}&order={}", path, sort_str, order_str);
         let aligned = self
@@ -168,7 +163,7 @@ impl ApiClientAdapter {
             "{id}",
             library_id.to_string(),
         );
-        let url = self.client.build_url(&path, false);
+        let url = self.client.build_url(&path);
         let req = self.client.client.post(&url).json(spec);
         let req = self.client.build_request(req).await;
         let bytes = self
@@ -246,13 +241,12 @@ impl ApiService for ApiClientAdapter {
     }
 
     async fn fetch_library_media(&self, library_id: Uuid) -> RepositoryResult<Vec<Media>> {
-        use ferrex_core::LibraryMediaResponse;
-
         // Build URL for the library media endpoint
-        let url = self.client.build_url(
-            replace_param(v1::libraries::MEDIA, "{id}", library_id.to_string()),
-            false,
-        );
+        let url = self.client.build_url(replace_param(
+            v1::libraries::MEDIA,
+            "{id}",
+            library_id.to_string(),
+        ));
         log::info!("Fetching library media from {}", url);
         let request = self.client.client.get(&url);
         let request = self.client.build_request(request).await;
@@ -315,10 +309,7 @@ impl ApiService for ApiClientAdapter {
             .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
     }
 
-    async fn query_media(
-        &self,
-        query: ferrex_core::query::MediaQuery,
-    ) -> RepositoryResult<Vec<ferrex_core::query::MediaWithStatus>> {
+    async fn query_media(&self, query: MediaQuery) -> RepositoryResult<Vec<MediaWithStatus>> {
         self.client
             .query_media(query)
             .await
@@ -337,10 +328,11 @@ impl ApiService for ApiClientAdapter {
         password: String,
         display_name: Option<String>,
         setup_token: Option<String>,
+        claim_token: Option<String>,
     ) -> RepositoryResult<(User, AuthToken)> {
         let token = self
             .client
-            .create_initial_admin(username, password, display_name, setup_token)
+            .create_initial_admin(username, password, display_name, setup_token, claim_token)
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
 
@@ -353,6 +345,26 @@ impl ApiService for ApiClientAdapter {
         Ok((user, token))
     }
 
+    async fn start_setup_claim(
+        &self,
+        device_name: Option<String>,
+    ) -> RepositoryResult<StartClaimResponse> {
+        self.client
+            .start_setup_claim(device_name)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn confirm_setup_claim(
+        &self,
+        claim_code: String,
+    ) -> RepositoryResult<ConfirmClaimResponse> {
+        self.client
+            .confirm_setup_claim(&claim_code)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
     async fn get_public<T: for<'de> Deserialize<'de>>(&self, path: &str) -> RepositoryResult<T> {
         self.client
             .get_public(path)
@@ -361,7 +373,7 @@ impl ApiService for ApiClientAdapter {
     }
 
     fn build_url(&self, path: &str) -> String {
-        self.client.build_url(path, false)
+        self.client.build_url(path)
     }
 
     fn base_url(&self) -> &str {
@@ -473,7 +485,7 @@ impl ApiService for ApiClientAdapter {
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
     }
 
-    async fn fetch_scan_metrics(&self) -> RepositoryResult<ferrex_core::api_scan::ScanMetrics> {
+    async fn fetch_scan_metrics(&self) -> RepositoryResult<ScanMetrics> {
         self.client
             .get(v1::scan::METRICS)
             .await
@@ -481,7 +493,7 @@ impl ApiService for ApiClientAdapter {
     }
 
     async fn fetch_scan_config(&self) -> RepositoryResult<ScanConfig> {
-        let wrapped: ferrex_core::api_scan::ScanConfig = self
+        let wrapped: ScanConfig = self
             .client
             .get(v1::scan::CONFIG)
             .await

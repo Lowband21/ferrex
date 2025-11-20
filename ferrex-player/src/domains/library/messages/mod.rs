@@ -3,10 +3,9 @@ pub mod scan_subscription;
 pub mod subscriptions;
 
 use crate::infrastructure::api_types::{Library, Media, MediaID};
-use ferrex_core::api_scan::{ScanConfig, ScanMetrics};
-use ferrex_core::{
-    LibraryID, MediaFile, MediaIDLike,
-    api_types::{LibraryMediaResponse, ScanProgressEvent, ScanSnapshotDto},
+use ferrex_core::player_prelude::{
+    LibraryID, LibraryMediaResponse, MediaFile, MediaIDLike, ScanConfig, ScanMetrics,
+    ScanProgressEvent, ScanSnapshotDto,
 };
 use rkyv::util::AlignedVec;
 use uuid::Uuid;

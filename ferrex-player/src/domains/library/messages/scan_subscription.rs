@@ -1,6 +1,6 @@
 use super::Message;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use ferrex_core::api_types::ScanProgressEvent;
+use ferrex_core::player_prelude::ScanProgressEvent;
 use iced::Subscription;
 use rkyv::{from_bytes, rancor::Error as RkyvError};
 use tokio::sync::mpsc;
@@ -237,8 +237,7 @@ mod tests {
     use super::*;
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
     use chrono::Utc;
-    use ferrex_core::LibraryID;
-    use ferrex_core::api_types::ScanStageLatencySummary;
+    use ferrex_core::player_prelude::{LibraryID, ScanStageLatencySummary};
     use rkyv::rancor::Error as RkyvError;
     use rkyv::to_bytes;
 

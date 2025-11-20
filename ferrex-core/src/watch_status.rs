@@ -36,7 +36,7 @@
 //! watch_state.update_progress(request.media_id, request.position, request.duration);
 //! ```
 
-use crate::MediaType;
+use crate::types::util_types::MediaType;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     collections::{HashMap, HashSet},
@@ -88,7 +88,7 @@ impl<'de> Deserialize<'de> for UserWatchState {
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize)]
+        #[derive(Debug, Deserialize)]
         struct UserWatchStateHelper {
             in_progress: Vec<InProgressItem>,
             completed: Vec<Uuid>,

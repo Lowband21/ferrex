@@ -1,7 +1,6 @@
-#![feature(type_alias_impl_trait)]
 use ferrex_player::*;
 
-use env_logger::{Builder, Env, Target};
+use env_logger::{Builder, Target};
 use iced::{Font, Task, Theme};
 use iced_aw::ICED_AW_FONT_BYTES;
 use log::LevelFilter;
@@ -171,23 +170,32 @@ fn main() -> iced::Result {
             },
         );
 
-        let mut tasks = vec![auth_task];
-
         #[cfg(feature = "demo")]
-        if demo_mode {
-            let auth_service = state.domains.auth.state.auth_service.clone();
-            let (username, password) = demo_credentials.clone();
-            log::info!("[Demo] Attempting automatic demo login as {}", username);
-            tasks.push(Task::perform(
-                async move {
-                    auth_service
-                        .authenticate_device(username, password, true)
-                        .await
-                        .map_err(|err| err.to_string())
-                },
-                |result| DomainMessage::Auth(domains::auth::messages::Message::AuthResult(result)),
-            ));
-        }
+        let tasks = {
+            let mut tasks = vec![auth_task];
+
+            if demo_mode {
+                let auth_service = state.domains.auth.state.auth_service.clone();
+                let (username, password) = demo_credentials.clone();
+                log::info!("[Demo] Attempting automatic demo login as {}", username);
+                tasks.push(Task::perform(
+                    async move {
+                        auth_service
+                            .authenticate_device(username, password, true)
+                            .await
+                            .map_err(|err| err.to_string())
+                    },
+                    |result| {
+                        DomainMessage::Auth(domains::auth::messages::Message::AuthResult(result))
+                    },
+                ));
+            }
+
+            tasks
+        };
+
+        #[cfg(not(feature = "demo"))]
+        let tasks = vec![auth_task];
 
         // Note: Library loading will happen after authentication
         (state, Task::batch(tasks))

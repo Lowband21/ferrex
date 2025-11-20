@@ -1,10 +1,8 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::{
-    Result,
-    rbac::{Permission, Role, UserPermissions},
-};
+use crate::error::Result;
+use crate::rbac::{Permission, PermissionCategory, Role, UserPermissions};
 
 #[async_trait]
 pub trait RbacRepository: Send + Sync {
@@ -31,4 +29,21 @@ pub trait RbacRepository: Send + Sync {
     async fn get_admin_count(&self, exclude_user_id: Option<Uuid>) -> Result<usize>;
     async fn user_has_role(&self, user_id: Uuid, role_name: &str) -> Result<bool>;
     async fn get_users_with_role(&self, role_name: &str) -> Result<Vec<Uuid>>;
+
+    async fn upsert_role(
+        &self,
+        role_id: Uuid,
+        name: &str,
+        description: &str,
+        is_system: bool,
+    ) -> Result<()>;
+
+    async fn upsert_permission(
+        &self,
+        name: &str,
+        category: PermissionCategory,
+        description: &str,
+    ) -> Result<Uuid>;
+
+    async fn assign_permission_to_role(&self, role_id: Uuid, permission_id: Uuid) -> Result<()>;
 }

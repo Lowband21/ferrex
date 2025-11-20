@@ -1,5 +1,9 @@
 //! Macros for generating virtual grid views
 
+use ferrex_core::player_prelude::{
+    ArchivedEpisodeReference, ArchivedMovieReference, ArchivedSeasonReference,
+    ArchivedSeriesReference, EpisodeReference, MovieReference, SeasonReference, SeriesReference,
+};
 /// Macro to generate virtual grid views for different reference types
 /// This eliminates code duplication between movie and series grids
 use iced::Color;
@@ -275,51 +279,51 @@ pub trait ThemeColorAccess {
     fn theme_color(&self) -> Option<&str>;
 }
 
-// Theme color access for ferrex_core types
-impl ThemeColorAccess for ferrex_core::MovieReference {
+// Theme color access for media references
+impl ThemeColorAccess for MovieReference {
     fn theme_color(&self) -> Option<&str> {
         self.theme_color.as_deref()
     }
 }
 
-impl ThemeColorAccess for ferrex_core::SeriesReference {
+impl ThemeColorAccess for SeriesReference {
     fn theme_color(&self) -> Option<&str> {
         self.theme_color.as_deref()
     }
 }
 
-impl ThemeColorAccess for ferrex_core::SeasonReference {
+impl ThemeColorAccess for SeasonReference {
     fn theme_color(&self) -> Option<&str> {
         self.theme_color.as_deref()
     }
 }
 
-impl ThemeColorAccess for ferrex_core::EpisodeReference {
+impl ThemeColorAccess for EpisodeReference {
     fn theme_color(&self) -> Option<&str> {
         None
     }
 }
 
-// Archived ferrex_core types (yoked)
-impl ThemeColorAccess for ferrex_core::ArchivedMovieReference {
+// Archived references (yoked)
+impl ThemeColorAccess for ArchivedMovieReference {
     fn theme_color(&self) -> Option<&str> {
         self.theme_color.as_deref()
     }
 }
 
-impl ThemeColorAccess for ferrex_core::ArchivedSeriesReference {
+impl ThemeColorAccess for ArchivedSeriesReference {
     fn theme_color(&self) -> Option<&str> {
         self.theme_color.as_deref()
     }
 }
 
-impl ThemeColorAccess for ferrex_core::ArchivedSeasonReference {
+impl ThemeColorAccess for ArchivedSeasonReference {
     fn theme_color(&self) -> Option<&str> {
         self.theme_color.as_deref()
     }
 }
 
-impl ThemeColorAccess for ferrex_core::ArchivedEpisodeReference {
+impl ThemeColorAccess for ArchivedEpisodeReference {
     fn theme_color(&self) -> Option<&str> {
         None
     }
@@ -403,15 +407,15 @@ macro_rules! media_card {
 
             // Determine image size based on card size
             let image_size = match card_size {
-                CardSize::Small => ferrex_core::ImageSize::Thumbnail,
-                CardSize::Medium => ferrex_core::ImageSize::Poster,
-                CardSize::Large => ferrex_core::ImageSize::Full,
-                CardSize::Wide => ferrex_core::ImageSize::Backdrop,
-                CardSize::Custom(_, _) => ferrex_core::ImageSize::Poster,
+                CardSize::Small => ferrex_core::player_prelude::ImageSize::Thumbnail,
+                CardSize::Medium => ferrex_core::player_prelude::ImageSize::Poster,
+                CardSize::Large => ferrex_core::player_prelude::ImageSize::Full,
+                CardSize::Wide => ferrex_core::player_prelude::ImageSize::Backdrop,
+                CardSize::Custom(_, _) => ferrex_core::player_prelude::ImageSize::Poster,
             };
 
             //// Map priority if provided
-            let priority = ferrex_core::Priority::Preload;
+            let priority = ferrex_core::player_prelude::Priority::Preload;
             $(let priority = $priority;)?
 
             // Create the image widget

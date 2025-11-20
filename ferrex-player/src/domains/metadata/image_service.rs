@@ -1,5 +1,5 @@
 use dashmap::DashMap;
-use ferrex_core::ImageRequest;
+use ferrex_core::player_prelude::ImageRequest;
 use iced::widget::image::Handle;
 use priority_queue::PriorityQueue;
 use std::sync::{Arc, Mutex};

@@ -8,7 +8,7 @@ pub mod update;
 use self::messages::Message as UserManagementMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
-use ferrex_core::rbac::UserPermissions;
+use ferrex_core::player_prelude::UserPermissions;
 use iced::Task;
 
 /// User management domain state
@@ -53,7 +53,7 @@ impl UserManagementDomain {
     }
 
     /// Update function - delegates to existing update_user_management logic
-    pub fn update(&mut self, message: UserManagementMessage) -> Task<DomainMessage> {
+    pub fn update(&mut self, _message: UserManagementMessage) -> Task<DomainMessage> {
         // This will call the existing update_user_management function
         Task::none()
     }

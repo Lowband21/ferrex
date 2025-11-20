@@ -1,13 +1,13 @@
 //! Search service for executing searches against MediaStore and server
 
-use ferrex_core::LibraryID;
+use ferrex_core::player_prelude::{
+    LibraryID, MediaDetailsOption, MediaQueryBuilder, MediaWithStatus, SearchField, TmdbDetails,
+};
 use std::sync::Arc;
 
 //use crate::domains::media::store::{MediaStore, MediaStoreQuerying};
 use crate::infrastructure::api_types::{Media, MovieReference, SeriesReference};
 use crate::infrastructure::services::api::ApiService;
-use ferrex_core::query::MediaQueryBuilder;
-use ferrex_core::query::types::SearchField;
 
 use super::metrics::SearchPerformanceMetrics;
 use super::types::{SearchResult, SearchStrategy};
@@ -166,8 +166,8 @@ impl SearchService {
                         .get_release_year()
                         .map(|year| format!("{} • Movie", year)),
                     year: match &movie.details {
-                        ferrex_core::MediaDetailsOption::Details(
-                            ferrex_core::TmdbDetails::Movie(details),
+                        MediaDetailsOption::Details(
+                            TmdbDetails::Movie(details),
                         ) => details.release_date.as_ref().and_then(|d| {
                             chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
                                 .ok()
@@ -176,8 +176,8 @@ impl SearchService {
                         _ => None,
                     },
                     poster_url: match &movie.details {
-                        ferrex_core::MediaDetailsOption::Details(
-                            ferrex_core::TmdbDetails::Movie(details),
+                        MediaDetailsOption::Details(
+                            TmdbDetails::Movie(details),
                         ) => details.poster_path.clone(),
                         _ => None,
                     },
@@ -203,8 +203,8 @@ impl SearchService {
                     media_ref: Media::Series(series.clone()),
                     title: series.title.as_str().to_string(),
                     subtitle: match &series.details {
-                        ferrex_core::MediaDetailsOption::Details(
-                            ferrex_core::TmdbDetails::Series(details),
+                        MediaDetailsOption::Details(
+                            TmdbDetails::Series(details),
                         ) => details.first_air_date.as_ref().and_then(|d| {
                             chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
                                 .ok()
@@ -213,8 +213,8 @@ impl SearchService {
                         _ => Some("Series".to_string()),
                     },
                     year: match &series.details {
-                        ferrex_core::MediaDetailsOption::Details(
-                            ferrex_core::TmdbDetails::Series(details),
+                        MediaDetailsOption::Details(
+                            TmdbDetails::Series(details),
                         ) => details.first_air_date.as_ref().and_then(|d| {
                             chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
                                 .ok()
@@ -223,8 +223,8 @@ impl SearchService {
                         _ => None,
                     },
                     poster_url: match &series.details {
-                        ferrex_core::MediaDetailsOption::Details(
-                            ferrex_core::TmdbDetails::Series(details),
+                        MediaDetailsOption::Details(
+                            TmdbDetails::Series(details),
                         ) => details.poster_path.clone(),
                         _ => None,
                     },
@@ -376,9 +376,7 @@ impl SearchService {
 
         // Check overview
         if (check_all || fields.contains(&SearchField::Overview))
-            && let ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Movie(
-                details,
-            )) = &movie.details
+            && let MediaDetailsOption::Details(TmdbDetails::Movie(details)) = &movie.details
             && let Some(overview) = &details.overview
             && let Some(score) = self.calculate_match_score(overview, query, fuzzy)
         {
@@ -387,9 +385,7 @@ impl SearchService {
 
         // Check genres
         if (check_all || fields.contains(&SearchField::Genre))
-            && let ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Movie(
-                details,
-            )) = &movie.details
+            && let MediaDetailsOption::Details(TmdbDetails::Movie(details)) = &movie.details
         {
             for genre in &details.genres {
                 if let Some(score) = self.calculate_match_score(&genre.name, query, fuzzy) {
@@ -433,9 +429,7 @@ impl SearchService {
 
         // Check overview
         if (check_all || fields.contains(&SearchField::Overview))
-            && let ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Series(
-                details,
-            )) = &series.details
+            && let MediaDetailsOption::Details(TmdbDetails::Series(details)) = &series.details
             && let Some(overview) = &details.overview
             && let Some(score) = self.calculate_match_score(overview, query, fuzzy)
         {
@@ -444,9 +438,7 @@ impl SearchService {
 
         // Check genres
         if (check_all || fields.contains(&SearchField::Genre))
-            && let ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Series(
-                details,
-            )) = &series.details
+            && let MediaDetailsOption::Details(TmdbDetails::Series(details)) = &series.details
         {
             for genre in &details.genres {
                 if let Some(score) = self.calculate_match_score(&genre.name, query, fuzzy) {
@@ -547,7 +539,7 @@ impl SearchService {
     )]
     fn convert_api_results_from_status(
         &self,
-        response: Vec<ferrex_core::query::MediaWithStatus>,
+        response: Vec<MediaWithStatus>,
         query: &str,
     ) -> Vec<SearchResult> {
         response
@@ -576,29 +568,29 @@ impl SearchService {
             Media::Movie(movie) => SearchResult {
                 title: movie.title.as_str().to_string(),
                 subtitle: match &movie.details {
-                    ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Movie(
-                        details,
-                    )) => details.release_date.as_ref().and_then(|d| {
-                        chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-                            .ok()
-                            .map(|date| format!("{} • Movie", date.year()))
-                    }),
+                    MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
+                        details.release_date.as_ref().and_then(|d| {
+                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                                .ok()
+                                .map(|date| format!("{} • Movie", date.year()))
+                        })
+                    }
                     _ => Some("Movie".to_string()),
                 },
                 year: match &movie.details {
-                    ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Movie(
-                        details,
-                    )) => details.release_date.as_ref().and_then(|d| {
-                        chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-                            .ok()
-                            .map(|date| date.year())
-                    }),
+                    MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
+                        details.release_date.as_ref().and_then(|d| {
+                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                                .ok()
+                                .map(|date| date.year())
+                        })
+                    }
                     _ => None,
                 },
                 poster_url: match &movie.details {
-                    ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Movie(
-                        details,
-                    )) => details.poster_path.clone(),
+                    MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
+                        details.poster_path.clone()
+                    }
                     _ => None,
                 },
                 match_score: 1.0, // Server results assumed to be relevant
@@ -609,29 +601,29 @@ impl SearchService {
             Media::Series(series) => SearchResult {
                 title: series.title.as_str().to_string(),
                 subtitle: match &series.details {
-                    ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Series(
-                        details,
-                    )) => details.first_air_date.as_ref().and_then(|d| {
-                        chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-                            .ok()
-                            .map(|date| format!("{} • Series", date.year()))
-                    }),
+                    MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
+                        details.first_air_date.as_ref().and_then(|d| {
+                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                                .ok()
+                                .map(|date| format!("{} • Series", date.year()))
+                        })
+                    }
                     _ => Some("Series".to_string()),
                 },
                 year: match &series.details {
-                    ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Series(
-                        details,
-                    )) => details.first_air_date.as_ref().and_then(|d| {
-                        chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-                            .ok()
-                            .map(|date| date.year())
-                    }),
+                    MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
+                        details.first_air_date.as_ref().and_then(|d| {
+                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                                .ok()
+                                .map(|date| date.year())
+                        })
+                    }
                     _ => None,
                 },
                 poster_url: match &series.details {
-                    ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Series(
-                        details,
-                    )) => details.poster_path.clone(),
+                    MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
+                        details.poster_path.clone()
+                    }
                     _ => None,
                 },
                 match_score: 1.0,
@@ -644,9 +636,9 @@ impl SearchService {
                 subtitle: Some("Series • Season".to_string()),
                 year: None,
                 poster_url: match &season.details {
-                    ferrex_core::MediaDetailsOption::Details(ferrex_core::TmdbDetails::Season(
-                        details,
-                    )) => details.poster_path.clone(),
+                    MediaDetailsOption::Details(TmdbDetails::Season(details)) => {
+                        details.poster_path.clone()
+                    }
                     _ => None,
                 },
                 match_score: 0.8,
@@ -656,9 +648,9 @@ impl SearchService {
             },
             Media::Episode(episode) => SearchResult {
                 title: match &episode.details {
-                    ferrex_core::MediaDetailsOption::Details(
-                        ferrex_core::TmdbDetails::Episode(details),
-                    ) => details.name.clone(),
+                    MediaDetailsOption::Details(TmdbDetails::Episode(details)) => {
+                        details.name.clone()
+                    }
                     _ => format!("Episode {}", episode.episode_number.value()),
                 },
                 subtitle: Some(format!(
@@ -669,9 +661,9 @@ impl SearchService {
                 )),
                 year: None,
                 poster_url: match &episode.details {
-                    ferrex_core::MediaDetailsOption::Details(
-                        ferrex_core::TmdbDetails::Episode(details),
-                    ) => details.still_path.clone(),
+                    MediaDetailsOption::Details(TmdbDetails::Episode(details)) => {
+                        details.still_path.clone()
+                    }
                     _ => None,
                 },
                 match_score: 0.7,
