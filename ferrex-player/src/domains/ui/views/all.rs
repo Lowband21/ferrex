@@ -5,7 +5,7 @@ use crate::domains::ui::views::grid::{
 use crate::domains::ui::{
     messages::Message, views::carousel::windowed_media_carousel,
 };
-use crate::infrastructure::LibraryType;
+use crate::infra::LibraryType;
 use crate::state::State;
 use ferrex_core::player_prelude::{MovieID, SeriesID};
 use iced::{
@@ -28,9 +28,7 @@ pub fn view_all_content<'a>(state: &'a State) -> Element<'a, Message> {
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    profiling::scope!(
-        crate::infrastructure::profiling_scopes::scopes::VIEW_RENDER
-    );
+    profiling::scope!(crate::infra::profiling_scopes::scopes::VIEW_RENDER);
 
     let watch_state_opt = state.domains.media.state.get_watch_state();
 

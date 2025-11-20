@@ -1,26 +1,12 @@
-use crate::{
-    error::Result,
-    image::MediaImageKind,
-    query::types::{MediaQuery, MediaWithStatus},
-    rbac::{Permission, Role, UserPermissions},
-    sync_session::{Participant, PlaybackState, SyncSession},
-    types::{
-        details::LibraryReference,
-        files::{MediaFile, MediaFileMetadata},
-        ids::LibraryID,
-        library::Library,
-    },
-    user::User,
-    watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
-};
-use async_trait::async_trait;
+use crate::domain::media::image::MediaImageKind;
+use crate::types::ids::LibraryID;
 use chrono::{DateTime, Utc};
+#[cfg(feature = "rkyv")]
 use rkyv::{
     Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use uuid::Uuid;
 
 // Scan state types
@@ -154,15 +140,8 @@ pub struct EpisodeInfo {
     pub media_file_id: Option<Uuid>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Archive,
-    RkyvSerialize,
-    RkyvDeserialize,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "rkyv", derive(Archive, RkyvSerialize, RkyvDeserialize))]
 pub struct ImageRecord {
     pub id: Uuid,
     pub tmdb_path: String,
@@ -171,19 +150,15 @@ pub struct ImageRecord {
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub format: Option<String>,
-    #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
+    #[cfg_attr(
+        feature = "rkyv",
+        rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)
+    )]
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Archive,
-    RkyvSerialize,
-    RkyvDeserialize,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "rkyv", derive(Archive, RkyvSerialize, RkyvDeserialize))]
 pub struct ImageVariant {
     pub id: Uuid,
     pub image_id: Uuid,
@@ -192,9 +167,15 @@ pub struct ImageVariant {
     pub file_size: i32,
     pub width: Option<i32>,
     pub height: Option<i32>,
-    #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
+    #[cfg_attr(
+        feature = "rkyv",
+        rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)
+    )]
     pub created_at: chrono::DateTime<chrono::Utc>,
-    #[rkyv(with = crate::rkyv_wrappers::OptionDateTime)]
+    #[cfg_attr(
+        feature = "rkyv",
+        rkyv(with = crate::rkyv_wrappers::OptionDateTime)
+    )]
     pub downloaded_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -208,15 +189,8 @@ pub struct MediaImage {
     pub is_primary: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Archive,
-    RkyvSerialize,
-    RkyvDeserialize,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "rkyv", derive(Archive, RkyvSerialize, RkyvDeserialize))]
 pub struct ImageLookupParams {
     pub media_type: String,
     pub media_id: String,
@@ -310,314 +284,4 @@ pub struct FolderScanFilters {
     pub priority: Option<ScanPriority>,
     pub max_batch_size: Option<i32>,
     pub error_retry_threshold: Option<i32>,
-}
-
-#[async_trait]
-pub trait MediaDatabaseTrait: Send + Sync {
-    /// Get self as Any for downcasting
-    fn as_any(&self) -> &dyn std::any::Any;
-
-    async fn initialize_schema(&self) -> Result<()>;
-
-    // Generic store media? Shouldn't we store the media file with the associated library?
-    async fn store_media(&self, media_file: MediaFile) -> Result<Uuid>;
-    async fn store_media_batch(
-        &self,
-        media_files: Vec<MediaFile>,
-    ) -> Result<Vec<Uuid>>;
-    async fn get_media(&self, id: &Uuid) -> Result<Option<MediaFile>>;
-    async fn get_media_by_path(&self, path: &str) -> Result<Option<MediaFile>>;
-    async fn list_media(&self, filters: MediaFilters)
-    -> Result<Vec<MediaFile>>;
-    async fn get_stats(&self) -> Result<MediaStats>;
-    async fn file_exists(&self, path: &str) -> Result<bool>;
-    async fn delete_media(&self, id: &str) -> Result<()>;
-    async fn get_all_media(&self) -> Result<Vec<MediaFile>>;
-
-    async fn store_external_metadata(
-        &self,
-        media_id: &str,
-        metadata: &MediaFileMetadata,
-    ) -> Result<()>;
-    async fn store_tv_show(&self, show_info: &TvShowInfo) -> Result<String>;
-    async fn get_tv_show(&self, tmdb_id: &str) -> Result<Option<TvShowInfo>>;
-    async fn link_episode_to_file(
-        &self,
-        media_file_id: &str,
-        show_tmdb_id: &str,
-        season: i32,
-        episode: i32,
-    ) -> Result<()>;
-
-    // Library management methods
-    async fn create_library(&self, library: Library) -> Result<String>;
-    async fn get_library(&self, id: &LibraryID) -> Result<Option<Library>>;
-    async fn list_libraries(&self) -> Result<Vec<Library>>;
-    async fn update_library(&self, id: &str, library: Library) -> Result<()>;
-    async fn delete_library(&self, id: &str) -> Result<()>;
-    async fn update_library_last_scan(&self, id: &LibraryID) -> Result<()>;
-
-    // Library management
-    async fn list_library_references(&self) -> Result<Vec<LibraryReference>>;
-    async fn get_library_reference(&self, id: Uuid)
-    -> Result<LibraryReference>;
-
-    // Scan state management
-    async fn create_scan_state(&self, scan_state: &ScanState) -> Result<()>;
-    async fn update_scan_state(&self, scan_state: &ScanState) -> Result<()>;
-    async fn get_scan_state(&self, id: Uuid) -> Result<Option<ScanState>>;
-    async fn get_active_scans(
-        &self,
-        library_id: Option<Uuid>,
-    ) -> Result<Vec<ScanState>>;
-    async fn get_latest_scan(
-        &self,
-        library_id: LibraryID,
-        scan_type: ScanType,
-    ) -> Result<Option<ScanState>>;
-
-    // Media processing status
-    async fn create_or_update_processing_status(
-        &self,
-        status: &MediaProcessingStatus,
-    ) -> Result<()>;
-    async fn get_processing_status(
-        &self,
-        media_file_id: Uuid,
-    ) -> Result<Option<MediaProcessingStatus>>;
-    async fn get_unprocessed_files(
-        &self,
-        library_id: LibraryID,
-        status_type: &str,
-        limit: i32,
-    ) -> Result<Vec<MediaFile>>;
-    async fn get_failed_files(
-        &self,
-        library_id: LibraryID,
-        max_retries: i32,
-    ) -> Result<Vec<MediaFile>>;
-    async fn reset_processing_status(&self, media_file_id: Uuid) -> Result<()>;
-
-    // File watch events
-    async fn create_file_watch_event(
-        &self,
-        event: &FileWatchEvent,
-    ) -> Result<()>;
-    async fn get_unprocessed_events(
-        &self,
-        library_id: LibraryID,
-        limit: i32,
-    ) -> Result<Vec<FileWatchEvent>>;
-    async fn mark_event_processed(&self, event_id: Uuid) -> Result<()>;
-    async fn cleanup_old_events(&self, days_to_keep: i32) -> Result<u32>;
-
-    // User management methods
-    async fn create_user(&self, user: &User) -> Result<()>;
-    async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>>;
-    async fn get_user_by_username(
-        &self,
-        username: &str,
-    ) -> Result<Option<User>>;
-    async fn get_all_users(&self) -> Result<Vec<User>>;
-    async fn update_user(&self, user: &User) -> Result<()>;
-    async fn delete_user(&self, id: Uuid) -> Result<()>;
-
-    // User password management
-    async fn get_user_password_hash(
-        &self,
-        user_id: Uuid,
-    ) -> Result<Option<String>>;
-    async fn update_user_password(
-        &self,
-        user_id: Uuid,
-        password_hash: &str,
-    ) -> Result<()>;
-
-    // Atomic user operations
-    async fn delete_user_atomic(
-        &self,
-        user_id: Uuid,
-        check_last_admin: bool,
-    ) -> Result<()>;
-
-    // RBAC methods
-    async fn get_user_permissions(
-        &self,
-        user_id: Uuid,
-    ) -> Result<UserPermissions>;
-    async fn get_all_roles(&self) -> Result<Vec<Role>>;
-    async fn get_all_permissions(&self) -> Result<Vec<Permission>>;
-    async fn assign_user_role(
-        &self,
-        user_id: Uuid,
-        role_id: Uuid,
-        granted_by: Uuid,
-    ) -> Result<()>;
-    async fn remove_user_role(
-        &self,
-        user_id: Uuid,
-        role_id: Uuid,
-    ) -> Result<()>;
-    async fn remove_user_role_atomic(
-        &self,
-        user_id: Uuid,
-        role_id: Uuid,
-        check_last_admin: bool,
-    ) -> Result<()>;
-    async fn override_user_permission(
-        &self,
-        user_id: Uuid,
-        permission: &str,
-        granted: bool,
-        granted_by: Uuid,
-        reason: Option<String>,
-    ) -> Result<()>;
-
-    // RBAC query operations
-    async fn get_admin_count(
-        &self,
-        exclude_user_id: Option<Uuid>,
-    ) -> Result<usize>;
-    async fn user_has_role(
-        &self,
-        user_id: Uuid,
-        role_name: &str,
-    ) -> Result<bool>;
-    async fn get_users_with_role(&self, role_name: &str) -> Result<Vec<Uuid>>;
-
-    // Watch status methods
-    async fn update_watch_progress(
-        &self,
-        user_id: Uuid,
-        progress: &UpdateProgressRequest,
-    ) -> Result<()>;
-    async fn get_user_watch_state(
-        &self,
-        user_id: Uuid,
-    ) -> Result<UserWatchState>;
-    async fn get_continue_watching(
-        &self,
-        user_id: Uuid,
-        limit: usize,
-    ) -> Result<Vec<InProgressItem>>;
-    async fn clear_watch_progress(
-        &self,
-        user_id: Uuid,
-        media_id: &Uuid,
-    ) -> Result<()>;
-    async fn is_media_completed(
-        &self,
-        user_id: Uuid,
-        media_id: &Uuid,
-    ) -> Result<bool>;
-
-    // Sync session methods
-    async fn create_sync_session(&self, session: &SyncSession) -> Result<()>;
-    async fn get_sync_session_by_code(
-        &self,
-        room_code: &str,
-    ) -> Result<Option<SyncSession>>;
-    async fn get_sync_session(&self, id: Uuid) -> Result<Option<SyncSession>>;
-    async fn update_sync_session_state(
-        &self,
-        id: Uuid,
-        state: &PlaybackState,
-    ) -> Result<()>;
-    async fn update_sync_session(
-        &self,
-        id: Uuid,
-        session: &SyncSession,
-    ) -> Result<()>;
-    async fn add_sync_participant(
-        &self,
-        session_id: Uuid,
-        participant: &Participant,
-    ) -> Result<()>;
-    async fn remove_sync_participant(
-        &self,
-        session_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<()>;
-    async fn delete_sync_session(&self, id: Uuid) -> Result<()>;
-    async fn end_sync_session(&self, id: Uuid) -> Result<()>;
-    async fn cleanup_expired_sync_sessions(&self) -> Result<u32>;
-
-    // Query system
-    async fn query_media(
-        &self,
-        query: &MediaQuery,
-    ) -> Result<Vec<MediaWithStatus>>;
-
-    // Folder inventory management methods
-    /// Get folders that need scanning based on filters
-    async fn get_folders_needing_scan(
-        &self,
-        filters: &FolderScanFilters,
-    ) -> Result<Vec<FolderInventory>>;
-
-    /// Update folder processing status
-    async fn update_folder_status(
-        &self,
-        folder_id: Uuid,
-        status: FolderProcessingStatus,
-        error: Option<String>,
-    ) -> Result<()>;
-
-    /// Record a folder scan error and update retry information
-    async fn record_folder_scan_error(
-        &self,
-        folder_id: Uuid,
-        error: &str,
-        next_retry: Option<DateTime<Utc>>,
-    ) -> Result<()>;
-
-    /// Get complete folder inventory for a library
-    async fn get_folder_inventory(
-        &self,
-        library_id: LibraryID,
-    ) -> Result<Vec<FolderInventory>>;
-
-    /// Upsert a folder (insert or update if exists)
-    async fn upsert_folder(&self, folder: &FolderInventory) -> Result<Uuid>;
-
-    /// Cleanup stale folders that haven't been seen in the specified time
-    async fn cleanup_stale_folders(
-        &self,
-        library_id: LibraryID,
-        stale_after_hours: i32,
-    ) -> Result<u32>;
-
-    /// Get folder by path
-    async fn get_folder_by_path(
-        &self,
-        library_id: LibraryID,
-        path: &Path,
-    ) -> Result<Option<FolderInventory>>;
-
-    /// Update folder content statistics
-    async fn update_folder_stats(
-        &self,
-        folder_id: Uuid,
-        total_files: i32,
-        processed_files: i32,
-        total_size_bytes: i64,
-        file_types: Vec<String>,
-    ) -> Result<()>;
-
-    /// Mark folder as processed
-    async fn mark_folder_processed(&self, folder_id: Uuid) -> Result<()>;
-
-    /// Get child folders of a parent folder
-    async fn get_child_folders(
-        &self,
-        parent_folder_id: Uuid,
-    ) -> Result<Vec<FolderInventory>>;
-
-    /// Get season folders under a series folder
-    /// This queries folder_inventory table for all folders where parent_folder_id matches
-    /// the series folder and folder_type is 'season'
-    async fn get_season_folders(
-        &self,
-        parent_folder_id: Uuid,
-    ) -> Result<Vec<FolderInventory>>;
 }

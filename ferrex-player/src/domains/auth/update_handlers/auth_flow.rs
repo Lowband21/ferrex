@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
-use crate::domains::auth::manager::DeviceAuthStatus;
-use crate::domains::auth::messages as auth;
-use crate::domains::auth::security::secure_credential::SecureCredential;
-use crate::infrastructure::services::api::ApiService;
-use crate::infrastructure::services::auth::AuthService;
-use crate::state::State;
+use crate::{
+    domains::auth::{
+        manager::DeviceAuthStatus, messages as auth,
+        security::secure_credential::SecureCredential,
+    },
+    infra::services::auth::AuthService,
+    state::State,
+};
 use ferrex_core::player_prelude as core;
 use ferrex_core::player_prelude::{User, UserPermissions};
 use iced::Task;
@@ -134,11 +136,24 @@ pub fn handle_users_loaded(
                 "[Auth] Setting auth_flow to SelectingUser with {} users",
                 loaded_users.len()
             );
-            state.domains.auth.state.auth_flow =
-                AuthenticationFlow::SelectingUser {
-                    users: loaded_users,
-                    error: None,
-                };
+            if loaded_users.is_empty() {
+                // No cached users and not in setup flow -> show pre-auth login
+                state.domains.auth.state.auth_flow =
+                    AuthenticationFlow::PreAuthLogin {
+                        username: String::new(),
+                        password: SecureCredential::new(String::new()),
+                        show_password: false,
+                        remember_device: state.domains.auth.state.auto_login_enabled,
+                        error: None,
+                        loading: false,
+                    };
+            } else {
+                state.domains.auth.state.auth_flow =
+                    AuthenticationFlow::SelectingUser {
+                        users: loaded_users,
+                        error: None,
+                    };
+            }
         }
         Err(err) => {
             log::error!("[Auth] Error loading users: {}", err);
@@ -604,21 +619,31 @@ pub fn handle_auth_flow_update_credential(
 ) -> Task<auth::Message> {
     use crate::domains::auth::types::{AuthenticationFlow, CredentialType};
 
-    if let AuthenticationFlow::EnteringCredentials {
-        input: current_input,
-        input_type,
-        error,
-        ..
-    } = &mut state.domains.auth.state.auth_flow
-    {
-        *current_input = SecureCredential::new(input.clone());
-        *error = None;
+    match &mut state.domains.auth.state.auth_flow {
+        AuthenticationFlow::EnteringCredentials {
+            input: current_input,
+            input_type,
+            error,
+            ..
+        } => {
+            *current_input = SecureCredential::new(input.clone());
+            *error = None;
 
-        // Auto-submit when PIN is complete
-        if matches!(input_type, CredentialType::Pin { .. }) && input.len() == 4
-        {
-            return Task::done(auth::Message::SubmitCredential);
+            // Auto-submit when PIN is complete
+            if matches!(input_type, CredentialType::Pin { .. })
+                && current_input.len() == 4
+            {
+                return Task::done(auth::Message::SubmitCredential);
+            }
         }
+
+        // Allow PreAuthLogin password input to update via the same message
+        AuthenticationFlow::PreAuthLogin { password, error, .. } => {
+            *password = SecureCredential::new(input);
+            *error = None;
+        }
+
+        _ => {}
     }
     Task::none()
 }
@@ -679,6 +704,90 @@ pub fn handle_auth_flow_submit_credential(
     Task::none()
 }
 
+/// Handle pre-auth username updates
+pub fn handle_pre_auth_update_username(
+    state: &mut State,
+    username: String,
+) -> Task<auth::Message> {
+    use crate::domains::auth::types::AuthenticationFlow;
+    if let AuthenticationFlow::PreAuthLogin { username: u, error, .. } =
+        &mut state.domains.auth.state.auth_flow
+    {
+        *u = username;
+        *error = None;
+    }
+    Task::none()
+}
+
+/// Handle pre-auth password visibility toggle
+pub fn handle_pre_auth_toggle_password_visibility(
+    state: &mut State,
+) -> Task<auth::Message> {
+    use crate::domains::auth::types::AuthenticationFlow;
+    if let AuthenticationFlow::PreAuthLogin { show_password, .. } =
+        &mut state.domains.auth.state.auth_flow
+    {
+        *show_password = !*show_password;
+    }
+    Task::none()
+}
+
+/// Handle pre-auth remember device toggle
+pub fn handle_pre_auth_toggle_remember_device(
+    state: &mut State,
+) -> Task<auth::Message> {
+    use crate::domains::auth::types::AuthenticationFlow;
+    if let AuthenticationFlow::PreAuthLogin { remember_device, .. } =
+        &mut state.domains.auth.state.auth_flow
+    {
+        *remember_device = !*remember_device;
+        state.domains.auth.state.auto_login_enabled = *remember_device;
+    }
+    Task::none()
+}
+
+/// Handle pre-auth submit
+pub fn handle_pre_auth_submit(state: &mut State) -> Task<auth::Message> {
+    use crate::domains::auth::types::AuthenticationFlow;
+
+    if let AuthenticationFlow::PreAuthLogin {
+        username,
+        password,
+        remember_device,
+        loading,
+        error,
+        ..
+    } = &mut state.domains.auth.state.auth_flow
+    {
+        *error = None;
+        if username.trim().is_empty() {
+            *error = Some("Username is required".to_string());
+            return Task::none();
+        }
+        if password.as_str().is_empty() {
+            *error = Some("Password is required".to_string());
+            return Task::none();
+        }
+
+        let svc: Arc<dyn AuthService> =
+            std::sync::Arc::clone(&state.domains.auth.state.auth_service);
+        let username = username.clone();
+        let password = password.as_str().to_string();
+        let remember = *remember_device;
+        *loading = true;
+
+        return Task::perform(
+            async move {
+                svc.authenticate_device(username, password, remember)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            auth::Message::AuthResult,
+        );
+    }
+    Task::none()
+}
+
 /// Handle authentication result
 pub fn handle_auth_flow_auth_result(
     state: &mut State,
@@ -710,14 +819,20 @@ pub fn handle_auth_flow_auth_result(
                 Some(auth_result.permissions.clone());
 
             // Check if we need to set up a PIN
-            if let AuthenticationFlow::EnteringCredentials {
-                input_type: CredentialType::Password,
-                remember_device: true,
-                ..
-            } = &state.domains.auth.state.auth_flow
-                && !auth_result.device_has_pin
-            {
-                // Need to set up PIN
+            // Support both regular flow and pre-auth password flow
+            let needs_pin_setup = match &state.domains.auth.state.auth_flow {
+                AuthenticationFlow::EnteringCredentials {
+                    input_type: CredentialType::Password,
+                    remember_device: true,
+                    ..
+                } => !auth_result.device_has_pin,
+                AuthenticationFlow::PreAuthLogin { remember_device, .. } => {
+                    *remember_device && !auth_result.device_has_pin
+                }
+                _ => false,
+            };
+
+            if needs_pin_setup {
                 state.domains.auth.state.auth_flow =
                     AuthenticationFlow::SettingUpPin {
                         user: auth_result.user.clone(),
@@ -754,27 +869,32 @@ pub fn handle_auth_flow_auth_result(
             )
         }
         Err(error) => {
-            let mut auth_flow = state.domains.auth.state.auth_flow.clone();
-            if let AuthenticationFlow::EnteringCredentials {
-                error: ref mut view_error,
-                ref mut loading,
-                ref mut attempts_remaining,
-                ..
-            } = auth_flow
-            {
-                // Check if error indicates lockout before moving error
-                let is_lockout =
-                    error.contains("locked") || error.contains("attempts");
-
-                *view_error = Some(error);
-                *loading = false;
-
-                // Update attempts remaining if it's a lockout error
-                if is_lockout && let Some(remaining) = attempts_remaining {
-                    *remaining = remaining.saturating_sub(1);
+            let mut flow = state.domains.auth.state.auth_flow.clone();
+            match &mut flow {
+                AuthenticationFlow::EnteringCredentials {
+                    error: view_error,
+                    loading,
+                    attempts_remaining,
+                    ..
+                } => {
+                    let is_lockout =
+                        error.contains("locked") || error.contains("attempts");
+                    *view_error = Some(error);
+                    *loading = false;
+                    if is_lockout {
+                        if let Some(remaining) = attempts_remaining {
+                            *remaining = remaining.saturating_sub(1);
+                        }
+                    }
                 }
-                state.domains.auth.state.auth_flow = auth_flow;
+                AuthenticationFlow::PreAuthLogin { error: view_error, loading, .. } => {
+                    *view_error = Some(error);
+                    *loading = false;
+                }
+                _ => {}
             }
+
+            state.domains.auth.state.auth_flow = flow;
             Task::none()
         }
     }
@@ -915,83 +1035,126 @@ pub fn handle_remember_device_synced(
     Task::none()
 }
 
-// Stub implementations for legacy handlers - TO BE REMOVED when views are migrated
+/// Transition into PIN setup when we have an authenticated user context.
+pub fn handle_auth_flow_setup_pin(state: &mut State) -> Task<auth::Message> {
+    use crate::domains::auth::types::AuthenticationFlow;
 
-pub fn handle_show_pin_entry(
-    _state: &mut State,
-    _user: core::User,
-) -> Task<auth::Message> {
-    // Legacy handler - replaced by AuthFlow
+    let user = match &state.domains.auth.state.auth_flow {
+        AuthenticationFlow::Authenticated { user, .. } => Some(user.clone()),
+        AuthenticationFlow::EnteringCredentials { user, .. } => {
+            Some(user.clone())
+        }
+        AuthenticationFlow::SettingUpPin { .. } => None,
+        _ => None,
+    };
+
+    if let Some(user) = user {
+        state.domains.auth.state.auth_flow = AuthenticationFlow::SettingUpPin {
+            user,
+            pin: SecureCredential::new(String::new()),
+            confirm_pin: SecureCredential::new(String::new()),
+            error: None,
+        };
+    }
+
     Task::none()
+}
+
+/// Update the PIN being entered during setup.
+pub fn handle_auth_flow_update_pin(
+    state: &mut State,
+    raw_value: String,
+) -> Task<auth::Message> {
+    use crate::domains::auth::types::AuthenticationFlow;
+
+    if let AuthenticationFlow::SettingUpPin { pin, error, .. } =
+        &mut state.domains.auth.state.auth_flow
+    {
+        let normalized = raw_value
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .take(4)
+            .collect::<String>();
+
+        *pin = SecureCredential::new(normalized);
+        *error = None;
+    }
+
+    Task::none()
+}
+
+/// Update the confirmation PIN during setup.
+pub fn handle_auth_flow_update_confirm_pin(
+    state: &mut State,
+    raw_value: String,
+) -> Task<auth::Message> {
+    use crate::domains::auth::types::AuthenticationFlow;
+
+    if let AuthenticationFlow::SettingUpPin {
+        confirm_pin, error, ..
+    } = &mut state.domains.auth.state.auth_flow
+    {
+        let normalized = raw_value
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .take(4)
+            .collect::<String>();
+
+        *confirm_pin = SecureCredential::new(normalized);
+        *error = None;
+    }
+
+    Task::none()
+}
+
+/// Retry the current authentication step.
+pub fn handle_auth_flow_retry(state: &mut State) -> Task<auth::Message> {
+    use crate::domains::auth::types::AuthenticationFlow;
+
+    match &state.domains.auth.state.auth_flow {
+        AuthenticationFlow::LoadingUsers
+        | AuthenticationFlow::SelectingUser { .. } => handle_load_users(state),
+        AuthenticationFlow::CheckingDevice { user } => {
+            let svc: Arc<dyn AuthService> =
+                Arc::clone(&state.domains.auth.state.auth_service);
+            let user_clone = user.clone();
+            let user_id = user_clone.id;
+
+            Task::perform(
+                async move {
+                    svc.check_device_auth(user_id)
+                        .await
+                        .map_err(|e| e.to_string())
+                },
+                move |result| {
+                    auth::Message::DeviceStatusChecked(user_clone, result)
+                },
+            )
+        }
+        AuthenticationFlow::EnteringCredentials { .. } => {
+            handle_auth_flow_submit_credential(state)
+        }
+        _ => Task::none(),
+    }
+}
+
+/// Handle local back navigation for the auth flow.
+pub fn handle_auth_flow_back(state: &mut State) -> Task<auth::Message> {
+    use crate::domains::auth::types::AuthenticationFlow;
+
+    match state.domains.auth.state.auth_flow.clone() {
+        AuthenticationFlow::EnteringCredentials { .. }
+        | AuthenticationFlow::CheckingDevice { .. } => {
+            handle_back_to_user_selection(state)
+        }
+        AuthenticationFlow::SettingUpPin { .. } => {
+            handle_auth_flow_pin_set(state, Ok(()))
+        }
+        _ => Task::none(),
+    }
 }
 
 pub fn handle_show_create_user(_state: &mut State) -> Task<auth::Message> {
-    // Legacy handler - replaced by AuthFlow
-    Task::none()
-}
-
-pub fn handle_pin_digit_pressed(
-    _state: &mut State,
-    _digit: char,
-) -> Task<auth::Message> {
-    // Legacy handler - replaced by AuthFlow
-    Task::none()
-}
-
-pub fn handle_pin_backspace(_state: &mut State) -> Task<auth::Message> {
-    // Legacy handler - replaced by AuthFlow
-    Task::none()
-}
-
-pub fn handle_pin_clear(_state: &mut State) -> Task<auth::Message> {
-    // Legacy handler - replaced by AuthFlow
-    Task::none()
-}
-
-pub fn handle_pin_submit(_state: &mut State) -> Task<auth::Message> {
-    // Legacy handler - replaced by AuthFlow
-    Task::none()
-}
-
-pub fn handle_show_password_login(
-    _state: &mut State,
-    _username: String,
-) -> Task<auth::Message> {
-    // Legacy handler - replaced by AuthFlow
-    Task::none()
-}
-
-pub fn handle_password_login_update_username(
-    _state: &mut State,
-    _username: String,
-) -> Task<auth::Message> {
-    // Legacy handler - replaced by AuthFlow
-    Task::none()
-}
-
-pub fn handle_password_login_update_password(
-    _state: &mut State,
-    _password: String,
-) -> Task<auth::Message> {
-    // Legacy handler - replaced by AuthFlow
-    Task::none()
-}
-
-pub fn handle_password_login_toggle_visibility(
-    _state: &mut State,
-) -> Task<auth::Message> {
-    // Legacy handler - replaced by AuthFlow
-    Task::none()
-}
-
-pub fn handle_password_login_toggle_remember(
-    _state: &mut State,
-) -> Task<auth::Message> {
-    // Legacy handler - replaced by AuthFlow
-    Task::none()
-}
-
-pub fn handle_password_login_submit(_state: &mut State) -> Task<auth::Message> {
     // Legacy handler - replaced by AuthFlow
     Task::none()
 }

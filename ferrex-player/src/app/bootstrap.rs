@@ -31,8 +31,10 @@ impl AppConfig {
     }
 
     pub fn from_environment() -> Self {
+        // Prefer http by default during local development to avoid TLS surprises.
+        // Rationale: release builds do not accept self-signed TLS; http avoids connection failures.
         let server_url = std::env::var("FERREX_SERVER_URL")
-            .unwrap_or_else(|_| "https://localhost:3000".to_string());
+            .unwrap_or_else(|_| "http://localhost:3000".to_string());
 
         #[cfg(feature = "demo")]
         {
@@ -90,16 +92,14 @@ impl AppConfig {
 pub fn base_state(config: &AppConfig) -> State {
     let mut state = State::new(config.server_url().to_string());
 
-    crate::infrastructure::service_registry::init_registry(
-        state.image_service.clone(),
-    );
+    crate::infra::service_registry::init_registry(state.image_service.clone());
 
     let lib_id = state
         .domains
         .library
         .state
         .current_library_id
-        .map(|library_id| library_id.as_uuid());
+        .map(|library_id| library_id.to_uuid());
 
     state
         .domains
@@ -123,9 +123,9 @@ pub fn base_state(config: &AppConfig) -> State {
 #[cfg(any(test, feature = "iced_tester"))]
 fn apply_test_stubs(state: &mut State) {
     use crate::domains::search::SearchDomain;
-    use crate::infrastructure::services::auth::AuthService;
-    use crate::infrastructure::services::settings::SettingsService;
-    use crate::infrastructure::testing::stubs::{
+    use crate::infra::services::auth::AuthService;
+    use crate::infra::services::settings::SettingsService;
+    use crate::infra::testing::stubs::{
         TestApiService, TestAuthService, TestSettingsService,
     };
 

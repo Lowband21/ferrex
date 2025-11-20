@@ -7,16 +7,16 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
-use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
-use ferrex_core::api_routes::v1;
-use ferrex_core::auth::domain::value_objects::SessionScope;
-use ferrex_core::auth::{AuthResult as ServerAuthResult, DeviceInfo};
+use ed25519_dalek::{Signature, Signer, SigningKey};
+use ferrex_core::api::routes::v1;
+use ferrex_core::domain::users::auth::{
+    device::DeviceInfo, domain::value_objects::SessionScope,
+};
 use ferrex_core::player_prelude::{
     ApiResponse, AuthToken, LoginRequest, Platform, RegisterRequest, User,
     UserPermissions,
 };
 use log::{error, info, warn};
-use rand_core::OsRng;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
@@ -27,14 +27,7 @@ use uuid::Uuid;
 
 use crate::domains::auth::hardware_fingerprint::generate_hardware_fingerprint;
 use crate::domains::auth::storage::{AuthStorage, StoredAuth};
-use crate::infrastructure::api_client::ApiClient;
-
-const KEYCHAIN_SERVICE: &str = "ferrex-media-player";
-const KEYCHAIN_ACCOUNT: &str = "auth-token";
-
-/// JWT Token expiry buffer - refresh tokens 1 minute before they expire
-/// This provides a reasonable buffer to prevent race conditions without being too aggressive
-const TOKEN_EXPIRY_BUFFER_SECONDS: i64 = 60;
+use crate::infra::api_client::ApiClient;
 
 #[derive(Debug, Serialize)]
 struct RefreshTokenRequest {
@@ -158,7 +151,7 @@ pub struct SetPinRequest {
 ///
 /// ### Token Expiry Handling
 /// - JWT tokens typically have 1-hour expiry times from the server
-/// - A 60-second buffer (TOKEN_EXPIRY_BUFFER_SECONDS) is applied when loading tokens
+/// - A 60-second buffer is applied when loading tokens
 /// - Tokens with less than 60 seconds remaining are considered expired and rejected
 /// - This prevents race conditions where a token expires immediately after loading
 ///
@@ -191,12 +184,17 @@ impl AuthManager {
         let auth_storage = match AuthStorage::new() {
             Ok(storage) => Arc::new(storage),
             Err(e) => {
+                // Rationale: Do not crash the application if the platform config dir is unavailable.
+                // Instead, fall back to a temp-file path, effectively disabling persistence across restarts
+                // while allowing the app to run. This is safer for public release.
                 warn!(
-                    "Failed to create auth storage: {}. Auth persistence will be disabled.",
+                    "Failed to create auth storage at platform path: {}. Falling back to temp path (persistence disabled for this run).",
                     e
                 );
-                // TODO: Fix this panic
-                panic!("Unable to create auth storage: {}", e);
+                let fallback = std::env::temp_dir()
+                    .join("ferrex-player")
+                    .join("auth_cache.disabled.enc");
+                Arc::new(AuthStorage::with_cache_path(fallback))
             }
         };
 
@@ -754,7 +752,7 @@ impl AuthManager {
         struct ChallengeResp {
             challenge_id: Uuid,
             nonce: String,
-            expires_in_secs: i64,
+            _expires_in_secs: i64,
             pin_salt: String,
         }
 
@@ -857,7 +855,7 @@ impl AuthManager {
         struct ChallengeResp {
             challenge_id: Uuid,
             nonce: String,
-            expires_in_secs: i64,
+            _expires_in_secs: i64,
             pin_salt: String,
         }
         let challenge: ChallengeResp = self
@@ -911,6 +909,73 @@ impl AuthManager {
         Ok(())
     }
 
+    async fn perform_login(
+        &self,
+        username: String,
+        secret: String,
+        remember_device: Option<bool>,
+    ) -> AuthResult<PlayerAuthResult> {
+        let server_url = self.api_client.base_url().to_string();
+        let (user, permissions) =
+            self.login(username, secret, server_url).await?;
+
+        if let Some(remember) = remember_device
+            && let Err(err) = self
+                .set_auto_login_scope(remember, AutoLoginScope::DeviceOnly)
+                .await
+        {
+            warn!("Failed to update auto-login preference: {}", err);
+        }
+
+        let device_status = self.check_device_auth(user.id).await?;
+
+        // Persist lightweight user summary locally to enable offline user cards
+        let summary = crate::domains::auth::dto::UserListItemDto {
+            id: user.id,
+            username: user.username.clone(),
+            display_name: user.display_name.clone(),
+            avatar_url: user.avatar_url.clone(),
+            has_pin: device_status.has_pin,
+            last_login: Some(chrono::Utc::now()),
+        };
+        if let Err(e) = self.auth_storage.upsert_user_summary(&summary).await {
+            warn!("Failed to persist user summary: {}", e);
+        }
+
+        Ok(PlayerAuthResult {
+            user,
+            permissions,
+            device_has_pin: device_status.has_pin,
+        })
+    }
+
+    /// Authenticate using username/password and optionally remember this device.
+    pub async fn authenticate_device(
+        &self,
+        username: String,
+        password: String,
+        remember_device: bool,
+    ) -> AuthResult<PlayerAuthResult> {
+        self.perform_login(username, password, Some(remember_device))
+            .await
+    }
+
+    /// Authenticate using a stored PIN for the selected user.
+    pub async fn authenticate_pin(
+        &self,
+        user_id: Uuid,
+        pin: String,
+    ) -> AuthResult<PlayerAuthResult> {
+        let users = self.get_all_users().await?;
+        let username = users
+            .into_iter()
+            .find(|candidate| candidate.id == user_id)
+            .map(|user| user.username)
+            .ok_or(AuthError::UserNotFound(user_id))?;
+
+        self.perform_login(username, pin, None).await
+    }
+
     /// Check if user has PIN on this device
     pub async fn check_device_auth(
         &self,
@@ -927,7 +992,23 @@ impl AuthManager {
             return Ok(status);
         }
 
-        // Online check
+        // If not authenticated, avoid online probing; treat as needs login
+        let is_authed = self.auth_state.with_state(|state| {
+            matches!(state, AuthState::Authenticated { .. })
+        });
+        if !is_authed {
+            log::info!(
+                "[Auth] Not authenticated; deferring device status check for user {}",
+                user_id
+            );
+            return Ok(DeviceAuthStatus {
+                device_registered: false,
+                has_pin: false,
+                remaining_attempts: None,
+            });
+        }
+
+        // Online check (requires authenticated session)
         let device_id = self.get_or_create_device_id().await?;
         log::info!(
             "[Auth] Checking device status online for user {} on device {}",
@@ -935,13 +1016,8 @@ impl AuthManager {
             device_id
         );
 
-        // Note: This endpoint doesn't require authentication - it's checking if a device can use PIN
-        let status_path = format!(
-            "{}?user_id={}&device_id={}",
-            v1::auth::device::STATUS,
-            user_id,
-            device_id
-        );
+        // Authenticated endpoint; user is inferred from the session
+        let status_path = format!("{}?device_id={}", v1::auth::device::STATUS, device_id);
 
         let status: DeviceAuthStatus =
             self.api_client.get(&status_path).await.map_err(|e| {
@@ -961,22 +1037,44 @@ impl AuthManager {
         Ok(status)
     }
 
-    /// Check cached device status (stub for now)
+    /// Check cached device status using locally stored user summaries
     async fn check_cached_device_status(
         &self,
-        _user_id: Uuid,
+        user_id: Uuid,
     ) -> Option<DeviceAuthStatus> {
-        // TODO: Implement offline cache
+        if let Ok(users) = self.auth_storage.load_user_summaries().await {
+            if let Some(u) = users.into_iter().find(|u| u.id == user_id) {
+                return Some(DeviceAuthStatus {
+                    device_registered: true,
+                    has_pin: u.has_pin,
+                    remaining_attempts: None,
+                });
+            }
+        }
         None
     }
 
-    /// Cache device status (stub for now)
+    /// Cache device status by updating user summary
     async fn cache_device_status(
         &self,
-        _user_id: Uuid,
-        _status: &DeviceAuthStatus,
+        user_id: Uuid,
+        status: &DeviceAuthStatus,
     ) {
-        // TODO: Implement offline cache
+        if let Ok(mut users) = self.auth_storage.load_user_summaries().await {
+            let mut updated = false;
+            for u in users.iter_mut() {
+                if u.id == user_id {
+                    u.has_pin = status.has_pin;
+                    updated = true;
+                    break;
+                }
+            }
+            if updated {
+                if let Err(e) = self.auth_storage.save_user_summaries(&users).await {
+                    warn!("Failed to update cached user summaries: {}", e);
+                }
+            }
+        }
     }
 
     /// Get or create device ID
@@ -1135,73 +1233,33 @@ impl AuthManager {
     /// This method sends the device fingerprint to get appropriate user information
     /// based on whether the device is known/trusted.
     pub async fn get_all_users(&self) -> AuthResult<Vec<UserListItemDto>> {
-        // Generate device fingerprint
-        let fingerprint =
-            crate::domains::auth::hardware_fingerprint::generate_hardware_fingerprint()
-                .await
-                .map_err(|e| {
-                    AuthError::Device(DeviceError::FingerprintGeneration(e.to_string()))
-                })?;
-
         // Check if we have an active auth token
         let has_auth = self.auth_state.with_state(|state| {
             matches!(state, AuthState::Authenticated { .. })
         });
 
         let users: Vec<UserListItemDto> = if has_auth {
-            // Use authenticated endpoint for better information
-            self.api_client
+            // Use authenticated endpoint and update local cache
+            let fetched: Vec<UserListItemDto> = self
+                .api_client
                 .get(v1::users::LIST_AUTH)
                 .await
                 .map_err(|e| {
-                    AuthError::Network(NetworkError::RequestFailed(
-                        e.to_string(),
-                    ))
-                })?
-        } else {
-            // TODO: Use ApiClient trait instance
-            // Use public endpoint with device fingerprint
-            // Build request with custom header
-            let client = reqwest::Client::new();
-            let url =
-                format!("{}/api/v1/users/public", self.api_client.base_url());
-
-            let response = client
-                .get(&url)
-                .header("X-Device-Fingerprint", fingerprint)
-                .send()
-                .await
-                .map_err(|e| {
-                    AuthError::Network(NetworkError::RequestFailed(
-                        e.to_string(),
-                    ))
+                    AuthError::Network(NetworkError::RequestFailed(e.to_string()))
                 })?;
-
-            if !response.status().is_success() {
-                let status = response.status();
-                let error_text = response
-                    .text()
-                    .await
-                    .unwrap_or_else(|_| status.to_string());
-                return Err(AuthError::Network(NetworkError::RequestFailed(
-                    format!("Failed to get users: {}", error_text),
-                )));
+            if let Err(e) = self.auth_storage.save_user_summaries(&fetched).await {
+                warn!("Failed to save user summaries: {}", e);
             }
-
-            response
-                .json::<ApiResponse<Vec<UserListItemDto>>>()
-                .await
-                .map_err(|e| {
-                    AuthError::Network(NetworkError::RequestFailed(
-                        e.to_string(),
-                    ))
-                })?
-                .data
-                .ok_or_else(|| {
-                    AuthError::Network(NetworkError::RequestFailed(
-                        "No data in response".to_string(),
-                    ))
-                })?
+            fetched
+        } else {
+            // Do not perform unauthenticated network calls; return cached summaries
+            match self.auth_storage.load_user_summaries().await {
+                Ok(users) => users,
+                Err(e) => {
+                    warn!("Failed to load cached user summaries: {}", e);
+                    Vec::new()
+                }
+            }
         };
 
         Ok(users)
@@ -1209,12 +1267,13 @@ impl AuthManager {
 
     /// Check setup status
     pub async fn check_setup_status(&self) -> AuthResult<bool> {
+        // TODO: Utilize setup statistics
         #[derive(Debug, Deserialize)]
         struct SetupStatus {
             needs_setup: bool,
-            has_admin: bool,
-            user_count: usize,
-            library_count: usize,
+            _has_admin: bool,
+            _user_count: usize,
+            _library_count: usize,
         }
 
         let status: SetupStatus =
@@ -1335,6 +1394,25 @@ fn get_device_name() -> String {
     format!("{} Device", get_current_platform().as_ref())
 }
 
+/// Get the current platform
+fn get_current_platform() -> Platform {
+    #[cfg(target_os = "macos")]
+    return Platform::MacOS;
+
+    #[cfg(target_os = "linux")]
+    return Platform::Linux;
+
+    #[cfg(target_os = "windows")]
+    return Platform::Windows;
+
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows"
+    )))]
+    return Platform::Unknown;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1367,23 +1445,4 @@ mod tests {
             "different salts must produce distinct proofs"
         );
     }
-}
-
-/// Get the current platform
-fn get_current_platform() -> Platform {
-    #[cfg(target_os = "macos")]
-    return Platform::MacOS;
-
-    #[cfg(target_os = "linux")]
-    return Platform::Linux;
-
-    #[cfg(target_os = "windows")]
-    return Platform::Windows;
-
-    #[cfg(not(any(
-        target_os = "macos",
-        target_os = "linux",
-        target_os = "windows"
-    )))]
-    return Platform::Unknown;
 }

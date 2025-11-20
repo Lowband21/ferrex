@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use ferrex_core::auth::device::{AuthDeviceStatus, AuthenticatedDevice};
+use ferrex_core::domain::users::auth::device::{
+    AuthDeviceStatus, AuthenticatedDevice,
+};
+use ferrex_core::player_prelude::Platform;
 use ferrex_player::domains::ui::views::settings::device_management::UserDevice;
-use ferrex_player::infrastructure::services::settings::SettingsService;
+use ferrex_player::infra::services::settings::SettingsService;
 use ferrex_player::state::State;
 use serde_json::json;
 use uuid::Uuid;
@@ -19,7 +22,7 @@ impl SettingsService for MockSettingsServiceOk {
             user_id: Uuid::now_v7(),
             fingerprint: "fp-test".to_string(),
             name: "Test Device".to_string(),
-            platform: ferrex_core::auth::Platform::Linux,
+            platform: Platform::Linux,
             app_version: Some("1.0.0".to_string()),
             hardware_id: None,
             status: AuthDeviceStatus::Trusted,

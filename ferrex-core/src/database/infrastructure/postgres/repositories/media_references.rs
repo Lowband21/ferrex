@@ -7,7 +7,6 @@ use crate::{
     player_prelude::{
         EnhancedMovieDetails, MediaDetailsOption, MediaFile, TmdbDetails,
     },
-    traits::id::MediaIDLike,
     types::{
         ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID},
         library::LibraryType,
@@ -79,11 +78,12 @@ impl PostgresMediaReferencesRepository {
             let repository = TmdbMetadataRepository::new(&self.pool);
             let movie_ref = repository.load_movie_reference(row).await?;
             let metadata = match &movie_ref.details {
-                MediaDetailsOption::Details(details) =>
+                MediaDetailsOption::Details(details) => {
                     match details.as_ref() {
                         TmdbDetails::Movie(details) => Some(details.clone()),
                         _ => None,
-                    },
+                    }
+                }
                 _ => None,
             };
 
@@ -790,12 +790,10 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
             MediaError::Internal(format!("Failed to get series seasons: {}", e))
         })?;
 
-        let mut buff = Uuid::encode_buffer();
-
         info!(
             "Found {} season rows for series {}",
             rows.len(),
-            series_id.as_str(&mut buff)
+            series_uuid
         );
 
         let repository = TmdbMetadataRepository::new(&self.pool);

@@ -13,7 +13,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     error::MediaError,
-    orchestration::{
+    scan::orchestration::{
         config::RetryConfig,
         job::{
             EnqueueRequest, JobHandle, JobId, JobKind, JobPayload, JobPriority,
@@ -451,14 +451,14 @@ impl QueueInstrumentation for PostgresQueueService {
 #[async_trait]
 impl QueueService for PostgresQueueService {
     async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
-        let job_id = crate::orchestration::job::JobId::new();
+        let job_id = crate::scan::orchestration::job::JobId::new();
         let payload_json =
             serde_json::to_value(&request.payload).map_err(|e| {
                 MediaError::Internal(format!(
                     "failed to serialize job payload: {e}"
                 ))
             })?;
-        let library_id = request.payload.library_id().as_uuid();
+        let library_id = request.payload.library_id().to_uuid();
         let kind_str = request.payload.kind().to_string();
         let dedupe_key = request.dedupe_key().to_string();
         let priority_val: i16 = request.priority as u8 as i16;
@@ -481,7 +481,8 @@ impl QueueService for PostgresQueueService {
         .map_err(|e| {
             MediaError::Internal(format!("enqueue precheck failed: {e}"))
         })? {
-            let existing_id = crate::orchestration::job::JobId(existing.id);
+            let existing_id =
+                crate::scan::orchestration::job::JobId(existing.id);
             let existing_priority: i16 = existing.priority;
             // Try to elevate priority if incoming is higher and the job is not leased
             if priority_val < existing_priority {
@@ -603,13 +604,14 @@ impl QueueService for PostgresQueueService {
                             );
                         }
                         return Ok(JobHandle::merged(
-                            crate::orchestration::job::JobId(row.id),
+                            crate::scan::orchestration::job::JobId(row.id),
                             &request.payload,
                             request.priority,
                         ));
                     } else {
                         // No active row found; try a fresh insert once and, on conflict again, return the found ID
-                        let job_id2 = crate::orchestration::job::JobId::new();
+                        let job_id2 =
+                            crate::scan::orchestration::job::JobId::new();
                         let retry = sqlx::query!(
                             r#"
                             INSERT INTO orchestrator_jobs (
@@ -670,7 +672,9 @@ impl QueueService for PostgresQueueService {
 
                                 if let Some(w) = winner {
                                     return Ok(JobHandle::merged(
-                                        crate::orchestration::job::JobId(w.id),
+                                        crate::scan::orchestration::job::JobId(
+                                            w.id,
+                                        ),
                                         &request.payload,
                                         request.priority,
                                     ));
@@ -717,14 +721,14 @@ impl QueueService for PostgresQueueService {
         let mut out: Vec<JobHandle> = Vec::with_capacity(requests.len());
 
         for request in requests {
-            let job_id = crate::orchestration::job::JobId::new();
+            let job_id = crate::scan::orchestration::job::JobId::new();
             let payload_json =
                 serde_json::to_value(&request.payload).map_err(|e| {
                     MediaError::Internal(format!(
                         "failed to serialize job payload: {e}"
                     ))
                 })?;
-            let library_id = request.payload.library_id().as_uuid();
+            let library_id = request.payload.library_id().to_uuid();
             let kind_str = request.payload.kind().to_string();
             let dedupe_key = request.dedupe_key().to_string();
             let priority_val: i16 = request.priority as u8 as i16;
@@ -748,7 +752,8 @@ impl QueueService for PostgresQueueService {
                     "enqueue_many precheck failed: {e}"
                 ))
             })? {
-                let existing_id = crate::orchestration::job::JobId(existing.id);
+                let existing_id =
+                    crate::scan::orchestration::job::JobId(existing.id);
                 let existing_priority: i16 = existing.priority;
                 if priority_val < existing_priority {
                     let _ = sqlx::query!(
@@ -847,7 +852,7 @@ impl QueueService for PostgresQueueService {
                                 })?;
                             }
                             out.push(JobHandle::merged(
-                                crate::orchestration::job::JobId(row.id),
+                                crate::scan::orchestration::job::JobId(row.id),
                                 &request.payload,
                                 request.priority,
                             ));
@@ -884,7 +889,9 @@ impl QueueService for PostgresQueueService {
         &self,
         request: DequeueRequest,
     ) -> Result<Option<JobLease>> {
-        use crate::orchestration::job::{JobPriority, JobRecord, JobState};
+        use crate::scan::orchestration::job::{
+            JobPriority, JobRecord, JobState,
+        };
         use uuid::Uuid;
 
         let mut tx = self.pool.begin().await.map_err(|e| {
@@ -1080,7 +1087,9 @@ impl QueueService for PostgresQueueService {
     }
 
     async fn renew(&self, renewal: LeaseRenewal) -> Result<JobLease> {
-        use crate::orchestration::job::{JobPriority, JobRecord, JobState};
+        use crate::scan::orchestration::job::{
+            JobPriority, JobRecord, JobState,
+        };
 
         let mut tx = self.pool.begin().await.map_err(|e| {
             MediaError::Internal(format!("begin renew tx failed: {e}"))

@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use crate::database::ports::media_references::MediaReferencesRepository;
 use crate::error::{MediaError, Result};
-use crate::metadata::MetadataExtractor;
-use crate::orchestration::job::{
+use crate::infrastructure::media::metadata::MetadataExtractor;
+use crate::scan::orchestration::job::{
     ImageFetchJob, IndexUpsertJob, MediaAnalyzeJob, MediaFingerprint,
     MetadataEnrichJob,
 };

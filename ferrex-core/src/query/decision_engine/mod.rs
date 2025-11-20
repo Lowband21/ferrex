@@ -247,8 +247,7 @@ impl DecisionEngine {
         (cost_confidence * 0.4
             + data_confidence * 0.3
             + network_confidence * 0.3)
-            .min(1.0)
-            .max(0.0)
+            .clamp(0.0, 1.0)
     }
 
     /// Generate human-readable reasoning for the strategy selection

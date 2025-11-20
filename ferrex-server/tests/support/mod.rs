@@ -4,15 +4,16 @@ use anyhow::{Context, Result, anyhow};
 use axum::Router;
 use ferrex_core::{
     application::unit_of_work::AppUnitOfWork,
-    auth::{
+    database::PostgresDatabase,
+    domain::users::auth::{
         AuthCrypto,
-        domain::repositories::{
-            AuthEventRepository, AuthSessionRepository,
-            DeviceChallengeRepository, DeviceSessionRepository,
-            RefreshTokenRepository, UserAuthenticationRepository,
-        },
-        domain::services::{
-            AuthenticationService, DeviceTrustService, PinManagementService,
+        domain::{
+            AuthenticationService, DeviceSessionRepository, DeviceTrustService,
+            PinManagementService, UserAuthenticationRepository,
+            repositories::{
+                AuthEventRepository, AuthSessionRepository,
+                DeviceChallengeRepository, RefreshTokenRepository,
+            },
         },
         infrastructure::repositories::{
             PostgresAuthEventRepository, PostgresAuthSessionRepository,
@@ -20,14 +21,12 @@ use ferrex_core::{
             PostgresRefreshTokenRepository, PostgresUserAuthRepository,
         },
     },
-    database::PostgresDatabase,
-    image_service::ImageService,
-    orchestration::{
+    infrastructure::{image_service::ImageService, providers::TmdbApiProvider},
+    scan::orchestration::{
         budget::InMemoryBudget,
         config::OrchestratorConfig,
         persistence::{PostgresCursorRepository, PostgresQueueService},
     },
-    providers::TmdbApiProvider,
     setup::SetupClaimService,
 };
 use ferrex_server::{
@@ -77,6 +76,8 @@ pub async fn build_test_app_with_hooks<H: StartupHooks>(
     // SAFETY: tests run in isolation and set the env var before any child threads read it.
     unsafe {
         std::env::set_var("FERREX_DISABLE_FFMPEG", "1");
+        // Prevent host-level setup tokens from constraining the default claim flow path.
+        std::env::remove_var("FERREX_SETUP_TOKEN");
     }
 
     let tempdir =
@@ -165,7 +166,7 @@ pub async fn build_test_app_with_hooks<H: StartupHooks>(
 
     let tmdb_provider = Arc::new(TmdbApiProvider::new());
 
-    let queue_service = Arc::new(
+    let queue_service: Arc<PostgresQueueService> = Arc::new(
         PostgresQueueService::new(pool.clone())
             .await
             .map_err(|err| anyhow!("failed to create queue service: {err}"))?,
@@ -192,7 +193,6 @@ pub async fn build_test_app_with_hooks<H: StartupHooks>(
 
     let scan_control = Arc::new(ScanControlPlane::with_quiescence_window(
         unit_of_work.clone(),
-        postgres.clone(),
         orchestrator,
         Duration::from_secs(1),
     ));

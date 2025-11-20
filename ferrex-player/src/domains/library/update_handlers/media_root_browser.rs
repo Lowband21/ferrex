@@ -116,7 +116,7 @@ fn handle_path_selected(
         return Task::none();
     };
 
-    let mut absolute = std::path::PathBuf::from(root.clone());
+    let mut absolute = PathBuf::from(root.clone());
     if !relative_path.is_empty() {
         for segment in relative_path.split('/') {
             if segment.is_empty() {

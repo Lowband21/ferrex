@@ -1,5 +1,5 @@
 use crate::domains::library::messages::Message;
-use crate::infrastructure::{
+use crate::infra::{
     api_types::{Media, MediaID},
     services::api::ApiService,
 };
@@ -7,7 +7,7 @@ use base64::{
     Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
 };
 use ferrex_core::{
-    api_routes::v1, player_prelude::MediaEvent, traits::id::MediaIDLike,
+    api::routes::v1, player_prelude::MediaEvent,
     types::events::MediaSseEventType,
 };
 use futures::StreamExt;
@@ -15,7 +15,6 @@ use futures::stream::{self, BoxStream};
 use iced::Subscription;
 use rkyv::{from_bytes, rancor::Error as RkyvError};
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
@@ -301,11 +300,10 @@ impl MediaEventState {
                 Some(Message::MediaDiscovered(vec![Media::Series(series)]))
             }
             MediaEvent::SeasonAdded { season } => {
-                let mut buf = Uuid::encode_buffer();
                 log::info!(
                     "Season added: S{} for series {}",
                     season.season_number.value(),
-                    season.series_id.as_str(&mut buf)
+                    season.series_id.as_str()
                 );
                 Some(Message::MediaDiscovered(vec![Media::Season(season)]))
             }
@@ -396,13 +394,37 @@ fn decode_media_event(payload: &str) -> Result<MediaEvent, String> {
 
     serde_json::from_str::<MediaEvent>(payload).map_err(|err| err.to_string())
 }
+impl Drop for MediaEventState {
+    fn drop(&mut self) {
+        // Clean up the spawned task when the state is dropped
+        if let Some(handle) = self.task_handle.take() {
+            handle.abort();
+        }
+    }
+}
+
+// Helper extension to convert Media to legacy MediaFile if needed
+impl Message {
+    /// Create a MediaDiscovered message from media references
+    pub fn media_discovered(references: Vec<Media>) -> Self {
+        Message::MediaDiscovered(references)
+    }
+
+    /// Create a MediaUpdated message from a media reference
+    pub fn media_updated(reference: Media) -> Self {
+        Message::MediaUpdated(reference)
+    }
+
+    /// Create a MediaDeleted message from a media ID
+    pub fn media_deleted(id: MediaID) -> Self {
+        Message::MediaDeleted(id)
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::{
-        Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
-    };
+    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use ferrex_core::player_prelude::{MediaID, MovieID};
     use rkyv::rancor::Error as RkyvError;
     use rkyv::to_bytes;
@@ -430,32 +452,5 @@ mod tests {
 
         let decoded = decode_media_event(&json).expect("decode json");
         assert_eq!(decoded, event);
-    }
-}
-
-impl Drop for MediaEventState {
-    fn drop(&mut self) {
-        // Clean up the spawned task when the state is dropped
-        if let Some(handle) = self.task_handle.take() {
-            handle.abort();
-        }
-    }
-}
-
-// Helper extension to convert Media to legacy MediaFile if needed
-impl Message {
-    /// Create a MediaDiscovered message from media references
-    pub fn media_discovered(references: Vec<Media>) -> Self {
-        Message::MediaDiscovered(references)
-    }
-
-    /// Create a MediaUpdated message from a media reference
-    pub fn media_updated(reference: Media) -> Self {
-        Message::MediaUpdated(reference)
-    }
-
-    /// Create a MediaDeleted message from a media ID
-    pub fn media_deleted(id: MediaID) -> Self {
-        Message::MediaDeleted(id)
     }
 }

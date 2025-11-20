@@ -7,22 +7,22 @@ use sqlx::PgPool;
 use tempfile::tempdir;
 use uuid::Uuid;
 
-use ferrex_core::orchestration::actors::folder::{DefaultFolderScanActor, FolderScanActor};
-use ferrex_core::orchestration::actors::library::*;
-use ferrex_core::orchestration::actors::messages::ParentDescriptors;
-use ferrex_core::orchestration::actors::pipeline::*;
-use ferrex_core::orchestration::correlation::CorrelationCache;
-use ferrex_core::orchestration::dispatcher::DefaultJobDispatcher;
-use ferrex_core::orchestration::events::EventBus;
-use ferrex_core::orchestration::job::{JobKind, JobPayload, JobPriority, MediaAnalyzeJob, MediaFingerprint};
-use ferrex_core::orchestration::lease::{DequeueRequest, LeaseRenewal};
-use ferrex_core::orchestration::persistence::{PostgresCursorRepository, PostgresQueueService};
-use ferrex_core::orchestration::queue::QueueService;
-use ferrex_core::orchestration::runtime::InProcJobEventBus;
+use ferrex_core::scan::orchestration::actors::folder::{DefaultFolderScanActor, FolderScanActor};
+use ferrex_core::scan::orchestration::actors::library::*;
+use ferrex_core::scan::orchestration::actors::messages::ParentDescriptors;
+use ferrex_core::scan::orchestration::actors::pipeline::*;
+use ferrex_core::scan::orchestration::correlation::CorrelationCache;
+use ferrex_core::scan::orchestration::dispatcher::DefaultJobDispatcher;
+use ferrex_core::scan::orchestration::events::EventBus;
+use ferrex_core::scan::orchestration::job::{JobKind, JobPayload, JobPriority, MediaAnalyzeJob, MediaFingerprint};
+use ferrex_core::scan::orchestration::lease::{DequeueRequest, LeaseRenewal};
+use ferrex_core::scan::orchestration::persistence::{PostgresCursorRepository, PostgresQueueService};
+use ferrex_core::scan::orchestration::queue::QueueService;
+use ferrex_core::scan::orchestration::runtime::InProcJobEventBus;
 use ferrex_core::{LibraryID, LibraryReference, LibraryType, Result};
 
 fn norm(path: &Path) -> String {
-    ferrex_core::orchestration::scan_cursor::normalize_path(path)
+    ferrex_core::scan::orchestration::scan_cursor::normalize_path(path)
 }
 
 fn make_library(root: PathBuf, library_type: LibraryType) -> LibraryReference {
@@ -163,7 +163,7 @@ async fn bulk_seed_depth1_and_recursive_followups(pool: PgPool) -> Result<()> {
     assert!(seen.contains(&expect2), "X2 must be enqueued at depth-1");
 
     // Dispatcher with real folder actor to recurse and enqueue child scans
-    let actors = ferrex_core::orchestration::dispatcher::DispatcherActors::new(
+    let actors = ferrex_core::scan::orchestration::dispatcher::DispatcherActors::new(
         Arc::new(DefaultFolderScanActor::new()) as Arc<dyn FolderScanActor>,
         Arc::new(StubAnalyze) as Arc<dyn MediaAnalyzeActor>,
         Arc::new(StubMetadata) as Arc<dyn MetadataActor>,
@@ -193,7 +193,7 @@ async fn bulk_seed_depth1_and_recursive_followups(pool: PgPool) -> Result<()> {
         .expect("expected a folder scan job to be queued");
 
     let status = dispatcher.dispatch(&lease).await;
-    assert!(matches!(status, ferrex_core::orchestration::dispatcher::DispatchStatus::Success));
+    assert!(matches!(status, ferrex_core::scan::orchestration::dispatcher::DispatchStatus::Success));
     // Mark completed
     queue.complete(lease.lease_id).await?;
 

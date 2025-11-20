@@ -1,7 +1,8 @@
 use anyhow::Result;
 use chrono::{Duration, Utc};
-use ferrex_core::auth::domain::services::AuthenticationError;
-use ferrex_core::auth::domain::value_objects::DeviceFingerprint;
+use ferrex_core::domain::users::auth::domain::{
+    services::AuthenticationError, value_objects::DeviceFingerprint,
+};
 use sqlx::PgPool;
 
 #[path = "support/mod.rs"]

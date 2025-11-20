@@ -44,11 +44,12 @@ pub fn application(
 }
 
 fn default_settings() -> Settings {
-    let mut settings = Settings::default();
-    settings.id = Some("ferrex-player".to_string());
-    settings.antialiasing = true;
-    settings.default_font = Font::MONOSPACE;
-    settings
+    Settings {
+        id: Some("ferrex-player".to_string()),
+        antialiasing: true,
+        default_font: Font::MONOSPACE,
+        ..Default::default()
+    }
 }
 
 fn app_theme(_: &State) -> Theme {

@@ -29,7 +29,7 @@ impl SortableEntity for MovieReference {
 
         if F::ID == "title" {
             // Title is always available from MovieReference
-            let key = StringKey::from_str(self.title.as_str());
+            let key = StringKey::new(Some(self.title.to_string()));
             // We know F::Key = StringKey when F::ID = "title"
             // This will panic if the type doesn't match, which is what we want
             // since it indicates a programming error
@@ -48,20 +48,27 @@ impl SortableEntity for MovieReference {
             // Release date requires TMDB details
             let date = match &self.details {
                 MediaDetailsOption::Details(details) => {
-                    if let TmdbDetails::Movie(movie_details) = details.as_ref() {
-                        movie_details.release_date.as_ref().and_then(|date_str| {
-                        // Parse the date string (expected format: YYYY-MM-DD)
-                        use chrono::{NaiveDate, NaiveTime, Utc};
-                        NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-                            .ok()
-                            .and_then(|date| {
-                                let naive_datetime = date.and_time(
-                                    NaiveTime::from_hms_opt(0, 0, 0)?,
-                                );
-                                naive_datetime.and_local_timezone(Utc).single()
-                            })
-                        })
-                    } else { None }
+                    if let TmdbDetails::Movie(movie_details) = details.as_ref()
+                    {
+                        movie_details.release_date.as_ref().and_then(
+                            |date_str| {
+                                // Parse the date string (expected format: YYYY-MM-DD)
+                                use chrono::{NaiveDate, NaiveTime, Utc};
+                                NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                                    .ok()
+                                    .and_then(|date| {
+                                        let naive_datetime = date.and_time(
+                                            NaiveTime::from_hms_opt(0, 0, 0)?,
+                                        );
+                                        naive_datetime
+                                            .and_local_timezone(Utc)
+                                            .single()
+                                    })
+                            },
+                        )
+                    } else {
+                        None
+                    }
                 }
                 _ => None,
             };
@@ -73,10 +80,14 @@ impl SortableEntity for MovieReference {
         } else if F::ID == "rating" {
             // Rating (vote_average) requires TMDB details
             let rating = match &self.details {
-                MediaDetailsOption::Details(details) => match details.as_ref() {
-                    TmdbDetails::Movie(movie_details) => movie_details.vote_average,
-                    _ => None,
-                },
+                MediaDetailsOption::Details(details) => {
+                    match details.as_ref() {
+                        TmdbDetails::Movie(movie_details) => {
+                            movie_details.vote_average
+                        }
+                        _ => None,
+                    }
+                }
                 _ => None,
             };
             let key = OptionalFloatKey::new(rating);
@@ -87,10 +98,14 @@ impl SortableEntity for MovieReference {
         } else if F::ID == "popularity" {
             // Popularity requires TMDB details
             let popularity = match &self.details {
-                MediaDetailsOption::Details(details) => match details.as_ref() {
-                    TmdbDetails::Movie(movie_details) => movie_details.popularity,
-                    _ => None,
-                },
+                MediaDetailsOption::Details(details) => {
+                    match details.as_ref() {
+                        TmdbDetails::Movie(movie_details) => {
+                            movie_details.popularity
+                        }
+                        _ => None,
+                    }
+                }
                 _ => None,
             };
             let key = OptionalFloatKey::new(popularity);
@@ -101,10 +116,14 @@ impl SortableEntity for MovieReference {
         } else if F::ID == "runtime" {
             // Runtime requires TMDB details
             let runtime = match &self.details {
-                MediaDetailsOption::Details(details) => match details.as_ref() {
-                    TmdbDetails::Movie(movie_details) => movie_details.runtime,
-                    _ => None,
-                },
+                MediaDetailsOption::Details(details) => {
+                    match details.as_ref() {
+                        TmdbDetails::Movie(movie_details) => {
+                            movie_details.runtime
+                        }
+                        _ => None,
+                    }
+                }
                 _ => None,
             };
             let key = OptionalU32Key::new(runtime);
@@ -181,8 +200,7 @@ impl SortableEntity for SeriesReference {
         // Using type assertion to avoid unsafe code
 
         if F::ID == "title" {
-            // Title is always available from SeriesReference
-            let key = StringKey::from_str(self.title.as_str());
+            let key = StringKey::new(Some(self.title.to_string()));
             *Box::<dyn std::any::Any>::downcast(
                 Box::new(key) as Box<dyn std::any::Any>
             )
@@ -198,24 +216,28 @@ impl SortableEntity for SeriesReference {
             // First air date requires TMDB details
             let date = match &self.details {
                 MediaDetailsOption::Details(details) => {
-                    if let TmdbDetails::Series(series_details) = details.as_ref() {
+                    if let TmdbDetails::Series(series_details) =
+                        details.as_ref()
+                    {
                         series_details.first_air_date.as_ref().and_then(
-                        |date_str| {
-                            // Parse the date string (expected format: YYYY-MM-DD)
-                            use chrono::{NaiveDate, NaiveTime, Utc};
-                            NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-                                .ok()
-                                .and_then(|date| {
-                                    let naive_datetime = date.and_time(
-                                        NaiveTime::from_hms_opt(0, 0, 0)?,
-                                    );
-                                    naive_datetime
-                                        .and_local_timezone(Utc)
-                                        .single()
-                                })
-                        },
+                            |date_str| {
+                                // Parse the date string (expected format: YYYY-MM-DD)
+                                use chrono::{NaiveDate, NaiveTime, Utc};
+                                NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                                    .ok()
+                                    .and_then(|date| {
+                                        let naive_datetime = date.and_time(
+                                            NaiveTime::from_hms_opt(0, 0, 0)?,
+                                        );
+                                        naive_datetime
+                                            .and_local_timezone(Utc)
+                                            .single()
+                                    })
+                            },
                         )
-                    } else { None }
+                    } else {
+                        None
+                    }
                 }
                 _ => None,
             };
@@ -227,10 +249,14 @@ impl SortableEntity for SeriesReference {
         } else if F::ID == "rating" {
             // Rating (vote_average) requires TMDB details
             let rating = match &self.details {
-                MediaDetailsOption::Details(details) => match details.as_ref() {
-                    TmdbDetails::Series(series_details) => series_details.vote_average,
-                    _ => None,
-                },
+                MediaDetailsOption::Details(details) => {
+                    match details.as_ref() {
+                        TmdbDetails::Series(series_details) => {
+                            series_details.vote_average
+                        }
+                        _ => None,
+                    }
+                }
                 _ => None,
             };
             let key = OptionalFloatKey::new(rating);
@@ -241,10 +267,14 @@ impl SortableEntity for SeriesReference {
         } else if F::ID == "popularity" {
             // Popularity requires TMDB details
             let popularity = match &self.details {
-                MediaDetailsOption::Details(details) => match details.as_ref() {
-                    TmdbDetails::Series(series_details) => series_details.popularity,
-                    _ => None,
-                },
+                MediaDetailsOption::Details(details) => {
+                    match details.as_ref() {
+                        TmdbDetails::Series(series_details) => {
+                            series_details.popularity
+                        }
+                        _ => None,
+                    }
+                }
                 _ => None,
             };
             let key = OptionalFloatKey::new(popularity);
@@ -344,7 +374,9 @@ mod tests {
             library_id: LibraryID::new(),
             tmdb_id: 12345,
             title: MovieTitle::new("Test Movie".to_string()).unwrap(),
-            details: MediaDetailsOption::Details(Box::new(TmdbDetails::Movie(details))),
+            details: MediaDetailsOption::Details(Box::new(TmdbDetails::Movie(
+                details,
+            ))),
             endpoint: MovieURL::from_string("/movies/test-movie-1".to_string()),
             file: MediaFile {
                 id: Uuid::now_v7(),

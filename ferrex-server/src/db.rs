@@ -27,10 +27,10 @@ pub async fn prepare_demo_database(base: &str) -> Result<String> {
 
     let mut admin_url = base_url.clone();
     admin_url.set_path("/postgres");
-    let admin_url = admin_url.into_string();
 
-    let mut connection =
-        PgConnection::connect(&admin_url).await.with_context(|| {
+    let mut connection = PgConnection::connect(admin_url.as_str())
+        .await
+        .with_context(|| {
             format!("failed to connect to admin database via {}", admin_url)
         })?;
 

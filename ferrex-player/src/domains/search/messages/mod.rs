@@ -2,7 +2,7 @@
 
 use super::metrics::SearchPerformanceMetrics;
 use super::types::{SearchMode, SearchResult};
-use crate::infrastructure::api_types::Media;
+use crate::infra::api_types::Media;
 
 /// Search domain messages
 #[derive(Clone)]

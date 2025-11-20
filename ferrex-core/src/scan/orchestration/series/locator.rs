@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use crate::database::ports::media_references::MediaReferencesRepository;
 use crate::error::Result;
-use crate::orchestration::actors::messages::ParentDescriptors;
-use crate::orchestration::series::clean_series_title;
+use crate::scan::orchestration::actors::messages::ParentDescriptors;
+use crate::scan::orchestration::series::clean_series_title;
 use crate::types::ids::LibraryID;
 use crate::types::media::SeriesReference;
 
@@ -86,7 +86,7 @@ fn candidate_titles(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestration::actors::messages::ParentDescriptors;
+    use crate::scan::orchestration::actors::messages::ParentDescriptors;
 
     #[test]
     fn candidate_titles_prefers_hints() {

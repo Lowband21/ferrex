@@ -1,9 +1,11 @@
 use axum::{Extension, Json, extract::State};
 use ferrex_core::{
-    api_types::ApiResponse,
-    auth::policy::{PasswordPolicy, PasswordPolicyRule},
+    api::types::ApiResponse,
     database::ports::security_settings::SecuritySettingsUpdate,
-    user::User,
+    domain::users::{
+        auth::policy::{PasswordPolicy, PasswordPolicyRule},
+        user::User,
+    },
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};

@@ -5,13 +5,12 @@ use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::auth::types::{
     AuthenticationFlow, SetupClaimStatus, SetupClaimUi,
 };
-use crate::infrastructure::api_client::SetupStatus;
-use crate::infrastructure::services::api::ApiService;
-use crate::infrastructure::services::auth::AuthService;
+use crate::infra::api_client::SetupStatus;
+use crate::infra::api_types::{ConfirmClaimResponse, StartClaimResponse};
 use crate::state::State;
-use ferrex_core::api_types::setup::{ConfirmClaimResponse, StartClaimResponse};
 use ferrex_core::{
-    auth::domain::value_objects::SessionScope, player_prelude as core,
+    domain::users::auth::domain::value_objects::SessionScope,
+    player_prelude as core,
 };
 use iced::Task;
 use log::{error, info};
@@ -85,7 +84,26 @@ pub fn handle_setup_status_checked(
             };
         Task::none()
     } else {
-        super::auth_flow::transition_to_auto_login_check(state)
+        // Rationale: When we checked setup due to an empty user list, this is
+        // not a first-run server. In that case we should not loop back into the
+        // auto-login check which simply re-triggers user loading and keeps the
+        // UI stuck on the "Loading users..." view with no cache. Instead, show
+        // the pre-auth login form so the user can enter username/password.
+        // Auto‑login (if applicable) is handled during bootstrap before we get here.
+
+        state.is_authenticated = false;
+        state.domains.auth.state.is_authenticated = false;
+        state.domains.auth.state.user_permissions = None;
+        state.domains.auth.state.auth_flow = AuthenticationFlow::PreAuthLogin {
+            username: String::new(),
+            password: SecureCredential::new(String::new()),
+            show_password: false,
+            // Mirror current device preference as default toggle state
+            remember_device: state.domains.auth.state.auto_login_enabled,
+            error: None,
+            loading: false,
+        };
+        Task::none()
     }
 }
 

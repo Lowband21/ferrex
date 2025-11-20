@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use ferrex_core::{
+use ferrex_core::domain::users::{
     auth::domain::services::AuthenticationError,
     user::{User, UserSession},
 };

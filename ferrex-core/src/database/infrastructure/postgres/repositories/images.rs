@@ -11,11 +11,11 @@ use crate::{
         ports::images::ImageRepository,
         traits::{ImageLookupParams, ImageRecord, ImageVariant, MediaImage},
     },
-    error::{MediaError, Result},
-    image::{
+    domain::media::image::{
         MediaImageKind,
         records::{MediaImageVariantKey, MediaImageVariantRecord},
     },
+    error::{MediaError, Result},
 };
 
 #[derive(Clone, Debug)]

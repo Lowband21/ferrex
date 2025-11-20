@@ -3,7 +3,7 @@ use std::fmt;
 use tokio::sync::broadcast;
 
 use crate::error::Result;
-use crate::orchestration::events::{
+use crate::scan::orchestration::events::{
     JobEvent, JobEventPublisher, ScanEvent, ScanEventPublisher,
 };
 

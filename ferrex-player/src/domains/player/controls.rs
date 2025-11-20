@@ -3,7 +3,7 @@ use super::track_selection::format_subtitle_track;
 use crate::{
     common::ui_utils::{icon_text, lucide_font},
     domains::player::{messages::Message, state::PlayerDomainState},
-    infrastructure::constants::player::seeking::*,
+    infra::constants::player::seeking::*,
 };
 use iced::ContentFit;
 use iced::Theme;
@@ -105,7 +105,7 @@ impl PlayerDomainState {
                 // Control buttons - with padding
                 container(self.build_control_buttons())
                     .padding(
-                        crate::infrastructure::constants::player_controls::CONTROL_BUTTONS_PADDING
+                        crate::infra::constants::player_controls::CONTROL_BUTTONS_PADDING
                     )
                     .width(Length::Fill),
             ]
@@ -123,7 +123,7 @@ impl PlayerDomainState {
     fn build_seek_bar(&self) -> Element<'_, Message> {
         let bar_height = super::state::SEEK_BAR_VISUAL_HEIGHT;
         let hit_area_height =
-            crate::infrastructure::constants::player_controls::SEEK_BAR_HIT_ZONE_HEIGHT;
+            crate::infra::constants::player_controls::SEEK_BAR_HIT_ZONE_HEIGHT;
 
         // Calculate percentages
         // Use source duration if available (for HLS this is the full media duration)
@@ -147,8 +147,7 @@ impl PlayerDomainState {
         let played_portion = (played_percentage * 1000.0).max(1.0) as u16;
         let _buffered_portion = ((buffered_percentage - played_percentage)
             * 1000.0)
-            .max(0.0)
-            .min(50.0) as u16;
+            .clamp(0.0, 50.0) as u16;
         let unplayed_portion = (1000u16)
             .saturating_sub(played_portion)
             //.saturating_sub(buffered_portion)
@@ -295,7 +294,7 @@ impl PlayerDomainState {
                                 .style(theme::slider_volume)
                         )
                         .height(
-                            crate::infrastructure::constants::player_controls::CONTROL_BUTTONS_HEIGHT
+                            crate::infra::constants::player_controls::CONTROL_BUTTONS_HEIGHT
                         )
                         .align_y(iced::alignment::Vertical::Center),
                         Space::new().width(Length::Fixed(20.0)),

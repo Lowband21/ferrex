@@ -4,7 +4,7 @@ use ferrex_core::player_prelude::{LibraryID, SearchField};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::infrastructure::api_types::Media;
+use crate::infra::api_types::Media;
 
 /// Search UI mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 use crate::common::ui_utils::{Icon, icon_text};
 use crate::domains::ui::views::grid::macros::parse_hex_color;
-use crate::domains::ui::widgets::AnimationType;
-use crate::infrastructure::api_types::{MediaDetailsOption, TmdbDetails};
+use crate::infra::api_types::MediaDetailsOption;
+use crate::infra::widgets::poster::poster_animation_types::PosterAnimationType;
 use crate::{
     domains::ui::components, domains::ui::messages::Message,
     domains::ui::theme, domains::ui::widgets::image_for::image_for,
@@ -11,7 +11,7 @@ use crate::{
 use ferrex_core::{
     traits::id::MediaIDLike,
     types::{
-        details::{ArchivedMediaDetailsOption, ArchivedTmdbDetails},
+        details::ArchivedMediaDetailsOption,
         ids::MovieID,
         image_request::Priority,
         util_types::{ImageSize, ImageType},
@@ -69,7 +69,7 @@ pub fn view_movie_detail<'a>(
                 .width(Length::Fixed(300.0))
                 .height(Length::Fixed(450.0))
                 .priority(Priority::Visible)
-                .animation(AnimationType::flip());
+                .animation(PosterAnimationType::flip());
 
             if let Some(hex) = theme_color
                 && let Ok(color) = parse_hex_color(&hex)
@@ -96,15 +96,14 @@ pub fn view_movie_detail<'a>(
                     .unwrap();
 
             // Extract movie details for easier access
-            let movie_details_opt = if let MediaDetailsOption::Details(
-                TmdbDetails::Movie(movie_details),
-            ) = movie_details
+            let movie_details_opt = if let Some(details) =
+                movie_details.as_movie()
             {
                 log::debug!(
                     "[MovieDetail] Movie '{}' has full TMDB details with overview",
                     movie.title
                 );
-                Some(movie_details)
+                Some(details.clone())
             } else {
                 match &movie.details {
                     ArchivedMediaDetailsOption::Endpoint(endpoint) => {
@@ -447,10 +446,7 @@ pub fn view_movie_detail<'a>(
             }
 
             // Cast section - now in a full-width container at the bottom
-            if let ArchivedMediaDetailsOption::Details(
-                ArchivedTmdbDetails::Movie(ref movie_details),
-            ) = movie.details
-            {
+            if let Some(movie_details) = movie.details.as_movie() {
                 let cast_section =
                     components::create_cast_scrollable(&movie_details.cast);
                 content = content.push(cast_section);

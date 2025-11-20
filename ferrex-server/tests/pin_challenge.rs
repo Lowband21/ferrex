@@ -4,12 +4,11 @@ use axum_test::TestServer;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use ferrex_core::{
-    api_routes::v1,
-    auth::domain::{
-        aggregates::DeviceSession, services::AuthEventContext,
-        value_objects::DeviceFingerprint,
+    api::routes::v1,
+    domain::users::auth::domain::{
+        AuthEventContext, DeviceFingerprint, DeviceSession,
     },
-    user::User,
+    player_prelude::User,
 };
 use serde_json::json;
 use sqlx::PgPool;

@@ -5,8 +5,8 @@ use axum::{
     },
     response::Response,
 };
+use ferrex_core::domain::users::user::User;
 use ferrex_core::sync_session::SyncMessage;
-use ferrex_core::user::User;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use tokio::sync::mpsc;

@@ -11,7 +11,7 @@ pub mod update_handlers;
 use self::image_service::UnifiedImageService;
 use self::messages::Message as MetadataMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::infrastructure::services::api::ApiService;
+use crate::infra::services::api::ApiService;
 use iced::Task;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};

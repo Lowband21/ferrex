@@ -247,11 +247,11 @@ impl Default for QueryComplexityGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api_types::ScalarRange;
-    use crate::query::types::SortOrder;
-    use crate::query_prelude::{
+    use crate::api::types::ScalarRange;
+    use crate::query::prelude::{
         MediaFilters, Pagination, SearchField, SearchQuery, SortCriteria,
     };
+    use crate::query::types::SortOrder;
     use uuid::Uuid;
 
     #[test]
@@ -294,7 +294,7 @@ mod tests {
                     ScalarRange::new(7.0, 10.0).to_rating_value(),
                 ),
                 watch_status: Some(
-                    crate::watch_status::WatchStatusFilter::InProgress,
+                    crate::domain::watch::WatchStatusFilter::InProgress,
                 ),
                 ..Default::default()
             },

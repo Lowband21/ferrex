@@ -9,11 +9,14 @@ use std::{collections::HashMap, fmt, sync::Arc};
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::database::PostgresDatabase;
 use ferrex_core::error::{MediaError, Result};
-use ferrex_core::fs_watch::{
-    FsWatchConfig, FsWatchService, NoopFsWatchObserver,
+use ferrex_core::infrastructure::{
+    media::{image_service::ImageService, providers::TmdbApiProvider},
+    scan::{
+        FsWatchConfig, FsWatchService, NoopFsWatchObserver,
+        PostgresCursorRepository, PostgresQueueService,
+    },
 };
-use ferrex_core::image_service::ImageService;
-use ferrex_core::orchestration::{
+use ferrex_core::scan::orchestration::{
     actors::{
         DefaultFolderScanActor, DefaultIndexerActor, DefaultLibraryActor,
         DefaultMediaAnalyzeActor, LibraryActorCommand, LibraryActorConfig,
@@ -34,7 +37,6 @@ use ferrex_core::orchestration::{
     },
     job::{EnqueueRequest, JobHandle, JobKind, JobPriority, JobValidator},
     lease::{DequeueRequest, JobLease},
-    persistence::{PostgresCursorRepository, PostgresQueueService},
     queue::QueueService,
     runtime::{
         InProcJobEventBus, LibraryActorHandle, OrchestratorRuntime,
@@ -42,7 +44,6 @@ use ferrex_core::orchestration::{
     },
     scheduler::ReadyCountEntry,
 };
-use ferrex_core::providers::TmdbApiProvider;
 use ferrex_core::types::LibraryID;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
@@ -386,9 +387,9 @@ impl ScanOrchestrator {
     /// Return ready-queue depths for each job kind to aid diagnostics.
     pub async fn queue_depths(
         &self,
-    ) -> Result<ferrex_core::api_scan::ScanQueueDepths> {
+    ) -> Result<ferrex_core::api::scan::ScanQueueDepths> {
         let queue = self.runtime.queue();
-        Ok(ferrex_core::api_scan::ScanQueueDepths {
+        Ok(ferrex_core::api::scan::ScanQueueDepths {
             folder_scan: queue.queue_depth(JobKind::FolderScan).await?,
             analyze: queue.queue_depth(JobKind::MediaAnalyze).await?,
             metadata: queue.queue_depth(JobKind::MetadataEnrich).await?,

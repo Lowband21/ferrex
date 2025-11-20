@@ -1,6 +1,5 @@
 use crate::domains::library::messages::Message;
 use crate::domains::library::server;
-use crate::infrastructure::services::api::ApiService;
 use crate::state::State;
 use ferrex_core::player_prelude::{
     LibraryID, ScanLifecycleStatus, ScanProgressEvent, ScanSnapshotDto,
@@ -227,17 +226,21 @@ pub fn remove_scan(state: &mut State, scan_id: Uuid) {
 
 fn map_status(
     status: &str,
-) -> Option<ferrex_core::api_types::ScanLifecycleStatus> {
+) -> Option<crate::infra::api_types::ScanLifecycleStatus> {
     match status {
-        "pending" => Some(ferrex_core::api_types::ScanLifecycleStatus::Pending),
-        "running" => Some(ferrex_core::api_types::ScanLifecycleStatus::Running),
-        "paused" => Some(ferrex_core::api_types::ScanLifecycleStatus::Paused),
-        "completed" => {
-            Some(ferrex_core::api_types::ScanLifecycleStatus::Completed)
+        "pending" => {
+            Some(crate::infra::api_types::ScanLifecycleStatus::Pending)
         }
-        "failed" => Some(ferrex_core::api_types::ScanLifecycleStatus::Failed),
+        "running" => {
+            Some(crate::infra::api_types::ScanLifecycleStatus::Running)
+        }
+        "paused" => Some(crate::infra::api_types::ScanLifecycleStatus::Paused),
+        "completed" => {
+            Some(crate::infra::api_types::ScanLifecycleStatus::Completed)
+        }
+        "failed" => Some(crate::infra::api_types::ScanLifecycleStatus::Failed),
         "canceled" | "cancelled" => {
-            Some(ferrex_core::api_types::ScanLifecycleStatus::Canceled)
+            Some(crate::infra::api_types::ScanLifecycleStatus::Canceled)
         }
         _ => None,
     }

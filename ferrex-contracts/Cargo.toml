@@ -1,0 +1,25 @@
+[package]
+name = "ferrex-contracts"
+description = "Trait surfaces and domain contracts built atop ferrex-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+serde = ["ferrex-model/serde"]
+rkyv = ["dep:rkyv", "ferrex-model/rkyv"]
+chrono = ["ferrex-model/chrono"]
+
+[dependencies]
+ferrex-model = { workspace = true }
+rkyv = { workspace = true, optional = true }
+uuid.workspace = true
+log.workspace = true

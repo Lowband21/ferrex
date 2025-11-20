@@ -4,10 +4,10 @@ use axum::{
     http::StatusCode,
 };
 use ferrex_core::{
-    api_types::ApiResponse,
+    api::types::ApiResponse,
+    domain::users::user::User,
+    domain::watch::{InProgressItem, UpdateProgressRequest, UserWatchState},
     types::MediaType,
-    user::User,
-    watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

@@ -25,9 +25,9 @@
 //!
 //! The crate is organized into several key modules:
 //!
-//! - [`api_types`]: Common types used across API boundaries
-//! - [`user`]: User authentication and session management
-//! - [`watch_status`]: Media playback progress tracking
+//! - [`api`]: Versioned routes and cross-service API DTOs
+//! - [`domain::users`]: User authentication and session management
+//! - [`domain::watch`]: Media playback progress tracking
 //! - [`sync_session`]: Synchronized playback session management
 //! - [`query`]: Advanced media querying capabilities
 //! - [`database`]: Database traits and implementations
@@ -36,14 +36,15 @@
 //!
 //! ```no_run
 //! use ferrex_core::{
-//!     database::MediaDatabase,
+//!     database::DatabaseContext,
 //!     player_prelude::{MediaID, MediaIDLike, MovieID, UpdateProgressRequest, UserWatchState},
 //!     user::RegisterRequest,
 //! };
 //!
-//! async fn register_and_track(
-//!     _db: &MediaDatabase,
-//! ) -> Result<(), Box<dyn std::error::Error>> {
+//! async fn register_and_track(database_url: &str) -> Result<(), Box<dyn std::error::Error>> {
+//!     let db_ctx = DatabaseContext::connect_postgres(database_url).await?;
+//!     let unit_of_work = db_ctx.unit_of_work();
+//!
 //!     let request = RegisterRequest {
 //!         username: "alice".to_string(),
 //!         password: "secure_password".to_string(),
@@ -69,13 +70,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(missing_docs)]
 
-/// Common API routes used across Ferrex services
-pub mod api_routes;
+/// Versioned routes and API data transfer objects
+pub mod api;
 
-/// Domain-specific scan API payloads shared between server and player
-pub mod api_scan;
-/// Common API types used across the Ferrex ecosystem
-pub mod api_types;
+/// Domain module grouping core business logic.
+pub mod domain;
+
+/// Infrastructure adapters (database, external services, runtimes).
+pub mod infrastructure;
 
 /// Database abstraction layer and implementations
 #[cfg(feature = "database")]
@@ -88,41 +90,13 @@ pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 /// Error types and error handling utilities
 pub mod error;
 
-/// Parser for identifying and organizing media extras (trailers, featurettes, etc.)
-pub mod extras_parser;
-
-/// Image caching and serving service
-#[cfg(feature = "database")]
-#[cfg_attr(docsrs, doc(cfg(feature = "database")))]
-pub mod image_service;
-
-/// Shared image domain records
-#[cfg(feature = "database")]
-pub mod image;
-
-#[cfg(feature = "database")]
-pub use image::MediaImageKind;
-
 /// rkyv wrapper types for external dependencies
-pub mod rkyv_wrappers;
-
-/// FFmpeg-based metadata extraction
-#[cfg(feature = "ffmpeg")]
-#[cfg_attr(docsrs, doc(cfg(feature = "ffmpeg")))]
-pub mod metadata;
-
-/// External metadata providers (TMDB integration)
-pub mod providers;
+#[cfg(feature = "rkyv")]
+#[cfg_attr(docsrs, doc(cfg(feature = "rkyv")))]
+pub use ferrex_model::rkyv_wrappers;
 
 /// Advanced media query system with filtering and sorting
 pub mod query;
-
-/// Sorted indices for efficient media sorting
-#[cfg(feature = "database")]
-pub mod indices;
-
-/// Role-Based Access Control (RBAC) system
-pub mod rbac;
 
 /// Demo-mode helpers for quickly seeding fake media libraries.
 #[cfg(feature = "demo")]
@@ -133,61 +107,28 @@ pub mod demo;
 #[cfg_attr(docsrs, doc(cfg(feature = "scan-runtime")))]
 pub mod scan;
 
-/// Scan orchestrator domain scaffolding
-#[cfg(feature = "scan-runtime")]
-#[cfg_attr(docsrs, doc(cfg(feature = "scan-runtime")))]
-pub mod orchestration;
-
-/// Filesystem watch adapters feeding the orchestrator actors
-#[cfg(feature = "scan-runtime")]
-#[cfg_attr(docsrs, doc(cfg(feature = "scan-runtime")))]
-pub mod fs_watch;
-
-/// Public scanner interface (legacy helpers and fixtures).
-#[cfg(feature = "scan-runtime")]
-#[cfg_attr(docsrs, doc(cfg(feature = "scan-runtime")))]
-pub mod scanner;
-
 /// Synchronized playback session management
 pub mod sync_session;
 
-/// TV show filename parser for extracting episode information
-pub mod tv_parser;
-
 /// Common types used by both server and client
-pub mod types;
+pub use ferrex_model as types;
 
 /// Traits for core types
-pub mod traits;
-
-/// User authentication and session management
-pub mod user;
-
-/// Enhanced authentication with device trust and PIN support
-pub mod auth;
+pub use ferrex_contracts as traits;
 
 /// First-run setup flows (claim codes, binding)
 #[cfg(feature = "database")]
 pub mod setup;
-
-/// User management domain module with CRUD operations
-pub mod user_management;
-
-/// Media watch status and progress tracking
-pub mod watch_status;
 
 /// Application-level composition utilities (Unit of Work, facades)
 pub mod application;
 
 pub mod player_prelude;
 
-/// Query helper exports grouped for UI/search crates
-pub use query::prelude as query_prelude;
-
 // #[cfg(feature = "compat")]
 // mod compat {
-//     pub use super::api_scan::*;
-//     pub use super::api_types::*;
+//     pub use super::api::scan::*;
+//     pub use super::api::types::*;
 //     #[cfg(feature = "database")]
 //     pub use super::database::*;
 //     pub use super::error::*;
@@ -223,7 +164,7 @@ pub use query::prelude as query_prelude;
 //     // Authentication exports
 //     pub use super::auth::AuthError as DeviceAuthError;
 //     #[cfg(feature = "database")]
-//     pub use super::auth::infrastructure::*;
+//     pub use super::auth::infra::*;
 //     #[cfg(feature = "database")]
 //     pub use super::auth::pin::*;
 //     pub use super::auth::rate_limit::*;

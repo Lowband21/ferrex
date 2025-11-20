@@ -71,13 +71,13 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         if let MediaDetailsOption::Details(details) = &movie.details {
             if let TmdbDetails::Movie(details) = details.as_ref() {
-            persist_movie_metadata(
-                &mut tx,
-                target_movie_id,
-                movie.tmdb_id,
-                details,
-            )
-            .await?;
+                persist_movie_metadata(
+                    &mut tx,
+                    target_movie_id,
+                    movie.tmdb_id,
+                    details,
+                )
+                .await?;
             }
         } else if movie.tmdb_id != 0 {
             // TMDB id present but no metadata; ensure relations removed
@@ -107,13 +107,13 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         if let MediaDetailsOption::Details(details) = &series.details {
             if let TmdbDetails::Series(details) = details.as_ref() {
-            persist_series_metadata(
-                &mut tx,
-                target_series_id,
-                series.tmdb_id,
-                details,
-            )
-            .await?;
+                persist_series_metadata(
+                    &mut tx,
+                    target_series_id,
+                    series.tmdb_id,
+                    details,
+                )
+                .await?;
             }
         } else if series.tmdb_id != 0 {
             purge_series_metadata(&mut tx, target_series_id).await?;
@@ -142,13 +142,13 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         if let MediaDetailsOption::Details(details) = &season.details {
             if let TmdbDetails::Season(details) = details.as_ref() {
-            persist_season_metadata(
-                &mut tx,
-                season_id,
-                season.tmdb_series_id,
-                details,
-            )
-            .await?;
+                persist_season_metadata(
+                    &mut tx,
+                    season_id,
+                    season.tmdb_series_id,
+                    details,
+                )
+                .await?;
             }
         } else {
             purge_season_metadata(&mut tx, season_id).await?;
@@ -210,13 +210,13 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         if let MediaDetailsOption::Details(details) = &episode.details {
             if let TmdbDetails::Episode(details) = details.as_ref() {
-            persist_episode_metadata(
-                &mut tx,
-                insert_id,
-                episode.tmdb_series_id,
-                details,
-            )
-            .await?;
+                persist_episode_metadata(
+                    &mut tx,
+                    insert_id,
+                    episode.tmdb_series_id,
+                    details,
+                )
+                .await?;
             }
         } else {
             purge_episode_metadata(&mut tx, insert_id).await?;
@@ -255,7 +255,9 @@ impl<'a> TmdbMetadataRepository<'a> {
                 ))
             })?,
             details: details
-                .map(|d| MediaDetailsOption::Details(Box::new(TmdbDetails::Movie(d))))
+                .map(|d| {
+                    MediaDetailsOption::Details(Box::new(TmdbDetails::Movie(d)))
+                })
                 .unwrap_or_else(|| {
                     MediaDetailsOption::Endpoint(format!("/movie/{}", movie_id))
                 }),
@@ -292,7 +294,11 @@ impl<'a> TmdbMetadataRepository<'a> {
                 ))
             })?,
             details: details
-                .map(|d| MediaDetailsOption::Details(Box::new(TmdbDetails::Series(d))))
+                .map(|d| {
+                    MediaDetailsOption::Details(Box::new(TmdbDetails::Series(
+                        d,
+                    )))
+                })
                 .unwrap_or_else(|| {
                     MediaDetailsOption::Endpoint(format!(
                         "/series/{}",
@@ -325,7 +331,9 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         let details = load_season_details(self.pool, season_id).await?;
         let details_option = details
-            .map(|d| MediaDetailsOption::Details(Box::new(TmdbDetails::Season(d))))
+            .map(|d| {
+                MediaDetailsOption::Details(Box::new(TmdbDetails::Season(d)))
+            })
             .unwrap_or_else(|| {
                 MediaDetailsOption::Endpoint(format!("/media/{}", season_id))
             });
@@ -366,7 +374,9 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         let details = load_episode_details(self.pool, episode_id).await?;
         let details_option = details
-            .map(|d| MediaDetailsOption::Details(Box::new(TmdbDetails::Episode(d))))
+            .map(|d| {
+                MediaDetailsOption::Details(Box::new(TmdbDetails::Episode(d)))
+            })
             .unwrap_or_else(|| {
                 MediaDetailsOption::Endpoint(format!("/media/{}", episode_id))
             });
@@ -3250,10 +3260,7 @@ async fn load_season_details(
     .collect();
 
     let raw_season_number = row.season_number;
-    let season_number = match u8::try_from(raw_season_number) {
-        Ok(value) => value,
-        Err(_) => 0,
-    };
+    let season_number = u8::try_from(raw_season_number).unwrap_or_default();
     let details = SeasonDetails {
         id: row.tmdb_id as u64,
         season_number,

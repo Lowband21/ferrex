@@ -27,9 +27,7 @@ pub fn update_settings(
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    profiling::scope!(
-        crate::infrastructure::profiling_scopes::scopes::SETTINGS_UPDATE
-    );
+    profiling::scope!(crate::infra::profiling_scopes::scopes::SETTINGS_UPDATE);
 
     match message {
         // Navigation

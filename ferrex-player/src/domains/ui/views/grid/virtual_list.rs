@@ -110,7 +110,7 @@ pub fn virtual_list<'a, Message: 'a>(
         feature = "profile-with-tracing"
     ))]
     profiling::scope!(
-        crate::infrastructure::profiling_scopes::scopes::VIRTUAL_LIST_RENDER
+        crate::infra::profiling_scopes::scopes::VIRTUAL_LIST_RENDER
     );
 
     let mut content = column![].spacing(0).width(Length::Fill);

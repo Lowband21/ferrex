@@ -894,21 +894,3 @@ impl AuthService {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Minimal test helper - no heavy mocks, just real service with test setup
-    pub struct TestHelper {
-        pub auth_service: AuthService,
-    }
-
-    impl TestHelper {
-        pub fn new() -> Self {
-            Self {
-                auth_service: AuthService::new(),
-            }
-        }
-    }
-}

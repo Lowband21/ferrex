@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use ferrex_core::auth::{
+use ferrex_core::domain::users::auth::{
     AuthCrypto,
     domain::services::{
         AuthenticationError, AuthenticationService,

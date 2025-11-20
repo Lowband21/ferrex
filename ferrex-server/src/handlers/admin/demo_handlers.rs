@@ -1,12 +1,10 @@
-#![cfg(feature = "demo")]
-
 use axum::extract::State;
 use axum::response::Json;
 
 use crate::demo::DemoSizeOverrides;
 use crate::infra::app_state::AppState;
 use crate::infra::errors::{AppError, AppResult};
-use ferrex_core::api_types::{DemoResetRequest, DemoStatus};
+use ferrex_core::api::types::{DemoResetRequest, DemoStatus};
 
 pub async fn status(
     State(state): State<AppState>,

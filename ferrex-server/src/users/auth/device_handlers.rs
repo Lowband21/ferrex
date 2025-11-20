@@ -4,22 +4,25 @@ use axum::{Extension, Json, extract::State, http::HeaderMap};
 use base64::Engine as _;
 use chrono::Utc;
 use ferrex_core::{
-    api_types::ApiResponse,
-    auth::{
-        AuthError, AuthResult,
-        device::{
-            AuthDeviceStatus, AuthenticatedDevice, DeviceInfo,
-            DeviceRegistration, Platform,
-        },
-        domain::{
-            aggregates::{DeviceSession, DeviceStatus},
-            services::{
-                AuthEventContext, AuthenticationError, DeviceTrustError,
-                PinManagementError, TokenBundle,
+    api::types::ApiResponse,
+    domain::users::{
+        auth::{
+            AuthError, AuthResult,
+            device::{
+                AuthDeviceStatus, AuthenticatedDevice, DeviceInfo,
+                DeviceRegistration, Platform,
+            },
+            domain::{
+                aggregates::{DeviceSession, DeviceStatus},
+                services::{
+                    AuthEventContext, AuthenticationError, DeviceTrustError,
+                    PinManagementError, TokenBundle,
+                },
+                value_objects::{DeviceFingerprint, PinPolicy},
             },
         },
+        user::User,
     },
-    user::User,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -36,8 +39,7 @@ use crate::{
     },
     users::map_auth_facade_error,
 };
-use ferrex_core::auth::domain::services::AuthenticationError as CoreAuthError;
-use ferrex_core::auth::domain::value_objects::{DeviceFingerprint, PinPolicy};
+use ferrex_core::domain::users::auth::domain::services::AuthenticationError as CoreAuthError;
 
 const MAX_PIN_ATTEMPTS: u8 = 3;
 
@@ -221,7 +223,6 @@ pub async fn device_login(
 
 pub async fn pin_login(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Json(request): Json<PinLoginRequest>,
 ) -> AppResult<Json<ApiResponse<AuthResult>>> {
     // Global rate limiting middleware enforces PIN auth limits.
@@ -270,7 +271,6 @@ pub struct PinChallengeResponse {
 /// Issue a device possession challenge for PIN login
 pub async fn pin_challenge(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Json(request): Json<PinChallengeRequest>,
 ) -> AppResult<Json<ApiResponse<PinChallengeResponse>>> {
     let facade = state.auth_facade().clone();
@@ -356,12 +356,12 @@ pub async fn set_device_pin(
 
 pub async fn check_device_status(
     State(state): State<AppState>,
-    Extension(_user): Extension<User>,
+    Extension(user): Extension<User>,
     axum::extract::Query(query): axum::extract::Query<DeviceStatusQuery>,
 ) -> AppResult<Json<ApiResponse<DeviceAuthStatus>>> {
     let facade = state.auth_facade().clone();
     let status = match facade.get_device_by_id(query.device_id).await {
-        Ok(session) if session.user_id() == query.user_id => {
+        Ok(session) if session.user_id() == user.id => {
             if matches!(session.status(), DeviceStatus::Revoked) {
                 DeviceAuthStatus {
                     device_registered: false,
@@ -500,7 +500,6 @@ pub async fn change_device_pin(
 
 #[derive(Debug, Deserialize)]
 pub struct DeviceStatusQuery {
-    pub user_id: Uuid,
     pub device_id: Uuid,
 }
 

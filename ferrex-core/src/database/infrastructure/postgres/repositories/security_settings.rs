@@ -4,9 +4,11 @@ use serde_json::Value;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use crate::auth::policy::{AuthSecuritySettings, PasswordPolicy};
 use crate::database::ports::security_settings::{
     SecuritySettingsRepository, SecuritySettingsUpdate,
+};
+use crate::domain::users::auth::policy::{
+    AuthSecuritySettings, PasswordPolicy,
 };
 use crate::error::{MediaError, Result};
 

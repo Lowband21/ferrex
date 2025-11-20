@@ -5,8 +5,7 @@ preset: FirstRun
 click (550.74, 185.98)
 move cursor to (563.99, 219.30)
 type "lowband"
-press (532.40, 272.55)
-release (530.82, 271.82)
+click (532.40, 272.55)
 move cursor to (591.55, 240.76)
 type "Lowband"
 click (570.17, 367.06)

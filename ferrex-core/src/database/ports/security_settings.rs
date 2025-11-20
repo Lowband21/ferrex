@@ -1,7 +1,9 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::auth::policy::{AuthSecuritySettings, PasswordPolicy};
+use crate::domain::users::auth::policy::{
+    AuthSecuritySettings, PasswordPolicy,
+};
 use crate::error::Result;
 
 #[derive(Debug, Clone)]

@@ -5,12 +5,12 @@ use tokio::task::JoinHandle;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use ferrex_core::orchestration::persistence::PostgresQueueService;
-use ferrex_core::orchestration::job::{
+use ferrex_core::scan::orchestration::persistence::PostgresQueueService;
+use ferrex_core::scan::orchestration::job::{
     EnqueueRequest, JobPayload, JobPriority, FolderScanJob, MediaAnalyzeJob, MetadataEnrichJob,
     IndexUpsertJob, MediaFingerprint, JobKind,
 };
-use ferrex_core::orchestration::lease::{DequeueRequest, LeaseRenewal, QueueSelector};
+use ferrex_core::scan::orchestration::lease::{DequeueRequest, LeaseRenewal, QueueSelector};
 use ferrex_core::QueueService;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -30,7 +30,7 @@ async fn e2e_bulk_enqueue_dequeue_complete(pool: PgPool) {
             library_id: lib_id,
             folder_path_norm: format!("/bulk/path/{}", i),
             parent_context: None,
-            scan_reason: ferrex_core::orchestration::job::ScanReason::UserRequested,
+            scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
             enqueue_time: Utc::now(),
             device_id: None,
         };
@@ -48,7 +48,7 @@ async fn e2e_bulk_enqueue_dequeue_complete(pool: PgPool) {
         handles.push(tokio::spawn(async move {
             loop {
                 let dq = DequeueRequest {
-                    kind: ferrex_core::orchestration::job::JobKind::FolderScan,
+                    kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan,
                     worker_id: format!("e2e-w{}", w),
                     lease_ttl: chrono::Duration::seconds(10),
                     selector: None,
@@ -101,7 +101,7 @@ async fn crash_simulation_expired_leases_recovered(pool: PgPool) {
             library_id: lib_id,
             folder_path_norm: format!("/crash/path/{}", i),
             parent_context: None,
-            scan_reason: ferrex_core::orchestration::job::ScanReason::UserRequested,
+            scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
             enqueue_time: Utc::now(),
             device_id: None,
         };
@@ -113,7 +113,7 @@ async fn crash_simulation_expired_leases_recovered(pool: PgPool) {
     // Lease all
     let mut leased_ids = Vec::new();
     for i in 0..m {
-        let dq = DequeueRequest { kind: ferrex_core::orchestration::job::JobKind::FolderScan, worker_id: format!("cr-{}", i), lease_ttl: chrono::Duration::seconds(30), selector: None };
+        let dq = DequeueRequest { kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan, worker_id: format!("cr-{}", i), lease_ttl: chrono::Duration::seconds(30), selector: None };
         let lease = svc.dequeue(dq).await.expect("dequeue ok").expect("lease");
         leased_ids.push(lease.job.id.0);
     }
@@ -133,7 +133,7 @@ async fn crash_simulation_expired_leases_recovered(pool: PgPool) {
 
     // Now process to completion
     loop {
-        let dq = DequeueRequest { kind: ferrex_core::orchestration::job::JobKind::FolderScan, worker_id: "cr-worker".into(), lease_ttl: chrono::Duration::seconds(10), selector: None };
+        let dq = DequeueRequest { kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan, worker_id: "cr-worker".into(), lease_ttl: chrono::Duration::seconds(10), selector: None };
         match svc.dequeue(dq).await.expect("dequeue") {
             Some(lease) => { svc.complete(lease.lease_id).await.expect("complete"); }
             None => break,
@@ -161,7 +161,7 @@ async fn selector_prefers_match_otherwise_fifo(pool: PgPool) {
                 library_id: lib_x,
                 folder_path_norm: "/selector/a".into(),
                 parent_context: None,
-                scan_reason: ferrex_core::orchestration::job::ScanReason::UserRequested,
+                scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
                 enqueue_time: Utc::now(),
                 device_id: None,
             }),
@@ -176,7 +176,7 @@ async fn selector_prefers_match_otherwise_fifo(pool: PgPool) {
                 library_id: lib_y,
                 folder_path_norm: "/selector/b".into(),
                 parent_context: None,
-                scan_reason: ferrex_core::orchestration::job::ScanReason::UserRequested,
+                scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
                 enqueue_time: Utc::now(),
                 device_id: None,
             }),
@@ -191,7 +191,7 @@ async fn selector_prefers_match_otherwise_fifo(pool: PgPool) {
                 library_id: lib_x,
                 folder_path_norm: "/selector/c".into(),
                 parent_context: None,
-                scan_reason: ferrex_core::orchestration::job::ScanReason::UserRequested,
+                scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
                 enqueue_time: Utc::now(),
                 device_id: None,
             }),
@@ -292,7 +292,7 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
             library_id: lib_id,
             folder_path_norm: format!("/e2e/mixed/folder_{}", i),
             parent_context: None,
-            scan_reason: ferrex_core::orchestration::job::ScanReason::UserRequested,
+            scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
             enqueue_time: Utc::now(),
             device_id: None,
         };
@@ -305,7 +305,7 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
             library_id: lib_id,
             folder_path_norm: "/e2e/mixed/folder_1".into(),
             parent_context: None,
-            scan_reason: ferrex_core::orchestration::job::ScanReason::UserRequested,
+            scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
             enqueue_time: Utc::now(),
             device_id: None,
         }),
@@ -325,7 +325,7 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
             fingerprint: fp,
             discovered_at: Utc::now(),
             context: serde_json::Value::Null,
-            scan_reason: ferrex_core::orchestration::job::ScanReason::BulkSeed,
+            scan_reason: ferrex_core::scan::orchestration::job::ScanReason::BulkSeed,
         };
         enqueues.push(EnqueueRequest::new(JobPriority::P2, JobPayload::MediaAnalyze(ma)));
     }
@@ -342,7 +342,7 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
         },
         discovered_at: Utc::now(),
         context: serde_json::Value::Null,
-        scan_reason: ferrex_core::orchestration::job::ScanReason::BulkSeed,
+        scan_reason: ferrex_core::scan::orchestration::job::ScanReason::BulkSeed,
     };
     enqueues.push(EnqueueRequest::new(JobPriority::P2, JobPayload::MediaAnalyze(ma_dupe)));
 
@@ -461,13 +461,13 @@ async fn bench_stub_latency_logging(pool: PgPool) {
     // Enqueue a small batch and measure dequeue->complete latency
     let n = 10;
     for i in 0..n {
-        let fs = FolderScanJob { library_id: lib_id, folder_path_norm: format!("/bench/{}", i), parent_context: None, scan_reason: ferrex_core::orchestration::job::ScanReason::UserRequested, enqueue_time: Utc::now(), device_id: None };
+        let fs = FolderScanJob { library_id: lib_id, folder_path_norm: format!("/bench/{}", i), parent_context: None, scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested, enqueue_time: Utc::now(), device_id: None };
         svc.enqueue(EnqueueRequest::new(JobPriority::P1, JobPayload::FolderScan(fs))).await.expect("enqueue");
     }
 
     let mut latencies = Vec::new();
     loop {
-        let dq = DequeueRequest { kind: ferrex_core::orchestration::job::JobKind::FolderScan, worker_id: "bench".into(), lease_ttl: chrono::Duration::seconds(5), selector: None };
+        let dq = DequeueRequest { kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan, worker_id: "bench".into(), lease_ttl: chrono::Duration::seconds(5), selector: None };
         match svc.dequeue(dq).await.expect("dequeue") {
             Some(lease) => {
                 let start = Utc::now();

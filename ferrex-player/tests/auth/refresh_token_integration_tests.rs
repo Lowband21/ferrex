@@ -7,7 +7,7 @@
 // - API client retry mechanism
 
 use ferrex_player::domains::auth::storage::{AuthStorage, StoredAuth};
-use ferrex_core::{
+use ferrex_core::domain::users::{
     auth::domain::value_objects::SessionScope,
     user::{AuthToken, User},
 };

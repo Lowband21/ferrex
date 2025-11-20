@@ -842,7 +842,7 @@ impl TextInput {
 }
 
 // Text styles
-pub fn icon_white<'a>(_theme: &iced::Theme) -> iced::widget::text::Style {
+pub fn icon_white(_theme: &iced::Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
         color: Some(Color::WHITE),
     }

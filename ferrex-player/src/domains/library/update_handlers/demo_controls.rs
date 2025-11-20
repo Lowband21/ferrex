@@ -1,10 +1,9 @@
-#![cfg(feature = "demo")]
-
 use iced::Task;
 
-use crate::domains::library::messages::Message;
-use crate::infrastructure::api_types::DemoResetRequest;
-use crate::state::State;
+use crate::{
+    domains::library::messages::Message, infra::api_types::DemoResetRequest,
+    state::State,
+};
 
 pub fn handle_fetch_demo_status(state: &mut State) -> Task<Message> {
     state.domains.library.state.demo_controls.is_loading = true;

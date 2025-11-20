@@ -167,7 +167,7 @@ impl PostgresMediaRepository {
     ) {
         if let Some(library) = filter.library_id {
             builder.push(" AND library_id = ");
-            builder.push_bind(library.as_uuid());
+            builder.push_bind(library.to_uuid());
         }
 
         if let Some(prefix) = &filter.path_prefix {

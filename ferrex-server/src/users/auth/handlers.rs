@@ -2,13 +2,18 @@ use crate::users::map_auth_facade_error;
 use axum::{Extension, Json, extract::State, http::StatusCode};
 use chrono::Utc;
 use ferrex_core::{
-    api_types::ApiResponse,
-    auth::{
-        domain::services::{AuthenticationError, TokenBundle},
-        policy::PasswordPolicyRule,
+    api::types::ApiResponse,
+    domain::users::{
+        auth::{
+            domain::services::{AuthenticationError, TokenBundle},
+            policy::PasswordPolicyRule,
+        },
+        user::{
+            AuthError, AuthToken, LoginRequest, RegisterRequest, User,
+            ValidationError,
+        },
     },
     error::MediaError,
-    user::{AuthError, AuthToken, LoginRequest, RegisterRequest, User},
 };
 use serde::Deserialize;
 
@@ -27,7 +32,7 @@ pub async fn register(
     State(state): State<AppState>,
     Json(request): Json<RegisterRequest>,
 ) -> AppResult<Json<ApiResponse<AuthToken>>> {
-    request.validate().map_err(|e| {
+    request.validate().map_err(|e: ValidationError| {
         AppError::bad_request(format!("Validation error: {}", e))
     })?;
 

@@ -33,14 +33,14 @@ macro_rules! virtual_reference_grid {
             #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
             profiling::scope!("View::Grid::Total");
 
-            let is_scrolling = if let Some(last_scroll) = state.domains.ui.state.last_scroll_time {
-                let elapsed = last_scroll.elapsed();
-                elapsed < std::time::Duration::from_millis(
-                    $crate::infrastructure::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS
-                )
-            } else {
-                false
-            };
+            // let is_scrolling = if let Some(last_scroll) = state.domains.ui.state.last_scroll_time {
+            //     let elapsed = last_scroll.elapsed();
+            //     elapsed < std::time::Duration::from_millis(
+            //         $crate::infra::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS
+            //     )
+            // } else {
+            //     false
+            // };
 
             /*
             log::trace!("{}: rendering {} items (scroll={})",
@@ -49,7 +49,7 @@ macro_rules! virtual_reference_grid {
                 log::trace!("First item in grid");
             } */
 
-            use $crate::infrastructure::constants::{grid, poster};
+            use $crate::infra::constants::{grid, poster};
 
             // Don't add spacing here since ROW_HEIGHT already includes spacing
             let mut content = column![].spacing(0).width(Length::Fill);
@@ -69,7 +69,7 @@ macro_rules! virtual_reference_grid {
             //content = content.push(Space::new().height(header::HEIGHT * 2.0));
 
             // Calculate total rows
-            let total_rows = (len + grid_state.columns - 1) / grid_state.columns;
+            let total_rows = len.div_ceil(grid_state.columns);
 
             // Add spacer for rows above viewport
             let start_row = grid_state.visible_range.start / grid_state.columns;
@@ -82,7 +82,7 @@ macro_rules! virtual_reference_grid {
 
             // Render visible rows
             let end_row =
-                (grid_state.visible_range.end + grid_state.columns - 1) / grid_state.columns;
+                grid_state.visible_range.end.div_ceil(grid_state.columns);
             for row_idx in start_row..end_row.min(total_rows) {
                 let mut row_content = row![].spacing(grid::EFFECTIVE_SPACING);
 
@@ -114,7 +114,7 @@ macro_rules! virtual_reference_grid {
 
                         // Use container dimensions that account for animation padding
                         let (container_width, _container_height) =
-                            $crate::infrastructure::constants::calculations::get_container_dimensions(1.0);
+                            $crate::infra::constants::calculations::get_container_dimensions(1.0);
 
                         // Debug logging to verify container dimensions
                         //if item_idx == 0 {
@@ -125,7 +125,7 @@ macro_rules! virtual_reference_grid {
 
                         // Use total card height with animation padding
                         let total_card_height = poster::TOTAL_CARD_HEIGHT
-                            + 2.0 * $crate::infrastructure::constants::animation::calculate_vertical_padding(poster::BASE_HEIGHT);
+                            + 2.0 * $crate::infra::constants::animation::calculate_vertical_padding(poster::BASE_HEIGHT);
 
                         row_content = row_content.push(
                             container(card)
@@ -136,9 +136,9 @@ macro_rules! virtual_reference_grid {
                     } else if item_idx < len {
                         // Placeholder for items not yet visible but in the row
                         let (container_width, _) =
-                            $crate::infrastructure::constants::calculations::get_container_dimensions(1.0);
+                            $crate::infra::constants::calculations::get_container_dimensions(1.0);
                         let total_card_height = poster::TOTAL_CARD_HEIGHT
-                            + 2.0 * $crate::infrastructure::constants::animation::calculate_vertical_padding(poster::BASE_HEIGHT);
+                            + 2.0 * $crate::infra::constants::animation::calculate_vertical_padding(poster::BASE_HEIGHT);
                         row_content = row_content.push(
                             container(Space::new().width(
                                 container_width,
@@ -156,7 +156,7 @@ macro_rules! virtual_reference_grid {
                     if items_in_last_row < grid_state.columns {
                         for _ in items_in_last_row..grid_state.columns {
                             let (container_width, _) =
-                                $crate::infrastructure::constants::calculations::get_container_dimensions(1.0);
+                                $crate::infra::constants::calculations::get_container_dimensions(1.0);
                             row_content = row_content.push(Space::new().width(container_width));
                         }
                     }
@@ -245,7 +245,7 @@ pub fn truncate_text(text: &str, max_chars: usize) -> String {
         let mut chars_collected = 0;
         let mut byte_index = 0;
 
-        for (i, ch) in text.char_indices() {
+        for (i, _ch) in text.char_indices() {
             if chars_collected >= target_chars {
                 byte_index = i;
                 break;
@@ -361,7 +361,7 @@ macro_rules! media_card {
         }
     ) => {{
         use $crate::domains::ui::views::grid::types::*;
-        use $crate::domains::ui::widgets::{AnimationType as WidgetAnimationType};
+        use $crate::domains::ui::widgets::poster::poster_animation_types::PosterAnimationType;
         use $crate::domains::ui::theme;
         use iced::{
             widget::{button, column, container, text},
@@ -392,11 +392,11 @@ macro_rules! media_card {
 
         // Determine widget animation type early so it can be used for both image and overlay
         let widget_anim = match animation_config.animation_type {
-            AnimationType::Flip => WidgetAnimationType::flip(),
-            AnimationType::FadeIn | AnimationType::FadeScale => WidgetAnimationType::Fade {
+            AnimationType::Flip => PosterAnimationType::flip(),
+            AnimationType::FadeIn | AnimationType::FadeScale => PosterAnimationType::Fade {
                 duration: animation_config.duration
             },
-            _ => WidgetAnimationType::None,
+            _ => PosterAnimationType::None,
         };
 
         // Create the main image/poster element using image_for
@@ -469,9 +469,9 @@ macro_rules! media_card {
             .into();
 
         // Calculate proper container dimensions based on animation type
-        let (container_width, container_height) = if matches!(widget_anim, WidgetAnimationType::Flip { .. }) {
+        let (container_width, container_height) = if matches!(widget_anim, PosterAnimationType::Flip { .. }) {
             // For enhanced flip, use expanded dimensions to accommodate animation
-            use $crate::infrastructure::constants::animation;
+            use $crate::infra::constants::animation;
             let h_padding = animation::calculate_horizontal_padding(width);
             let v_padding = animation::calculate_vertical_padding(height);
             (width + h_padding * 2.0, height + v_padding * 2.0)
@@ -481,7 +481,7 @@ macro_rules! media_card {
         };
 
         // For enhanced flip, we need to center the poster within the container
-        let poster_with_overlay_element = if matches!(widget_anim, WidgetAnimationType::Flip { .. }) {
+        let poster_with_overlay_element = if matches!(widget_anim, PosterAnimationType::Flip { .. }) {
             // Center the poster within the larger container
             // The shader handles all hover detection internally based on actual poster bounds
             let centered_poster: Element<'_, $crate::domains::ui::messages::Message> = container(poster_element)

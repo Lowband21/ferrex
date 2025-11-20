@@ -6,7 +6,7 @@ use uuid::Uuid;
 use super::{ViewModel, VisibleItems};
 use crate::{
     domains::ui::views::carousel::CarouselState,
-    infrastructure::{
+    infra::{
         api_types::{MediaID, MovieReference, SeriesReference},
         repository::accessor::{Accessor, ReadOnly},
     },
@@ -289,7 +289,7 @@ impl ViewModel for AllViewModel {
                 if let Some(id) = self.sorted_movie_ids.get(idx) {
                     if let Some(media) = store.get(id) {
                         if let Some(movie) = media.as_movie() {
-                            if crate::infrastructure::api_types::needs_details_fetch(&movie.details)
+                            if crate::infra::api_types::needs_details_fetch(&movie.details)
                             {
                                 items.push((id.clone(), FetchPriority::High));
                             }
@@ -303,7 +303,7 @@ impl ViewModel for AllViewModel {
                 if let Some(id) = self.sorted_series_ids.get(idx) {
                     if let Some(media) = store.get(id) {
                         if let Some(series) = media.as_series() {
-                            if crate::infrastructure::api_types::needs_details_fetch(
+                            if crate::infra::api_types::needs_details_fetch(
                                 &series.details,
                             ) {
                                 items.push((id.clone(), FetchPriority::High));
@@ -323,7 +323,7 @@ impl ViewModel for AllViewModel {
                 if let Some(id) = self.sorted_movie_ids.get(idx) {
                     if let Some(media) = store.get(id) {
                         if let Some(movie) = media.as_movie() {
-                            if crate::infrastructure::api_types::needs_details_fetch(&movie.details)
+                            if crate::infra::api_types::needs_details_fetch(&movie.details)
                             {
                                 items.push((id.clone(), FetchPriority::Medium));
                             }
@@ -341,7 +341,7 @@ impl ViewModel for AllViewModel {
                 if let Some(id) = self.sorted_series_ids.get(idx) {
                     if let Some(media) = store.get(id) {
                         if let Some(series) = media.as_series() {
-                            if crate::infrastructure::api_types::needs_details_fetch(
+                            if crate::infra::api_types::needs_details_fetch(
                                 &series.details,
                             ) {
                                 items.push((id.clone(), FetchPriority::Medium));

@@ -127,7 +127,7 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                 DisplayMode::Library => {
                     // Use the tab system to get the active tab
                     use crate::domains::ui::tabs::TabState;
-                    use crate::infrastructure::api_types::LibraryType;
+                    use crate::infra::api_types::LibraryType;
 
                     let active_tab = state.tab_manager.active_tab();
                     match active_tab {
@@ -136,7 +136,7 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                         {
                             LibraryType::Movies => {
                                 // Compute a small prefetch set and preload their textures into the atlas
-                                let preload_range = lib_state.grid_state.get_preload_range(crate::infrastructure::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+                                let preload_range = lib_state.grid_state.get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
                                 let ids_slice = lib_state
                                     .cached_index_ids
                                     .get(preload_range)
@@ -146,7 +146,7 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                                     ImageType::Movie,
                                     ImageSize::Poster,
                                 );
-                                let budget = crate::infrastructure::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
+                                let budget = crate::infra::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
                                 let preloader =
                                     texture_preloader(handles, budget);
 
@@ -161,7 +161,7 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                                 column![preloader, grid].into()
                             }
                             LibraryType::Series => {
-                                let preload_range = lib_state.grid_state.get_preload_range(crate::infrastructure::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+                                let preload_range = lib_state.grid_state.get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
                                 let ids_slice = lib_state
                                     .cached_index_ids
                                     .get(preload_range)
@@ -171,7 +171,7 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                                     ImageType::Series,
                                     ImageSize::Poster,
                                 );
-                                let budget = crate::infrastructure::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
+                                let budget = crate::infra::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
                                 let preloader =
                                     texture_preloader(handles, budget);
 

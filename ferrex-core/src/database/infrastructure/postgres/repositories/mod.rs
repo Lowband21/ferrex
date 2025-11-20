@@ -1,5 +1,6 @@
 //! PostgreSQL-backed repository implementations.
 
+pub mod file_watch;
 pub mod folder_inventory;
 pub mod images;
 pub mod indices;

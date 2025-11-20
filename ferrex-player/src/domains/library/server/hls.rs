@@ -437,10 +437,14 @@ impl HlsClient {
         while i < lines.len() {
             let line = lines[i].trim();
 
-            if line.starts_with("#EXT-X-TARGETDURATION:") {
-                target_duration = line[22..].parse().unwrap_or(4.0);
-            } else if line.starts_with("#EXT-X-MEDIA-SEQUENCE:") {
-                media_sequence = line[22..].parse().unwrap_or(0);
+            if let Some(duration_str) =
+                line.strip_prefix("#EXT-X-TARGETDURATION:")
+            {
+                target_duration = duration_str.parse().unwrap_or(4.0);
+            } else if let Some(sequence_str) =
+                line.strip_prefix("#EXT-X-MEDIA-SEQUENCE:")
+            {
+                media_sequence = sequence_str.parse().unwrap_or(0);
             } else if let Some(duration_str) = line.strip_prefix("#EXTINF:") {
                 // Parse segment duration
                 let duration = duration_str

@@ -7,7 +7,7 @@ use serde_json::json;
 use sqlx::PgPool;
 use std::net::SocketAddr;
 
-use ferrex_core::api_routes::v1;
+use ferrex_core::api::routes::v1;
 use ferrex_server::users::setup::claim::reset_claim_rate_limiter_for_tests;
 
 #[path = "support/mod.rs"]

@@ -13,9 +13,8 @@ use self::{
     media_root_browser::State as MediaRootBrowserState, types::LibraryFormData,
 };
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
-use crate::infrastructure::repository::accessor::{Accessor, ReadWrite};
-use crate::infrastructure::services::api::ApiService;
+use crate::infra::repository::accessor::{Accessor, ReadWrite};
+use crate::infra::services::api::ApiService;
 use ferrex_core::player_prelude::{
     LibraryID, LibraryMediaCache, ScanConfig, ScanMetrics, ScanProgressEvent,
     ScanSnapshotDto,

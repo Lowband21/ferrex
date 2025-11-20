@@ -4,8 +4,10 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::database::ports::rbac::RbacRepository;
+use crate::domain::users::rbac::{
+    Permission, PermissionCategory, Role, UserPermissions,
+};
 use crate::error::{MediaError, Result};
-use crate::rbac::{Permission, PermissionCategory, Role, UserPermissions};
 
 /// PostgreSQL-backed implementation of RBAC repository operations.
 #[derive(Clone, Debug)]

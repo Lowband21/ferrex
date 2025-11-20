@@ -1,7 +1,7 @@
 use axum::{Extension, Json, extract::State};
 use ferrex_core::{
+    domain::users::user::User,
     query::types::{MediaQuery, MediaWithStatus},
-    user::User,
 };
 
 use crate::infra::{app_state::AppState, errors::AppResult};

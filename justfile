@@ -5,6 +5,33 @@
 set dotenv-path := "config/.env"
 set dotenv-override := true
 
+# Current date
+
+date := shell('date --iso-8601=minutes')
+
+# Persist test output
+
+test_output := '--show-output > logs/test/test_' + date + '.log'
+
+# Filter for cargo json-diagnostic-short output
+
+diagnostic_filter := 'utils/jq/cargo-diagnostic-filter.jq'
+
+# Timestamped log file definitions
+
+warn_file := 'logs/warn/warn_' + date + '.log'
+warn_core_file := 'logs/warn/warn_core_' + date + '.log'
+warn_server_file := 'logs/warn/warn_server_' + date + '.log'
+warn_player_file := 'logs/warn/warn_player_' + date + '.log'
+error_file := 'logs/error/error_' + date + '.log'
+error_core_file := 'logs/error/error_core_' + date + '.log'
+error_server_file := 'logs/error/error_server_' + date + '.log'
+error_player_file := 'logs/error/error_player_' + date + '.log'
+clippy_file := 'logs/clippy/clippy_' + date + '.log'
+clippy_core_file := 'logs/clippy/clippy_core_' + date + '.log'
+clippy_server_file := 'logs/clippy/clippy_server_' + date + '.log'
+clippy_player_file := 'logs/clippy/clippy_player_' + date + '.log'
+
 ########################################
 # Docker Compose shortcuts (stack + cfg)
 ########################################
@@ -176,8 +203,9 @@ db-migrate profile="release" args="" wild="1":
 
 alias c := check
 alias cq := check-quiet
-alias ca := check
-alias caq := check-quiet
+alias ca := check-all
+alias caq := check-all-quiet
+alias cpq := check-player-nowarn
 alias rp := run-player
 alias rpr := run-player-release
 alias rs := run-server
@@ -201,12 +229,12 @@ check-quiet:
     RUSTFLAGS=-Awarnings cargo check --workspace --quiet
 
 [no-cd]
-check_all args="":
-    RUSTFLAGS=-Awarnings cargo check --workspace --all-features --all-targets {{ args }}
+check-all args="":
+    cargo check --workspace --all-features --all-targets {{ args }}
 
 [no-cd]
 check-all-quiet:
-    cargo check --workspace --quiet
+    RUSTFLAGS=-Awarnings cargo check --workspace --quiet
 
 [no-cd]
 check-player:
@@ -220,10 +248,82 @@ check-server:
 check-core:
     cargo check -p ferrex-core
 
+[no-cd]
+check-player-nowarn:
+    RUSTFLAGS=-Awarnings cargo check -p ferrex-player --quiet
+
+[no-cd]
+check-server-nowarn:
+    RUSTFLAGS=-Awarnings cargo check -p ferrex-server
+
+[no-cd]
+check-core-nowarn:
+    RUSTFLAGS=-Awarnings cargo check -p ferrex-core
+
+[no-cd]
+log-error: prep-logs log-core-error log-server-error log-player-error
+    #!/usr/bin/env bash
+    set -euo pipefail
+    RUSTFLAGS=-Awarnings cargo check --all-targets --all-features --workspace --message-format=json-diagnostic-short |
+      jq -r -R -f {{ diagnostic_filter }} > {{ error_file }}
+
+[no-cd]
+log-core-error: prep-logs
+    #!/usr/bin/env bash
+    set -euo pipefail
+    RUSTFLAGS=-Awarnings cargo check --all-targets --all-features -p ferrex-core -p ferrex-model -p ferrex-contracts --message-format=json-diagnostic-short |
+      jq -r -R -f {{ diagnostic_filter }} > {{ error_core_file }}
+
+[no-cd]
+log-server-error: prep-logs
+    #!/usr/bin/env bash
+    set -euo pipefail
+    RUSTFLAGS=-Awarnings cargo check --all-targets --all-features -p ferrex-server --message-format=json-diagnostic-short |
+      jq -r -R -f {{ diagnostic_filter }} > {{ error_server_file }}
+
+[no-cd]
+log-player-error: prep-logs
+    #!/usr/bin/env bash
+    set -euo pipefail
+    RUSTFLAGS=-Awarnings cargo check --all-targets --all-features -p ferrex-player --message-format=json-diagnostic-short |
+      jq -r -R -f {{ diagnostic_filter }} > {{ error_player_file }}
+
+[no-cd]
+log-warn: prep-logs log-core-warn log-server-warn log-player-warn
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo check --all-targets --all-features --workspace --message-format=json-diagnostic-short |
+      jq -r -R -f {{ diagnostic_filter }} > {{ warn_file }}
+
+[no-cd]
+log-core-warn: prep-logs
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo check --all-targets --all-features -p ferrex-core -p ferrex-model -p ferrex-contracts --message-format=json-diagnostic-short |
+      jq -r -R -f {{ diagnostic_filter }} > {{ warn_core_file }}
+
+[no-cd]
+log-server-warn: prep-logs
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo check --all-targets --all-features -p ferrex-server --message-format=json-diagnostic-short |
+      jq -r -R -f {{ diagnostic_filter }} > {{ warn_server_file }}
+
+[no-cd]
+log-player-warn: prep-logs
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo check --all-targets --all-features -p ferrex-player --message-format=json-diagnostic-short |
+      jq -r -R -f {{ diagnostic_filter }} > {{ warn_player_file }}
+
 # Test
 [no-cd]
 test args="" pt_args="":
     RUSTFLAGS=-Awarnings cargo test --workspace --all-features --all-targets --no-fail-fast --quiet {{ args }} -- {{ pt_args }}
+
+[no-cd]
+log-tests args="" pt_args=test_output: prep-logs
+    RUSTFLAGS=-Awarnings cargo test --workspace --all-features --all-targets --no-fail-fast {{ args }} -- {{ pt_args }}
 
 [no-cd]
 test-player:
@@ -262,6 +362,34 @@ lint:
 [no-cd]
 lint-player:
     cargo clippy --all-targets --all-features -p ferrex-player
+
+[no-cd]
+log-clippy: prep-logs log-core-clippy log-server-clippy log-player-clippy
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo clippy --all-targets --all-features --workspace --message-format=json-diagnostic-short |
+      jq -r -R -f {{ diagnostic_filter }} > {{ clippy_file }}
+
+[no-cd]
+log-core-clippy: prep-logs
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo clippy --all-targets --all-features -p ferrex-core -p ferrex-model -p ferrex-contracts --message-format=json-diagnostic-short |
+      jq -r -R -f {{ diagnostic_filter }} > {{ clippy_core_file }}
+
+[no-cd]
+log-server-clippy: prep-logs
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo clippy --all-targets --all-features -p ferrex-server --message-format=json-diagnostic-short |
+      jq -r -R -f {{ diagnostic_filter }} > {{ clippy_server_file }}
+
+[no-cd]
+log-player-clippy: prep-logs
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo clippy --all-targets --all-features -p ferrex-player --message-format=json-diagnostic-short |
+      jq -r -R -f {{ diagnostic_filter }} > {{ clippy_player_file }}
 
 # Fix
 [no-cd]
@@ -323,6 +451,17 @@ gstat:
 wtadd relative-path branch:
     git worktree add ./{{ relative-path }} -b {{ branch }}
     cp -r ./.cargo ./.env ./{{ relative-path }}
+
+[no-cd]
+@prep-logs:
+    mkdir -p logs/test
+    mkdir -p logs/warn
+    mkdir -p logs/error
+    mkdir -p logs/clippy
+
+[no-cd]
+@log: log-warn log-clippy
+    echo "Log files saved to logs/"
 
 ##########################
 # Compilation benchmarking

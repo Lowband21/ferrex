@@ -1,12 +1,12 @@
 use ferrex_core::{
-    api_types::setup::{ConfirmClaimResponse, StartClaimResponse},
+    api::types::setup::{ConfirmClaimResponse, StartClaimResponse},
     player_prelude::{User, UserPermissions, UserWatchState},
 };
 use uuid::Uuid;
 
 use crate::domains::auth::dto::UserListItemDto;
 use crate::domains::auth::manager::{DeviceAuthStatus, PlayerAuthResult};
-use crate::infrastructure::api_client::SetupStatus as ApiSetupStatus;
+use crate::infra::api_client::SetupStatus as ApiSetupStatus;
 
 pub mod commands;
 pub mod subscriptions;
@@ -41,26 +41,17 @@ pub enum Message {
     ShowCreateUser,
     BackToUserSelection,
 
-    // PIN authentication
-    ShowPinEntry(User),
-    PinDigitPressed(char),
-    PinBackspace,
-    PinClear,
-    PinSubmit,
+    // Pre-auth login
+    PreAuthUpdateUsername(String),
+    PreAuthTogglePasswordVisibility,
+    PreAuthToggleRememberDevice,
+    PreAuthSubmit,
 
     // Login results
     LoginSuccess(User, UserPermissions),
     WatchStatusLoaded(Result<UserWatchState, String>),
     Logout,
     LogoutComplete,
-
-    // Password login
-    ShowPasswordLogin(String), // username
-    PasswordLoginUpdateUsername(String),
-    PasswordLoginUpdatePassword(String),
-    PasswordLoginToggleVisibility,
-    PasswordLoginToggleRemember,
-    PasswordLoginSubmit,
 
     // Device auth flow
     DeviceStatusChecked(User, Result<DeviceAuthStatus, String>),
@@ -133,38 +124,23 @@ impl std::fmt::Debug for Message {
             Self::ShowCreateUser => write!(f, "ShowCreateUser"),
             Self::BackToUserSelection => write!(f, "BackToUserSelection"),
 
-            // PIN authentication
-            Self::ShowPinEntry(_) => write!(f, "ShowPinEntry(...)"),
-            Self::PinDigitPressed(digit) => {
-                write!(f, "PinDigitPressed({})", digit)
+            // Pre-auth login messages
+            Self::PreAuthUpdateUsername(_) => {
+                write!(f, "PreAuthUpdateUsername(***)")
             }
-            Self::PinBackspace => write!(f, "PinBackspace"),
-            Self::PinClear => write!(f, "PinClear"),
-            Self::PinSubmit => write!(f, "PinSubmit"),
+            Self::PreAuthTogglePasswordVisibility => {
+                write!(f, "PreAuthTogglePasswordVisibility")
+            }
+            Self::PreAuthToggleRememberDevice => {
+                write!(f, "PreAuthToggleRememberDevice")
+            }
+            Self::PreAuthSubmit => write!(f, "PreAuthSubmit"),
 
             // Login results
             Self::LoginSuccess(_, _) => write!(f, "LoginSuccess(...)"),
             Self::WatchStatusLoaded(_) => write!(f, "WatchStatusLoaded(...)"),
             Self::Logout => write!(f, "Logout"),
             Self::LogoutComplete => write!(f, "LogoutComplete"),
-
-            // Password login - hide sensitive data
-            Self::ShowPasswordLogin(username) => {
-                write!(f, "ShowPasswordLogin({})", username)
-            }
-            Self::PasswordLoginUpdateUsername(username) => {
-                write!(f, "PasswordLoginUpdateUsername({})", username)
-            }
-            Self::PasswordLoginUpdatePassword(_) => {
-                write!(f, "PasswordLoginUpdatePassword(***)")
-            }
-            Self::PasswordLoginToggleVisibility => {
-                write!(f, "PasswordLoginToggleVisibility")
-            }
-            Self::PasswordLoginToggleRemember => {
-                write!(f, "PasswordLoginToggleRemember")
-            }
-            Self::PasswordLoginSubmit => write!(f, "PasswordLoginSubmit"),
 
             // Device auth flow - hide sensitive data
             Self::DeviceStatusChecked(_, _) => {
@@ -256,9 +232,6 @@ impl Message {
             Self::UpdateCredential(_) => "UpdateCredential(***)".to_string(),
             Self::UpdatePin(_) => "UpdatePin(***)".to_string(),
             Self::UpdateConfirmPin(_) => "UpdateConfirmPin(***)".to_string(),
-            Self::PasswordLoginUpdatePassword(_) => {
-                "PasswordLoginUpdatePassword(***)".to_string()
-            }
             Self::UpdateSetupField(SetupField::Password(_)) => {
                 "UpdateSetupField(Password(***)".to_string()
             }
@@ -292,35 +265,20 @@ impl Message {
             Self::SelectUser(_) => "Auth::SelectUser",
             Self::ShowCreateUser => "Auth::ShowCreateUser",
             Self::BackToUserSelection => "Auth::BackToUserSelection",
-
-            // PIN authentication
-            Self::ShowPinEntry(_) => "Auth::ShowPinEntry",
-            Self::PinDigitPressed(_) => "Auth::PinDigitPressed",
-            Self::PinBackspace => "Auth::PinBackspace",
-            Self::PinClear => "Auth::PinClear",
-            Self::PinSubmit => "Auth::PinSubmit",
+            Self::PreAuthUpdateUsername(_) => "Auth::PreAuthUpdateUsername",
+            Self::PreAuthTogglePasswordVisibility => {
+                "Auth::PreAuthTogglePasswordVisibility"
+            }
+            Self::PreAuthToggleRememberDevice => {
+                "Auth::PreAuthToggleRememberDevice"
+            }
+            Self::PreAuthSubmit => "Auth::PreAuthSubmit",
 
             // Login results
             Self::LoginSuccess(_, _) => "Auth::LoginSuccess",
             Self::WatchStatusLoaded(_) => "Auth::WatchStatusLoaded",
             Self::Logout => "Auth::Logout",
             Self::LogoutComplete => "Auth::LogoutComplete",
-
-            // Password login
-            Self::ShowPasswordLogin(_) => "Auth::ShowPasswordLogin",
-            Self::PasswordLoginUpdateUsername(_) => {
-                "Auth::PasswordLoginUpdateUsername"
-            }
-            Self::PasswordLoginUpdatePassword(_) => {
-                "Auth::PasswordLoginUpdatePassword"
-            }
-            Self::PasswordLoginToggleVisibility => {
-                "Auth::PasswordLoginToggleVisibility"
-            }
-            Self::PasswordLoginToggleRemember => {
-                "Auth::PasswordLoginToggleRemember"
-            }
-            Self::PasswordLoginSubmit => "Auth::PasswordLoginSubmit",
 
             // Device auth flow
             Self::DeviceStatusChecked(_, _) => "Auth::DeviceStatusChecked",

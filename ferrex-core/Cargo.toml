@@ -13,7 +13,11 @@ description = "Core library for Ferrex Media Server - handles media metadata, da
 [lints]
 workspace = true
 
+# Shared crates
+
 [dependencies]
+ferrex-model = { workspace = true, features = ["serde", "chrono"] }
+ferrex-contracts = { workspace = true, features = ["serde", "chrono"] }
 # Serialization
 serde.workspace = true
 serde_json.workspace = true
@@ -91,11 +95,12 @@ ed25519-dalek = { version = "2", default-features = false, features = [
 ] }
 
 [features]
-default = ["ffmpeg", "database", "compat", "scan-runtime"]
+default = ["ffmpeg", "database", "compat", "scan-runtime", "rkyv"]
 ffmpeg = ["dep:ffmpeg-next"]
 database = ["dep:sqlx", "dep:redis", "dep:ipnetwork", "dep:image", "dep:notify"]
 compat = []
 demo = []
+rkyv = ["ferrex-model/rkyv", "ferrex-contracts/rkyv"]
 
 # Bundles the queue, watcher, and scan orchestrator runtime. Keeping this behind its own flag lets
 # us eventually build a lean `ffi` profile without pulling in SQLx or notify.

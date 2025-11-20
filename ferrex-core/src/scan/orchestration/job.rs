@@ -1,6 +1,8 @@
+use crate::domain::media::image::{
+    MediaImageKind, records::MediaImageVariantKey,
+};
 use crate::error::Result;
-use crate::image::records::MediaImageVariantKey;
-use crate::{MediaImageKind, types::LibraryID};
+use crate::types::LibraryID;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

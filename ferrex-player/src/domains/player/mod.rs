@@ -16,7 +16,7 @@ pub mod external_mpv;
 use self::messages::Message;
 use self::state::PlayerDomainState;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::infrastructure::services::api::ApiService;
+use crate::infra::services::api::ApiService;
 use ferrex_core::player_prelude::LibraryID;
 use iced::Task;
 use std::sync::Arc;
@@ -76,12 +76,9 @@ impl PlayerDomain {
             CrossDomainEvent::MediaStarted(_media_id) => {
                 // Player domain doesn't need to handle this - it emits it
                 Task::none()
-            }
-            // Legacy transcoding events - no longer used
-            #[allow(dead_code)]
-            CrossDomainEvent::RequestTranscoding(_)
-            | CrossDomainEvent::TranscodingReady(_) => Task::none(),
-            // NOTE: VideoReadyToPlay moved to direct Media messages in Task 2.7
+            } // CrossDomainEvent::RequestTranscoding(_)
+            // | CrossDomainEvent::TranscodingReady(_) => Task::none(),
+            //
             _ => Task::none(),
         }
     }

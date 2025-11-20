@@ -8,9 +8,11 @@ use axum::{
     extract::{Path, State},
 };
 use ferrex_core::{
-    api_types::ApiResponse,
-    rbac::{OverridePermissionRequest, Permission, Role, UserPermissions},
-    user::User,
+    api::types::ApiResponse,
+    domain::users::{
+        rbac::{OverridePermissionRequest, Permission, Role, UserPermissions},
+        user::User,
+    },
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -36,7 +38,7 @@ pub struct RoleWithPermissions {
 /// Requires: users:manage_roles permission
 pub async fn list_roles_handler(
     State(state): State<AppState>,
-    Extension(_user): Extension<User>,
+    #[allow(unused)] Extension(user): Extension<User>,
 ) -> AppResult<Json<ApiResponse<RolesResponse>>> {
     // Permission check is handled by middleware
 
@@ -45,7 +47,7 @@ pub async fn list_roles_handler(
     // For each role, get its permissions
     let mut roles_with_perms = Vec::new();
     for role in roles {
-        // This is a simplified version - in production you'd want a more efficient query
+        // This is a simplified version
         let permissions = state
             .unit_of_work()
             .rbac
@@ -170,7 +172,7 @@ pub async fn override_user_permission_handler(
 pub async fn get_my_permissions_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-) -> AppResult<Json<ApiResponse<ferrex_core::rbac::UserPermissions>>> {
+) -> AppResult<Json<ApiResponse<UserPermissions>>> {
     let permissions = state
         .unit_of_work()
         .rbac

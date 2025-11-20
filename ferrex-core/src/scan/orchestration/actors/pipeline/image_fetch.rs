@@ -4,8 +4,10 @@ use async_trait::async_trait;
 use tracing::info;
 
 use crate::error::{MediaError, Result};
-use crate::image_service::{ImageService, TmdbImageSize};
-use crate::orchestration::job::{ImageFetchJob, ImageFetchSource};
+use crate::infrastructure::media::image_service::{
+    ImageService, TmdbImageSize,
+};
+use crate::scan::orchestration::job::{ImageFetchJob, ImageFetchSource};
 
 use super::{ImageFetchActor, ImageFetchCommand};
 

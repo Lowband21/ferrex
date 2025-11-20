@@ -95,8 +95,8 @@ impl From<anyhow::Error> for AppError {
     }
 }
 
-impl From<ferrex_core::user::ValidationError> for AppError {
-    fn from(err: ferrex_core::user::ValidationError) -> Self {
+impl From<ferrex_core::domain::users::user::ValidationError> for AppError {
+    fn from(err: ferrex_core::domain::users::user::ValidationError) -> Self {
         Self::bad_request(err.to_string())
     }
 }

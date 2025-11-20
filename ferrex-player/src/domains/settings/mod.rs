@@ -8,7 +8,7 @@ pub mod update;
 
 use self::messages::Message as SettingsMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::infrastructure::services::api::ApiService;
+use crate::infra::services::api::ApiService;
 use ferrex_core::player_prelude::UserPermissions;
 use iced::Task;
 
@@ -24,10 +24,10 @@ pub struct SettingsDomainState {
 
     // References needed by settings domain
     pub user_permissions: Option<UserPermissions>,
-    pub auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
+    pub auth_service: std::sync::Arc<dyn crate::infra::services::auth::AuthService>,
     pub api_service: std::sync::Arc<dyn ApiService>,
     pub settings_service:
-        std::sync::Arc<dyn crate::infrastructure::services::settings::SettingsService>,
+        std::sync::Arc<dyn crate::infra::services::settings::SettingsService>,
 }
 
 #[cfg_attr(
@@ -42,11 +42,11 @@ impl SettingsDomainState {
     /// Create a new SettingsDomainState with required services
     pub fn new(
         auth_service: std::sync::Arc<
-            dyn crate::infrastructure::services::auth::AuthService,
+            dyn crate::infra::services::auth::AuthService,
         >,
         api_service: std::sync::Arc<dyn ApiService>,
         settings_service: std::sync::Arc<
-            dyn crate::infrastructure::services::settings::SettingsService,
+            dyn crate::infra::services::settings::SettingsService,
         >,
     ) -> Self {
         Self {
@@ -74,10 +74,10 @@ pub struct SettingsDomain {
 
     // References needed by settings domain
     pub user_permissions: Option<UserPermissions>,
-    pub auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
+    pub auth_service: std::sync::Arc<dyn crate::infra::services::auth::AuthService>,
     pub api_service: std::sync::Arc<dyn ApiService>,
     pub settings_service:
-        std::sync::Arc<dyn crate::infrastructure::services::settings::SettingsService>,
+        std::sync::Arc<dyn crate::infra::services::settings::SettingsService>,
 }
 
 #[cfg_attr(

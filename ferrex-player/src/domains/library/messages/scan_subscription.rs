@@ -1,7 +1,5 @@
 use super::Message;
-use base64::{
-    Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
-};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use ferrex_core::player_prelude::ScanProgressEvent;
 use iced::Subscription;
 use rkyv::{from_bytes, rancor::Error as RkyvError};
@@ -11,7 +9,7 @@ use uuid::Uuid;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use crate::infrastructure::services::api::ApiService;
+use crate::infra::services::api::ApiService;
 
 use futures::stream::BoxStream;
 
@@ -263,7 +261,7 @@ fn decode_scan_progress_event(
 mod tests {
     use super::*;
     use base64::{
-        Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
+        Engine, engine::general_purpose::STANDARD as BASE64_STANDARD,
     };
     use chrono::Utc;
     use ferrex_core::player_prelude::{LibraryID, ScanStageLatencySummary};

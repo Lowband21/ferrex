@@ -5,10 +5,10 @@
 //! the entire monolithic State struct.
 
 use ferrex_core::{
-    api_types::Library,
-    user::User,
+    api::types::Library,
+    domain::watch::UserWatchState,
     rbac::UserPermissions,
-    watch_status::UserWatchState,
+    user::User,
 };
 use ferrex_player::{
     auth_manager::AuthManager,

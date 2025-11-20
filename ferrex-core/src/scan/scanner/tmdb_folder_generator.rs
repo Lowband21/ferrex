@@ -7,7 +7,7 @@ use rand::Rng;
 
 use crate::{
     error::{MediaError, Result},
-    providers::TmdbApiProvider,
+    infrastructure::media::providers::TmdbApiProvider,
 };
 
 use super::fs::InMemoryFs;

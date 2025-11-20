@@ -46,17 +46,16 @@ pub fn update_auth(
             let setup_task = handle_setup_status_checked(state, status)
                 .map(DomainMessage::Auth);
 
-            let focus_task = if needs_setup
-                && matches!(
-                    state.domains.auth.state.auth_flow,
-                    crate::domains::auth::types::AuthenticationFlow::FirstRunSetup { .. }
-                )
-            {
+            // Rationale: Activate focus for the appropriate auth form based on setup status.
+            // When not first-run, we show the pre-auth login and should enable Tab traversal.
+            let focus_task = if needs_setup {
                 Task::done(DomainMessage::Focus(FocusMessage::Activate(
                     FocusArea::AuthFirstRunSetup,
                 )))
             } else {
-                Task::none()
+                Task::done(DomainMessage::Focus(FocusMessage::Activate(
+                    FocusArea::AuthPreAuthLogin,
+                )))
             };
 
             DomainUpdateResult::task(Task::batch(vec![setup_task, focus_task]))
@@ -77,6 +76,20 @@ pub fn update_auth(
             wrap_task!(handle_users_loaded(state, result,))
         }
 
+        // Pre-auth login
+        auth::Message::PreAuthUpdateUsername(value) => {
+            wrap_task!(handle_pre_auth_update_username(state, value))
+        }
+        auth::Message::PreAuthTogglePasswordVisibility => {
+            wrap_task!(handle_pre_auth_toggle_password_visibility(state))
+        }
+        auth::Message::PreAuthToggleRememberDevice => {
+            wrap_task!(handle_pre_auth_toggle_remember_device(state))
+        }
+        auth::Message::PreAuthSubmit => {
+            wrap_task!(handle_pre_auth_submit(state))
+        }
+
         auth::Message::SelectUser(user_id) => {
             wrap_task!(handle_select_user(state, user_id))
         }
@@ -88,23 +101,6 @@ pub fn update_auth(
         auth::Message::BackToUserSelection => {
             wrap_task!(handle_back_to_user_selection(state))
         }
-
-        // PIN authentication
-        auth::Message::ShowPinEntry(user) => {
-            wrap_task!(handle_show_pin_entry(state, user))
-        }
-
-        auth::Message::PinDigitPressed(digit) => {
-            wrap_task!(handle_pin_digit_pressed(state, digit))
-        }
-
-        auth::Message::PinBackspace => {
-            wrap_task!(handle_pin_backspace(state))
-        }
-
-        auth::Message::PinClear => wrap_task!(handle_pin_clear(state)),
-
-        auth::Message::PinSubmit => wrap_task!(handle_pin_submit(state)),
 
         // Login results
         auth::Message::LoginSuccess(user, permissions) => {
@@ -162,31 +158,6 @@ pub fn update_auth(
             )
         }
 
-        // Password login
-        auth::Message::ShowPasswordLogin(username) => {
-            wrap_task!(handle_show_password_login(state, username))
-        }
-
-        auth::Message::PasswordLoginUpdateUsername(username) => {
-            wrap_task!(handle_password_login_update_username(state, username,))
-        }
-
-        auth::Message::PasswordLoginUpdatePassword(password) => {
-            wrap_task!(handle_password_login_update_password(state, password,))
-        }
-
-        auth::Message::PasswordLoginToggleVisibility => {
-            wrap_task!(handle_password_login_toggle_visibility(state))
-        }
-
-        auth::Message::PasswordLoginToggleRemember => {
-            wrap_task!(handle_password_login_toggle_remember(state))
-        }
-
-        auth::Message::PasswordLoginSubmit => {
-            wrap_task!(handle_password_login_submit(state))
-        }
-
         // Device auth flow
         auth::Message::DeviceStatusChecked(user, result) => {
             let device_task = handle_device_status_checked(state, user, result)
@@ -233,15 +204,15 @@ pub fn update_auth(
         }
 
         auth::Message::SetupPin => {
-            wrap_task!(Task::none()) // TODO: Implement
+            wrap_task!(handle_auth_flow_setup_pin(state))
         }
 
-        auth::Message::UpdatePin(_pin) => {
-            wrap_task!(Task::none()) // TODO: Implement
+        auth::Message::UpdatePin(pin) => {
+            wrap_task!(handle_auth_flow_update_pin(state, pin))
         }
 
-        auth::Message::UpdateConfirmPin(_pin) => {
-            wrap_task!(Task::none()) // TODO: Implement
+        auth::Message::UpdateConfirmPin(pin) => {
+            wrap_task!(handle_auth_flow_update_confirm_pin(state, pin))
         }
 
         auth::Message::SubmitPin => {
@@ -252,13 +223,9 @@ pub fn update_auth(
             wrap_task!(handle_auth_flow_pin_set(state, result))
         }
 
-        auth::Message::Retry => {
-            wrap_task!(Task::none()) // TODO: Implement
-        }
+        auth::Message::Retry => wrap_task!(handle_auth_flow_retry(state)),
 
-        auth::Message::Back => {
-            wrap_task!(Task::none()) // TODO: Implement
-        }
+        auth::Message::Back => wrap_task!(handle_auth_flow_back(state)),
 
         // Admin PIN unlock management
         auth::Message::EnableAdminPinUnlock => {
@@ -372,14 +339,14 @@ fn handle_auth_command(
 /// Execute an auth command using the auth service
 async fn execute_auth_command(
     auth_service: &std::sync::Arc<
-        dyn crate::infrastructure::services::auth::AuthService,
+        dyn crate::infra::services::auth::AuthService,
     >,
     command: &auth::AuthCommand,
 ) -> auth::AuthCommandResult {
     match command {
         auth::AuthCommand::ChangePassword {
-            old_password,
-            new_password,
+            old_password: _old_password,
+            new_password: _new_password,
         } => {
             // Note: This would require a change_password method on AuthManager
             // For now, return not implemented
@@ -414,8 +381,8 @@ async fn execute_auth_command(
         }
 
         auth::AuthCommand::ChangeUserPin {
-            current_pin,
-            new_pin,
+            current_pin: _current_pin,
+            new_pin: _new_pin,
         } => {
             // TODO: Add change_device_pin method to AuthService trait
             auth::AuthCommandResult::Error(

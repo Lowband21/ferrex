@@ -6,8 +6,8 @@ use ferrex_core::player_prelude::{
 use std::collections::HashMap;
 
 use super::{TabId, TabState};
-use crate::infrastructure::api_types::LibraryType;
-use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
+use crate::infra::api_types::LibraryType;
+use crate::infra::repository::accessor::{Accessor, ReadOnly};
 
 /// Manages all tab states in the application
 #[derive(Debug)]

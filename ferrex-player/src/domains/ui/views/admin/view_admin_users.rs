@@ -1,8 +1,9 @@
 use crate::domains::auth::permissions::StatePermissionExt;
 use crate::domains::ui::messages::Message;
 use crate::domains::ui::theme;
+use crate::infra::api_types::AdminUserInfo;
 use crate::state::State;
-use ferrex_core::api_types::users_admin::AdminUserInfo;
+use chrono::Utc;
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Element, Length};
 
@@ -104,7 +105,7 @@ fn user_row(user: &AdminUserInfo) -> Element<'_, Message> {
         user.roles.join(", ")
     };
 
-    let created = chrono::NaiveDateTime::from_timestamp_opt(user.created_at, 0)
+    let created = chrono::DateTime::<Utc>::from_timestamp(user.created_at, 0)
         .map(|dt| dt.format("%Y-%m-%d").to_string())
         .unwrap_or_else(|| user.created_at.to_string());
 

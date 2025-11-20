@@ -4,11 +4,14 @@
 //! It acts as a mediator to maintain proper domain boundaries while enabling
 //! necessary cross-domain workflows.
 
-use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::domains::ui::scroll_manager::ScrollStateExt;
-use crate::domains::{auth, library, player, ui};
-use crate::state::State;
-use ferrex_core::player_prelude::MediaIDLike;
+use crate::{
+    common::messages::{CrossDomainEvent, DomainMessage},
+    domains::{
+        auth, library, player,
+        ui::{self, scroll_manager::ScrollStateExt},
+    },
+    state::State,
+};
 use iced::Task;
 
 #[cfg_attr(
@@ -253,14 +256,14 @@ pub fn handle_event(
             ))
         }
 
-        // Legacy transcoding events (deprecated)
-        CrossDomainEvent::RequestTranscoding(_)
-        | CrossDomainEvent::TranscodingReady(_) => {
-            log::warn!(
-                "[CrossDomain] Legacy transcoding event received - ignoring"
-            );
-            Task::none()
-        }
+        // // Legacy transcoding events (deprecated)
+        // CrossDomainEvent::RequestTranscoding(_)
+        // | CrossDomainEvent::TranscodingReady(_) => {
+        //     log::warn!(
+        //         "[CrossDomain] Legacy transcoding event received - ignoring"
+        //     );
+        //     Task::none()
+        // }
 
         // Window management events
         CrossDomainEvent::HideWindow => {
@@ -351,8 +354,8 @@ pub fn handle_event(
             /*
             for item in &items {
                 match item {
-                    crate::infrastructure::api_types::Media::Movie(movie) => {
-                        if crate::infrastructure::api_types::needs_details_fetch(&movie.details) {
+                    crate::infra::api_types::Media::Movie(movie) => {
+                        if crate::infra::api_types::needs_details_fetch(&movie.details) {
                             still_need_fetch += 1;
                             log::debug!(
                                 "Movie {} still has Endpoint, not Details",
@@ -363,8 +366,8 @@ pub fn handle_event(
                             log::debug!("Movie {} has full Details", movie.title.as_str());
                         }
                     }
-                    crate::infrastructure::api_types::Media::Series(series) => {
-                        if crate::infrastructure::api_types::needs_details_fetch(&series.details) {
+                    crate::infra::api_types::Media::Series(series) => {
+                        if crate::infra::api_types::needs_details_fetch(&series.details) {
                             still_need_fetch += 1;
                             log::debug!(
                                 "Series {} still has Endpoint, not Details",
@@ -432,7 +435,7 @@ pub fn handle_event(
         CrossDomainEvent::NavigateToMedia(media_ref) => {
             log::info!("[CrossDomain] Navigate to media requested");
             // Convert to appropriate UI navigation message based on media type
-            use crate::infrastructure::api_types::Media;
+            use crate::infra::api_types::Media;
 
             let ui_message = match media_ref {
                 Media::Movie(movie) => {
@@ -513,7 +516,7 @@ fn handle_authentication_complete(state: &State) -> Task<DomainMessage> {
 }
 
 /// Handle database cleared - refresh all data
-fn handle_database_cleared(state: &State) -> Task<DomainMessage> {
+fn handle_database_cleared(_state: &State) -> Task<DomainMessage> {
     log::info!("[CrossDomain] Database cleared - refreshing all data");
 
     // After database is cleared, we need to reload libraries
@@ -538,7 +541,7 @@ fn handle_library_refresh_request(state: &State) -> Task<DomainMessage> {
     }
 
     // If we have a current library, refresh its content
-    if let Some(library_id) = state.domains.library.state.current_library_id {
+    if let Some(_library_id) = state.domains.library.state.current_library_id {
         tasks.push(Task::done(DomainMessage::Library(
             library::messages::Message::RefreshLibrary,
         )));

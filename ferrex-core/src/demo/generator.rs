@@ -1,8 +1,8 @@
 use crate::{
     demo::config::{DemoLibraryOptions, DemoSeedOptions},
     error::{MediaError, Result},
-    providers::TmdbApiProvider,
-    scanner::{GeneratedNode, StructurePlan, TmdbFolderGenerator},
+    infrastructure::media::providers::TmdbApiProvider,
+    scan::scanner::{GeneratedNode, StructurePlan, TmdbFolderGenerator},
     types::library::LibraryType,
 };
 use rand::Rng;

@@ -7,7 +7,7 @@ use sqlx::{
 // Use Media enum from our domain prelude, not tmdb_api
 
 use crate::{
-    api_types::{RATING_DECIMAL_SCALE, RatingValue},
+    api::types::{RATING_DECIMAL_SCALE, RatingValue},
     database::ports::query::QueryRepository,
     error::{MediaError, Result},
     player_prelude::*,

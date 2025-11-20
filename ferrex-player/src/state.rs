@@ -1,45 +1,52 @@
-//! Refactored State using domain-driven architecture
+//! Minimal Central State
 //!
 //! This new State structure delegates domain-specific state to the DomainRegistry,
 //! keeping only the view models and cross-cutting concerns at the top level.
 
-use crate::common::focus::FocusManager;
-use crate::common::messages::DomainMessage;
-use crate::domains::DomainRegistry;
-use crate::domains::auth::AuthDomainState;
-use crate::domains::auth::AuthManager;
-use crate::domains::library::LibraryDomainState;
-use crate::domains::media::MediaDomainState;
-use crate::domains::metadata::MetadataDomainState;
-use crate::domains::metadata::image_service::UnifiedImageService;
-use crate::domains::player::PlayerDomain;
-use crate::domains::search::SearchDomain;
-use crate::domains::settings::SettingsDomainState;
-use crate::domains::streaming::StreamingDomainState;
-use crate::domains::ui::UIDomainState;
-use crate::domains::ui::tabs::{TabId, TabManager};
-use crate::domains::ui::types::DisplayMode;
-use crate::domains::ui::views::carousel::CarouselState;
-use crate::domains::ui::widgets::AnimationType;
-use crate::domains::user_management::UserManagementDomainState;
-use crate::infrastructure::ServiceBuilder;
-use crate::infrastructure::adapters::ApiClientAdapter;
-use crate::infrastructure::adapters::AuthManagerAdapter;
-use crate::infrastructure::api_client::ApiClient;
-use crate::infrastructure::constants::animation::DEFAULT_DURATION_MS;
-use crate::infrastructure::constants::animation::DEFAULT_POSTER_ANIMATION;
-use crate::infrastructure::constants::animation::PosterAnimationKind;
-use crate::infrastructure::repository::{
-    accessor::{Accessor, ReadOnly, ReadWrite},
-    repository::MediaRepo,
+use crate::{
+    common::{focus::FocusManager, messages::DomainMessage},
+    domains::{
+        DomainRegistry,
+        auth::{AuthDomainState, AuthManager},
+        library::LibraryDomainState,
+        media::MediaDomainState,
+        metadata::{MetadataDomainState, image_service::UnifiedImageService},
+        player::PlayerDomain,
+        search::SearchDomain,
+        settings::SettingsDomainState,
+        streaming::StreamingDomainState,
+        ui::{
+            UIDomainState,
+            tabs::{TabId, TabManager},
+            types::DisplayMode,
+            views::carousel::CarouselState,
+        },
+        user_management::UserManagementDomainState,
+    },
+    infra::{
+        ServiceBuilder,
+        adapters::{ApiClientAdapter, AuthManagerAdapter},
+        api_client::ApiClient,
+        constants::animation::{
+            DEFAULT_DURATION_MS, DEFAULT_POSTER_ANIMATION, PosterAnimationKind,
+        },
+        repository::{
+            accessor::{Accessor, ReadOnly, ReadWrite},
+            repository::MediaRepo,
+        },
+        services::{
+            api::ApiService, settings::SettingsApiAdapter,
+            streaming::StreamingApiAdapter,
+            user_management::UserAdminApiAdapter,
+        },
+        widgets::poster::poster_animation_types::PosterAnimationType,
+    },
 };
-use crate::infrastructure::services::api::ApiService;
-use crate::infrastructure::services::settings::SettingsApiAdapter;
-use crate::infrastructure::services::streaming::StreamingApiAdapter;
-use crate::infrastructure::services::user_management::UserAdminApiAdapter;
+
 use ferrex_core::player_prelude::{
     LibraryID, SortBy, SortOrder, UiResolution, UiWatchStatus,
 };
+
 use iced::Task;
 use parking_lot::RwLock as StdRwLock;
 use std::sync::Arc;
@@ -130,11 +137,11 @@ impl State {
             // Resolve default widget animation from constants
             default_widget_animation: {
                 match DEFAULT_POSTER_ANIMATION {
-                    PosterAnimationKind::None => AnimationType::None,
-                    PosterAnimationKind::Fade => AnimationType::Fade {
+                    PosterAnimationKind::None => PosterAnimationType::None,
+                    PosterAnimationKind::Fade => PosterAnimationType::Fade {
                         duration: std::time::Duration::from_millis(DEFAULT_DURATION_MS),
                     },
-                    PosterAnimationKind::Flip => AnimationType::flip(),
+                    PosterAnimationKind::Flip => PosterAnimationType::flip(),
                 }
             },
             repo_accessor: ui_accessor.clone(),

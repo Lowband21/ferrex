@@ -1,3 +1,7 @@
+-- Ensure fixtures target the ferrex schema even if the runtime connection has
+-- not yet adjusted the search_path.
+SET search_path TO ferrex, public;
+
 INSERT INTO libraries (
     id,
     name,

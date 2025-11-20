@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
+use crate::domain::users::user::User;
 use crate::error::Result;
-use crate::user::User;
 
 // User management and credentials (authentication-adjacent) repository
 #[async_trait]

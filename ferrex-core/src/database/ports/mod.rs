@@ -1,10 +1,9 @@
 //! Repository ports (interfaces) grouped by bounded context.
 //! These enable a DDD-style separation between domain/services and infrastructure.
 //!
-//! NOTE: Existing code still uses `MediaDatabaseTrait` as a façade. These ports
-//! are introduced to improve cohesion and guide further refactoring. Implementations
-//! live in the Postgres adapter under `database::postgres_ext`.
+//! Implementations live in the Postgres adapter under `database::infrastructure::postgres`.
 
+pub mod file_watch;
 pub mod folder_inventory;
 pub mod images;
 pub mod indices;

@@ -18,10 +18,16 @@ use crate::{
         media_files::MediaFilesWritePort,
         media_references::MediaReferencesRepository,
     },
+    domain::media::{
+        image::{MediaImageKind, records::MediaImageVariantKey},
+        tv_parser::TvParser,
+    },
     error::{MediaError, Result},
-    image::{MediaImageKind, records::MediaImageVariantKey},
-    image_service::{ImageService, tmdb_image_size::TmdbImageSize},
-    orchestration::{
+    infrastructure::media::{
+        image_service::{ImageService, TmdbImageSize},
+        providers::{ProviderError, TmdbApiProvider},
+    },
+    scan::orchestration::{
         actors::messages::ParentDescriptors,
         job::{ImageFetchJob, ImageFetchPriority, ImageFetchSource},
         series::{
@@ -29,9 +35,7 @@ use crate::{
             collapse_whitespace,
         },
     },
-    providers::{ProviderError, TmdbApiProvider},
     traits::prelude::MediaIDLike,
-    tv_parser::TvParser,
     types::{
         details::{
             AlternativeTitle, CastMember, CollectionInfo, ContentRating,
@@ -270,6 +274,7 @@ impl TmdbMetadataActor {
             })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn queue_image_job(
         &self,
         library_id: LibraryID,
@@ -427,10 +432,7 @@ impl TmdbMetadataActor {
 
     fn handle_movie_release_dates(
         tmdb_id: u64,
-        result: std::result::Result<
-            MovieReleaseDatesResult,
-            crate::providers::ProviderError,
-        >,
+        result: std::result::Result<MovieReleaseDatesResult, ProviderError>,
     ) -> Option<(
         Option<String>,
         Vec<ContentRating>,
@@ -1278,8 +1280,22 @@ impl TmdbMetadataActor {
             })
             .collect::<Vec<_>>();
 
-        let mut media_file =
-            MediaFile::new(PathBuf::from(path_norm), library_id)?;
+        let allow_zero_length = {
+            #[cfg(feature = "demo")]
+            {
+                crate::demo::allow_zero_length_for(&library_id)
+            }
+            #[cfg(not(feature = "demo"))]
+            {
+                false
+            }
+        };
+
+        let mut media_file = MediaFile::new_with_policy(
+            PathBuf::from(path_norm),
+            library_id,
+            allow_zero_length,
+        )?;
         if let Some(meta) = metadata {
             media_file.media_file_metadata = Some(meta.clone());
         }
@@ -1370,9 +1386,21 @@ impl TmdbMetadataActor {
         mut command: MetadataCommand,
         metadata: Option<MediaFileMetadata>,
     ) -> Result<MediaReadyForIndex> {
-        let mut media_file = MediaFile::new(
+        let allow_zero_length = {
+            #[cfg(feature = "demo")]
+            {
+                crate::demo::allow_zero_length_for(&command.analyzed.library_id)
+            }
+            #[cfg(not(feature = "demo"))]
+            {
+                false
+            }
+        };
+
+        let mut media_file = MediaFile::new_with_policy(
             PathBuf::from(&command.analyzed.path_norm),
             command.analyzed.library_id,
+            allow_zero_length,
         )?;
         if let Some(meta) = metadata.clone() {
             media_file.media_file_metadata = Some(meta);
@@ -2069,9 +2097,21 @@ impl TmdbMetadataActor {
         metadata: Option<MediaFileMetadata>,
         info: &EpisodeContextInfo,
     ) -> Result<(EpisodeReference, Option<u64>)> {
-        let mut media_file = MediaFile::new(
+        let allow_zero_length = {
+            #[cfg(feature = "demo")]
+            {
+                crate::demo::allow_zero_length_for(&command.analyzed.library_id)
+            }
+            #[cfg(not(feature = "demo"))]
+            {
+                false
+            }
+        };
+
+        let mut media_file = MediaFile::new_with_policy(
             PathBuf::from(&command.analyzed.path_norm),
             command.analyzed.library_id,
+            allow_zero_length,
         )?;
 
         if let Some(meta) = metadata.clone() {

@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use crate::database::ports::users::UsersRepository;
 use crate::{
+    domain::users::user::User,
     error::{MediaError, Result},
-    user::User,
 };
 
 /// PostgreSQL-backed implementation of the `UsersRepository` port.

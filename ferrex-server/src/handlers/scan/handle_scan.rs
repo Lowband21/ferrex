@@ -7,7 +7,7 @@ use axum::{
 use base64::{
     Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
 };
-use ferrex_core::api_types::{
+use ferrex_core::api::types::{
     ActiveScansResponse, ApiResponse, LatestProgressResponse,
     ScanCommandAcceptedResponse, ScanCommandRequest, ScanSnapshotDto,
     StartScanRequest,
@@ -24,7 +24,7 @@ use crate::infra::app_state::AppState;
 use crate::infra::scan::scan_manager::{
     ScanBroadcastFrame, ScanControlError, ScanControlPlane, ScanHistoryEntry,
 };
-use ferrex_core::api_scan::{
+use ferrex_core::api::scan::{
     BudgetConfigView, BulkModeView, LeaseConfigView, MetadataLimitsView,
     OrchestratorConfigView, QueueConfigView, RetryConfigView, ScanConfig,
     ScanMetrics, WatchConfigView,
@@ -282,6 +282,7 @@ pub async fn scan_config_handler(
         watch: WatchConfigView {
             debounce_window_ms: cfg.watch.debounce_window_ms,
             max_batch_events: cfg.watch.max_batch_events,
+            poll_interval_ms: cfg.watch.poll_interval_ms,
         },
         budget: BudgetConfigView {
             library_scan_limit: cfg.budget.library_scan_limit,

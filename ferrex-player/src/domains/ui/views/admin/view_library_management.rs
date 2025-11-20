@@ -8,7 +8,7 @@ use crate::{
         auth::permissions::{self, StatePermissionExt},
         ui::{messages::Message, theme, views::admin::view_library_form},
     },
-    infrastructure::repository::accessor::{Accessor, ReadOnly},
+    infra::repository::accessor::{Accessor, ReadOnly},
     state::State,
 };
 use ferrex_core::player_prelude::{

@@ -284,24 +284,21 @@ fn create_device_card<'a>(device: &'a UserDevice) -> Element<'a, Message> {
                                     .size(12)
                                     .color(theme::MediaServerTheme::SUCCESS),
                             )
-                            .style(|theme: &Theme| {
-                                let palette = theme.extended_palette();
-                                container::Style {
-                                    background: Some(
-                                        theme::MediaServerTheme::SUCCESS
-                                            .scale_alpha(0.2)
-                                            .into(),
-                                    ),
-                                    border: Border {
-                                        color: theme::MediaServerTheme::SUCCESS,
-                                        width: 1.0,
-                                        radius: 4.0.into(),
-                                    },
-                                    text_color: Some(
-                                        theme::MediaServerTheme::SUCCESS,
-                                    ),
-                                    ..Default::default()
-                                }
+                            .style(|theme: &Theme| container::Style {
+                                background: Some(
+                                    theme::MediaServerTheme::SUCCESS
+                                        .scale_alpha(0.2)
+                                        .into(),
+                                ),
+                                border: Border {
+                                    color: theme::MediaServerTheme::SUCCESS,
+                                    width: 1.0,
+                                    radius: 4.0.into(),
+                                },
+                                text_color: Some(
+                                    theme::MediaServerTheme::SUCCESS,
+                                ),
+                                ..Default::default()
                             })
                             .padding([2, 8])
                             .into()

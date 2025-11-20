@@ -2,7 +2,9 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use tracing::{info, warn};
+#[cfg(feature = "demo")]
+use tracing::info;
+use tracing::warn;
 
 use crate::{
     infra::{app_context::AppContext, app_state::AppState},

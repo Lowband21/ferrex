@@ -1,3 +1,4 @@
+use ferrex_model::error::ModelError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -33,3 +34,9 @@ pub enum MediaError {
 }
 
 pub type Result<T> = std::result::Result<T, MediaError>;
+
+impl From<ModelError> for MediaError {
+    fn from(err: ModelError) -> Self {
+        MediaError::InvalidMedia(err.to_string())
+    }
+}

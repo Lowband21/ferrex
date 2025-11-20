@@ -5,7 +5,8 @@ use axum::{
     response::Response,
 };
 use ferrex_core::{
-    types::MediaType, user::User, watch_status::UpdateProgressRequest,
+    domain::{users::user::User, watch::UpdateProgressRequest},
+    types::MediaType,
 };
 use serde::Deserialize;
 use tokio_util::io::ReaderStream;

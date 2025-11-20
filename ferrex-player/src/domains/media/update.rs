@@ -1,7 +1,8 @@
 use super::messages::Message;
-use crate::common::messages::{DomainMessage, DomainUpdateResult};
-use crate::infrastructure::services::api::ApiService;
-use crate::state::State;
+use crate::{
+    common::messages::{DomainMessage, DomainUpdateResult},
+    state::State,
+};
 use ferrex_core::player_prelude::{
     MediaIDLike, UpdateProgressRequest, UserWatchState,
 };
@@ -211,8 +212,6 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                 "SendProgressUpdateWithData: Starting progress update with captured data"
             );
 
-            let duration = duration;
-
             // Send an immediate progress update using the captured data
             if let Some(api_service) = &state.domains.media.state.api_service {
                 log::debug!(
@@ -266,15 +265,6 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
             } else {
                 DomainUpdateResult::task(Task::none())
             }
-        }
-
-        // All other messages are now handled by player domain
-        _ => {
-            log::warn!(
-                "Media domain received unhandled message: {:?}",
-                message
-            );
-            DomainUpdateResult::task(Task::none())
         }
     }
 }

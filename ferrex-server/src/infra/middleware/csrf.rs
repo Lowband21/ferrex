@@ -47,6 +47,7 @@ pub fn extract_csrf_from_cookies(headers: &HeaderMap) -> Option<String> {
 
 use std::{
     fmt,
+    future::ready,
     task::{Context, Poll},
 };
 use tower::Layer;
@@ -110,12 +111,8 @@ where
     fn from_request_parts(
         _parts: &mut Parts,
         _state: &S,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = Result<Self, Self::Rejection>>
-                + Send,
-        >,
-    > {
-        Box::pin(async move { Ok(ValidateCsrf) })
+    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send
+    {
+        ready(Ok(ValidateCsrf))
     }
 }

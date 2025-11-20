@@ -20,9 +20,7 @@ pub fn update_streaming(
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    profiling::scope!(
-        crate::infrastructure::profiling_scopes::scopes::STREAMING_UPDATE
-    );
+    profiling::scope!(crate::infra::profiling_scopes::scopes::STREAMING_UPDATE);
 
     match message {
         // Transcoding messages

@@ -1,18 +1,18 @@
 use axum::{
     Extension, Json,
     extract::{Path, State},
-    http::HeaderMap,
     http::StatusCode,
 };
 use ferrex_core::{
-    api_types::ApiResponse,
-    auth::domain::{
-        services::{
-            AuthenticationError, PasswordChangeActor, PasswordChangeRequest,
+    api::types::ApiResponse,
+    domain::users::{
+        auth::domain::{
+            services::{
+                AuthenticationError, PasswordChangeActor, PasswordChangeRequest,
+            },
         },
-        value_objects::DeviceFingerprint,
+        user::{User, UserUpdateRequest},
     },
-    user::{User, UserUpdateRequest},
 };
 use serde::Deserialize;
 use tracing::info;
@@ -26,85 +26,6 @@ use crate::{
     },
     users::{UserService, user_service::UpdateUserParams},
 };
-
-/// List users for selection screen (rate-limited public endpoint)
-///
-/// This endpoint is intentionally limited to prevent user enumeration attacks:
-/// - Returns only minimal user information
-/// - Requires device fingerprint for tracking
-/// - Rate limited to prevent scraping
-/// - May require CAPTCHA in future versions
-pub async fn list_users_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> AppResult<Json<ApiResponse<Vec<UserListItemDto>>>> {
-    // Extract device fingerprint from headers (required for user selection)
-    let device_fingerprint = headers
-        .get("X-Device-Fingerprint")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| {
-            AppError::bad_request(
-                "Device fingerprint required for user list".to_string(),
-            )
-        })?;
-
-    // Validate device fingerprint format (basic validation)
-    if device_fingerprint.len() < 32 || device_fingerprint.len() > 256 {
-        return Err(AppError::bad_request(
-            "Invalid device fingerprint".to_string(),
-        ));
-    }
-
-    let fingerprint =
-        DeviceFingerprint::from_hash(device_fingerprint.to_string()).map_err(
-            |_| AppError::bad_request("Invalid device fingerprint".to_string()),
-        )?;
-
-    let (is_known_device, mut users, pin_map) = state
-        .auth_facade()
-        .device_user_listing(&fingerprint)
-        .await
-        .map_err(map_facade_error)?;
-
-    // Sort deterministically to ensure stable ordering regardless of backend defaults.
-    users.sort_by(|a, b| a.username.cmp(&b.username));
-
-    if !is_known_device {
-        let mut limited = users;
-        limited.truncate(50);
-
-        let user_list: Vec<UserListItemDto> = limited
-            .into_iter()
-            .map(|user| UserListItemDto {
-                id: Uuid::new_v5(
-                    &Uuid::NAMESPACE_DNS,
-                    user.username.as_bytes(),
-                ),
-                username: user.username,
-                display_name: user.display_name,
-                avatar_url: user.avatar_url,
-                has_pin: false,
-                last_login: None,
-            })
-            .collect();
-
-        return Ok(Json(ApiResponse::success(user_list)));
-    }
-
-    let user_list: Vec<UserListItemDto> = users
-        .into_iter()
-        .map(|user| UserListItemDto {
-            id: user.id,
-            username: user.username,
-            display_name: user.display_name,
-            avatar_url: user.avatar_url,
-            has_pin: pin_map.get(&user.id).copied().unwrap_or(false),
-            last_login: None,
-        })
-        .collect();
-
-    Ok(Json(ApiResponse::success(user_list)))
-}
 
 /// List all users with full information (authenticated endpoint)
 ///

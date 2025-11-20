@@ -1,14 +1,14 @@
-use std::sync::Arc;
-
-use anyhow::anyhow;
 use ferrex_core::player_prelude::{
     ActiveScansResponse, LatestProgressResponse, LibraryID,
     ScanCommandAcceptedResponse, ScanCommandRequest, ScanSnapshotDto,
     StartScanRequest,
 };
-use uuid::Uuid;
 
-use crate::infrastructure::services::api::ApiService;
+use crate::infra::services::api::ApiService;
+
+use anyhow::anyhow;
+use std::sync::Arc;
+use uuid::Uuid;
 
 pub async fn start_library_scan(
     client: Arc<dyn ApiService>,

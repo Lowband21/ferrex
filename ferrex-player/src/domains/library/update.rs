@@ -1,5 +1,5 @@
 #[cfg(feature = "demo")]
-use crate::infrastructure::api_types::DemoStatus;
+use crate::infra::api_types::DemoStatus;
 use crate::{
     common::focus::{FocusArea, FocusMessage},
     common::messages::{DomainMessage, DomainUpdateResult},
@@ -7,7 +7,7 @@ use crate::{
         library::update_handlers::fetch_libraries,
         ui::tabs::{TabId, TabState},
     },
-    infrastructure::api_types::Media,
+    infra::api_types::Media,
     state::State,
 };
 
@@ -20,7 +20,7 @@ use ferrex_core::player_prelude::{
     Priority, ScanLifecycleStatus, ScanSnapshotDto,
 };
 #[cfg(feature = "demo")]
-use ferrex_core::types::library::LibraryType;
+use ferrex_model::library::LibraryType;
 
 #[cfg_attr(
     any(
@@ -484,14 +484,14 @@ pub fn update_library(
                     .filter(|m| {
                         // Check if media needs metadata - typically if it lacks details or has no TMDB ID
                         match m {
-                            crate::infrastructure::api_types::Media::Movie(movie) => {
+                            crate::infra::api_types::Media::Movie(movie) => {
                                 movie.tmdb_id == 0
                                     || matches!(
                                         movie.details,
                                         MediaDetailsOption::Endpoint(_)
                                     )
                             }
-                            crate::infrastructure::api_types::Media::Series(series) => {
+                            crate::infra::api_types::Media::Series(series) => {
                                 series.tmdb_id == 0
                                     || matches!(
                                         series.details,

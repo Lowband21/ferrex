@@ -20,15 +20,13 @@ use crate::domains::ui::views::settings::device_management::{
 use crate::state::State;
 
 pub fn collect(config: &Arc<AppConfig>) -> Vec<Preset<State, DomainMessage>> {
-    let mut presets = Vec::new();
-
-    presets.push(first_run_preset(Arc::clone(config)));
-    presets.push(user_selection_preset(Arc::clone(config)));
-    presets.push(admin_session_preset(Arc::clone(config)));
-    presets.push(auth_devices_preset(Arc::clone(config)));
-    presets.push(library_loaded_preset(Arc::clone(config)));
-
-    presets
+    vec![
+        (first_run_preset(Arc::clone(config))),
+        (user_selection_preset(Arc::clone(config))),
+        (admin_session_preset(Arc::clone(config))),
+        (auth_devices_preset(Arc::clone(config))),
+        (library_loaded_preset(Arc::clone(config))),
+    ]
 }
 
 fn first_run_preset(config: Arc<AppConfig>) -> Preset<State, DomainMessage> {

@@ -26,7 +26,8 @@ pub fn handle_unified_image_loaded(
         use std::time::{Duration, Instant};
         let until = Instant::now()
             + Duration::from_millis(
-                (crate::infrastructure::constants::layout::animation::DEFAULT_DURATION_MS as f64
+                (crate::infra::constants::layout::animation::DEFAULT_DURATION_MS
+                    as f64
                     * 1.25) as u64,
             );
         let ui_until = &mut state.domains.ui.state.poster_anim_active_until;

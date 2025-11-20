@@ -5,7 +5,7 @@
 
 use ferrex_player::domains::auth::manager::AuthManager;
 use ferrex_player::domains::auth::errors::{AuthError, TokenError};
-use ferrex_player::infrastructure::api_client::ApiClient;
+use ferrex_player::infra::api_client::ApiClient;
 use ferrex_core::{
     auth::domain::value_objects::SessionScope,
     rbac::UserPermissions,
@@ -39,7 +39,7 @@ impl MockAuthServer {
             refresh_count: Arc::new(RwLock::new(0)),
         }
     }
-    
+
     pub async fn add_refresh_token(&self, token: String, user_id: Uuid, device_id: String) {
         let data = RefreshTokenData {
             user_id,
@@ -48,25 +48,25 @@ impl MockAuthServer {
         };
         self.refresh_tokens.write().await.insert(token, data);
     }
-    
+
     pub async fn set_should_fail(&self, should_fail: bool) {
         *self.should_fail_refresh.write().await = should_fail;
     }
-    
+
     pub async fn get_refresh_count(&self) -> usize {
         *self.refresh_count.read().await
     }
-    
+
     pub async fn validate_refresh_token(&self, token: &str) -> Result<AuthToken, String> {
         // Increment refresh count
         let mut count = self.refresh_count.write().await;
         *count += 1;
-        
+
         // Check if we should fail
         if *self.should_fail_refresh.read().await {
             return Err("Refresh token invalid or expired".to_string());
         }
-        
+
         // Check if token exists
         let tokens = self.refresh_tokens.read().await;
         if let Some(data) = tokens.get(token) {
@@ -74,7 +74,7 @@ impl MockAuthServer {
             if data.expires_at < Utc::now() {
                 return Err("Refresh token expired".to_string());
             }
-            
+
             // Generate new tokens
             Ok(AuthToken {
                 access_token: format!("new_access_token_{}", *count),

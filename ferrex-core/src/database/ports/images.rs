@@ -4,9 +4,11 @@ use uuid::Uuid;
 use crate::database::traits::{
     ImageLookupParams, ImageRecord, ImageVariant, MediaImage,
 };
+use crate::domain::media::image::MediaImageKind;
+use crate::domain::media::image::records::{
+    MediaImageVariantKey, MediaImageVariantRecord,
+};
 use crate::error::Result;
-use crate::image::MediaImageKind;
-use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
 
 /// Repository port for image persistence and media-image associations.
 ///

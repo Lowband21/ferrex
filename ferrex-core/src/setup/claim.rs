@@ -6,8 +6,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    auth::AuthCrypto,
     database::ports::setup_claims::{NewSetupClaim, SetupClaimsRepository},
+    domain::users::auth::AuthCrypto,
     error::MediaError,
 };
 
@@ -331,12 +331,11 @@ mod tests {
             let claims = self.claims.lock().await;
             Ok(claims
                 .values()
-                .filter(|record| {
+                .find(|record| {
                     record.confirmed_at.is_none()
                         && record.revoked_at.is_none()
                         && record.expires_at > now
                 })
-                .next()
                 .cloned())
         }
 

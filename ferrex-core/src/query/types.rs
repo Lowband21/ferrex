@@ -1,7 +1,7 @@
 use crate::{
-    api_types::{RatingValue, ScalarRange},
+    api::types::{RatingValue, ScalarRange},
+    domain::watch::{InProgressItem, WatchStatusFilter},
     types::media::Media,
-    watch_status::{InProgressItem, WatchStatusFilter},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -1,0 +1,69 @@
+//! Core data model definitions shared across Ferrex crates.
+
+#[cfg(feature = "chrono")]
+pub use ::chrono;
+
+#[cfg(not(feature = "chrono"))]
+pub mod chrono_stub;
+#[cfg(not(feature = "chrono"))]
+pub use chrono_stub as chrono;
+
+pub mod details;
+pub mod error;
+pub mod events;
+pub mod files;
+pub mod filter_types;
+pub mod ids;
+pub mod image;
+pub mod image_request;
+pub mod library;
+pub mod media;
+pub mod media_events;
+pub mod media_id;
+pub mod numbers;
+pub mod prelude;
+#[cfg(feature = "rkyv")]
+pub mod rkyv_wrappers;
+pub mod scan;
+pub mod titles;
+pub mod transcoding;
+pub mod urls;
+pub mod util_types;
+
+// Intentionally curated re-exports for downstream consumers.
+#[cfg(feature = "rkyv")]
+pub use details::ArchivedCastMember;
+pub use details::{
+    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, GenreInfo,
+    LibraryReference, MediaDetailsOption, NetworkInfo, ProductionCompany,
+    ProductionCountry, SeasonDetails, SpokenLanguage, TmdbDetails,
+};
+pub use error::{ModelError, Result as ModelResult};
+pub use files::{MediaFile, MediaFileMetadata, ParsedMediaInfo};
+pub use filter_types::{UiDecade, UiGenre, UiResolution, UiWatchStatus};
+pub use ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID};
+pub use image_request::{
+    BackdropKind, BackdropSize, EpisodeStillSize, ImageRequest, PosterKind,
+    PosterSize, Priority, ProfileSize,
+};
+#[cfg(feature = "rkyv")]
+pub use library::{ArchivedLibrary, ArchivedLibraryExt, ArchivedLibraryType};
+pub use library::{Library, LibraryLike, LibraryLikeMut, LibraryType};
+#[cfg(feature = "rkyv")]
+pub use media::{
+    ArchivedEpisodeReference, ArchivedMedia, ArchivedMovieReference,
+    ArchivedSeasonReference, ArchivedSeriesReference,
+};
+pub use media::{
+    EpisodeReference, Media, MovieReference, SeasonReference, SeriesReference,
+};
+pub use media_events::{
+    MediaEvent, ScanEventMetadata, ScanProgressEvent, ScanStageLatencySummary,
+};
+#[cfg(feature = "rkyv")]
+pub use media_id::ArchivedMediaID;
+pub use media_id::MediaID;
+pub use transcoding::{
+    TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,
+};
+pub use util_types::{ImageSize, ImageType, MediaType};

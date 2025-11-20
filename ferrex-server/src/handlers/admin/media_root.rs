@@ -7,7 +7,7 @@ use axum::{
     extract::{Query, State},
     response::Json,
 };
-use ferrex_core::api_types::{
+use ferrex_core::api::types::{
     ApiResponse,
     admin::{
         MediaRootBreadcrumb, MediaRootBrowseRequest, MediaRootBrowseResponse,

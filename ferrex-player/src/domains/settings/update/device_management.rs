@@ -4,6 +4,7 @@ use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::settings::messages as settings;
 use crate::domains::ui::views::settings::device_management::UserDevice;
 use crate::state::State;
+use ferrex_core::player_prelude::Platform;
 use iced::Task;
 use log::{error, info};
 use std::str::FromStr;
@@ -43,20 +44,14 @@ pub fn handle_load_devices(state: &mut State) -> DomainUpdateResult {
                         .map(|device| {
                             // Determine device type from platform
                             let device_type = match device.platform {
-                                ferrex_core::auth::Platform::Android => {
-                                    "mobile"
-                                }
-                                ferrex_core::auth::Platform::IOS => "mobile",
-                                ferrex_core::auth::Platform::TvOS => "tv",
-                                ferrex_core::auth::Platform::Windows => {
-                                    "desktop"
-                                }
-                                ferrex_core::auth::Platform::MacOS => "desktop",
-                                ferrex_core::auth::Platform::Linux => "desktop",
-                                ferrex_core::auth::Platform::Web => "web",
-                                ferrex_core::auth::Platform::Unknown => {
-                                    "unknown"
-                                }
+                                Platform::Android => "mobile",
+                                Platform::IOS => "mobile",
+                                Platform::TvOS => "tv",
+                                Platform::Windows => "desktop",
+                                Platform::MacOS => "desktop",
+                                Platform::Linux => "desktop",
+                                Platform::Web => "web",
+                                Platform::Unknown => "unknown",
                             }
                             .to_string();
 

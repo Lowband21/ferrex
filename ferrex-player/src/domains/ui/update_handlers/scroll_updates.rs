@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::{
     domains::ui::{messages::Message, tabs::TabState},
-    infrastructure::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS,
+    infra::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS,
     state::State,
 };
 use ferrex_core::player_prelude::{MediaID, MediaIDLike};
@@ -35,7 +35,7 @@ pub fn handle_detail_view_scrolled(
         .library
         .state
         .current_library_id
-        .map(|library_id| library_id.as_uuid());
+        .map(|library_id| library_id.to_uuid());
 
     // Update depth lines to move with the scrolled content
     state
@@ -107,11 +107,11 @@ pub fn handle_tab_grid_scrolled(
     // This avoids visible stalls while atlas uploads complete
     {
         use std::time::Duration;
-        let until = now + Duration::from_millis(
-            (crate::infrastructure::constants::animation::DEFAULT_DURATION_MS
-                as f64
-                * 1.25) as u64,
-        );
+        let until = now
+            + Duration::from_millis(
+                (crate::infra::constants::animation::DEFAULT_DURATION_MS as f64
+                    * 1.25) as u64,
+            );
         let ui_until = &mut state.domains.ui.state.poster_anim_active_until;
         *ui_until = Some(ui_until.map(|u| u.max(until)).unwrap_or(until));
     }

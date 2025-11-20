@@ -1,5 +1,4 @@
 use crate::domains::ui::views::grid::{create_movie_card, create_series_card};
-use iced::widget::{column, row};
 use uuid::Uuid;
 
 // Use the macro to generate virtual grid functions

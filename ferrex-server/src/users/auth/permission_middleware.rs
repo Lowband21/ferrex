@@ -4,7 +4,10 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use ferrex_core::{api_types::ApiResponse, rbac::UserPermissions, user::User};
+use ferrex_core::{
+    api::types::ApiResponse,
+    domain::users::{rbac::UserPermissions, user::User},
+};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -29,19 +32,16 @@ async fn check_permission_async(
     next: Next,
     permission: &str,
 ) -> Response {
-    // Extract the user from extensions (set by auth_middleware)
-    let user = match request.extensions().get::<User>() {
-        Some(user) => user,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                axum::Json(ApiResponse::<()>::error(
-                    "Authentication required".to_string(),
-                )),
-            )
-                .into_response();
-        }
-    };
+    // Ensure auth_middleware populated the user extension
+    if request.extensions().get::<User>().is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(ApiResponse::<()>::error(
+                "Authentication required".to_string(),
+            )),
+        )
+            .into_response();
+    }
 
     // Extract permissions from extensions (should be set by auth_middleware)
     let permissions = match request.extensions().get::<UserPermissions>() {
@@ -91,19 +91,16 @@ async fn check_any_permission_async(
     next: Next,
     permissions: &[&str],
 ) -> Response {
-    // Extract the user from extensions (set by auth_middleware)
-    let user = match request.extensions().get::<User>() {
-        Some(user) => user,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                axum::Json(ApiResponse::<()>::error(
-                    "Authentication required".to_string(),
-                )),
-            )
-                .into_response();
-        }
-    };
+    // Ensure auth_middleware populated the user extension
+    if request.extensions().get::<User>().is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(ApiResponse::<()>::error(
+                "Authentication required".to_string(),
+            )),
+        )
+            .into_response();
+    }
 
     // Extract permissions from extensions (should be set by auth_middleware)
     let user_permissions = match request.extensions().get::<UserPermissions>() {

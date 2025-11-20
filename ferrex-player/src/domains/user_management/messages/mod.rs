@@ -1,4 +1,4 @@
-use ferrex_core::api_types::users_admin::AdminUserInfo;
+use crate::infra::api_types::AdminUserInfo;
 use ferrex_core::player_prelude::User;
 use uuid::Uuid;
 

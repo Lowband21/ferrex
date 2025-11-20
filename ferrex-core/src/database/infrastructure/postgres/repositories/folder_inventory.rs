@@ -146,7 +146,7 @@ impl PostgresFolderInventoryRepository {
 
         if let Some(library_id) = filters.library_id {
             builder.push(" AND library_id = ");
-            builder.push_bind(library_id.as_uuid());
+            builder.push_bind(library_id.to_uuid());
         }
 
         if let Some(status) = filters.processing_status {

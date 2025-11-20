@@ -1,5 +1,5 @@
 use anyhow::{Context, anyhow};
-use ferrex_core::{
+use ferrex_core::scan::{
     orchestration::config::OrchestratorConfig, scanner::settings,
 };
 use serde::{Deserialize, Serialize};
@@ -13,18 +13,13 @@ fn default_video_extensions() -> Vec<String> {
 }
 
 /// Source that produced the scanner configuration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ScannerConfigSource {
+    #[default]
     Default,
     EnvPath(PathBuf),
     EnvInline,
     File(PathBuf),
-}
-
-impl Default for ScannerConfigSource {
-    fn default() -> Self {
-        ScannerConfigSource::Default
-    }
 }
 
 /// Top-level scanner settings. Use these to tune how quickly new folders are

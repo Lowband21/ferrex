@@ -2,6 +2,7 @@
 
 pub mod repositories;
 
+pub use repositories::file_watch::PostgresFileWatchRepository;
 pub use repositories::folder_inventory::PostgresFolderInventoryRepository;
 pub use repositories::images::PostgresImageRepository;
 pub use repositories::indices::PostgresIndicesRepository;

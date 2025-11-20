@@ -1,16 +1,16 @@
 use ferrex_core::error::MediaError;
-use ferrex_core::orchestration::QueueService;
-use ferrex_core::orchestration::config::RetryConfig;
+use ferrex_core::scan::orchestration::QueueService;
+use ferrex_core::scan::orchestration::config::RetryConfig;
 use ferrex_core::types::LibraryID;
 use sqlx::PgPool;
 use sqlx::Row;
 
-use ferrex_core::orchestration::persistence::PostgresQueueService;
+use ferrex_core::scan::orchestration::persistence::PostgresQueueService;
 
-#[path = "support/mod.rs"]
-mod support;
+#[path = "support/constants.rs"]
+mod constants;
 
-use support::constants::ORCHESTRATION_JITTER_TOLERANCE_MS;
+use constants::ORCHESTRATION_JITTER_TOLERANCE_MS;
 
 #[sqlx::test]
 async fn postgres_queue_service_initializes(pool: PgPool) {
@@ -21,10 +21,10 @@ async fn postgres_queue_service_initializes(pool: PgPool) {
 }
 
 use chrono::Utc;
-use ferrex_core::orchestration::job::{
+use ferrex_core::scan::orchestration::job::{
     EnqueueRequest, FolderScanJob, JobPayload, JobPriority, ScanReason,
 };
-use ferrex_core::orchestration::lease::DequeueRequest;
+use ferrex_core::scan::orchestration::lease::DequeueRequest;
 use uuid::Uuid;
 
 async fn seed_library(pool: &PgPool) -> Uuid {
@@ -165,7 +165,7 @@ async fn dequeue_leases_one_and_leaves_others_ready(pool: PgPool) {
 
     // Dequeue one
     let dq = DequeueRequest {
-        kind: ferrex_core::orchestration::job::JobKind::FolderScan,
+        kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan,
         worker_id: "w1".to_string(),
         lease_ttl: chrono::Duration::seconds(15),
         selector: None,
@@ -222,13 +222,13 @@ async fn concurrent_dequeues_do_not_double_lease(pool: PgPool) {
 
     // Two concurrent dequeues
     let dq1 = DequeueRequest {
-        kind: ferrex_core::orchestration::job::JobKind::FolderScan,
+        kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan,
         worker_id: "wA".to_string(),
         lease_ttl: chrono::Duration::seconds(10),
         selector: None,
     };
     let dq2 = DequeueRequest {
-        kind: ferrex_core::orchestration::job::JobKind::FolderScan,
+        kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan,
         worker_id: "wB".to_string(),
         lease_ttl: chrono::Duration::seconds(10),
         selector: None,
@@ -375,7 +375,9 @@ async fn enqueue_duplicate_no_elevation_keeps_priority(pool: PgPool) {
 
 #[sqlx::test]
 async fn lease_renewal_success_and_post_expiry_failure(pool: PgPool) {
-    use ferrex_core::orchestration::lease::{DequeueRequest, LeaseRenewal};
+    use ferrex_core::scan::orchestration::lease::{
+        DequeueRequest, LeaseRenewal,
+    };
 
     let svc = PostgresQueueService::new(pool.clone())
         .await
@@ -404,7 +406,7 @@ async fn lease_renewal_success_and_post_expiry_failure(pool: PgPool) {
 
     // Dequeue with very short TTL
     let dq = DequeueRequest {
-        kind: ferrex_core::orchestration::job::JobKind::FolderScan,
+        kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan,
         worker_id: "renew-worker".into(),
         lease_ttl: chrono::Duration::milliseconds(500),
         selector: None,
@@ -443,7 +445,7 @@ async fn lease_renewal_success_and_post_expiry_failure(pool: PgPool) {
     .expect("force lease expiry");
 
     // Attempt another renewal should fail with NotFound
-    let renewal2 = ferrex_core::orchestration::lease::LeaseRenewal {
+    let renewal2 = ferrex_core::scan::orchestration::lease::LeaseRenewal {
         lease_id: renewed.lease_id,
         worker_id: "renew-worker".into(),
         extend_by: chrono::Duration::milliseconds(200),
@@ -484,7 +486,7 @@ async fn job_completion_sets_terminal_state(pool: PgPool) {
         .expect("enqueue");
 
     let dq = DequeueRequest {
-        kind: ferrex_core::orchestration::job::JobKind::FolderScan,
+        kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan,
         worker_id: "worker".into(),
         lease_ttl: chrono::Duration::seconds(5),
         selector: None,
@@ -513,7 +515,7 @@ async fn job_completion_sets_terminal_state(pool: PgPool) {
 
 #[sqlx::test]
 async fn job_failure_backoff_and_dead_letter(pool: PgPool) {
-    use ferrex_core::orchestration::lease::DequeueRequest;
+    use ferrex_core::scan::orchestration::lease::DequeueRequest;
 
     let svc = PostgresQueueService::new(pool.clone())
         .await
@@ -545,7 +547,7 @@ async fn job_failure_backoff_and_dead_letter(pool: PgPool) {
     );
     for attempt in 1..=5 {
         let dq = DequeueRequest {
-            kind: ferrex_core::orchestration::job::JobKind::FolderScan,
+            kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan,
             worker_id: format!("w-{}", attempt),
             lease_ttl: chrono::Duration::milliseconds(100),
             selector: None,
@@ -629,7 +631,7 @@ async fn job_failure_backoff_and_dead_letter(pool: PgPool) {
     // Drive attempts to dead_letter at > max attempts
     for attempt in 6..=11 {
         let dq = DequeueRequest {
-            kind: ferrex_core::orchestration::job::JobKind::FolderScan,
+            kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan,
             worker_id: format!("w-{}", attempt),
             lease_ttl: chrono::Duration::milliseconds(50),
             selector: None,
@@ -662,7 +664,7 @@ async fn job_failure_backoff_and_dead_letter(pool: PgPool) {
 
 #[sqlx::test]
 async fn scan_expired_leases_transitions_ready_and_dlq(pool: PgPool) {
-    use ferrex_core::orchestration::lease::DequeueRequest;
+    use ferrex_core::scan::orchestration::lease::DequeueRequest;
     let svc = PostgresQueueService::new(pool.clone())
         .await
         .expect("svc init");
@@ -692,7 +694,7 @@ async fn scan_expired_leases_transitions_ready_and_dlq(pool: PgPool) {
     let mut leases = vec![];
     for i in 0..3 {
         let dq = DequeueRequest {
-            kind: ferrex_core::orchestration::job::JobKind::FolderScan,
+            kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan,
             worker_id: format!("sx-{}", i),
             lease_ttl: chrono::Duration::seconds(30),
             selector: None,

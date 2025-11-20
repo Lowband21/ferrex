@@ -7,14 +7,14 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    api_types::{
+    api::types::{
         RATING_DECIMAL_SCALE, RatingValue, filters::FilterIndicesRequest,
     },
     database::ports::indices::IndicesRepository,
+    domain::watch::WatchStatusFilter,
     error::{MediaError, Result},
     query::types::{MediaTypeFilter, SortBy, SortOrder},
     types::ids::LibraryID,
-    watch_status::WatchStatusFilter,
 };
 
 #[derive(Clone, Debug)]
@@ -101,7 +101,7 @@ impl IndicesRepository for PostgresIndicesRepository {
         spec: &FilterIndicesRequest,
         user_id: Option<Uuid>,
     ) -> Result<Vec<u32>> {
-        let library_uuid = library_id.as_uuid();
+        let library_uuid = library_id.to_uuid();
         let builder =
             FilteredMovieIndexBuilder::new(library_uuid, spec, user_id)
                 .map_err(|err| MediaError::InvalidMedia(err.to_string()))?;
@@ -279,7 +279,7 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
         Ok(())
     }
 
-    fn push_year_filter(&mut self, range: crate::api_types::ScalarRange<u16>) {
+    fn push_year_filter(&mut self, range: crate::api::types::ScalarRange<u16>) {
         self.qb.push(
             " AND mm.release_date IS NOT NULL AND EXTRACT(YEAR FROM mm.release_date)::INT BETWEEN ",
         );
@@ -290,7 +290,7 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
 
     fn push_rating_filter(
         &mut self,
-        range: crate::api_types::ScalarRange<RatingValue>,
+        range: crate::api::types::ScalarRange<RatingValue>,
     ) -> std::result::Result<(), FilterQueryError> {
         self.qb.push(" AND mm.vote_average BETWEEN ");
         self.qb.push_bind(rating_bound(range.min));
@@ -301,7 +301,7 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
 
     fn push_resolution_filter(
         &mut self,
-        range: crate::api_types::ScalarRange<u16>,
+        range: crate::api::types::ScalarRange<u16>,
     ) {
         self.qb.push(
             " AND ((mf.technical_metadata->>'height')::INTEGER) BETWEEN ",

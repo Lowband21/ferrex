@@ -184,6 +184,92 @@ pub fn view_credential_entry<'a>(
     auth_container(card).into()
 }
 
+/// Shows a pre-auth login screen with username and password (no server-provided user yet)
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
+pub fn view_pre_auth_login<'a>(
+    username: &'a str,
+    password: &'a SecureCredential,
+    show_password: bool,
+    remember_device: bool,
+    error: Option<&'a str>,
+    loading: bool,
+) -> Element<'a, DomainMessage> {
+    let mut content = column![
+        title("Sign in"),
+        spacing(),
+    ];
+
+    if let Some(err) = error {
+        content = content.push(error_message(err));
+        content = content.push(Space::new().height(Length::Fixed(12.0)));
+    }
+
+    // Username input
+    content = content.push(
+        text_input("Username", username)
+            .on_input(|s| DomainMessage::Auth(auth::Message::PreAuthUpdateUsername(s)))
+            .id(ids::auth_pre_auth_username())
+            .padding(12)
+            .size(16)
+            .width(Length::Fill),
+    );
+
+    content = content.push(Space::new().height(Length::Fixed(8.0)));
+
+    // Password input
+    content = content.push(
+        text_input("Password", password.as_str())
+            .on_input(|s| DomainMessage::Auth(auth::Message::UpdateCredential(s)))
+            .on_submit(DomainMessage::Auth(auth::Message::PreAuthSubmit))
+            .secure(!show_password)
+            .id(ids::auth_pre_auth_password())
+            .padding(12)
+            .size(16)
+            .width(Length::Fill),
+    );
+
+    content = content.push(Space::new().height(Length::Fixed(8.0)));
+
+    // Toggles
+    content = content.push(
+        row![
+            checkbox("Show password", show_password)
+                .on_toggle(|_| DomainMessage::Auth(auth::Message::PreAuthTogglePasswordVisibility))
+                .size(16)
+                .spacing(8),
+            Space::new().width(Length::Fixed(16.0)),
+            checkbox("Remember this device", remember_device)
+                .on_toggle(|_| DomainMessage::Auth(auth::Message::PreAuthToggleRememberDevice))
+                .size(16)
+                .spacing(8),
+        ]
+        .align_y(Alignment::Center),
+    );
+
+    content = content.push(spacing());
+
+    // Submit button
+    let submit_label = if loading { "Signing in..." } else { "Sign In" };
+    let submit_button = if loading {
+        primary_button(submit_label)
+    } else {
+        primary_button(submit_label)
+            .on_press(DomainMessage::Auth(auth::Message::PreAuthSubmit))
+    };
+
+    content = content.push(submit_button);
+
+    let card = auth_card(content.align_x(Alignment::Center));
+    auth_container(card).into()
+}
+
 /// Creates a PIN input display
 fn pin_input<'a>(value: &str, max_length: u8) -> Element<'a, DomainMessage> {
     let digits: Vec<Element<'a, DomainMessage>> = (0..max_length)

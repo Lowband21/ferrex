@@ -3,19 +3,21 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Error as AnyhowError;
 use ferrex_core::{
     application::unit_of_work::AppUnitOfWork,
-    auth::domain::{
-        aggregates::DeviceSession,
-        repositories::AuthSessionRecord,
-        services::{
-            AuthEventContext, AuthenticationError, AuthenticationService,
-            DeviceTrustError, DeviceTrustService, PasswordChangeActor,
-            PasswordChangeRequest, PinManagementError, PinManagementService,
-            TokenBundle,
-        },
-        value_objects::{DeviceFingerprint, PinPolicy, RevocationReason},
-    },
     database::ports::users::UsersRepository,
-    user::{User, UserSession},
+    domain::users::{
+        auth::domain::{
+            aggregates::DeviceSession,
+            repositories::AuthSessionRecord,
+            services::{
+                AuthEventContext, AuthenticationError, AuthenticationService,
+                DeviceTrustError, DeviceTrustService, PasswordChangeActor,
+                PasswordChangeRequest, PinManagementError,
+                PinManagementService, TokenBundle,
+            },
+            value_objects::{DeviceFingerprint, PinPolicy, RevocationReason},
+        },
+        user::{User, UserSession},
+    },
 };
 use serde_json::Value;
 use thiserror::Error;

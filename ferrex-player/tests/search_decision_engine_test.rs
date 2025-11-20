@@ -9,8 +9,6 @@ mod search_decision_engine_tests {
 
     #[test]
     fn test_simple_decision_engine() {
-        let engine = SearchDecisionEngine::new_simple();
-
         // Test with no network
         let strategy = SearchDecisionEngine::determine_strategy(
             "test query",

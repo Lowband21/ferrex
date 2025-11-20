@@ -5,13 +5,13 @@ use axum::{
     extract::{Extension, Path, State},
 };
 use ferrex_core::{
+    domain::users::user::User,
     sync_session::{
         CreateSyncSessionRequest, CreateSyncSessionResponse,
         JoinSyncSessionResponse, Participant, PlaybackState, SyncSession,
         SyncSessionError,
     },
     traits::prelude::MediaIDLike,
-    user::User,
 };
 use uuid::Uuid;
 

@@ -1,12 +1,11 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::OnceLock;
 
 use axum::{
     Json,
     extract::{ConnectInfo, State},
 };
 use ferrex_core::{
-    api_types::{
+    api::types::{
         ApiResponse,
         setup::{
             ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest,

@@ -19,9 +19,7 @@ use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::BackgroundEffect;
 use crate::domains::{player, ui};
 use crate::state::State;
-use ferrex_core::player_prelude::{
-    BackdropKind, BackdropSize, ImageRequest, MediaIDLike,
-};
+use ferrex_core::player_prelude::{BackdropKind, BackdropSize, ImageRequest};
 use iced::widget::{Space, Stack, column, container, scrollable};
 use iced::{Element, Font, Length};
 
@@ -102,7 +100,8 @@ pub fn view(state: &State) -> Element<'_, DomainMessage> {
             .state
             .current_library_id
             .as_ref()
-            .map(|id| id.as_uuid());
+            .map(|id| id.to_uuid());
+
         let controls_bar = match &state.domains.ui.state.view {
             ViewState::Library => {
                 view_library_controls_bar(state, selected_library)

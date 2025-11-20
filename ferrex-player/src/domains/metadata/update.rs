@@ -20,9 +20,7 @@ pub fn update_metadata(
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    profiling::scope!(
-        crate::infrastructure::profiling_scopes::scopes::METADATA_UPDATE
-    );
+    profiling::scope!(crate::infra::profiling_scopes::scopes::METADATA_UPDATE);
 
     match message {
         Message::InitializeService => {
@@ -103,74 +101,6 @@ pub fn update_metadata(
             // TODO: Trigger forced rescan of media library
             DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
         }
-        Message::RefreshShowMetadata(series_id) => todo!(),
-        Message::RefreshSeasonMetadata(season_id, _) => todo!(),
-        Message::RefreshEpisodeMetadata(episode_id) => todo!(),
-        Message::ShowMetadataRefreshed(_) => todo!(),
-        Message::ShowMetadataRefreshFailed(_, _) => todo!(),
-        Message::BatchMetadataComplete => {
-            log::info!("Batch metadata processing completed");
-            state.loading = false;
-            DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
-        }
-        //Message::MediaDetailsUpdated(media_reference) => {
-        //    log::debug!("Single media details updated");
-        //    // Process single media update through the batch handler for consistency
-        //    DomainUpdateResult::task(
-        //        state
-        //            .handle_media_details_batch(vec![media_reference])
-        //            .discard()
-        //            .map(DomainMessage::Metadata),
-        //    )
-        //}
-        //Message::MediaDetailsBatch(media_references) => {
-        //    log::info!(
-        //        "Processing batch of {} media details",
-        //        media_references.len()
-        //    );
-        //    // Delegate to the state's batch handler which updates MediaStore efficiently
-        //    DomainUpdateResult::task(
-        //        state
-        //            .handle_media_details_batch(media_references)
-        //            .map(|_| Message::BatchMetadataComplete)
-        //            .map(DomainMessage::Metadata),
-        //    )
-        //}
-        Message::CheckDetailsFetcherQueue => {
-            log::debug!(
-                "CheckDetailsFetcherQueue - deprecated with new batch metadata service"
-            );
-            // This is no longer needed with the new metadata service
-            // The service sends MediaDetailsUpdated messages directly
-            DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
-        }
-        //Message::FetchBatchMetadata(libraries_data) => {
-        //    log::info!(
-        //        "Fetching batch metadata for {} libraries",
-        //        libraries_data.len()
-        //    );
-
-        //    // Execute the batch metadata fetcher directly on background thread
-        //    if let Some(fetcher) = &state.batch_metadata_fetcher {
-        //        let fetcher_clone = std::sync::Arc::clone(fetcher);
-
-        //        // Spawn the metadata fetching directly - no Iced tasks
-        //        tokio::spawn(async move {
-        //            log::info!("[Metadata] Starting batch metadata fetch");
-        //            // Process libraries will now emit events directly, not return tasks
-        //            fetcher_clone
-        //                .process_libraries_with_verification(libraries_data)
-        //                .await;
-        //            log::info!("[Metadata] Batch metadata fetch initiated");
-        //        });
-
-        //        // Return immediately - processing happens in background
-        //        DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
-        //    } else {
-        //        log::error!("BatchMetadataFetcher not initialized");
-        //        DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
-        //    }
-        //}
         Message::ImageLoaded(_, items) => todo!(),
         Message::UnifiedImageLoaded(request, handle) => {
             let task = crate::domains::metadata::update_handlers::unified_image::handle_unified_image_loaded(state, request, handle);

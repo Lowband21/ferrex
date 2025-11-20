@@ -18,19 +18,27 @@ pub mod widgets;
 pub mod yoke_cache;
 
 use self::views::carousel::CarouselState;
-use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::domains::ui::background_state::BackgroundShaderState;
-use crate::domains::ui::messages::Message as UIMessage;
-use crate::domains::ui::scroll_manager::ScrollPositionManager;
-use crate::domains::ui::types::{DisplayMode, ViewState};
-use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
-use crate::infrastructure::repository::{
-    EpisodeYoke, MovieYoke, SeasonYoke, SeriesYoke,
+use crate::{
+    common::messages::{CrossDomainEvent, DomainMessage},
+    domains::ui::{
+        background_state::BackgroundShaderState,
+        messages::Message as UIMessage,
+        scroll_manager::ScrollPositionManager,
+        types::{DisplayMode, ViewState},
+    },
+    infra::{
+        repository::{
+            EpisodeYoke, MovieYoke, SeasonYoke, SeriesYoke,
+            accessor::{Accessor, ReadOnly},
+        },
+        widgets::poster::poster_animation_types::PosterAnimationType,
+    },
 };
 use ferrex_core::player_prelude::{
     LibraryID, SortBy, SortOrder, UiDecade, UiGenre, UiResolution,
     UiWatchStatus,
 };
+
 use iced::Task;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -42,7 +50,7 @@ use yoke_cache::YokeCache;
 pub struct UIDomainState {
     pub view: ViewState,
 
-    pub default_widget_animation: crate::domains::ui::widgets::AnimationType,
+    pub default_widget_animation: PosterAnimationType,
 
     pub repo_accessor: Accessor<ReadOnly>,
 

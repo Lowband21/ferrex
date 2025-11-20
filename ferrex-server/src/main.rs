@@ -21,6 +21,61 @@
 //! - TMDB for metadata
 // ```
 
+use ferrex_core::{
+    database::{
+        PostgresDatabase, context::DatabaseContext,
+        ports::media_files::MediaFileFilter,
+    },
+    domain::users::auth::{
+        AuthCrypto,
+        domain::{
+            repositories::{
+                AuthEventRepository, AuthSessionRepository,
+                DeviceChallengeRepository, DeviceSessionRepository,
+                RefreshTokenRepository, UserAuthenticationRepository,
+            },
+            services::{
+                AuthenticationService, DeviceTrustService, PinManagementService,
+            },
+        },
+        infrastructure::repositories::{
+            PostgresAuthEventRepository, PostgresAuthSessionRepository,
+            PostgresDeviceChallengeRepository, PostgresDeviceSessionRepository,
+            PostgresRefreshTokenRepository, PostgresUserAuthRepository,
+        },
+    },
+    infrastructure::media::{
+        image_service::ImageService, providers::TmdbApiProvider,
+    },
+    scan::orchestration::LibraryActorConfig,
+    setup::SetupClaimService,
+    types::LibraryReference,
+};
+
+use ferrex_server::{
+    application::auth::AuthApplicationFacade,
+    db::validate_primary_database_url,
+    infra::{
+        app_context::AppContext,
+        app_state::AppState,
+        config::{
+            Config, ConfigLoad, ConfigLoader, HstsSettings, RateLimitSource,
+            cli::{
+                CheckOptions, InitOptions, run_config_check, run_config_init,
+            },
+        },
+        orchestration::ScanOrchestrator,
+        scan::scan_manager::ScanControlPlane,
+        startup::{ProdStartupHooks, StartupHooks},
+        websocket,
+    },
+    media::prep::thumbnail_service::ThumbnailService,
+    routes,
+    users::auth::tls::{TlsCertConfig, create_tls_acceptor},
+};
+#[cfg(feature = "demo")]
+use ferrex_server::{db::prepare_demo_database, demo::DemoCoordinator};
+
 use anyhow::Context;
 use axum::{
     Router,
@@ -32,55 +87,11 @@ use axum::{
 };
 use chrono::Utc;
 use clap::{Args as ClapArgs, Parser, Subcommand};
-use ferrex_core::application::unit_of_work::AppUnitOfWork;
-use ferrex_core::auth::{
-    AuthCrypto,
-    domain::repositories::{
-        AuthEventRepository, AuthSessionRepository, DeviceChallengeRepository,
-        DeviceSessionRepository, RefreshTokenRepository,
-        UserAuthenticationRepository,
-    },
-    domain::services::{
-        AuthenticationService, DeviceTrustService, PinManagementService,
-    },
-    infrastructure::repositories::{
-        PostgresAuthEventRepository, PostgresAuthSessionRepository,
-        PostgresDeviceChallengeRepository, PostgresDeviceSessionRepository,
-        PostgresRefreshTokenRepository, PostgresUserAuthRepository,
-    },
-};
-use ferrex_core::database::ports::media_files::MediaFileFilter;
-use ferrex_core::database::{PostgresDatabase, traits::MediaDatabaseTrait};
-use ferrex_core::image_service::ImageService;
-use ferrex_core::orchestration::LibraryActorConfig;
-use ferrex_core::providers::TmdbApiProvider;
-use ferrex_core::setup::SetupClaimService;
-use ferrex_core::types::LibraryReference;
-use ferrex_server::db::validate_primary_database_url;
-use ferrex_server::{
-    application::auth::AuthApplicationFacade,
-    infra::{
-        app_context::AppContext,
-        app_state::AppState,
-        config::{
-            Config, ConfigLoad, ConfigLoader, HstsSettings, RateLimitSource,
-        },
-        orchestration::ScanOrchestrator,
-        scan::scan_manager::ScanControlPlane,
-        startup::{ProdStartupHooks, StartupHooks},
-        websocket,
-    },
-    media::prep::thumbnail_service::ThumbnailService,
-    routes,
-};
-#[cfg(feature = "demo")]
-use ferrex_server::{db::prepare_demo_database, demo::DemoCoordinator};
 use serde_json::{Value, json};
-use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc,
+    time::Duration,
+};
 use tokio::sync::Mutex;
 use tower_http::{
     cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer},
@@ -89,11 +100,6 @@ use tower_http::{
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
-
-use ferrex_server::infra::config::cli::{
-    CheckOptions, InitOptions, run_config_check, run_config_init,
-};
-use ferrex_server::users::auth::tls::{TlsCertConfig, create_tls_acceptor};
 
 /// CLI entry point
 #[derive(Parser, Debug)]
@@ -238,8 +244,10 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run_db_preflight(args: &ServeArgs) -> anyhow::Result<()> {
-    let ConfigBootstrap { database_url, .. } = load_runtime_config(args).await?;
-    let pg = PostgresDatabase::new(&database_url).await
+    let ConfigBootstrap { database_url, .. } =
+        load_runtime_config(args).await?;
+    let pg = PostgresDatabase::new(&database_url)
+        .await
         .context("failed to connect to PostgreSQL for preflight")?;
     pg.preflight_only()
         .await
@@ -249,8 +257,10 @@ async fn run_db_preflight(args: &ServeArgs) -> anyhow::Result<()> {
 }
 
 async fn run_db_migrate(args: &ServeArgs) -> anyhow::Result<()> {
-    let ConfigBootstrap { database_url, .. } = load_runtime_config(args).await?;
-    let pg = PostgresDatabase::new(&database_url).await
+    let ConfigBootstrap { database_url, .. } =
+        load_runtime_config(args).await?;
+    let pg = PostgresDatabase::new(&database_url)
+        .await
         .context("failed to connect to PostgreSQL for migration")?;
     pg.initialize_schema()
         .await
@@ -477,10 +487,11 @@ async fn wire_app_resources(
     with_cache: bool,
     #[cfg(feature = "demo")] demo_coordinator: Option<Arc<DemoCoordinator>>,
 ) -> anyhow::Result<ResourceBootstrap> {
-    let postgres_backend = match PostgresDatabase::new(database_url).await {
-        Ok(database) => {
+    let db_context = match DatabaseContext::connect_postgres(database_url).await
+    {
+        Ok(context) => {
             info!("Successfully connected to PostgreSQL");
-            Arc::new(database)
+            context
         }
         Err(connect_error) => {
             error!(
@@ -494,6 +505,8 @@ async fn wire_app_resources(
         }
     };
 
+    let postgres_backend = db_context.postgres();
+
     match postgres_backend.initialize_schema().await {
         Ok(()) => {
             info!("Database schema initialized successfully");
@@ -504,10 +517,7 @@ async fn wire_app_resources(
         }
     }
 
-    let unit_of_work = Arc::new(
-        AppUnitOfWork::from_postgres(postgres_backend.clone())
-            .expect("Failed to compose AppUnitOfWork from Postgres backend"),
-    );
+    let unit_of_work = db_context.unit_of_work();
     let postgres_pool = postgres_backend.pool().clone();
 
     #[cfg(feature = "demo")]
@@ -598,7 +608,6 @@ async fn wire_app_resources(
         Duration::from_millis(config.scanner.quiescence_window_ms.max(1));
     let scan_control = Arc::new(ScanControlPlane::with_quiescence_window(
         unit_of_work.clone(),
-        postgres_backend.clone(),
         orchestrator,
         quiescence,
     ));
@@ -862,8 +871,8 @@ pub fn create_app(state: AppState, https_terminates_here: bool) -> Router {
     let rate_limit_layer = {
         use axum::extract::{ConnectInfo, MatchedPath};
         use axum::http::header::{HeaderName, HeaderValue, RETRY_AFTER};
-        use ferrex_core::api_routes::v1;
-        use ferrex_core::auth::rate_limit::RateLimitKey;
+        use ferrex_core::api::routes::v1;
+        use ferrex_core::domain::users::auth::rate_limit::RateLimitKey;
         use ferrex_server::infra::middleware::create_rate_limiter;
         use std::net::SocketAddr;
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -925,7 +934,7 @@ pub fn create_app(state: AppState, https_terminates_here: bool) -> Router {
                                         let response = Response::builder().status(StatusCode::TOO_MANY_REQUESTS).body(Body::empty()).unwrap();
                                         Ok::<_, StatusCode>(response)
                                     }
-                                    Err(ferrex_core::auth::rate_limit::RateLimitError::RateLimitExceeded { retry_after, .. }) => {
+                                    Err(ferrex_core::domain::users::auth::rate_limit::RateLimitError::RateLimitExceeded { retry_after, .. }) => {
                                         let response = Response::builder()
                                             .status(StatusCode::TOO_MANY_REQUESTS)
                                             .header(RETRY_AFTER, HeaderValue::from_str(&retry_after.as_secs().to_string()).unwrap_or(HeaderValue::from_static("60")))

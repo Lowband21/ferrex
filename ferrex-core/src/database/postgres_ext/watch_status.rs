@@ -1,9 +1,8 @@
-use crate::error::Result;
-use crate::watch_status::{InProgressItem, UserWatchState};
 use crate::{
     database::PostgresDatabase,
     database::ports::watch_status::WatchStatusRepository,
-    watch_status::UpdateProgressRequest,
+    domain::watch::{InProgressItem, UpdateProgressRequest, UserWatchState},
+    error::Result,
 };
 use uuid::Uuid;
 

@@ -8,7 +8,14 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use ferrex_core::{api_types::ApiResponse, rbac::UserPermissions, user::User};
+use ferrex_core::{
+    api::types::ApiResponse,
+    domain::users::{
+        auth::domain::services::{PasswordChangeActor, PasswordChangeRequest},
+        rbac::UserPermissions,
+        user::User,
+    },
+};
 use serde_json::json;
 use sqlx::types::ipnetwork::IpNetwork;
 use uuid::Uuid;
@@ -17,7 +24,7 @@ use crate::infra::app_state::AppState;
 use crate::infra::errors::{AppError, AppResult};
 use crate::users::user_management::map_auth_facade_error;
 use crate::users::{CreateUserParams, UpdateUserParams, UserService};
-use ferrex_core::api_types::users_admin::{
+use ferrex_core::api::types::users_admin::{
     AdminUserInfo, CreateUserRequest, UpdateUserRequest,
 };
 
@@ -120,12 +127,13 @@ pub async fn admin_update_user(
         .await?;
 
     if let Some(new_password) = request.new_password.as_ref() {
-        state.auth_facade()
-            .change_password(ferrex_core::auth::domain::services::PasswordChangeRequest {
+        state
+            .auth_facade()
+            .change_password(PasswordChangeRequest {
                 user_id,
                 new_password: new_password.clone(),
                 current_password: None,
-                actor: ferrex_core::auth::domain::services::PasswordChangeActor::AdminInitiated {
+                actor: PasswordChangeActor::AdminInitiated {
                     admin_user_id: admin.id,
                 },
                 context: None,

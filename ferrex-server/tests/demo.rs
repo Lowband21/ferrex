@@ -128,8 +128,10 @@ async fn demo_reset_preserves_libraries_and_cleans_files(
     let plan_provider: Arc<dyn DemoPlanProvider> =
         Arc::new(QueuePlanProvider::new(demo_plan_sequences()));
 
-    let mut options = DemoSeedOptions::default();
-    options.allow_zero_length_files = true;
+    let options = DemoSeedOptions {
+        allow_zero_length_files: true,
+        ..DemoSeedOptions::default()
+    };
 
     let mut config = state.config().clone();
     let coordinator = DemoCoordinator::bootstrap_with_provider(

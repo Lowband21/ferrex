@@ -1,7 +1,7 @@
 use crate::{
     database::{PostgresDatabase, ports::rbac::RbacRepository},
+    domain::users::rbac::{Permission, Role, UserPermissions},
     error::Result,
-    rbac::{Permission, Role, UserPermissions},
 };
 use uuid::Uuid;
 

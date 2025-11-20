@@ -9,7 +9,7 @@ async fn test_folder_inventory_table_exists(
     let result = sqlx::query(
         "SELECT EXISTS (
             SELECT FROM information_schema.tables 
-            WHERE table_schema = 'public' 
+            WHERE table_schema = 'ferrex' 
             AND table_name = 'folder_inventory'
         )",
     )

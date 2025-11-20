@@ -10,9 +10,9 @@ use crate::{
 };
 use ferrex_core::{
     application::unit_of_work::AppUnitOfWork,
-    auth::AuthCrypto,
     database::{PostgresDatabase, ports::setup_claims::SetupClaimsRepository},
-    image_service::ImageService,
+    domain::users::auth::AuthCrypto,
+    infrastructure::media::image_service::ImageService,
     setup::SetupClaimService,
 };
 

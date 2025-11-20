@@ -80,7 +80,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
 
             DomainUpdateResult::task(Task::perform(
                 async move { event },
-                |event| DomainMessage::Event(event),
+                DomainMessage::Event,
             ))
         }
 
@@ -209,7 +209,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             let event = CrossDomainEvent::RequestMediaDetails(media_ref);
             DomainUpdateResult::task(Task::perform(
                 async move { event },
-                |event| DomainMessage::Event(event),
+                DomainMessage::Event,
             ))
         }
 
@@ -364,7 +364,7 @@ fn handle_execute_search(
 
 fn handle_select_result(
     state: &mut State,
-    media_ref: crate::infrastructure::api_types::Media,
+    media_ref: crate::infra::api_types::Media,
 ) -> DomainUpdateResult {
     #[cfg(any(
         feature = "profile-with-puffin",

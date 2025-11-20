@@ -4,7 +4,9 @@
 //! throughout the player application. It keeps permission logic
 //! centralized and out of the already-large State struct.
 
-use ferrex_core::{player_prelude::UserPermissions, rbac::permissions};
+use ferrex_core::{
+    domain::users::rbac::permissions, player_prelude::UserPermissions,
+};
 
 /// Permission checker for the current user
 pub struct PermissionChecker<'a> {

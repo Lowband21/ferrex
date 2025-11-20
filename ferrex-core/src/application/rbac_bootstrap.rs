@@ -4,8 +4,8 @@ use uuid::Uuid;
 
 use crate::{
     database::ports::rbac::RbacRepository,
+    domain::users::rbac::{self, PermissionCategory},
     error::Result,
-    rbac::{self, PermissionCategory},
 };
 
 pub struct RbacBootstrapService {

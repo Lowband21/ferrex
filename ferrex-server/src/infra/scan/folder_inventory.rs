@@ -8,8 +8,8 @@ use axum::{
 use chrono::{DateTime, Utc};
 use ferrex_core::{
     database::traits::{FolderInventory, FolderProcessingStatus},
+    domain::users::user::User,
     types::LibraryID,
-    user::User,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

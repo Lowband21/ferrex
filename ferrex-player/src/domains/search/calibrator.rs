@@ -61,7 +61,7 @@ impl SearchCalibrator {
             let mut server_success = false;
 
             for query in &test_queries {
-                if let Ok(_) = service
+                if (service
                     .search(
                         query,
                         &[SearchField::Title],
@@ -69,7 +69,8 @@ impl SearchCalibrator {
                         None,
                         false,
                     )
-                    .await
+                    .await)
+                    .is_ok()
                 {
                     server_success = true;
                 }

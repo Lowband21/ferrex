@@ -1,28 +1,20 @@
-//! Search service for executing searches against MediaStore and server
+//! Search service for executing searches against the server
 
 use ferrex_core::player_prelude::{
-    LibraryID, MediaDetailsOption, MediaQueryBuilder, MediaWithStatus,
-    SearchField, TmdbDetails,
+    LibraryID, MediaQueryBuilder, MediaWithStatus, SearchField,
 };
 use std::sync::Arc;
 
-//use crate::domains::media::store::{MediaStore, MediaStoreQuerying};
-use crate::infrastructure::api_types::{
-    Media, MovieReference, SeriesReference,
-};
-use crate::infrastructure::services::api::ApiService;
+use crate::infra::api_types::{Media, MovieReference, SeriesReference};
+use crate::infra::services::api::ApiService;
 
 use super::metrics::SearchPerformanceMetrics;
 use super::types::{SearchResult, SearchStrategy};
 use chrono::Datelike;
 use std::time::Instant;
 
-/// Service for executing searches
 #[derive(Debug)]
 pub struct SearchService {
-    /// Reference to the media store for client-side searching
-    //media_store: Arc<StdRwLock<MediaStore>>,
-    /// API service for server-side searching (optional)
     api_service: Option<Arc<dyn ApiService>>,
 }
 
@@ -255,7 +247,7 @@ impl SearchService {
         query: &str,
         fields: &[SearchField],
         library_id: Option<LibraryID>,
-        fuzzy: bool,
+        _fuzzy: bool,
     ) -> Result<Vec<SearchResult>, String> {
         let api_service = self.api_service.as_ref().ok_or_else(|| {
             "No API service available for server search".to_string()
@@ -383,11 +375,12 @@ impl SearchService {
             best_score = best_score.max(score);
         }
 
+        let details = movie.details.as_movie();
+
         // Check overview
         if (check_all || fields.contains(&SearchField::Overview))
-            && let MediaDetailsOption::Details(TmdbDetails::Movie(details)) =
-                &movie.details
-            && let Some(overview) = &details.overview
+            && let Some(details) = details
+            && let Some(overview) = details.overview.as_ref()
             && let Some(score) =
                 self.calculate_match_score(overview, query, fuzzy)
         {
@@ -396,8 +389,7 @@ impl SearchService {
 
         // Check genres
         if (check_all || fields.contains(&SearchField::Genre))
-            && let MediaDetailsOption::Details(TmdbDetails::Movie(details)) =
-                &movie.details
+            && let Some(details) = details
         {
             for genre in &details.genres {
                 if let Some(score) =
@@ -442,11 +434,12 @@ impl SearchService {
             best_score = best_score.max(score);
         }
 
+        let details = series.details.as_series();
+
         // Check overview
         if (check_all || fields.contains(&SearchField::Overview))
-            && let MediaDetailsOption::Details(TmdbDetails::Series(details)) =
-                &series.details
-            && let Some(overview) = &details.overview
+            && let Some(details) = details
+            && let Some(overview) = details.overview.as_ref()
             && let Some(score) =
                 self.calculate_match_score(overview, query, fuzzy)
         {
@@ -455,8 +448,7 @@ impl SearchService {
 
         // Check genres
         if (check_all || fields.contains(&SearchField::Genre))
-            && let MediaDetailsOption::Details(TmdbDetails::Series(details)) =
-                &series.details
+            && let Some(details) = details
         {
             for genre in &details.genres {
                 if let Some(score) =
@@ -598,37 +590,33 @@ impl SearchService {
     fn convert_media_ref_to_result(
         &self,
         media_ref: Media,
-        query: &str,
+        _query: &str,
     ) -> SearchResult {
         match &media_ref {
             Media::Movie(movie) => SearchResult {
                 title: movie.title.as_str().to_string(),
-                subtitle: match &movie.details {
-                    MediaDetailsOption::Details(TmdbDetails::Movie(
-                        details,
-                    )) => details.release_date.as_ref().and_then(|d| {
-                        chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-                            .ok()
-                            .map(|date| format!("{} • Movie", date.year()))
-                    }),
-                    _ => Some("Movie".to_string()),
-                },
-                year: match &movie.details {
-                    MediaDetailsOption::Details(TmdbDetails::Movie(
-                        details,
-                    )) => details.release_date.as_ref().and_then(|d| {
+                subtitle: movie
+                    .details
+                    .as_movie()
+                    .and_then(|details| {
+                        details.release_date.as_ref().and_then(|d| {
+                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                                .ok()
+                                .map(|date| format!("{} • Movie", date.year()))
+                        })
+                    })
+                    .or(Some("Movie".to_string())),
+                year: movie.details.as_movie().and_then(|details| {
+                    details.release_date.as_ref().and_then(|d| {
                         chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
                             .ok()
                             .map(|date| date.year())
-                    }),
-                    _ => None,
-                },
-                poster_url: match &movie.details {
-                    MediaDetailsOption::Details(TmdbDetails::Movie(
-                        details,
-                    )) => details.poster_path.clone(),
-                    _ => None,
-                },
+                    })
+                }),
+                poster_url: movie
+                    .details
+                    .as_movie()
+                    .and_then(|details| details.poster_path.clone()),
                 match_score: 1.0, // Server results assumed to be relevant
                 match_field: SearchField::All,
                 library_id: Some(movie.file.library_id),
@@ -636,32 +624,28 @@ impl SearchService {
             },
             Media::Series(series) => SearchResult {
                 title: series.title.as_str().to_string(),
-                subtitle: match &series.details {
-                    MediaDetailsOption::Details(TmdbDetails::Series(
-                        details,
-                    )) => details.first_air_date.as_ref().and_then(|d| {
-                        chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-                            .ok()
-                            .map(|date| format!("{} • Series", date.year()))
-                    }),
-                    _ => Some("Series".to_string()),
-                },
-                year: match &series.details {
-                    MediaDetailsOption::Details(TmdbDetails::Series(
-                        details,
-                    )) => details.first_air_date.as_ref().and_then(|d| {
+                subtitle: series
+                    .details
+                    .as_series()
+                    .and_then(|details| {
+                        details.first_air_date.as_ref().and_then(|d| {
+                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                                .ok()
+                                .map(|date| format!("{} • Series", date.year()))
+                        })
+                    })
+                    .or(Some("Series".to_string())),
+                year: series.details.as_series().and_then(|details| {
+                    details.first_air_date.as_ref().and_then(|d| {
                         chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
                             .ok()
                             .map(|date| date.year())
-                    }),
-                    _ => None,
-                },
-                poster_url: match &series.details {
-                    MediaDetailsOption::Details(TmdbDetails::Series(
-                        details,
-                    )) => details.poster_path.clone(),
-                    _ => None,
-                },
+                    })
+                }),
+                poster_url: series
+                    .details
+                    .as_series()
+                    .and_then(|details| details.poster_path.clone()),
                 match_score: 1.0,
                 match_field: SearchField::All,
                 library_id: Some(series.library_id),
@@ -671,24 +655,22 @@ impl SearchService {
                 title: format!("Season {}", season.season_number.value()),
                 subtitle: Some("Series • Season".to_string()),
                 year: None,
-                poster_url: match &season.details {
-                    MediaDetailsOption::Details(TmdbDetails::Season(
-                        details,
-                    )) => details.poster_path.clone(),
-                    _ => None,
-                },
+                poster_url: (season.details)
+                    .as_season()
+                    .and_then(|details| details.poster_path.clone()),
                 match_score: 0.8,
                 match_field: SearchField::All,
                 library_id: Some(season.library_id),
                 media_ref,
             },
             Media::Episode(episode) => SearchResult {
-                title: match &episode.details {
-                    MediaDetailsOption::Details(TmdbDetails::Episode(
-                        details,
-                    )) => details.name.clone(),
-                    _ => format!("Episode {}", episode.episode_number.value()),
-                },
+                title: episode
+                    .details
+                    .as_episode()
+                    .map(|details| details.name.clone())
+                    .unwrap_or_else(|| {
+                        format!("Episode {}", episode.episode_number.value())
+                    }),
                 subtitle: Some(format!(
                     "Episode {} • S{:02}E{:02}",
                     episode.episode_number.value(),
@@ -696,12 +678,10 @@ impl SearchService {
                     episode.episode_number.value()
                 )),
                 year: None,
-                poster_url: match &episode.details {
-                    MediaDetailsOption::Details(TmdbDetails::Episode(
-                        details,
-                    )) => details.still_path.clone(),
-                    _ => None,
-                },
+                poster_url: episode
+                    .details
+                    .as_episode()
+                    .and_then(|details| details.still_path.clone()),
                 match_score: 0.7,
                 match_field: SearchField::All,
                 library_id: Some(episode.file.library_id),

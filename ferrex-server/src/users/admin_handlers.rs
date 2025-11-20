@@ -4,9 +4,11 @@ use axum::{
     Extension, Json,
 };
 use ferrex_core::{
-    api_types::{ApiResponse, users_admin::AdminUserInfo},
-    auth::domain::services::AuthenticationError,
-    user::User,
+    api::types::{ApiResponse, users_admin::AdminUserInfo},
+    domain::users::{
+        auth::domain::services::AuthenticationError,
+        user::{self, User},
+    },
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -39,7 +41,7 @@ pub struct RegisterAdminSessionRequest {
     pub session_token: String,
 }
 
-/// Response for user list with role info lives in ferrex-core::api_types::users_admin::AdminUserInfo
+/// Response for user list with role info lives in ferrex-core::api::types::users_admin::AdminUserInfo
 /// Query parameters for filtering users
 #[derive(Debug, Deserialize)]
 pub struct UserFilters {
@@ -236,7 +238,7 @@ pub async fn register_admin_session(
 /// Remove an admin session binding for a device
 pub async fn remove_admin_session(
     State(state): State<AppState>,
-    Extension(_user): Extension<User>,
+    Extension(_admin): Extension<User>,
     Path(device_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     state.remove_admin_session(device_id).await;
@@ -248,9 +250,9 @@ pub async fn get_user_sessions_admin(
     State(state): State<AppState>,
     Extension(_admin): Extension<User>,
     Path(user_id): Path<Uuid>,
-) -> AppResult<Json<ApiResponse<Vec<ferrex_core::user::UserSession>>>> {
+) -> AppResult<Json<ApiResponse<Vec<user::UserSession>>>> {
     // Verify user exists
-    let user = state
+    let _existing_user = state
         .unit_of_work()
         .users
         .get_user_by_id(user_id)
@@ -305,7 +307,7 @@ pub struct AdminStats {
 
 pub async fn get_admin_stats(
     State(state): State<AppState>,
-    Extension(admin): Extension<User>,
+    Extension(_admin): Extension<User>,
 ) -> AppResult<Json<ApiResponse<AdminStats>>> {
     // Get user stats
     let users = state.unit_of_work().users.get_all_users().await?;

@@ -17,6 +17,7 @@ use crate::domains::auth::types::{
 };
 use ferrex_core::player_prelude::UserPermissions;
 use iced::Element;
+use crate::domains::ui::views::auth::credential_entry::view_pre_auth_login;
 
 pub use components::*;
 pub use credential_entry::view_credential_entry;
@@ -46,6 +47,22 @@ pub fn view_auth<'a>(
         CheckingSetup => view_loading_users(), // Show loading while checking
 
         CheckingAutoLogin => view_loading_users(), // Show loading while checking auto-login
+
+        PreAuthLogin {
+            username,
+            password,
+            show_password,
+            remember_device,
+            error,
+            loading,
+        } => view_pre_auth_login(
+            username,
+            password,
+            *show_password,
+            *remember_device,
+            error.as_deref(),
+            *loading,
+        ),
 
         FirstRunSetup {
             username,

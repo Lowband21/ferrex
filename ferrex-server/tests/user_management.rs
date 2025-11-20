@@ -4,7 +4,7 @@ use anyhow::Result;
 use axum::Router;
 use axum::http::StatusCode;
 use axum_test::TestServer;
-use ferrex_core::api_routes::{self, utils as route_utils};
+use ferrex_core::api::routes::{self, utils as route_utils};
 use ferrex_server::infra::app_state::AppState;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -31,7 +31,7 @@ async fn register_user(
     password: &str,
 ) -> Result<(String, String, String)> {
     let response = server
-        .post(api_routes::v1::auth::REGISTER)
+        .post(routes::v1::auth::REGISTER)
         .json(&json!({
             "username": username,
             "display_name": format!("{} display", username),
@@ -86,14 +86,14 @@ async fn user_management_requires_permissions(pool: PgPool) -> Result<()> {
 
     // List users should be forbidden without the admin users:read permission.
     let list = server
-        .get(api_routes::v1::users::COLLECTION)
+        .get(routes::v1::users::COLLECTION)
         .add_header("Authorization", bearer(&access_token))
         .await;
     list.assert_status(StatusCode::FORBIDDEN);
 
     // Creating a new user should also be forbidden.
     let create = server
-        .post(api_routes::v1::users::COLLECTION)
+        .post(routes::v1::users::COLLECTION)
         .add_header("Authorization", bearer(&access_token))
         .json(&json!({
             "username": "another_user",
@@ -104,11 +104,8 @@ async fn user_management_requires_permissions(pool: PgPool) -> Result<()> {
     create.assert_status(StatusCode::FORBIDDEN);
 
     // Updating an existing user without permissions should fail.
-    let update_path = route_utils::replace_param(
-        api_routes::v1::users::ITEM,
-        "{id}",
-        &user_id,
-    );
+    let update_path =
+        route_utils::replace_param(routes::v1::users::ITEM, "{id}", &user_id);
     let update = server
         .put(&update_path)
         .add_header("Authorization", bearer(&access_token))
@@ -159,7 +156,7 @@ async fn admin_user_crud_flow_enforces_audit_expectations(
 
     // Create a managed user through the admin API.
     let create_response = server
-        .post(api_routes::v1::users::COLLECTION)
+        .post(routes::v1::users::COLLECTION)
         .add_header("Authorization", bearer(&admin_access))
         .json(&json!({
             "username": "managed_user",
@@ -189,7 +186,7 @@ async fn admin_user_crud_flow_enforces_audit_expectations(
 
     // Admin listing should include the newly created user.
     let list_response = server
-        .get(api_routes::v1::users::COLLECTION)
+        .get(routes::v1::users::COLLECTION)
         .add_header("Authorization", bearer(&admin_access))
         .await;
     list_response.assert_status_ok();
@@ -203,7 +200,7 @@ async fn admin_user_crud_flow_enforces_audit_expectations(
 
     // Update the managed user profile.
     let update_path = route_utils::replace_param(
-        api_routes::v1::users::ITEM,
+        routes::v1::users::ITEM,
         "{id}",
         &managed_id_raw,
     );
@@ -227,7 +224,7 @@ async fn admin_user_crud_flow_enforces_audit_expectations(
 
     // Log in as the managed user to create active sessions and refresh tokens.
     let login_response = server
-        .post(api_routes::v1::auth::LOGIN)
+        .post(routes::v1::auth::LOGIN)
         .json(&json!({
             "username": "managed_user",
             "password": "Managed#Pass123"
@@ -244,7 +241,7 @@ async fn admin_user_crud_flow_enforces_audit_expectations(
 
     // The listing should now show one active session for the managed user.
     let list_after_login = server
-        .get(api_routes::v1::users::COLLECTION)
+        .get(routes::v1::users::COLLECTION)
         .add_header("Authorization", bearer(&admin_access))
         .await;
     list_after_login.assert_status_ok();
@@ -338,7 +335,7 @@ async fn admin_user_crud_flow_enforces_audit_expectations(
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn admin_endpoints_record_audit_logs(pool: PgPool) -> Result<()> {
-    use ferrex_core::api_routes::v1;
+    use ferrex_core::api::routes::v1;
 
     let app = build_test_app(pool).await?;
     let (router, state, _tempdir) = app.into_parts();

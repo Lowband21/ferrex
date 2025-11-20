@@ -1,5 +1,9 @@
 use crate::domains::ui::components;
 use crate::domains::ui::views::grid::macros::parse_hex_color;
+use crate::infra::api_types::{
+    EpisodeID, ImageSize, ImageType, MediaID, Priority, SeasonID,
+    SeasonReference, SeriesID,
+};
 use crate::{
     domains::ui::{
         messages::Message, theme, views::grid::macros::ThemeColorAccess,
@@ -8,19 +12,8 @@ use crate::{
     media_card,
     state::State,
 };
-use ferrex_core::{
-    traits::{
-        details_like::SeriesDetailsLike,
-        id::MediaIDLike,
-        sub_like::{EpisodeLike, SeasonLike, SeriesLike},
-    },
-    types::{
-        ids::{EpisodeID, SeasonID, SeriesID},
-        image_request::Priority,
-        media::SeasonReference,
-        media_id::MediaID,
-        util_types::{ImageSize, ImageType},
-    },
+use ferrex_core::player_prelude::{
+    EpisodeLike, MediaIDLike, SeasonLike, SeriesDetailsLike, SeriesLike,
 };
 use iced::{
     Element, Length,
@@ -315,13 +308,8 @@ pub fn view_series_detail<'a>(
                 .unwrap_or(false)
         {
             if let Some(first_ep) = first_episode {
-                let series_details = match &series_ref.details {
-                    crate::infrastructure::api_types::MediaDetailsOption::Details(
-                        crate::infrastructure::api_types::TmdbDetails::Series(details),
-                    ) => Some(details),
-                    _ => None,
-                };
-                let legacy_file = crate::infrastructure::api_types::episode_reference_to_legacy(
+                let series_details = series_ref.details.as_series();
+                let legacy_file = crate::infra::api_types::episode_reference_to_legacy(
                     &first_ep,
                     series_details,
                 );
@@ -346,13 +334,8 @@ pub fn view_series_detail<'a>(
         }
     } else if let Some(first_ep) = first_episode {
         // No watch state, just show Play button for first episode
-        let series_details = match &series_ref.details {
-            crate::infrastructure::api_types::MediaDetailsOption::Details(
-                crate::infrastructure::api_types::TmdbDetails::Series(details),
-            ) => Some(details),
-            _ => None,
-        };
-        let legacy_file = crate::infrastructure::api_types::episode_reference_to_legacy(
+        let series_details = series_ref.details.as_series();
+        let legacy_file = crate::infra::api_types::episode_reference_to_legacy(
             &first_ep,
             series_details,
         );

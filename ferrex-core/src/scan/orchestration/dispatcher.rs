@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     error::{MediaError, Result},
-    orchestration::{
+    scan::orchestration::{
         actors::{
             folder::{FolderScanActor, FolderScanCommand, FolderScanContext},
             messages::ParentDescriptors,
@@ -428,7 +428,7 @@ where
             // Elevate analyze priority so per-item pipelines advance ahead of more scans.
             // This prevents breadth-first scanning from starving downstream stages.
             let analyze_priority = priority_for_reason(&media.context.reason)
-                .elevate(crate::orchestration::job::JobPriority::P0);
+                .elevate(crate::scan::orchestration::job::JobPriority::P0);
             let analyze = MediaAnalyzeJob {
                 library_id: media.library_id,
                 path_norm: media.path_norm.clone(),
@@ -568,7 +568,7 @@ where
 
         // Prefer advancing metadata for already-discovered items over additional scans.
         let priority =
-            priority.elevate(crate::orchestration::job::JobPriority::P0);
+            priority.elevate(crate::scan::orchestration::job::JobPriority::P0);
         let req =
             EnqueueRequest::new(priority, JobPayload::MetadataEnrich(meta_job));
         self.enqueue_follow_up(req).await
@@ -782,20 +782,20 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestration::actors::folder::{
+    use crate::scan::orchestration::actors::folder::{
         FolderListingPlan, FolderScanCommand,
     };
-    use crate::orchestration::actors::messages::{
+    use crate::scan::orchestration::actors::messages::{
         FolderScanSummary, MediaFileDiscovered, MediaKindHint,
     };
-    use crate::orchestration::actors::pipeline::{
+    use crate::scan::orchestration::actors::pipeline::{
         IndexingChange, IndexingOutcome,
     };
-    use crate::orchestration::persistence::{
+    use crate::scan::orchestration::persistence::{
         PostgresCursorRepository, PostgresQueueService,
     };
-    use crate::orchestration::runtime::InProcJobEventBus;
-    use crate::orchestration::{
+    use crate::scan::orchestration::runtime::InProcJobEventBus;
+    use crate::scan::orchestration::{
         job::*,
         lease::{DequeueRequest, LeaseId},
     };

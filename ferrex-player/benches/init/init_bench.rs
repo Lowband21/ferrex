@@ -5,8 +5,8 @@ use ferrex_player::{
     domains::{
         library::update_handlers::fetch_libraries, metadata::image_types::{ImageRequest, Priority}
     },
-    infrastructure::{api_types::Library, service_registry},
-    state_refactored::State,
+    infra::{api_types::Library, service_registry},
+    state::State,
 };
 use tokio::runtime::Runtime;
 
@@ -178,7 +178,7 @@ pub async fn full_initialization_operation(
             .iter()
             .filter(|media_ref| {
                 matches!(media_ref.media_type(), "movie" | "series")
-                    && ferrex_player::infrastructure::api_types::needs_details_fetch(
+                    && ferrex_player::infra::api_types::needs_details_fetch(
                         media_ref.as_ref().details(),
                     )
             })

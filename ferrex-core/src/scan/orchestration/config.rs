@@ -206,6 +206,9 @@ pub struct WatchConfig {
     pub debounce_window_ms: u64,
     /// Maximum number of events to flush in a single batch.
     pub max_batch_events: usize,
+    /// Polling cadence in milliseconds for filesystems without native watchers.
+    #[serde(default = "WatchConfig::default_poll_interval_ms")]
+    pub poll_interval_ms: u64,
 }
 
 impl Default for WatchConfig {
@@ -213,6 +216,13 @@ impl Default for WatchConfig {
         Self {
             debounce_window_ms: 250,
             max_batch_events: 1024,
+            poll_interval_ms: Self::default_poll_interval_ms(),
         }
+    }
+}
+
+impl WatchConfig {
+    const fn default_poll_interval_ms() -> u64 {
+        30_000
     }
 }

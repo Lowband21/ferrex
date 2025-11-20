@@ -23,14 +23,16 @@
 use axum::{extract::State, Json};
 use chrono::{DateTime, Duration, Utc};
 use ferrex_core::{
-    api_types::ApiResponse,
-    auth::{
-        domain::services::{AuthenticationError, TokenBundle},
-        policy::{PasswordPolicy, PasswordPolicyRule},
+    api::types::ApiResponse,
+    domain::users::{
+        auth::{
+            domain::services::{AuthenticationError, TokenBundle},
+            policy::{PasswordPolicy, PasswordPolicyRule},
+        },
+        rbac::roles,
+        user::AuthToken,
     },
-    rbac::roles,
     setup::SetupClaimError,
-    user::AuthToken,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -564,7 +566,7 @@ fn describe_policy_failures(failures: &[PasswordPolicyRule]) -> String {
 
     failures
         .iter()
-        .map(|rule| rule.to_string())
+        .map(|rule: &PasswordPolicyRule| rule.to_string())
         .collect::<Vec<_>>()
         .join(", ")
 }

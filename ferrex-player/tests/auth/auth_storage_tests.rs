@@ -1,7 +1,7 @@
 use chrono::Utc;
-use ferrex_core::rbac::UserPermissions;
-use ferrex_core::{
+use ferrex_core::domain::users::{
     auth::domain::value_objects::SessionScope,
+    rbac::UserPermissions,
     user::{AuthToken, User, UserPreferences},
 };
 use ferrex_player::domains::auth::storage::{AuthStorage, StoredAuth};

@@ -1,24 +1,26 @@
-#![cfg(feature = "demo")]
+pub use crate::db::{derive_demo_database_url, prepare_demo_database};
+use crate::{
+    infra::{app_state::AppState, config::Config},
+    users::{UserService, user_service::CreateUserParams},
+};
+
+use ferrex_core::{
+    api::types::{DemoLibraryStatus, DemoResetRequest, DemoStatus},
+    application::unit_of_work::AppUnitOfWork,
+    demo::{self, DemoSeedOptions},
+    domain::users::rbac::roles,
+    infrastructure::providers::TmdbApiProvider,
+    types::{LibraryID, library::LibraryType},
+};
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use ferrex_core::api_types::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
-use ferrex_core::application::unit_of_work::AppUnitOfWork;
-use ferrex_core::demo::{self, DemoSeedOptions};
-use ferrex_core::providers::TmdbApiProvider;
-use ferrex_core::rbac::roles;
-use ferrex_core::types::LibraryID;
-use ferrex_core::types::library::LibraryType;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::sync::Mutex;
 use tracing::warn;
-
-pub use crate::db::{derive_demo_database_url, prepare_demo_database};
-use crate::infra::app_state::AppState;
-use crate::infra::config::Config;
-use crate::users::UserService;
-use crate::users::user_service::CreateUserParams;
 
 #[async_trait]
 pub trait DemoPlanProvider: Send + Sync {

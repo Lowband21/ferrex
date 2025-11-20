@@ -8,12 +8,12 @@ pub mod update_handlers;
 
 use self::messages::Message as StreamingMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::infrastructure::services::api::ApiService;
+use crate::infra::services::api::ApiService;
 use ferrex_core::player_prelude::{LibraryID, TranscodingStatus};
 use iced::Task;
 use std::sync::Arc;
 
-use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
+use crate::infra::repository::accessor::{Accessor, ReadOnly};
 
 /// Streaming domain state
 pub struct StreamingDomainState {
@@ -24,9 +24,8 @@ pub struct StreamingDomainState {
     pub repo_accessor: Accessor<ReadOnly>,
 
     // Streaming-specific service trait
-    pub streaming_service: Arc<
-        dyn crate::infrastructure::services::streaming::StreamingApiService,
-    >,
+    pub streaming_service:
+        Arc<dyn crate::infra::services::streaming::StreamingApiService>,
 
     // Streaming state moved from PlayerState
     pub using_hls: bool,
@@ -93,7 +92,7 @@ impl StreamingDomainState {
     pub fn new(
         api_service: Arc<dyn ApiService>,
         streaming_service: Arc<
-            dyn crate::infrastructure::services::streaming::StreamingApiService,
+            dyn crate::infra::services::streaming::StreamingApiService,
         >,
         repo_accessor: Accessor<ReadOnly>,
     ) -> Self {

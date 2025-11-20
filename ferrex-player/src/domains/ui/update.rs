@@ -10,7 +10,7 @@ use crate::{
             views::carousel::CarouselMessage,
         },
     },
-    infrastructure::api_types::LibraryType,
+    infra::api_types::LibraryType,
     state::State,
 };
 use ferrex_core::{
@@ -319,7 +319,7 @@ pub fn update_ui(
                     let task = Task::perform(
                         async move {
                             match api
-                                .fetch_filtered_indices(lib_id.as_uuid(), &spec_for_request)
+                                .fetch_filtered_indices(lib_id.to_uuid(), &spec_for_request)
                                 .await
                             {
                                 Ok(positions) => ui::Message::ApplyFilteredPositions(
@@ -554,7 +554,7 @@ pub fn update_ui(
                     let elapsed = last_time.elapsed();
                     should_process = elapsed
                         >= std::time::Duration::from_millis(
-                            crate::infrastructure::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS,
+                            crate::infra::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS,
                         );
                     if should_process {
                         log::info!("Scroll STOPPED after {:.0}ms", elapsed.as_millis());
@@ -607,7 +607,7 @@ pub fn update_ui(
         }
         ui::Message::PromoteVisibleChunk(items) => {
             if let Some(image_service) =
-                crate::infrastructure::service_registry::get_image_service()
+                crate::infra::service_registry::get_image_service()
             {
                 let mut count = 0usize;
                 for (media_type, uuid) in items.into_iter() {
@@ -669,7 +669,7 @@ pub fn update_ui(
                 .library
                 .state
                 .current_library_id
-                .map(|id| id.as_uuid());
+                .map(|id| id.to_uuid());
             state.domains.ui.state.view = ViewState::Library;
             state.domains.ui.state.display_mode = DisplayMode::Curated;
 
@@ -722,7 +722,8 @@ pub fn update_ui(
                 .library
                 .state
                 .current_library_id
-                .map(|id| id.as_uuid());
+                .map(|id| id.to_uuid());
+
             match state.domains.ui.state.navigation_history.pop() {
                 Some(previous_view) => {
                     state.domains.ui.state.view = previous_view.clone();
@@ -801,7 +802,7 @@ pub fn update_ui(
                                 .library
                                 .state
                                 .current_library_id
-                                .map(|id| id.as_uuid());
+                                .map(|id| id.to_uuid());
 
                             state
                                 .domains
@@ -876,7 +877,7 @@ pub fn update_ui(
                         .background_shader_state
                         .reset_to_library_colors();
 
-                    let library_id = library_id.map(|id| id.as_uuid());
+                    let library_id = library_id.map(|id| id.to_uuid());
 
                     state
                         .domains
@@ -902,18 +903,19 @@ pub fn update_ui(
             // The UI rebuild causes scrollables to reset, so we need to restore position
             let scroll_restore_task =
                 if let Some(tab) = state.tab_manager.get_tab(state.tab_manager.active_tab_id()) {
-                    if let crate::domains::ui::tabs::TabState::Library(lib_state) = tab {
-                        let scroll_position = lib_state.grid_state.scroll_position;
-                        let scrollable_id = lib_state.grid_state.scrollable_id.clone();
-                        scroll_to::<DomainMessage>(
-                            scrollable_id,
-                            AbsoluteOffset {
-                                x: 0.0,
-                                y: scroll_position,
-                            },
-                        )
-                    } else {
-                        Task::none()
+                    match tab {
+                        crate::domains::ui::tabs::TabState::Library(lib_state) => {
+                            let scroll_position = lib_state.grid_state.scroll_position;
+                            let scrollable_id = lib_state.grid_state.scrollable_id.clone();
+                            scroll_to::<DomainMessage>(
+                                                    scrollable_id,
+                                                    AbsoluteOffset {
+                                                        x: 0.0,
+                                                        y: scroll_position,
+                                                    },
+                                                )
+                        }
+                        _ => Task::none(),
                     }
                 } else {
                     Task::none()

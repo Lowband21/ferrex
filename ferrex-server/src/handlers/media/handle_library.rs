@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
+use ferrex_core::domain::users::user::User;
 use ferrex_core::error::MediaError;
 use ferrex_core::query::{
     filtering::hash_filter_spec,
@@ -12,14 +13,13 @@ use ferrex_core::query::{
 use ferrex_core::types::{
     Library, LibraryID, LibraryReference, Media, MediaDetailsOption, MediaID,
 };
-use ferrex_core::user::User;
 use ferrex_core::{
-    api_types::{
+    api::types::{
         ApiResponse, CreateLibraryRequest, FetchMediaRequest,
         FilterIndicesRequest, IndicesResponse, LibraryMediaResponse,
         UpdateLibraryRequest,
     },
-    orchestration::LibraryActorConfig,
+    scan::orchestration::LibraryActorConfig,
     types::LibraryType,
 };
 use rkyv::rancor::Error as RkyvError;
@@ -193,7 +193,7 @@ fn parse_sort_order(s: &str) -> Option<SortOrder> {
 /// Get presorted media indices for a library (movie libraries supported)
 pub async fn get_library_sorted_indices_handler(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    Extension(_user): Extension<User>,
     Path(library_id): Path<Uuid>,
     Query(params): Query<SortedIdsQuery>,
 ) -> impl IntoResponse {
@@ -263,7 +263,6 @@ pub async fn get_library_sorted_indices_handler(
     respond_with_indices(indices)
 }
 
-/// Filter indices (movies Phase 1)
 pub async fn post_library_filtered_indices_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
@@ -290,8 +289,10 @@ pub async fn post_library_filtered_indices_handler(
         return Err(StatusCode::NOT_IMPLEMENTED);
     }
 
-    let library_uuid = library_ref.id.as_uuid();
+    let library_uuid = library_ref.id.to_uuid();
+
     let user_scope = requires_user_scope(&spec).then_some(user.id);
+
     // Check short-lived in-process cache first
     let cache_key = FilterCacheKey {
         library_id: library_uuid,
@@ -486,7 +487,7 @@ pub async fn fetch_media_handler(
     }
 }
 
-/// Manual TMDB matching for media items
+// Manual TMDB matching for media items
 /*
 pub async fn manual_match_media_handler(
     State(state): State<AppState>,

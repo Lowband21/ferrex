@@ -3,11 +3,11 @@ use std::time::{Duration, Instant};
 use criterion::Criterion;
 use ferrex_player::{
     domains::media::library::{fetch_libraries, fetch_library_media_references},
-    infrastructure::{
-        api_types::{Library, LibraryType},
+    infra::{
+        api::types::{Library, LibraryType},
         service_registry,
     },
-    state_refactored::State,
+    state::State,
 };
 use tokio::runtime::Runtime;
 
@@ -219,7 +219,7 @@ pub async fn batch_metadata_operation(
             .iter()
             .filter(|media_ref| {
                 matches!(media_ref.media_type(), "movie" | "series")
-                    && ferrex_player::infrastructure::api_types::needs_details_fetch(
+                    && ferrex_player::infra::api_types::needs_details_fetch(
                         media_ref.as_ref().details(),
                     )
             })

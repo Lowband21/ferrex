@@ -6,13 +6,15 @@ use axum::{
     extract::{Path, Query, State},
 };
 use ferrex_core::{
-    api_types::ApiResponse,
-    auth::domain::services::{
-        AuthenticationError, PasswordChangeActor, PasswordChangeRequest,
+    api::types::ApiResponse,
+    domain::users::{
+        auth::domain::services::{
+            AuthenticationError, PasswordChangeActor, PasswordChangeRequest,
+        },
+        rbac::{self, UserPermissions},
+        user::User,
+        user_management::{ListUsersOptions, UserAdminRecord},
     },
-    rbac::{self, UserPermissions},
-    user::User,
-    user_management::{ListUsersOptions, UserAdminRecord},
 };
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -37,7 +39,7 @@ pub struct ListUsersQuery {
     pub include_inactive: bool,
 }
 
-pub use ferrex_core::api_types::users_admin::{
+pub use ferrex_core::api::types::users_admin::{
     CreateUserRequest, UpdateUserRequest,
 };
 

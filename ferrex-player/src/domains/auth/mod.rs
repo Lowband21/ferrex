@@ -17,7 +17,7 @@ pub mod update;
 pub mod update_handlers;
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::infrastructure::services::api::ApiService;
+use crate::infra::services::api::ApiService;
 use ferrex_core::player_prelude::UserPermissions;
 use iced::Task;
 
@@ -35,7 +35,7 @@ pub struct AuthDomainState {
     pub user_permissions: Option<UserPermissions>,
     pub auto_login_enabled: bool,
     pub auth_service:
-        std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
+        std::sync::Arc<dyn crate::infra::services::auth::AuthService>,
 }
 
 #[cfg_attr(
@@ -50,7 +50,7 @@ impl AuthDomainState {
     pub fn new(
         api_service: std::sync::Arc<dyn ApiService>,
         auth_service: std::sync::Arc<
-            dyn crate::infrastructure::services::auth::AuthService,
+            dyn crate::infra::services::auth::AuthService,
         >,
     ) -> Self {
         Self {

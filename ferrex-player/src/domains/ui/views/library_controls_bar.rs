@@ -4,7 +4,7 @@ use crate::{
         tabs::{TabId, TabState},
         widgets::library_sort_filter_menu,
     },
-    infrastructure::constants::layout::header::HEIGHT,
+    infra::constants::layout::header::HEIGHT,
     state::State,
 };
 use ferrex_core::player_prelude::{LibraryID, UiResolution, UiWatchStatus};

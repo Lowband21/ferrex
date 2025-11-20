@@ -27,7 +27,7 @@ fn main() -> iced::Result {
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    ferrex_player::infrastructure::profiling::init();
+    ferrex_player::infra::profiling::init();
 
     #[cfg(any(
         feature = "profile-with-puffin",

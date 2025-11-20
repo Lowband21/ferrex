@@ -1,5 +1,11 @@
 [workspace]
-members = ["ferrex-server", "ferrex-core", "ferrex-player"]
+members = [
+  "ferrex-server",
+  "ferrex-core",
+  "ferrex-player",
+  "ferrex-model",
+  "ferrex-contracts",
+]
 default-members = ["ferrex-server", "ferrex-core"]
 resolver = "3"
 
@@ -42,6 +48,13 @@ missing_crate_level_docs = "allow"
 missing_docs = "allow"
 missing_debug_implementations = "deny"
 
+
+
+[workspace.dependencies.ferrex-model]
+path = "ferrex-model"
+
+[workspace.dependencies.ferrex-contracts]
+path = "ferrex-contracts"
 
 [workspace.dependencies]
 # Async runtime

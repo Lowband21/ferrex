@@ -11,7 +11,9 @@ categories.workspace = true
 description = "Cross-platform desktop player for Ferrex with a focus on performance, cutting edge features, and media compatibility"
 
 [dependencies]
-ferrex-core = { path = "../ferrex-core", default-features = false }
+ferrex-core = { path = "../ferrex-core", default-features = false, features = ["rkyv"] }
+ferrex-model = { path = "../ferrex-model", features = ["serde", "rkyv", "chrono"] }
+ferrex-contracts = { path = "../ferrex-contracts", features = ["serde", "rkyv", "chrono"] }
 
 # Iced
 iced = { git = "https://github.com/Lowband21/iced-ferrex.git", default-features = false, features = [

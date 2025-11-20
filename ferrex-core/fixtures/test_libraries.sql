@@ -1,3 +1,7 @@
+-- Ensure fixtures target the migrated ferrex schema even when the database-level
+-- search_path was not updated by the migration (common in test sandboxes).
+SET search_path TO ferrex, public;
+
 INSERT INTO libraries (
     id,
     name,

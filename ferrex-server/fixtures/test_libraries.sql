@@ -1,3 +1,5 @@
+SET search_path TO ferrex, public;
+
 INSERT INTO libraries (
     id,
     name,

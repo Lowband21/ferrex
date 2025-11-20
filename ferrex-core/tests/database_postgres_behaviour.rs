@@ -2,11 +2,12 @@ use std::collections::HashSet;
 
 use anyhow::Result;
 use chrono::{Duration, Utc};
+use ferrex_core::database::infrastructure::postgres::PostgresFolderInventoryRepository;
+use ferrex_core::database::ports::folder_inventory::FolderInventoryRepository;
 use ferrex_core::database::postgres::PostgresDatabase;
 use ferrex_core::database::postgres_ext::processing_status::ProcessingStatusRepository;
 use ferrex_core::database::traits::{
-    FolderProcessingStatus, FolderScanFilters, MediaDatabaseTrait,
-    MediaProcessingStatus,
+    FolderProcessingStatus, FolderScanFilters, MediaProcessingStatus,
 };
 use ferrex_core::types::LibraryID;
 use sqlx::PgPool;
@@ -220,7 +221,7 @@ async fn processing_status_helpers_filter_correctly(
     )
 )]
 async fn folder_inventory_filters_are_bound(pool: PgPool) -> Result<()> {
-    let db = PostgresDatabase::from_pool(pool.clone());
+    let folder_repo = PostgresFolderInventoryRepository::new(pool.clone());
     let library_id = fixture_library_id();
 
     let mut filters = FolderScanFilters {
@@ -228,8 +229,11 @@ async fn folder_inventory_filters_are_bound(pool: PgPool) -> Result<()> {
         ..Default::default()
     };
 
-    let all_candidates =
-        MediaDatabaseTrait::get_folders_needing_scan(&db, &filters).await?;
+    let all_candidates = FolderInventoryRepository::get_folders_needing_scan(
+        &folder_repo,
+        &filters,
+    )
+    .await?;
     assert_eq!(
         all_candidates.len(),
         3,
@@ -241,8 +245,11 @@ async fn folder_inventory_filters_are_bound(pool: PgPool) -> Result<()> {
     );
 
     filters.processing_status = Some(FolderProcessingStatus::Pending);
-    let pending_only =
-        MediaDatabaseTrait::get_folders_needing_scan(&db, &filters).await?;
+    let pending_only = FolderInventoryRepository::get_folders_needing_scan(
+        &folder_repo,
+        &filters,
+    )
+    .await?;
     assert_eq!(pending_only.len(), 1);
     assert_eq!(
         pending_only[0].processing_status,
@@ -251,16 +258,22 @@ async fn folder_inventory_filters_are_bound(pool: PgPool) -> Result<()> {
 
     filters.processing_status = Some(FolderProcessingStatus::Failed);
     filters.max_attempts = Some(2);
-    let retryable =
-        MediaDatabaseTrait::get_folders_needing_scan(&db, &filters).await?;
+    let retryable = FolderInventoryRepository::get_folders_needing_scan(
+        &folder_repo,
+        &filters,
+    )
+    .await?;
     assert_eq!(retryable.len(), 1);
     assert_eq!(retryable[0].processing_attempts, 1);
 
     filters.processing_status = None;
     filters.max_attempts = None;
     filters.stale_after_hours = Some(24);
-    let stale =
-        MediaDatabaseTrait::get_folders_needing_scan(&db, &filters).await?;
+    let stale = FolderInventoryRepository::get_folders_needing_scan(
+        &folder_repo,
+        &filters,
+    )
+    .await?;
     assert_eq!(stale.len(), 1);
     assert_eq!(stale[0].folder_path, "/fixture/library/a/pending");
 

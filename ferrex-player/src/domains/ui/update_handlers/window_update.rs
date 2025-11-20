@@ -35,7 +35,7 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<Message> {
         .library
         .state
         .current_library_id
-        .map(|library_id| library_id.as_uuid());
+        .map(|library_id| library_id.to_uuid());
 
     // Update depth regions for the current view with new window size
     state

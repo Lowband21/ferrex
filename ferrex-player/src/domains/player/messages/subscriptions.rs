@@ -1,6 +1,6 @@
 use crate::common::messages::DomainMessage;
 use crate::domains::player::messages::Message;
-use crate::infrastructure::constants::player::seeking::*;
+use crate::infra::constants::player::seeking::*;
 use crate::state::State;
 use iced::Subscription;
 

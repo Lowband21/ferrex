@@ -13,7 +13,7 @@ pub fn truncate_text(text: &str, max_chars: usize) -> String {
         let mut chars_collected = 0;
         let mut byte_index = 0;
 
-        for (i, ch) in text.char_indices() {
+        for (i, _) in text.char_indices() {
             if chars_collected >= target_chars {
                 byte_index = i;
                 break;

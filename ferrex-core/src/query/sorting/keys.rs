@@ -15,10 +15,6 @@ impl StringKey {
     pub fn new(value: Option<String>) -> Self {
         StringKey(value)
     }
-
-    pub fn from_str(s: &str) -> Self {
-        StringKey(Some(s.to_string()))
-    }
 }
 
 impl Ord for StringKey {
@@ -265,7 +261,7 @@ mod tests {
     #[test]
     fn test_missing_values_sort_last() {
         // String keys
-        let present = StringKey::from_str("test");
+        let present = StringKey::new(Some("test".to_string()));
         let missing = StringKey::missing();
         assert!(present < missing);
 
@@ -293,8 +289,8 @@ mod tests {
     #[test]
     fn test_key_ordering() {
         // Test string ordering
-        let a = StringKey::from_str("apple");
-        let b = StringKey::from_str("banana");
+        let a = StringKey::new(Some("apple".to_string()));
+        let b = StringKey::new(Some("banana".to_string()));
         assert!(a < b);
 
         // Test float ordering

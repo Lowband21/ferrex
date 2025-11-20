@@ -16,7 +16,7 @@ pub fn image_cache_cleanup() -> Subscription<Message> {
 
             // Perform cleanup
             if let Some(image_service) =
-                crate::infrastructure::service_registry::get_image_service()
+                crate::infra::service_registry::get_image_service()
             {
                 // Clean up entries older than 30 minutes
                 image_service.get().cleanup_stale_entries(

@@ -59,9 +59,9 @@ impl VirtualGridState {
             viewport_height: 800.0,
             viewport_width: 1200.0, // Default
             overscan_rows_above:
-                crate::infrastructure::constants::virtual_grid::PREFETCH_ROWS_ABOVE,
+                crate::infra::constants::virtual_grid::PREFETCH_ROWS_ABOVE,
             overscan_rows_below:
-                crate::infrastructure::constants::virtual_grid::PREFETCH_ROWS_BELOW,
+                crate::infra::constants::virtual_grid::PREFETCH_ROWS_BELOW,
             visible_range: 0..0,
             scrollable_id,
             item_width: 200.0, // Default
@@ -76,9 +76,7 @@ impl VirtualGridState {
 
     /// Update columns based on viewport width
     pub fn update_columns(&mut self, viewport_width: f32) {
-        use crate::infrastructure::constants::{
-            calculations, poster, scale_presets,
-        };
+        use crate::infra::constants::{calculations, poster, scale_presets};
 
         // Calculate columns using centralized logic
         let scale = scale_presets::DEFAULT_SCALE;
@@ -175,7 +173,7 @@ impl VirtualGridState {
     pub fn resize(&mut self, width: f32) {
         log::debug!("Resize: updating columns for width {}", width);
 
-        use crate::infrastructure::constants::{calculations, scale_presets};
+        use crate::infra::constants::{calculations, scale_presets};
 
         let scale = scale_presets::DEFAULT_SCALE;
         let old_columns = self.columns;

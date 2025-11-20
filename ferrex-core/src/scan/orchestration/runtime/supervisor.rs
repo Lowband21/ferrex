@@ -8,7 +8,7 @@ use std::{
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
-use crate::orchestration::{
+use crate::scan::orchestration::{
     actors::LibraryActor,
     budget::{WorkloadBudget, WorkloadType},
     config::OrchestratorConfig,
@@ -30,8 +30,8 @@ use crate::{
     types::ids::LibraryID,
 };
 
-use crate::orchestration::actors::LibraryActorCommand;
-use crate::orchestration::runtime::JobEventStream;
+use crate::scan::orchestration::actors::LibraryActorCommand;
+use crate::scan::orchestration::runtime::JobEventStream;
 
 pub type LibraryActorHandle = Arc<Mutex<Box<dyn LibraryActor>>>;
 
@@ -43,7 +43,7 @@ where
     Q: QueueService + LeaseExpiryScanner + 'static,
     E: ScanEventBus
         + JobEventStream
-        + crate::orchestration::runtime::ScanEventStream
+        + crate::scan::orchestration::runtime::ScanEventStream
         + 'static,
     B: WorkloadBudget + 'static,
 {
@@ -67,7 +67,7 @@ where
     Q: QueueService + LeaseExpiryScanner + 'static,
     E: ScanEventBus
         + JobEventStream
-        + crate::orchestration::runtime::ScanEventStream
+        + crate::scan::orchestration::runtime::ScanEventStream
         + 'static,
     B: WorkloadBudget + 'static,
 {
@@ -113,7 +113,7 @@ where
     Q: QueueService + LeaseExpiryScanner + 'static,
     E: ScanEventBus
         + JobEventStream
-        + crate::orchestration::runtime::ScanEventStream
+        + crate::scan::orchestration::runtime::ScanEventStream
         + 'static,
     B: WorkloadBudget + 'static,
 {
@@ -250,7 +250,7 @@ where
     Q: QueueService + LeaseExpiryScanner + 'static,
     E: ScanEventBus
         + JobEventStream
-        + crate::orchestration::runtime::ScanEventStream
+        + crate::scan::orchestration::runtime::ScanEventStream
         + 'static,
     B: WorkloadBudget + 'static,
 {
@@ -376,7 +376,7 @@ where
                                         EnqueueRequest,
                                     )> = Vec::new();
                                     for evt in events {
-                                        if let crate::orchestration::actors::LibraryActorEvent::EnqueueFolderScan { folder_path, priority, reason, parent, correlation_id } = evt {
+                                        if let crate::scan::orchestration::actors::LibraryActorEvent::EnqueueFolderScan { folder_path, priority, reason, parent, correlation_id } = evt {
                                             let encoded_parent = match serde_json::to_string(&parent) {
                                                 Ok(s) => s,
                                                 Err(err) => {
@@ -1089,7 +1089,7 @@ where
     Q: QueueService + LeaseExpiryScanner + 'static,
     E: ScanEventBus
         + JobEventStream
-        + crate::orchestration::runtime::ScanEventStream
+        + crate::scan::orchestration::runtime::ScanEventStream
         + 'static,
     B: WorkloadBudget + 'static,
 {
@@ -1138,7 +1138,7 @@ where
     Q: QueueService + LeaseExpiryScanner + 'static,
     E: ScanEventBus
         + JobEventStream
-        + crate::orchestration::runtime::ScanEventStream
+        + crate::scan::orchestration::runtime::ScanEventStream
         + 'static,
     B: WorkloadBudget + 'static,
 {
@@ -1155,7 +1155,7 @@ where
     Q: QueueService + LeaseExpiryScanner + 'static,
     E: ScanEventBus
         + JobEventStream
-        + crate::orchestration::runtime::ScanEventStream
+        + crate::scan::orchestration::runtime::ScanEventStream
         + 'static,
     B: WorkloadBudget + 'static,
 {
@@ -1187,7 +1187,7 @@ where
     Q: QueueService + LeaseExpiryScanner + 'static,
     E: ScanEventBus
         + JobEventStream
-        + crate::orchestration::runtime::ScanEventStream
+        + crate::scan::orchestration::runtime::ScanEventStream
         + 'static,
     B: WorkloadBudget + 'static,
 {
@@ -1269,20 +1269,22 @@ fn workload_for(kind: JobKind) -> WorkloadType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestration::budget::InMemoryBudget;
-    use crate::orchestration::config::{LibraryQueuePolicy, PriorityWeights};
-    use crate::orchestration::dispatcher::DispatchStatus;
-    use crate::orchestration::events::{
+    use crate::scan::orchestration::budget::InMemoryBudget;
+    use crate::scan::orchestration::config::{
+        LibraryQueuePolicy, PriorityWeights,
+    };
+    use crate::scan::orchestration::dispatcher::DispatchStatus;
+    use crate::scan::orchestration::events::{
         EventMeta, JobEvent, JobEventPayload, JobEventPublisher,
         stable_path_key,
     };
-    use crate::orchestration::job::{
+    use crate::scan::orchestration::job::{
         EnqueueRequest, FolderScanJob, JobId, JobPayload, JobPriority,
         ScanReason,
     };
-    use crate::orchestration::lease::JobLease;
-    use crate::orchestration::persistence::PostgresQueueService;
-    use crate::orchestration::runtime::InProcJobEventBus;
+    use crate::scan::orchestration::lease::JobLease;
+    use crate::scan::orchestration::persistence::PostgresQueueService;
+    use crate::scan::orchestration::runtime::InProcJobEventBus;
     use crate::types::ids::LibraryID;
     use async_trait::async_trait;
     use chrono::Utc;

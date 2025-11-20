@@ -2,8 +2,8 @@
 
 use crate::domains::ui::view_models::AllViewModel;
 use crate::domains::ui::views::grid::VirtualGridState;
-use crate::infrastructure::api_types::{LibraryType, Media};
-use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
+use crate::infra::api_types::{LibraryType, Media};
+use crate::infra::repository::accessor::{Accessor, ReadOnly};
 use ferrex_core::player_prelude::{
     ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedMovieReference,
     ArchivedSeriesReference, LibraryID, MediaID, MediaIDLike, MediaOps,
@@ -109,7 +109,7 @@ mod tests {
 
         let (indices, ids) = LibraryTabState::reconcile_positions(
             &positions,
-            |idx| data.get(idx).and_then(|opt| opt.clone()),
+            |idx| data.get(idx).and_then(|opt| *opt),
             None,
         );
 
@@ -129,7 +129,7 @@ mod tests {
 
         let (indices, ids) = LibraryTabState::reconcile_positions(
             &positions,
-            |idx| data.get(idx).and_then(|opt| opt.clone()),
+            |idx| data.get(idx).and_then(|opt| *opt),
             Some(&allowed),
         );
 
@@ -258,7 +258,7 @@ impl LibraryTabState {
         let grid_state = VirtualGridState::with_id(
             0,
             5,
-            crate::infrastructure::constants::virtual_grid::ROW_HEIGHT,
+            crate::infra::constants::virtual_grid::ROW_HEIGHT,
             scrollable_id,
         );
 
@@ -310,7 +310,7 @@ impl LibraryTabState {
             return;
         }
 
-        let lib_uuid = self.library_id.as_uuid();
+        let lib_uuid = *self.library_id.as_uuid();
         let yoke_opt = self
             .accessor
             .get_archived_library_yoke(&lib_uuid)
@@ -585,7 +585,7 @@ impl LibraryTabState {
             return Vec::new();
         }
 
-        let lib_uuid = self.library_id.as_uuid();
+        let lib_uuid = *self.library_id.as_uuid();
         let yoke_opt = self
             .accessor
             .get_archived_library_yoke(&lib_uuid)

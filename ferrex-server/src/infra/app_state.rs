@@ -13,7 +13,9 @@ use crate::infra::scan::scan_manager::ScanControlPlane;
 use crate::infra::websocket::ConnectionManager;
 use crate::media::prep::thumbnail_service::ThumbnailService;
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
-use ferrex_core::auth::{
+use ferrex_core::database::PostgresDatabase;
+use ferrex_core::database::ports::setup_claims::SetupClaimsRepository;
+use ferrex_core::domain::users::auth::{
     AuthCrypto,
     domain::{
         services::{
@@ -22,9 +24,7 @@ use ferrex_core::auth::{
         value_objects::SessionScope,
     },
 };
-use ferrex_core::database::PostgresDatabase;
-use ferrex_core::database::ports::setup_claims::SetupClaimsRepository;
-use ferrex_core::image_service::ImageService;
+use ferrex_core::infrastructure::media::image_service::ImageService;
 use ferrex_core::setup::SetupClaimService;
 
 #[cfg(feature = "demo")]

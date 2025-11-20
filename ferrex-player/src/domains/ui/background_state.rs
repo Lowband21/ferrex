@@ -9,7 +9,7 @@ use super::widgets::background_shader::{
     BackgroundEffect, BackgroundShader, DepthLayout, background_shader,
 };
 use crate::domains::ui::views::library_controls_bar;
-use crate::infrastructure::constants::layout::{detail, header};
+use crate::infra::constants::layout::{detail, header};
 
 /// Persistent state for the background shader
 #[derive(Debug, Clone)]
@@ -44,7 +44,7 @@ impl Default for BackgroundShaderState {
             secondary_color: secondary,
             backdrop_handle: None,
             backdrop_aspect_ratio: Some(
-                crate::infrastructure::constants::layout::backdrop::SOURCE_ASPECT,
+                crate::infra::constants::layout::backdrop::SOURCE_ASPECT,
             ),
             backdrop_aspect_mode: BackdropAspectMode::default(),
             backdrop_fade_start: 0.75,
@@ -276,7 +276,7 @@ impl BackgroundShaderState {
         window_width: f32,
         window_height: f32,
     ) -> f32 {
-        use crate::infrastructure::constants::layout::header;
+        use crate::infra::constants::layout::header;
 
         // Calculate the display aspect based on current mode and actual window dimensions
         let backdrop_aspect =
@@ -295,7 +295,7 @@ impl BackgroundShaderState {
         window_width: f32,
         window_height: f32,
     ) -> f32 {
-        use crate::infrastructure::constants::layout::backdrop;
+        use crate::infra::constants::layout::backdrop;
 
         match self.backdrop_aspect_mode {
             BackdropAspectMode::Force21x9 => backdrop::DISPLAY_ASPECT,

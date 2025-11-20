@@ -25,9 +25,7 @@ pub fn update_player(
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    profiling::scope!(
-        crate::infrastructure::profiling_scopes::scopes::PLAYER_UPDATE
-    );
+    profiling::scope!(crate::infra::profiling_scopes::scopes::PLAYER_UPDATE);
 
     // Convenience alias
     let state: &mut PlayerDomainState = &mut app_state.domains.player.state;
@@ -668,7 +666,7 @@ pub fn update_player(
             // Check if we're within the seek bar's vertical hit zone
             // The seek bar is positioned at the bottom of the screen
             let seek_bar_vertical_center = window_size.height
-                - crate::infrastructure::constants::player_controls::SEEK_BAR_CENTER_FROM_BOTTOM;
+                - crate::infra::constants::player_controls::SEEK_BAR_CENTER_FROM_BOTTOM;
             let max_vertical_distance = super::state::SEEK_BAR_VISUAL_HEIGHT
                 * super::state::SEEK_BAR_CLICK_TOLERANCE_MULTIPLIER;
             let within_seek_zone = (point.y - seek_bar_vertical_center).abs()

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use uuid::Uuid;
 
 use crate::{
-    api_types::FilterIndicesRequest,
+    api::types::FilterIndicesRequest,
     error::Result,
     query::types::{SortBy, SortOrder},
     types::LibraryID,

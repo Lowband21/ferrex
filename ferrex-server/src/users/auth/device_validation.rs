@@ -6,17 +6,19 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use ferrex_core::{
-    api_types::ApiResponse,
-    auth::{
-        AuthError,
-        domain::{
-            aggregates::{DeviceSession, DeviceStatus},
-            services::{
-                AuthenticationError, DeviceTrustError, PinManagementError,
+    api::types::ApiResponse,
+    domain::users::{
+        auth::{
+            AuthError,
+            domain::{
+                aggregates::{DeviceSession, DeviceStatus},
+                services::{
+                    AuthenticationError, DeviceTrustError, PinManagementError,
+                },
             },
         },
+        user::User,
     },
-    user::User,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};

@@ -1,10 +1,10 @@
 use crate::domains::library::messages::Message;
-use crate::infrastructure::api_types::Library;
+use crate::infra::api_types::Library;
 use crate::state::State;
 
 use chrono::Utc;
 use ferrex_core::{
-    api_types::{CreateLibraryRequest, UpdateLibraryRequest},
+    api::types::{CreateLibraryRequest, UpdateLibraryRequest},
     types::{ids::LibraryID, library::LibraryType},
 };
 use iced::Task;
@@ -250,7 +250,7 @@ pub fn handle_reset_library(
         .library
         .state
         .repo_accessor
-        .get_archived_library_yoke(&library_id.as_uuid());
+        .get_archived_library_yoke(library_id.as_uuid());
 
     let Ok(Some(yoke)) = archived else {
         return Task::done(Message::ResetLibraryDone(Err(
@@ -258,17 +258,16 @@ pub fn handle_reset_library(
         )));
     };
 
-    let lib =
-        match deserialize::<crate::infrastructure::api_types::Library, Error>(
-            *yoke.get(),
-        ) {
-            Ok(v) => v,
-            Err(_) => {
-                return Task::done(Message::ResetLibraryDone(Err(
-                    "deserialize_failed".to_string(),
-                )));
-            }
-        };
+    let lib = match deserialize::<crate::infra::api_types::Library, Error>(
+        *yoke.get(),
+    ) {
+        Ok(v) => v,
+        Err(_) => {
+            return Task::done(Message::ResetLibraryDone(Err(
+                "deserialize_failed".to_string(),
+            )));
+        }
+    };
 
     let delete_api = state.api_service.clone();
     let create_api = state.api_service.clone();
@@ -282,7 +281,7 @@ pub fn handle_reset_library(
                 .map_err(|e| e.to_string())?;
 
             // Recreate with same properties and start_scan=true
-            let req = ferrex_core::api_types::CreateLibraryRequest {
+            let req = crate::infra::api_types::CreateLibraryRequest {
                 name: lib.name.clone(),
                 library_type: lib.library_type,
                 paths: lib
@@ -415,8 +414,8 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
         // Create library object from form data
         // Convert string library type to enum
         let library_type = match form_data.library_type.as_str() {
-            "Movies" => crate::infrastructure::api_types::LibraryType::Movies,
-            "TvShows" => crate::infrastructure::api_types::LibraryType::Series,
+            "Movies" => crate::infra::api_types::LibraryType::Movies,
+            "TvShows" => crate::infra::api_types::LibraryType::Series,
             _ => {
                 state
                     .domains
@@ -463,7 +462,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
             let api = state.api_service.clone();
             Task::perform(
                 async move {
-                    let req = ferrex_core::api_types::UpdateLibraryRequest {
+                    let req = crate::infra::api_types::UpdateLibraryRequest {
                         name: Some(library.name.clone()),
                         paths: Some(
                             library
@@ -494,7 +493,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
             let start_scan = form_data.start_scan;
             Task::perform(
                 async move {
-                    let req = ferrex_core::api_types::CreateLibraryRequest {
+                    let req = crate::infra::api_types::CreateLibraryRequest {
                         name: library.name.clone(),
                         library_type: library.library_type,
                         paths: library

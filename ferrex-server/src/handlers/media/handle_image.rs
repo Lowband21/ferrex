@@ -6,8 +6,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ferrex_core::database::traits::ImageLookupParams;
-use ferrex_core::image::MediaImageKind;
-use ferrex_core::image_service::TmdbImageSize;
+use ferrex_core::domain::media::image::MediaImageKind;
+use ferrex_core::infrastructure::media::image_service::TmdbImageSize;
 use httpdate::{fmt_http_date, parse_http_date};
 use serde::Deserialize;
 use std::io::ErrorKind;

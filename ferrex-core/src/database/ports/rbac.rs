@@ -1,8 +1,10 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
+use crate::domain::users::rbac::{
+    Permission, PermissionCategory, Role, UserPermissions,
+};
 use crate::error::Result;
-use crate::rbac::{Permission, PermissionCategory, Role, UserPermissions};
 
 #[async_trait]
 pub trait RbacRepository: Send + Sync {

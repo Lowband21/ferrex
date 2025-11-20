@@ -1,6 +1,6 @@
 use super::types::*;
 use crate::types::ids::LibraryID;
-use crate::{api_types::ScalarRange, watch_status::WatchStatusFilter};
+use crate::{api::types::ScalarRange, domain::watch::WatchStatusFilter};
 use uuid::Uuid;
 
 /// Fluent API for building media queries
@@ -88,7 +88,7 @@ impl MediaQueryBuilder {
 
     /// Filter by library
     pub fn in_library(mut self, library_id: LibraryID) -> Self {
-        self.query.filters.library_ids.push(library_id.as_uuid());
+        self.query.filters.library_ids.push(library_id.to_uuid());
         self
     }
 

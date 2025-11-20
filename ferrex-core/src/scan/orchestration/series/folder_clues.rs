@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::tv_parser::TvParser;
+use crate::domain::media::tv_parser::TvParser;
 
 use super::naming::clean_series_title;
 

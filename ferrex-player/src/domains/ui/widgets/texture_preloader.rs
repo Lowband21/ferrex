@@ -196,7 +196,7 @@ pub fn collect_cached_handles_for_media(
     image_type: ImageType,
     size: ImageSize,
 ) -> Vec<Handle> {
-    use crate::infrastructure::service_registry;
+    use crate::infra::service_registry;
 
     let image_service = service_registry::get_image_service();
     if image_service.is_none() {

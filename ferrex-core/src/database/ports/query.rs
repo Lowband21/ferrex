@@ -2,11 +2,11 @@ use async_trait::async_trait;
 use sqlx::{Postgres, QueryBuilder};
 use uuid::Uuid;
 
+use crate::domain::watch::{InProgressItem, WatchStatusFilter};
 use crate::error::Result;
+use crate::query::prelude::{SearchQuery, SortCriteria};
 use crate::query::types::{MediaQuery, MediaWithStatus};
-use crate::query_prelude::{SearchQuery, SortCriteria};
 use crate::types::{EpisodeID, EpisodeReference, MovieID, MovieReference};
-use crate::watch_status::{InProgressItem, WatchStatusFilter};
 
 #[async_trait]
 pub trait QueryRepository: Send + Sync {

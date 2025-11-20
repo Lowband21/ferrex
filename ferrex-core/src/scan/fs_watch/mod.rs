@@ -15,7 +15,8 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use notify::event::{EventKind, ModifyKind, RemoveKind, RenameMode};
 use notify::{
-    Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, Watcher,
+    Config as NotifyConfig, Event, PollWatcher, RecommendedWatcher,
+    RecursiveMode, Watcher,
 };
 use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, mpsc};
@@ -32,13 +33,13 @@ pub mod watcher;
 
 use crate::error::MediaError;
 use crate::error::Result;
-use crate::orchestration::FileSystemEvent;
-use crate::orchestration::FileSystemEventKind;
-use crate::orchestration::LibraryActorCommand;
-use crate::orchestration::LibraryActorHandle;
-use crate::orchestration::LibraryRootsId;
-use crate::orchestration::config::WatchConfig;
-use crate::orchestration::scan_cursor::normalize_path;
+use crate::scan::orchestration::FileSystemEvent;
+use crate::scan::orchestration::FileSystemEventKind;
+use crate::scan::orchestration::LibraryActorCommand;
+use crate::scan::orchestration::LibraryActorHandle;
+use crate::scan::orchestration::LibraryRootsId;
+use crate::scan::orchestration::config::WatchConfig;
+use crate::scan::orchestration::scan_cursor::normalize_path;
 use crate::types::ids::LibraryID;
 /// Version field stamped on emitted `FileSystemEvent`s.
 pub const EVENT_VERSION: u16 = 1;
@@ -50,6 +51,8 @@ pub struct FsWatchConfig {
     pub debounce_window: Duration,
     /// Maximum number of filesystem events bundled into a single flush.
     pub max_batch_events: usize,
+    /// Polling cadence for backends that cannot deliver native filesystem events.
+    pub poll_interval: Duration,
 }
 
 impl Default for FsWatchConfig {
@@ -57,6 +60,7 @@ impl Default for FsWatchConfig {
         Self {
             debounce_window: Duration::from_millis(250),
             max_batch_events: 1024,
+            poll_interval: Duration::from_secs(30),
         }
     }
 }
@@ -68,6 +72,7 @@ impl From<WatchConfig> for FsWatchConfig {
                 cfg.debounce_window_ms.max(1),
             ),
             max_batch_events: cfg.max_batch_events.max(1),
+            poll_interval: Duration::from_millis(cfg.poll_interval_ms.max(1)),
         }
     }
 }
@@ -179,10 +184,11 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
         let observer = Arc::clone(&self.observer);
         let watcher_roots = resolved_roots.clone();
         let watcher_tx = tx.clone();
+        let watcher_config = self.config.clone();
 
         tokio::spawn(async move {
             let build_result = spawn_blocking(move || {
-                init_watchers(watcher_roots, watcher_tx)
+                init_watchers(watcher_config, watcher_roots, watcher_tx)
             })
             .await;
 
@@ -242,7 +248,7 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
 }
 
 struct LibraryWatch {
-    watchers: Option<Vec<RecommendedWatcher>>,
+    watchers: Option<Vec<ActiveWatcher>>,
     flush_task: JoinHandle<()>,
 }
 
@@ -261,6 +267,21 @@ impl fmt::Debug for LibraryWatch {
             .field("watcher_count", &watcher_count)
             .field("flush_task_finished", &self.flush_task.is_finished())
             .finish()
+    }
+}
+
+enum ActiveWatcher {
+    Native { _watcher: RecommendedWatcher },
+    Poll { _watcher: PollWatcher },
+}
+
+impl fmt::Debug for ActiveWatcher {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = match self {
+            ActiveWatcher::Native { .. } => "Native",
+            ActiveWatcher::Poll { .. } => "Poll",
+        };
+        f.debug_tuple("ActiveWatcher").field(&kind).finish()
     }
 }
 
@@ -649,33 +670,55 @@ fn resolve_roots(
 }
 
 fn init_watchers(
+    config: FsWatchConfig,
     watcher_roots: Vec<(LibraryRootsId, PathBuf)>,
     watcher_tx: mpsc::Sender<WatchMessage>,
-) -> Result<Vec<RecommendedWatcher>> {
+) -> Result<Vec<ActiveWatcher>> {
     let mut watchers = Vec::with_capacity(watcher_roots.len());
     for (_root_id, root_path) in &watcher_roots {
-        let path_clone = root_path.clone();
-        let tx_event = watcher_tx.clone();
-        let mut watcher = RecommendedWatcher::new(
-            move |res: std::result::Result<Event, notify::Error>| match res {
-                Ok(event) => {
-                    if let Err(err) =
-                        tx_event.blocking_send(WatchMessage::Event(event))
-                    {
-                        warn!(
-                            "fs_watch channel send failed for {}: {}",
-                            path_clone.display(),
-                            err
-                        );
+        match build_native_watcher(root_path, watcher_tx.clone()) {
+            Ok(watcher) => {
+                watchers.push(ActiveWatcher::Native { _watcher: watcher })
+            }
+            Err(native_err) => {
+                let native_err_msg = native_err.to_string();
+                warn!(
+                    path = %root_path.display(),
+                    "native watcher unavailable, falling back to polling: {}",
+                    native_err_msg
+                );
+
+                match build_poll_watcher(
+                    root_path,
+                    watcher_tx.clone(),
+                    config.poll_interval,
+                ) {
+                    Ok(poller) => {
+                        watchers.push(ActiveWatcher::Poll { _watcher: poller })
+                    }
+                    Err(poll_err) => {
+                        let poll_err_msg = poll_err.to_string();
+                        return Err(MediaError::Internal(format!(
+                            "failed to watch {} (native error: {}; polling error: {})",
+                            root_path.display(),
+                            native_err_msg,
+                            poll_err_msg
+                        )));
                     }
                 }
-                Err(err) => {
-                    let msg = err.to_string();
-                    let _ = tx_event.blocking_send(WatchMessage::Error(msg));
-                }
-            },
-            NotifyConfig::default(),
-        )
+            }
+        }
+    }
+
+    Ok(watchers)
+}
+
+fn build_native_watcher(
+    root_path: &Path,
+    watcher_tx: mpsc::Sender<WatchMessage>,
+) -> Result<RecommendedWatcher> {
+    let handler = build_event_handler(watcher_tx, root_path.to_path_buf());
+    let mut watcher = RecommendedWatcher::new(handler, NotifyConfig::default())
         .map_err(|err| {
             MediaError::Internal(format!(
                 "failed to create watcher for {}: {}",
@@ -684,18 +727,67 @@ fn init_watchers(
             ))
         })?;
 
-        if let Err(err) = watcher.watch(root_path, RecursiveMode::Recursive) {
-            return Err(MediaError::Internal(format!(
+    watcher
+        .watch(root_path, RecursiveMode::Recursive)
+        .map_err(|err| {
+            MediaError::Internal(format!(
                 "failed to watch {}: {}",
                 root_path.display(),
                 err
-            )));
+            ))
+        })?;
+
+    Ok(watcher)
+}
+
+fn build_poll_watcher(
+    root_path: &Path,
+    watcher_tx: mpsc::Sender<WatchMessage>,
+    poll_interval: Duration,
+) -> Result<PollWatcher> {
+    let handler = build_event_handler(watcher_tx, root_path.to_path_buf());
+    let config = NotifyConfig::default().with_poll_interval(poll_interval);
+    let mut watcher = PollWatcher::new(handler, config).map_err(|err| {
+        MediaError::Internal(format!(
+            "failed to create poll watcher for {}: {}",
+            root_path.display(),
+            err
+        ))
+    })?;
+
+    watcher
+        .watch(root_path, RecursiveMode::Recursive)
+        .map_err(|err| {
+            MediaError::Internal(format!(
+                "failed to watch {} via polling: {}",
+                root_path.display(),
+                err
+            ))
+        })?;
+
+    Ok(watcher)
+}
+
+fn build_event_handler(
+    tx_event: mpsc::Sender<WatchMessage>,
+    path_hint: PathBuf,
+) -> impl FnMut(std::result::Result<Event, notify::Error>) + Send + 'static {
+    move |res| match res {
+        Ok(event) => {
+            if let Err(err) = tx_event.blocking_send(WatchMessage::Event(event))
+            {
+                warn!(
+                    "fs_watch channel send failed for {}: {}",
+                    path_hint.display(),
+                    err
+                );
+            }
         }
-
-        watchers.push(watcher);
+        Err(err) => {
+            let msg = err.to_string();
+            let _ = tx_event.blocking_send(WatchMessage::Error(msg));
+        }
     }
-
-    Ok(watchers)
 }
 
 fn encode_hash(parts: &[&str]) -> String {
@@ -711,9 +803,9 @@ fn encode_hash(parts: &[&str]) -> String {
 mod tests {
     use std::sync::Arc;
 
+    use super::{FsWatchConfig, FsWatchService, NoopFsWatchObserver};
     use crate::error::Result;
-    use crate::fs_watch::{FsWatchConfig, FsWatchService, NoopFsWatchObserver};
-    use crate::orchestration::{
+    use crate::scan::orchestration::{
         LibraryActor, LibraryActorCommand, LibraryActorConfig,
         LibraryActorEvent, LibraryActorHandle, LibraryActorState,
         LibraryRootsId,

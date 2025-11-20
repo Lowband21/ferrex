@@ -4,7 +4,7 @@
 //! movies, TV shows, seasons, and episodes with consistent styling, animations,
 //! and loading states.
 
-use crate::infrastructure::repository::MaybeYoked;
+use crate::infra::repository::MaybeYoked;
 use ferrex_core::player_prelude::{
     ImageSize, ImageType, MediaDetailsOptionLike, MediaID, MediaIDLike,
     MediaOps, MovieID, MovieLike, Priority, SeriesID, SeriesLike,
@@ -16,8 +16,8 @@ use iced::{Alignment, Length};
 use crate::domains::ui::messages::Message;
 use crate::domains::ui::views::grid::macros::parse_hex_color;
 use crate::domains::ui::widgets::image_for;
-use crate::infrastructure::api_types::WatchProgress;
-use crate::infrastructure::constants::poster::CORNER_RADIUS;
+use crate::infra::api_types::WatchProgress;
+use crate::infra::constants::poster::CORNER_RADIUS;
 use iced::{Element, widget::column};
 use uuid::Uuid;
 
@@ -99,7 +99,7 @@ pub fn movie_reference_card_with_state<'a>(
 ) -> Element<'a, Message> {
     // Try from UI yoke cache first
     let uuid = movie_id.to_uuid();
-    let yoke_arc: Arc<crate::infrastructure::repository::MovieYoke> =
+    let yoke_arc: Arc<crate::infra::repository::MovieYoke> =
         match state.domains.ui.state.movie_yoke_cache.peek_ref(&uuid) {
             Some(arc) => arc.clone(),
             _ => {
@@ -303,7 +303,7 @@ pub fn series_reference_card_with_state<'a>(
 ) -> Element<'a, Message> {
     // Try from UI yoke cache first
     let uuid = series_id.to_uuid();
-    let yoke_arc: Arc<crate::infrastructure::repository::SeriesYoke> =
+    let yoke_arc: Arc<crate::infra::repository::SeriesYoke> =
         match state.domains.ui.state.series_yoke_cache.peek_ref(&uuid) {
             Some(arc) => arc.clone(),
             _ => {
@@ -490,30 +490,23 @@ pub fn season_reference_card_with_state<'a, Season: MaybeYoked>(
 )where
         Season::InnerRef: SeasonLike,
         <Season as MaybeYoked>::InnerRef: MediaOps<Id = SeasonID>{
-    use crate::infrastructure::api_types::{MediaDetailsOption, TmdbDetails};
-
     let season_id = season.id.as_uuid();
 
     // Extract season name from details if available
-    let season_name = match &season.details {
-        MediaDetailsOption::Details(TmdbDetails::Season(details)) => {
-            if details.name.is_empty() {
-                if season.season_number.value() == 0 {
-                    "Specials"
-                } else {
-                    "Season"
-                }
-            } else {
-                details.name.as_str()
-            }
-        }
-        _ => {
+    let season_name = if let Some(details) = season.details.as_season() {
+        if details.name.is_empty() {
             if season.season_number.value() == 0 {
                 "Specials"
             } else {
                 "Season"
             }
+        } else {
+            details.name.as_str()
         }
+    } else if season.season_number.value() == 0 {
+        "Specials"
+    } else {
+        "Season"
     };
 
     /*
@@ -588,10 +581,10 @@ pub fn episode_reference_card_with_state<'a, Episode: MediaOps + EpisodeLike>(
     let episode_id = episode.id.as_uuid();
 
     // Extract episode name from details if available
-    let (episode_name, has_details) = match &episode.details {
-        MediaDetailsOption::Details(TmdbDetails::Episode(details)) => (details.name.as_str(), true),
-        _ => ("", false),
-    };
+    let (episode_name, has_details) = episode
+        .details()
+        .map(|details| (details.name.as_str(), true))
+        .unwrap_or(("", false));
 
     // Format season and episode numbers
     let season_episode = format!(

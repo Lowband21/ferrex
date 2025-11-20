@@ -327,9 +327,9 @@ pub enum CrossDomainEvent {
 
     // Metadata events
     MetadataUpdated(MediaID),
-    BatchMetadataReady(Vec<crate::infrastructure::api_types::Media>),
+    BatchMetadataReady(Vec<crate::infra::api_types::Media>),
     RequestBatchMetadataFetch(
-        Vec<(uuid::Uuid, Vec<crate::infrastructure::api_types::Media>)>,
+        Vec<(uuid::Uuid, Vec<crate::infra::api_types::Media>)>,
     ), // Request batch metadata fetching
     MediaLoaded, // Media has been loaded and is ready
 
@@ -349,8 +349,8 @@ pub enum CrossDomainEvent {
     // Search events
     SearchInProgress(bool), // Search is in progress (multi-consumer: UI loading state)
     // NOTE: Search command events moved to direct Search messages in Task 2.10
-    NavigateToMedia(crate::infrastructure::api_types::Media), // Navigate to selected media (UI event)
-    RequestMediaDetails(crate::infrastructure::api_types::Media), // Request details for media
+    NavigateToMedia(crate::infra::api_types::Media), // Navigate to selected media (UI event)
+    RequestMediaDetails(crate::infra::api_types::Media), // Request details for media
 
     // Generic no-op event
     NoOp,

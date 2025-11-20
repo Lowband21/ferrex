@@ -5,17 +5,19 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use ferrex_core::auth::domain::value_objects::{DeviceFingerprint, PinPolicy};
-use ferrex_core::auth::infrastructure::repositories::{
-    PostgresAuthEventRepository, PostgresAuthSessionRepository,
-    PostgresDeviceSessionRepository, PostgresRefreshTokenRepository,
-    PostgresUserAuthRepository,
-};
-use ferrex_core::auth::{
+use ferrex_core::domain::users::auth::{
     AuthCrypto,
-    domain::services::{
-        AuthenticationService, DeviceTrustService, PinManagementService,
-        create_authentication_service,
+    domain::{
+        services::{
+            AuthenticationService, DeviceTrustService, PinManagementService,
+            create_authentication_service,
+        },
+        value_objects::{DeviceFingerprint, PinPolicy},
+    },
+    infrastructure::repositories::{
+        PostgresAuthEventRepository, PostgresAuthSessionRepository,
+        PostgresDeviceSessionRepository, PostgresRefreshTokenRepository,
+        PostgresUserAuthRepository,
     },
 };
 
@@ -76,11 +78,6 @@ impl TestAuthHarness {
     /// Direct access to the underlying connection pool.
     pub fn pool(&self) -> &PgPool {
         &self.pool
-    }
-
-    /// Access the test crypto instance.
-    pub fn crypto(&self) -> &AuthCrypto {
-        self.crypto.as_ref()
     }
 
     /// Borrow the authentication service for login flows.

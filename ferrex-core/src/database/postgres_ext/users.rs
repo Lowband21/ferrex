@@ -1,7 +1,8 @@
+use crate::database::PostgresDatabase;
 use crate::database::ports::rbac::RbacRepository;
 use crate::database::ports::users::UsersRepository;
+use crate::domain::users::user::User;
 use crate::error::Result;
-use crate::{database::PostgresDatabase, user::User};
 use uuid::Uuid;
 
 /// User management and authentication extensions for PostgresDatabase

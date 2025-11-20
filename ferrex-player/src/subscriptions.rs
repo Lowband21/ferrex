@@ -23,7 +23,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
 
     let subscriptions = vec![
         // Auth domain subscriptions
-        crate::domains::auth::messages::subscriptions::subscription(state),
+        //crate::domains::auth::messages::subscriptions::subscription(state),
         // Player domain subscriptions
         crate::domains::player::messages::subscriptions::subscription(state),
         // Library domain subscriptions

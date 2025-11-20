@@ -2,11 +2,11 @@ use std::{sync::Arc, time::Duration};
 
 use ferrex_player::{
     domains::ui::views::grid::VirtualGridState,
-    infrastructure::{
+    infra::{
         api_types::{LibraryMediaCache, MovieReference, SeriesReference},
         service_registry,
     },
-    state_refactored::State,
+    state::State,
 };
 use tokio::runtime::Runtime;
 

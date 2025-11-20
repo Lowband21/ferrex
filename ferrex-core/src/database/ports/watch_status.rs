@@ -1,10 +1,10 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::error::Result;
-use crate::watch_status::{
+use crate::domain::watch::{
     InProgressItem, UpdateProgressRequest, UserWatchState,
 };
+use crate::error::Result;
 
 #[async_trait]
 pub trait WatchStatusRepository: Send + Sync {

@@ -2,10 +2,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::domains::library::messages::Message;
-use crate::infrastructure::repository::repository::MediaRepo;
-use crate::infrastructure::services::api::ApiService;
+use crate::infra::repository::repository::MediaRepo;
+use crate::infra::services::api::ApiService;
 use crate::state::State;
-use ferrex_core::api_routes::v1;
+use ferrex_core::api::routes::v1;
 use iced::Task;
 use rkyv::util::AlignedVec;
 

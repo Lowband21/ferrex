@@ -18,7 +18,7 @@ impl SecureCredential {
     }
 
     /// Create a new SecureCredential from a string slice
-    pub fn from_str(data: &str) -> Self {
+    pub fn new_from_str(data: &str) -> Self {
         Self {
             data: data.to_string(),
         }
@@ -74,7 +74,7 @@ impl From<String> for SecureCredential {
 
 impl From<&str> for SecureCredential {
     fn from(data: &str) -> Self {
-        Self::from_str(data)
+        Self::new_from_str(data)
     }
 }
 
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn test_from_str() {
-        let credential = SecureCredential::from_str("test_password");
+        let credential = SecureCredential::new_from_str("test_password");
         assert_eq!(credential.as_str(), "test_password");
         assert_eq!(credential.len(), 13);
     }

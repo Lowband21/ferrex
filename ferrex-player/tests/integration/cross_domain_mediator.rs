@@ -3,8 +3,8 @@
 //! These tests verify the actual behavior of the mediator (update function)
 //! in routing cross-domain events between domains.
 
+use ferrex_core::domain::users::rbac::UserPermissions;
 use ferrex_core::player_prelude::LibraryID;
-use ferrex_core::rbac::UserPermissions;
 use ferrex_player::common::messages::{CrossDomainEvent, DomainUpdateResult};
 use ferrex_player::state::State;
 use iced::Task;
@@ -198,7 +198,7 @@ async fn test_mediator_processes_multiple_events() {
 #[tokio::test]
 async fn test_user_authenticated_updates_state() {
     use chrono::Utc;
-    use ferrex_core::user::{User, UserPreferences};
+    use ferrex_core::domain::users::user::{User, UserPreferences};
 
     let mut state = State::default();
 

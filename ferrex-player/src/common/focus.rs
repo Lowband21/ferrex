@@ -8,6 +8,7 @@ use once_cell::sync::Lazy;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FocusArea {
     AuthFirstRunSetup,
+    AuthPreAuthLogin,
     AuthPasswordEntry,
     LibraryForm,
 }
@@ -41,7 +42,7 @@ pub struct FocusManager {
 
 #[derive(Debug)]
 struct ActiveArea {
-    area: FocusArea,
+    _area: FocusArea,
     has_multiple_fields: bool,
 }
 
@@ -55,7 +56,7 @@ impl FocusManager {
         }
 
         self.active = Some(ActiveArea {
-            area,
+            _area: area,
             has_multiple_fields: fields.len() > 1,
         });
 
@@ -69,19 +70,19 @@ impl FocusManager {
 
     /// Determine if the current context supports tab traversal.
     pub fn allow_traversal(&self) -> bool {
-        self.active
-            .as_ref()
-            .map(|active| active.has_multiple_fields)
-            .unwrap_or(false)
+        // Rationale: Enable Tab traversal whenever a focus area is active,
+        // even if it has a single text field (e.g., password-only screens).
+        self.active.is_some()
     }
 }
 
 impl FocusArea {
     fn fields(self) -> &'static [FocusId] {
         match self {
-            FocusArea::AuthFirstRunSetup => &AUTH_FIRST_RUN_FIELDS,
-            FocusArea::AuthPasswordEntry => &AUTH_PASSWORD_ENTRY_FIELDS,
-            FocusArea::LibraryForm => &LIBRARY_FORM_FIELDS,
+            FocusArea::AuthFirstRunSetup => AUTH_FIRST_RUN_FIELDS,
+            FocusArea::AuthPreAuthLogin => AUTH_PRE_AUTH_FIELDS,
+            FocusArea::AuthPasswordEntry => AUTH_PASSWORD_ENTRY_FIELDS,
+            FocusArea::LibraryForm => LIBRARY_FORM_FIELDS,
         }
     }
 }
@@ -150,6 +151,18 @@ pub mod ids {
         "auth.credential.password"
     );
 
+    // Pre-auth login form fields
+    define_focus_id!(
+        auth_pre_auth_username,
+        AUTH_PRE_AUTH_USERNAME,
+        "auth.pre.username"
+    );
+    define_focus_id!(
+        auth_pre_auth_password,
+        AUTH_PRE_AUTH_PASSWORD,
+        "auth.pre.password"
+    );
+
     define_focus_id!(library_form_name, LIBRARY_FORM_NAME, "library.form.name");
     define_focus_id!(
         library_form_paths,
@@ -167,7 +180,8 @@ use ids::{
     AUTH_FIRST_RUN_CONFIRM_PASSWORD, AUTH_FIRST_RUN_DEVICE_NAME,
     AUTH_FIRST_RUN_DISPLAY_NAME, AUTH_FIRST_RUN_PASSWORD,
     AUTH_FIRST_RUN_SETUP_TOKEN, AUTH_FIRST_RUN_USERNAME, AUTH_PASSWORD_ENTRY,
-    LIBRARY_FORM_NAME, LIBRARY_FORM_PATHS, LIBRARY_FORM_SCAN_INTERVAL,
+    AUTH_PRE_AUTH_PASSWORD, AUTH_PRE_AUTH_USERNAME, LIBRARY_FORM_NAME,
+    LIBRARY_FORM_PATHS, LIBRARY_FORM_SCAN_INTERVAL,
 };
 
 static AUTH_FIRST_RUN_FIELDS: &[FocusId] = &[
@@ -180,6 +194,11 @@ static AUTH_FIRST_RUN_FIELDS: &[FocusId] = &[
 ];
 
 static AUTH_PASSWORD_ENTRY_FIELDS: &[FocusId] = &[&AUTH_PASSWORD_ENTRY];
+
+static AUTH_PRE_AUTH_FIELDS: &[FocusId] = &[
+    &AUTH_PRE_AUTH_USERNAME,
+    &AUTH_PRE_AUTH_PASSWORD,
+];
 
 static LIBRARY_FORM_FIELDS: &[FocusId] = &[
     &LIBRARY_FORM_NAME,

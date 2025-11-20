@@ -18,6 +18,7 @@ use argon2::{Argon2, Params};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 use ferrex_core::player_prelude::{AuthToken, User, UserPermissions};
+use crate::domains::auth::dto::UserListItemDto;
 use uuid::Uuid;
 
 const AUTH_CACHE_FILE: &str = "auth_cache.enc";
@@ -213,6 +214,52 @@ impl AuthStorage {
 
     pub fn with_cache_path(cache_path: PathBuf) -> Self {
         Self { cache_path }
+    }
+
+    fn users_cache_path(&self) -> PathBuf {
+        self.cache_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("users_cache.json")
+    }
+
+    /// Load locally cached user summaries for offline user selection
+    pub async fn load_user_summaries(&self) -> Result<Vec<UserListItemDto>> {
+        let path = self.users_cache_path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let data = tokio::fs::read_to_string(&path).await?;
+        let users: Vec<UserListItemDto> = serde_json::from_str(&data)?;
+        Ok(users)
+    }
+
+    /// Save user summaries atomically
+    pub async fn save_user_summaries(
+        &self,
+        users: &[UserListItemDto],
+    ) -> Result<()> {
+        let path = self.users_cache_path();
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let data = serde_json::to_string_pretty(users)?;
+        tokio::fs::write(&path, data).await?;
+        Ok(())
+    }
+
+    /// Upsert a single user summary into the cache
+    pub async fn upsert_user_summary(
+        &self,
+        summary: &UserListItemDto,
+    ) -> Result<()> {
+        let mut users = self.load_user_summaries().await.unwrap_or_default();
+        if let Some(existing) = users.iter_mut().find(|u| u.id == summary.id) {
+            *existing = summary.clone();
+        } else {
+            users.push(summary.clone());
+        }
+        self.save_user_summaries(&users).await
     }
 
     /// Derive encryption key from device fingerprint using Argon2
@@ -578,7 +625,7 @@ impl AuthStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrex_core::auth::domain::value_objects::SessionScope;
+    use ferrex_core::domain::users::auth::domain::value_objects::SessionScope;
     use tempfile::TempDir;
     use uuid::Uuid;
 

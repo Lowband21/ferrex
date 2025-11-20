@@ -6,7 +6,7 @@
 
 use crate::common::messages::DomainMessage;
 use crate::domains::ui::{types::ViewState, views::grid::VirtualGridState};
-use ferrex_core::player_prelude::{LibraryID, MediaIDLike};
+use ferrex_core::player_prelude::LibraryID;
 use iced::Task;
 use iced::widget::scrollable::Viewport;
 use std::collections::HashMap;
@@ -365,7 +365,7 @@ impl ScrollPositionManager {
         state: ScrollState,
     ) {
         if let Some(id) = library_id {
-            let key = view.scroll_key(Some(id.as_uuid()));
+            let key = view.scroll_key(Some(id.to_uuid()));
             self.save_state(key, state);
         }
     }
@@ -377,7 +377,7 @@ impl ScrollPositionManager {
         library_id: Option<LibraryID>,
     ) -> Option<&ScrollState> {
         if let Some(id) = library_id {
-            let key = view.scroll_key(Some(id.as_uuid()));
+            let key = view.scroll_key(Some(id.to_uuid()));
             self.get_state(&key)
         } else {
             None
@@ -393,7 +393,7 @@ impl ScrollPositionManager {
         state: ScrollState,
     ) {
         if let Some(id) = library_id {
-            let key = view.scroll_key_with_context(Some(id.as_uuid()), context);
+            let key = view.scroll_key_with_context(Some(id.to_uuid()), context);
             self.save_state(key, state);
         }
     }
@@ -406,7 +406,7 @@ impl ScrollPositionManager {
         context: &Uuid,
     ) -> Option<&ScrollState> {
         if let Some(id) = library_id {
-            let key = view.scroll_key_with_context(Some(id.as_uuid()), context);
+            let key = view.scroll_key_with_context(Some(id.to_uuid()), context);
             self.get_state(&key)
         } else {
             None

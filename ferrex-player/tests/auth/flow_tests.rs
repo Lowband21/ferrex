@@ -1,10 +1,9 @@
-use ferrex_player::domains::auth::messages as auth_msgs;
 use ferrex_player::domains::auth::types::{AuthenticationFlow, CredentialType};
 use ferrex_player::domains::auth::update_handlers::auth_updates;
-use ferrex_player::state_refactored::State;
+use ferrex_player::state::State;
 
-fn make_user(id: uuid::Uuid, username: &str) -> ferrex_core::user::User {
-    ferrex_core::user::User {
+fn make_user(id: uuid::Uuid, username: &str) -> ferrex_core::domain::users::user::User {
+    ferrex_core::domain::users::user::User {
         id,
         username: username.to_string(),
         display_name: format!("{} display", username),
@@ -12,7 +11,7 @@ fn make_user(id: uuid::Uuid, username: &str) -> ferrex_core::user::User {
         email: None,
         is_active: true,
         last_login: None,
-        preferences: ferrex_core::user::UserPreferences::default(),
+        preferences: ferrex_core::domain::users::user::UserPreferences::default(),
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }
@@ -90,4 +89,3 @@ fn device_status_no_pin_shows_password_entry() {
         other => panic!("unexpected flow: {:?}", other),
     }
 }
-

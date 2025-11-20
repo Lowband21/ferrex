@@ -2,10 +2,13 @@
 
 use ferrex_core::{
     application::rbac_bootstrap::RbacBootstrapService,
-    user::User,
-    user_management::{
-        CreateUserCommand, DeleteUserCommand, ListUsersOptions,
-        UpdateUserCommand, UserAdminError, UserAdministrationService,
+    domain::users::{
+        user::User,
+        user_management::{
+            CreateUserCommand, DeleteUserCommand, ListUsersOptions,
+            PaginatedUsers, UpdateUserCommand, UserAdminError,
+            UserAdministrationService,
+        },
     },
 };
 use std::fmt;
@@ -81,7 +84,7 @@ impl<'a> UserService<'a> {
     pub async fn list_users(
         &self,
         options: ListUsersOptions,
-    ) -> AppResult<ferrex_core::user_management::PaginatedUsers> {
+    ) -> AppResult<PaginatedUsers> {
         self.admin()
             .list_users(options)
             .await

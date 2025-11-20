@@ -7,7 +7,7 @@ pub mod update;
 
 use self::messages::Message as UserManagementMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::infrastructure::services::api::ApiService;
+use crate::infra::services::api::ApiService;
 use ferrex_core::player_prelude::UserPermissions;
 use iced::Task;
 
@@ -18,10 +18,12 @@ pub struct UserManagementDomainState {
     pub api_service: Option<std::sync::Arc<dyn ApiService>>,
     pub user_permissions: Option<UserPermissions>,
     pub user_admin_service: Option<
-        std::sync::Arc<dyn crate::infrastructure::services::user_management::UserAdminService>,
+        std::sync::Arc<
+            dyn crate::infra::services::user_management::UserAdminService,
+        >,
     >,
     /// Cached admin user list for the admin users page
-    pub users: Vec<ferrex_core::api_types::users_admin::AdminUserInfo>,
+    pub users: Vec<crate::infra::api_types::AdminUserInfo>,
 }
 
 impl std::fmt::Debug for UserManagementDomainState {

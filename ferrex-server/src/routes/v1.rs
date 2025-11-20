@@ -3,8 +3,8 @@ use axum::{
     routing::{get, post, put},
 };
 
-use ferrex_core::api_routes::v1;
-use ferrex_core::api_routes::v1::admin::MEDIA_ROOT_BROWSER;
+use ferrex_core::api::routes::v1;
+use ferrex_core::api::routes::v1::admin::MEDIA_ROOT_BROWSER;
 
 #[cfg(feature = "demo")]
 use crate::handlers::admin::demo_handlers;
@@ -38,7 +38,6 @@ use crate::{
     users::admin_user_management,
     users::{
         admin_handlers, auth, role_handlers, security_settings_handlers,
-        session_handlers,
         setup::{
             claim::{confirm_secure_claim, start_secure_claim},
             setup::{check_setup_status, create_initial_admin},
@@ -68,15 +67,6 @@ pub fn create_v1_router(state: AppState) -> Router<AppState> {
             v1::auth::device::PIN_CHALLENGE,
             post(auth::device_handlers::pin_challenge),
         )
-        .route(
-            v1::auth::device::STATUS,
-            get(auth::device_handlers::check_device_status),
-        )
-        // Public user endpoints (for user selection screen)
-        .route(
-            v1::users::PUBLIC_LIST,
-            get(user_handlers::list_users_handler),
-        )
         // Public setup endpoints (for first-run)
         .route(v1::setup::STATUS, get(check_setup_status))
         .route(v1::setup::CREATE_ADMIN, post(create_initial_admin))
@@ -89,7 +79,7 @@ pub fn create_v1_router(state: AppState) -> Router<AppState> {
         //
         .merge(create_libraries_routes(state.clone()))
         .merge(create_scan_routes(state.clone()))
-        .merge(create_metadata_routes())
+        .merge(create_metadata_routes(state.clone()))
         // Merge protected routes
         .merge(create_protected_routes(state.clone()))
         // Merge admin routes
@@ -120,6 +110,10 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
             v1::auth::device::REVOKE,
             post(auth::device_handlers::revoke_device),
         )
+        .route(
+            v1::auth::device::STATUS,
+            get(auth::device_handlers::check_device_status),
+        )
         // Device trust validation endpoints
         .route(
             v1::auth::device::VALIDATE_TRUST,
@@ -143,21 +137,6 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         .route(
             v1::users::CHANGE_PASSWORD,
             put(user_handlers::change_password_handler),
-        )
-        // Note: User profile management routes moved to new user management API
-        .route(
-            v1::users::sessions::COLLECTION,
-            get(session_handlers::get_user_sessions_handler),
-        )
-        .route(
-            v1::users::sessions::ITEM,
-            axum::routing::delete(session_handlers::delete_session_handler),
-        )
-        .route(
-            v1::users::sessions::COLLECTION,
-            axum::routing::delete(
-                session_handlers::delete_all_sessions_handler,
-            ),
         )
         // User preferences endpoint (for current user)
         .route(
@@ -325,9 +304,13 @@ fn create_scan_routes(state: AppState) -> Router<AppState> {
         ))
 }
 
-fn create_metadata_routes() -> Router<AppState> {
-    Router::new().route(v1::images::SERVE, get(serve_image_handler))
-    // When metadata endpoints require auth middleware, reintroduce state injection here.
+fn create_metadata_routes(state: AppState) -> Router<AppState> {
+    Router::new()
+        .route(v1::images::SERVE, get(serve_image_handler))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ))
 }
 
 /// Create admin routes that require admin role

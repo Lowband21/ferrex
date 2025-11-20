@@ -591,9 +591,7 @@ PY
     echo "Error: ferrex-server produced an empty config at $CONFIG_FILE" >&2
     exit 1
   fi
-  # Ensure container runtime uses the container path for config resolution regardless of init mode.
-  # This avoids leaking host absolute paths into container env and breaking config loading.
-  set_env_var FERREX_CONFIG_PATH "/app/config/ferrex.toml"
+  set_env_var FERREX_CONFIG_PATH "config/ferrex.toml"
 else
   echo "Skipping config wizard; existing $CONFIG_FILE_DISPLAY preserved."
 fi

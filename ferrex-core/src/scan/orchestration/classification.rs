@@ -2,11 +2,11 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::borrow::Cow;
 
-use crate::orchestration::actors::messages::ParentDescriptors;
-use crate::orchestration::series::{
+use crate::domain::media::tv_parser::TvParser;
+use crate::scan::orchestration::actors::messages::ParentDescriptors;
+use crate::scan::orchestration::series::{
     SeriesFolderClues, clean_series_title, slugify_series_title,
 };
-use crate::tv_parser::TvParser;
 use crate::types::library::LibraryType;
 
 /// Provides classification utilities for translating filesystem folder names into

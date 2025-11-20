@@ -86,19 +86,9 @@ mod first_run {
     include!("auth/first_run_tests.rs");
 }
 
-// Token expiry extraction tests
-mod token_expiry_extraction {
-    include!("auth/token_expiry_extraction_test.rs");
-}
-
 // Token persistence behaviour
 mod auth_storage_persistence {
     include!("auth/auth_storage_tests.rs");
-}
-
-// Token expiry handling
-mod token_expiry_behaviour {
-    include!("auth/token_expiry_tests.rs");
 }
 
 // Refresh token integration tests

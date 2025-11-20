@@ -5,16 +5,10 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use axum::{
-    body::Body,
-    extract::{ConnectInfo, State},
-    http::{Request, StatusCode},
-    middleware::Next,
-    response::{IntoResponse, Response},
-};
-use ferrex_core::auth::rate_limit::{
-    EndpointLimits, RateLimitDecision, RateLimitError, RateLimitKey,
-    RateLimitResult, RateLimitRule, RateLimiter, TrustedSources, backoff,
+use ferrex_core::domain::users::auth::rate_limit::{
+    EndpointLimits, RateLimitAlgorithm, RateLimitDecision, RateLimitError,
+    RateLimitKey, RateLimitResult, RateLimitRule, RateLimiter, TrustedSources,
+    backoff,
 };
 use redis::AsyncCommands;
 use redis::aio::ConnectionManager;
@@ -22,7 +16,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fmt,
-    net::SocketAddr,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -30,10 +23,7 @@ use tokio::{
     sync::{RwLock, broadcast},
     time::interval,
 };
-use tracing::{debug, error, info, warn};
-use uuid::Uuid;
-
-use crate::infra::app_state::AppState;
+use tracing::{debug, info, warn};
 
 /// Redis scripts for atomic operations
 mod scripts {
@@ -446,7 +436,7 @@ impl RateLimiter for RedisRateLimiter {
         let mut conn = self.redis.clone();
 
         let result = match rule.algorithm {
-            ferrex_core::auth::rate_limit::RateLimitAlgorithm::SlidingWindowLog => {
+            RateLimitAlgorithm::SlidingWindowLog => {
                 let script = scripts::sliding_window_log();
                 script
                     .arg(now)
@@ -457,7 +447,7 @@ impl RateLimiter for RedisRateLimiter {
                     .await
                     .map_err(|e| RateLimitError::BackendError(e.into()))?
             }
-            ferrex_core::auth::rate_limit::RateLimitAlgorithm::TokenBucket => {
+            RateLimitAlgorithm::TokenBucket => {
                 let rate = rule.limit as f64 / rule.window.as_secs_f64();
                 let script = scripts::token_bucket();
                 script
@@ -478,9 +468,12 @@ impl RateLimiter for RedisRateLimiter {
                     .map_err(|e| RateLimitError::BackendError(e.into()))?;
 
                 if count == 1 {
-                    conn.expire::<_, ()>(&redis_key, rule.window.as_secs() as i64)
-                        .await
-                        .map_err(|e| RateLimitError::BackendError(e.into()))?;
+                    conn.expire::<_, ()>(
+                        &redis_key,
+                        rule.window.as_secs() as i64,
+                    )
+                    .await
+                    .map_err(|e| RateLimitError::BackendError(e.into()))?;
                 }
 
                 if count <= rule.limit as i64 {
@@ -622,7 +615,7 @@ impl RateLimiter for RedisRateLimiter {
         let mut conn = self.redis.clone();
 
         let current_count: u32 = match rule.algorithm {
-            ferrex_core::auth::rate_limit::RateLimitAlgorithm::SlidingWindowLog => {
+            RateLimitAlgorithm::SlidingWindowLog => {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
@@ -734,115 +727,6 @@ fn apply_dynamic_rule(
     }
 }
 
-// Rate limit layer is now inlined in main.rs due to type inference issues with axum 0.7
-
-/// Extract rate limit key from request
-fn extract_rate_limit_key(request: &Request<Body>) -> RateLimitKey {
-    // Try to get authenticated user from extensions
-    if let Some(user) = request.extensions().get::<ferrex_core::user::User>() {
-        return RateLimitKey::UserId(user.id);
-    }
-
-    // Try to get device ID from headers
-    if let Some(device_id) = request
-        .headers()
-        .get("X-Device-ID")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| Uuid::parse_str(s).ok())
-    {
-        return RateLimitKey::DeviceId(device_id);
-    }
-
-    // Fall back to IP address
-    if let Some(ConnectInfo(addr)) =
-        request.extensions().get::<ConnectInfo<SocketAddr>>()
-    {
-        return RateLimitKey::IpAddress(addr.ip().to_string());
-    }
-
-    // Try X-Forwarded-For header
-    if let Some(forwarded) = request
-        .headers()
-        .get("X-Forwarded-For")
-        .and_then(|v| v.to_str().ok())
-        && let Some(ip) = forwarded.split(',').next()
-    {
-        return RateLimitKey::IpAddress(ip.trim().to_string());
-    }
-
-    // Default to unknown
-    RateLimitKey::Custom("unknown".to_string())
-}
-
-/// Rate limiting middleware
-async fn rate_limit_middleware(
-    State(state): State<AppState>,
-    request: Request<Body>,
-    next: Next,
-    limiter: Arc<dyn RateLimiter>,
-    endpoint: String,
-) -> Result<Response, StatusCode> {
-    // Extract rate limit key
-    let key = extract_rate_limit_key(&request);
-
-    // Get endpoint-specific rule
-    let rule = {
-        let config = state.config_handle();
-        // TODO: Get rule from config based on endpoint
-        RateLimitRule::default()
-    };
-
-    // Check rate limit
-    match limiter.check_and_update(&key, &rule).await {
-        Ok(decision) => {
-            if decision.allowed {
-                // Add rate limit headers to response
-                let mut response = next.run(request).await;
-
-                let headers = response.headers_mut();
-                headers.insert(
-                    "X-RateLimit-Limit",
-                    decision.limit.to_string().parse().unwrap(),
-                );
-                headers.insert(
-                    "X-RateLimit-Remaining",
-                    (decision.limit - decision.current_count)
-                        .to_string()
-                        .parse()
-                        .unwrap(),
-                );
-                headers.insert(
-                    "X-RateLimit-Reset",
-                    (SystemTime::now() + decision.reset_after)
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs()
-                        .to_string()
-                        .parse()
-                        .unwrap(),
-                );
-
-                Ok(response)
-            } else {
-                Err(StatusCode::TOO_MANY_REQUESTS)
-            }
-        }
-        Err(RateLimitError::RateLimitExceeded { retry_after, .. }) => {
-            let mut response = StatusCode::TOO_MANY_REQUESTS.into_response();
-            response.headers_mut().insert(
-                "Retry-After",
-                retry_after.as_secs().to_string().parse().unwrap(),
-            );
-            Ok(response)
-        }
-        Err(e) => {
-            error!("Rate limiter error: {}", e);
-            // Fail open - allow request on errors
-            Ok(next.run(request).await)
-        }
-    }
-}
-
 /// Create endpoint-specific rate limiter
 pub fn create_rate_limiter(
     redis_url: &str,
@@ -854,23 +738,4 @@ pub fn create_rate_limiter(
             Ok(Arc::new(limiter) as Arc<dyn RateLimiter>)
         })
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_rate_limit_key_extraction() {
-        let request = Request::builder()
-            .header("X-Forwarded-For", "192.168.1.100, 10.0.0.1")
-            .body(Body::empty())
-            .unwrap();
-
-        let key = extract_rate_limit_key(&request);
-        match key {
-            RateLimitKey::IpAddress(ip) => assert_eq!(ip, "192.168.1.100"),
-            _ => panic!("Expected IP address key"),
-        }
-    }
 }

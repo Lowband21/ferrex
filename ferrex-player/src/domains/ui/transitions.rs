@@ -393,8 +393,8 @@ pub fn generate_random_gradient_center() -> (f32, f32) {
     use rand::Rng;
     let mut rng = rand::rng();
     (
-        0.01 + rng.r#gen::<f32>() * 0.99,
-        0.01 + rng.r#gen::<f32>() * 0.9,
+        0.01 + rng.random::<f32>() * 0.99,
+        0.01 + rng.random::<f32>() * 0.9,
     )
 }
 

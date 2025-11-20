@@ -3,25 +3,14 @@ pub mod image_loading_subscription;
 pub mod subscription;
 pub mod subscriptions;
 
-use crate::infrastructure::api_types::{Media, SeriesReference};
-use ferrex_core::player_prelude::{
-    EpisodeID, ImageRequest, MediaID, SeasonID, SeriesID,
-};
+use crate::infra::api_types::{Media, SeriesReference};
+use ferrex_core::player_prelude::{ImageRequest, MediaID};
 
 #[derive(Clone)]
 pub enum Message {
     // Metadata service
     InitializeService,
 
-    RefreshShowMetadata(SeriesID), // Refresh metadata for all episodes in a show
-    RefreshSeasonMetadata(SeasonID, u32), // Refresh metadata for all episodes in a season
-    RefreshEpisodeMetadata(EpisodeID), // Refresh metadata for a single episode
-    ShowMetadataRefreshed(String),     // show_name
-    ShowMetadataRefreshFailed(String, String), // show_name, error
-
-    // Batch operations
-    BatchMetadataComplete,
-    CheckDetailsFetcherQueue, // Check if background fetcher has completed items
     MediaDetailsLoaded(Result<Vec<Media>, String>), // Full media details loaded
     SeriesSortingCompleted(Vec<SeriesReference>), // Series sorted in background
 
@@ -40,31 +29,6 @@ impl Message {
     pub fn name(&self) -> &'static str {
         match self {
             Message::InitializeService => "Metadata::InitializeService",
-            /*
-            Message::FetchMetadata(_) => "Metadata::FetchMetadata",
-            Message::MetadataFetched(_, _) => "Metadata::MetadataFetched",
-            Message::TvShowLoaded(_, _) => "Metadata::TvShowLoaded",
-            Message::SeasonLoaded(_, _, _) => "Metadata::SeasonLoaded",
-             */
-            Message::RefreshShowMetadata(_) => "Metadata::RefreshShowMetadata",
-            Message::RefreshSeasonMetadata(_, _) => {
-                "Metadata::RefreshSeasonMetadata"
-            }
-            Message::RefreshEpisodeMetadata(_) => {
-                "Metadata::RefreshEpisodeMetadata"
-            }
-            Message::ShowMetadataRefreshed(_) => {
-                "Metadata::ShowMetadataRefreshed"
-            }
-            Message::ShowMetadataRefreshFailed(_, _) => {
-                "Metadata::ShowMetadataRefreshFailed"
-            }
-            Message::BatchMetadataComplete => "Metadata::BatchMetadataComplete",
-            //Message::MediaDetailsUpdated(_) => "Metadata::MediaDetailsUpdated",
-            //Message::MediaDetailsBatch(_) => "Metadata::MediaDetailsBatch",
-            Message::CheckDetailsFetcherQueue => {
-                "Metadata::CheckDetailsFetcherQueue"
-            }
             Message::MediaDetailsLoaded(_) => "Metadata::MediaDetailsLoaded",
             //Message::MediaDetailsFetched(_, _) => "Metadata::MediaDetailsFetched",
             //Message::MetadataUpdated(_) => "Metadata::MetadataUpdated",
@@ -88,63 +52,6 @@ impl std::fmt::Debug for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InitializeService => write!(f, "Metadata::InitializeService"),
-            Self::RefreshShowMetadata(id) => f
-                .debug_tuple("Metadata::RefreshShowMetadata")
-                .field(id)
-                .finish(),
-            Self::RefreshSeasonMetadata(id, num) => f
-                .debug_tuple("Metadata::RefreshSeasonMetadata")
-                .field(id)
-                .field(num)
-                .finish(),
-            Self::RefreshEpisodeMetadata(id) => f
-                .debug_tuple("Metadata::RefreshEpisodeMetadata")
-                .field(id)
-                .finish(),
-            Self::ShowMetadataRefreshed(name) => f
-                .debug_tuple("Metadata::ShowMetadataRefreshed")
-                .field(name)
-                .finish(),
-            Self::ShowMetadataRefreshFailed(name, err) => f
-                .debug_tuple("Metadata::ShowMetadataRefreshFailed")
-                .field(name)
-                .field(err)
-                .finish(),
-            Self::BatchMetadataComplete => {
-                write!(f, "Metadata::BatchMetadataComplete")
-            }
-            //Self::MediaDetailsUpdated(media) => {
-            //    // Show summary instead of full details
-            //    match media {
-            //        Media::Movie(m) => write!(
-            //            f,
-            //            "Metadata::MediaDetailsUpdated(Movie: {})",
-            //            m.title.as_str()
-            //        ),
-            //        Media::Series(s) => write!(
-            //            f,
-            //            "Metadata::MediaDetailsUpdated(Series: {})",
-            //            s.title.as_str()
-            //        ),
-            //        Media::Season(s) => write!(
-            //            f,
-            //            "Metadata::MediaDetailsUpdated(Season: {})",
-            //            s.id.as_str()
-            //        ),
-            //        Media::Episode(e) => write!(
-            //            f,
-            //            "Metadata::MediaDetailsUpdated(Episode: S{:02}E{:02})",
-            //            e.season_number.value(),
-            //            e.episode_number.value()
-            //        ),
-            //    }
-            //}
-            //Self::MediaDetailsBatch(batch) => {
-            //    write!(f, "Metadata::MediaDetailsBatch({} items)", batch.len())
-            //}
-            Self::CheckDetailsFetcherQueue => {
-                write!(f, "Metadata::CheckDetailsFetcherQueue")
-            }
             Self::MediaDetailsLoaded(result) => match result {
                 Ok(refs) => write!(
                     f,
@@ -153,37 +60,6 @@ impl std::fmt::Debug for Message {
                 ),
                 Err(e) => write!(f, "Metadata::MediaDetailsLoaded(Err: {})", e),
             },
-            //Self::MediaDetailsFetched(id, result) => match result {
-            //    Ok(media) => match media {
-            //        Media::Movie(m) => write!(
-            //            f,
-            //            "Metadata::MediaDetailsFetched({}, Ok: Movie {})",
-            //            id,
-            //            m.title.as_str()
-            //        ),
-            //        Media::Series(s) => write!(
-            //            f,
-            //            "Metadata::MediaDetailsFetched({}, Ok: Series {})",
-            //            id,
-            //            s.title.as_str()
-            //        ),
-            //        Media::Season(s) => write!(
-            //            f,
-            //            "Metadata::MediaDetailsFetched({}, Ok: Season {})",
-            //            id,
-            //            s.id.as_str()
-            //        ),
-            //        Media::Episode(e) => write!(
-            //            f,
-            //            "Metadata::MediaDetailsFetched({}, Ok: Episode S{:02}E{:02})",
-            //            id,
-            //            e.season_number.value(),
-            //            e.episode_number.value()
-            //        ),
-            //    },
-            //    Err(e) => write!(f, "Metadata::MediaDetailsFetched({}, Err: {})", id, e),
-            //},
-            //Self::MetadataUpdated(media_id) => write!(f, "Metadata::MetadataUpdated({})", media_id),
             Self::ImageLoaded(cache_key, result) => match result {
                 Ok(data) => write!(
                     f,

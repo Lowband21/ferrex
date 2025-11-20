@@ -1,6 +1,6 @@
 use super::Message;
-use crate::infrastructure::services::api::ApiService;
-use ferrex_core::api_routes::{utils, v1};
+use crate::infra::services::api::ApiService;
+use ferrex_core::api::routes::{utils, v1};
 use ferrex_core::player_prelude::{ImageSize, ImageType};
 use futures::stream;
 use iced::Subscription;
@@ -12,7 +12,6 @@ pub fn image_loading(
     api_service: Arc<dyn ApiService>,
     server_url: String,
     receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
-    auth_token: Option<String>,
 ) -> Subscription<Message> {
     // Subscription data that includes both ID and context
     #[derive(Debug, Clone)]
@@ -21,7 +20,6 @@ pub fn image_loading(
         api_service: Arc<dyn ApiService>,
         server_url: String,
         receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
-        auth_token: Option<String>,
     }
 
     impl std::hash::Hash for ImageLoaderSubscription {
@@ -35,7 +33,6 @@ pub fn image_loading(
         api_service,
         server_url,
         receiver,
-        auth_token,
     };
 
     Subscription::run_with(subscription, |sub| {
@@ -55,7 +52,6 @@ pub fn image_loading(
             Arc::clone(&sub.api_service),
             sub.server_url.clone(),
             Arc::clone(&sub.receiver),
-            sub.auth_token.clone(),
         )
     })
 }
@@ -67,7 +63,6 @@ fn image_loader_stream(
     wake_receiver_arc: Arc<
         Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>,
     >,
-    auth_token: Option<String>,
 ) -> impl futures::Stream<Item = Message> {
     enum ImageLoaderState {
         Running {
@@ -86,7 +81,6 @@ fn image_loader_stream(
         },
         move |state| {
             let server_url = server_url.clone();
-            let auth_token = auth_token.clone();
             let api_service = Arc::clone(&api_service);
             let wake_receiver_arc = Arc::clone(&wake_receiver_arc);
             async move {
@@ -97,7 +91,7 @@ fn image_loader_stream(
                     } => {
                         // Try to pull a request from the queue first
                         let request =
-                            match crate::infrastructure::service_registry::get_image_service() {
+                            match crate::infra::service_registry::get_image_service() {
                                 Some(image_service) => image_service.get().get_next_request(),
                                 _ => None,
                             };
@@ -105,7 +99,7 @@ fn image_loader_stream(
                         if let Some(request) = request {
                             // Mark the image as loading in the service
                             if let Some(image_service) =
-                                crate::infrastructure::service_registry::get_image_service()
+                                crate::infra::service_registry::get_image_service()
                             {
                                 image_service.get().mark_loading(&request);
                             }

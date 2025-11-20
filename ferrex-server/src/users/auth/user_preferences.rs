@@ -3,7 +3,7 @@ use crate::infra::{
     errors::{AppError, AppResult},
 };
 use axum::{Extension, Json, extract::State};
-use ferrex_core::{api_types::ApiResponse, user::User};
+use ferrex_core::{api::types::ApiResponse, domain::users::user::User};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

@@ -25,7 +25,6 @@ pub struct MetadataNeeds {
 pub trait ViewModel: Send + Sync {
     /// Update the view model from the media store
     //fn refresh_from_repo(&mut self);
-
     /// Get the currently visible items
     fn get_visible_items(&self) -> VisibleItems;
 

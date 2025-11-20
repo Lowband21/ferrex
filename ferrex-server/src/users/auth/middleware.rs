@@ -5,12 +5,17 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ferrex_core::{
-    api_types::ApiResponse, auth::domain::value_objects::SessionScope,
-    rbac::UserPermissions, user::User,
+    api::types::ApiResponse,
+    domain::users::{
+        auth::domain::{
+            services::AuthenticationError, value_objects::SessionScope,
+        },
+        rbac::UserPermissions,
+        user::User,
+    },
 };
 
 use crate::infra::app_state::AppState;
-use ferrex_core::auth::domain::services::AuthenticationError;
 
 pub async fn auth_middleware(
     State(state): State<AppState>,
@@ -79,18 +84,15 @@ pub async fn optional_auth_middleware(
 }
 
 pub async fn admin_middleware(request: Request, next: Next) -> Response {
-    let user = match request.extensions().get::<User>() {
-        Some(user) => user,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                axum::Json(ApiResponse::<()>::error(
-                    "Authentication required".to_string(),
-                )),
-            )
-                .into_response();
-        }
-    };
+    if request.extensions().get::<User>().is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(ApiResponse::<()>::error(
+                "Authentication required".to_string(),
+            )),
+        )
+            .into_response();
+    }
 
     let permissions = match request.extensions().get::<UserPermissions>() {
         Some(perms) => perms,

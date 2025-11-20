@@ -17,7 +17,7 @@ use crate::{
 
 use super::folder::is_media_file_path;
 use super::messages::{ActorObserver, IssuedJobRecord, ParentDescriptors};
-use crate::orchestration::{
+use crate::scan::orchestration::{
     correlation::CorrelationCache,
     events::JobEventPublisher,
     job::{DedupeKey, JobHandle, JobId, JobPriority, ScanReason},
@@ -696,12 +696,12 @@ mod tests {
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use sha2::{Digest, Sha256};
-    use std::sync::Arc;
+    use std::{path::Path, sync::Arc};
     use tokio::sync::Mutex as AsyncMutex;
 
     use crate::{
         error::MediaError,
-        orchestration::{
+        scan::orchestration::{
             FolderScanJob, NoopActorObserver,
             correlation::CorrelationCache,
             events::{JobEvent, JobEventPublisher},
@@ -714,8 +714,9 @@ mod tests {
 
     #[derive(Clone, Debug)]
     struct RecordedJob {
-        job: FolderScanJob,
-        correlation: Option<Uuid>,
+        // Fields are recorded for potential future assertions; currently unused in these tests.
+        _job: FolderScanJob,
+        _correlation: Option<Uuid>,
     }
 
     #[derive(Clone, Default)]
@@ -781,8 +782,8 @@ mod tests {
         async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
             if let JobPayload::FolderScan(job) = &request.payload {
                 self.jobs.lock().await.push(RecordedJob {
-                    job: job.clone(),
-                    correlation: request.correlation_id,
+                    _job: job.clone(),
+                    _correlation: request.correlation_id,
                 });
             }
             Ok(JobHandle::accepted(
@@ -845,7 +846,7 @@ mod tests {
     }
 
     fn make_event(
-        path: &PathBuf,
+        path: &Path,
         kind: FileSystemEventKind,
         library_id: LibraryID,
     ) -> FileSystemEvent {
@@ -853,7 +854,7 @@ mod tests {
     }
 
     fn make_event_with_correlation(
-        path: &PathBuf,
+        path: &Path,
         kind: FileSystemEventKind,
         library_id: LibraryID,
         correlation: Option<Uuid>,
@@ -870,7 +871,7 @@ mod tests {
             library_id,
             path_key,
             fingerprint: None,
-            path: path.clone(),
+            path: path.to_path_buf(),
             old_path: None,
             kind,
             occurred_at: Utc::now(),

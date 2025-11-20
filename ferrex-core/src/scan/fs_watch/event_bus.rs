@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use futures::Stream;
 use uuid::Uuid;
 
-use crate::database::MediaDatabase;
+use crate::database::ports::file_watch::FileWatchEventRepository;
 use crate::database::traits::FileWatchEvent;
 use crate::error::{MediaError, Result};
 use crate::types::ids::LibraryID;
@@ -77,19 +77,20 @@ pub trait FileChangeEventBus: Send + Sync {
 
 #[derive(Clone)]
 pub struct LegacyDatabaseFileChangeEventBus {
-    db: Arc<MediaDatabase>,
+    repository: Arc<dyn FileWatchEventRepository>,
 }
 
 impl LegacyDatabaseFileChangeEventBus {
-    pub fn new(db: Arc<MediaDatabase>) -> Self {
-        Self { db }
+    pub fn new(repository: Arc<dyn FileWatchEventRepository>) -> Self {
+        Self { repository }
     }
 }
 
 impl fmt::Debug for LegacyDatabaseFileChangeEventBus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let repo_type = std::any::type_name_of_val(self.repository.as_ref());
         f.debug_struct("LegacyDatabaseFileChangeEventBus")
-            .field("db", &self.db)
+            .field("repository_type", &repo_type)
             .finish()
     }
 }
@@ -97,7 +98,7 @@ impl fmt::Debug for LegacyDatabaseFileChangeEventBus {
 #[async_trait]
 impl FileChangeEventBus for LegacyDatabaseFileChangeEventBus {
     async fn publish(&self, event: FileWatchEvent) -> Result<()> {
-        self.db.backend().create_file_watch_event(&event).await
+        self.repository.create_event(&event).await
     }
 
     async fn subscribe(
@@ -137,17 +138,16 @@ impl FileChangeEventBus for LegacyDatabaseFileChangeEventBus {
         library_id: LibraryID,
         limit: i32,
     ) -> Result<Vec<FileWatchEvent>> {
-        self.db
-            .backend()
+        self.repository
             .get_unprocessed_events(library_id, limit)
             .await
     }
 
     async fn mark_processed(&self, event_id: Uuid) -> Result<()> {
-        self.db.backend().mark_event_processed(event_id).await
+        self.repository.mark_processed(event_id).await
     }
 
     async fn cleanup_retention(&self, days_to_keep: i32) -> Result<u32> {
-        self.db.backend().cleanup_old_events(days_to_keep).await
+        self.repository.cleanup_processed(days_to_keep).await
     }
 }

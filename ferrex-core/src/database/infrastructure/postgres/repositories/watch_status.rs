@@ -7,8 +7,8 @@ use uuid::Uuid;
 
 use crate::database::ports::watch_status::WatchStatusRepository;
 use crate::{
+    domain::watch::{InProgressItem, UpdateProgressRequest, UserWatchState},
     error::{MediaError, Result},
-    watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
 };
 
 #[derive(Clone, Debug)]

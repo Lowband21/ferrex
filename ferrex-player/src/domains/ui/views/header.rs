@@ -2,7 +2,7 @@ use crate::domains::auth::permissions::StatePermissionExt;
 use crate::{
     common::ui_utils::icon_text_with_size,
     domains::ui::{messages::Message, theme, types::ViewState},
-    infrastructure::constants::layout::header::HEIGHT,
+    infra::constants::layout::header::HEIGHT,
     state::State,
 };
 use ferrex_core::player_prelude::LibraryID;
@@ -772,7 +772,6 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
     profiling::function
 )]
 fn get_detail_title(state: &State) -> String {
-    let buff = Uuid::encode_buffer();
     match &state.domains.ui.state.view {
         ViewState::MovieDetail { .. } => "Placeholder".to_string(), //movie,
         ViewState::SeriesDetail { .. } => {

@@ -112,6 +112,16 @@ pub enum AuthenticationFlow {
     /// Loading users from server
     LoadingUsers,
 
+    /// Pre-auth login screen collecting username/password when no user list is available
+    PreAuthLogin {
+        username: String,
+        password: crate::domains::auth::security::secure_credential::SecureCredential,
+        show_password: bool,
+        remember_device: bool,
+        error: Option<String>,
+        loading: bool,
+    },
+
     /// User selection screen
     SelectingUser {
         users: Vec<UserListItemDto>,
@@ -147,6 +157,3 @@ pub enum AuthenticationFlow {
         mode: AuthenticationMode,
     },
 }
-
-/// Legacy compatibility - will be removed
-pub type AuthViewState = AuthenticationFlow;

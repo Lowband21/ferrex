@@ -4,16 +4,16 @@
 //! with automatic loading, caching, and animation support.
 
 use crate::domains::metadata::image_service::FirstDisplayHint;
-use crate::domains::ui::widgets::rounded_image_shader::AnimatedPosterBounds;
+use crate::infra::widgets::poster::poster_animation_types::{
+    AnimatedPosterBounds, AnimationBehavior, PosterAnimationType,
+};
 use crate::{
     domains::ui::messages::Message,
-    domains::ui::widgets::{
-        AnimationBehavior, AnimationType, rounded_image_shader,
-    },
-    infrastructure::api_types::{
+    domains::ui::widgets::poster,
+    infra::api_types::{
         EpisodeReference, MovieReference, SeasonReference, SeriesReference,
     },
-    infrastructure::service_registry,
+    infra::service_registry,
 };
 use ferrex_core::player_prelude::{
     ImageRequest, ImageSize, ImageType, MediaIDLike, Priority,
@@ -70,8 +70,7 @@ impl ImageFor {
             media_id,
             size: ImageSize::Poster,
             image_type: ImageType::Movie,
-            radius:
-                crate::infrastructure::constants::layout::poster::CORNER_RADIUS,
+            radius: crate::infra::constants::layout::poster::CORNER_RADIUS,
             width: Length::Fixed(200.0),
             height: Length::Fixed(300.0),
             // Might want to use a different default icon
@@ -80,7 +79,7 @@ impl ImageFor {
             priority: Priority::Preload,
             image_index: 0,
             // Default; callers (views) should set from UI state
-            animation: AnimationBehavior::constant(AnimationType::flip()),
+            animation: AnimationBehavior::constant(PosterAnimationType::flip()),
             theme_color: None,
             is_hovered: false,
             on_play: None,
@@ -167,7 +166,7 @@ impl ImageFor {
 
     /// Set the animation behavior using a single animation intent.
     /// Flip animations automatically degrade to a fade once the image is cached.
-    pub fn animation(mut self, animation: AnimationType) -> Self {
+    pub fn animation(mut self, animation: PosterAnimationType) -> Self {
         self.animation = AnimationBehavior::from_primary(animation);
         self
     }
@@ -180,7 +179,7 @@ impl ImageFor {
 
     /// Disable animation
     pub fn no_animation(mut self) -> Self {
-        self.animation = AnimationBehavior::constant(AnimationType::None);
+        self.animation = AnimationBehavior::constant(PosterAnimationType::None);
         self
     }
 
@@ -230,7 +229,7 @@ pub fn image_for(media_id: Uuid) -> ImageFor {
 
 // Thread-local cache for the image service to avoid repeated lookups
 thread_local! {
-    static CACHED_IMAGE_SERVICE: std::cell::RefCell<Option<crate::infrastructure::service_registry::ImageServiceHandle>> = const { std::cell::RefCell::new(None) };
+    static CACHED_IMAGE_SERVICE: std::cell::RefCell<Option<crate::infra::service_registry::ImageServiceHandle>> = const { std::cell::RefCell::new(None) };
 }
 
 impl<'a> From<ImageFor> for Element<'a, Message> {
@@ -321,8 +320,8 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                         None => image.animation,
                     };
 
-                    let mut shader: rounded_image_shader::RoundedImage =
-                        rounded_image_shader(handle, Some(request_hash))
+                    let mut shader: poster::Poster =
+                        poster(handle, Some(request_hash))
                             .radius(image.radius)
                             .with_animated_bounds(bounds)
                             .is_hovered(image.is_hovered);
@@ -350,7 +349,7 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                                 Some(jittered),
                             )
                         }
-                        None => (AnimationType::None, None),
+                        None => (PosterAnimationType::None, None),
                     };
 
                     if let Some(load_time) = load_time_opt {
@@ -418,7 +417,7 @@ fn create_shader_from_cached<'a>(
     bounds: AnimatedPosterBounds,
 ) -> Element<'a, Message> {
     // Check if we should skip atlas upload for VeryFast scrolling
-    let mut shader = rounded_image_shader(handle, Some(request_hash))
+    let mut shader = poster(handle, Some(request_hash))
         .radius(image.radius)
         .with_animated_bounds(bounds)
         .is_hovered(image.is_hovered);
@@ -444,7 +443,7 @@ fn create_shader_from_cached<'a>(
                 load_time + std::time::Duration::from_millis(jitter_ms);
             (animation.select(Some(jittered)), Some(jittered))
         }
-        None => (AnimationType::None, None),
+        None => (PosterAnimationType::None, None),
     };
 
     if let Some(load_time) = load_time_opt {
@@ -493,11 +492,11 @@ fn create_loading_placeholder<'a>(
     // The PlaceholderSunken animation type will show backface with theme color
     // and apply sunken depth effect
     // Use the request hash so the placeholder shares identity with the texture once it loads.
-    rounded_image_shader(placeholder_handle, Some(request_hash))
+    poster(placeholder_handle, Some(request_hash))
         .radius(radius)
         .with_animated_bounds(bounds)
         .theme_color(color)
-        .with_animation(AnimationType::PlaceholderSunken)
+        .with_animation(PosterAnimationType::PlaceholderSunken)
         .is_hovered(false) // Placeholders are never hovered
         .into()
 }

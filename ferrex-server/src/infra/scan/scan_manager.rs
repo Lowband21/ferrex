@@ -1,20 +1,18 @@
 use axum::http::StatusCode;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use ferrex_core::api_types::{
+use ferrex_core::api::types::{
     ScanLifecycleStatus as ApiScanLifecycleStatus, ScanSnapshotDto,
 };
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::error::MediaError;
-use ferrex_core::orchestration::actors::pipeline::{
+use ferrex_core::scan::orchestration::actors::pipeline::{
     IndexingChange, IndexingOutcome,
 };
-use ferrex_core::orchestration::{
-    JobEvent, LibraryActorCommand, PostgresCursorRepository, StartMode,
-};
-use ferrex_core::orchestration::{
+use ferrex_core::scan::orchestration::{
+    JobEvent, LibraryActorCommand, StartMode,
     events::{JobEventPayload, ScanEvent},
     job::{JobId, JobKind},
-    scan_cursor::{ScanCursor, ScanCursorId, ScanCursorRepository},
+    scan_cursor::{ScanCursor, ScanCursorRepository},
 };
 use ferrex_core::types::events::ScanSseEventType;
 use ferrex_core::types::ids::{EpisodeID, MovieID, SeasonID, SeriesID};
@@ -23,11 +21,9 @@ use ferrex_core::types::{
     ScanStageLatencySummary,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
 use std::{
     collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
     fmt,
-    hash::{Hash, Hasher},
     sync::{Arc, Weak},
     time::{Duration, Instant},
 };
@@ -40,8 +36,6 @@ use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
 use crate::infra::orchestration::ScanOrchestrator;
-use ferrex_core::database::postgres::PostgresDatabase;
-
 const EVENT_VERSION: &str = "1";
 const HISTORY_CAPACITY: usize = 256;
 const EVENT_HISTORY_CAPACITY: usize = 512;
@@ -80,7 +74,6 @@ impl fmt::Debug for ScanControlPlane {
 
 struct ScanControlPlaneInner {
     unit_of_work: Arc<AppUnitOfWork>,
-    postgres: Arc<PostgresDatabase>,
     orchestrator: Arc<ScanOrchestrator>,
     active: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
     history: RwLock<VecDeque<ScanHistoryEntry>>,
@@ -91,12 +84,10 @@ struct ScanControlPlaneInner {
 impl ScanControlPlane {
     pub fn new(
         unit_of_work: Arc<AppUnitOfWork>,
-        postgres: Arc<PostgresDatabase>,
         orchestrator: Arc<ScanOrchestrator>,
     ) -> Self {
         Self::with_quiescence_window(
             unit_of_work,
-            postgres,
             orchestrator,
             DEFAULT_QUIESCENCE,
         )
@@ -104,24 +95,20 @@ impl ScanControlPlane {
 
     pub fn with_quiescence_window(
         unit_of_work: Arc<AppUnitOfWork>,
-        postgres: Arc<PostgresDatabase>,
         orchestrator: Arc<ScanOrchestrator>,
         quiescence: Duration,
     ) -> Self {
         let (media_tx, _rx) = broadcast::channel(512);
         let aggregator = ScanRunAggregator::new(
             Arc::clone(&orchestrator),
-            orchestrator.cursor_repository(),
             quiescence,
             media_tx.clone(),
             unit_of_work.clone(),
-            postgres.clone(),
         );
 
         Self {
             inner: Arc::new(ScanControlPlaneInner {
                 unit_of_work,
-                postgres,
                 orchestrator,
                 active: RwLock::new(HashMap::new()),
                 history: RwLock::new(VecDeque::with_capacity(HISTORY_CAPACITY)),
@@ -176,14 +163,12 @@ impl ScanControlPlane {
 
         let correlation_id = correlation_id.unwrap_or_else(Uuid::now_v7);
         let scan_id = correlation_id;
-        let cursor_repository = self.inner.orchestrator.cursor_repository();
         let run = ScanRun::new(
             Arc::clone(&self.inner),
             scan_id,
             library_id,
             correlation_id,
             StartMode::Bulk,
-            cursor_repository,
         );
 
         self.inner.register_run(run.clone()).await;
@@ -418,7 +403,6 @@ struct ScanRun {
     inner: Weak<ScanControlPlaneInner>,
     events: Mutex<VecDeque<ScanBroadcastFrame>>,
     start_mode: StartMode,
-    cursor_repository: Arc<PostgresCursorRepository>,
     log: Mutex<ScanLogWatermark>,
 }
 
@@ -501,7 +485,6 @@ struct ScanItemState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScanItemStatus {
-    Pending,
     InProgress,
     Retrying,
     Completed,
@@ -510,7 +493,7 @@ enum ScanItemStatus {
 
 impl ScanItemStatus {
     fn is_active(self) -> bool {
-        matches!(self, Self::Pending | Self::InProgress | Self::Retrying)
+        matches!(self, Self::InProgress | Self::Retrying)
     }
 
     fn is_terminal(self) -> bool {
@@ -535,7 +518,6 @@ impl ScanRun {
         library_id: LibraryID,
         correlation_id: Uuid,
         mode: StartMode,
-        cursor_repository: Arc<PostgresCursorRepository>,
     ) -> Arc<Self> {
         let (tx, _rx) = broadcast::channel(1024);
         Arc::new(ScanRun {
@@ -568,7 +550,6 @@ impl ScanRun {
             inner: Arc::downgrade(&inner),
             events: Mutex::new(VecDeque::with_capacity(EVENT_HISTORY_CAPACITY)),
             start_mode: mode,
-            cursor_repository,
             log: Mutex::new(ScanLogWatermark::default()),
         })
     }
@@ -605,11 +586,11 @@ impl ScanRun {
     }
 
     async fn rehydrate_from_cursors(&self) {
-        let cursors = match self
-            .cursor_repository
-            .list_by_library(self.library_id)
-            .await
-        {
+        let Some(inner) = self.inner.upgrade() else {
+            return;
+        };
+        let repository = inner.orchestrator.cursor_repository();
+        let cursors = match repository.list_by_library(self.library_id).await {
             Ok(entries) => entries,
             Err(err) => {
                 warn!(
@@ -634,41 +615,6 @@ impl ScanRun {
         for frame in frames {
             self.emit_frame(frame.event, frame.payload).await;
         }
-    }
-
-    async fn persist_completed_cursor(
-        &self,
-        path_norm: &str,
-        event_time: DateTime<Utc>,
-    ) {
-        if let Some(cursor) = self.make_cursor(path_norm, event_time)
-            && let Err(err) = self.cursor_repository.upsert(cursor).await
-        {
-            warn!(
-                library = %self.library_id,
-                scan = %self.scan_id,
-                path = %path_norm,
-                error = %err,
-                "failed to persist completed cursor"
-            );
-        }
-    }
-
-    fn make_cursor(
-        &self,
-        path_norm: &str,
-        last_scan_at: DateTime<Utc>,
-    ) -> Option<ScanCursor> {
-        if path_norm.is_empty() {
-            return None;
-        }
-
-        Some(build_cursor(
-            self.library_id,
-            path_norm,
-            last_scan_at,
-            self.scan_id,
-        ))
     }
 
     async fn pause(
@@ -867,10 +813,10 @@ impl ScanRun {
     ) {
         let event_time = Utc::now();
         let path = path_key.clone();
-        let (frames, persist_path) = {
+        let frames = {
             let mut state = self.state.lock().await;
             if state.is_terminal() {
-                (Vec::new(), None)
+                Vec::new()
             } else {
                 tracing::debug!(
                     target: "scan::state",
@@ -909,8 +855,7 @@ impl ScanRun {
                         frames.push(frame);
                     }
                 }
-                let persist = if changed { path.clone() } else { None };
-                (frames, persist)
+                frames
             }
         };
 
@@ -1293,7 +1238,6 @@ impl ScanRun {
     }
 
     async fn finalize_history(&self, terminal: ScanLifecycleStatus) {
-        let terminal_copy = terminal.clone();
         let snapshot = {
             let state = self.state.lock().await;
             ScanHistoryEntry {
@@ -1388,31 +1332,6 @@ impl Default for ScanLogWatermark {
             item_step: 25,
             pct_step: 10,
         }
-    }
-}
-
-fn build_cursor(
-    library_id: LibraryID,
-    path_norm: &str,
-    last_scan_at: DateTime<Utc>,
-    salt: Uuid,
-) -> ScanCursor {
-    let mut hasher = DefaultHasher::new();
-    path_norm.hash(&mut hasher);
-    let path_hash = hasher.finish();
-    let listing_hash = format!("scan:{}:{:x}", salt, path_hash);
-
-    ScanCursor {
-        id: ScanCursorId {
-            library_id,
-            path_hash,
-        },
-        folder_path_norm: path_norm.to_string(),
-        listing_hash,
-        entry_count: 0,
-        last_scan_at,
-        last_modified_at: None,
-        device_id: None,
     }
 }
 
@@ -1788,10 +1707,6 @@ impl ScanRunState {
                 == self.total_items
     }
 
-    fn has_outstanding_items(&self) -> bool {
-        !self.can_enter_quiescing()
-    }
-
     fn outstanding_items_stalled(
         &self,
         stall_timeout: ChronoDuration,
@@ -1826,24 +1741,20 @@ struct ScanRunAggregator {
 
 struct ScanRunAggregatorInner {
     orchestrator: Arc<ScanOrchestrator>,
-    cursor_repository: Arc<PostgresCursorRepository>,
     runs: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
     quiescence_chrono: ChronoDuration,
     stall_timeout: ChronoDuration,
     media_tx: broadcast::Sender<MediaEvent>,
     unit_of_work: Arc<AppUnitOfWork>,
-    postgres: Arc<PostgresDatabase>,
     seen_media: Mutex<HashSet<Uuid>>,
 }
 
 impl ScanRunAggregator {
     fn new(
         orchestrator: Arc<ScanOrchestrator>,
-        cursor_repository: Arc<PostgresCursorRepository>,
         quiescence: Duration,
         media_tx: broadcast::Sender<MediaEvent>,
         unit_of_work: Arc<AppUnitOfWork>,
-        postgres: Arc<PostgresDatabase>,
     ) -> Self {
         let chrono_window = ChronoDuration::from_std(quiescence)
             .unwrap_or_else(|_| ChronoDuration::seconds(3));
@@ -1854,13 +1765,11 @@ impl ScanRunAggregator {
             .unwrap_or_else(|_| ChronoDuration::seconds(60));
         let inner = Arc::new(ScanRunAggregatorInner {
             orchestrator,
-            cursor_repository,
             runs: RwLock::new(HashMap::new()),
             quiescence_chrono: chrono_window,
             stall_timeout: stall_window,
             media_tx,
             unit_of_work,
-            postgres,
             seen_media: Mutex::new(HashSet::new()),
         });
 
@@ -2200,7 +2109,7 @@ impl ScanRunAggregatorInner {
     }
 
     async fn handle_orphan_event(&self, event: &JobEvent) {
-        use ferrex_core::orchestration::job::JobKind::FolderScan;
+        use ferrex_core::scan::orchestration::job::JobKind::FolderScan;
 
         let path_norm = match event.meta.path_key.as_deref() {
             Some(value) if !value.is_empty() => value,
@@ -2208,16 +2117,12 @@ impl ScanRunAggregatorInner {
         };
 
         let should_persist = match event.payload {
-            JobEventPayload::Completed { kind, .. }
-                if matches!(kind, FolderScan) =>
-            {
-                true
-            }
-            JobEventPayload::DeadLettered { kind, .. }
-                if matches!(kind, FolderScan) =>
-            {
-                true
-            }
+            JobEventPayload::Completed {
+                kind: FolderScan, ..
+            } => true,
+            JobEventPayload::DeadLettered {
+                kind: FolderScan, ..
+            } => true,
             JobEventPayload::Failed {
                 kind, retryable, ..
             } if matches!(kind, FolderScan) && !retryable => true,

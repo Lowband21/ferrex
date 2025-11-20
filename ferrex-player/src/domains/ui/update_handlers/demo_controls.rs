@@ -1,11 +1,11 @@
-#![cfg(feature = "demo")]
-
 use iced::Task;
 
-use crate::common::messages::{DomainMessage, DomainUpdateResult};
-use crate::domains::library;
-use crate::infrastructure::api_types::DemoResetRequest;
-use crate::state::State;
+use crate::{
+    common::messages::{DomainMessage, DomainUpdateResult},
+    domains::library,
+    infra::api_types::DemoResetRequest,
+    state::State,
+};
 
 pub fn augment_show_library_management_tasks(
     state: &mut State,

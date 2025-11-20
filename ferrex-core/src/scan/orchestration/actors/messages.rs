@@ -1,10 +1,10 @@
 use crate::{
     error::Result,
-    orchestration::{
-        DedupeKey, JobId, JobPriority, LibraryRootsId, ScanReason,
-    },
     player_prelude::{
         EpisodeID, LibraryID, LibraryType, MovieID, SeasonID, SeriesID,
+    },
+    scan::orchestration::{
+        DedupeKey, JobId, JobPriority, LibraryRootsId, ScanReason,
     },
 };
 use chrono::{DateTime, Utc};
@@ -39,7 +39,7 @@ impl MediaKindHint {
 pub struct MediaFileDiscovered {
     pub library_id: LibraryID,
     pub path_norm: String,
-    pub fingerprint: crate::orchestration::job::MediaFingerprint,
+    pub fingerprint: crate::scan::orchestration::job::MediaFingerprint,
     pub classified_as: MediaKindHint,
     pub context: FolderScanContext,
 }

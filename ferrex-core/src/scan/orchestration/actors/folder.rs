@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 
 use crate::error::{MediaError, Result};
-use crate::orchestration::classification::FolderClassifier;
+use crate::scan::orchestration::classification::FolderClassifier;
 use crate::types::ids::LibraryID;
 use crate::types::library::LibraryType;
 use tracing::info;
@@ -13,8 +13,12 @@ use tracing::info;
 use super::messages::{
     FolderScanSummary, MediaFileDiscovered, ParentDescriptors,
 };
-use crate::orchestration::job::{FolderScanJob, MediaFingerprint, ScanReason};
-use crate::orchestration::scan_cursor::{ListingEntry, compute_listing_hash};
+use crate::scan::orchestration::job::{
+    FolderScanJob, MediaFingerprint, ScanReason,
+};
+use crate::scan::orchestration::scan_cursor::{
+    ListingEntry, compute_listing_hash,
+};
 
 /// Context supplied to folder scans so they can infer parent relationships.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -390,7 +394,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        orchestration::{
+        scan::orchestration::{
             DefaultFolderScanActor, FolderScanActor, FolderScanCommand,
             FolderScanContext, FolderScanJob, ParentDescriptors, ScanReason,
         },

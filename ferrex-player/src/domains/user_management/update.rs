@@ -1,4 +1,4 @@
-use ferrex_core::api_types::users_admin::AdminUserInfo;
+use crate::infra::api_types::AdminUserInfo;
 use ferrex_core::player_prelude::UserPermissions;
 use iced::Task;
 use log::{debug, error, info};
@@ -19,9 +19,7 @@ pub fn update_user_management(
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    profiling::scope!(
-        crate::infrastructure::profiling_scopes::scopes::USER_MGMT_UPDATE
-    );
+    profiling::scope!(crate::infra::profiling_scopes::scopes::USER_MGMT_UPDATE);
 
     debug!("User management update: {}", message.name());
 

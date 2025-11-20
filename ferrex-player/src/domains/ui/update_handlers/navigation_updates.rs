@@ -1,6 +1,5 @@
 use iced::Task;
 use rkyv::option::ArchivedOption;
-use uuid::Uuid;
 
 use super::super::views::carousel::CarouselState;
 use crate::{
@@ -46,7 +45,8 @@ fn prepare_depth_regions_for_transition(
         .library
         .state
         .current_library_id
-        .map(|library_id| library_id.as_uuid());
+        .map(|library_id| library_id.to_uuid());
+
     state
         .domains
         .ui
@@ -138,11 +138,7 @@ pub fn handle_view_movie_details(
     state: &mut State,
     movie_id: MovieID,
 ) -> Task<Message> {
-    let mut buff = Uuid::encode_buffer();
-    log::info!(
-        "Viewing movie details for id: {})",
-        movie_id.as_str(&mut buff)
-    );
+    log::info!("Viewing movie details for id: {})", movie_id.as_str());
 
     // Save current view to navigation history
     state
@@ -559,8 +555,7 @@ pub fn handle_view_episode(
     state: &mut State,
     episode_id: EpisodeID,
 ) -> Task<Message> {
-    let mut buff = Uuid::encode_buffer();
-    log::info!("Viewing episode: {}", episode_id.as_str(&mut buff));
+    log::info!("Viewing episode: {}", episode_id.as_str());
 
     // Save current view to navigation history
     state

@@ -3,10 +3,10 @@ pub mod scan_subscription;
 pub mod subscriptions;
 
 use crate::domains::library::media_root_browser;
-use crate::infrastructure::api_types::{Library, Media, MediaID};
+use crate::infra::api_types::{Library, Media, MediaID};
 use ferrex_core::player_prelude::{
-    LibraryID, LibraryMediaResponse, MediaFile, MediaIDLike, ScanConfig,
-    ScanMetrics, ScanProgressEvent, ScanSnapshotDto,
+    LibraryID, LibraryMediaResponse, MediaFile, ScanConfig, ScanMetrics,
+    ScanProgressEvent, ScanSnapshotDto,
 };
 use rkyv::util::AlignedVec;
 use uuid::Uuid;
@@ -73,15 +73,11 @@ pub enum Message {
     #[cfg(feature = "demo")]
     FetchDemoStatus,
     #[cfg(feature = "demo")]
-    DemoStatusLoaded(
-        Result<crate::infrastructure::api_types::DemoStatus, String>,
-    ),
+    DemoStatusLoaded(Result<crate::infra::api_types::DemoStatus, String>),
     #[cfg(feature = "demo")]
-    ApplyDemoSizing(crate::infrastructure::api_types::DemoResetRequest),
+    ApplyDemoSizing(crate::infra::api_types::DemoResetRequest),
     #[cfg(feature = "demo")]
-    DemoSizingApplied(
-        Result<crate::infrastructure::api_types::DemoStatus, String>,
-    ),
+    DemoSizingApplied(Result<crate::infra::api_types::DemoStatus, String>),
     // Scanner metrics/config
     FetchScanMetrics,
     ScanMetricsLoaded(Result<ScanMetrics, String>),
@@ -405,11 +401,10 @@ impl std::fmt::Debug for Message {
                     )
                 }
                 Media::Season(s) => {
-                    let mut buf = Uuid::encode_buffer();
                     write!(
                         f,
                         "Library::MediaUpdated(Season: {})",
-                        s.id.as_str(&mut buf)
+                        s.id.as_str()
                     )
                 }
                 Media::Episode(e) => {

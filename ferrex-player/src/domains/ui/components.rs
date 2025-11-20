@@ -1,7 +1,8 @@
 use crate::common::ui_utils::icon_text;
 use crate::domains::ui::messages::Message;
-use crate::domains::ui::widgets::{AnimationType, image_for};
-use crate::infrastructure::constants::poster::CORNER_RADIUS;
+use crate::domains::ui::widgets::image_for;
+use crate::infra::constants::poster::CORNER_RADIUS;
+use crate::infra::widgets::poster::poster_animation_types::PosterAnimationType;
 use crate::{domains::ui::theme, state::State};
 
 use ferrex_core::player_prelude::{ArchivedCastMember, ImageSize, ImageType};
@@ -84,7 +85,7 @@ fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, Message> {
             image_for(uuid)
                 .size(ImageSize::Profile)
                 .image_type(ImageType::Person)
-                .animation(AnimationType::flip())
+                .animation(PosterAnimationType::flip())
                 .width(Length::Fixed(card_width))
                 .height(Length::Fixed(image_height))
                 .radius(CORNER_RADIUS)
@@ -182,7 +183,7 @@ pub fn create_action_button_row<'a>(
 
 /// Create technical details cards for media file metadata
 pub fn create_technical_details<'a>(
-    metadata: &'a crate::infrastructure::api_types::MediaFileMetadata,
+    metadata: &'a crate::infra::api_types::MediaFileMetadata,
 ) -> Element<'a, Message> {
     let mut tech_row = row![Space::new().width(20)].spacing(8);
 
