@@ -38,6 +38,7 @@ pub struct State {
     pub loading: bool,
     pub is_authenticated: bool,
     pub window_size: iced::Size,
+    pub window_position: Option<iced::Point>,
     pub is_fullscreen: bool,
 
     /// Notifier for MediaStore changes - triggers ViewModel refreshes
@@ -212,6 +213,7 @@ impl State {
             loading: true,
             is_authenticated: false,
             window_size: iced::Size::new(1280.0, 720.0),
+            window_position: None,
             is_fullscreen: false,
             media_store_notifier,
         }

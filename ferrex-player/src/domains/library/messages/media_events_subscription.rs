@@ -1,10 +1,11 @@
 use crate::domains::library::messages::Message;
-use crate::infrastructure::api_types::MediaReference;
+use crate::infrastructure::api_types::{MediaId, MediaReference};
 use ferrex_core::MediaEvent;
 use futures::stream;
 use futures::StreamExt;
 use iced::Subscription;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 /// Creates a subscription to server-sent events for library media changes
 pub fn media_events(server_url: String) -> Subscription<Message> {
@@ -319,7 +320,7 @@ impl Message {
     }
 
     /// Create a MediaDeleted message from a media ID
-    pub fn media_deleted(id: String) -> Self {
+    pub fn media_deleted(id: MediaId) -> Self {
         Message::MediaDeleted(id)
     }
 }

@@ -43,14 +43,8 @@ pub fn view_all_content(state: &State) -> Element<Message> {
             move |idx| {
                 series_list.get(idx).map(|series| {
                     let series_id = series.id.clone();
-                    let is_hovered = state
-                        .domains
-                        .ui
-                        .state
-                        .hovered_media_id
-                        .as_ref()
-                        .map(|s| s.as_str())
-                        == Some(series_id.as_str());
+                    let is_hovered = state.domains.ui.state.hovered_media_id.as_ref().map(|s| s)
+                        == Some(series_id.as_ref());
 
                     let item_watch_progress = if let Some(watch_state) = watch_state_opt {
                         watch_state.get_watch_progress(&MediaId::from(series_id))
@@ -89,8 +83,8 @@ pub fn view_all_content(state: &State) -> Element<Message> {
                         .state
                         .hovered_media_id
                         .as_ref()
-                        .map(|s| s.as_str())
-                        == Some(movie_id.as_str());
+                        .map(|s| s.as_ref())
+                        == Some(movie_id.as_ref());
 
                     let item_watch_progress = if let Some(watch_state) = watch_state_opt {
                         watch_state.get_watch_progress(&MediaId::from(movie_id))

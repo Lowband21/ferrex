@@ -1,9 +1,5 @@
 [workspace]
-members = [
-    "ferrex-server",
-    "ferrex-core",
-    "ferrex-player",
-]
+members = ["ferrex-server", "ferrex-core", "ferrex-player"]
 exclude = ["lucide_icons_iced_0.14", "iced_fork"]
 resolver = "2"
 
@@ -53,7 +49,15 @@ async-trait = "0.1"
 
 # Database
 surrealdb = { version = "1.5", features = ["kv-mem"] }
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "migrate", "bigdecimal", "ipnetwork"] }
+sqlx = { version = "0.7", features = [
+    "runtime-tokio-rustls",
+    "postgres",
+    "chrono",
+    "uuid",
+    "migrate",
+    "bigdecimal",
+    "ipnetwork",
+] }
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 
 # Media processing
@@ -126,4 +130,3 @@ bare_urls = "warn"
 [workspace.lints.rust]
 missing_docs = "warn"
 missing_debug_implementations = "warn"
-

@@ -11,6 +11,9 @@ pub mod update;
 pub mod video;
 pub mod view;
 
+#[cfg(feature = "external-mpv-player")]
+pub mod external_mpv;
+
 use self::messages::Message;
 use self::state::PlayerDomainState;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
@@ -78,6 +81,7 @@ impl PlayerDomain {
                 Task::none()
             }
             // Legacy transcoding events - no longer used
+            #[allow(dead_code)]
             CrossDomainEvent::RequestTranscoding(_) | CrossDomainEvent::TranscodingReady(_) => {
                 Task::none()
             }

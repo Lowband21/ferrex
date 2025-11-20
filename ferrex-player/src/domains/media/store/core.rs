@@ -990,7 +990,7 @@ impl MediaStore {
     }
 
     /// Get seasons for a series
-    pub fn get_seasons(&self, series_id: &str) -> Vec<&SeasonReference> {
+    pub fn get_seasons(&self, series_id: &Uuid) -> Vec<&SeasonReference> {
         // Debug logging to diagnose season loading issue
         let season_ids = self.by_type.get(&MediaType::Season);
         if let Some(ids) = season_ids {
@@ -1011,7 +1011,7 @@ impl MediaStore {
                 .filter_map(|media| media.as_season())
                 .collect();
 
-            log::info!(
+            log::debug!(
                 "MediaStore::get_seasons - {} seasons found in media HashMap (out of {} in index)",
                 all_seasons.len(),
                 ids.len()
@@ -1020,28 +1020,30 @@ impl MediaStore {
             // DEBUG: Log what series_ids the seasons have
             if all_seasons.is_empty() {
                 log::warn!("No seasons found in media HashMap despite having IDs in index!");
-            } else {
-                for season in &all_seasons {
-                    log::info!(
-                        "  Season {} (ID: {}) has series_id: {} (looking for: {})",
-                        season.season_number.value(),
-                        season.id.as_str(),
-                        season.series_id.as_str(),
-                        series_id
-                    );
-                }
-            }
+            } /* else {
+
+                  for season in &all_seasons {
+                      log::debug!(
+                          "  Season {} (ID: {}) has series_id: {} (looking for: {})",
+                          season.season_number.value(),
+                          season.id.as_str(),
+                          season.series_id.as_str(),
+                          series_id
+                      );
+                  }
+              } */
 
             let matching_seasons: Vec<_> = all_seasons
                 .into_iter()
-                .filter(|season| season.series_id.as_str() == series_id)
+                .filter(|season| season.series_id.as_ref() == series_id)
                 .collect();
 
-            log::info!(
+            /*
+            log::debug!(
                 "MediaStore::get_seasons - {} seasons match series_id {}",
                 matching_seasons.len(),
                 series_id
-            );
+            ); */
 
             matching_seasons
         } else {
@@ -1051,7 +1053,7 @@ impl MediaStore {
     }
 
     /// Get owned seasons for a series (for UI components that need owned data)
-    pub fn get_seasons_owned(&self, series_id: &str) -> Vec<SeasonReference> {
+    pub fn get_seasons_owned(&self, series_id: &Uuid) -> Vec<SeasonReference> {
         self.by_type
             .get(&MediaType::Season)
             .map(|ids| {
@@ -1059,7 +1061,7 @@ impl MediaStore {
                     .filter_map(|id| self.media.get(id))
                     .filter_map(|media| match media {
                         MediaReference::Season(season)
-                            if season.series_id.as_str() == series_id =>
+                            if season.series_id.as_ref() == series_id =>
                         {
                             Some(season.clone())
                         }
@@ -1097,7 +1099,7 @@ impl MediaStore {
     }
 
     /// Get episodes for a season
-    pub fn get_episodes(&self, season_id: &str) -> Vec<&EpisodeReference> {
+    pub fn get_episodes(&self, season_id: &Uuid) -> Vec<&EpisodeReference> {
         self.by_type
             .get(&MediaType::Episode)
             .map(|ids| {
@@ -1106,7 +1108,7 @@ impl MediaStore {
                     .filter_map(|media| {
                         media
                             .as_episode()
-                            .filter(|episode| episode.season_id.as_str() == season_id)
+                            .filter(|episode| episode.season_id.as_ref() == season_id)
                     })
                     .collect()
             })
@@ -1169,32 +1171,24 @@ impl MediaStore {
     /// Find all media items with a specific file ID
     /// This is useful when handling file deletion events from the server
     /// Returns a vector of MediaIds that have the matching file ID
-    pub fn find_by_file_id(&self, file_id: &str) -> Vec<MediaId> {
+    pub fn _find_by_file_id(&self, media_id: &MediaId) -> Vec<MediaId> {
         let mut matching_ids = Vec::new();
 
         // Only check Movies and Episodes since they have files
         // Check movies first
         if let Some(movie_ids) = self.by_type.get(&MediaType::Movie) {
-            for media_id in movie_ids {
-                if let Some(media) = self.media.get(media_id) {
-                    if let Some(movie) = media.as_movie() {
-                        if movie.file.id.to_string() == file_id {
-                            matching_ids.push(media_id.clone());
-                        }
-                    }
+            for id in movie_ids {
+                if id == media_id {
+                    matching_ids.push(*media_id);
                 }
             }
         }
 
         // Check episodes
         if let Some(episode_ids) = self.by_type.get(&MediaType::Episode) {
-            for media_id in episode_ids {
-                if let Some(media) = self.media.get(media_id) {
-                    if let Some(episode) = media.as_episode() {
-                        if episode.file.id.to_string() == file_id {
-                            matching_ids.push(media_id.clone());
-                        }
-                    }
+            for id in episode_ids {
+                if id == media_id {
+                    matching_ids.push(*media_id);
                 }
             }
         }

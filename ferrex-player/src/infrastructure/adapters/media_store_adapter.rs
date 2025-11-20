@@ -4,18 +4,18 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use tokio::sync::RwLock as TokioRwLock;
 use std::sync::RwLock as StdRwLock;
 use uuid::Uuid;
 
-use ferrex_core::media::{MovieReference, SeriesReference, EpisodeReference, SeasonReference, MediaReference};
-use ferrex_core::media::{MovieID, SeriesID, SeasonID, EpisodeID};
-use ferrex_core::api_types::MediaId;
 use crate::domains::media::store::{MediaStore, MediaType};
-use crate::domains::ui::types::{SortBy, SortOrder};
 use crate::infrastructure::repositories::{
-    RepositoryResult, RepositoryError,
-    media::{MediaRepository, MediaQuery, MediaFilterOptions, MediaMetadataUpdate}
+    media::{MediaFilterOptions, MediaMetadataUpdate, MediaQuery, MediaRepository},
+    RepositoryError, RepositoryResult,
+};
+use ferrex_core::api_types::MediaId;
+use ferrex_core::media::{EpisodeID, SeasonID, SeriesID};
+use ferrex_core::media::{
+    EpisodeReference, MediaReference, MovieReference, SeasonReference, SeriesReference,
 };
 
 /// Adapter that implements MediaRepository using the existing MediaStore
@@ -32,15 +32,19 @@ impl MediaStoreAdapter {
 #[async_trait]
 impl MediaRepository for MediaStoreAdapter {
     async fn get(&self, id: &MediaId) -> RepositoryResult<Option<MediaReference>> {
-        let store = self.store.read()
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
         Ok(store.get(id).cloned())
     }
-    
+
     async fn get_many(&self, ids: &[MediaId]) -> RepositoryResult<Vec<MediaReference>> {
-        let store = self.store.read()
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
-        
+
         let mut results = Vec::new();
         for id in ids {
             if let Some(media) = store.get(id) {
@@ -49,18 +53,20 @@ impl MediaRepository for MediaStoreAdapter {
         }
         Ok(results)
     }
-    
+
     async fn query_movies(&self, query: &MediaQuery) -> RepositoryResult<Vec<MovieReference>> {
-        let store = self.store.read()
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
-        
+
         // Get movies, optionally filtered by library
         let movies = if let Some(lib_id) = query.filter.library_id {
             store.get_movies(Some(lib_id))
         } else {
             store.get_movies(None)
         };
-        
+
         // Apply additional filters
         let filtered: Vec<MovieReference> = movies
             .into_iter()
@@ -79,7 +85,7 @@ impl MediaRepository for MediaStoreAdapter {
                         }
                     }
                 }
-                
+
                 if let Some(year_max) = query.filter.year_max {
                     if let MDO::Details(TD::Movie(mov)) = &movie.details {
                         if let Some(release_date) = &mov.release_date {
@@ -91,7 +97,7 @@ impl MediaRepository for MediaStoreAdapter {
                         }
                     }
                 }
-                
+
                 // Rating filter
                 if let Some(rating_min) = query.filter.rating_min {
                     if let MDO::Details(TD::Movie(mov)) = &movie.details {
@@ -102,39 +108,41 @@ impl MediaRepository for MediaStoreAdapter {
                         }
                     }
                 }
-                
+
                 true
             })
             .cloned()
             .collect();
-        
+
         // Apply limit and offset
         let result = if let Some(offset) = query.offset {
             filtered.into_iter().skip(offset).collect::<Vec<_>>()
         } else {
             filtered
         };
-        
+
         let result = if let Some(limit) = query.limit {
             result.into_iter().take(limit).collect()
         } else {
             result
         };
-        
+
         Ok(result)
     }
-    
+
     async fn query_series(&self, query: &MediaQuery) -> RepositoryResult<Vec<SeriesReference>> {
-        let store = self.store.read()
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
-        
+
         // Get series, optionally filtered by library
         let series = if let Some(lib_id) = query.filter.library_id {
             store.get_series(Some(lib_id))
         } else {
             store.get_series(None)
         };
-        
+
         // Apply additional filters (similar to movies)
         let filtered: Vec<SeriesReference> = series
             .into_iter()
@@ -153,7 +161,7 @@ impl MediaRepository for MediaStoreAdapter {
                         }
                     }
                 }
-                
+
                 if let Some(year_max) = query.filter.year_max {
                     if let MDO::Details(TD::Series(ser)) = &series.details {
                         if let Some(first_air) = &ser.first_air_date {
@@ -165,7 +173,7 @@ impl MediaRepository for MediaStoreAdapter {
                         }
                     }
                 }
-                
+
                 // Rating filter
                 if let Some(rating_min) = query.filter.rating_min {
                     if let MDO::Details(TD::Series(ser)) = &series.details {
@@ -176,78 +184,124 @@ impl MediaRepository for MediaStoreAdapter {
                         }
                     }
                 }
-                
+
                 true
             })
             .cloned()
             .collect();
-        
+
         // Apply limit and offset
         let result = if let Some(offset) = query.offset {
             filtered.into_iter().skip(offset).collect::<Vec<_>>()
         } else {
             filtered
         };
-        
+
         let result = if let Some(limit) = query.limit {
             result.into_iter().take(limit).collect()
         } else {
             result
         };
-        
+
         Ok(result)
     }
-    
+
     async fn get_all_movies(&self) -> RepositoryResult<Vec<MovieReference>> {
-        let store = self.store.read()
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
         Ok(store.get_all_movies().into_iter().cloned().collect())
     }
-    
+
     async fn get_all_series(&self) -> RepositoryResult<Vec<SeriesReference>> {
-        let store = self.store.read()
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
         Ok(store.get_all_series().into_iter().cloned().collect())
     }
-    
-    async fn get_movies_by_library(&self, library_id: Uuid) -> RepositoryResult<Vec<MovieReference>> {
-        let store = self.store.read()
+
+    async fn get_movies_by_library(
+        &self,
+        library_id: Uuid,
+    ) -> RepositoryResult<Vec<MovieReference>> {
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
-        Ok(store.get_movies(Some(library_id)).into_iter().cloned().collect())
+        Ok(store
+            .get_movies(Some(library_id))
+            .into_iter()
+            .cloned()
+            .collect())
     }
-    
-    async fn get_series_by_library(&self, library_id: Uuid) -> RepositoryResult<Vec<SeriesReference>> {
-        let store = self.store.read()
+
+    async fn get_series_by_library(
+        &self,
+        library_id: Uuid,
+    ) -> RepositoryResult<Vec<SeriesReference>> {
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
-        Ok(store.get_series(Some(library_id)).into_iter().cloned().collect())
+        Ok(store
+            .get_series(Some(library_id))
+            .into_iter()
+            .cloned()
+            .collect())
     }
-    
+
     async fn get_seasons(&self, series_id: &SeriesID) -> RepositoryResult<Vec<SeasonReference>> {
-        let store = self.store.read()
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
-        Ok(store.get_seasons(series_id.as_str()).into_iter().cloned().collect())
+        Ok(store
+            .get_seasons(series_id.as_ref())
+            .into_iter()
+            .cloned()
+            .collect())
     }
-    
+
     async fn get_episodes(&self, season_id: &SeasonID) -> RepositoryResult<Vec<EpisodeReference>> {
-        let store = self.store.read()
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
-        Ok(store.get_episodes(season_id.as_str()).into_iter().cloned().collect())
+        Ok(store
+            .get_episodes(season_id.as_ref())
+            .into_iter()
+            .cloned()
+            .collect())
     }
-    
-    async fn get_episode(&self, episode_id: &EpisodeID) -> RepositoryResult<Option<EpisodeReference>> {
-        let store = self.store.read()
+
+    async fn get_episode(
+        &self,
+        episode_id: &EpisodeID,
+    ) -> RepositoryResult<Option<EpisodeReference>> {
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
-        Ok(store.get(&MediaId::Episode(episode_id.clone()))
+        Ok(store
+            .get(&MediaId::Episode(episode_id.clone()))
             .and_then(|m| match m {
                 MediaReference::Episode(e) => Some(e.clone()),
                 _ => None,
             }))
     }
-    
-    async fn search(&self, query: &str, media_type: Option<MediaType>) -> RepositoryResult<Vec<MediaReference>> {
-        let store = self.store.read()
+
+    async fn search(
+        &self,
+        query: &str,
+        media_type: Option<MediaType>,
+    ) -> RepositoryResult<Vec<MediaReference>> {
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
-        
+
         // Simple title-based search
         let query_lower = query.to_lowercase();
         // Search movies and series by title. Episodes/seasons omitted due to lack of title field.
@@ -255,7 +309,9 @@ impl MediaRepository for MediaStoreAdapter {
         let movies = store.get_all_movies();
         for m in movies {
             if let Some(ref mt) = media_type {
-                if *mt != MediaType::Movie { continue; }
+                if *mt != MediaType::Movie {
+                    continue;
+                }
             }
             if m.title.as_str().to_lowercase().contains(&query_lower) {
                 results.push(MediaReference::Movie(m.clone()));
@@ -264,20 +320,24 @@ impl MediaRepository for MediaStoreAdapter {
         let series = store.get_all_series();
         for s in series {
             if let Some(ref mt) = media_type {
-                if *mt != MediaType::Series { continue; }
+                if *mt != MediaType::Series {
+                    continue;
+                }
             }
             if s.title.as_str().to_lowercase().contains(&query_lower) {
                 results.push(MediaReference::Series(s.clone()));
             }
         }
-        
+
         Ok(results)
     }
-    
+
     async fn count(&self, filter: &MediaFilterOptions) -> RepositoryResult<usize> {
-        let store = self.store.read()
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
-        
+
         if let Some(media_type) = &filter.media_type {
             if let Some(library_id) = filter.library_id {
                 // Count by type and library
@@ -302,39 +362,49 @@ impl MediaRepository for MediaStoreAdapter {
             Ok(store.get_all_movies().len() + store.get_all_series().len())
         }
     }
-    
+
     async fn is_empty(&self) -> RepositoryResult<bool> {
-        let store = self.store.read()
+        let store = self
+            .store
+            .read()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
         Ok(store.is_empty())
     }
-    
+
     async fn upsert(&self, media: MediaReference) -> RepositoryResult<()> {
-        let mut store = self.store.write()
+        let mut store = self
+            .store
+            .write()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
         store.upsert(media);
         Ok(())
     }
-    
+
     async fn upsert_many(&self, media: Vec<MediaReference>) -> RepositoryResult<()> {
-        let mut store = self.store.write()
+        let mut store = self
+            .store
+            .write()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
         for item in media {
             store.upsert(item);
         }
         Ok(())
     }
-    
+
     async fn delete(&self, id: &MediaId) -> RepositoryResult<bool> {
-        let mut store = self.store.write()
+        let mut store = self
+            .store
+            .write()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
         Ok(store.remove(id).is_some())
     }
-    
+
     async fn delete_by_library(&self, library_id: Uuid) -> RepositoryResult<usize> {
-        let mut store = self.store.write()
+        let mut store = self
+            .store
+            .write()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
-        
+
         // Get all media for this library (collect IDs first to avoid borrow conflicts)
         let movie_ids: Vec<MediaId> = store
             .get_movies(Some(library_id))
@@ -346,16 +416,16 @@ impl MediaRepository for MediaStoreAdapter {
             .into_iter()
             .map(|s| s.id.clone())
             .collect();
-        
+
         let mut count = 0;
-        
+
         // Delete movies
         for mid in movie_ids {
             if store.remove(&mid).is_some() {
                 count += 1;
             }
         }
-        
+
         // Delete series (and their seasons/episodes)
         for sid in series_ids {
             // Remove series itself
@@ -364,7 +434,7 @@ impl MediaRepository for MediaStoreAdapter {
             }
             // Also remove associated seasons and episodes
             let season_ids: Vec<ferrex_core::SeasonID> = store
-                .get_seasons(sid.as_str())
+                .get_seasons(sid.as_ref())
                 .into_iter()
                 .map(|s| s.id.clone())
                 .collect();
@@ -373,7 +443,7 @@ impl MediaRepository for MediaStoreAdapter {
                     count += 1;
                 }
                 let episode_ids: Vec<ferrex_core::EpisodeID> = store
-                    .get_episodes(season_id.as_str())
+                    .get_episodes(season_id.as_ref())
                     .into_iter()
                     .map(|e| e.id.clone())
                     .collect();
@@ -384,24 +454,35 @@ impl MediaRepository for MediaStoreAdapter {
                 }
             }
         }
-        
+
         Ok(count)
     }
-    
+
     async fn clear(&self) -> RepositoryResult<()> {
-        let mut store = self.store.write()
+        let mut store = self
+            .store
+            .write()
             .map_err(|e| RepositoryError::LockError(e.to_string()))?;
         store.clear();
         Ok(())
     }
-    
-    async fn update_metadata(&self, _id: &MediaId, _metadata: MediaMetadataUpdate) -> RepositoryResult<()> {
+
+    async fn update_metadata(
+        &self,
+        _id: &MediaId,
+        _metadata: MediaMetadataUpdate,
+    ) -> RepositoryResult<()> {
         // This would update the metadata in the store
         // For now, not implemented as MediaStore doesn't have a direct update method
         Ok(())
     }
-    
-    async fn update_watched_status(&self, _id: &MediaId, _watched: bool, _progress: Option<f32>) -> RepositoryResult<()> {
+
+    async fn update_watched_status(
+        &self,
+        _id: &MediaId,
+        _watched: bool,
+        _progress: Option<f32>,
+    ) -> RepositoryResult<()> {
         // This would update watched status
         // Would need to integrate with watch status tracking
         Ok(())

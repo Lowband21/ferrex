@@ -1,7 +1,8 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 
-use iced::Task;
+use iced::{Point, Task};
+
 use iced_video_player::Video;
 
 use gstreamer as gst;
@@ -40,6 +41,84 @@ pub fn close_video(state: &mut State) {
     ),
     profiling::function
 )]
+#[cfg(feature = "external-mpv-player")]
+pub fn load_external_video(state: &mut State) -> Task<crate::domains::media::messages::Message> {
+    use super::external_mpv;
+    use iced::window;
+
+    // Check if video is already loaded or loading
+    if state.domains.player.state.external_mpv_handle.is_some() {
+        log::warn!("External MPV already running, skipping duplicate load");
+        return Task::none();
+    }
+
+    let url = match &state.domains.player.state.current_url {
+        Some(url) => url.clone(),
+        None => {
+            state.domains.ui.state.view = ViewState::VideoError {
+                message: "No URL provided".to_string(),
+            };
+            return Task::none();
+        }
+    };
+
+    log::info!("Starting external MPV playback for: {}", url);
+
+    // Get current window settings
+    let is_fullscreen = state.domains.player.state.is_fullscreen;
+    let window_size = Some((
+        state.window_size.width as u32,
+        state.window_size.height as u32,
+    ));
+
+    let window_position = state
+        .window_position
+        .map(|pos| (pos.x as i32, pos.y as i32));
+
+    log::info!(
+        "Launching MPV with fullscreen={}, window_size={:?}, window_position={:?}",
+        is_fullscreen,
+        window_size,
+        window_position
+    );
+
+    // Start position polling subscription first
+    state.domains.player.state.external_mpv_active = true;
+    state.domains.ui.state.view = ViewState::Player;
+
+    // Get resume position from player state
+    let resume_position = state.domains.player.state.pending_resume_position;
+    
+    // Spawn external MPV with window settings, position, and resume position
+    match external_mpv::start_external_playback(
+        url.as_str(),
+        is_fullscreen,
+        window_size,
+        window_position,
+        resume_position,
+    ) {
+        Ok(handle) => {
+            state.domains.player.state.external_mpv_handle = Some(Box::new(handle));
+            state.domains.player.state.is_loading_video = false;
+            
+            // Clear pending resume position after use
+            state.domains.player.state.pending_resume_position = None;
+
+            log::info!("External MPV started successfully, emitting HideWindow event");
+
+            // Return no task - window hiding will be handled via domain event
+            Task::none()
+        }
+        Err(e) => {
+            log::error!("Failed to start external MPV: {}", e);
+            state.domains.ui.state.view = ViewState::VideoError {
+                message: format!("Failed to start MPV: {}", e),
+            };
+            Task::none()
+        }
+    }
+}
+
 pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Message> {
     // Check if video is already loaded or loading
     if state.domains.player.state.video_opt.is_some() {

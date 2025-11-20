@@ -74,7 +74,7 @@ pub trait ViewIdentifier {
     fn scroll_key(&self, library_id: Option<Uuid>) -> String;
 
     /// Generate a context-specific key (for views with sub-scrollables)
-    fn scroll_key_with_context(&self, library_id: Option<Uuid>, context: &str) -> String;
+    fn scroll_key_with_context(&self, library_id: Option<Uuid>, context: &Uuid) -> String;
 }
 
 impl ViewIdentifier for ViewState {
@@ -84,25 +84,26 @@ impl ViewIdentifier for ViewState {
             ViewState::MovieDetail { movie, .. } => ScrollPositionManager::generate_key(
                 "movie_detail",
                 library_id,
-                Some(&movie.id.as_str()),
+                Some(movie.id.as_ref()),
             ),
             ViewState::TvShowDetail { series_id, .. } => ScrollPositionManager::generate_key(
                 "tv_show_detail",
                 library_id,
-                Some(series_id.as_str()),
+                Some(series_id.as_ref()),
             ),
             ViewState::SeasonDetail {
                 series_id,
                 season_id,
                 ..
-            } => {
-                let context = format!("{}.{}", series_id.as_str(), season_id.as_str());
-                ScrollPositionManager::generate_key("season_detail", library_id, Some(&context))
-            }
+            } => ScrollPositionManager::generate_key(
+                "season_detail",
+                library_id,
+                Some(season_id.as_ref()),
+            ),
             ViewState::EpisodeDetail { episode_id, .. } => ScrollPositionManager::generate_key(
                 "episode_detail",
                 library_id,
-                Some(episode_id.as_str()),
+                Some(episode_id.as_ref()),
             ),
             ViewState::LibraryManagement => {
                 ScrollPositionManager::generate_key("library_management", None, None)
@@ -123,7 +124,7 @@ impl ViewIdentifier for ViewState {
         }
     }
 
-    fn scroll_key_with_context(&self, library_id: Option<Uuid>, context: &str) -> String {
+    fn scroll_key_with_context(&self, library_id: Option<Uuid>, context: &Uuid) -> String {
         match self {
             ViewState::Library => {
                 ScrollPositionManager::generate_key("library", library_id, Some(context))
@@ -295,7 +296,7 @@ impl ScrollPositionManager {
     pub fn generate_key(
         view_type: &str,
         library_id: Option<Uuid>,
-        context: Option<&str>,
+        context: Option<&Uuid>,
     ) -> String {
         let mut key = view_type.to_string();
 
@@ -336,7 +337,7 @@ impl ScrollPositionManager {
         &mut self,
         view: &ViewState,
         library_id: Option<Uuid>,
-        context: &str,
+        context: &Uuid,
         state: ScrollState,
     ) {
         let key = view.scroll_key_with_context(library_id, context);
@@ -348,7 +349,7 @@ impl ScrollPositionManager {
         &self,
         view: &ViewState,
         library_id: Option<Uuid>,
-        context: &str,
+        context: &Uuid,
     ) -> Option<&ScrollState> {
         let key = view.scroll_key_with_context(library_id, context);
         self.get_state(&key)

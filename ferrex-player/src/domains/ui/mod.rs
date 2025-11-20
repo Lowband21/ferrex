@@ -42,7 +42,7 @@ pub struct UIDomainState {
     pub error_message: Option<String>,
     pub window_size: iced::Size,
     pub expanded_shows: HashSet<String>,
-    pub hovered_media_id: Option<String>,
+    pub hovered_media_id: Option<Uuid>,
 
     // Library filtering
     pub current_library_id: Option<Uuid>,

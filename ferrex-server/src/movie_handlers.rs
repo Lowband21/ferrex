@@ -7,6 +7,7 @@ use axum::{
 use ferrex_core::{database::traits::MediaFilters, ParsedMediaInfo};
 use serde_json::{json, Value};
 use tracing::{info, warn};
+use uuid::Uuid;
 
 pub async fn list_movies_handler(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
     info!("Listing all movies");
@@ -76,7 +77,7 @@ pub async fn list_movies_handler(State(state): State<AppState>) -> Result<Json<V
 
 pub async fn movie_details_handler(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("Getting details for movie ID: {}", id);
 

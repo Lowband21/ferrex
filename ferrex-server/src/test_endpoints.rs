@@ -227,7 +227,7 @@ pub async fn test_hls_streaming(
     // Start adaptive transcoding
     match state
         .transcoding_service
-        .start_adaptive_transcoding(&id, Some(JobPriority::High))
+        .start_adaptive_transcoding(id, Some(JobPriority::High))
         .await
     {
         Ok(job_id) => {

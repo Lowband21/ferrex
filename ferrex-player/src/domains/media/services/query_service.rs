@@ -129,7 +129,7 @@ impl MediaQueryService {
     pub fn get_seasons_for_series(&self, series_id: &SeriesID) -> Vec<SeasonReference> {
         if let Ok(store) = self.media_store.read() {
             store
-                .get_seasons(series_id.as_str())
+                .get_seasons(series_id.as_ref())
                 .into_iter()
                 .cloned()
                 .collect()
@@ -142,7 +142,7 @@ impl MediaQueryService {
     pub fn get_episodes_for_season(&self, season_id: &SeasonID) -> Vec<EpisodeReference> {
         if let Ok(store) = self.media_store.read() {
             store
-                .get_episodes(season_id.as_str())
+                .get_episodes(season_id.as_ref())
                 .into_iter()
                 .cloned()
                 .collect()

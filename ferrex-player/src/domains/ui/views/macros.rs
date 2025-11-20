@@ -133,7 +133,7 @@ macro_rules! media_card {
         use $crate::domains::ui::widgets::{AnimationType as WidgetAnimationType};
         use $crate::domains::ui::theme;
         use iced::{
-            widget::{button, column, container, row, text, Stack},
+            widget::{button, column, container, text},
             Length,
         };
 
@@ -226,8 +226,8 @@ macro_rules! media_card {
         // Wrap the image element with precise hover detection
         // This tracks only the actual poster bounds, not the container
         let image_with_hover = iced::widget::mouse_area(image_element)
-            .on_enter($crate::domains::ui::messages::Message::MediaHovered($image_key.to_string()))
-            .on_exit($crate::domains::ui::messages::Message::MediaUnhovered($image_key.to_string()));
+            .on_enter($crate::domains::ui::messages::Message::MediaHovered($image_key))
+            .on_exit($crate::domains::ui::messages::Message::MediaUnhovered($image_key));
 
         // Create the poster element
         // Always wrap in button for non-hover clicks, but the shader handles its own overlay buttons

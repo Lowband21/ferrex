@@ -1,6 +1,5 @@
 use super::state::AspectRatio;
 use crate::domains::media::library::MediaFile;
-use iced::Point;
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -15,6 +14,7 @@ pub enum Message {
     Pause,
     PlayPause,
     Stop,
+    ResetAfterStop,  // Internal message to reset state after progress update
 
     // Seeking
     Seek(f64),
@@ -22,7 +22,6 @@ pub enum Message {
     SeekRelative(f64),
     SeekRelease,
     SeekBarPressed,
-    SeekBarMoved(Point),
     SeekForward,  // +15s
     SeekBackward, // -15s
     SeekDone,     // Seek operation completed
@@ -81,4 +80,14 @@ pub enum Message {
     SetToneMappingBrightness(f32),
     SetToneMappingContrast(f32),
     SetToneMappingSaturationBoost(f32),
+    
+    // External MPV player messages
+    #[cfg(feature = "external-mpv-player")]
+    ExternalPlaybackStarted,
+    #[cfg(feature = "external-mpv-player")]
+    ExternalPlaybackUpdate { position: f64, duration: f64 },
+    #[cfg(feature = "external-mpv-player")]
+    ExternalPlaybackEnded,
+    #[cfg(feature = "external-mpv-player")]
+    PollExternalMpv,
 }

@@ -27,9 +27,29 @@ pub fn handle_play_media(state: &mut State, media: MediaFile) -> DomainUpdateRes
 
     state.domains.player.state.current_media = Some(media.clone());
 
+    // Set duration from media metadata if available
+    if let Some(metadata) = &media.metadata {
+        if let Some(duration) = metadata.duration {
+            log::info!("Setting duration from media metadata: {:.1}s", duration);
+            state.domains.player.state.duration = duration;
+        } else {
+            log::warn!("Media metadata has no duration field");
+            state.domains.player.state.duration = 0.0;
+        }
+    } else {
+        log::warn!("Media has no metadata, duration will be set when video loads");
+        state.domains.player.state.duration = 0.0;
+    }
+
     // Reset watch progress tracking for new media
     state.domains.player.state.last_progress_update = None;
     state.domains.player.state.last_progress_sent = 0.0;
+    
+    // Pass any pending resume position to player domain
+    state.domains.player.state.pending_resume_position = state.domains.media.state.pending_resume_position;
+    
+    // Clear the pending resume position from media domain after transferring
+    state.domains.media.state.pending_resume_position = None;
 
     // Note: current_media_id is set by PlayMediaWithId message handler if available
 
@@ -140,15 +160,10 @@ pub fn handle_play_media(state: &mut State, media: MediaFile) -> DomainUpdateRes
             state.domains.ui.state.error_message = None;
 
             {
-                // For direct streaming, send messages to load video
-                DomainUpdateResult::task(Task::batch(vec![
-                    Task::done(crate::common::messages::DomainMessage::Media(
-                        Message::_LoadVideo,
-                    )),
-                    Task::done(crate::common::messages::DomainMessage::Player(
-                        crate::domains::player::messages::Message::VideoReadyToPlay,
-                    )),
-                ]))
+                // For direct streaming, send message to load video
+                DomainUpdateResult::task(Task::done(crate::common::messages::DomainMessage::Media(
+                    Message::_LoadVideo,
+                )))
             }
         }
         Err(e) => {

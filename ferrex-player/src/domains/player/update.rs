@@ -54,43 +54,82 @@ pub fn update_player(
         Message::Play => {
             if let Some(video) = &mut state.video_opt {
                 video.set_paused(false);
+                DomainUpdateResult::task(Task::done(crate::common::messages::DomainMessage::Media(
+                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                        state.current_media_id.unwrap(),
+                        video.position().as_secs_f64(),
+                        video.duration().as_secs_f64(),
+                    ),
+                )))
+            } else {
+                DomainUpdateResult::task(Task::none())
             }
-            // Send progress update when playback starts
-            DomainUpdateResult::task(Task::done(crate::common::messages::DomainMessage::Media(
-                crate::domains::media::messages::Message::SendProgressUpdate,
-            )))
         }
 
         Message::Pause => {
             if let Some(video) = &mut state.video_opt {
                 video.set_paused(true);
+                DomainUpdateResult::task(Task::done(crate::common::messages::DomainMessage::Media(
+                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                        state.current_media_id.unwrap(),
+                        video.position().as_secs_f64(),
+                        video.duration().as_secs_f64(),
+                    ),
+                )))
+            } else {
+                DomainUpdateResult::task(Task::none())
             }
-            // Send progress update when playback pauses
-            DomainUpdateResult::task(Task::done(crate::common::messages::DomainMessage::Media(
-                crate::domains::media::messages::Message::SendProgressUpdate,
-            )))
         }
 
         Message::PlayPause => {
-            if let Some(video) = &mut state.video_opt {
+            let task = if let Some(video) = &mut state.video_opt {
                 let is_paused = video.paused();
                 video.set_paused(!is_paused);
-                state.update_controls(true);
-            }
+                DomainUpdateResult::task(Task::done(crate::common::messages::DomainMessage::Media(
+                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                        state.current_media_id.unwrap(),
+                        video.position().as_secs_f64(),
+                        video.duration().as_secs_f64(),
+                    ),
+                )))
+            } else {
+                DomainUpdateResult::task(Task::none())
+            };
+            state.update_controls(true);
+            task
+        }
+
+        Message::ResetAfterStop => {
+            // Reset the player state after progress update has been sent
+            state.reset();
             DomainUpdateResult::task(Task::none())
         }
 
         Message::Stop => {
-            // Send final progress update before stopping
-            let update_task = Task::done(crate::common::messages::DomainMessage::Media(
-                crate::domains::media::messages::Message::SendProgressUpdate,
-            ));
-            state.reset();
-            // Navigate back after stopping
-            DomainUpdateResult::task(Task::batch(vec![
+            // Capture position and duration BEFORE reset
+            let update_task = if let Some(media_id) = state.current_media_id {
+                let position = state.position;
+                let duration = state.duration;
+
+                // Send final progress update with captured data
+                Task::done(crate::common::messages::DomainMessage::Media(
+                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                        media_id, position, duration,
+                    ),
+                ))
+            } else {
+                Task::none()
+            };
+
+            // Store tasks before reset
+            let tasks = Task::batch(vec![
                 update_task,
+                Task::done(DomainMessage::Player(Message::ResetAfterStop)),
                 Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack)),
-            ]))
+            ]);
+
+            // Return tasks without resetting yet
+            DomainUpdateResult::task(tasks)
         }
 
         Message::Seek(position) => {
@@ -106,7 +145,7 @@ pub fn update_player(
 
         Message::SeekRelease => {
             // Perform the seek on release
-            if let Some(video) = &mut state.video_opt {
+            if let (Some(video), Some(media_id)) = (&mut state.video_opt, state.current_media_id) {
                 state.dragging = false;
 
                 // Use pending seek position if available, otherwise use last seek position
@@ -136,7 +175,11 @@ pub fn update_player(
                 // Send progress update after seek completes
                 return DomainUpdateResult::task(Task::done(
                     crate::common::messages::DomainMessage::Media(
-                        crate::domains::media::messages::Message::SendProgressUpdate,
+                        crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                            media_id,
+                            state.position,
+                            state.duration,
+                        ),
                     ),
                 ));
             }
@@ -144,46 +187,53 @@ pub fn update_player(
         }
 
         Message::SeekBarPressed => {
-            // Start seeking - use the last known position if we have one
+            // Only start seeking if we have a valid seek position
+            // (which means the mouse was within the seek bar's vertical hit zone)
             if let Some(_video) = &state.video_opt {
-                state.dragging = true;
-
-                // If we have a last_seek_position (from mouse move), update visual position
+                // Check if we have a valid seek position from MouseMoved
                 if let Some(seek_position) = state.last_seek_position {
+                    // Start dragging
+                    state.dragging = true;
+                    // Update visual position
                     state.position = seek_position;
+                    state.update_controls(true);
+                    log::debug!(
+                        "Seek bar pressed - starting drag at position: {:.2}s",
+                        seek_position
+                    );
+                } else {
+                    // Mouse was outside the seek bar's vertical hit zone
+                    log::debug!(
+                        "Seek bar pressed but mouse is outside valid vertical zone - ignoring"
+                    );
                 }
-
-                state.update_controls(true);
             }
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::SeekBarMoved(_point) => {
-            // SeekBarMoved is deprecated - mouse tracking is now handled via MouseMoved
-            log::warn!(
-                "SeekBarMoved is deprecated - seek bar dragging is now handled via MouseMoved"
-            );
             DomainUpdateResult::task(Task::none())
         }
 
         Message::SeekDone => {
             // Seek operation completed, clear seeking flag
-            if let Some(video) = &mut state.video_opt {
+            if let (Some(video), Some(media_id)) = (&mut state.video_opt, state.current_media_id) {
                 let video_pos = video.position().as_secs_f64();
                 log::debug!(
                     "SeekDone: Clearing seeking flag. Video position: {:.2}s, UI position: {:.2}s",
                     video_pos,
                     state.position
                 );
+                state.seeking = false;
+                state.seek_started_time = None;
+                // Send progress update after seek completes
+                DomainUpdateResult::task(Task::done(crate::common::messages::DomainMessage::Media(
+                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                        media_id,
+                        video_pos,
+                        state.duration,
+                    ),
+                )))
             } else {
                 log::debug!("SeekDone: Clearing seeking flag (no video)");
+                DomainUpdateResult::task(Task::none())
             }
-            state.seeking = false;
-            state.seek_started_time = None;
-            // Send progress update after seek completes
-            DomainUpdateResult::task(Task::done(crate::common::messages::DomainMessage::Media(
-                crate::domains::media::messages::Message::SendProgressUpdate,
-            )))
         }
 
         Message::SeekRelative(secs) => {
@@ -265,7 +315,38 @@ pub fn update_player(
 
         Message::EndOfStream => {
             log::info!("End of stream");
-            DomainUpdateResult::task(Task::none())
+
+            // Capture position and duration for progress update
+            if let Some(media_id) = state.current_media_id {
+                let position = state.position;
+                let duration = state.duration;
+
+                // Send final progress update with captured data
+                let progress_task = Task::done(crate::common::messages::DomainMessage::Media(
+                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                        media_id, position, duration,
+                    ),
+                ));
+
+                // Check if we should play next episode
+                let next_episode_task = if let Some(media_id) = &state.current_media_id {
+                    // Only auto-play next episode if this is an episode
+                    if let ferrex_core::api_types::MediaId::Episode(_) = media_id {
+                        log::info!("Current media is an episode, checking for next episode");
+                        Task::done(crate::common::messages::DomainMessage::Media(
+                            crate::domains::media::messages::Message::PlayNextEpisode,
+                        ))
+                    } else {
+                        Task::none()
+                    }
+                } else {
+                    Task::none()
+                };
+
+                DomainUpdateResult::task(Task::batch(vec![progress_task, next_episode_task]))
+            } else {
+                DomainUpdateResult::task(Task::none())
+            }
         }
 
         Message::NewFrame => {
@@ -350,11 +431,13 @@ pub fn update_player(
             } else {
                 iced::window::Mode::Windowed
             };
-            // Use toggle_maximize for now as change_mode might not be available in this Iced version
-            // TODO: Update to use proper fullscreen mode when Iced is updated
-            //iced::Settings::fullscreen;
-            DomainUpdateResult::task(
-                iced::window::get_latest().and_then(move |id| iced::window::set_mode(id, mode)),
+
+            // Emit SetWindowMode event instead of managing window directly
+            DomainUpdateResult::with_events(
+                Task::none(),
+                vec![crate::common::messages::CrossDomainEvent::SetWindowMode(
+                    mode,
+                )],
             )
         }
 
@@ -373,16 +456,37 @@ pub fn update_player(
             // Update controls visibility
             state.update_controls(true);
 
-            // Always calculate potential seek position for click-to-seek
-            let percentage = (point.x / window_size.width).clamp(0.0, 1.0) as f64;
-            let duration = state.source_duration.unwrap_or(state.duration);
-            let seek_position = percentage * duration;
+            // Track vertical position for seek bar validation
+            state.last_mouse_y = Some(point.y);
 
-            // Store for potential click-to-seek
-            state.last_seek_position = Some(seek_position);
+            // Check if we're within the seek bar's vertical hit zone
+            // The seek bar is positioned at the bottom of the screen
+            let seek_bar_vertical_center = window_size.height
+                - crate::infrastructure::constants::player_controls::SEEK_BAR_CENTER_FROM_BOTTOM;
+            let max_vertical_distance = super::state::SEEK_BAR_VISUAL_HEIGHT
+                * super::state::SEEK_BAR_CLICK_TOLERANCE_MULTIPLIER;
+            let within_seek_zone =
+                (point.y - seek_bar_vertical_center).abs() <= max_vertical_distance;
+
+            // Only calculate seek position if within vertical bounds OR already dragging
+            if within_seek_zone || state.dragging {
+                let percentage = (point.x / window_size.width).clamp(0.0, 1.0) as f64;
+                let duration = state.source_duration.unwrap_or(state.duration);
+                let seek_position = percentage * duration;
+                // Store for potential click-to-seek
+                state.last_seek_position = Some(seek_position);
+            } else {
+                // Clear seek position when outside zone and not dragging
+                state.last_seek_position = None;
+            }
 
             // If we're dragging the seek bar, update position and perform seek
             if state.dragging {
+                // When dragging, always calculate position even if outside vertical zone
+                let percentage = (point.x / window_size.width).clamp(0.0, 1.0) as f64;
+                let duration = state.source_duration.unwrap_or(state.duration);
+                let seek_position = percentage * duration;
+
                 // Update position immediately for responsive UI
                 state.position = seek_position;
                 state.update_controls(true);
@@ -732,6 +836,132 @@ pub fn update_player(
             DomainUpdateResult::task(Task::done(DomainMessage::Media(
                 crate::domains::media::messages::Message::LoadMediaById(media_id),
             )))
+        }
+
+        // External MPV player messages
+        #[cfg(feature = "external-mpv-player")]
+        Message::ExternalPlaybackStarted => {
+            log::info!("External MPV playback started");
+            DomainUpdateResult::task(Task::none())
+        }
+
+        #[cfg(feature = "external-mpv-player")]
+        Message::ExternalPlaybackUpdate { position, duration } => {
+            // Update state with position from external MPV
+            state.position = position;
+            state.duration = duration;
+
+            // Save watch progress
+            if position > 0.0 && duration > 0.0 {
+                state.last_progress_sent = position;
+            }
+
+            DomainUpdateResult::task(Task::none())
+        }
+
+        #[cfg(feature = "external-mpv-player")]
+        Message::ExternalPlaybackEnded => {
+            log::info!("External MPV playback ended");
+
+            // Save final position
+            if let (Some(handle), Some(media_id)) =
+                (&state.external_mpv_handle, state.current_media_id)
+            {
+                let final_position = handle.get_final_position();
+                let final_fullscreen = handle.get_final_fullscreen();
+                state.position = final_position;
+
+                // Send final progress update
+                let progress_task = Task::done(crate::common::messages::DomainMessage::Media(
+                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                        media_id,
+                        final_position,
+                        state.duration,
+                    ),
+                ));
+
+                // Clear external MPV state
+                state.external_mpv_handle = None;
+                state.external_mpv_active = false;
+
+                // Emit RestoreWindow event
+                DomainUpdateResult::with_events(
+                    progress_task,
+                    vec![crate::common::messages::CrossDomainEvent::RestoreWindow(
+                        final_fullscreen,
+                    )],
+                )
+            } else {
+                DomainUpdateResult::task(Task::none())
+            }
+        }
+
+        #[cfg(feature = "external-mpv-player")]
+        Message::PollExternalMpv => {
+            use iced::window;
+
+            if let (Some(mut handle), Some(media_id)) =
+                (state.external_mpv_handle.take(), state.current_media_id)
+            {
+                // Check if MPV is still alive
+                if !handle.is_alive() {
+                    log::info!("External MPV process has ended");
+
+                    // Get final state before dropping the handle
+                    let (position, duration) = handle.poll_position();
+                    let final_fullscreen = handle.get_final_fullscreen();
+
+                    log::info!("position: {:?}, duration: {:?}", position, duration);
+
+                    state.position = position;
+                    state.is_fullscreen = final_fullscreen;
+
+                    // Clear external MPV state
+                    state.external_mpv_active = false;
+
+                    // Send final progress update
+                    let end_playback_task =
+                        Task::done(crate::common::messages::DomainMessage::Player(
+                            Message::ExternalPlaybackEnded,
+                        ));
+                    let progress_task = Task::done(crate::common::messages::DomainMessage::Media(
+                        crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                            media_id, position, duration,
+                        ),
+                    ));
+
+                    // Navigate back to previous view
+                    let nav_task =
+                        Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack));
+
+                    // Emit RestoreWindow event and return tasks
+                    DomainUpdateResult::with_events(
+                        end_playback_task.chain(progress_task).chain(nav_task),
+                        vec![crate::common::messages::CrossDomainEvent::RestoreWindow(
+                            final_fullscreen,
+                        )],
+                    )
+                } else {
+                    // Poll for position updates
+                    let (position, duration) = handle.poll_position();
+
+                    // Put the handle back
+                    state.external_mpv_handle = Some(handle);
+
+                    // Update state if we got valid data
+                    if position >= 0.0 && duration > 0.0 {
+                        update_player(
+                            state,
+                            Message::ExternalPlaybackUpdate { position, duration },
+                            window_size,
+                        )
+                    } else {
+                        DomainUpdateResult::task(Task::none())
+                    }
+                }
+            } else {
+                DomainUpdateResult::task(Task::none())
+            }
         }
     }
 }

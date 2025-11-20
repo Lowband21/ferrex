@@ -233,56 +233,15 @@ pub fn handle_media_event_received(state: &mut State, event: MediaEvent) -> Task
         MediaEvent::MediaDeleted { id } => {
             log::info!("Media deleted: {}", id);
 
-            // NEW ARCHITECTURE: Parse the id string into a MediaId
-            // The id could be in format "movie:XXX", "series:XXX", "season:XXX", or "episode:XXX"
-            let media_id = if id.starts_with("movie:") {
-                MediaId::Movie(
-                    ferrex_core::MovieID::new(id.strip_prefix("movie:").unwrap().to_string())
-                        .unwrap(),
-                )
-            } else if id.starts_with("series:") {
-                MediaId::Series(
-                    ferrex_core::SeriesID::new(id.strip_prefix("series:").unwrap().to_string())
-                        .unwrap(),
-                )
-            } else if id.starts_with("season:") {
-                MediaId::Season(
-                    ferrex_core::SeasonID::new(id.strip_prefix("season:").unwrap().to_string())
-                        .unwrap(),
-                )
-            } else if id.starts_with("episode:") {
-                MediaId::Episode(
-                    ferrex_core::EpisodeID::new(id.strip_prefix("episode:").unwrap().to_string())
-                        .unwrap(),
-                )
-            } else {
-                // Fallback: try to determine type by querying MediaStore
-                log::warn!("MediaDeleted event with unprefixed id: {}, skipping", id);
-                return Task::none();
-            };
-
             // NEW ARCHITECTURE: Remove from MediaStore
             if let Ok(mut store) = state.domains.media.state.media_store.write() {
-                store.remove(&media_id);
+                store.remove(&id);
             }
 
             // Remove from library references
             for library in state.domains.library.state.libraries.iter_mut() {
                 if let Some(media_vec) = &mut library.media {
-                    media_vec.retain(|media_ref| match media_ref {
-                        crate::infrastructure::api_types::MediaReference::Movie(m) => {
-                            MediaId::Movie(m.id.clone()) != media_id
-                        }
-                        crate::infrastructure::api_types::MediaReference::Series(s) => {
-                            MediaId::Series(s.id.clone()) != media_id
-                        }
-                        crate::infrastructure::api_types::MediaReference::Season(s) => {
-                            MediaId::Season(s.id.clone()) != media_id
-                        }
-                        crate::infrastructure::api_types::MediaReference::Episode(e) => {
-                            MediaId::Episode(e.id.clone()) != media_id
-                        }
-                    });
+                    media_vec.retain(|media_ref| media_ref.as_ref().id() == id);
                 }
             }
 

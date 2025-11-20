@@ -107,7 +107,7 @@ impl PlayerDomainState {
                 //Space::with_height(Length::Fixed(15.0)),
                 // Control buttons - with padding
                 container(self.build_control_buttons())
-                    .padding(40) // Same padding on all sides
+                    .padding(crate::infrastructure::constants::player_controls::CONTROL_BUTTONS_PADDING)
                     .width(Length::Fill),
             ]
             .spacing(0)
@@ -117,9 +117,13 @@ impl PlayerDomainState {
     }
 
     /// Build the custom seek bar
+    /// 
+    /// The seek bar has a visual height of 4px but a hit zone of 30px for easier interaction.
+    /// Mouse clicks are validated to be within 7x the visual bar height (28px) vertically to prevent
+    /// accidental seeks when clicking elsewhere on the screen.
     fn build_seek_bar(&self) -> Element<Message> {
-        let bar_height = 4.0;
-        let hit_area_height = 30.0;
+        let bar_height = super::state::SEEK_BAR_VISUAL_HEIGHT;
+        let hit_area_height = crate::infrastructure::constants::player_controls::SEEK_BAR_HIT_ZONE_HEIGHT;
 
         // Calculate percentages
         // Use source duration if available (for HLS this is the full media duration)
@@ -270,7 +274,7 @@ impl PlayerDomainState {
                             .width(Length::Fixed(80.0))
                             .style(theme::slider_volume)
                     )
-                    .height(36.0)
+                    .height(crate::infrastructure::constants::player_controls::CONTROL_BUTTONS_HEIGHT)
                     .align_y(iced::alignment::Vertical::Center),
                     Space::with_width(Length::Fixed(20.0)),
                     // Subtitle button (with indicator if text subtitles are available)

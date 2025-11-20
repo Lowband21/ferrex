@@ -46,7 +46,7 @@ pub struct TranscodingService {
     cache_manager: Arc<CacheManager>,
     hardware_selector: Arc<HardwareSelector>,
     progress_store: Arc<RwLock<HashMap<String, JobProgress>>>,
-    media_cache: Arc<RwLock<HashMap<String, (std::time::Instant, MediaFile)>>>,
+    media_cache: Arc<RwLock<HashMap<Uuid, (std::time::Instant, MediaFile)>>>,
 }
 
 impl TranscodingService {
@@ -172,13 +172,13 @@ impl TranscodingService {
     }
 
     /// Get media with request-level caching
-    async fn get_media_cached(&self, media_id: &str) -> Result<MediaFile> {
+    async fn get_media_cached(&self, media_id: Uuid) -> Result<MediaFile> {
         const CACHE_TTL: Duration = Duration::from_secs(30);
 
         // Check cache first
         {
             let cache = self.media_cache.read().await;
-            if let Some((cached_at, media)) = cache.get(media_id) {
+            if let Some((cached_at, media)) = cache.get(&media_id) {
                 if cached_at.elapsed() < CACHE_TTL {
                     return Ok(media.clone());
                 }
@@ -189,7 +189,7 @@ impl TranscodingService {
         let media = self
             .db
             .backend()
-            .get_media(media_id)
+            .get_media(&media_id)
             .await
             .context("Failed to get media from database")?
             .ok_or_else(|| anyhow::anyhow!("Media not found"))?;
@@ -197,10 +197,7 @@ impl TranscodingService {
         // Update cache
         {
             let mut cache = self.media_cache.write().await;
-            cache.insert(
-                media_id.to_string(),
-                (std::time::Instant::now(), media.clone()),
-            );
+            cache.insert(media_id, (std::time::Instant::now(), media.clone()));
 
             // Clean up old entries if cache gets too large
             if cache.len() > 100 {
@@ -215,15 +212,17 @@ impl TranscodingService {
     /// Start a transcoding job for a media file
     pub async fn start_transcoding(
         &self,
-        media_id: &str,
+        media_id: &String,
         profile: TranscodingProfile,
         _tone_mapping_config: Option<ToneMappingConfig>,
         priority: Option<JobPriority>,
     ) -> Result<String> {
         let start = std::time::Instant::now();
 
+        let media_id_uuid = Uuid::parse_str(media_id).unwrap();
+
         // Get media file from database (with caching)
-        let media = self.get_media_cached(media_id).await?;
+        let media = self.get_media_cached(media_id_uuid).await?;
 
         // Check if file exists
         if !tokio::fs::try_exists(&media.path).await.unwrap_or(false) {
@@ -233,18 +232,18 @@ impl TranscodingService {
         // Check if we already have this version cached
         if self
             .cache_manager
-            .has_cached_version(media_id, &profile.name)
+            .has_cached_version(&media_id, &profile.name)
             .await
         {
             info!(
                 "Using cached version for media {} with profile {}",
                 media_id, profile.name
             );
-            return Ok(format!("cached_{}", media_id));
+            return Ok(media_id.clone());
         }
 
         // Generate job ID
-        let job_id = Uuid::new_v4().to_string();
+        let job_id = Uuid::now_v7().to_string();
 
         // Create output directory
         let output_dir = self
@@ -294,7 +293,7 @@ impl TranscodingService {
     /// Start adaptive bitrate transcoding
     pub async fn start_adaptive_transcoding(
         &self,
-        media_id: &str,
+        media_id: Uuid,
         priority: Option<JobPriority>,
     ) -> Result<String> {
         let overall_start = std::time::Instant::now();
@@ -333,10 +332,9 @@ impl TranscodingService {
             .map(|variant| {
                 let profile_name = format!("adaptive_{}", variant.name);
                 let cache_manager = self.cache_manager.clone();
-                let media_id = media_id.to_string();
                 async move {
                     cache_manager
-                        .has_cached_version(&media_id, &profile_name)
+                        .has_cached_version(&media_id.to_string(), &profile_name)
                         .await
                 }
             })
@@ -355,7 +353,7 @@ impl TranscodingService {
             let master_path = self
                 .config
                 .transcode_cache_dir
-                .join(media_id)
+                .join(media_id.to_string())
                 .join("master.m3u8");
             if tokio::fs::try_exists(&master_path).await.unwrap_or(false) {
                 info!(
@@ -433,7 +431,7 @@ impl TranscodingService {
             };
 
             let job_id = self
-                .start_transcoding(media_id, profile, None, priority)
+                .start_transcoding(&media_id.to_string(), profile, None, priority)
                 .await?;
 
             // Skip cached versions - they don't need status tracking
@@ -457,13 +455,13 @@ impl TranscodingService {
         if variant_job_ids.is_empty() {
             info!("All variants already cached for media {}", media_id);
             // Ensure master playlist exists
-            self.ensure_master_playlist_exists(media_id, &adaptive_profile)
+            self.ensure_master_playlist_exists(&media_id.to_string(), &adaptive_profile)
                 .await?;
             return Ok(format!("cached_{}", media_id));
         }
 
         // Create master job that tracks all variant jobs
-        let master_output_dir = self.config.transcode_cache_dir.join(media_id);
+        let master_output_dir = self.config.transcode_cache_dir.join(media_id.to_string());
 
         info!(
             "Creating master job {} with variant jobs: {:?}",
@@ -684,7 +682,7 @@ impl TranscodingService {
             } else {
                 0.0
             };
-            info!("Master job aggregation: {} active variant jobs (out of {}), total_progress={}, avg={}", 
+            info!("Master job aggregation: {} active variant jobs (out of {}), total_progress={}, avg={}",
                 active_jobs, variant_job_ids.len(), total_progress, avg_progress);
             TranscodingStatus::Processing {
                 progress: avg_progress,
@@ -843,8 +841,10 @@ impl TranscodingService {
     }
 
     /// Get playlist URL for a transcoded media
-    pub async fn get_playlist_url(&self, media_id: &str, profile_name: &str) -> Option<PathBuf> {
-        let cache_path = self.cache_manager.get_cache_path(media_id, profile_name);
+    pub async fn get_playlist_url(&self, media_id: &Uuid, profile_name: &str) -> Option<PathBuf> {
+        let cache_path = self
+            .cache_manager
+            .get_cache_path(&media_id.to_string(), profile_name);
         let playlist_path = cache_path.join("playlist.m3u8");
 
         if tokio::fs::try_exists(&playlist_path).await.unwrap_or(false) {
@@ -920,7 +920,7 @@ impl TranscodingService {
             // Only include variants that are actually cached
             if self
                 .cache_manager
-                .has_cached_version(media_id, &profile_name)
+                .has_cached_version(&media_id, &profile_name)
                 .await
             {
                 let (width, height) = {

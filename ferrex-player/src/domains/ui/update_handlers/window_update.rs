@@ -44,3 +44,21 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<Message> {
 
     Task::none()
 }
+
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
+pub fn handle_window_moved(state: &mut State, position: Option<iced::Point>) -> Task<Message> {
+    // Store the window position for later use (e.g., when spawning MPV)
+    if let Some(position) = position {
+        log::info!("Window moved to: ({}, {})", position.x, position.y);
+        state.window_position = Some(position);
+    }
+
+    Task::none()
+}

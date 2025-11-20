@@ -1,20 +1,23 @@
 use crate::{
     api_types::MediaId,
-    database::{traits::MediaDatabaseTrait, postgres::PostgresDatabase},
+    database::{postgres::PostgresDatabase, traits::MediaDatabaseTrait},
     media::*,
     query::*,
-    watch_status::{WatchStatusFilter, InProgressItem},
-    Result, MediaError,
+    watch_status::{InProgressItem, WatchStatusFilter},
+    MediaError, Result,
 };
-use sqlx::{QueryBuilder, Postgres, Row};
+use chrono::Datelike;
 use sqlx::types::BigDecimal;
+use sqlx::{Postgres, QueryBuilder, Row};
 use std::str::FromStr;
 use uuid::Uuid;
-use chrono::Datelike;
 
 impl PostgresDatabase {
     /// Execute a media query using optimized SQL queries with proper indexing
-    pub async fn query_media_optimized(&self, query: &MediaQuery) -> Result<Vec<MediaReferenceWithStatus>> {
+    pub async fn query_media_optimized(
+        &self,
+        query: &MediaQuery,
+    ) -> Result<Vec<MediaReferenceWithStatus>> {
         // Handle watch status filter separately if provided
         if let Some(watch_filter) = &query.filters.watch_status {
             return self.query_media_by_watch_status(query, watch_filter).await;
@@ -22,12 +25,8 @@ impl PostgresDatabase {
 
         // Build the main SQL query
         let mut results = match query.filters.media_type {
-            Some(MediaTypeFilter::Movie) => {
-                self.query_movies_optimized(query).await?
-            }
-            Some(MediaTypeFilter::Series) => {
-                self.query_tv_shows_optimized(query).await?
-            }
+            Some(MediaTypeFilter::Movie) => self.query_movies_optimized(query).await?,
+            Some(MediaTypeFilter::Series) => self.query_tv_shows_optimized(query).await?,
             Some(MediaTypeFilter::Season) | Some(MediaTypeFilter::Episode) => {
                 // For Season/Episode filters, query TV shows and filter results
                 self.query_tv_shows_optimized(query).await?
@@ -48,12 +47,15 @@ impl PostgresDatabase {
         Ok(results)
     }
 
-    async fn query_movies_optimized(&self, query: &MediaQuery) -> Result<Vec<MediaReferenceWithStatus>> {
+    async fn query_movies_optimized(
+        &self,
+        query: &MediaQuery,
+    ) -> Result<Vec<MediaReferenceWithStatus>> {
         let mut sql_builder = QueryBuilder::<Postgres>::new(
             r#"
-            SELECT 
+            SELECT
                 mr.id, mr.tmdb_id, mr.title, mr.theme_color,
-                mf.id as file_id, mf.file_path, mf.filename, mf.file_size, 
+                mf.id as file_id, mf.file_path, mf.filename, mf.file_size,
                 mf.created_at as file_created_at, mf.technical_metadata, mf.library_id,
                 mm.release_date, mm.vote_average, mm.runtime, mm.popularity,
                 mm.genre_names, mm.release_year, mm.overview, mm.cast_names
@@ -61,7 +63,7 @@ impl PostgresDatabase {
             JOIN media_files mf ON mr.file_id = mf.id
             LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id
             WHERE 1=1
-            "#
+            "#,
         );
 
         // Add library filter
@@ -118,7 +120,7 @@ impl PostgresDatabase {
         let mut results = Vec::new();
         for row in rows {
             let movie_ref = self.row_to_movie_reference(&row)?;
-            
+
             // Get watch status if user context provided
             let (watch_status, is_completed) = if let Some(user_id) = query.user_context {
                 self.get_movie_watch_status(user_id, &movie_ref.id).await?
@@ -136,20 +138,23 @@ impl PostgresDatabase {
         Ok(results)
     }
 
-    async fn query_tv_shows_optimized(&self, query: &MediaQuery) -> Result<Vec<MediaReferenceWithStatus>> {
+    async fn query_tv_shows_optimized(
+        &self,
+        query: &MediaQuery,
+    ) -> Result<Vec<MediaReferenceWithStatus>> {
         // For TV shows, we need to handle the hierarchy differently
         // We'll use a LATERAL JOIN to efficiently fetch series with their episodes
         let mut sql_builder = QueryBuilder::<Postgres>::new(
             r#"
             WITH series_data AS (
-                SELECT 
+                SELECT
                     sr.id, sr.tmdb_id, sr.title,
                     sm.first_air_date, sm.vote_average, sm.popularity,
                     sm.genre_names, sm.first_air_year, sm.overview, sm.cast_names
                 FROM series_references sr
                 LEFT JOIN series_metadata sm ON sr.id = sm.series_id
                 WHERE 1=1
-            "#
+            "#,
         );
 
         // Add library filter
@@ -184,16 +189,16 @@ impl PostgresDatabase {
         sql_builder.push(
             r#"
             )
-            SELECT 
+            SELECT
                 sd.*,
                 sn.id as season_id, sn.season_number,
-                ep.id as episode_id, ep.season_number as ep_season, 
+                ep.id as episode_id, ep.season_number as ep_season,
                 ep.episode_number, ep.file_id,
-                mf.file_path, mf.filename, mf.file_size, 
+                mf.file_path, mf.filename, mf.file_size,
                 mf.created_at as file_created_at, mf.library_id
             FROM series_data sd
             LEFT JOIN LATERAL (
-                SELECT * FROM season_references 
+                SELECT * FROM season_references
                 WHERE series_id = sd.id
                 ORDER BY season_number
             ) sn ON true
@@ -203,7 +208,7 @@ impl PostgresDatabase {
                 ORDER BY season_number, episode_number
             ) ep ON true
             LEFT JOIN media_files mf ON ep.file_id = mf.id
-            "#
+            "#,
         );
 
         // Add sorting for series
@@ -211,7 +216,7 @@ impl PostgresDatabase {
 
         // Note: Pagination for hierarchical data is complex
         // We'll apply it after building the hierarchy
-        
+
         let rows = sql_builder
             .build()
             .fetch_all(self.pool())
@@ -227,7 +232,7 @@ impl PostgresDatabase {
             return Ok(Vec::new());
         }
         let end = (start + query.pagination.limit).min(results.len());
-        
+
         Ok(results[start..end].to_vec())
     }
 
@@ -236,21 +241,17 @@ impl PostgresDatabase {
         query: &MediaQuery,
         watch_filter: &WatchStatusFilter,
     ) -> Result<Vec<MediaReferenceWithStatus>> {
-        let user_id = query.user_context
-            .ok_or_else(|| MediaError::InvalidMedia("User context required for watch status filter".to_string()))?;
+        let user_id = query.user_context.ok_or_else(|| {
+            MediaError::InvalidMedia("User context required for watch status filter".to_string())
+        })?;
 
         match watch_filter {
-            WatchStatusFilter::InProgress => {
-                self.query_in_progress_media(user_id, query).await
-            }
-            WatchStatusFilter::Completed => {
-                self.query_completed_media(user_id, query).await
-            }
-            WatchStatusFilter::Unwatched => {
-                self.query_unwatched_media(user_id, query).await
-            }
+            WatchStatusFilter::InProgress => self.query_in_progress_media(user_id, query).await,
+            WatchStatusFilter::Completed => self.query_completed_media(user_id, query).await,
+            WatchStatusFilter::Unwatched => self.query_unwatched_media(user_id, query).await,
             WatchStatusFilter::RecentlyWatched { days } => {
-                self.query_recently_watched_media(user_id, *days, query).await
+                self.query_recently_watched_media(user_id, *days, query)
+                    .await
             }
         }
     }
@@ -262,21 +263,21 @@ impl PostgresDatabase {
     ) -> Result<Vec<MediaReferenceWithStatus>> {
         let mut sql_builder = QueryBuilder::<Postgres>::new(
             r#"
-            SELECT 
+            SELECT
                 uwp.media_id_json, uwp.position, uwp.duration, uwp.last_watched,
-                CASE 
+                CASE
                     WHEN uwp.media_id_json->>'type' = 'Movie' THEN 'movie'
                     WHEN uwp.media_id_json->>'type' = 'Episode' THEN 'episode'
                 END as media_type,
-                CASE 
+                CASE
                     WHEN uwp.media_id_json->>'type' = 'Movie' THEN (uwp.media_id_json->>'id')::uuid
                     WHEN uwp.media_id_json->>'type' = 'Episode' THEN (uwp.media_id_json->>'id')::uuid
                 END as media_id
             FROM user_watch_progress uwp
             WHERE uwp.user_id = $1
-                AND uwp.position > 0 
+                AND uwp.position > 0
                 AND (uwp.position / uwp.duration) < 0.95
-            "#
+            "#,
         );
 
         sql_builder.push_bind(user_id);
@@ -306,11 +307,15 @@ impl PostgresDatabase {
 
             let media_ref = match media_type.as_str() {
                 "movie" => {
-                    let movie = self.get_movie_reference(&MovieID::new(media_id.to_string())?).await?;
+                    let movie = self
+                        .get_movie_reference(&MovieID::new(media_id.to_string())?)
+                        .await?;
                     MediaReference::Movie(movie)
                 }
                 "episode" => {
-                    let episode = self.get_episode_reference(&EpisodeID::new(media_id.to_string())?).await?;
+                    let episode = self
+                        .get_episode_reference(&EpisodeID::new(media_id.to_string())?)
+                        .await?;
                     MediaReference::Episode(episode)
                 }
                 _ => continue,
@@ -344,19 +349,19 @@ impl PostgresDatabase {
     ) -> Result<Vec<MediaReferenceWithStatus>> {
         let mut sql_builder = QueryBuilder::<Postgres>::new(
             r#"
-            SELECT 
+            SELECT
                 ucm.media_id_json, ucm.completed_at,
-                CASE 
+                CASE
                     WHEN ucm.media_id_json->>'type' = 'Movie' THEN 'movie'
                     WHEN ucm.media_id_json->>'type' = 'Episode' THEN 'episode'
                 END as media_type,
-                CASE 
+                CASE
                     WHEN ucm.media_id_json->>'type' = 'Movie' THEN (ucm.media_id_json->>'id')::uuid
                     WHEN ucm.media_id_json->>'type' = 'Episode' THEN (ucm.media_id_json->>'id')::uuid
                 END as media_id
             FROM user_completed_media ucm
             WHERE ucm.user_id = $1
-            "#
+            "#,
         );
 
         sql_builder.push_bind(user_id);
@@ -383,11 +388,15 @@ impl PostgresDatabase {
 
             let media_ref = match media_type.as_str() {
                 "movie" => {
-                    let movie = self.get_movie_reference(&MovieID::new(media_id.to_string())?).await?;
+                    let movie = self
+                        .get_movie_reference(&MovieID::new(media_id.to_string())?)
+                        .await?;
                     MediaReference::Movie(movie)
                 }
                 "episode" => {
-                    let episode = self.get_episode_reference(&EpisodeID::new(media_id.to_string())?).await?;
+                    let episode = self
+                        .get_episode_reference(&EpisodeID::new(media_id.to_string())?)
+                        .await?;
                     MediaReference::Episode(episode)
                 }
                 _ => continue,
@@ -428,7 +437,7 @@ impl PostgresDatabase {
         if search.fuzzy {
             // Use trigram similarity for fuzzy search
             sql_builder.push(" AND (");
-            
+
             if search.fields.is_empty() || search.fields.contains(&SearchField::All) {
                 sql_builder.push("mr.title % ");
                 sql_builder.push_bind(search.text.clone());
@@ -441,7 +450,7 @@ impl PostgresDatabase {
                         sql_builder.push(" OR ");
                     }
                     first = false;
-                    
+
                     match field {
                         SearchField::Title => {
                             sql_builder.push("mr.title % ");
@@ -452,7 +461,9 @@ impl PostgresDatabase {
                             sql_builder.push_bind(search.text.clone());
                         }
                         SearchField::Cast => {
-                            sql_builder.push("EXISTS (SELECT 1 FROM unnest(mm.cast_names) AS name WHERE name % ");
+                            sql_builder.push(
+                                "EXISTS (SELECT 1 FROM unnest(mm.cast_names) AS name WHERE name % ",
+                            );
                             sql_builder.push_bind(search.text.clone());
                             sql_builder.push(")");
                         }
@@ -475,13 +486,13 @@ impl PostgresDatabase {
             } else {
                 sql_builder.push(" AND (");
                 let mut first = true;
-                
+
                 for field in &search.fields {
                     if !first {
                         sql_builder.push(" OR ");
                     }
                     first = false;
-                    
+
                     match field {
                         SearchField::Title => {
                             sql_builder.push("mr.title ILIKE ");
@@ -506,7 +517,7 @@ impl PostgresDatabase {
 
     fn add_movie_sort_clause(&self, sql_builder: &mut QueryBuilder<Postgres>, sort: &SortCriteria) {
         sql_builder.push(" ORDER BY ");
-        
+
         let (field, null_position) = match sort.primary {
             SortField::Title => ("LOWER(mr.title)", "LAST"),
             SortField::DateAdded => ("mf.created_at", "LAST"),
@@ -517,7 +528,7 @@ impl PostgresDatabase {
         };
 
         sql_builder.push(field);
-        
+
         match sort.order {
             SortOrder::Ascending => sql_builder.push(" ASC NULLS "),
             SortOrder::Descending => sql_builder.push(" DESC NULLS "),
@@ -525,9 +536,13 @@ impl PostgresDatabase {
         sql_builder.push(null_position);
     }
 
-    fn add_series_sort_clause(&self, sql_builder: &mut QueryBuilder<Postgres>, sort: &SortCriteria) {
+    fn add_series_sort_clause(
+        &self,
+        sql_builder: &mut QueryBuilder<Postgres>,
+        sort: &SortCriteria,
+    ) {
         sql_builder.push(" ORDER BY ");
-        
+
         let (field, null_position) = match sort.primary {
             SortField::Title => ("LOWER(sd.title)", "LAST"),
             SortField::DateAdded => ("file_created_at", "LAST"),
@@ -537,21 +552,25 @@ impl PostgresDatabase {
         };
 
         sql_builder.push(field);
-        
+
         match sort.order {
             SortOrder::Ascending => sql_builder.push(" ASC NULLS "),
             SortOrder::Descending => sql_builder.push(" DESC NULLS "),
         };
         sql_builder.push(null_position);
-        
+
         // Secondary sort for hierarchy
         sql_builder.push(", sd.id, season_number, episode_number");
     }
 
-    fn sort_combined_results(&self, results: &mut Vec<MediaReferenceWithStatus>, sort: &SortCriteria) {
-        use crate::media::{MediaReference, MediaDetailsOption, TmdbDetails};
+    fn sort_combined_results(
+        &self,
+        results: &mut Vec<MediaReferenceWithStatus>,
+        sort: &SortCriteria,
+    ) {
+        use crate::media::{MediaDetailsOption, MediaReference, TmdbDetails};
         use crate::query::{SortField, SortOrder};
-        
+
         results.sort_by(|a, b| {
             // Extract sort values based on the sort field
             let (a_value, b_value) = match sort.primary {
@@ -559,60 +578,60 @@ impl PostgresDatabase {
                     let a_title = match &a.media {
                         MediaReference::Movie(m) => m.title.as_str(),
                         MediaReference::Series(s) => s.title.as_str(),
-                        MediaReference::Season(_) => "",  // Seasons don't have titles
-                        MediaReference::Episode(_) => "",  // Episodes don't have titles
+                        MediaReference::Season(_) => "", // Seasons don't have titles
+                        MediaReference::Episode(_) => "", // Episodes don't have titles
                     };
                     let b_title = match &b.media {
                         MediaReference::Movie(m) => m.title.as_str(),
                         MediaReference::Series(s) => s.title.as_str(),
-                        MediaReference::Season(_) => "",  // Seasons don't have titles
-                        MediaReference::Episode(_) => "",  // Episodes don't have titles
+                        MediaReference::Season(_) => "", // Seasons don't have titles
+                        MediaReference::Episode(_) => "", // Episodes don't have titles
                     };
                     (a_title, b_title)
-                },
+                }
                 SortField::DateAdded => {
                     // For DateAdded, we need to get the file created_at
                     // Since we don't have direct access to file data here,
                     // we'll use the ID comparison as a proxy (newer IDs = newer files)
                     let a_id = match &a.media {
-                        MediaReference::Movie(m) => m.id.as_str(),
-                        MediaReference::Series(s) => s.id.as_str(),
-                        MediaReference::Season(s) => s.id.as_str(),
-                        MediaReference::Episode(e) => e.id.as_str(),
+                        MediaReference::Movie(m) => m.file.created_at,
+                        MediaReference::Series(s) => s.created_at,
+                        MediaReference::Season(s) => s.created_at,
+                        MediaReference::Episode(e) => e.file.created_at,
                     };
                     let b_id = match &b.media {
-                        MediaReference::Movie(m) => m.id.as_str(),
-                        MediaReference::Series(s) => s.id.as_str(),
-                        MediaReference::Season(s) => s.id.as_str(),
-                        MediaReference::Episode(e) => e.id.as_str(),
+                        MediaReference::Movie(m) => m.file.created_at,
+                        MediaReference::Series(s) => s.created_at,
+                        MediaReference::Season(s) => s.created_at,
+                        MediaReference::Episode(e) => e.file.created_at,
                     };
                     return match sort.order {
-                        SortOrder::Ascending => a_id.cmp(b_id),
-                        SortOrder::Descending => b_id.cmp(a_id),
+                        SortOrder::Ascending => a_id.cmp(&b_id),
+                        SortOrder::Descending => b_id.cmp(&a_id),
                     };
-                },
+                }
                 SortField::ReleaseDate => {
                     // Extract release dates from details if available
                     let a_date = extract_release_date(&a.media);
                     let b_date = extract_release_date(&b.media);
-                    
+
                     match (a_date, b_date) {
                         (Some(a), Some(b)) => {
                             return match sort.order {
                                 SortOrder::Ascending => a.cmp(&b),
                                 SortOrder::Descending => b.cmp(&a),
                             };
-                        },
+                        }
                         (Some(_), None) => return std::cmp::Ordering::Less,
                         (None, Some(_)) => return std::cmp::Ordering::Greater,
                         (None, None) => return std::cmp::Ordering::Equal,
                     }
-                },
+                }
                 SortField::Rating => {
                     // Extract ratings from details if available
                     let a_rating = extract_rating(&a.media);
                     let b_rating = extract_rating(&b.media);
-                    
+
                     match (a_rating, b_rating) {
                         (Some(a), Some(b)) => {
                             let ordering = a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal);
@@ -620,43 +639,43 @@ impl PostgresDatabase {
                                 SortOrder::Ascending => ordering,
                                 SortOrder::Descending => ordering.reverse(),
                             };
-                        },
+                        }
                         (Some(_), None) => return std::cmp::Ordering::Less,
                         (None, Some(_)) => return std::cmp::Ordering::Greater,
                         (None, None) => return std::cmp::Ordering::Equal,
                     }
-                },
+                }
                 SortField::Runtime => {
                     // Extract runtime from details if available
                     let a_runtime = extract_runtime(&a.media);
                     let b_runtime = extract_runtime(&b.media);
-                    
+
                     match (a_runtime, b_runtime) {
                         (Some(a), Some(b)) => {
                             return match sort.order {
                                 SortOrder::Ascending => a.cmp(&b),
                                 SortOrder::Descending => b.cmp(&a),
                             };
-                        },
+                        }
                         (Some(_), None) => return std::cmp::Ordering::Less,
                         (None, Some(_)) => return std::cmp::Ordering::Greater,
                         (None, None) => return std::cmp::Ordering::Equal,
                     }
-                },
+                }
                 SortField::LastWatched | SortField::WatchProgress => {
                     // These require user context and watch status
                     // For now, maintain original order
                     return std::cmp::Ordering::Equal;
-                },
+                }
             };
-            
+
             // For string comparisons (Title)
             match sort.order {
                 SortOrder::Ascending => a_value.cmp(&b_value),
                 SortOrder::Descending => b_value.cmp(&a_value),
             }
         });
-        
+
         // Helper functions to extract values from MediaReference
         fn extract_release_date(media: &MediaReference) -> Option<String> {
             match media {
@@ -666,18 +685,18 @@ impl PostgresDatabase {
                     } else {
                         None
                     }
-                },
+                }
                 MediaReference::Series(s) => {
                     if let MediaDetailsOption::Details(TmdbDetails::Series(details)) = &s.details {
                         details.first_air_date.clone()
                     } else {
                         None
                     }
-                },
+                }
                 _ => None,
             }
         }
-        
+
         fn extract_rating(media: &MediaReference) -> Option<f32> {
             match media {
                 MediaReference::Movie(m) => {
@@ -686,18 +705,18 @@ impl PostgresDatabase {
                     } else {
                         None
                     }
-                },
+                }
                 MediaReference::Series(s) => {
                     if let MediaDetailsOption::Details(TmdbDetails::Series(details)) = &s.details {
                         details.vote_average
                     } else {
                         None
                     }
-                },
+                }
                 _ => None,
             }
         }
-        
+
         fn extract_runtime(media: &MediaReference) -> Option<u32> {
             match media {
                 MediaReference::Movie(m) => {
@@ -706,7 +725,7 @@ impl PostgresDatabase {
                     } else {
                         None
                     }
-                },
+                }
                 // TV series don't have a single runtime, so we skip them
                 _ => None,
             }
@@ -715,7 +734,7 @@ impl PostgresDatabase {
 
     fn row_to_movie_reference(&self, row: &sqlx::postgres::PgRow) -> Result<MovieReference> {
         use sqlx::Row;
-        
+
         let technical_metadata: Option<serde_json::Value> = row.try_get("technical_metadata").ok();
         let media_file_metadata = technical_metadata
             .map(|tm| serde_json::from_value(tm))
@@ -736,8 +755,14 @@ impl PostgresDatabase {
             id: MovieID::new(row.get::<Uuid, _>("id").to_string())?,
             tmdb_id: row.get::<i64, _>("tmdb_id") as u64,
             title: MovieTitle::new(row.get("title"))?,
-            details: MediaDetailsOption::Endpoint(format!("/api/movie/{}", row.get::<Uuid, _>("id"))),
-            endpoint: MovieURL::from_string(format!("/api/stream/{}", row.get::<Uuid, _>("file_id"))),
+            details: MediaDetailsOption::Endpoint(format!(
+                "/api/movie/{}",
+                row.get::<Uuid, _>("id")
+            )),
+            endpoint: MovieURL::from_string(format!(
+                "/api/stream/{}",
+                row.get::<Uuid, _>("file_id")
+            )),
             file: media_file,
             theme_color: row.try_get("theme_color").ok(),
         })
@@ -757,7 +782,7 @@ impl PostgresDatabase {
 
         for row in rows {
             let series_id: Uuid = row.get("id");
-            
+
             // Create or get series reference
             if !series_map.contains_key(&series_id) {
                 let series_ref = SeriesReference {
@@ -767,12 +792,14 @@ impl PostgresDatabase {
                     title: SeriesTitle::new(row.get("title"))?,
                     details: MediaDetailsOption::Endpoint(format!("/api/series/{}", series_id)),
                     endpoint: SeriesURL::from_string(format!("/api/series/{}", series_id)),
-                    created_at: row.try_get("created_at").unwrap_or_else(|_| chrono::Utc::now()),
+                    created_at: row
+                        .try_get("created_at")
+                        .unwrap_or_else(|_| chrono::Utc::now()),
                     theme_color: row.try_get("theme_color").ok(),
                 };
-                
+
                 series_map.insert(series_id, series_ref.clone());
-                
+
                 // Add series to results
                 results.push(MediaReferenceWithStatus {
                     media: MediaReference::Series(series_ref),
@@ -785,7 +812,7 @@ impl PostgresDatabase {
             if let Ok(season_id) = row.try_get::<Uuid, _>("season_id") {
                 let season_number: i16 = row.get("season_number");
                 let key = (series_id, season_number);
-                
+
                 if !season_map.contains_key(&key) {
                     let season_ref = SeasonReference {
                         id: SeasonID::new(season_id.to_string())?,
@@ -793,18 +820,22 @@ impl PostgresDatabase {
                         season_number: SeasonNumber::new(season_number as u8),
                         library_id: row.try_get("library_id").unwrap_or(Uuid::new_v4()),
                         tmdb_series_id: row.get::<i64, _>("tmdb_id") as u64,
-                        details: MediaDetailsOption::Endpoint(
-                            format!("/api/series/{}/season/{}", series_id, season_number)
-                        ),
-                        endpoint: SeasonURL::from_string(
-                            format!("/api/series/{}/season/{}", series_id, season_number)
-                        ),
-                        created_at: row.try_get("created_at").unwrap_or_else(|_| chrono::Utc::now()),
+                        details: MediaDetailsOption::Endpoint(format!(
+                            "/api/series/{}/season/{}",
+                            series_id, season_number
+                        )),
+                        endpoint: SeasonURL::from_string(format!(
+                            "/api/series/{}/season/{}",
+                            series_id, season_number
+                        )),
+                        created_at: row
+                            .try_get("created_at")
+                            .unwrap_or_else(|_| chrono::Utc::now()),
                         theme_color: None,
                     };
-                    
+
                     season_map.insert(key, season_ref.clone());
-                    
+
                     // Add season to results
                     results.push(MediaReferenceWithStatus {
                         media: MediaReference::Season(season_ref),
@@ -819,7 +850,7 @@ impl PostgresDatabase {
                 let season_number: i16 = row.get("ep_season");
                 let episode_number: i16 = row.get("episode_number");
                 let file_id: Uuid = row.get("file_id");
-                
+
                 let media_file = MediaFile {
                     id: file_id,
                     path: std::path::PathBuf::from(row.get::<String, _>("file_path")),
@@ -837,17 +868,18 @@ impl PostgresDatabase {
                     season_number: SeasonNumber::new(season_number as u8),
                     episode_number: EpisodeNumber::new(episode_number as u8),
                     tmdb_series_id: row.get::<i64, _>("tmdb_id") as u64,
-                    details: MediaDetailsOption::Endpoint(
-                        format!("/api/series/{}/season/{}/episode/{}", 
-                                series_id, season_number, episode_number)
-                    ),
+                    details: MediaDetailsOption::Endpoint(format!(
+                        "/api/series/{}/season/{}/episode/{}",
+                        series_id, season_number, episode_number
+                    )),
                     endpoint: EpisodeURL::from_string(format!("/api/stream/{}", file_id)),
                     file: media_file,
                 };
 
                 // Get watch status if user context provided
                 let (watch_status, is_completed) = if let Some(user_id) = query.user_context {
-                    self.get_episode_watch_status(user_id, &episode_ref.id).await?
+                    self.get_episode_watch_status(user_id, &episode_ref.id)
+                        .await?
                 } else {
                     (None, false)
                 };
@@ -871,9 +903,9 @@ impl PostgresDatabase {
         // Check watch progress
         let progress = sqlx::query!(
             r#"
-            SELECT position, duration, last_watched 
-            FROM user_watch_progress 
-            WHERE user_id = $1 
+            SELECT position, duration, last_watched
+            FROM user_watch_progress
+            WHERE user_id = $1
                 AND media_id_json->>'type' = 'Movie'
                 AND media_id_json->>'id' = $2
             "#,
@@ -891,7 +923,7 @@ impl PostgresDatabase {
                 duration: row.duration as f32,
                 last_watched: row.last_watched,
             };
-            
+
             // Check if completed (>95% watched)
             let is_completed = (row.position as f64 / row.duration as f64) >= 0.95;
             return Ok((Some(watch_status), is_completed));
@@ -901,8 +933,8 @@ impl PostgresDatabase {
         let completed = sqlx::query!(
             r#"
             SELECT 1 as exists
-            FROM user_completed_media 
-            WHERE user_id = $1 
+            FROM user_completed_media
+            WHERE user_id = $1
                 AND media_id_json->>'type' = 'Movie'
                 AND media_id_json->>'id' = $2
             "#,
@@ -924,9 +956,9 @@ impl PostgresDatabase {
         // Similar to get_movie_watch_status but for episodes
         let progress = sqlx::query!(
             r#"
-            SELECT position, duration, last_watched 
-            FROM user_watch_progress 
-            WHERE user_id = $1 
+            SELECT position, duration, last_watched
+            FROM user_watch_progress
+            WHERE user_id = $1
                 AND media_id_json->>'type' = 'Episode'
                 AND media_id_json->>'id' = $2
             "#,
@@ -944,7 +976,7 @@ impl PostgresDatabase {
                 duration: row.duration as f32,
                 last_watched: row.last_watched,
             };
-            
+
             let is_completed = (row.position as f64 / row.duration as f64) >= 0.95;
             return Ok((Some(watch_status), is_completed));
         }
@@ -952,8 +984,8 @@ impl PostgresDatabase {
         let completed = sqlx::query!(
             r#"
             SELECT 1 as exists
-            FROM user_completed_media 
-            WHERE user_id = $1 
+            FROM user_completed_media
+            WHERE user_id = $1
                 AND media_id_json->>'type' = 'Episode'
                 AND media_id_json->>'id' = $2
             "#,

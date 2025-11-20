@@ -5,7 +5,8 @@ use axum::{
     response::Json,
 };
 use ferrex_core::{
-    database::traits::MediaFilters, media::{EnhancedMovieDetails, EnhancedSeriesDetails},
+    database::traits::MediaFilters,
+    media::{EnhancedMovieDetails, EnhancedSeriesDetails},
     ApiResponse, CreateLibraryRequest, FetchMediaRequest, Library, LibraryMediaResponse,
     LibraryReference, ManualMatchRequest, MediaDetailsOption, MediaEvent, MediaId, MediaReference,
     ParsedMediaInfo, TmdbDetails, UpdateLibraryRequest,
@@ -56,17 +57,21 @@ pub async fn get_library_media_handler(
                 // Get seasons for this series
                 match state.db.backend().get_series_seasons(&series_id).await {
                     Ok(seasons) => {
-                        info!("Found {} seasons for series {} ({})", 
-                              seasons.len(), 
-                              series.title.as_str(),
-                              series_id.as_str());
+                        info!(
+                            "Found {} seasons for series {} ({})",
+                            seasons.len(),
+                            series.title.as_str(),
+                            series_id.as_str()
+                        );
                         for season in seasons {
                             let season_id = season.id.clone();
-                            info!("Adding season {} (S{}) for series {} to media references", 
-                                  season_id.as_str(),
-                                  season.season_number.value(),
-                                  series.title.as_str());
-                            
+                            info!(
+                                "Adding season {} (S{}) for series {} to media references",
+                                season_id.as_str(),
+                                season.season_number.value(),
+                                series.title.as_str()
+                            );
+
                             // DEBUG: Verify series_id matches
                             if season.series_id != series.id {
                                 error!(
@@ -82,7 +87,7 @@ pub async fn get_library_media_handler(
                                     season.series_id.as_str()
                                 );
                             }
-                            
+
                             media.push(MediaReference::Season(season.clone()));
 
                             // Get episodes for this season
@@ -142,75 +147,118 @@ pub async fn fetch_media_handler(
 
                         // Get the associated media file to extract TMDB ID
                         if let Ok(Some(media_file)) =
-                            state.db.backend().get_media(id.as_str()).await
+                            state.db.backend().get_media(id.as_ref()).await
                         {
                             if let Some(metadata) = &media_file.media_file_metadata {
                                 if let Some(parsed) = &metadata.parsed_info {
                                     if let ParsedMediaInfo::Movie(movie_info) = parsed {
                                         // Search TMDB for the movie
-                                        if let Some(tmdb_provider) = &state.metadata_service.tmdb_provider {
-                                            match tmdb_provider
-                                                .search_movies(&movie_info.title, movie_info.year.map(|y| y as u16))
-                                                .await
+                                        if let Some(tmdb_provider) =
+                                            &state.metadata_service.tmdb_provider
                                         {
-                                            Ok(results) if !results.is_empty() => {
-                                                let tmdb_id = results[0].tmdb_id;
+                                            match tmdb_provider
+                                                .search_movies(
+                                                    &movie_info.title,
+                                                    movie_info.year.map(|y| y as u16),
+                                                )
+                                                .await
+                                            {
+                                                Ok(results) if !results.is_empty() => {
+                                                    let tmdb_id = results[0].tmdb_id;
 
-                                                // Get full details from TMDB
-                                                match tmdb_provider
-                                                    .get_movie(tmdb_id)
-                                                    .await
-                                                {
-                                                    Ok(details) => {
-                                                        // Update the movie with full details
-                                                        movie.details = MediaDetailsOption::Details(
-                                                            TmdbDetails::Movie(EnhancedMovieDetails {
-                                                                id: details.inner.id as u64,
-                                                                title: details.inner.title.clone(),
-                                                                overview: Some(details.inner.overview.clone()),
-                                                                release_date: details.inner.release_date.clone().map(|d| d.to_string()),
-                                                                runtime: None, // Not available in MovieBase
-                                                                vote_average: Some(details.inner.vote_average as f32),
-                                                                vote_count: Some(details.inner.vote_count as u32),
-                                                                popularity: Some(details.inner.popularity as f32),
-                                                                genres: vec![], // Not available in MovieBase
-                                                                production_companies: vec![], // Not available in MovieBase
-                                                                poster_path: details.inner.poster_path.clone(),
-                                                                backdrop_path: details.inner.backdrop_path.clone(),
-                                                                logo_path: None,
-                                                                images: Default::default(),
-                                                                cast: vec![],
-                                                                crew: vec![],
-                                                                videos: vec![],
-                                                                keywords: vec![],
-                                                                external_ids: Default::default(),
-                                                            }),
-                                                        );
+                                                    // Get full details from TMDB
+                                                    match tmdb_provider.get_movie(tmdb_id).await {
+                                                        Ok(details) => {
+                                                            // Update the movie with full details
+                                                            movie.details =
+                                                                MediaDetailsOption::Details(
+                                                                    TmdbDetails::Movie(
+                                                                        EnhancedMovieDetails {
+                                                                            id: details.inner.id
+                                                                                as u64,
+                                                                            title: details
+                                                                                .inner
+                                                                                .title
+                                                                                .clone(),
+                                                                            overview: Some(
+                                                                                details
+                                                                                    .inner
+                                                                                    .overview
+                                                                                    .clone(),
+                                                                            ),
+                                                                            release_date: details
+                                                                                .inner
+                                                                                .release_date
+                                                                                .clone()
+                                                                                .map(|d| {
+                                                                                    d.to_string()
+                                                                                }),
+                                                                            runtime: None, // Not available in MovieBase
+                                                                            vote_average: Some(
+                                                                                details
+                                                                                    .inner
+                                                                                    .vote_average
+                                                                                    as f32,
+                                                                            ),
+                                                                            vote_count: Some(
+                                                                                details
+                                                                                    .inner
+                                                                                    .vote_count
+                                                                                    as u32,
+                                                                            ),
+                                                                            popularity: Some(
+                                                                                details
+                                                                                    .inner
+                                                                                    .popularity
+                                                                                    as f32,
+                                                                            ),
+                                                                            genres: vec![], // Not available in MovieBase
+                                                                            production_companies: vec![], // Not available in MovieBase
+                                                                            poster_path: details
+                                                                                .inner
+                                                                                .poster_path
+                                                                                .clone(),
+                                                                            backdrop_path: details
+                                                                                .inner
+                                                                                .backdrop_path
+                                                                                .clone(),
+                                                                            logo_path: None,
+                                                                            images:
+                                                                                Default::default(),
+                                                                            cast: vec![],
+                                                                            crew: vec![],
+                                                                            videos: vec![],
+                                                                            keywords: vec![],
+                                                                            external_ids:
+                                                                                Default::default(),
+                                                                        },
+                                                                    ),
+                                                                );
 
-                                                        // Update in database
-                                                        let _ = state
-                                                            .db
-                                                            .backend()
-                                                            .store_movie_reference(&movie)
-                                                            .await;
+                                                            // Update in database
+                                                            let _ = state
+                                                                .db
+                                                                .backend()
+                                                                .store_movie_reference(&movie)
+                                                                .await;
 
-                                                        info!("Successfully fetched and stored TMDB metadata for movie {}", id.as_str());
-                                                    }
-                                                    Err(e) => {
-                                                        warn!("Failed to get movie details from TMDB: {}", e);
+                                                            info!("Successfully fetched and stored TMDB metadata for movie {}", id.as_str());
+                                                        }
+                                                        Err(e) => {
+                                                            warn!("Failed to get movie details from TMDB: {}", e);
+                                                        }
                                                     }
                                                 }
+                                                Ok(_) => {
+                                                    warn!(
+                                                        "No TMDB results found for movie: {}",
+                                                        movie_info.title
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    warn!("Failed to search TMDB for movie: {}", e);
+                                                }
                                             }
-                                            Ok(_) => {
-                                                warn!(
-                                                    "No TMDB results found for movie: {}",
-                                                    movie_info.title
-                                                );
-                                            }
-                                            Err(e) => {
-                                                warn!("Failed to search TMDB for movie: {}", e);
-                                            }
-                                        }
                                         } else {
                                             warn!("TMDB provider not configured");
                                         }
@@ -233,7 +281,10 @@ pub async fn fetch_media_handler(
                 Ok(mut series) => {
                     // Check if we need to fetch metadata from TMDB
                     if matches!(series.details, MediaDetailsOption::Endpoint(_)) {
-                        info!("Series {} has endpoint URL, fetching TMDB metadata", id.as_str());
+                        info!(
+                            "Series {} has endpoint URL, fetching TMDB metadata",
+                            id.as_str()
+                        );
 
                         // Get any associated media file to extract show name
                         let filters = MediaFilters {
@@ -249,22 +300,24 @@ pub async fn fetch_media_handler(
                                     if let Some(parsed) = &metadata.parsed_info {
                                         if let ParsedMediaInfo::Episode(episode_info) = parsed {
                                             // Search TMDB for the series
-                                            if let Some(tmdb_provider) = &state.metadata_service.tmdb_provider {
+                                            if let Some(tmdb_provider) =
+                                                &state.metadata_service.tmdb_provider
+                                            {
                                                 match tmdb_provider
                                                     .search_series(&episode_info.show_name)
                                                     .await
-                                            {
-                                                Ok(results) if !results.is_empty() => {
-                                                    let tmdb_id = results[0].tmdb_id;
+                                                {
+                                                    Ok(results) if !results.is_empty() => {
+                                                        let tmdb_id = results[0].tmdb_id;
 
-                                                    // Get full details from TMDB
-                                                    match tmdb_provider
-                                                        .get_series(tmdb_id)
-                                                        .await
-                                                    {
-                                                        Ok(details) => {
-                                                            // Update the series with full details
-                                                            series.details = MediaDetailsOption::Details(TmdbDetails::Series(EnhancedSeriesDetails {
+                                                        // Get full details from TMDB
+                                                        match tmdb_provider
+                                                            .get_series(tmdb_id)
+                                                            .await
+                                                        {
+                                                            Ok(details) => {
+                                                                // Update the series with full details
+                                                                series.details = MediaDetailsOption::Details(TmdbDetails::Series(EnhancedSeriesDetails {
                                                                 id: details.inner.id as u64,
                                                                 name: details.inner.name.clone(),
                                                                 overview: details.inner.overview.clone(),
@@ -288,33 +341,33 @@ pub async fn fetch_media_handler(
                                                                 external_ids: Default::default(),
                                                             }));
 
-                                                            // Update in database
-                                                            let _ = state
-                                                                .db
-                                                                .backend()
-                                                                .store_series_reference(&series)
-                                                                .await;
+                                                                // Update in database
+                                                                let _ = state
+                                                                    .db
+                                                                    .backend()
+                                                                    .store_series_reference(&series)
+                                                                    .await;
 
-                                                            info!("Successfully fetched and stored TMDB metadata for series {}", id.as_str());
-                                                        }
-                                                        Err(e) => {
-                                                            warn!("Failed to get series details from TMDB: {}", e);
+                                                                info!("Successfully fetched and stored TMDB metadata for series {}", id.as_str());
+                                                            }
+                                                            Err(e) => {
+                                                                warn!("Failed to get series details from TMDB: {}", e);
+                                                            }
                                                         }
                                                     }
+                                                    Ok(_) => {
+                                                        warn!(
+                                                            "No TMDB results found for series: {}",
+                                                            episode_info.show_name
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        warn!(
+                                                            "Failed to search TMDB for series: {}",
+                                                            e
+                                                        );
+                                                    }
                                                 }
-                                                Ok(_) => {
-                                                    warn!(
-                                                        "No TMDB results found for series: {}",
-                                                        episode_info.show_name
-                                                    );
-                                                }
-                                                Err(e) => {
-                                                    warn!(
-                                                        "Failed to search TMDB for series: {}",
-                                                        e
-                                                    );
-                                                }
-                                            }
                                             } else {
                                                 warn!("TMDB provider not configured");
                                             }
@@ -361,7 +414,9 @@ pub async fn fetch_media_handler(
             // Person references are not stored as media items
             // They are part of cast/crew data in movie/series metadata
             error!("Person references cannot be fetched as media items");
-            Ok(Json(ApiResponse::error("Person references are not stored as separate media items".to_string())))
+            Ok(Json(ApiResponse::error(
+                "Person references are not stored as separate media items".to_string(),
+            )))
         }
     }
 }
@@ -505,25 +560,39 @@ pub async fn create_library_handler(
     match state.db.backend().create_library(library.clone()).await {
         Ok(id) => {
             info!("Library successfully created in database with ID: {}", id);
-            
+
             // Update the FolderMonitor's library list to include the new library
             {
                 let mut libraries = state.folder_monitor.libraries.write().await;
                 libraries.push(library.clone());
             }
-            
+
             // Trigger immediate folder discovery for the new library
-            if let Err(e) = state.folder_monitor.discover_library_folders_immediate(&library.id).await {
-                warn!("Failed to trigger immediate folder discovery for library {}: {}", id, e);
+            if let Err(e) = state
+                .folder_monitor
+                .discover_library_folders_immediate(&library.id)
+                .await
+            {
+                warn!(
+                    "Failed to trigger immediate folder discovery for library {}: {}",
+                    id, e
+                );
                 // Continue anyway - folder discovery will happen in the next scheduled cycle
             } else {
                 info!("Immediate folder discovery triggered for library {}", id);
-                
+
                 // Trigger an immediate scan for the newly created library after folder discovery
                 info!("Triggering immediate scan for newly created library {}", id);
-                match state.scan_manager.start_library_scan(Arc::new(library.clone()), false).await {
+                match state
+                    .scan_manager
+                    .start_library_scan(Arc::new(library.clone()), false)
+                    .await
+                {
                     Ok(scan_id) => {
-                        info!("Immediate scan started for library {} with scan ID: {}", id, scan_id);
+                        info!(
+                            "Immediate scan started for library {} with scan ID: {}",
+                            id, scan_id
+                        );
                     }
                     Err(e) => {
                         warn!("Failed to trigger immediate scan for library {}: {}", id, e);
@@ -531,7 +600,7 @@ pub async fn create_library_handler(
                     }
                 }
             }
-            
+
             Ok(Json(ApiResponse::success(id)))
         }
         Err(e) => {

@@ -135,11 +135,12 @@ pub fn view_library(state: &State) -> Element<Message> {
                                 LibraryType::Movies => {
                                     // Use movies from tab state
                                     let movies = lib_state.movies().unwrap_or(&[]);
+                                    /*
                                     log::debug!(
                                         "[Library Movies View] Rendering {} movies for library {}",
                                         movies.len(),
                                         lib_state.library_id
-                                    );
+                                    ); */
                                     grid_view::virtual_movie_references_grid(
                                         movies,
                                         &lib_state.grid_state,
@@ -151,11 +152,12 @@ pub fn view_library(state: &State) -> Element<Message> {
                                 LibraryType::TvShows => {
                                     // Use TV shows from tab state
                                     let shows = lib_state.tv_shows().unwrap_or(&[]);
+                                    /*
                                     log::debug!(
                                         "[Library TV View] Rendering {} series for library {}",
                                         shows.len(),
                                         lib_state.library_id
-                                    );
+                                    ); */
                                     grid_view::virtual_series_references_grid(
                                         shows,
                                         &lib_state.grid_state,

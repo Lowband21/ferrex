@@ -2,6 +2,7 @@ use crate::domains::media::library::MediaFile;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// Represents a TV show with all its seasons and episodes
 #[derive(Debug, Clone)]
@@ -609,7 +610,7 @@ pub struct SeasonSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EpisodeSummary {
-    pub id: String,
+    pub id: Uuid,
     pub filename: String,
     pub episode_number: u32,
     pub number: u32, // Alias for episode_number
@@ -622,7 +623,7 @@ pub struct EpisodeSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MovieDetails {
-    pub id: String,
+    pub id: Uuid,
     pub title: String,
     pub year: Option<u16>,
     pub tmdb_id: Option<u32>,
@@ -657,7 +658,7 @@ impl TvShow {
     pub fn from_series_reference(
         series: &SeriesReference,
         seasons: Vec<SeasonReference>,
-        episodes: HashMap<String, Vec<EpisodeReference>>, // key is season_id
+        episodes: HashMap<Uuid, Vec<EpisodeReference>>, // key is season_id
     ) -> Self {
         let mut show = Self {
             name: series.title.as_str().to_string(),
@@ -690,7 +691,7 @@ impl TvShow {
             }
 
             // Add episodes for this season
-            if let Some(season_episodes) = episodes.get(season_ref.id.as_str()) {
+            if let Some(season_episodes) = episodes.get(season_ref.id.as_ref()) {
                 for episode_ref in season_episodes {
                     // Convert episode reference to legacy MediaFile
                     let legacy_file = crate::infrastructure::api_types::episode_reference_to_legacy(
@@ -721,7 +722,7 @@ impl MovieDetails {
         let metadata = file.media_file_metadata.as_ref();
 
         let mut details = Self {
-            id: movie.id.as_str().to_string(),
+            id: movie.id.as_uuid(),
             title: movie.title.as_str().to_string(),
             year: None,
             tmdb_id: Some(movie.tmdb_id as u32),
@@ -779,21 +780,21 @@ impl ReferenceOrganizer {
     ) -> (
         Vec<MovieReference>,
         HashMap<
-            String,
+            Uuid,
             (
                 SeriesReference,
                 Vec<SeasonReference>,
-                HashMap<String, Vec<EpisodeReference>>,
+                HashMap<Uuid, Vec<EpisodeReference>>,
             ),
         >,
     ) {
         let mut movies = Vec::new();
         let mut tv_shows: HashMap<
-            String,
+            Uuid,
             (
                 SeriesReference,
                 Vec<SeasonReference>,
-                HashMap<String, Vec<EpisodeReference>>,
+                HashMap<Uuid, Vec<EpisodeReference>>,
             ),
         > = HashMap::new();
 
@@ -801,16 +802,16 @@ impl ReferenceOrganizer {
             if let Some(movie) = reference.as_movie() {
                 movies.push(movie.clone());
             } else if let Some(series) = reference.as_series() {
-                let series_id = series.id.as_str().to_string();
+                let series_id = series.id.as_uuid();
                 tv_shows.insert(series_id, (series.clone(), Vec::new(), HashMap::new()));
             } else if let Some(season) = reference.as_season() {
-                let series_id = season.series_id.as_str().to_string();
+                let series_id = season.series_id.as_ref();
                 if let Some((_, seasons, _)) = tv_shows.get_mut(&series_id) {
                     seasons.push(season.clone());
                 }
             } else if let Some(episode) = reference.as_episode() {
-                let series_id = episode.series_id.as_str().to_string();
-                let season_id = episode.season_id.as_str().to_string();
+                let series_id = episode.series_id.as_uuid();
+                let season_id = episode.season_id.as_uuid();
                 if let Some((_, _, episodes_map)) = tv_shows.get_mut(&series_id) {
                     episodes_map
                         .entry(season_id)

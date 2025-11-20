@@ -2,6 +2,10 @@ use crate::domains::media::library::MediaFile;
 use iced_video_player::{AudioTrack, SubtitleTrack, ToneMappingConfig, Video};
 use std::time::{Duration, Instant};
 
+// Seek bar interaction constants  
+pub const SEEK_BAR_VISUAL_HEIGHT: f32 = 4.0; // The visible bar height
+pub const SEEK_BAR_CLICK_TOLERANCE_MULTIPLIER: f32 = 7.0; // Allow clicks within 7x the visual bar height
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AspectRatio {
     Original,
@@ -23,6 +27,7 @@ pub struct PlayerDomainState {
     // Watch progress tracking
     pub last_progress_update: Option<Instant>,
     pub last_progress_sent: f64,
+    pub pending_resume_position: Option<f32>, // Position to resume at when video loads
 
     // Playback state
     pub position: f64,
@@ -30,6 +35,7 @@ pub struct PlayerDomainState {
     pub buffered_percentage: f64, // Percentage of video buffered (0.0 to 1.0)
     pub dragging: bool,
     pub last_seek_position: Option<f64>,
+    pub last_mouse_y: Option<f32>, // Track vertical mouse position for seek bar validation
     pub seeking: bool,
     pub seek_started_time: Option<Instant>,
 
@@ -85,6 +91,12 @@ pub struct PlayerDomainState {
 
     // Tone mapping configuration
     pub tone_mapping_config: ToneMappingConfig,
+
+    // External MPV player support
+    #[cfg(feature = "external-mpv-player")]
+    pub external_mpv_handle: Option<Box<super::external_mpv::ExternalMpvHandle>>,
+    #[cfg(feature = "external-mpv-player")]
+    pub external_mpv_active: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -102,11 +114,13 @@ impl Default for PlayerDomainState {
             video_opt: None,
             last_progress_update: None,
             last_progress_sent: 0.0,
+            pending_resume_position: None,
             position: 0.0,
             duration: 0.0,
             buffered_percentage: 0.0, // Start with no buffer
             dragging: false,
             last_seek_position: None,
+            last_mouse_y: None,
             seeking: false,
             seek_started_time: None,
             controls: true,
@@ -136,6 +150,10 @@ impl Default for PlayerDomainState {
             is_loading_video: false,
             source_duration: None,
             tone_mapping_config: ToneMappingConfig::default(),
+            #[cfg(feature = "external-mpv-player")]
+            external_mpv_handle: None,
+            #[cfg(feature = "external-mpv-player")]
+            external_mpv_active: false,
         }
     }
 }
@@ -156,11 +174,13 @@ impl PlayerDomainState {
         self.video_opt = None;
         self.last_progress_update = None;
         self.last_progress_sent = 0.0;
+        self.pending_resume_position = None;
         self.position = 0.0;
         self.duration = 0.0;
         self.buffered_percentage = 0.0; // Start with no buffer
         self.dragging = false;
         self.last_seek_position = None;
+        self.last_mouse_y = None;
         self.seeking = false;
         self.seek_started_time = None;
         self.available_audio_tracks.clear();

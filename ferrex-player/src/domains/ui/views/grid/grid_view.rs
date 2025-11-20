@@ -5,6 +5,7 @@ use iced::{
     Element,
 };
 use tokio::sync::watch;
+use uuid::Uuid;
 
 #[cfg_attr(
     any(
@@ -16,13 +17,13 @@ use tokio::sync::watch;
 )]
 fn create_movie_card<'a>(
     movie: &'a MovieReference,
-    hovered_media_id: &Option<String>,
+    hovered_media_id: &Option<Uuid>,
     is_visible: bool,
     watch_progress: Option<WatchProgress>,
 ) -> Element<'a, Message> {
     let is_hovered = hovered_media_id
         .as_ref()
-        .map(|id| id == movie.id.as_str())
+        .map(|id| id == movie.id.as_ref())
         .unwrap_or(false);
     super::super::super::components::movie_reference_card_with_state(
         movie,
@@ -42,13 +43,13 @@ fn create_movie_card<'a>(
 )]
 fn create_series_card<'a>(
     series: &'a SeriesReference,
-    hovered_media_id: &Option<String>,
+    hovered_media_id: &Option<Uuid>,
     is_visible: bool,
     watch_progress: Option<WatchProgress>,
 ) -> Element<'a, Message> {
     let is_hovered = hovered_media_id
         .as_ref()
-        .map(|id| id == series.id.as_str())
+        .map(|id| id == series.id.as_ref())
         .unwrap_or(false);
     crate::domains::ui::components::series_reference_card_with_state(
         series,

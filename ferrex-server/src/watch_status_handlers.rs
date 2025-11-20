@@ -206,13 +206,13 @@ pub async fn get_media_progress_handler(
 
     // Check if media is completed
     let is_completed = watch_state.completed.contains(&media_id);
-    
+
     // Check if media is in progress
     let progress = watch_state
         .in_progress
         .iter()
-        .find(|item| item.media_id == media_id)
-        .map(|item| ProgressResponse {
+        .find(|(id, _)| *id == &media_id)
+        .map(|(_, item)| ProgressResponse {
             media_id: item.media_id.clone(),
             position: item.position,
             duration: item.duration,
@@ -250,8 +250,8 @@ pub async fn mark_completed_handler(
     // Create a progress update request with 100% completion
     let request = UpdateProgressRequest {
         media_id: media_id.clone(),
-        position: 1.0,  // Dummy position
-        duration: 1.0,  // Dummy duration to ensure 100% completion
+        position: 1.0, // Dummy position
+        duration: 1.0, // Dummy duration to ensure 100% completion
     };
 
     // Update progress to mark as completed
@@ -300,7 +300,9 @@ fn parse_media_id(media_id_str: &str) -> Result<MediaId, (StatusCode, String)> {
     if let Ok(uuid) = Uuid::parse_str(media_id_str) {
         // For now, assume it's a movie ID
         // In a real implementation, you'd need to determine the type
-        return Ok(MediaId::Movie(ferrex_core::media::MovieID::new(uuid.to_string()).unwrap()));
+        return Ok(MediaId::Movie(
+            ferrex_core::media::MovieID::new(uuid.to_string()).unwrap(),
+        ));
     }
 
     // Try to parse as "type:id" format
@@ -320,8 +322,12 @@ fn parse_media_id(media_id_str: &str) -> Result<MediaId, (StatusCode, String)> {
     })?;
 
     match parts[0] {
-        "movie" => Ok(MediaId::Movie(ferrex_core::media::MovieID::new(id.to_string()).unwrap())),
-        "episode" => Ok(MediaId::Episode(ferrex_core::media::EpisodeID::new(id.to_string()).unwrap())),
+        "movie" => Ok(MediaId::Movie(
+            ferrex_core::media::MovieID::new(id.to_string()).unwrap(),
+        )),
+        "episode" => Ok(MediaId::Episode(
+            ferrex_core::media::EpisodeID::new(id.to_string()).unwrap(),
+        )),
         _ => Err((
             StatusCode::BAD_REQUEST,
             format!("Unknown media type: {}", parts[0]),

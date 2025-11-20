@@ -1,7 +1,8 @@
 use crate::{
-    domains::library::messages::Message, domains::ui::types::ViewState,
-    domains::ui::view_models::ViewModel, infrastructure::api_types::LibraryMediaCache,
-    infrastructure::api_types::MediaReference, state_refactored::State,
+    domains::library::messages::Message,
+    domains::ui::types::ViewState,
+    infrastructure::api_types::{LibraryMediaCache, MediaId, MediaReference, MovieID, SeriesID},
+    state_refactored::State,
 };
 use iced::Task;
 
@@ -156,13 +157,14 @@ pub fn handle_media_updated(state: &mut State, reference: MediaReference) -> Tas
                 },
                 MediaReference::Series(series),
             ) => {
-                let series_id_str = series.id.as_str();
-                if series_references.contains_key(series_id_str) {
-                    series_references.insert(series_id_str.to_string(), series.clone());
+                let series_id = series.id;
+                let series_id_str = series_id.as_str();
+                if series_references.contains_key(series_id.as_ref()) {
+                    series_references.insert(series_id.as_uuid(), series.clone());
                     // Also update in sorted list
                     if let Some(sorted_series) = series_references_sorted
                         .iter_mut()
-                        .find(|s| s.id == series.id)
+                        .find(|s| s.id == series_id)
                     {
                         *sorted_series = series.clone();
                     }
@@ -198,24 +200,12 @@ pub fn handle_media_updated(state: &mut State, reference: MediaReference) -> Tas
     ),
     profiling::function
 )]
-pub fn handle_media_deleted(state: &mut State, file_id: String) -> Task<Message> {
-    log::info!("Media file deleted: {}", file_id);
+pub fn handle_media_deleted(state: &mut State, media_id: MediaId) -> Task<Message> {
+    log::info!("Media file deleted: {}", media_id);
 
-    // NEW ARCHITECTURE: Find and remove from MediaStore by file ID
-    let media_ids_to_remove = if let Ok(store) = state.domains.media.state.media_store.read() {
-        store.find_by_file_id(&file_id)
-    } else {
-        Vec::new()
-    };
-
-    // Remove the found media items
-    if !media_ids_to_remove.is_empty() {
-        if let Ok(mut store) = state.domains.media.state.media_store.write() {
-            for media_id in media_ids_to_remove {
-                log::debug!("Removing media with file_id {}: {:?}", file_id, media_id);
-                store.remove(&media_id);
-            }
-        }
+    if let Ok(mut store) = state.domains.media.state.media_store.write() {
+        log::debug!("Removing media with media_id {}", media_id);
+        store.remove(&media_id);
     }
 
     // Remove from current library's references
@@ -229,27 +219,22 @@ pub fn handle_media_deleted(state: &mut State, file_id: String) -> Task<Message>
             .find(|l| &l.id == library_id)
         {
             if let Some(media_vec) = &mut library.media {
-                media_vec.retain(|media| match media {
-                    MediaReference::Movie(m) => m.file.id.to_string() != file_id,
-                    MediaReference::Episode(e) => e.file.id.to_string() != file_id,
-                    _ => true, // Series and seasons don't have file IDs
-                });
+                media_vec.retain(|media| media.as_ref().id() == media_id);
             }
         }
     }
 
-    // Remove from library_media_cache
     for (_, cache) in state.domains.library.state.library_media_cache.iter_mut() {
         match cache {
             LibraryMediaCache::Movies { references } => {
-                references.retain(|m| m.file.id.to_string() != file_id);
+                references.retain(|m| media_id.eq_movie(&m.id));
             }
             LibraryMediaCache::TvShows {
                 episode_references, ..
             } => {
                 // Remove episodes with this file ID from all seasons
                 for (_, episodes) in episode_references.iter_mut() {
-                    episodes.retain(|e| e.file.id.to_string() != file_id);
+                    episodes.retain(|e| media_id.eq_episode(&e.id));
                 }
             }
         }
@@ -258,7 +243,7 @@ pub fn handle_media_deleted(state: &mut State, file_id: String) -> Task<Message>
     // Clear detail view if it matches the deleted file
     match &state.domains.ui.state.view {
         ViewState::MovieDetail { movie, .. } => {
-            if movie.file.id.to_string() == file_id {
+            if media_id.eq_movie(&movie.id) {
                 state.domains.ui.state.view = ViewState::Library;
             }
         }
@@ -268,7 +253,7 @@ pub fn handle_media_deleted(state: &mut State, file_id: String) -> Task<Message>
                 if let Some(MediaReference::Episode(episode)) = store.get(
                     &ferrex_core::api_types::MediaId::Episode(episode_id.clone()),
                 ) {
-                    if episode.file.id.to_string() == file_id {
+                    if media_id.eq_episode(&episode.id) {
                         // Go back to TV show detail
                         state.domains.ui.state.view = ViewState::TvShowDetail {
                             series_id: episode.series_id.clone(),

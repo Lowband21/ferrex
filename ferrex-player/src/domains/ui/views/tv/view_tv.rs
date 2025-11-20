@@ -13,6 +13,16 @@ use iced::{
     widget::{button, column, container, row, scrollable, text, Space, Stack},
     Element, Length,
 };
+use lucide_icons::Icon;
+
+// Helper functions for icons
+fn icon_text(icon: Icon) -> text::Text<'static> {
+    text(icon.unicode()).font(lucide_font()).size(20)
+}
+
+fn lucide_font() -> iced::Font {
+    iced::Font::with_name("lucide")
+}
 
 #[cfg_attr(
     any(
@@ -22,7 +32,7 @@ use iced::{
     ),
     profiling::function
 )]
-pub fn view_tv_show_detail<'a>(state: &'a State, _show_name: &'a str) -> Element<'a, Message> {
+pub fn view_tv_show_detail<'a>(state: &'a State, _id: &'a SeriesID) -> Element<'a, Message> {
     let mut content = column![].spacing(20);
 
     // Add dynamic spacing at the top based on backdrop dimensions
@@ -144,7 +154,17 @@ pub fn view_tv_show_detail<'a>(state: &'a State, _show_name: &'a str) -> Element
             );
         }
 
-        // Play button row - find first episode to play using the seasons we already have
+        // Play button row - use series progress service to find appropriate episode
+        use crate::domains::media::services::SeriesProgressService;
+
+        let media_store = state.domains.media.state.media_store.clone();
+        let service = SeriesProgressService::new(media_store);
+        let watch_state = state.domains.media.state.user_watch_state.as_ref();
+
+        // Get next episode to continue and first episode for play from beginning
+        let next_episode_info = service.get_next_episode_for_series(&series_id, watch_state);
+
+        // Also get the very first episode for "Play from Beginning" option
         let first_episode = {
             let first_season = seasons
                 .iter()
@@ -152,7 +172,6 @@ pub fn view_tv_show_detail<'a>(state: &'a State, _show_name: &'a str) -> Element
                 .or_else(|| seasons.first());
 
             if let Some(season) = first_season {
-                // Use MediaQueryService to get episodes (clean architecture)
                 let episodes = state
                     .domains
                     .media
@@ -165,7 +184,91 @@ pub fn view_tv_show_detail<'a>(state: &'a State, _show_name: &'a str) -> Element
             }
         };
 
-        if let Some(episode) = first_episode {
+        // Calculate series progress percentage
+        let series_progress = service.get_series_progress(&series_id, watch_state);
+        let unwatched_count = service.get_unwatched_count(&series_id, watch_state);
+
+        // Build button row based on watch state
+        let mut buttons = vec![];
+
+        if let Some((next_episode, resume_position)) = next_episode_info {
+            // Determine if this is a continuation or fresh start
+            let is_in_progress = resume_position.is_some() || series_progress > 0.0;
+
+            let primary_label = if is_in_progress {
+                if let Some(pos) = resume_position {
+                    format!(
+                        "Continue S{:02}E{:02}",
+                        next_episode.season_number.value(),
+                        next_episode.episode_number.value()
+                    )
+                } else {
+                    format!(
+                        "Continue S{:02}E{:02}",
+                        next_episode.season_number.value(),
+                        next_episode.episode_number.value()
+                    )
+                }
+            } else {
+                "Play".to_string()
+            };
+
+            // Primary action button
+            buttons.push(
+                button(
+                    row![
+                        icon_text(Icon::Play),
+                        Space::with_width(8),
+                        text(primary_label).size(16)
+                    ]
+                    .align_y(iced::Alignment::Center),
+                )
+                .padding([10, 20])
+                .on_press(Message::PlaySeriesNextEpisode(series_id.clone()))
+                .style(theme::Button::Primary.style())
+                .into(),
+            );
+
+            // Add "Play from Beginning" if we're not already at the beginning
+            if is_in_progress
+                && first_episode.is_some()
+                && first_episode
+                    .as_ref()
+                    .map(|e| e.id != next_episode.id)
+                    .unwrap_or(false)
+            {
+                if let Some(first_ep) = first_episode {
+                    let series_details = match &series_ref.details {
+                        crate::infrastructure::api_types::MediaDetailsOption::Details(
+                            crate::infrastructure::api_types::TmdbDetails::Series(details),
+                        ) => Some(details),
+                        _ => None,
+                    };
+                    let legacy_file = crate::infrastructure::api_types::episode_reference_to_legacy(
+                        &first_ep,
+                        series_details,
+                    );
+                    buttons.push(
+                        button(
+                            row![
+                                icon_text(Icon::SkipBack),
+                                Space::with_width(8),
+                                text("Play from Beginning").size(16)
+                            ]
+                            .align_y(iced::Alignment::Center),
+                        )
+                        .padding([10, 20])
+                        .on_press(Message::PlayMediaWithId(
+                            legacy_file,
+                            ferrex_core::api_types::MediaId::Episode(first_ep.id.clone()),
+                        ))
+                        .style(theme::Button::Secondary.style())
+                        .into(),
+                    );
+                }
+            }
+        } else if let Some(first_ep) = first_episode {
+            // No watch state, just show Play button for first episode
             let series_details = match &series_ref.details {
                 crate::infrastructure::api_types::MediaDetailsOption::Details(
                     crate::infrastructure::api_types::TmdbDetails::Series(details),
@@ -173,18 +276,45 @@ pub fn view_tv_show_detail<'a>(state: &'a State, _show_name: &'a str) -> Element
                 _ => None,
             };
             let legacy_file = crate::infrastructure::api_types::episode_reference_to_legacy(
-                &episode,
+                &first_ep,
                 series_details,
             );
-            let button_row = crate::domains::ui::components::create_action_button_row(
-                Message::PlayMediaWithId(
+            buttons.push(
+                button(
+                    row![
+                        icon_text(Icon::Play),
+                        Space::with_width(8),
+                        text("Play").size(16)
+                    ]
+                    .align_y(iced::Alignment::Center),
+                )
+                .padding([10, 20])
+                .on_press(Message::PlayMediaWithId(
                     legacy_file,
-                    ferrex_core::api_types::MediaId::Episode(episode.id.clone()),
-                ),
-                vec![], // No additional buttons yet
+                    ferrex_core::api_types::MediaId::Episode(first_ep.id.clone()),
+                ))
+                .style(theme::Button::Primary.style())
+                .into(),
             );
+        }
+
+        // Add progress info if available
+        if series_progress > 0.0 {
+            details = details.push(
+                text(format!(
+                    "{} unwatched episodes • {:.0}% complete",
+                    unwatched_count,
+                    series_progress * 100.0
+                ))
+                .size(14)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            );
+        }
+
+        // Add button row if we have buttons
+        if !buttons.is_empty() {
             details = details.push(Space::with_height(10));
-            details = details.push(button_row);
+            details = details.push(row(buttons).spacing(10).align_y(iced::Alignment::Center));
         }
 
         // Description
@@ -344,7 +474,7 @@ pub fn view_season_detail<'a>(
             // SINGLE SOURCE OF TRUTH: Always get episodes from MediaStore
             let episodes: Vec<_> = if let Some(ref season) = season_ref {
                 store
-                    .get_episodes(season.id.as_str())
+                    .get_episodes(season.id.as_ref())
                     .into_iter()
                     .cloned()
                     .collect()

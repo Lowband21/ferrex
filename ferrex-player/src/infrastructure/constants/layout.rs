@@ -91,6 +91,35 @@ pub mod virtual_grid {
                 + animation::EFFECT_PADDING);
 }
 
+/// Player controls layout constants
+pub mod player_controls {
+    /// Padding around control buttons container (all sides)
+    pub const CONTROL_BUTTONS_PADDING: f32 = 40.0;
+    
+    /// Height of the control buttons row (based on volume slider container height)
+    pub const CONTROL_BUTTONS_HEIGHT: f32 = 36.0;
+    
+    /// Seek bar hit zone height (clickable area)
+    pub const SEEK_BAR_HIT_ZONE_HEIGHT: f32 = 30.0;
+    
+    /// Total height of the control buttons container including padding
+    /// Bottom padding (40) + control buttons (36) + top padding (40) = 116px
+    pub const CONTROL_CONTAINER_TOTAL_HEIGHT: f32 = CONTROL_BUTTONS_PADDING * 2.0 + CONTROL_BUTTONS_HEIGHT;
+    
+    /// Distance from bottom of screen to the visual center of the seek bar
+    /// The seek bar sits directly above the control container
+    /// Calculation: CONTROL_CONTAINER_TOTAL_HEIGHT + SEEK_BAR_HIT_ZONE_HEIGHT/2
+    /// = 116 + 15 = 131px
+    pub const SEEK_BAR_CENTER_FROM_BOTTOM: f32 = CONTROL_CONTAINER_TOTAL_HEIGHT + SEEK_BAR_HIT_ZONE_HEIGHT / 2.0;
+    
+    /// Distance from bottom of screen to the bottom edge of the seek bar hit zone
+    /// This is where the seek bar's clickable area begins
+    pub const SEEK_BAR_BOTTOM_EDGE: f32 = CONTROL_CONTAINER_TOTAL_HEIGHT;
+    
+    /// Padding around the top bar (title and navigation)
+    pub const TOP_BAR_PADDING: f32 = 15.0;
+}
+
 /// User preference scales
 pub mod scale_presets {
     /// Normal scale factor

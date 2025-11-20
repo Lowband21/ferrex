@@ -3,6 +3,7 @@ pub mod subscriptions;
 use crate::domains::ui::{views::carousel::CarouselMessage, DisplayMode, SortBy};
 use iced::widget::scrollable;
 use iced::Size;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub enum Message {
@@ -41,10 +42,11 @@ pub enum Message {
 
     // Window events
     WindowResized(Size),
+    WindowMoved(Option<iced::Point>),
 
     // Hover events
-    MediaHovered(String),   // media_id
-    MediaUnhovered(String), // media_id being unhovered
+    MediaHovered(Uuid),
+    MediaUnhovered(Uuid),
 
     // Header navigation
     NavigateHome,
@@ -119,6 +121,7 @@ pub enum Message {
         crate::domains::media::library::MediaFile,
         ferrex_core::api_types::MediaId,
     ), // Proxy for Media::PlayMediaWithId
+    PlaySeriesNextEpisode(ferrex_core::SeriesID), // Play next unwatched/in-progress episode
 
     // TV Show loading
     TvShowLoaded(
@@ -183,6 +186,7 @@ impl Message {
 
             // Window events
             Self::WindowResized(_) => "UI::WindowResized",
+            Self::WindowMoved(_) => "UI::WindowMoved",
 
             // Hover events
             Self::MediaHovered(_) => "UI::MediaHovered",
@@ -256,6 +260,7 @@ impl Message {
             Self::ToggleScanProgress => "UI::ToggleScanProgress",
             Self::SelectLibrary(_) => "UI::SelectLibrary",
             Self::PlayMediaWithId(_, _) => "UI::PlayMediaWithId",
+            Self::PlaySeriesNextEpisode(_) => "UI::PlaySeriesNextEpisode",
 
             // TV Show loading
             Self::TvShowLoaded(_, _) => "UI::TvShowLoaded",
@@ -303,6 +308,7 @@ impl std::fmt::Debug for Message {
             Self::HideLibraryManagement => write!(f, "UI::HideLibraryManagement"),
             Self::NavigateHome => write!(f, "UI::NavigateHome"),
             Self::WindowResized(size) => write!(f, "UI::WindowResized({:?})", size),
+            Self::WindowMoved(position) => write!(f, "UI::WindowMoved({:?})", position),
             Self::ToggleBackdropAspectMode => write!(f, "UI::ToggleBackdropAspectMode"),
             Self::TvShowLoaded(series_id, result) => match result {
                 Ok(_) => write!(f, "UI::TvShowLoaded({}, Ok)", series_id),
@@ -320,7 +326,6 @@ impl std::fmt::Debug for Message {
             Self::ScanLibrary_(id) => write!(f, "UI::ScanLibrary_({})", id),
             Self::DeleteLibrary(id) => write!(f, "UI::DeleteLibrary({})", id),
             Self::UpdateLibraryFormName(name) => write!(f, "UI::UpdateLibraryFormName({})", name),
-
             Self::ShowClearDatabaseConfirm => write!(f, "UI::ShowClearDatabaseConfirm"),
             Self::HideClearDatabaseConfirm => write!(f, "UI::HideClearDatabaseConfirm"),
             Self::ClearDatabase => write!(f, "UI::ClearDatabase"),
@@ -347,8 +352,6 @@ impl std::fmt::Debug for Message {
             Self::ShowDeviceManagement => write!(f, "UI::ShowDeviceManagement"),
             Self::BackToSettings => write!(f, "UI::BackToSettings"),
             Self::Logout => write!(f, "UI::Logout"),
-
-            // Security settings
             Self::ShowChangePassword => write!(f, "UI::ShowChangePassword"),
             Self::UpdatePasswordCurrent(_) => write!(f, "UI::UpdatePasswordCurrent"),
             Self::UpdatePasswordNew(_) => write!(f, "UI::UpdatePasswordNew"),
@@ -357,7 +360,6 @@ impl std::fmt::Debug for Message {
             Self::SubmitPasswordChange => write!(f, "UI::SubmitPasswordChange"),
             Self::PasswordChangeResult(_) => write!(f, "UI::PasswordChangeResult"),
             Self::CancelPasswordChange => write!(f, "UI::CancelPasswordChange"),
-
             Self::ShowSetPin => write!(f, "UI::ShowSetPin"),
             Self::ShowChangePin => write!(f, "UI::ShowChangePin"),
             Self::UpdatePinCurrent(_) => write!(f, "UI::UpdatePinCurrent"),
@@ -366,8 +368,6 @@ impl std::fmt::Debug for Message {
             Self::SubmitPinChange => write!(f, "UI::SubmitPinChange"),
             Self::PinChangeResult(_) => write!(f, "UI::PinChangeResult"),
             Self::CancelPinChange => write!(f, "UI::CancelPinChange"),
-
-            // Device management
             Self::LoadDevices => write!(f, "UI::LoadDevices"),
             Self::DevicesLoaded(result) => match result {
                 Ok(devices) => write!(f, "UI::DevicesLoaded(Ok: {} devices)", devices.len()),
@@ -379,8 +379,6 @@ impl std::fmt::Debug for Message {
                 Err(e) => write!(f, "UI::DeviceRevoked(Err: {})", e),
             },
             Self::RefreshDevices => write!(f, "UI::RefreshDevices"),
-
-            // User preferences
             Self::ToggleAutoLogin(_) => write!(f, "UI::ToggleAutoLogin"),
             Self::AutoLoginToggled(_) => write!(f, "UI::AutoLoginToggled"),
             Self::CarouselNavigation(carousel_message) => {
@@ -399,6 +397,9 @@ impl std::fmt::Debug for Message {
             Self::SelectLibrary(uuid) => write!(f, "UI::SelectLibrary({:?})", uuid),
             Self::PlayMediaWithId(media_file, media_id) => {
                 write!(f, "UI::PlayMediaWithId({:?}, {:?})", media_file, media_id)
+            }
+            Message::PlaySeriesNextEpisode(series_id) => {
+                write!(f, "PlaySeriesNextEpisode({:?})", series_id)
             }
             Self::UpdateLibraryFormType(_) => write!(f, "UI::UpdateLibraryFormType()"),
             Self::UpdateLibraryFormPaths(_) => write!(f, "UI::UpdateLibraryFormPaths()"),

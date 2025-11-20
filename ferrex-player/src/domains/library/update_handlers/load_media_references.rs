@@ -6,7 +6,6 @@ use crate::{
     domains::library::messages::Message,
     domains::media::library::fetch_library_media_references,
     domains::media::models::ReferenceOrganizer,
-    domains::ui::view_models::ViewModel,
     infrastructure::api_types::{
         LibraryMediaResponse, LibraryType, MediaDetailsOption, MediaReference,
     },
@@ -236,8 +235,8 @@ impl State {
                 let mut episode_map = HashMap::new();
 
                 for (series_id, (series, seasons, episodes)) in tv_shows {
-                    series_map.insert(series_id.clone(), series);
-                    season_map.insert(series_id.clone(), seasons);
+                    series_map.insert(series_id, series);
+                    season_map.insert(series_id, seasons);
 
                     for (season_id, eps) in episodes {
                         episode_map.insert(season_id, eps);
@@ -386,9 +385,11 @@ impl State {
                     MediaReference::Series(series),
                 ) => {
                     // Update in the map
-                    let series_id_str = series.id.as_str();
-                    if series_references.contains_key(series_id_str) {
-                        series_references.insert(series_id_str.to_string(), series.clone());
+                    let series_id = series.id;
+                    let series_id_str = series_id.as_str();
+
+                    if series_references.contains_key(series_id.as_ref()) {
+                        series_references.insert(series_id.as_uuid(), series.clone());
                         // Also update in the sorted list
                         if let Some(sorted_series) = series_references_sorted
                             .iter_mut()
@@ -475,9 +476,8 @@ impl State {
                         ..
                     } = cache
                     {
-                        let series_id_str = series.id.as_str();
-                        if series_references.contains_key(series_id_str) {
-                            series_references.insert(series_id_str.to_string(), series.clone());
+                        if series_references.contains_key(series.id.as_ref()) {
+                            series_references.insert(series.id.as_uuid(), series.clone());
                             // Also update in sorted list
                             if let Some(sorted_series) = series_references_sorted
                                 .iter_mut()

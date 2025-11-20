@@ -177,7 +177,9 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         // Toggle fullscreen mode
         CrossDomainEvent::MediaToggleFullscreen => {
             log::info!("[CrossDomain] Toggle fullscreen requested");
-            Task::done(DomainMessage::Ui(ui::messages::Message::ToggleFullscreen))
+            Task::done(DomainMessage::Player(
+                crate::domains::player::messages::Message::ToggleFullscreen,
+            ))
         }
 
         // Play media with ID
@@ -192,6 +194,47 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         CrossDomainEvent::RequestTranscoding(_) | CrossDomainEvent::TranscodingReady(_) => {
             log::warn!("[CrossDomain] Legacy transcoding event received - ignoring");
             Task::none()
+        }
+
+        // Window management events
+        CrossDomainEvent::HideWindow => {
+            log::info!("[CrossDomain] Hide window requested");
+            iced::window::get_latest().and_then(|id| {
+                log::info!("Hiding window with id: {:?}", id);
+                //iced::window::set_mode(id, iced::window::Mode::Fullscreen)
+                iced::window::minimize(id, true)
+            })
+        }
+
+        CrossDomainEvent::RestoreWindow(fullscreen) => {
+            log::info!(
+                "[CrossDomain] Restore window requested (fullscreen: {})",
+                fullscreen
+            );
+            let minimize_task = iced::window::get_latest().and_then(|id| {
+                log::info!("Hiding window with id: {:?}", id);
+                //iced::window::set_mode(id, iced::window::Mode::Fullscreen)
+                iced::window::minimize(id, true)
+            });
+
+            let mode = if fullscreen {
+                iced::window::Mode::Fullscreen
+            } else {
+                iced::window::Mode::Windowed
+            };
+            let restore_task = iced::window::get_latest().and_then(move |id| {
+                log::info!("Re storing window {:?} to mode: {:?}", id, mode);
+                iced::window::set_mode(id, mode)
+            });
+            Task::batch(vec![minimize_task, restore_task])
+        }
+
+        CrossDomainEvent::SetWindowMode(mode) => {
+            log::info!("[CrossDomain] Set window mode: {:?}", mode);
+            iced::window::get_latest().and_then(move |id| {
+                log::info!("Setting window {:?} to mode: {:?}", id, mode);
+                iced::window::set_mode(id, mode)
+            })
         }
 
         // Media playback events

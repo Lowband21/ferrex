@@ -4,7 +4,6 @@ use crate::{
         library,
         ui::{
             messages as ui,
-            scroll_manager::ScrollStateExt,
             types::{DisplayMode, ViewState},
             view_models::ViewModel,
             views::carousel::CarouselMessage,
@@ -13,7 +12,6 @@ use crate::{
     infrastructure::api_types::{MediaId, MediaReference},
     state_refactored::State,
 };
-use glib::Priority;
 use iced::Task;
 use std::sync::Arc;
 
@@ -339,6 +337,10 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         ),
         ui::Message::WindowResized(size) => DomainUpdateResult::task(
             super::update_handlers::window_update::handle_window_resized(state, size)
+                .map(DomainMessage::Ui),
+        ),
+        ui::Message::WindowMoved(position) => DomainUpdateResult::task(
+            super::update_handlers::window_update::handle_window_moved(state, position)
                 .map(DomainMessage::Ui),
         ),
         ui::Message::MediaHovered(media_id) => {
@@ -1005,6 +1007,44 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 Task::none(),
                 vec![CrossDomainEvent::MediaPlayWithId(media_file, media_id)],
             )
+        }
+        ui::Message::PlaySeriesNextEpisode(series_id) => {
+            // Use series progress service to find next episode
+            use crate::domains::media::services::SeriesProgressService;
+
+            let media_store = state.domains.media.state.media_store.clone();
+            let service = SeriesProgressService::new(media_store);
+
+            // Get watch state and find next episode
+            let watch_state = state.domains.media.state.user_watch_state.as_ref();
+
+            if let Some((episode, resume_position)) =
+                service.get_next_episode_for_series(&series_id, watch_state)
+            {
+                // Convert episode to MediaFile
+                let media_file =
+                    crate::domains::media::library::MediaFile::from(episode.file.clone());
+                let media_id = ferrex_core::api_types::MediaId::Episode(episode.id.clone());
+
+                // Store resume position if available
+                if let Some(resume_pos) = resume_position {
+                    state.domains.media.state.pending_resume_position = Some(resume_pos);
+                    log::info!("Series will resume episode at position: {:.1}s", resume_pos);
+                }
+
+                // Play the episode
+                DomainUpdateResult::with_events(
+                    Task::none(),
+                    vec![CrossDomainEvent::MediaPlayWithId(media_file, media_id)],
+                )
+            } else {
+                log::info!(
+                    "No unwatched episodes found for series {}",
+                    series_id.as_str()
+                );
+                // Could show a message or navigate to series details
+                DomainUpdateResult::task(Task::none())
+            }
         }
 
         // Library management proxies

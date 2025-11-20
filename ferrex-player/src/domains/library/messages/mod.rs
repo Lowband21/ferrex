@@ -3,7 +3,7 @@ pub mod scan_subscription;
 pub mod subscriptions;
 
 use crate::domains::media::library::MediaFile;
-use crate::infrastructure::api_types::{Library, MediaReference};
+use crate::infrastructure::api_types::{Library, MediaId, MediaReference};
 use ferrex_core::api_types::{LibraryMediaResponse, ScanProgress};
 use uuid::Uuid;
 
@@ -55,7 +55,7 @@ pub enum Message {
     // Media events from server
     MediaDiscovered(Vec<MediaReference>),
     MediaUpdated(MediaReference),
-    MediaDeleted(String), // File ID - we don't know the media type at deletion time
+    MediaDeleted(MediaId),
 
     // No-operation message
     NoOp,

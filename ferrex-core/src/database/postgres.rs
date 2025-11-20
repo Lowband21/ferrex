@@ -1,8 +1,8 @@
 use super::traits::*;
 use crate::media::{
-    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeID, EpisodeNumber, 
-    EpisodeReference, EpisodeURL, LibraryReference, MediaDetailsOption, MovieID, MovieReference, 
-    MovieTitle, MovieURL, SeasonDetails, SeasonID, SeasonNumber, SeasonReference, SeasonURL, 
+    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeID, EpisodeNumber,
+    EpisodeReference, EpisodeURL, LibraryReference, MediaDetailsOption, MovieID, MovieReference,
+    MovieTitle, MovieURL, SeasonDetails, SeasonID, SeasonNumber, SeasonReference, SeasonURL,
     SeriesID, SeriesReference, SeriesTitle, SeriesURL, TmdbDetails,
 };
 use crate::{Library, MediaError, MediaFile, MediaFileMetadata, Result};
@@ -10,10 +10,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::{self, json};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
-use std::str::FromStr;
 use std::collections::HashMap;
-use std::path::PathBuf;
-use tracing::{info, error, warn};
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 /// Statistics about the connection pool
@@ -39,7 +39,7 @@ impl PostgresDatabase {
             .ok()
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(20);
-        
+
         let min_connections = std::env::var("DB_MIN_CONNECTIONS")
             .ok()
             .and_then(|s| s.parse::<u32>().ok())
@@ -47,12 +47,12 @@ impl PostgresDatabase {
 
         // Configure pool for optimal bulk query performance
         let pool = PgPoolOptions::new()
-            .max_connections(max_connections)  // Configurable for different workloads
-            .min_connections(min_connections)   // Maintain idle connections
-            .acquire_timeout(std::time::Duration::from_secs(30))  // Longer timeout for bulk ops
-            .max_lifetime(std::time::Duration::from_secs(1800))   // 30 min lifetime
-            .idle_timeout(std::time::Duration::from_secs(600))    // 10 min idle timeout
-            .test_before_acquire(true)  // Ensure connections are healthy
+            .max_connections(max_connections) // Configurable for different workloads
+            .min_connections(min_connections) // Maintain idle connections
+            .acquire_timeout(std::time::Duration::from_secs(30)) // Longer timeout for bulk ops
+            .max_lifetime(std::time::Duration::from_secs(1800)) // 30 min lifetime
+            .idle_timeout(std::time::Duration::from_secs(600)) // 10 min idle timeout
+            .test_before_acquire(true) // Ensure connections are healthy
             .connect(connection_string)
             .await
             .map_err(|e| MediaError::Internal(format!("Database connection failed: {}", e)))?;
@@ -62,7 +62,7 @@ impl PostgresDatabase {
             max_connections, min_connections
         );
 
-        Ok(PostgresDatabase { 
+        Ok(PostgresDatabase {
             pool,
             max_connections,
             min_connections,
@@ -74,14 +74,14 @@ impl PostgresDatabase {
         // Use default values for test pools
         let max_connections = 20;
         let min_connections = 5;
-        
+
         PostgresDatabase {
             pool,
             max_connections,
             min_connections,
         }
     }
-    
+
     /// Get a reference to the connection pool for use in extension modules
     pub fn pool(&self) -> &PgPool {
         &self.pool
@@ -142,7 +142,7 @@ impl PostgresDatabase {
         let actual_id = sqlx::query_scalar!(
             r#"
             INSERT INTO media_files (
-                id, library_id, file_path, filename, file_size, 
+                id, library_id, file_path, filename, file_size,
                 technical_metadata, parsed_info
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -206,8 +206,7 @@ impl PostgresDatabase {
         actual_file_id: Uuid,
         metadata: Option<&EnhancedMovieDetails>,
     ) -> Result<()> {
-        let movie_uuid = Uuid::parse_str(movie.id.as_str())
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid movie ID: {}", e)))?;
+        let movie_uuid = movie.id.as_ref();
         let library_id = movie.file.library_id;
 
         // For movies without TMDB data (tmdb_id = 0), we need different handling
@@ -228,7 +227,7 @@ impl PostgresDatabase {
                 // Update the existing reference
                 sqlx::query!(
                     r#"
-                    UPDATE movie_references 
+                    UPDATE movie_references
                     SET title = $1, theme_color = $2, updated_at = NOW()
                     WHERE id = $3
                     "#,
@@ -331,8 +330,7 @@ impl PostgresDatabase {
             .await?;
 
         // Store the movie reference with the actual file ID
-        let movie_uuid = Uuid::parse_str(movie.id.as_str())
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid movie ID: {}", e)))?;
+        let movie_uuid = movie.id.as_ref();
         let library_id = movie.file.library_id;
 
         // For movies without TMDB data (tmdb_id = 0), we need different handling
@@ -353,7 +351,7 @@ impl PostgresDatabase {
                 // Update the existing reference
                 sqlx::query!(
                     r#"
-                    UPDATE movie_references 
+                    UPDATE movie_references
                     SET title = $1, theme_color = $2, updated_at = NOW()
                     WHERE id = $3
                     "#,
@@ -480,7 +478,7 @@ impl PostgresDatabase {
         // Process in chunks to avoid overwhelming the transaction
         const CHUNK_SIZE: usize = 50;
         let total_movies = movies.len();
-        
+
         for (idx, chunk) in movies.chunks(CHUNK_SIZE).enumerate() {
             for (movie_ref, metadata) in chunk {
                 // Store media file within transaction first
@@ -489,10 +487,15 @@ impl PostgresDatabase {
                     .await?;
 
                 // Now store movie reference with the actual file ID
-                self.store_movie_reference_in_transaction(&mut tx, movie_ref, actual_file_id, metadata.as_ref())
-                    .await?;
+                self.store_movie_reference_in_transaction(
+                    &mut tx,
+                    movie_ref,
+                    actual_file_id,
+                    metadata.as_ref(),
+                )
+                .await?;
             }
-            
+
             if idx > 0 && idx % 5 == 0 {
                 info!("Processed {} / {} movies", idx * CHUNK_SIZE, total_movies);
             }
@@ -512,12 +515,11 @@ impl PostgresDatabase {
         id: &MovieID,
         include_metadata: bool,
     ) -> Result<Option<(MovieReference, Option<EnhancedMovieDetails>)>> {
-        let movie_uuid = Uuid::parse_str(id.as_str())
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid movie ID: {}", e)))?;
+        let movie_uuid = id.as_ref();
 
         let query = if include_metadata {
             r#"
-            SELECT 
+            SELECT
                 mr.id, mr.tmdb_id, mr.title, mr.theme_color, mr.library_id,
                 mf.id as file_id, mf.file_path, mf.filename, mf.file_size, mf.created_at as file_created_at,
                 mf.technical_metadata, mf.parsed_info,
@@ -529,11 +531,11 @@ impl PostgresDatabase {
             "#
         } else {
             r#"
-            SELECT 
+            SELECT
                 mr.id, mr.tmdb_id, mr.title, mr.theme_color, mr.library_id,
                 mf.id as file_id, mf.file_path, mf.filename, mf.file_size, mf.created_at as file_created_at,
                 mf.technical_metadata, mf.parsed_info,
-                NULL::jsonb as tmdb_details, NULL::jsonb as images, NULL::jsonb as cast_crew, 
+                NULL::jsonb as tmdb_details, NULL::jsonb as images, NULL::jsonb as cast_crew,
                 NULL::jsonb as videos, NULL::text[] as keywords, NULL::jsonb as external_ids
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
@@ -624,7 +626,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    
+
     async fn initialize_schema(&self) -> Result<()> {
         // Run migrations using sqlx migrate
         sqlx::migrate!("./migrations")
@@ -635,20 +637,26 @@ impl MediaDatabaseTrait for PostgresDatabase {
         Ok(())
     }
 
-    async fn store_media(&self, media_file: MediaFile) -> Result<String> {
+    async fn store_media(&self, media_file: MediaFile) -> Result<Uuid> {
         // Use a transaction to get the actual ID
-        let mut tx = self.pool.begin().await
+        let mut tx = self
+            .pool
+            .begin()
+            .await
             .map_err(|e| MediaError::Internal(format!("Transaction failed: {}", e)))?;
-        
-        let actual_id = self.store_media_file_in_transaction(&mut tx, &media_file).await?;
-        
-        tx.commit().await
+
+        let actual_id = self
+            .store_media_file_in_transaction(&mut tx, &media_file)
+            .await?;
+
+        tx.commit()
+            .await
             .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
-        
-        Ok(actual_id.to_string())
+
+        Ok(actual_id)
     }
 
-    async fn store_media_batch(&self, media_files: Vec<MediaFile>) -> Result<Vec<String>> {
+    async fn store_media_batch(&self, media_files: Vec<MediaFile>) -> Result<Vec<Uuid>> {
         if media_files.is_empty() {
             return Ok(Vec::new());
         }
@@ -660,7 +668,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             .map_err(|e| MediaError::Internal(format!("Transaction failed: {}", e)))?;
 
         let mut ids = Vec::new();
-        
+
         // Process in chunks to avoid overwhelming the connection
         const CHUNK_SIZE: usize = 100;
         for chunk in media_files.chunks(CHUNK_SIZE) {
@@ -669,7 +677,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 let actual_id = self
                     .store_media_file_in_transaction(&mut tx, media_file)
                     .await?;
-                ids.push(actual_id.to_string());
+                ids.push(actual_id);
             }
         }
 
@@ -681,10 +689,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         Ok(ids)
     }
 
-    async fn get_media(&self, id: &str) -> Result<Option<MediaFile>> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {}", e)))?;
-
+    async fn get_media(&self, uuid: &Uuid) -> Result<Option<MediaFile>> {
         let row = sqlx::query!(
             r#"
             SELECT id, library_id, file_path, filename, file_size, created_at, technical_metadata, parsed_info
@@ -824,13 +829,13 @@ impl MediaDatabaseTrait for PostgresDatabase {
         // For by_type, we'll extract from parsed_info JSON
         let type_rows = sqlx::query!(
             r#"
-            SELECT 
-                CASE 
+            SELECT
+                CASE
                     WHEN parsed_info->>'media_type' IS NOT NULL THEN parsed_info->>'media_type'
                     ELSE 'unknown'
                 END as media_type,
                 COUNT(*) as count
-            FROM media_files 
+            FROM media_files
             GROUP BY parsed_info->>'media_type'
             "#
         )
@@ -1056,7 +1061,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         sqlx::query!(
             r#"
-            UPDATE libraries 
+            UPDATE libraries
             SET name = $1, library_type = $2, paths = $3, scan_interval_minutes = $4, enabled = $5, updated_at = NOW()
             WHERE id = $6
             "#,
@@ -1140,7 +1145,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
         // Extract metadata from the details field if available
         let metadata = match &series.details {
             MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
-                info!("Storing series {} with TMDB metadata", series.title.as_str());
+                info!(
+                    "Storing series {} with TMDB metadata",
+                    series.title.as_str()
+                );
                 Some(details)
             }
             MediaDetailsOption::Details(_) => {
@@ -1175,11 +1183,9 @@ impl MediaDatabaseTrait for PostgresDatabase {
         };
 
         // Store the season reference
-        let season_uuid = Uuid::parse_str(season.id.as_str())
-            .map_err(|e| MediaError::Internal(format!("Invalid season UUID: {}", e)))?;
-        let series_uuid = Uuid::parse_str(season.series_id.as_str())
-            .map_err(|e| MediaError::Internal(format!("Invalid series UUID: {}", e)))?;
-        
+        let season_uuid = season.id.as_ref();
+        let series_uuid = season.series_id.as_ref();
+
         // Use RETURNING to get the actual ID (either new or existing)
         let actual_season_id = sqlx::query_scalar!(
             r#"
@@ -1229,30 +1235,33 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn store_episode_reference(&self, episode: &EpisodeReference) -> Result<()> {
-        info!("Storing episode reference: {} S{}E{}", episode.id.as_str(), 
-              episode.season_number.value(), episode.episode_number.value());
+        info!(
+            "Storing episode reference: {} S{}E{}",
+            episode.id.as_str(),
+            episode.season_number.value(),
+            episode.episode_number.value()
+        );
 
         // Parse IDs
-        let episode_uuid = Uuid::parse_str(episode.id.as_str())
-            .map_err(|e| MediaError::Internal(format!("Invalid episode UUID: {}", e)))?;
-        let series_uuid = Uuid::parse_str(episode.series_id.as_str())
-            .map_err(|e| MediaError::Internal(format!("Invalid series UUID: {}", e)))?;
-        let season_uuid = Uuid::parse_str(episode.season_id.as_str())
-            .map_err(|e| MediaError::Internal(format!("Invalid season UUID: {}", e)))?;
-        let file_uuid = Uuid::parse_str(&episode.file.id.to_string())
-            .map_err(|e| MediaError::Internal(format!("Invalid file UUID: {}", e)))?;
+        let episode_uuid = episode.id.as_uuid();
+        let series_uuid = episode.series_id.as_ref();
+        let season_uuid = episode.season_id.as_ref();
+        let file_uuid = episode.id.as_ref();
 
         // Start transaction
-        let mut tx = self.pool.begin().await
+        let mut tx = self
+            .pool
+            .begin()
+            .await
             .map_err(|e| MediaError::Internal(format!("Failed to start transaction: {}", e)))?;
 
         // First, check if episode already exists for this series/season/episode number
         let existing_episode_id: Option<Uuid> = sqlx::query_scalar!(
             r#"
-            SELECT id 
-            FROM episode_references 
-            WHERE series_id = $1 
-              AND season_number = $2 
+            SELECT id
+            FROM episode_references
+            WHERE series_id = $1
+              AND season_number = $2
               AND episode_number = $3
             "#,
             series_uuid,
@@ -1265,11 +1274,14 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let actual_episode_id = if let Some(existing_id) = existing_episode_id {
             // Episode exists, update it
-            info!("Episode already exists with ID {}, updating instead of creating new", existing_id);
-            
+            info!(
+                "Episode already exists with ID {}, updating instead of creating new",
+                existing_id
+            );
+
             sqlx::query!(
                 r#"
-                UPDATE episode_references 
+                UPDATE episode_references
                 SET season_id = $1,
                     file_id = $2,
                     tmdb_series_id = $3,
@@ -1283,15 +1295,17 @@ impl MediaDatabaseTrait for PostgresDatabase {
             )
             .execute(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to update episode reference: {}", e)))?;
-            
+            .map_err(|e| {
+                MediaError::Internal(format!("Failed to update episode reference: {}", e))
+            })?;
+
             existing_id
         } else {
             // Episode doesn't exist, insert it
             sqlx::query!(
                 r#"
                 INSERT INTO episode_references (
-                    id, series_id, season_id, file_id, 
+                    id, series_id, season_id, file_id,
                     season_number, episode_number, tmdb_series_id
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
                 "#,
@@ -1305,20 +1319,26 @@ impl MediaDatabaseTrait for PostgresDatabase {
             )
             .execute(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to insert episode reference: {}", e)))?;
-            
+            .map_err(|e| {
+                MediaError::Internal(format!("Failed to insert episode reference: {}", e))
+            })?;
+
             episode_uuid
         };
-        
+
         // Log if we're using a different ID than expected (conflict occurred)
         if actual_episode_id != episode_uuid {
-            info!("Episode already exists with ID {}, updating instead of creating new", actual_episode_id);
+            info!(
+                "Episode already exists with ID {}, updating instead of creating new",
+                actual_episode_id
+            );
         }
 
         // Store metadata if available
         if let MediaDetailsOption::Details(TmdbDetails::Episode(details)) = &episode.details {
-            let tmdb_details_json = serde_json::to_value(details)
-                .map_err(|e| MediaError::Internal(format!("Failed to serialize episode details: {}", e)))?;
+            let tmdb_details_json = serde_json::to_value(details).map_err(|e| {
+                MediaError::Internal(format!("Failed to serialize episode details: {}", e))
+            })?;
 
             sqlx::query!(
                 r#"
@@ -1329,33 +1349,39 @@ impl MediaDatabaseTrait for PostgresDatabase {
                     tmdb_details = EXCLUDED.tmdb_details,
                     updated_at = NOW()
                 "#,
-                actual_episode_id,  // Use the actual ID from the database
+                actual_episode_id, // Use the actual ID from the database
                 tmdb_details_json,
                 serde_json::json!([])
             )
             .execute(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to insert episode metadata: {}", e)))?;
+            .map_err(|e| {
+                MediaError::Internal(format!("Failed to insert episode metadata: {}", e))
+            })?;
         }
 
         // Commit transaction
-        tx.commit().await
+        tx.commit()
+            .await
             .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
 
-        info!("Successfully stored episode reference: {} S{}E{} (actual ID: {})", 
-              episode.id.as_str(), episode.season_number.value(), episode.episode_number.value(), actual_episode_id);
+        info!(
+            "Successfully stored episode reference: {} S{}E{} (actual ID: {})",
+            episode.id.as_str(),
+            episode.season_number.value(),
+            episode.episode_number.value(),
+            actual_episode_id
+        );
 
         Ok(())
     }
 
-
-
     async fn get_all_movie_references(&self) -> Result<Vec<MovieReference>> {
         let rows = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 mr.id, mr.tmdb_id, mr.title, mr.theme_color,
-                mf.id as file_id, mf.file_path, mf.filename, mf.file_size, 
+                mf.id as file_id, mf.file_path, mf.filename, mf.file_size,
                 mf.created_at as file_created_at, mf.technical_metadata, mf.library_id
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
@@ -1408,14 +1434,13 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_series_seasons(&self, series_id: &SeriesID) -> Result<Vec<SeasonReference>> {
-        info!("Getting seasons for series: {}", series_id.as_str());
-        
-        let series_uuid = Uuid::parse_str(series_id.as_str())
-            .map_err(|e| MediaError::Internal(format!("Invalid UUID: {}", e)))?;
-            
+        info!("Getting seasons for series: {}", series_id.as_ref());
+
+        let series_uuid = series_id.as_ref();
+
         let rows = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 sr.id, sr.series_id, sr.season_number, sr.library_id, sr.tmdb_series_id, sr.created_at,
                 sm.tmdb_details
             FROM season_references sr
@@ -1428,9 +1453,13 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get series seasons: {}", e)))?;
-        
-        info!("Found {} season rows for series {}", rows.len(), series_id.as_str());
-        
+
+        info!(
+            "Found {} season rows for series {}",
+            rows.len(),
+            series_id.as_str()
+        );
+
         let mut seasons = Vec::new();
         for row in rows {
             // Parse TMDB details if available
@@ -1438,7 +1467,9 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
             } else {
                 match serde_json::from_value::<SeasonDetails>(row.tmdb_details) {
-                    Ok(season_details) => MediaDetailsOption::Details(TmdbDetails::Season(season_details)),
+                    Ok(season_details) => {
+                        MediaDetailsOption::Details(TmdbDetails::Season(season_details))
+                    }
                     Err(e) => {
                         warn!("Failed to parse season TMDB details: {}", e);
                         MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
@@ -1458,14 +1489,14 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 theme_color: None, // Seasons typically inherit theme color from the series
             });
         }
-        
+
         Ok(seasons)
     }
 
     async fn get_season_episodes(&self, season_id: &SeasonID) -> Result<Vec<EpisodeReference>> {
         let rows = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 er.id, er.episode_number, er.season_number, er.season_id, er.series_id,
                 er.tmdb_series_id, er.file_id,
                 em.tmdb_details,
@@ -1477,20 +1508,19 @@ impl MediaDatabaseTrait for PostgresDatabase {
             WHERE er.season_id = $1
             ORDER BY er.episode_number
             "#,
-            Uuid::parse_str(season_id.as_str())
-                .map_err(|e| MediaError::Internal(format!("Invalid season UUID: {}", e)))?
+            season_id.as_ref()
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get season episodes: {}", e)))?;
-        
+
         let mut episodes = Vec::new();
         for row in rows {
             // Parse technical metadata
             let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
             let parsed_metadata = technical_metadata
                 .and_then(|tm| serde_json::from_value::<MediaFileMetadata>(tm).ok());
-            
+
             // Create media file
             let media_file = MediaFile {
                 id: row.media_file_id,
@@ -1501,20 +1531,22 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 media_file_metadata: parsed_metadata,
                 library_id: row.library_id,
             };
-            
+
             // Parse TMDB details if available
             let details = if row.tmdb_details.is_null() {
                 MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
             } else {
                 match serde_json::from_value::<EpisodeDetails>(row.tmdb_details) {
-                    Ok(episode_details) => MediaDetailsOption::Details(TmdbDetails::Episode(episode_details)),
+                    Ok(episode_details) => {
+                        MediaDetailsOption::Details(TmdbDetails::Episode(episode_details))
+                    }
                     Err(e) => {
                         warn!("Failed to parse episode TMDB details: {}", e);
                         MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
                     }
                 }
             };
-            
+
             episodes.push(EpisodeReference {
                 id: EpisodeID::new(row.id.to_string())?,
                 episode_number: EpisodeNumber::new(row.episode_number as u8),
@@ -1527,16 +1559,16 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 file: media_file,
             });
         }
-        
+
         Ok(episodes)
     }
 
     async fn get_library_movies(&self, library_id: Uuid) -> Result<Vec<MovieReference>> {
         let rows = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 mr.id, mr.tmdb_id, mr.title, mr.theme_color,
-                mf.id as file_id, mf.file_path, mf.filename, mf.file_size, 
+                mf.id as file_id, mf.file_path, mf.filename, mf.file_size,
                 mf.created_at as file_created_at, mf.technical_metadata, mf.library_id
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
@@ -1634,8 +1666,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_series_reference(&self, id: &SeriesID) -> Result<SeriesReference> {
-        let series_uuid = Uuid::parse_str(id.as_str())
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid series ID: {}", e)))?;
+        let series_uuid = id.as_ref();
 
         // First get the series reference
         let series_row = sqlx::query!(
@@ -1695,12 +1726,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_season_reference(&self, id: &SeasonID) -> Result<SeasonReference> {
-        let season_uuid = Uuid::parse_str(id.as_str())
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid season ID: {}", e)))?;
-        
+        let season_uuid = id.as_ref();
+
         let row = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 sr.id, sr.series_id, sr.season_number, sr.library_id, sr.tmdb_series_id, sr.created_at,
                 sm.tmdb_details
             FROM season_references sr
@@ -1713,13 +1743,15 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?
         .ok_or_else(|| MediaError::NotFound("Season not found".to_string()))?;
-        
+
         // Parse TMDB details if available
         let details = if row.tmdb_details.is_null() {
             MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
         } else {
             match serde_json::from_value::<SeasonDetails>(row.tmdb_details) {
-                Ok(season_details) => MediaDetailsOption::Details(TmdbDetails::Season(season_details)),
+                Ok(season_details) => {
+                    MediaDetailsOption::Details(TmdbDetails::Season(season_details))
+                }
                 Err(e) => {
                     warn!("Failed to parse season TMDB details: {}", e);
                     MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
@@ -1741,12 +1773,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_episode_reference(&self, id: &EpisodeID) -> Result<EpisodeReference> {
-        let episode_uuid = Uuid::parse_str(id.as_str())
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid episode ID: {}", e)))?;
-        
+        let episode_uuid = id.as_ref();
+
         let row = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 er.id, er.episode_number, er.season_number, er.season_id, er.series_id,
                 er.tmdb_series_id, er.file_id,
                 em.tmdb_details,
@@ -1763,12 +1794,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?
         .ok_or_else(|| MediaError::NotFound("Episode not found".to_string()))?;
-        
+
         // Parse technical metadata
         let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
-        let parsed_metadata = technical_metadata
-            .and_then(|tm| serde_json::from_value::<MediaFileMetadata>(tm).ok());
-        
+        let parsed_metadata =
+            technical_metadata.and_then(|tm| serde_json::from_value::<MediaFileMetadata>(tm).ok());
+
         // Create media file
         let media_file = MediaFile {
             id: row.media_file_id,
@@ -1779,20 +1810,22 @@ impl MediaDatabaseTrait for PostgresDatabase {
             media_file_metadata: parsed_metadata,
             library_id: row.library_id,
         };
-        
+
         // Parse TMDB details if available
         let details = if row.tmdb_details.is_null() {
             MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
         } else {
             match serde_json::from_value::<EpisodeDetails>(row.tmdb_details) {
-                Ok(episode_details) => MediaDetailsOption::Details(TmdbDetails::Episode(episode_details)),
+                Ok(episode_details) => {
+                    MediaDetailsOption::Details(TmdbDetails::Episode(episode_details))
+                }
                 Err(e) => {
                     warn!("Failed to parse episode TMDB details: {}", e);
                     MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
                 }
             }
         };
-        
+
         Ok(EpisodeReference {
             id: EpisodeID::new(row.id.to_string())?,
             series_id: SeriesID::new(row.series_id.to_string())?,
@@ -1807,8 +1840,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn update_movie_tmdb_id(&self, id: &MovieID, tmdb_id: u64) -> Result<()> {
-        let movie_uuid = Uuid::parse_str(id.as_str())
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid movie ID: {}", e)))?;
+        let movie_uuid = id.as_ref();
 
         sqlx::query!(
             "UPDATE movie_references SET tmdb_id = $1, updated_at = NOW() WHERE id = $2",
@@ -1823,8 +1855,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn update_series_tmdb_id(&self, id: &SeriesID, tmdb_id: u64) -> Result<()> {
-        let series_uuid = Uuid::parse_str(id.as_str())
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid series ID: {}", e)))?;
+        let series_uuid = id.as_ref();
 
         sqlx::query!(
             "UPDATE series_references SET tmdb_id = $1, updated_at = NOW() WHERE id = $2",
@@ -1890,8 +1921,8 @@ impl MediaDatabaseTrait for PostgresDatabase {
             SELECT id, library_id, tmdb_id as "tmdb_id?", title, theme_color, created_at
             FROM series_references
             WHERE library_id = $1 AND title ILIKE $2
-            ORDER BY 
-                CASE 
+            ORDER BY
+                CASE
                     WHEN LOWER(title) = LOWER($3) THEN 0
                     WHEN LOWER(title) LIKE LOWER($3 || '%') THEN 1
                     ELSE 2
@@ -2208,9 +2239,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
         order_index: i32,
         is_primary: bool,
     ) -> Result<()> {
-        info!("link_media_image: type={}, media_id={}, image_id={}, image_type={}, index={}",
-              media_type, media_id, image_id, image_type, order_index);
-              
+        info!(
+            "link_media_image: type={}, media_id={}, image_id={}, image_type={}, index={}",
+            media_type, media_id, image_id, image_type, order_index
+        );
+
         sqlx::query!(
             r#"
             INSERT INTO media_images (media_type, media_id, image_id, image_type, order_index, is_primary)
@@ -2296,22 +2329,32 @@ impl MediaDatabaseTrait for PostgresDatabase {
         &self,
         params: &ImageLookupParams,
     ) -> Result<Option<(ImageRecord, Option<ImageVariant>)>> {
-        info!("lookup_image_variant: type={}, id='{}', image_type={}, index={}",
-              params.media_type, params.media_id, params.image_type, params.index);
-              
+        info!(
+            "lookup_image_variant: type={}, id='{}', image_type={}, index={}",
+            params.media_type, params.media_id, params.image_type, params.index
+        );
+
         // Parse media_id to UUID
         let media_id = match Uuid::parse_str(&params.media_id) {
             Ok(uuid) => uuid,
             Err(e) => {
-                warn!("Failed to parse media_id '{}' as UUID: {}", params.media_id, e);
-                return Err(MediaError::InvalidMedia(format!("Invalid media ID '{}': {}", params.media_id, e)));
+                warn!(
+                    "Failed to parse media_id '{}' as UUID: {}",
+                    params.media_id, e
+                );
+                return Err(MediaError::InvalidMedia(format!(
+                    "Invalid media ID '{}': {}",
+                    params.media_id, e
+                )));
             }
         };
 
         // First find the media image link
-        info!("Querying media_images table: type={}, media_id={}, image_type={}, index={}",
-              &params.media_type, media_id, &params.image_type, params.index);
-              
+        info!(
+            "Querying media_images table: type={}, media_id={}, image_type={}, index={}",
+            &params.media_type, media_id, &params.image_type, params.index
+        );
+
         let media_image = sqlx::query!(
             r#"
             SELECT image_id
@@ -2938,8 +2981,8 @@ impl MediaDatabaseTrait for PostgresDatabase {
                    f.technical_metadata, f.parsed_info, f.created_at, f.updated_at
             FROM media_files f
             JOIN media_processing_status p ON f.id = p.media_file_id
-            WHERE f.library_id = $1 
-              AND p.retry_count > 0 
+            WHERE f.library_id = $1
+              AND p.retry_count > 0
               AND p.retry_count <= $2
               AND (p.next_retry_at IS NULL OR p.next_retry_at <= NOW())
             "#,
@@ -3096,197 +3139,254 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         Ok(result.rows_affected() as u32)
     }
-    
+
     // ==================== User Management Methods ====================
-    
+
     async fn create_user(&self, user: &crate::User) -> Result<()> {
         // The trait method doesn't include password_hash, so we can't create a user through this interface
         // Users should be created through the authentication system which has access to the password
-        Err(MediaError::Internal("Use authentication system to create users with password".to_string()))
+        Err(MediaError::Internal(
+            "Use authentication system to create users with password".to_string(),
+        ))
     }
-    
+
     async fn get_user_by_id(&self, id: Uuid) -> Result<Option<crate::User>> {
         self.get_user_by_id(id).await
     }
-    
+
     async fn get_user_by_username(&self, username: &str) -> Result<Option<crate::User>> {
         self.get_user_by_username(username).await
     }
-    
+
     async fn get_all_users(&self) -> Result<Vec<crate::User>> {
         self.get_all_users().await
     }
-    
+
     async fn update_user(&self, user: &crate::User) -> Result<()> {
         self.update_user(user).await
     }
-    
+
     async fn delete_user(&self, id: Uuid) -> Result<()> {
         self.delete_user(id).await
     }
-    
+
     async fn get_user_password_hash(&self, user_id: Uuid) -> Result<Option<String>> {
         self.get_user_password_hash(user_id).await
     }
-    
+
     async fn update_user_password(&self, user_id: Uuid, password_hash: &str) -> Result<()> {
         self.update_user_password(user_id, password_hash).await
     }
-    
+
     async fn delete_user_atomic(&self, user_id: Uuid, check_last_admin: bool) -> Result<()> {
         self.delete_user_atomic(user_id, check_last_admin).await
     }
-    
+
     // ==================== RBAC Methods ====================
-    
+
     async fn get_user_permissions(&self, user_id: Uuid) -> Result<crate::rbac::UserPermissions> {
         self.rbac_get_user_permissions(user_id).await
     }
-    
+
     async fn get_all_roles(&self) -> Result<Vec<crate::rbac::Role>> {
         self.rbac_get_all_roles().await
     }
-    
+
     async fn get_all_permissions(&self) -> Result<Vec<crate::rbac::Permission>> {
         self.rbac_get_all_permissions().await
     }
-    
+
     async fn assign_user_role(&self, user_id: Uuid, role_id: Uuid, granted_by: Uuid) -> Result<()> {
-        self.rbac_assign_user_role(user_id, role_id, granted_by).await
+        self.rbac_assign_user_role(user_id, role_id, granted_by)
+            .await
     }
-    
+
     async fn remove_user_role(&self, user_id: Uuid, role_id: Uuid) -> Result<()> {
         self.rbac_remove_user_role(user_id, role_id).await
     }
-    
-    async fn remove_user_role_atomic(&self, user_id: Uuid, role_id: Uuid, check_last_admin: bool) -> Result<()> {
-        self.rbac_remove_user_role_atomic(user_id, role_id, check_last_admin).await
+
+    async fn remove_user_role_atomic(
+        &self,
+        user_id: Uuid,
+        role_id: Uuid,
+        check_last_admin: bool,
+    ) -> Result<()> {
+        self.rbac_remove_user_role_atomic(user_id, role_id, check_last_admin)
+            .await
     }
-    
-    async fn override_user_permission(&self, user_id: Uuid, permission: &str, granted: bool, granted_by: Uuid, reason: Option<String>) -> Result<()> {
-        self.rbac_override_user_permission(user_id, permission, granted, granted_by, reason).await
+
+    async fn override_user_permission(
+        &self,
+        user_id: Uuid,
+        permission: &str,
+        granted: bool,
+        granted_by: Uuid,
+        reason: Option<String>,
+    ) -> Result<()> {
+        self.rbac_override_user_permission(user_id, permission, granted, granted_by, reason)
+            .await
     }
-    
+
     async fn get_admin_count(&self, exclude_user_id: Option<Uuid>) -> Result<usize> {
         self.get_admin_count(exclude_user_id).await
     }
-    
+
     async fn user_has_role(&self, user_id: Uuid, role_name: &str) -> Result<bool> {
         self.user_has_role(user_id, role_name).await
     }
-    
+
     async fn get_users_with_role(&self, role_name: &str) -> Result<Vec<Uuid>> {
         self.get_users_with_role(role_name).await
     }
-    
+
     // ==================== Authentication Methods ====================
-    
-    async fn store_refresh_token(&self, token: &str, user_id: Uuid, device_name: Option<String>, expires_at: chrono::DateTime<chrono::Utc>) -> Result<()> {
-        self.store_refresh_token(token, user_id, device_name, expires_at).await
+
+    async fn store_refresh_token(
+        &self,
+        token: &str,
+        user_id: Uuid,
+        device_name: Option<String>,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        self.store_refresh_token(token, user_id, device_name, expires_at)
+            .await
     }
-    
-    async fn get_refresh_token(&self, token: &str) -> Result<Option<(Uuid, chrono::DateTime<chrono::Utc>)>> {
+
+    async fn get_refresh_token(
+        &self,
+        token: &str,
+    ) -> Result<Option<(Uuid, chrono::DateTime<chrono::Utc>)>> {
         self.get_refresh_token(token).await
     }
-    
+
     async fn delete_refresh_token(&self, token: &str) -> Result<()> {
         self.delete_refresh_token(token).await
     }
-    
+
     async fn delete_user_refresh_tokens(&self, user_id: Uuid) -> Result<()> {
         self.delete_user_refresh_tokens(user_id).await
     }
-    
+
     // ==================== Session Management ====================
-    
+
     async fn create_session(&self, session: &crate::UserSession) -> Result<()> {
         self.create_session(session).await
     }
-    
+
     async fn get_user_sessions(&self, user_id: Uuid) -> Result<Vec<crate::UserSession>> {
         self.get_user_sessions(user_id).await
     }
-    
+
     async fn delete_session(&self, session_id: Uuid) -> Result<()> {
         self.delete_session(session_id).await
     }
-    
+
     // ==================== Watch Status Methods ====================
-    
-    async fn update_watch_progress(&self, user_id: Uuid, progress: &crate::UpdateProgressRequest) -> Result<()> {
+
+    async fn update_watch_progress(
+        &self,
+        user_id: Uuid,
+        progress: &crate::UpdateProgressRequest,
+    ) -> Result<()> {
         self.update_watch_progress(user_id, progress).await
     }
-    
+
     async fn get_user_watch_state(&self, user_id: Uuid) -> Result<crate::UserWatchState> {
         self.get_user_watch_state(user_id).await
     }
-    
-    async fn get_continue_watching(&self, user_id: Uuid, limit: usize) -> Result<Vec<crate::InProgressItem>> {
+
+    async fn get_continue_watching(
+        &self,
+        user_id: Uuid,
+        limit: usize,
+    ) -> Result<Vec<crate::InProgressItem>> {
         self.get_continue_watching(user_id, limit).await
     }
-    
-    async fn clear_watch_progress(&self, user_id: Uuid, media_id: &crate::api_types::MediaId) -> Result<()> {
+
+    async fn clear_watch_progress(
+        &self,
+        user_id: Uuid,
+        media_id: &crate::api_types::MediaId,
+    ) -> Result<()> {
         self.clear_watch_progress(user_id, media_id).await
     }
-    
-    async fn is_media_completed(&self, user_id: Uuid, media_id: &crate::api_types::MediaId) -> Result<bool> {
+
+    async fn is_media_completed(
+        &self,
+        user_id: Uuid,
+        media_id: &crate::api_types::MediaId,
+    ) -> Result<bool> {
         self.is_media_completed(user_id, media_id).await
     }
-    
+
     // ==================== Sync Session Methods ====================
-    
+
     async fn create_sync_session(&self, session: &crate::SyncSession) -> Result<()> {
         self.create_sync_session(session).await
     }
-    
-    async fn get_sync_session_by_code(&self, room_code: &str) -> Result<Option<crate::SyncSession>> {
+
+    async fn get_sync_session_by_code(
+        &self,
+        room_code: &str,
+    ) -> Result<Option<crate::SyncSession>> {
         self.get_sync_session_by_code(room_code).await
     }
-    
+
     async fn get_sync_session(&self, id: Uuid) -> Result<Option<crate::SyncSession>> {
         self.get_sync_session(id).await
     }
-    
-    async fn update_sync_session_state(&self, id: Uuid, state: &crate::PlaybackState) -> Result<()> {
+
+    async fn update_sync_session_state(
+        &self,
+        id: Uuid,
+        state: &crate::PlaybackState,
+    ) -> Result<()> {
         self.update_sync_session_state(id, state).await
     }
-    
-    async fn add_sync_participant(&self, session_id: Uuid, participant: &crate::Participant) -> Result<()> {
+
+    async fn add_sync_participant(
+        &self,
+        session_id: Uuid,
+        participant: &crate::Participant,
+    ) -> Result<()> {
         self.add_sync_participant(session_id, participant).await
     }
-    
+
     async fn remove_sync_participant(&self, session_id: Uuid, user_id: Uuid) -> Result<()> {
         self.remove_sync_participant(session_id, user_id).await
     }
-    
+
     async fn delete_sync_session(&self, id: Uuid) -> Result<()> {
         self.delete_sync_session(id).await
     }
-    
+
     async fn update_sync_session(&self, id: Uuid, session: &crate::SyncSession) -> Result<()> {
         self.update_sync_session(id, session).await
     }
-    
+
     async fn end_sync_session(&self, id: Uuid) -> Result<()> {
         // For now, ending a session is the same as deleting it
         self.delete_sync_session(id).await
     }
-    
+
     async fn cleanup_expired_sync_sessions(&self) -> Result<u32> {
         self.cleanup_expired_sync_sessions().await
     }
-    
-    async fn query_media(&self, query: &crate::query::MediaQuery) -> Result<Vec<crate::query::MediaReferenceWithStatus>> {
+
+    async fn query_media(
+        &self,
+        query: &crate::query::MediaQuery,
+    ) -> Result<Vec<crate::query::MediaReferenceWithStatus>> {
         self.query_media(query).await
     }
-    
+
     // Device authentication methods
-    
+
     async fn register_device(&self, device: &crate::auth::AuthenticatedDevice) -> Result<()> {
         sqlx::query!(
             r#"
-            INSERT INTO authenticated_devices 
-            (id, fingerprint, name, platform, app_version, first_authenticated_by, 
+            INSERT INTO authenticated_devices
+            (id, fingerprint, name, platform, app_version, first_authenticated_by,
              first_authenticated_at, trusted_until, last_seen_at, metadata)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#,
@@ -3303,11 +3403,14 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
-    
-    async fn get_device_by_fingerprint(&self, fingerprint: &str) -> Result<Option<crate::auth::AuthenticatedDevice>> {
+
+    async fn get_device_by_fingerprint(
+        &self,
+        fingerprint: &str,
+    ) -> Result<Option<crate::auth::AuthenticatedDevice>> {
         let row = sqlx::query!(
             r#"
             SELECT id, fingerprint, name, platform, app_version, first_authenticated_by,
@@ -3320,7 +3423,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .fetch_optional(&self.pool)
         .await?;
-        
+
         Ok(row.map(|r| crate::auth::AuthenticatedDevice {
             id: r.id,
             fingerprint: r.fingerprint,
@@ -3337,8 +3440,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
             metadata: r.metadata.unwrap_or(serde_json::json!({})),
         }))
     }
-    
-    async fn get_user_devices(&self, user_id: Uuid) -> Result<Vec<crate::auth::AuthenticatedDevice>> {
+
+    async fn get_user_devices(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<crate::auth::AuthenticatedDevice>> {
         let rows = sqlx::query!(
             r#"
             SELECT ad.id, ad.fingerprint, ad.name, ad.platform, ad.app_version,
@@ -3354,68 +3460,84 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .fetch_all(&self.pool)
         .await?;
-        
-        Ok(rows.into_iter().map(|r| crate::auth::AuthenticatedDevice {
-            id: r.id,
-            fingerprint: r.fingerprint,
-            name: r.name,
-            platform: serde_json::from_str(&r.platform).unwrap_or(crate::auth::Platform::Unknown),
-            app_version: r.app_version,
-            first_authenticated_by: r.first_authenticated_by,
-            first_authenticated_at: r.first_authenticated_at,
-            trusted_until: r.trusted_until,
-            last_seen_at: r.last_seen_at,
-            revoked: r.revoked,
-            revoked_by: r.revoked_by,
-            revoked_at: r.revoked_at,
-            metadata: r.metadata.unwrap_or(serde_json::json!({})),
-        }).collect())
+
+        Ok(rows
+            .into_iter()
+            .map(|r| crate::auth::AuthenticatedDevice {
+                id: r.id,
+                fingerprint: r.fingerprint,
+                name: r.name,
+                platform: serde_json::from_str(&r.platform)
+                    .unwrap_or(crate::auth::Platform::Unknown),
+                app_version: r.app_version,
+                first_authenticated_by: r.first_authenticated_by,
+                first_authenticated_at: r.first_authenticated_at,
+                trusted_until: r.trusted_until,
+                last_seen_at: r.last_seen_at,
+                revoked: r.revoked,
+                revoked_by: r.revoked_by,
+                revoked_at: r.revoked_at,
+                metadata: r.metadata.unwrap_or(serde_json::json!({})),
+            })
+            .collect())
     }
-    
-    async fn update_device(&self, device_id: Uuid, updates: &crate::auth::DeviceUpdateParams) -> Result<()> {
+
+    async fn update_device(
+        &self,
+        device_id: Uuid,
+        updates: &crate::auth::DeviceUpdateParams,
+    ) -> Result<()> {
         let mut query_builder = sqlx::QueryBuilder::new("UPDATE authenticated_devices SET ");
         let mut first = true;
-        
+
         if let Some(name) = &updates.name {
-            if !first { query_builder.push(", "); }
+            if !first {
+                query_builder.push(", ");
+            }
             query_builder.push("name = ");
             query_builder.push_bind(name);
             first = false;
         }
-        
+
         if let Some(app_version) = &updates.app_version {
-            if !first { query_builder.push(", "); }
+            if !first {
+                query_builder.push(", ");
+            }
             query_builder.push("app_version = ");
             query_builder.push_bind(app_version);
             first = false;
         }
-        
+
         if let Some(last_seen_at) = &updates.last_seen_at {
-            if !first { query_builder.push(", "); }
+            if !first {
+                query_builder.push(", ");
+            }
             query_builder.push("last_seen_at = ");
             query_builder.push_bind(last_seen_at);
             first = false;
         }
-        
+
         if let Some(trusted_until) = &updates.trusted_until {
-            if !first { query_builder.push(", "); }
+            if !first {
+                query_builder.push(", ");
+            }
             query_builder.push("trusted_until = ");
             query_builder.push_bind(trusted_until);
             first = false;
         }
-        
+
         if !first {
             query_builder.push(", updated_at = NOW()");
         }
-        
+
         query_builder.push(" WHERE id = ");
         query_builder.push_bind(device_id);
-        
+
         query_builder.build().execute(&self.pool).await?;
-        
+
         Ok(())
     }
-    
+
     async fn revoke_device(&self, device_id: Uuid, revoked_by: Uuid) -> Result<()> {
         sqlx::query!(
             r#"
@@ -3428,15 +3550,18 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
-    
-    async fn upsert_device_credential(&self, credential: &crate::auth::DeviceUserCredential) -> Result<()> {
+
+    async fn upsert_device_credential(
+        &self,
+        credential: &crate::auth::DeviceUserCredential,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
-            INSERT INTO device_user_credentials 
-            (user_id, device_id, pin_hash, pin_set_at, pin_last_used_at, 
+            INSERT INTO device_user_credentials
+            (user_id, device_id, pin_hash, pin_set_at, pin_last_used_at,
              failed_attempts, locked_until, auto_login_enabled, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (user_id, device_id) DO UPDATE SET
@@ -3461,11 +3586,15 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
-    
-    async fn get_device_credential(&self, user_id: Uuid, device_id: Uuid) -> Result<Option<crate::auth::DeviceUserCredential>> {
+
+    async fn get_device_credential(
+        &self,
+        user_id: Uuid,
+        device_id: Uuid,
+    ) -> Result<Option<crate::auth::DeviceUserCredential>> {
         let row = sqlx::query!(
             r#"
             SELECT user_id, device_id, pin_hash, pin_set_at, pin_last_used_at,
@@ -3478,7 +3607,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .fetch_optional(&self.pool)
         .await?;
-        
+
         Ok(row.map(|r| crate::auth::DeviceUserCredential {
             user_id: r.user_id,
             device_id: r.device_id,
@@ -3492,8 +3621,13 @@ impl MediaDatabaseTrait for PostgresDatabase {
             updated_at: r.updated_at,
         }))
     }
-    
-    async fn update_device_pin(&self, user_id: Uuid, device_id: Uuid, pin_hash: &str) -> Result<()> {
+
+    async fn update_device_pin(
+        &self,
+        user_id: Uuid,
+        device_id: Uuid,
+        pin_hash: &str,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             UPDATE device_user_credentials
@@ -3506,11 +3640,17 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
-    
-    async fn update_device_failed_attempts(&self, user_id: Uuid, device_id: Uuid, attempts: i32, locked_until: Option<chrono::DateTime<chrono::Utc>>) -> Result<()> {
+
+    async fn update_device_failed_attempts(
+        &self,
+        user_id: Uuid,
+        device_id: Uuid,
+        attempts: i32,
+        locked_until: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             UPDATE device_user_credentials
@@ -3524,38 +3664,47 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
-    
-    async fn create_device_session(&self, session: &crate::auth::SessionDeviceSession) -> Result<()> {
+
+    async fn create_device_session(
+        &self,
+        session: &crate::auth::SessionDeviceSession,
+    ) -> Result<()> {
         // Token is already hashed by the caller
         sqlx::query!(
             r#"
-            INSERT INTO sessions 
-            (id, token_hash, user_id, device_id, created_at, expires_at, 
+            INSERT INTO sessions
+            (id, token_hash, user_id, device_id, created_at, expires_at,
              last_activity, ip_address, user_agent, revoked, revoked_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             "#,
             session.id,
-            session.session_token,  // Already hashed by caller
+            session.session_token, // Already hashed by caller
             session.user_id,
             session.device_id,
             session.created_at,
             session.expires_at,
             session.last_activity,
-            session.ip_address.as_ref().and_then(|ip| sqlx::types::ipnetwork::IpNetwork::from_str(ip).ok()),
+            session
+                .ip_address
+                .as_ref()
+                .and_then(|ip| sqlx::types::ipnetwork::IpNetwork::from_str(ip).ok()),
             session.user_agent,
             session.revoked,
             session.revoked_at
         )
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
-    
-    async fn get_device_sessions(&self, device_id: Uuid) -> Result<Vec<crate::auth::SessionDeviceSession>> {
+
+    async fn get_device_sessions(
+        &self,
+        device_id: Uuid,
+    ) -> Result<Vec<crate::auth::SessionDeviceSession>> {
         let rows = sqlx::query!(
             r#"
             SELECT id, user_id, device_id, created_at, expires_at,
@@ -3568,22 +3717,25 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .fetch_all(&self.pool)
         .await?;
-        
-        Ok(rows.into_iter().map(|r| crate::auth::SessionDeviceSession {
-            id: r.id,
-            user_id: r.user_id,
-            device_id: r.device_id,
-            session_token: String::new(), // Token hash is not returned for security
-            created_at: r.created_at,
-            expires_at: r.expires_at,
-            last_activity: r.last_activity,
-            ip_address: r.ip_address.map(|ip| ip.to_string()),
-            user_agent: r.user_agent,
-            revoked: r.revoked,
-            revoked_at: r.revoked_at,
-        }).collect())
+
+        Ok(rows
+            .into_iter()
+            .map(|r| crate::auth::SessionDeviceSession {
+                id: r.id,
+                user_id: r.user_id,
+                device_id: r.device_id,
+                session_token: String::new(), // Token hash is not returned for security
+                created_at: r.created_at,
+                expires_at: r.expires_at,
+                last_activity: r.last_activity,
+                ip_address: r.ip_address.map(|ip| ip.to_string()),
+                user_agent: r.user_agent,
+                revoked: r.revoked,
+                revoked_at: r.revoked_at,
+            })
+            .collect())
     }
-    
+
     async fn revoke_device_sessions(&self, device_id: Uuid) -> Result<()> {
         sqlx::query!(
             r#"
@@ -3595,14 +3747,14 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
-    
+
     async fn log_auth_event(&self, event: &crate::auth::AuthEvent) -> Result<()> {
         sqlx::query!(
             r#"
-            INSERT INTO auth_events 
+            INSERT INTO auth_events
             (id, user_id, device_id, event_type, success, failure_reason,
              ip_address, user_agent, metadata, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -3613,18 +3765,25 @@ impl MediaDatabaseTrait for PostgresDatabase {
             event.event_type.as_str(),
             event.success,
             event.failure_reason,
-            event.ip_address.as_ref().and_then(|ip| sqlx::types::ipnetwork::IpNetwork::from_str(ip).ok()),
+            event
+                .ip_address
+                .as_ref()
+                .and_then(|ip| sqlx::types::ipnetwork::IpNetwork::from_str(ip).ok()),
             event.user_agent,
             event.metadata,
             event.created_at
         )
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
-    
-    async fn get_user_auth_events(&self, user_id: Uuid, limit: usize) -> Result<Vec<crate::auth::AuthEvent>> {
+
+    async fn get_user_auth_events(
+        &self,
+        user_id: Uuid,
+        limit: usize,
+    ) -> Result<Vec<crate::auth::AuthEvent>> {
         let rows = sqlx::query!(
             r#"
             SELECT id, user_id, device_id, event_type, success, failure_reason,
@@ -3639,26 +3798,33 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .fetch_all(&self.pool)
         .await?;
-        
-        Ok(rows.into_iter().filter_map(|r| {
-            crate::auth::AuthEventType::from_str(&r.event_type).map(|event_type| {
-                crate::auth::AuthEvent {
-                    id: r.id,
-                    user_id: r.user_id,
-                    device_id: r.device_id,
-                    event_type,
-                    success: r.success,
-                    failure_reason: r.failure_reason,
-                    ip_address: r.ip_address.map(|ip| ip.to_string()),
-                    user_agent: r.user_agent,
-                    metadata: r.metadata.unwrap_or(serde_json::json!({})),
-                    created_at: r.created_at,
-                }
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                crate::auth::AuthEventType::from_str(&r.event_type).map(|event_type| {
+                    crate::auth::AuthEvent {
+                        id: r.id,
+                        user_id: r.user_id,
+                        device_id: r.device_id,
+                        event_type,
+                        success: r.success,
+                        failure_reason: r.failure_reason,
+                        ip_address: r.ip_address.map(|ip| ip.to_string()),
+                        user_agent: r.user_agent,
+                        metadata: r.metadata.unwrap_or(serde_json::json!({})),
+                        created_at: r.created_at,
+                    }
+                })
             })
-        }).collect())
+            .collect())
     }
-    
-    async fn get_device_auth_events(&self, device_id: Uuid, limit: usize) -> Result<Vec<crate::auth::AuthEvent>> {
+
+    async fn get_device_auth_events(
+        &self,
+        device_id: Uuid,
+        limit: usize,
+    ) -> Result<Vec<crate::auth::AuthEvent>> {
         let rows = sqlx::query!(
             r#"
             SELECT id, user_id, device_id, event_type, success, failure_reason,
@@ -3673,42 +3839,42 @@ impl MediaDatabaseTrait for PostgresDatabase {
         )
         .fetch_all(&self.pool)
         .await?;
-        
-        Ok(rows.into_iter().filter_map(|r| {
-            crate::auth::AuthEventType::from_str(&r.event_type).map(|event_type| {
-                crate::auth::AuthEvent {
-                    id: r.id,
-                    user_id: r.user_id,
-                    device_id: r.device_id,
-                    event_type,
-                    success: r.success,
-                    failure_reason: r.failure_reason,
-                    ip_address: r.ip_address.map(|ip| ip.to_string()),
-                    user_agent: r.user_agent,
-                    metadata: r.metadata.unwrap_or(serde_json::json!({})),
-                    created_at: r.created_at,
-                }
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                crate::auth::AuthEventType::from_str(&r.event_type).map(|event_type| {
+                    crate::auth::AuthEvent {
+                        id: r.id,
+                        user_id: r.user_id,
+                        device_id: r.device_id,
+                        event_type,
+                        success: r.success,
+                        failure_reason: r.failure_reason,
+                        ip_address: r.ip_address.map(|ip| ip.to_string()),
+                        user_agent: r.user_agent,
+                        metadata: r.metadata.unwrap_or(serde_json::json!({})),
+                        created_at: r.created_at,
+                    }
+                })
             })
-        }).collect())
+            .collect())
     }
-    
+
     // Bulk reference retrieval methods for performance
     async fn get_movie_references_bulk(&self, ids: &[&MovieID]) -> Result<Vec<MovieReference>> {
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        
+
         // Convert IDs to UUIDs
-        let uuids: Result<Vec<Uuid>> = ids.iter()
-            .map(|id| Uuid::parse_str(id.as_str())
-                .map_err(|e| MediaError::InvalidMedia(format!("Invalid movie ID: {}", e))))
-            .collect();
-        let uuids = uuids?;
-        
+        let uuids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+        let uuids = uuids;
+
         // Build query with ANY clause
         let rows = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 mr.id, mr.tmdb_id, mr.title, mr.theme_color, mr.library_id,
                 mf.id as file_id, mf.file_path, mf.filename, mf.file_size, mf.created_at as file_created_at,
                 mf.technical_metadata, mf.parsed_info,
@@ -3723,7 +3889,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
-        
+
         let mut movies = Vec::new();
         for row in rows {
             // Build MediaFile
@@ -3731,8 +3897,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
             let media_file_metadata = technical_metadata
                 .map(|tm| serde_json::from_value(tm))
                 .transpose()
-                .map_err(|e| MediaError::Internal(format!("Failed to deserialize metadata: {}", e)))?;
-            
+                .map_err(|e| {
+                    MediaError::Internal(format!("Failed to deserialize metadata: {}", e))
+                })?;
+
             let media_file = MediaFile {
                 id: row.file_id,
                 path: PathBuf::from(row.file_path),
@@ -3742,11 +3910,13 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 media_file_metadata,
                 library_id: row.library_id,
             };
-            
+
             // Build metadata if available
             let details = if let Some(tmdb_json) = row.tmdb_details {
                 match serde_json::from_value::<EnhancedMovieDetails>(tmdb_json) {
-                    Ok(metadata_details) => MediaDetailsOption::Details(TmdbDetails::Movie(metadata_details)),
+                    Ok(metadata_details) => {
+                        MediaDetailsOption::Details(TmdbDetails::Movie(metadata_details))
+                    }
                     Err(e) => {
                         warn!("Failed to deserialize movie metadata: {}", e);
                         MediaDetailsOption::Endpoint(format!("/api/movie/{}", row.id))
@@ -3755,7 +3925,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             } else {
                 MediaDetailsOption::Endpoint(format!("/api/movie/{}", row.id))
             };
-            
+
             let movie_ref = MovieReference {
                 id: MovieID::new(row.id.to_string())?,
                 tmdb_id: row.tmdb_id as u64,
@@ -3765,29 +3935,25 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 file: media_file,
                 theme_color: row.theme_color,
             };
-            
+
             movies.push(movie_ref);
         }
-        
+
         Ok(movies)
     }
-    
+
     async fn get_series_references_bulk(&self, ids: &[&SeriesID]) -> Result<Vec<SeriesReference>> {
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        
+
         // Convert IDs to UUIDs
-        let uuids: Result<Vec<Uuid>> = ids.iter()
-            .map(|id| Uuid::parse_str(id.as_str())
-                .map_err(|e| MediaError::InvalidMedia(format!("Invalid series ID: {}", e))))
-            .collect();
-        let uuids = uuids?;
-        
+        let uuids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+
         // Fetch series references with metadata
         let rows = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 sr.id, sr.library_id, sr.tmdb_id as "tmdb_id?", sr.title, sr.theme_color, sr.created_at,
                 sm.tmdb_details as "tmdb_details?"
             FROM series_references sr
@@ -3799,7 +3965,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
-        
+
         let mut series_list = Vec::new();
         for row in rows {
             // Extract required fields - these are non-nullable in the query
@@ -3807,23 +3973,25 @@ impl MediaDatabaseTrait for PostgresDatabase {
             let library_id = row.library_id;
             let title = row.title;
             let created_at = row.created_at;
-            
+
             // Build the details field
             let details = match row.tmdb_details {
                 Some(metadata) if !metadata.is_null() => {
                     match serde_json::from_value::<EnhancedSeriesDetails>(metadata) {
-                        Ok(series_details) => MediaDetailsOption::Details(TmdbDetails::Series(series_details)),
+                        Ok(series_details) => {
+                            MediaDetailsOption::Details(TmdbDetails::Series(series_details))
+                        }
                         Err(e) => {
                             warn!("Failed to deserialize series metadata: {}", e);
                             MediaDetailsOption::Endpoint(format!("/api/series/{}", row_id))
                         }
                     }
                 }
-                _ => MediaDetailsOption::Endpoint(format!("/api/series/{}", row_id))
+                _ => MediaDetailsOption::Endpoint(format!("/api/series/{}", row_id)),
             };
-            
+
             let tmdb_id = row.tmdb_id.unwrap_or(0) as u64;
-            
+
             series_list.push(SeriesReference {
                 id: SeriesID::new(row_id.to_string())?,
                 library_id,
@@ -3835,25 +4003,21 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 theme_color: row.theme_color,
             });
         }
-        
+
         Ok(series_list)
     }
-    
+
     async fn get_season_references_bulk(&self, ids: &[&SeasonID]) -> Result<Vec<SeasonReference>> {
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        
+
         // Convert IDs to UUIDs
-        let uuids: Result<Vec<Uuid>> = ids.iter()
-            .map(|id| Uuid::parse_str(id.as_str())
-                .map_err(|e| MediaError::InvalidMedia(format!("Invalid season ID: {}", e))))
-            .collect();
-        let uuids = uuids?;
-        
+        let uuids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+
         let rows = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 sr.id, sr.series_id, sr.season_number, sr.library_id, sr.tmdb_series_id, sr.created_at,
                 sm.tmdb_details
             FROM season_references sr
@@ -3865,21 +4029,21 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get seasons: {}", e)))?;
-        
+
         let mut seasons = Vec::new();
         for row in rows {
             // Parse TMDB details if available
             let details = match row.tmdb_details {
                 None => MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id)),
-                Some(tmdb_json) => {
-                    match serde_json::from_value::<SeasonDetails>(tmdb_json) {
-                        Ok(season_details) => MediaDetailsOption::Details(TmdbDetails::Season(season_details)),
-                        Err(e) => {
-                            warn!("Failed to parse season TMDB details: {}", e);
-                            MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
-                        }
+                Some(tmdb_json) => match serde_json::from_value::<SeasonDetails>(tmdb_json) {
+                    Ok(season_details) => {
+                        MediaDetailsOption::Details(TmdbDetails::Season(season_details))
                     }
-                }
+                    Err(e) => {
+                        warn!("Failed to parse season TMDB details: {}", e);
+                        MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
+                    }
+                },
             };
 
             seasons.push(SeasonReference {
@@ -3894,25 +4058,24 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 theme_color: None,
             });
         }
-        
+
         Ok(seasons)
     }
-    
-    async fn get_episode_references_bulk(&self, ids: &[&EpisodeID]) -> Result<Vec<EpisodeReference>> {
+
+    async fn get_episode_references_bulk(
+        &self,
+        ids: &[&EpisodeID],
+    ) -> Result<Vec<EpisodeReference>> {
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        
+
         // Convert IDs to UUIDs
-        let uuids: Result<Vec<Uuid>> = ids.iter()
-            .map(|id| Uuid::parse_str(id.as_str())
-                .map_err(|e| MediaError::InvalidMedia(format!("Invalid episode ID: {}", e))))
-            .collect();
-        let uuids = uuids?;
-        
+        let uuids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+
         let rows = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 er.id, er.episode_number, er.season_number, er.season_id, er.series_id,
                 er.tmdb_series_id, er.file_id,
                 em.tmdb_details,
@@ -3928,14 +4091,14 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get episodes: {}", e)))?;
-        
+
         let mut episodes = Vec::new();
         for row in rows {
             // Parse technical metadata
             let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
             let parsed_metadata = technical_metadata
                 .and_then(|tm| serde_json::from_value::<MediaFileMetadata>(tm).ok());
-            
+
             // Create media file
             let media_file = MediaFile {
                 id: row.media_file_id,
@@ -3946,21 +4109,21 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 media_file_metadata: parsed_metadata,
                 library_id: row.library_id,
             };
-            
+
             // Parse TMDB details if available
             let details = match row.tmdb_details {
                 None => MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id)),
-                Some(tmdb_json) => {
-                    match serde_json::from_value::<EpisodeDetails>(tmdb_json) {
-                        Ok(episode_details) => MediaDetailsOption::Details(TmdbDetails::Episode(episode_details)),
-                        Err(e) => {
-                            warn!("Failed to parse episode TMDB details: {}", e);
-                            MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
-                        }
+                Some(tmdb_json) => match serde_json::from_value::<EpisodeDetails>(tmdb_json) {
+                    Ok(episode_details) => {
+                        MediaDetailsOption::Details(TmdbDetails::Episode(episode_details))
                     }
-                }
+                    Err(e) => {
+                        warn!("Failed to parse episode TMDB details: {}", e);
+                        MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
+                    }
+                },
             };
-            
+
             episodes.push(EpisodeReference {
                 id: EpisodeID::new(row.id.to_string())?,
                 series_id: SeriesID::new(row.series_id.to_string())?,
@@ -3973,51 +4136,85 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 file: media_file,
             });
         }
-        
+
         Ok(episodes)
     }
 
     // Folder inventory management methods
-    async fn get_folders_needing_scan(&self, filters: &FolderScanFilters) -> Result<Vec<FolderInventory>> {
+    async fn get_folders_needing_scan(
+        &self,
+        filters: &FolderScanFilters,
+    ) -> Result<Vec<FolderInventory>> {
         self.get_folders_needing_scan_impl(filters).await
     }
-    
-    async fn update_folder_status(&self, folder_id: Uuid, status: FolderProcessingStatus, error: Option<String>) -> Result<()> {
-        self.update_folder_status_impl(folder_id, status, error).await
+
+    async fn update_folder_status(
+        &self,
+        folder_id: Uuid,
+        status: FolderProcessingStatus,
+        error: Option<String>,
+    ) -> Result<()> {
+        self.update_folder_status_impl(folder_id, status, error)
+            .await
     }
-    
-    async fn record_folder_scan_error(&self, folder_id: Uuid, error: &str, next_retry: Option<DateTime<Utc>>) -> Result<()> {
-        self.record_folder_scan_error_impl(folder_id, error, next_retry).await
+
+    async fn record_folder_scan_error(
+        &self,
+        folder_id: Uuid,
+        error: &str,
+        next_retry: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        self.record_folder_scan_error_impl(folder_id, error, next_retry)
+            .await
     }
-    
+
     async fn get_folder_inventory(&self, library_id: Uuid) -> Result<Vec<FolderInventory>> {
         self.get_folder_inventory_impl(library_id).await
     }
-    
+
     async fn upsert_folder(&self, folder: &FolderInventory) -> Result<Uuid> {
         self.upsert_folder_impl(folder).await
     }
-    
+
     async fn cleanup_stale_folders(&self, library_id: Uuid, stale_after_hours: i32) -> Result<u32> {
-        self.cleanup_stale_folders_impl(library_id, stale_after_hours).await
+        self.cleanup_stale_folders_impl(library_id, stale_after_hours)
+            .await
     }
-    
-    async fn get_folder_by_path(&self, library_id: Uuid, path: &str) -> Result<Option<FolderInventory>> {
+
+    async fn get_folder_by_path(
+        &self,
+        library_id: Uuid,
+        path: &Path,
+    ) -> Result<Option<FolderInventory>> {
         self.get_folder_by_path_impl(library_id, path).await
     }
-    
-    async fn update_folder_stats(&self, folder_id: Uuid, total_files: i32, processed_files: i32, total_size_bytes: i64, file_types: Vec<String>) -> Result<()> {
-        self.update_folder_stats_impl(folder_id, total_files, processed_files, total_size_bytes, file_types).await
+
+    async fn update_folder_stats(
+        &self,
+        folder_id: Uuid,
+        total_files: i32,
+        processed_files: i32,
+        total_size_bytes: i64,
+        file_types: Vec<String>,
+    ) -> Result<()> {
+        self.update_folder_stats_impl(
+            folder_id,
+            total_files,
+            processed_files,
+            total_size_bytes,
+            file_types,
+        )
+        .await
     }
-    
+
     async fn mark_folder_processed(&self, folder_id: Uuid) -> Result<()> {
         self.mark_folder_processed_impl(folder_id).await
     }
-    
+
     async fn get_child_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>> {
         self.get_child_folders_impl(parent_folder_id).await
     }
-    
+
     async fn get_season_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>> {
         self.get_season_folders_impl(parent_folder_id).await
     }
@@ -4030,8 +4227,7 @@ impl PostgresDatabase {
         series: &SeriesReference,
         metadata: Option<&EnhancedSeriesDetails>,
     ) -> Result<()> {
-        let series_uuid = Uuid::parse_str(series.id.as_str())
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid series ID: {}", e)))?;
+        let series_uuid = series.id.as_ref();
 
         // Convert tmdb_id, treating 0 as None (no TMDB match)
         let tmdb_id = if series.tmdb_id > 0 {
@@ -4089,7 +4285,7 @@ impl PostgresDatabase {
             // First check if a series with this tmdb_id already exists
             let existing = sqlx::query!(
                 r#"
-                SELECT id FROM series_references 
+                SELECT id FROM series_references
                 WHERE tmdb_id = $1 AND library_id = $2
                 "#,
                 tmdb_id,
@@ -4100,7 +4296,7 @@ impl PostgresDatabase {
             .map_err(|e| MediaError::Internal(format!("Failed to check existing series: {}", e)))?;
 
             if let Some(existing_row) = existing {
-                if existing_row.id != series_uuid {
+                if &existing_row.id != series_uuid {
                     // Different ID - this means find_or_create_series didn't find the existing series
                     // This is a logic error - the scanner should have used the existing series ID
                     return Err(MediaError::Internal(format!(
@@ -4172,8 +4368,9 @@ impl PostgresDatabase {
                 details.overview.as_deref().unwrap_or("None")
             );
 
-            let tmdb_json = serde_json::to_value(details)
-                .map_err(|e| MediaError::Internal(format!("Failed to serialize metadata: {}", e)))?;
+            let tmdb_json = serde_json::to_value(details).map_err(|e| {
+                MediaError::Internal(format!("Failed to serialize metadata: {}", e))
+            })?;
 
             // Extract arrays from the details structure
             let images_json = serde_json::json!({
@@ -4192,8 +4389,9 @@ impl PostgresDatabase {
 
             let keywords: Vec<String> = details.keywords.clone();
 
-            let external_ids_json = serde_json::to_value(&details.external_ids)
-                .map_err(|e| MediaError::Internal(format!("Failed to serialize external IDs: {}", e)))?;
+            let external_ids_json = serde_json::to_value(&details.external_ids).map_err(|e| {
+                MediaError::Internal(format!("Failed to serialize external IDs: {}", e))
+            })?;
 
             sqlx::query!(
                 r#"

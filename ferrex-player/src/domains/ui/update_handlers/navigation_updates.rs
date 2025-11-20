@@ -3,7 +3,7 @@ use iced::Task;
 use super::super::views::carousel::CarouselState;
 use crate::{
     domains::media::library::MediaFile,
-    domains::ui::{messages::Message, scroll_manager::ScrollStateExt, types, ViewState},
+    domains::ui::{messages::Message, types, ViewState},
     infrastructure::api_types::{MediaReference, MovieReference},
     state_refactored::State,
 };
@@ -275,7 +275,7 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
     // NEW ARCHITECTURE: Get seasons from MediaStore
     if let Ok(store) = state.domains.media.state.media_store.read() {
         // TODO: Media state reference outside of media domain
-        let seasons = store.get_seasons(series_id.as_str());
+        let seasons = store.get_seasons(series_id.as_ref());
         if !seasons.is_empty() {
             state.domains.ui.state.show_seasons_carousel =
                 Some(CarouselState::new_with_dimensions(
@@ -397,7 +397,7 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
     let (series_seasons, episode_refs) =
         if let Ok(store) = state.domains.media.state.media_store.read() {
             // TODO: Media state reference outside of media domain
-            let seasons = store.get_seasons_owned(series_id.as_str());
+            let seasons = store.get_seasons_owned(series_id.as_ref());
 
             log::info!(
                 "Navigation: Found {} seasons for series {} in MediaStore",
@@ -430,10 +430,10 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
             // Build episode map for all seasons
             let mut episodes_map = std::collections::HashMap::new();
             for season in &seasons {
-                let episodes = store.get_episodes(season.id.as_str());
+                let episodes = store.get_episodes(season.id.as_ref());
                 if !episodes.is_empty() {
                     episodes_map.insert(
-                        season.id.as_str().to_string(),
+                        season.id.as_uuid(),
                         episodes.into_iter().cloned().collect::<Vec<_>>(),
                     );
                 }
@@ -534,7 +534,7 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
 
                                 // Get episode count from episode_references
                                 let episode_count = episode_refs
-                                    .get(season.id.as_str())
+                                    .get(season.id.as_ref())
                                     .map(|episodes| episodes.len())
                                     .unwrap_or(0);
 
@@ -624,7 +624,7 @@ pub fn handle_view_season(
     // NEW ARCHITECTURE: Get episodes from MediaStore
     if let Ok(store) = state.domains.media.state.media_store.read() {
         // Media state reference ouside of media domain
-        let episodes = store.get_episodes(season_id.as_str());
+        let episodes = store.get_episodes(season_id.as_ref());
         if !episodes.is_empty() {
             // REMOVED: No longer storing episodes in duplicate state field
             // Episodes are now accessed directly from MediaStore to maintain single source of truth

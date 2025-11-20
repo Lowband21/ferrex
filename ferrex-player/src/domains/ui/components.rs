@@ -32,7 +32,7 @@ pub fn movie_reference_card_with_state<'a>(
     use crate::infrastructure::api_types::{MediaDetailsOption, TmdbDetails};
 
     let title = movie.title.as_str();
-    let movie_id = movie.id.as_str();
+    let movie_id = movie.id.as_uuid();
 
     // Extract year and other info from details if available
     let info = match &movie.details {
@@ -104,8 +104,8 @@ pub fn movie_reference_card_with_state<'a>(
 
     // Wrap with hover detection
     let image_with_hover = mouse_area(image_element)
-        .on_enter(Message::MediaHovered(movie_id.to_string()))
-        .on_exit(Message::MediaUnhovered(movie_id.to_string()));
+        .on_enter(Message::MediaHovered(movie_id))
+        .on_exit(Message::MediaUnhovered(movie_id));
 
     // Create poster button
     let poster_element = button(image_with_hover)
@@ -149,7 +149,7 @@ pub fn series_reference_card_with_state<'a>(
     _watch_status: Option<WatchProgress>, // Number of remaining episodes equal to integer from watch_status, individual episode watch progress can be passed with the decimal part
 ) -> Element<'a, Message> {
     let title = series.title.as_str();
-    let series_id = series.id.as_str();
+    let series_id = series.id.as_uuid();
 
     // Extract info from details if available
     let info = match &series.details {
@@ -182,7 +182,7 @@ pub fn series_reference_card_with_state<'a>(
         .placeholder(lucide_icons::Icon::Tv)
         .priority(priority)
         .is_hovered(is_hovered)
-        .on_play(Message::ViewTvShow(series.id.clone()))
+        .on_play(Message::PlaySeriesNextEpisode(series.id.clone()))
         .on_click(Message::ViewTvShow(series.id.clone()));
 
     // Add theme color if available
@@ -197,8 +197,8 @@ pub fn series_reference_card_with_state<'a>(
 
     // Wrap with hover detection
     let image_with_hover = mouse_area(image_element)
-        .on_enter(Message::MediaHovered(series_id.to_string()))
-        .on_exit(Message::MediaUnhovered(series_id.to_string()));
+        .on_enter(Message::MediaHovered(series_id))
+        .on_exit(Message::MediaUnhovered(series_id));
 
     // Create poster button
     let poster_element = button(image_with_hover)
@@ -243,7 +243,7 @@ pub fn season_reference_card_with_state<'a>(
 ) -> Element<'a, Message> {
     use crate::infrastructure::api_types::{MediaDetailsOption, TmdbDetails};
 
-    let season_id = season.id.as_str();
+    let season_id = season.id.as_uuid();
 
     // Extract season name from details if available
     let season_name = match &season.details {
@@ -269,7 +269,7 @@ pub fn season_reference_card_with_state<'a>(
 
     // Get episode count from state if available, otherwise show loading
     let episode_count = state
-        .map(|s| s.domains.media.state.get_season_episode_count(season_id))
+        .map(|s| s.domains.media.state.get_season_episode_count(&season_id))
         .unwrap_or(0);
 
     let subtitle = if episode_count > 0 {
@@ -336,7 +336,7 @@ pub fn episode_reference_card_with_state<'a>(
         Length,
     };
 
-    let episode_id = episode.id.as_str();
+    let episode_id = episode.id.as_uuid();
 
     // Extract episode name from details if available
     let (episode_name, has_details) = match &episode.details {
@@ -465,8 +465,8 @@ pub fn episode_reference_card_with_state<'a>(
             .width(Length::Fixed(width))
             .height(Length::Fixed(height + 70.0)),
     )
-    .on_enter(Message::MediaHovered(episode_id.to_string()))
-    .on_exit(Message::MediaUnhovered(episode_id.to_string()))
+    .on_enter(Message::MediaHovered(episode_id))
+    .on_exit(Message::MediaUnhovered(episode_id))
     .into()
 }
 

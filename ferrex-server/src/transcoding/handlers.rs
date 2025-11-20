@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::process::Stdio;
 use tokio_util::io::ReaderStream;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 use crate::{
     transcoding::{self, profiles, TranscodingService},
@@ -21,7 +22,7 @@ use crate::{
 // HLS Streaming handlers
 pub async fn hls_playlist_handler(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Response, StatusCode> {
     info!("HLS playlist request for media ID: {}", id);
@@ -62,7 +63,7 @@ pub async fn hls_playlist_handler(
                     let profile = profiles::TranscodingProfile::hdr_to_sdr_1080p();
                     match state
                         .transcoding_service
-                        .start_transcoding(&id, profile.clone(), None, None)
+                        .start_transcoding(&id.to_string(), profile.clone(), None, None)
                         .await
                     {
                         Ok(job_id) => {
@@ -207,16 +208,10 @@ pub async fn detect_hardware_encoder(ffmpeg_path: &str) -> HardwareEncoder {
 // Direct transcoding stream handler - pipes FFmpeg output directly to client
 pub async fn stream_transcode_handler(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, StatusCode> {
     info!("Direct transcode stream request for media ID: {}", id);
-
-    // Decode the percent-encoded ID
-    let decoded_id = urlencoding::decode(&id).map_err(|e| {
-        error!("Failed to decode media ID: {}", e);
-        StatusCode::BAD_REQUEST
-    })?;
 
     let profile_name = params
         .get("profile")
@@ -231,7 +226,7 @@ pub async fn stream_transcode_handler(
     };
 
     // Get media file
-    let media = match state.db.backend().get_media(&decoded_id).await {
+    let media = match state.db.backend().get_media(&id).await {
         Ok(Some(media)) => media,
         Ok(None) => return Err(StatusCode::NOT_FOUND),
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
@@ -490,7 +485,7 @@ pub struct TranscodeRequest {
 
 pub async fn start_transcode_handler(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
     Json(request): Json<TranscodeRequest>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("Transcode request for media ID: {}", id);
@@ -536,7 +531,7 @@ pub async fn start_transcode_handler(
     // Start transcoding
     match state
         .transcoding_service
-        .start_transcoding(&id, profile, request.tone_mapping, None)
+        .start_transcoding(&id.to_string(), profile, request.tone_mapping, None)
         .await
     {
         Ok(job_id) => Ok(Json(json!({
@@ -653,19 +648,13 @@ pub async fn transcode_status_handler(
 /// This creates multiple quality variants for adaptive streaming
 pub async fn start_adaptive_transcode_handler(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("Adaptive transcode request for media ID: {}", id);
 
-    // Decode the percent-encoded ID
-    let decoded_id = urlencoding::decode(&id).map_err(|e| {
-        error!("Failed to decode media ID: {}", e);
-        StatusCode::BAD_REQUEST
-    })?;
-
     match state
         .transcoding_service
-        .start_adaptive_transcoding(&decoded_id, None)
+        .start_adaptive_transcoding(id, None)
         .await
     {
         Ok(job_id) => Ok(Json(json!({
@@ -845,7 +834,7 @@ pub async fn get_master_playlist_handler(
 /// Get variant playlist for a specific quality profile
 pub async fn get_variant_playlist_handler(
     State(state): State<AppState>,
-    Path((id, profile)): Path<(String, String)>,
+    Path((id, profile)): Path<(Uuid, String)>,
 ) -> Result<Response<Body>, StatusCode> {
     match state
         .transcoding_service
@@ -936,7 +925,7 @@ pub async fn get_variant_playlist_handler(
                             match state
                                 .transcoding_service
                                 .start_transcoding(
-                                    &id,
+                                    &id.to_string(),
                                     transcode_profile,
                                     None,
                                     Some(transcoding::job::JobPriority::High),
@@ -955,7 +944,7 @@ pub async fn get_variant_playlist_handler(
                                         .header(header::CACHE_CONTROL, "no-cache")
                                         .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
                                         .header("X-Transcode-Status", "started")
-                                        .header("X-Transcode-Job-Id", job_id)
+                                        .header("X-Transcode-Job-Id", job_id.to_string())
                                         .body(Body::from("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-PLAYLIST-TYPE:EVENT\n# Transcoding in progress..."))
                                         .unwrap())
                                 }

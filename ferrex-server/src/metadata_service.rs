@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use uuid::Uuid;
 
 // TODO: This service is part of the old architecture and should be refactored
 // to work with the new reference-based types when the client is updated
@@ -245,7 +246,7 @@ impl MetadataService {
     }
 
     /// Get poster path for a media item
-    pub fn get_poster_path(&self, media_id: &str) -> PathBuf {
+    pub fn get_poster_path(&self, media_id: &Uuid) -> PathBuf {
         self.cache_dir
             .join("posters")
             .join(format!("{}.png", media_id))

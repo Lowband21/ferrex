@@ -1,69 +1,85 @@
+use std::path::Path;
+
+use crate::database::traits::{
+    FolderDiscoverySource, FolderInventory, FolderProcessingStatus, FolderScanFilters, FolderType,
+};
 use crate::database::PostgresDatabase;
-use crate::database::traits::{FolderInventory, FolderScanFilters, FolderProcessingStatus, FolderType, FolderDiscoverySource};
 use crate::{MediaError, Result};
 use chrono::{DateTime, Utc};
+use tracing::{error, info};
 use uuid::Uuid;
-use tracing::{info, error};
 
 /// Folder inventory management extensions for PostgresDatabase
 impl PostgresDatabase {
     /// Get folders that need scanning based on filters
-    pub async fn get_folders_needing_scan_impl(&self, filters: &FolderScanFilters) -> Result<Vec<FolderInventory>> {
+    pub async fn get_folders_needing_scan_impl(
+        &self,
+        filters: &FolderScanFilters,
+    ) -> Result<Vec<FolderInventory>> {
         let mut query = String::from(
             r#"
-            SELECT 
+            SELECT
                 id, library_id, folder_path, folder_type, parent_folder_id,
                 discovered_at, last_seen_at, discovery_source,
-                processing_status, last_processed_at, processing_error, 
+                processing_status, last_processed_at, processing_error,
                 processing_attempts, next_retry_at,
-                total_files, processed_files, total_size_bytes, 
+                total_files, processed_files, total_size_bytes,
                 file_types, last_modified,
                 metadata, created_at, updated_at
             FROM folder_inventory
             WHERE 1=1
-            "#
+            "#,
         );
 
         // Build dynamic WHERE clause based on filters
         let mut conditions = Vec::new();
-        
+
         if let Some(library_id) = filters.library_id {
             conditions.push(format!("library_id = '{}'", library_id));
         }
-        
+
         if let Some(status) = filters.processing_status {
-            conditions.push(format!("processing_status = '{}'", 
-                serde_json::to_string(&status).unwrap().trim_matches('"')));
+            conditions.push(format!(
+                "processing_status = '{}'",
+                serde_json::to_string(&status).unwrap().trim_matches('"')
+            ));
         }
-        
+
         if let Some(folder_type) = filters.folder_type {
-            conditions.push(format!("folder_type = '{}'", 
-                serde_json::to_string(&folder_type).unwrap().trim_matches('"')));
+            conditions.push(format!(
+                "folder_type = '{}'",
+                serde_json::to_string(&folder_type)
+                    .unwrap()
+                    .trim_matches('"')
+            ));
         }
-        
+
         if let Some(max_attempts) = filters.max_attempts {
             conditions.push(format!("processing_attempts < {}", max_attempts));
         }
-        
+
         if let Some(stale_hours) = filters.stale_after_hours {
-            conditions.push(format!("last_seen_at < NOW() - INTERVAL '{} hours'", stale_hours));
+            conditions.push(format!(
+                "last_seen_at < NOW() - INTERVAL '{} hours'",
+                stale_hours
+            ));
         }
-        
+
         // Add retry condition - only get folders that are ready for retry
         conditions.push("(next_retry_at IS NULL OR next_retry_at <= NOW())".to_string());
-        
+
         for condition in conditions {
             query.push_str(&format!(" AND {}", condition));
         }
-        
+
         // Add prioritized ordering:
         // 1. Pending (unscanned) folders first
         // 2. Failed folders with retry attempts remaining
         // 3. Everything else by oldest scan time
         let retry_threshold = filters.error_retry_threshold.unwrap_or(3);
         query.push_str(&format!(
-            r#" ORDER BY 
-                CASE 
+            r#" ORDER BY
+                CASE
                     WHEN processing_status = 'pending' THEN 1
                     WHEN processing_status = 'failed' AND processing_attempts < {} THEN 2
                     ELSE 3
@@ -72,35 +88,42 @@ impl PostgresDatabase {
                 last_seen_at ASC"#,
             retry_threshold
         ));
-        
+
         // Apply batch size limit if specified
         let limit = filters.max_batch_size.or(filters.limit).unwrap_or(100);
         query.push_str(&format!(" LIMIT {}", limit));
-        
+
         let rows = sqlx::query_as::<_, FolderInventoryRow>(&query)
             .fetch_all(self.pool())
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to get folders needing scan: {}", e)))?;
-        
+            .map_err(|e| {
+                MediaError::Internal(format!("Failed to get folders needing scan: {}", e))
+            })?;
+
         Ok(rows.into_iter().map(|row| row.into()).collect())
     }
-    
+
     /// Update folder processing status
-    pub async fn update_folder_status_impl(&self, folder_id: Uuid, status: FolderProcessingStatus, error: Option<String>) -> Result<()> {
+    pub async fn update_folder_status_impl(
+        &self,
+        folder_id: Uuid,
+        status: FolderProcessingStatus,
+        error: Option<String>,
+    ) -> Result<()> {
         let status_str = serde_json::to_string(&status)
             .unwrap()
             .trim_matches('"')
             .to_string();
-        
+
         let last_processed_at = if status == FolderProcessingStatus::Completed {
             Some(Utc::now())
         } else {
             None
         };
-        
+
         sqlx::query!(
             r#"
-            UPDATE folder_inventory 
+            UPDATE folder_inventory
             SET processing_status = $1,
                 processing_error = $2,
                 last_processed_at = $3,
@@ -115,15 +138,20 @@ impl PostgresDatabase {
         .execute(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to update folder status: {}", e)))?;
-        
+
         Ok(())
     }
-    
+
     /// Record a folder scan error and update retry information
-    pub async fn record_folder_scan_error_impl(&self, folder_id: Uuid, error: &str, next_retry: Option<DateTime<Utc>>) -> Result<()> {
+    pub async fn record_folder_scan_error_impl(
+        &self,
+        folder_id: Uuid,
+        error: &str,
+        next_retry: Option<DateTime<Utc>>,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
-            UPDATE folder_inventory 
+            UPDATE folder_inventory
             SET processing_status = 'failed',
                 processing_error = $1,
                 processing_attempts = processing_attempts + 1,
@@ -138,35 +166,38 @@ impl PostgresDatabase {
         .execute(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to record folder scan error: {}", e)))?;
-        
+
         Ok(())
     }
-    
+
     /// Get complete folder inventory for a library
-    pub async fn get_folder_inventory_impl(&self, library_id: Uuid) -> Result<Vec<FolderInventory>> {
+    pub async fn get_folder_inventory_impl(
+        &self,
+        library_id: Uuid,
+    ) -> Result<Vec<FolderInventory>> {
         let rows = sqlx::query_as::<_, FolderInventoryRow>(
             r#"
-            SELECT 
+            SELECT
                 id, library_id, folder_path, folder_type, parent_folder_id,
                 discovered_at, last_seen_at, discovery_source,
-                processing_status, last_processed_at, processing_error, 
+                processing_status, last_processed_at, processing_error,
                 processing_attempts, next_retry_at,
-                total_files, processed_files, total_size_bytes, 
+                total_files, processed_files, total_size_bytes,
                 file_types, last_modified,
                 metadata, created_at, updated_at
             FROM folder_inventory
             WHERE library_id = $1
             ORDER BY folder_path
-            "#
+            "#,
         )
         .bind(library_id)
         .fetch_all(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get folder inventory: {}", e)))?;
-        
+
         Ok(rows.into_iter().map(|row| row.into()).collect())
     }
-    
+
     /// Upsert a folder (insert or update if exists)
     pub async fn upsert_folder_impl(&self, folder: &FolderInventory) -> Result<Uuid> {
         let folder_type_str = serde_json::to_string(&folder.folder_type)
@@ -181,10 +212,10 @@ impl PostgresDatabase {
             .unwrap()
             .trim_matches('"')
             .to_string();
-        
-        let file_types_json = serde_json::to_value(&folder.file_types)
-            .unwrap_or_else(|_| serde_json::json!([]));
-        
+
+        let file_types_json =
+            serde_json::to_value(&folder.file_types).unwrap_or_else(|_| serde_json::json!([]));
+
         let result = sqlx::query!(
             r#"
             INSERT INTO folder_inventory (
@@ -197,7 +228,7 @@ impl PostgresDatabase {
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
             )
-            ON CONFLICT (library_id, folder_path) 
+            ON CONFLICT (library_id, folder_path)
             DO UPDATE SET
                 folder_type = EXCLUDED.folder_type,
                 parent_folder_id = EXCLUDED.parent_folder_id,
@@ -239,12 +270,16 @@ impl PostgresDatabase {
         .fetch_one(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to upsert folder: {}", e)))?;
-        
+
         Ok(result.id)
     }
-    
+
     /// Cleanup stale folders that haven't been seen in the specified time
-    pub async fn cleanup_stale_folders_impl(&self, library_id: Uuid, stale_after_hours: i32) -> Result<u32> {
+    pub async fn cleanup_stale_folders_impl(
+        &self,
+        library_id: Uuid,
+        stale_after_hours: i32,
+    ) -> Result<u32> {
         let result = sqlx::query!(
             r#"
             DELETE FROM folder_inventory
@@ -257,49 +292,63 @@ impl PostgresDatabase {
         .execute(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to cleanup stale folders: {}", e)))?;
-        
+
         let deleted_count = result.rows_affected() as u32;
-        
+
         if deleted_count > 0 {
-            info!("Cleaned up {} stale folders from library {}", deleted_count, library_id);
+            info!(
+                "Cleaned up {} stale folders from library {}",
+                deleted_count, library_id
+            );
         }
-        
+
         Ok(deleted_count)
     }
-    
+
     /// Get folder by path
-    pub async fn get_folder_by_path_impl(&self, library_id: Uuid, path: &str) -> Result<Option<FolderInventory>> {
+    pub async fn get_folder_by_path_impl(
+        &self,
+        library_id: Uuid,
+        path: &Path,
+    ) -> Result<Option<FolderInventory>> {
         let row = sqlx::query_as::<_, FolderInventoryRow>(
             r#"
-            SELECT 
+            SELECT
                 id, library_id, folder_path, folder_type, parent_folder_id,
                 discovered_at, last_seen_at, discovery_source,
-                processing_status, last_processed_at, processing_error, 
+                processing_status, last_processed_at, processing_error,
                 processing_attempts, next_retry_at,
-                total_files, processed_files, total_size_bytes, 
+                total_files, processed_files, total_size_bytes,
                 file_types, last_modified,
                 metadata, created_at, updated_at
             FROM folder_inventory
             WHERE library_id = $1 AND folder_path = $2
-            "#
+            "#,
         )
         .bind(library_id)
-        .bind(path)
+        .bind(path.to_string_lossy().to_string())
         .fetch_optional(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get folder by path: {}", e)))?;
-        
+
         Ok(row.map(|r| r.into()))
     }
-    
+
     /// Update folder content statistics
-    pub async fn update_folder_stats_impl(&self, folder_id: Uuid, total_files: i32, processed_files: i32, total_size_bytes: i64, file_types: Vec<String>) -> Result<()> {
-        let file_types_json = serde_json::to_value(&file_types)
-            .unwrap_or_else(|_| serde_json::json!([]));
-        
+    pub async fn update_folder_stats_impl(
+        &self,
+        folder_id: Uuid,
+        total_files: i32,
+        processed_files: i32,
+        total_size_bytes: i64,
+        file_types: Vec<String>,
+    ) -> Result<()> {
+        let file_types_json =
+            serde_json::to_value(&file_types).unwrap_or_else(|_| serde_json::json!([]));
+
         sqlx::query!(
             r#"
-            UPDATE folder_inventory 
+            UPDATE folder_inventory
             SET total_files = $1,
                 processed_files = $2,
                 total_size_bytes = $3,
@@ -316,15 +365,15 @@ impl PostgresDatabase {
         .execute(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to update folder stats: {}", e)))?;
-        
+
         Ok(())
     }
-    
+
     /// Mark folder as processed
     pub async fn mark_folder_processed_impl(&self, folder_id: Uuid) -> Result<()> {
         sqlx::query!(
             r#"
-            UPDATE folder_inventory 
+            UPDATE folder_inventory
             SET processing_status = 'completed',
                 last_processed_at = NOW(),
                 processing_error = NULL,
@@ -336,57 +385,63 @@ impl PostgresDatabase {
         .execute(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to mark folder as processed: {}", e)))?;
-        
+
         Ok(())
     }
-    
+
     /// Get child folders of a parent folder
-    pub async fn get_child_folders_impl(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>> {
+    pub async fn get_child_folders_impl(
+        &self,
+        parent_folder_id: Uuid,
+    ) -> Result<Vec<FolderInventory>> {
         let rows = sqlx::query_as::<_, FolderInventoryRow>(
             r#"
-            SELECT 
+            SELECT
                 id, library_id, folder_path, folder_type, parent_folder_id,
                 discovered_at, last_seen_at, discovery_source,
-                processing_status, last_processed_at, processing_error, 
+                processing_status, last_processed_at, processing_error,
                 processing_attempts, next_retry_at,
-                total_files, processed_files, total_size_bytes, 
+                total_files, processed_files, total_size_bytes,
                 file_types, last_modified,
                 metadata, created_at, updated_at
             FROM folder_inventory
             WHERE parent_folder_id = $1
             ORDER BY folder_path
-            "#
+            "#,
         )
         .bind(parent_folder_id)
         .fetch_all(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get child folders: {}", e)))?;
-        
+
         Ok(rows.into_iter().map(|row| row.into()).collect())
     }
-    
+
     /// Get season folders under a series folder
-    pub async fn get_season_folders_impl(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>> {
+    pub async fn get_season_folders_impl(
+        &self,
+        parent_folder_id: Uuid,
+    ) -> Result<Vec<FolderInventory>> {
         let rows = sqlx::query_as::<_, FolderInventoryRow>(
             r#"
-            SELECT 
+            SELECT
                 id, library_id, folder_path, folder_type, parent_folder_id,
                 discovered_at, last_seen_at, discovery_source,
-                processing_status, last_processed_at, processing_error, 
+                processing_status, last_processed_at, processing_error,
                 processing_attempts, next_retry_at,
-                total_files, processed_files, total_size_bytes, 
+                total_files, processed_files, total_size_bytes,
                 file_types, last_modified,
                 metadata, created_at, updated_at
             FROM folder_inventory
             WHERE parent_folder_id = $1 AND folder_type = 'season'
             ORDER BY folder_path
-            "#
+            "#,
         )
         .bind(parent_folder_id)
         .fetch_all(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get season folders: {}", e)))?;
-        
+
         Ok(rows.into_iter().map(|row| row.into()).collect())
     }
 }
@@ -427,7 +482,7 @@ impl From<FolderInventoryRow> for FolderInventory {
             "extra" => FolderType::Extra,
             _ => FolderType::Unknown,
         };
-        
+
         let discovery_source = match row.discovery_source.as_str() {
             "scan" => FolderDiscoverySource::Scan,
             "watch" => FolderDiscoverySource::Watch,
@@ -435,7 +490,7 @@ impl From<FolderInventoryRow> for FolderInventory {
             "import" => FolderDiscoverySource::Import,
             _ => FolderDiscoverySource::Scan,
         };
-        
+
         let processing_status = match row.processing_status.as_str() {
             "pending" => FolderProcessingStatus::Pending,
             "processing" => FolderProcessingStatus::Processing,
@@ -445,8 +500,9 @@ impl From<FolderInventoryRow> for FolderInventory {
             "queued" => FolderProcessingStatus::Queued,
             _ => FolderProcessingStatus::Pending,
         };
-        
-        let file_types: Vec<String> = row.file_types
+
+        let file_types: Vec<String> = row
+            .file_types
             .as_array()
             .map(|arr| {
                 arr.iter()
@@ -454,7 +510,7 @@ impl From<FolderInventoryRow> for FolderInventory {
                     .collect()
             })
             .unwrap_or_default();
-        
+
         FolderInventory {
             id: row.id,
             library_id: row.library_id,

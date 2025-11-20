@@ -20,9 +20,10 @@ use crate::infrastructure::{
     adapters::api_client_adapter::ApiClientAdapter,
     api_types::{EpisodeReference, SeasonReference, UserWatchState},
 };
-use ferrex_core::MediaId;
+use ferrex_core::{InProgressItem, MediaId};
 use iced::Task;
 use std::sync::{Arc, RwLock as StdRwLock};
+use std::time::Instant;
 use uuid::Uuid;
 
 /// Media domain state - focused on media management, not playback
@@ -32,6 +33,8 @@ pub struct MediaDomainState {
     pub user_watch_state: Option<UserWatchState>,
     pub current_season_details: Option<SeasonDetails>,
     pub current_media_id: Option<ferrex_core::api_types::MediaId>,
+    pub pending_resume_position: Option<f32>, // Resume position for next media to play
+    pub last_ui_refresh_for_progress: Option<std::time::Instant>, // Track last UI refresh for debouncing
     // REMOVED: current_show_seasons and current_season_episodes
     // These are now accessed directly from MediaStore to maintain single source of truth
 
@@ -41,7 +44,6 @@ pub struct MediaDomainState {
     // Shared references needed by media domain
     pub media_store: Arc<StdRwLock<MediaStore>>,
     pub api_service: Option<Arc<ApiClientAdapter>>,
-    pub current_library_id: Option<Uuid>,
 }
 
 #[cfg_attr(
@@ -63,10 +65,11 @@ impl MediaDomainState {
             user_watch_state: None,
             current_season_details: None,
             current_media_id: None,
+            pending_resume_position: None,
+            last_ui_refresh_for_progress: None,
             query_service,
             media_store,
             api_service,
-            current_library_id: None,
         }
     }
 
@@ -84,7 +87,7 @@ impl MediaDomainState {
     }
 
     /// Get episode count for a season
-    pub fn get_season_episode_count(&self, season_id: &str) -> u32 {
+    pub fn get_season_episode_count(&self, season_id: &Uuid) -> u32 {
         if let Ok(store) = self.media_store.read() {
             store.get_episodes(season_id).len() as u32
         } else {
@@ -96,16 +99,32 @@ impl MediaDomainState {
         &self.user_watch_state
     }
 
+    pub fn update_cached_in_progress(&mut self, id: MediaId, position: f32, duration: f32) {
+        if let Some(state) = &mut self.user_watch_state {
+            state.in_progress.insert(
+                id,
+                InProgressItem {
+                    media_id: id,
+                    position,
+                    duration,
+                    last_watched: chrono::Utc::now().timestamp(),
+                },
+            );
+        }
+    }
+
+    pub fn update_cached_watched(self, id: MediaId, progress: f32) {
+        if let Some(mut state) = self.user_watch_state {
+            state.completed.insert(id);
+        }
+    }
+
     /// Get the watch progress for a specific media item
     /// Returns Some(progress) where progress is 0.0-1.0, or None if no watch state loaded
     pub fn get_media_progress(&self, media_id: &MediaId) -> Option<f32> {
         if let Some(ref watch_state) = self.user_watch_state {
             // Check if it's in progress
-            if let Some(in_progress) = watch_state
-                .in_progress
-                .iter()
-                .find(|item| &item.media_id == media_id)
-            {
+            if let Some(in_progress) = watch_state.in_progress.get(media_id) {
                 if in_progress.duration > 0.0 {
                     return Some((in_progress.position / in_progress.duration).clamp(0.0, 1.0));
                 }
@@ -136,10 +155,7 @@ impl MediaDomainState {
     /// Check if a media item is currently in progress
     pub fn is_in_progress(&self, media_id: &MediaId) -> bool {
         if let Some(ref watch_state) = self.user_watch_state {
-            watch_state
-                .in_progress
-                .iter()
-                .any(|item| &item.media_id == media_id)
+            watch_state.in_progress.contains_key(media_id)
         } else {
             false
         }
@@ -183,8 +199,8 @@ impl MediaDomain {
                 // Could load user watch state here
                 Task::none()
             }
-            CrossDomainEvent::LibraryChanged(library_id) => {
-                self.state.current_library_id = Some(*library_id); // TODO: Isn't this handled by the library domain?
+            CrossDomainEvent::LibraryChanged(_library_id) => {
+                // Library domain handles current_library_id, media domain doesn't need to track it
                 Task::none()
             }
             CrossDomainEvent::ClearMediaStore => {

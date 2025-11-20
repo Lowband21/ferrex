@@ -450,13 +450,13 @@ async fn main() -> anyhow::Result<()> {
                 Vec::new()
             }
         };
-        
+
         // Get the backend as a trait object for FolderMonitor
         let postgres_backend = db
             .as_any()
             .downcast_ref::<PostgresDatabase>()
             .expect("Expected PostgreSQL backend for FolderMonitor");
-        
+
         // Create FolderMonitorConfig with 60-second scan interval
         let folder_monitor_config = ferrex_core::scanner::FolderMonitorConfig {
             scan_interval_secs: 60,
@@ -465,20 +465,21 @@ async fn main() -> anyhow::Result<()> {
             batch_size: 100,
             error_retry_threshold: 3,
         };
-        
+
         let monitor = Arc::new(FolderMonitor::new(
-            Arc::new(postgres_backend.clone()) as Arc<dyn ferrex_core::database::traits::MediaDatabaseTrait>,
+            Arc::new(postgres_backend.clone())
+                as Arc<dyn ferrex_core::database::traits::MediaDatabaseTrait>,
             Arc::new(tokio::sync::RwLock::new(libraries)),
             folder_monitor_config,
         ));
-        
+
         // Start the folder monitor background task
         if let Err(e) = monitor.clone().start().await {
             warn!("Failed to start FolderMonitor background task: {}", e);
         } else {
             info!("FolderMonitor background task started with 60-second scan interval");
         }
-        
+
         monitor
     };
 
@@ -567,12 +568,15 @@ async fn main() -> anyhow::Result<()> {
 pub fn create_app(state: AppState) -> Router {
     // Create versioned API routes
     let mut versioned_api = routes::create_api_router(state.clone());
-    
+
     // Apply rate limiting to API routes
     let rate_limit_config = middleware::rate_limit_setup::RateLimitConfig::default();
-    versioned_api = middleware::rate_limit_setup::apply_auth_rate_limits(versioned_api, &rate_limit_config);
-    versioned_api = middleware::rate_limit_setup::apply_public_rate_limits(versioned_api, &rate_limit_config);
-    versioned_api = middleware::rate_limit_setup::apply_api_rate_limits(versioned_api, &rate_limit_config);
+    versioned_api =
+        middleware::rate_limit_setup::apply_auth_rate_limits(versioned_api, &rate_limit_config);
+    versioned_api =
+        middleware::rate_limit_setup::apply_public_rate_limits(versioned_api, &rate_limit_config);
+    versioned_api =
+        middleware::rate_limit_setup::apply_api_rate_limits(versioned_api, &rate_limit_config);
 
     // Create backward compatibility layer for old API paths
     // This will redirect old paths to v1 endpoints during migration period
@@ -1233,7 +1237,10 @@ async fn stream_handler(
     })?;
 
     // Use the decoded ID for database lookup
-    let db_id = decoded_id.into_owned();
+    let db_id = Uuid::parse_str(&decoded_id).map_err(|e| {
+        error!("Failed to parse media ID: {}", e);
+        StatusCode::BAD_REQUEST
+    })?;
 
     info!("Database ID to query: {}", db_id);
 
@@ -1457,19 +1464,12 @@ async fn config_handler(State(state): State<AppState>) -> Result<Json<Value>, St
 
 async fn fetch_metadata_handler(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("Metadata fetch request for media ID: {}", id);
 
-    // Format ID for database lookup
-    let db_id = if id.starts_with("media:") {
-        id.clone()
-    } else {
-        format!("media:{}", id)
-    };
-
     // Get media file from database
-    let media_file = match state.db.backend().get_media(&db_id).await {
+    let media_file = match state.db.backend().get_media(&id).await {
         Ok(Some(media)) => media,
         Ok(None) => {
             warn!("Media file not found: {}", id);
@@ -1854,7 +1854,7 @@ async fn season_poster_handler(
 
 async fn thumbnail_handler(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result<Response, StatusCode> {
     info!("Thumbnail request for media ID: {}", id);
 
@@ -1920,12 +1920,10 @@ async fn delete_by_title_handler(
             } else {
                 deleted_count += 1;
 
-                // Clean up associated files
-                let media_id_str = media.id.to_string();
-                let media_id = media_id_str.split(':').last().unwrap_or(&media_id_str);
-
                 // Clean up thumbnail
-                let thumbnail_path = state.thumbnail_service.get_thumbnail_path(media_id);
+                let thumbnail_path = state
+                    .thumbnail_service
+                    .get_thumbnail_path(media.id.as_ref());
                 if thumbnail_path.exists() {
                     if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
                         warn!("Failed to delete thumbnail: {}", e);
@@ -1933,7 +1931,7 @@ async fn delete_by_title_handler(
                 }
 
                 // Clean up poster
-                let poster_path = state.metadata_service.get_poster_path(media_id);
+                let poster_path = state.metadata_service.get_poster_path(media.id.as_ref());
                 if poster_path.exists() {
                     if let Err(e) = tokio::fs::remove_file(&poster_path).await {
                         warn!("Failed to delete poster: {}", e);
@@ -1979,12 +1977,10 @@ async fn clear_database_handler(State(state): State<AppState>) -> Result<Json<Va
         } else {
             deleted_count += 1;
 
-            // Clean up associated files
             let media_id_str = media.id.to_string();
-            let media_id = media_id_str.split(':').last().unwrap_or(&media_id_str);
 
             // Clean up thumbnail
-            let thumbnail_path = state.thumbnail_service.get_thumbnail_path(media_id);
+            let thumbnail_path = state.thumbnail_service.get_thumbnail_path(&media.id);
             if thumbnail_path.exists() {
                 if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
                     warn!("Failed to delete thumbnail: {}", e);
@@ -1996,7 +1992,7 @@ async fn clear_database_handler(State(state): State<AppState>) -> Result<Json<Va
                 .config
                 .cache_dir
                 .join("posters")
-                .join(format!("{}_poster.png", media_id));
+                .join(format!("{}_poster.png", media_id_str));
             if png_poster_path.exists() {
                 if let Err(e) = tokio::fs::remove_file(&png_poster_path).await {
                     warn!("Failed to delete PNG poster: {}", e);
@@ -2007,7 +2003,7 @@ async fn clear_database_handler(State(state): State<AppState>) -> Result<Json<Va
                 .config
                 .cache_dir
                 .join("posters")
-                .join(format!("{}_poster.jpg", media_id));
+                .join(format!("{}_poster.jpg", media_id_str));
             if jpg_poster_path.exists() {
                 if let Err(e) = tokio::fs::remove_file(&jpg_poster_path).await {
                     warn!("Failed to delete JPG poster: {}", e);
@@ -2048,7 +2044,7 @@ async fn clear_database_handler(State(state): State<AppState>) -> Result<Json<Va
 
 #[derive(Deserialize)]
 struct BatchMetadataRequest {
-    media_ids: Vec<String>,
+    media_ids: Vec<Uuid>,
     priority: Option<String>, // "posters_only" or "full"
 }
 
@@ -2087,15 +2083,8 @@ async fn fetch_metadata_batch_handler(
         async move {
             let _permit = semaphore.acquire().await.unwrap();
 
-            // Strip "media:" prefix if present
-            let db_id = if id.starts_with("media:") {
-                id.strip_prefix("media:").unwrap_or(&id).to_string()
-            } else {
-                id.clone()
-            };
-
             // Get media from database
-            match state.db.backend().get_media(&db_id).await {
+            match state.db.backend().get_media(&id).await {
                 Ok(Some(media)) => {
                     // Batch metadata fetching is deprecated
                     // TMDB metadata should come from reference types in the database
@@ -2173,7 +2162,7 @@ async fn fetch_posters_batch_handler(
 
 #[derive(Deserialize)]
 struct QueueMissingMetadataRequest {
-    media_ids: Vec<String>,
+    media_ids: Vec<Uuid>,
 }
 
 async fn queue_missing_metadata_handler(
@@ -2195,15 +2184,8 @@ async fn queue_missing_metadata_handler(
         // Process in small batches with delays to avoid overloading
         for chunk in media_ids.chunks(10) {
             for id in chunk {
-                // Strip media: prefix if present
-                let db_id = if id.starts_with("media:") {
-                    id.strip_prefix("media:").unwrap_or(id).to_string()
-                } else {
-                    id.clone()
-                };
-
                 // Get media from database
-                if let Ok(Some(media)) = db.backend().get_media(&db_id).await {
+                if let Ok(Some(media)) = db.backend().get_media(id).await {
                     // DEPRECATED: External metadata fetching disabled during transition
                     // The new reference-based API handles metadata differently
                 }
@@ -2244,7 +2226,7 @@ async fn library_status_handler(State(state): State<AppState>) -> Result<Json<Va
 
 async fn media_availability_handler(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, StatusCode> {
     // Get media file from database
     let media_file = match state.db.backend().get_media(&id).await {

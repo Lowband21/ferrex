@@ -42,8 +42,8 @@ impl Default for StreamingScannerConfig {
             tmdb_rate_limit_ms: 250,   // 4 requests per second
             fuzzy_match_threshold: 60, // 60% match minimum
             cache_dir: None,
-            max_error_retries: 3,      // 3 retry attempts
-            folder_batch_limit: 50,     // Process up to 50 folders per batch
+            max_error_retries: 3,   // 3 retry attempts
+            folder_batch_limit: 50, // Process up to 50 folders per batch
         }
     }
 }
@@ -164,15 +164,18 @@ impl StreamingScannerV2 {
         output_tx: mpsc::Sender<ScanOutput>,
         scan_id: Uuid,
     ) -> Result<()> {
-        info!("Scanning movie library: {} using folder inventory", library.name);
+        info!(
+            "Scanning movie library: {} using folder inventory",
+            library.name
+        );
 
         let mut total_folders_processed = 0;
         let mut batch_number = 0;
-        
+
         // Loop to process all folders in batches
         loop {
             batch_number += 1;
-            
+
             // Query folder inventory for folders needing scan
             // Prioritize unscanned folders first
             let filters = crate::database::traits::FolderScanFilters {
@@ -189,27 +192,37 @@ impl StreamingScannerV2 {
 
             // Get pending folders first
             let mut folders_to_scan = self.db.backend().get_folders_needing_scan(&filters).await?;
-            
+
             // Also get failed folders that haven't exceeded max attempts
             let mut failed_filters = filters.clone();
-            failed_filters.processing_status = Some(crate::database::traits::FolderProcessingStatus::Failed);
-            let failed_folders = self.db.backend().get_folders_needing_scan(&failed_filters).await?;
+            failed_filters.processing_status =
+                Some(crate::database::traits::FolderProcessingStatus::Failed);
+            let failed_folders = self
+                .db
+                .backend()
+                .get_folders_needing_scan(&failed_filters)
+                .await?;
             folders_to_scan.extend(failed_folders);
 
             let batch_size = folders_to_scan.len();
-            
+
             // If no more folders to scan, we're done
             if batch_size == 0 {
                 if total_folders_processed == 0 {
-                    info!("No movie folders need scanning for library: {}", library.name);
+                    info!(
+                        "No movie folders need scanning for library: {}",
+                        library.name
+                    );
                 } else {
-                    info!("Completed scanning all {} movie folders for library: {}", 
-                          total_folders_processed, library.name);
+                    info!(
+                        "Completed scanning all {} movie folders for library: {}",
+                        total_folders_processed, library.name
+                    );
                 }
                 break;
             }
 
-            info!("Processing batch {} with {} movie folders for library: {} (total processed so far: {})", 
+            info!("Processing batch {} with {} movie folders for library: {} (total processed so far: {})",
                   batch_number, batch_size, library.name, total_folders_processed);
 
             // Create work channel
@@ -222,17 +235,28 @@ impl StreamingScannerV2 {
             tokio::spawn(async move {
                 for folder in folders_to_scan {
                     // Update folder status to 'scanning' before processing
-                    if let Err(e) = db.backend().update_folder_status(
-                        folder.id,
-                        crate::database::traits::FolderProcessingStatus::Processing,
-                        None
-                    ).await {
-                        error!("Failed to update folder {} status to scanning: {}", folder.folder_path, e);
+                    if let Err(e) = db
+                        .backend()
+                        .update_folder_status(
+                            folder.id,
+                            crate::database::traits::FolderProcessingStatus::Processing,
+                            None,
+                        )
+                        .await
+                    {
+                        error!(
+                            "Failed to update folder {} status to scanning: {}",
+                            folder.folder_path, e
+                        );
                         continue;
                     }
-                    
+
                     // Send folder info to worker
-                    if folder_tx_clone.send((folder.id, PathBuf::from(folder.folder_path))).await.is_err() {
+                    if folder_tx_clone
+                        .send((folder.id, PathBuf::from(folder.folder_path)))
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
                 }
@@ -258,14 +282,21 @@ impl StreamingScannerV2 {
                     error!("Movie worker failed: {}", e);
                 }
             }
-            
+
             total_folders_processed += batch_size;
-            info!("Completed batch {} ({} folders). Total processed: {}", 
-                  batch_number, batch_size, total_folders_processed);
+            info!(
+                "Completed batch {} ({} folders). Total processed: {}",
+                batch_number, batch_size, total_folders_processed
+            );
         }
 
         // Update library's last_scan timestamp after successful scan
-        if let Err(e) = self.db.backend().update_library_last_scan(&library.id.to_string()).await {
+        if let Err(e) = self
+            .db
+            .backend()
+            .update_library_last_scan(&library.id.to_string())
+            .await
+        {
             error!("Failed to update library last_scan timestamp: {}", e);
         } else {
             info!("Updated last_scan timestamp for library: {}", library.name);
@@ -281,15 +312,18 @@ impl StreamingScannerV2 {
         output_tx: mpsc::Sender<ScanOutput>,
         scan_id: Uuid,
     ) -> Result<()> {
-        info!("Scanning TV library: {} using folder inventory", library.name);
+        info!(
+            "Scanning TV library: {} using folder inventory",
+            library.name
+        );
 
         let mut total_folders_processed = 0;
         let mut batch_number = 0;
-        
+
         // Loop to process all folders in batches
         loop {
             batch_number += 1;
-            
+
             // Query folder inventory for series folders needing scan
             let filters = crate::database::traits::FolderScanFilters {
                 library_id: Some(library.id),
@@ -305,27 +339,37 @@ impl StreamingScannerV2 {
 
             // Get pending folders first
             let mut folders_to_scan = self.db.backend().get_folders_needing_scan(&filters).await?;
-            
+
             // Also get failed folders that haven't exceeded max attempts
             let mut failed_filters = filters.clone();
-            failed_filters.processing_status = Some(crate::database::traits::FolderProcessingStatus::Failed);
-            let failed_folders = self.db.backend().get_folders_needing_scan(&failed_filters).await?;
+            failed_filters.processing_status =
+                Some(crate::database::traits::FolderProcessingStatus::Failed);
+            let failed_folders = self
+                .db
+                .backend()
+                .get_folders_needing_scan(&failed_filters)
+                .await?;
             folders_to_scan.extend(failed_folders);
 
             let batch_size = folders_to_scan.len();
-            
+
             // If no more folders to scan, we're done
             if batch_size == 0 {
                 if total_folders_processed == 0 {
-                    info!("No TV series folders need scanning for library: {}", library.name);
+                    info!(
+                        "No TV series folders need scanning for library: {}",
+                        library.name
+                    );
                 } else {
-                    info!("Completed scanning all {} TV series folders for library: {}", 
-                          total_folders_processed, library.name);
+                    info!(
+                        "Completed scanning all {} TV series folders for library: {}",
+                        total_folders_processed, library.name
+                    );
                 }
                 break;
             }
 
-            info!("Processing batch {} with {} TV series folders for library: {} (total processed so far: {})", 
+            info!("Processing batch {} with {} TV series folders for library: {} (total processed so far: {})",
                   batch_number, batch_size, library.name, total_folders_processed);
 
             // Process each series folder in this batch
@@ -340,42 +384,72 @@ impl StreamingScannerV2 {
                     .await;
 
                 // Update folder status to 'scanning' before processing
-                if let Err(e) = self.db.backend().update_folder_status(
-                    folder_info.id,
-                    crate::database::traits::FolderProcessingStatus::Processing,
-                    None
-                ).await {
-                    error!("Failed to update folder {} status to scanning: {}", folder_info.folder_path, e);
+                if let Err(e) = self
+                    .db
+                    .backend()
+                    .update_folder_status(
+                        folder_info.id,
+                        crate::database::traits::FolderProcessingStatus::Processing,
+                        None,
+                    )
+                    .await
+                {
+                    error!(
+                        "Failed to update folder {} status to scanning: {}",
+                        folder_info.folder_path, e
+                    );
                     continue;
                 }
 
                 let scanner = self.clone();
                 let folder_path = PathBuf::from(&folder_info.folder_path);
                 let folder_id = folder_info.id;
-                
-                match scanner.process_series_folder(folder_path.clone(), library.id, &output_tx).await {
+
+                match scanner
+                    .process_series_folder(folder_path.clone(), library.id, &output_tx)
+                    .await
+                {
                     Ok(_) => {
                         // Update folder status to 'completed' after successful processing
-                        if let Err(e) = self.db.backend().update_folder_status(
-                            folder_id,
-                            crate::database::traits::FolderProcessingStatus::Completed,
-                            None
-                        ).await {
-                            error!("Failed to update folder {} status to completed: {}", folder_info.folder_path, e);
+                        if let Err(e) = self
+                            .db
+                            .backend()
+                            .update_folder_status(
+                                folder_id,
+                                crate::database::traits::FolderProcessingStatus::Completed,
+                                None,
+                            )
+                            .await
+                        {
+                            error!(
+                                "Failed to update folder {} status to completed: {}",
+                                folder_info.folder_path, e
+                            );
                         }
                     }
                     Err(e) => {
-                        error!("Failed to process series folder {}: {}", folder_info.folder_path, e);
-                        
+                        error!(
+                            "Failed to process series folder {}: {}",
+                            folder_info.folder_path, e
+                        );
+
                         // Update folder status to 'failed' with error message
-                        if let Err(update_err) = self.db.backend().update_folder_status(
-                            folder_id,
-                            crate::database::traits::FolderProcessingStatus::Failed,
-                            Some(e.to_string())
-                        ).await {
-                            error!("Failed to update folder {} status to failed: {}", folder_info.folder_path, update_err);
+                        if let Err(update_err) = self
+                            .db
+                            .backend()
+                            .update_folder_status(
+                                folder_id,
+                                crate::database::traits::FolderProcessingStatus::Failed,
+                                Some(e.to_string()),
+                            )
+                            .await
+                        {
+                            error!(
+                                "Failed to update folder {} status to failed: {}",
+                                folder_info.folder_path, update_err
+                            );
                         }
-                        
+
                         let _ = output_tx
                             .send(ScanOutput::Error {
                                 path: Some(folder_info.folder_path),
@@ -385,14 +459,21 @@ impl StreamingScannerV2 {
                     }
                 }
             }
-            
+
             total_folders_processed += batch_size;
-            info!("Completed batch {} ({} folders). Total processed: {}", 
-                  batch_number, batch_size, total_folders_processed);
+            info!(
+                "Completed batch {} ({} folders). Total processed: {}",
+                batch_number, batch_size, total_folders_processed
+            );
         }
 
         // Update library's last_scan timestamp after successful scan
-        if let Err(e) = self.db.backend().update_library_last_scan(&library.id.to_string()).await {
+        if let Err(e) = self
+            .db
+            .backend()
+            .update_library_last_scan(&library.id.to_string())
+            .await
+        {
             error!("Failed to update library last_scan timestamp: {}", e);
         } else {
             info!("Updated last_scan timestamp for library: {}", library.name);
@@ -411,9 +492,11 @@ impl StreamingScannerV2 {
         index: usize,
         tmdb_path: &str,
     ) -> Option<(String, Option<String>)> {
-        debug!("cache_image called: type={}, id={}, category={}, index={}, path={}", 
-               media_type, media_id, category, index, tmdb_path);
-        
+        debug!(
+            "cache_image called: type={}, id={}, category={}, index={}, path={}",
+            media_type, media_id, category, index, tmdb_path
+        );
+
         // Parse media_id to UUID
         let media_uuid = match Uuid::parse_str(media_id) {
             Ok(uuid) => uuid,
@@ -425,7 +508,10 @@ impl StreamingScannerV2 {
 
         // Download images immediately for better quality control
         let theme_color = if category == "poster" && index == 0 {
-            info!("Downloading poster for theme color extraction: {} {} {}", media_type, media_id, tmdb_path);
+            info!(
+                "Downloading poster for theme color extraction: {} {} {}",
+                media_type, media_id, tmdb_path
+            );
             // Download the poster variant to extract theme color
             match self
                 .image_service
@@ -433,16 +519,25 @@ impl StreamingScannerV2 {
                 .await
             {
                 Ok((_, _, extracted_color)) => {
-                    info!("Poster downloaded, extracted theme color: {:?}", extracted_color);
+                    info!(
+                        "Poster downloaded, extracted theme color: {:?}",
+                        extracted_color
+                    );
                     extracted_color
-                },
+                }
                 Err(e) => {
-                    warn!("Failed to download poster for theme color extraction: {}", e);
+                    warn!(
+                        "Failed to download poster for theme color extraction: {}",
+                        e
+                    );
                     None
                 }
             }
         } else if category == "backdrop" {
-            info!("Downloading backdrop at original resolution: {} {} {}", media_type, media_id, tmdb_path);
+            info!(
+                "Downloading backdrop at original resolution: {} {} {}",
+                media_type, media_id, tmdb_path
+            );
             // Download backdrop at original resolution for best quality
             match self
                 .image_service
@@ -452,16 +547,19 @@ impl StreamingScannerV2 {
                 Ok((_, _, _)) => {
                     info!("Backdrop downloaded at original resolution");
                     None
-                },
+                }
                 Err(e) => {
                     warn!("Failed to download backdrop: {}", e);
                     None
                 }
             }
         } else if category == "still" {
-            info!("Downloading episode still: {} {} {}", media_type, media_id, tmdb_path);
+            info!(
+                "Downloading episode still: {} {} {}",
+                media_type, media_id, tmdb_path
+            );
             // Download episode stills at multiple sizes for different use cases
-            
+
             // First download the smaller size for thumbnails
             match self
                 .image_service
@@ -470,12 +568,12 @@ impl StreamingScannerV2 {
             {
                 Ok((_, _, _)) => {
                     info!("Episode still w300 downloaded successfully");
-                },
+                }
                 Err(e) => {
                     warn!("Failed to download episode still w300: {}", e);
                 }
             }
-            
+
             // Then download larger size for detailed views
             match self
                 .image_service
@@ -485,7 +583,7 @@ impl StreamingScannerV2 {
                 Ok((_, _, _)) => {
                     info!("Episode still w500 downloaded successfully");
                     None
-                },
+                }
                 Err(e) => {
                     warn!("Failed to download episode still w500: {}", e);
                     None
@@ -496,9 +594,11 @@ impl StreamingScannerV2 {
         };
 
         // Link the image to the media item in database
-        debug!("Linking image to media: type={}, uuid={}, path={}, category={}", 
-               media_type, media_uuid, tmdb_path, category);
-        
+        debug!(
+            "Linking image to media: type={}, uuid={}, path={}, category={}",
+            media_type, media_uuid, tmdb_path, category
+        );
+
         if let Err(e) = self
             .image_service
             .link_to_media(
@@ -511,25 +611,25 @@ impl StreamingScannerV2 {
             )
             .await
         {
-            warn!("Failed to link image to media: type={}, uuid={}, error={}", media_type, media_uuid, e);
+            warn!(
+                "Failed to link image to media: type={}, uuid={}, error={}",
+                media_type, media_uuid, e
+            );
             return None;
         }
 
-        debug!("Successfully linked image to media: type={}, uuid={}", media_type, media_uuid);
+        debug!(
+            "Successfully linked image to media: type={}, uuid={}",
+            media_type, media_uuid
+        );
 
         // Return the endpoint URL that the image handler will use
-        let endpoint = format!(
-            "/images/{}/{}/{}/{}",
-            media_type, media_id, category, index
-        );
-        
+        let endpoint = format!("/images/{}/{}/{}/{}", media_type, media_id, category, index);
+
         debug!("Returning endpoint: {}", endpoint);
-        
+
         Some((endpoint, theme_color))
     }
-
-
-
 
     /// Check if a file is a video file
     fn is_video_file(&self, path: &Path) -> bool {
@@ -606,7 +706,10 @@ impl StreamingScannerV2 {
         _scan_id: Uuid,
     ) -> JoinHandle<Result<()>> {
         tokio::spawn(async move {
-            info!("Movie worker {} started (with inventory tracking)", worker_id);
+            info!(
+                "Movie worker {} started (with inventory tracking)",
+                worker_id
+            );
 
             loop {
                 let folder_data = {
@@ -626,16 +729,25 @@ impl StreamingScannerV2 {
                             worker_id,
                             movie_ref.title.as_str()
                         );
-                        
+
                         // Update folder status to 'completed' after successful processing
-                        if let Err(e) = self.db.backend().update_folder_status(
-                            folder_id,
-                            crate::database::traits::FolderProcessingStatus::Completed,
-                            None
-                        ).await {
-                            error!("Failed to update folder {} status to completed: {}", folder.display(), e);
+                        if let Err(e) = self
+                            .db
+                            .backend()
+                            .update_folder_status(
+                                folder_id,
+                                crate::database::traits::FolderProcessingStatus::Completed,
+                                None,
+                            )
+                            .await
+                        {
+                            error!(
+                                "Failed to update folder {} status to completed: {}",
+                                folder.display(),
+                                e
+                            );
                         }
-                        
+
                         let _ = output_tx.send(ScanOutput::MovieFound(movie_ref)).await;
                     }
                     Err(e) => {
@@ -643,16 +755,25 @@ impl StreamingScannerV2 {
                             "Movie worker {} failed to process {:?}: {}",
                             worker_id, folder, e
                         );
-                        
+
                         // Update folder status to 'failed' with error message
-                        if let Err(update_err) = self.db.backend().update_folder_status(
-                            folder_id,
-                            crate::database::traits::FolderProcessingStatus::Failed,
-                            Some(e.to_string())
-                        ).await {
-                            error!("Failed to update folder {} status to failed: {}", folder.display(), update_err);
+                        if let Err(update_err) = self
+                            .db
+                            .backend()
+                            .update_folder_status(
+                                folder_id,
+                                crate::database::traits::FolderProcessingStatus::Failed,
+                                Some(e.to_string()),
+                            )
+                            .await
+                        {
+                            error!(
+                                "Failed to update folder {} status to failed: {}",
+                                folder.display(),
+                                update_err
+                            );
                         }
-                        
+
                         let _ = output_tx
                             .send(ScanOutput::Error {
                                 path: Some(folder.display().to_string()),
@@ -829,15 +950,23 @@ impl StreamingScannerV2 {
 
         let credits = {
             self.rate_limit_tmdb().await;
-            match self.tmdb_provider
+            match self
+                .tmdb_provider
                 .get_movie_credits(tmdb_match.tmdb_id)
-                .await {
+                .await
+            {
                 Ok(credits) => {
-                    info!("Successfully fetched movie credits for TMDB ID {}", tmdb_match.tmdb_id);
+                    info!(
+                        "Successfully fetched movie credits for TMDB ID {}",
+                        tmdb_match.tmdb_id
+                    );
                     Some(credits)
                 }
                 Err(e) => {
-                    warn!("Failed to fetch movie credits for TMDB ID {}: {}", tmdb_match.tmdb_id, e);
+                    warn!(
+                        "Failed to fetch movie credits for TMDB ID {}: {}",
+                        tmdb_match.tmdb_id, e
+                    );
                     None
                 }
             }
@@ -855,7 +984,10 @@ impl StreamingScannerV2 {
         // Handle main poster from movie details and extract theme color
         let mut theme_color = None;
         if let Some(poster_path) = tmdb_details.inner.poster_path.as_ref() {
-            info!("Movie {} - Caching poster from path: {}", movie_id_str, poster_path);
+            info!(
+                "Movie {} - Caching poster from path: {}",
+                movie_id_str, poster_path
+            );
             if let Some((endpoint, extracted_color)) = self
                 .cache_image("movie", &movie_id_str, "poster", 0, poster_path)
                 .await
@@ -996,14 +1128,21 @@ impl StreamingScannerV2 {
         let mut crew = vec![];
 
         if let Some(credits_result) = &credits {
-            warn!("Movie {} - Processing credits: {} cast, {} crew members", movie_id_str, credits_result.cast.len(), credits_result.crew.len());
+            warn!(
+                "Movie {} - Processing credits: {} cast, {} crew members",
+                movie_id_str,
+                credits_result.cast.len(),
+                credits_result.crew.len()
+            );
             cast = credits_result
                 .cast
                 .iter()
                 .take(20)
                 .map(|c| {
-                    debug!("TMDB cast member: id={}, name={}, profile_path={:?}", 
-                           c.person.id, c.person.name, c.person.profile_path);
+                    debug!(
+                        "TMDB cast member: id={}, name={}, profile_path={:?}",
+                        c.person.id, c.person.name, c.person.profile_path
+                    );
                     CastMember {
                         id: c.person.id as u64,
                         name: c.person.name.clone(),
@@ -1035,51 +1174,85 @@ impl StreamingScannerV2 {
         }
 
         // Cache cast profile images
-        warn!("Movie {} - Caching profile images for {} cast members", movie_id_str, cast.len());
+        warn!(
+            "Movie {} - Caching profile images for {} cast members",
+            movie_id_str,
+            cast.len()
+        );
         let mut cached_count = 0;
         for (idx, cast_member) in cast.iter().enumerate() {
             if let Some(profile_path) = &cast_member.profile_path {
                 // Generate a deterministic UUID for the person based on their TMDB ID
-                let person_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("person-{}", cast_member.id).as_bytes());
+                let person_uuid = Uuid::new_v5(
+                    &Uuid::NAMESPACE_OID,
+                    format!("person-{}", cast_member.id).as_bytes(),
+                );
                 let person_id_str = person_uuid.to_string();
-                
+
                 if let Some((endpoint, _)) = self
                     .cache_image("person", &person_id_str, "profile", 0, profile_path)
                     .await
                 {
                     cached_count += 1;
-                    info!("Cached profile image for cast member {} ({}): {}", cast_member.name, cast_member.id, endpoint);
+                    info!(
+                        "Cached profile image for cast member {} ({}): {}",
+                        cast_member.name, cast_member.id, endpoint
+                    );
                 } else {
-                    warn!("Failed to cache profile image for cast member {} ({}) with path: {}", cast_member.name, cast_member.id, profile_path);
+                    warn!(
+                        "Failed to cache profile image for cast member {} ({}) with path: {}",
+                        cast_member.name, cast_member.id, profile_path
+                    );
                 }
             } else {
-                debug!("Cast member {} ({}) has no profile_path", cast_member.name, cast_member.id);
+                debug!(
+                    "Cast member {} ({}) has no profile_path",
+                    cast_member.name, cast_member.id
+                );
             }
         }
-        warn!("Movie {} - Successfully cached {} cast profile images", movie_id_str, cached_count);
+        warn!(
+            "Movie {} - Successfully cached {} cast profile images",
+            movie_id_str, cached_count
+        );
 
         // Cache crew profile images for important crew members
         let mut crew_cached_count = 0;
         for (idx, crew_member) in crew.iter().enumerate() {
             if let Some(profile_path) = &crew_member.profile_path {
                 // Generate a deterministic UUID for the person based on their TMDB ID
-                let person_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("person-{}", crew_member.id).as_bytes());
+                let person_uuid = Uuid::new_v5(
+                    &Uuid::NAMESPACE_OID,
+                    format!("person-{}", crew_member.id).as_bytes(),
+                );
                 let person_id_str = person_uuid.to_string();
-                
+
                 if let Some((endpoint, _)) = self
                     .cache_image("person", &person_id_str, "profile", 0, profile_path)
                     .await
                 {
                     crew_cached_count += 1;
-                    info!("Cached profile image for crew member {} ({}): {}", crew_member.name, crew_member.id, endpoint);
+                    info!(
+                        "Cached profile image for crew member {} ({}): {}",
+                        crew_member.name, crew_member.id, endpoint
+                    );
                 } else {
-                    warn!("Failed to cache profile image for crew member {} ({}) with path: {}", crew_member.name, crew_member.id, profile_path);
+                    warn!(
+                        "Failed to cache profile image for crew member {} ({}) with path: {}",
+                        crew_member.name, crew_member.id, profile_path
+                    );
                 }
             } else {
-                debug!("Crew member {} ({}) has no profile_path", crew_member.name, crew_member.id);
+                debug!(
+                    "Crew member {} ({}) has no profile_path",
+                    crew_member.name, crew_member.id
+                );
             }
         }
-        warn!("Movie {} - Successfully cached {} crew profile images", movie_id_str, crew_cached_count);
+        warn!(
+            "Movie {} - Successfully cached {} crew profile images",
+            movie_id_str, crew_cached_count
+        );
 
         // Extract genres from the movie details
         let genres = tmdb_details
@@ -1168,7 +1341,6 @@ impl StreamingScannerV2 {
         Ok(movie_ref)
     }
 
-
     /// Process a series folder
     pub async fn process_series_folder(
         &self,
@@ -1188,7 +1360,9 @@ impl StreamingScannerV2 {
         let clean_name = self.clean_series_name(&series_name);
 
         // Search TMDB with fuzzy matching
-        let series_ref = self.find_or_create_series(&clean_name, library_id, &series_folder).await?;
+        let series_ref = self
+            .find_or_create_series(&clean_name, library_id, &series_folder)
+            .await?;
 
         // Send series found event immediately
         output_tx
@@ -1197,62 +1371,113 @@ impl StreamingScannerV2 {
             .map_err(|_| MediaError::Cancelled("Output channel closed".to_string()))?;
 
         // Get the series folder from inventory to find its ID
-        let series_folder_str = series_folder.to_string_lossy().to_string();
-        let series_folder_info = match self.db.backend().get_folder_by_path(library_id, &series_folder_str).await? {
+        let series_folder_info = match self
+            .db
+            .backend()
+            .get_folder_by_path(library_id, &series_folder)
+            .await?
+        {
             Some(folder) => folder,
             None => {
-                warn!("Series folder not found in inventory: {}", series_folder_str);
+                warn!(
+                    "Series folder not found in inventory: {}",
+                    series_folder.display()
+                );
                 return Ok(());
             }
         };
 
         // Query for season folders under this series
-        info!("Querying for season folders under series: {} (folder_id: {})", series_name, series_folder_info.id);
-        let season_folders = self.db.backend().get_season_folders(series_folder_info.id).await?;
-        
+        info!(
+            "Querying for season folders under series: {} (folder_id: {})",
+            series_name, series_folder_info.id
+        );
+        let season_folders = self
+            .db
+            .backend()
+            .get_season_folders(series_folder_info.id)
+            .await?;
+
         if season_folders.is_empty() {
             info!("No season folders found for series: {}", series_name);
         } else {
-            info!("Found {} season folders for series: {}", season_folders.len(), series_name);
-            
+            info!(
+                "Found {} season folders for series: {}",
+                season_folders.len(),
+                series_name
+            );
+
             // Process each season folder
             for season_folder in season_folders {
                 let season_path = PathBuf::from(&season_folder.folder_path);
-                
+
                 // Update season folder status to 'scanning'
-                if let Err(e) = self.db.backend().update_folder_status(
-                    season_folder.id,
-                    crate::database::traits::FolderProcessingStatus::Processing,
-                    None
-                ).await {
-                    error!("Failed to update season folder {} status to scanning: {}", season_folder.folder_path, e);
+                if let Err(e) = self
+                    .db
+                    .backend()
+                    .update_folder_status(
+                        season_folder.id,
+                        crate::database::traits::FolderProcessingStatus::Processing,
+                        None,
+                    )
+                    .await
+                {
+                    error!(
+                        "Failed to update season folder {} status to scanning: {}",
+                        season_folder.folder_path, e
+                    );
                     continue;
                 }
-                
+
                 // Process the season folder
-                match self.process_season_folder(&season_path, &series_ref, library_id, output_tx).await {
+                match self
+                    .process_season_folder(&season_path, &series_ref, library_id, output_tx)
+                    .await
+                {
                     Ok(season_ref) => {
-                        info!("Successfully processed season {} of {}", season_ref.season_number, series_name);
-                        
+                        info!(
+                            "Successfully processed season {} of {}",
+                            season_ref.season_number, series_name
+                        );
+
                         // Update season folder status to 'completed'
-                        if let Err(e) = self.db.backend().update_folder_status(
-                            season_folder.id,
-                            crate::database::traits::FolderProcessingStatus::Completed,
-                            None
-                        ).await {
-                            error!("Failed to update season folder {} status to completed: {}", season_folder.folder_path, e);
+                        if let Err(e) = self
+                            .db
+                            .backend()
+                            .update_folder_status(
+                                season_folder.id,
+                                crate::database::traits::FolderProcessingStatus::Completed,
+                                None,
+                            )
+                            .await
+                        {
+                            error!(
+                                "Failed to update season folder {} status to completed: {}",
+                                season_folder.folder_path, e
+                            );
                         }
                     }
                     Err(e) => {
-                        error!("Failed to process season folder {}: {}", season_folder.folder_path, e);
-                        
+                        error!(
+                            "Failed to process season folder {}: {}",
+                            season_folder.folder_path, e
+                        );
+
                         // Update season folder status to 'failed'
-                        if let Err(e) = self.db.backend().update_folder_status(
-                            season_folder.id,
-                            crate::database::traits::FolderProcessingStatus::Failed,
-                            Some(e.to_string())
-                        ).await {
-                            error!("Failed to update season folder {} status to failed: {}", season_folder.folder_path, e);
+                        if let Err(e) = self
+                            .db
+                            .backend()
+                            .update_folder_status(
+                                season_folder.id,
+                                crate::database::traits::FolderProcessingStatus::Failed,
+                                Some(e.to_string()),
+                            )
+                            .await
+                        {
+                            error!(
+                                "Failed to update season folder {} status to failed: {}",
+                                season_folder.folder_path, e
+                            );
                         }
                     }
                 }
@@ -1263,14 +1488,24 @@ impl StreamingScannerV2 {
     }
 
     /// Find or create a series reference with TMDB data
-    pub async fn find_or_create_series(&self, series_name: &str, library_id: Uuid, series_folder: &Path) -> Result<SeriesReference> {
+    pub async fn find_or_create_series(
+        &self,
+        series_name: &str,
+        library_id: Uuid,
+        series_folder: &Path,
+    ) -> Result<SeriesReference> {
         info!(
             "SCAN: find_or_create_series called for '{}' in library {}",
             series_name, library_id
         );
-        
+
         // First, check if series already exists by name in this library
-        match self.db.backend().find_series_by_name(library_id, series_name).await {
+        match self
+            .db
+            .backend()
+            .find_series_by_name(library_id, series_name)
+            .await
+        {
             Ok(Some(existing_series)) => {
                 info!(
                     "SCAN: Found existing series '{}' (ID: {}) in library {} with TMDB ID: {}, returning it",
@@ -1282,7 +1517,10 @@ impl StreamingScannerV2 {
                 return Ok(existing_series);
             }
             Ok(None) => {
-                info!("SCAN: No existing series found by name '{}' in library {}", series_name, library_id);
+                info!(
+                    "SCAN: No existing series found by name '{}' in library {}",
+                    series_name, library_id
+                );
             }
             Err(e) => {
                 warn!("SCAN: Error checking for existing series by name: {}", e);
@@ -1341,8 +1579,16 @@ impl StreamingScannerV2 {
 
         // If we found a TMDB match, check if it already exists in the database
         if let Some(matched) = tmdb_match {
-            info!("SCAN: Found TMDB match for '{}': TMDB ID {}", series_name, matched.tmdb_id);
-            match self.db.backend().get_series_by_tmdb_id(library_id, matched.tmdb_id).await {
+            info!(
+                "SCAN: Found TMDB match for '{}': TMDB ID {}",
+                series_name, matched.tmdb_id
+            );
+            match self
+                .db
+                .backend()
+                .get_series_by_tmdb_id(library_id, matched.tmdb_id)
+                .await
+            {
                 Ok(Some(existing_series)) => {
                     info!(
                         "SCAN: Found existing series by TMDB ID {} (ID: {}) in library {}: '{}', returning it",
@@ -1354,7 +1600,10 @@ impl StreamingScannerV2 {
                     return Ok(existing_series);
                 }
                 Ok(None) => {
-                    info!("SCAN: No existing series found with TMDB ID {} in library {}", matched.tmdb_id, library_id);
+                    info!(
+                        "SCAN: No existing series found with TMDB ID {} in library {}",
+                        matched.tmdb_id, library_id
+                    );
                 }
                 Err(e) => {
                     warn!("SCAN: Error checking for existing series by TMDB ID: {}", e);
@@ -1395,15 +1644,19 @@ impl StreamingScannerV2 {
 
             let credits = {
                 self.rate_limit_tmdb().await;
-                match self.tmdb_provider
-                    .get_series_credits(matched.tmdb_id)
-                    .await {
+                match self.tmdb_provider.get_series_credits(matched.tmdb_id).await {
                     Ok(credits) => {
-                        info!("Successfully fetched series credits for TMDB ID {}", matched.tmdb_id);
+                        info!(
+                            "Successfully fetched series credits for TMDB ID {}",
+                            matched.tmdb_id
+                        );
                         Some(credits)
                     }
                     Err(e) => {
-                        warn!("Failed to fetch series credits for TMDB ID {}: {}", matched.tmdb_id, e);
+                        warn!(
+                            "Failed to fetch series credits for TMDB ID {}: {}",
+                            matched.tmdb_id, e
+                        );
                         None
                     }
                 }
@@ -1556,14 +1809,21 @@ impl StreamingScannerV2 {
             let mut crew = vec![];
 
             if let Some(credits_result) = &credits {
-                warn!("Series {} - Processing credits: {} cast, {} crew members", series_id_str, credits_result.cast.len(), credits_result.crew.len());
+                warn!(
+                    "Series {} - Processing credits: {} cast, {} crew members",
+                    series_id_str,
+                    credits_result.cast.len(),
+                    credits_result.crew.len()
+                );
                 cast = credits_result
                     .cast
                     .iter()
                     .take(20)
                     .map(|c| {
-                        debug!("TMDB TV cast member: id={}, name={}, profile_path={:?}", 
-                               c.inner.id, c.inner.name, c.inner.profile_path);
+                        debug!(
+                            "TMDB TV cast member: id={}, name={}, profile_path={:?}",
+                            c.inner.id, c.inner.name, c.inner.profile_path
+                        );
                         CastMember {
                             id: c.inner.id as u64,
                             name: c.inner.name.clone(),
@@ -1601,51 +1861,79 @@ impl StreamingScannerV2 {
             }
 
             // Cache cast profile images
-            warn!("Series {} - Caching profile images for {} cast members", series_id_str, cast.len());
+            warn!(
+                "Series {} - Caching profile images for {} cast members",
+                series_id_str,
+                cast.len()
+            );
             let mut cached_count = 0;
             for (idx, cast_member) in cast.iter().enumerate() {
                 if let Some(profile_path) = &cast_member.profile_path {
                     // Generate a deterministic UUID for the person based on their TMDB ID
-                    let person_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("person-{}", cast_member.id).as_bytes());
+                    let person_uuid = Uuid::new_v5(
+                        &Uuid::NAMESPACE_OID,
+                        format!("person-{}", cast_member.id).as_bytes(),
+                    );
                     let person_id_str = person_uuid.to_string();
-                    
+
                     if let Some((endpoint, _)) = self
                         .cache_image("person", &person_id_str, "profile", 0, profile_path)
                         .await
                     {
                         cached_count += 1;
-                        info!("Cached profile image for TV cast member {} ({}): {}", cast_member.name, cast_member.id, endpoint);
+                        info!(
+                            "Cached profile image for TV cast member {} ({}): {}",
+                            cast_member.name, cast_member.id, endpoint
+                        );
                     } else {
                         warn!("Failed to cache profile image for TV cast member {} ({}) with path: {}", cast_member.name, cast_member.id, profile_path);
                     }
                 } else {
-                    debug!("TV cast member {} ({}) has no profile_path", cast_member.name, cast_member.id);
+                    debug!(
+                        "TV cast member {} ({}) has no profile_path",
+                        cast_member.name, cast_member.id
+                    );
                 }
             }
-            warn!("Series {} - Successfully cached {} cast profile images", series_id_str, cached_count);
+            warn!(
+                "Series {} - Successfully cached {} cast profile images",
+                series_id_str, cached_count
+            );
 
             // Cache crew profile images for important crew members
             let mut crew_cached_count = 0;
             for (idx, crew_member) in crew.iter().enumerate() {
                 if let Some(profile_path) = &crew_member.profile_path {
                     // Generate a deterministic UUID for the person based on their TMDB ID
-                    let person_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("person-{}", crew_member.id).as_bytes());
+                    let person_uuid = Uuid::new_v5(
+                        &Uuid::NAMESPACE_OID,
+                        format!("person-{}", crew_member.id).as_bytes(),
+                    );
                     let person_id_str = person_uuid.to_string();
-                    
+
                     if let Some((endpoint, _)) = self
                         .cache_image("person", &person_id_str, "profile", 0, profile_path)
                         .await
                     {
                         crew_cached_count += 1;
-                        info!("Cached profile image for TV crew member {} ({}): {}", crew_member.name, crew_member.id, endpoint);
+                        info!(
+                            "Cached profile image for TV crew member {} ({}): {}",
+                            crew_member.name, crew_member.id, endpoint
+                        );
                     } else {
                         warn!("Failed to cache profile image for TV crew member {} ({}) with path: {}", crew_member.name, crew_member.id, profile_path);
                     }
                 } else {
-                    debug!("TV crew member {} ({}) has no profile_path", crew_member.name, crew_member.id);
+                    debug!(
+                        "TV crew member {} ({}) has no profile_path",
+                        crew_member.name, crew_member.id
+                    );
                 }
             }
-            warn!("Series {} - Successfully cached {} crew profile images", series_id_str, crew_cached_count);
+            warn!(
+                "Series {} - Successfully cached {} crew profile images",
+                series_id_str, crew_cached_count
+            );
 
             // Extract genres and networks from TV show details
             let genres = details
@@ -1697,29 +1985,29 @@ impl StreamingScannerV2 {
         };
 
         // Get folder creation time
-        let created_at = series_folder.metadata()
+        let created_at = series_folder
+            .metadata()
             .ok()
             .and_then(|metadata| {
-                metadata.created()
+                metadata
+                    .created()
                     .ok()
                     .and_then(|time| {
                         let duration = time.duration_since(std::time::UNIX_EPOCH).ok()?;
                         chrono::DateTime::<chrono::Utc>::from_timestamp(
                             duration.as_secs() as i64,
-                            duration.subsec_nanos()
+                            duration.subsec_nanos(),
                         )
                     })
                     .or_else(|| {
                         // Fallback to modified time if creation time not available
-                        metadata.modified()
-                            .ok()
-                            .and_then(|time| {
-                                let duration = time.duration_since(std::time::UNIX_EPOCH).ok()?;
-                                chrono::DateTime::<chrono::Utc>::from_timestamp(
-                                    duration.as_secs() as i64,
-                                    duration.subsec_nanos()
-                                )
-                            })
+                        metadata.modified().ok().and_then(|time| {
+                            let duration = time.duration_since(std::time::UNIX_EPOCH).ok()?;
+                            chrono::DateTime::<chrono::Utc>::from_timestamp(
+                                duration.as_secs() as i64,
+                                duration.subsec_nanos(),
+                            )
+                        })
                     })
             })
             .unwrap_or_else(chrono::Utc::now);
@@ -1761,7 +2049,7 @@ impl StreamingScannerV2 {
             series_ref.tmdb_id,
             series_ref.theme_color
         );
-        
+
         self.db
             .backend()
             .store_series_reference(&series_ref)
@@ -1769,7 +2057,8 @@ impl StreamingScannerV2 {
             .map_err(|e| {
                 error!(
                     "Failed to store series reference: {}. Series: {}",
-                    e, series_ref.title.as_str()
+                    e,
+                    series_ref.title.as_str()
                 );
                 MediaError::Internal(format!("Failed to store series reference: {}", e))
             })?;
@@ -1805,31 +2094,37 @@ impl StreamingScannerV2 {
         // Get season folder creation time
         let folder_created_at = match season_folder.metadata() {
             Ok(metadata) => {
-                metadata.created()
+                metadata
+                    .created()
                     .ok()
                     .and_then(|time| {
                         let duration = time.duration_since(std::time::UNIX_EPOCH).ok()?;
                         chrono::DateTime::<chrono::Utc>::from_timestamp(
                             duration.as_secs() as i64,
-                            duration.subsec_nanos()
+                            duration.subsec_nanos(),
                         )
                     })
                     .unwrap_or_else(|| {
                         // Fallback to modified time if creation time is not available
-                        metadata.modified()
+                        metadata
+                            .modified()
                             .ok()
                             .and_then(|time| {
                                 let duration = time.duration_since(std::time::UNIX_EPOCH).ok()?;
                                 chrono::DateTime::<chrono::Utc>::from_timestamp(
                                     duration.as_secs() as i64,
-                                    duration.subsec_nanos()
+                                    duration.subsec_nanos(),
                                 )
                             })
                             .unwrap_or_else(chrono::Utc::now)
                     })
             }
             Err(e) => {
-                warn!("Failed to get season folder metadata for {}: {}, using current time", season_folder.display(), e);
+                warn!(
+                    "Failed to get season folder metadata for {}: {}, using current time",
+                    season_folder.display(),
+                    e
+                );
                 chrono::Utc::now()
             }
         };
@@ -1850,41 +2145,46 @@ impl StreamingScannerV2 {
         let season_id_str = season_id.as_str().to_string();
 
         // Process season details and cache poster
-        let (enhanced_season, cached_poster_endpoint) = if let Some(details) = season_details.as_ref() {
-            let mut cached_poster = None;
-            
-            // Cache season poster if available
-            if let Some(poster_path) = &details.inner.poster_path {
-                info!("Caching season {} poster for series {}", season_num, series_ref.title.as_str());
-                if let Some((endpoint, _)) = self
-                    .cache_image("season", &season_id_str, "poster", 0, poster_path)
-                    .await
-                {
-                    info!("Successfully cached season poster: {}", endpoint);
-                    cached_poster = Some(endpoint);
-                } else {
-                    warn!("Failed to cache season poster");
+        let (enhanced_season, cached_poster_endpoint) =
+            if let Some(details) = season_details.as_ref() {
+                let mut cached_poster = None;
+
+                // Cache season poster if available
+                if let Some(poster_path) = &details.inner.poster_path {
+                    info!(
+                        "Caching season {} poster for series {}",
+                        season_num,
+                        series_ref.title.as_str()
+                    );
+                    if let Some((endpoint, _)) = self
+                        .cache_image("season", &season_id_str, "poster", 0, poster_path)
+                        .await
+                    {
+                        info!("Successfully cached season poster: {}", endpoint);
+                        cached_poster = Some(endpoint);
+                    } else {
+                        warn!("Failed to cache season poster");
+                    }
                 }
-            }
 
-            let enhanced = SeasonDetails {
-                id: details.inner.id as u64,
-                season_number: details.inner.season_number as u8,
-                name: if details.inner.name.is_empty() {
-                    format!("Season {}", season_num)
-                } else {
-                    details.inner.name.clone()
-                },
-                overview: details.inner.overview.clone(),
-                air_date: details.inner.air_date.as_ref().map(|d| d.to_string()),
-                episode_count: details.episodes.len() as u32,
-                poster_path: cached_poster.clone(),
+                let enhanced = SeasonDetails {
+                    id: details.inner.id as u64,
+                    season_number: details.inner.season_number as u8,
+                    name: if details.inner.name.is_empty() {
+                        format!("Season {}", season_num)
+                    } else {
+                        details.inner.name.clone()
+                    },
+                    overview: details.inner.overview.clone(),
+                    air_date: details.inner.air_date.as_ref().map(|d| d.to_string()),
+                    episode_count: details.episodes.len() as u32,
+                    poster_path: cached_poster.clone(),
+                };
+
+                (Some(enhanced), cached_poster)
+            } else {
+                (None, None)
             };
-
-            (Some(enhanced), cached_poster)
-        } else {
-            (None, None)
-        };
 
         let season_ref = SeasonReference {
             id: season_id,
@@ -1913,19 +2213,22 @@ impl StreamingScannerV2 {
             series_ref.title.as_str(),
             season_ref.series_id.as_str()
         );
-        
-        let actual_season_uuid = self.db
+
+        let actual_season_uuid = self
+            .db
             .backend()
             .store_season_reference(&season_ref)
             .await
             .map_err(|e| {
                 error!(
                     "Failed to store season reference: {}. Season: {} S{}",
-                    e, season_ref.id.as_str(), season_num
+                    e,
+                    season_ref.id.as_str(),
+                    season_num
                 );
                 MediaError::Internal(format!("Failed to store season reference: {}", e))
             })?;
-        
+
         // Update season_ref with the actual ID from the database (in case it already existed)
         let mut season_ref = season_ref;
         season_ref.id = SeasonID::new(actual_season_uuid.to_string())?;
@@ -2017,13 +2320,15 @@ impl StreamingScannerV2 {
         // Process episode details and cache still
         let enhanced_episode = if let Some(details) = episode_details.as_ref() {
             let mut cached_still = None;
-            
+
             // Cache episode still if available
             if let Some(still_path) = &details.inner.still_path {
-                info!("Caching episode S{}E{} still for series {}", 
-                      season_ref.season_number.value(), 
-                      episode_info.episode,
-                      series_ref.title.as_str());
+                info!(
+                    "Caching episode S{}E{} still for series {}",
+                    season_ref.season_number.value(),
+                    episode_info.episode,
+                    series_ref.title.as_str()
+                );
                 if let Some((endpoint, _)) = self
                     .cache_image("episode", &episode_id_str, "still", 0, still_path)
                     .await
@@ -2067,16 +2372,16 @@ impl StreamingScannerV2 {
         };
 
         // Store in database and get actual file ID
-        let actual_file_id = self.db
+        let actual_file_id = self
+            .db
             .backend()
             .store_media(episode_ref.file.clone())
             .await?;
-        
+
         // Update episode_ref with the actual file ID (in case it already existed)
         let mut episode_ref = episode_ref;
-        episode_ref.file.id = Uuid::parse_str(&actual_file_id)
-            .map_err(|e| MediaError::Internal(format!("Invalid file UUID: {}", e)))?;
-        
+        episode_ref.file.id = actual_file_id;
+
         self.db
             .backend()
             .store_episode_reference(&episode_ref)
@@ -2084,7 +2389,6 @@ impl StreamingScannerV2 {
 
         Ok(episode_ref)
     }
-
 
     /// Check if a folder name looks like a season folder
     fn is_season_folder(&self, name: &str) -> bool {

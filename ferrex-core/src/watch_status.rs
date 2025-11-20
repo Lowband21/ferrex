@@ -37,8 +37,11 @@
 //! ```
 
 use crate::{api_types::MediaId, User};
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::{Hash, Hasher},
+};
 
 /// User's complete watch state across all media
 ///
@@ -48,17 +51,60 @@ use std::collections::HashSet;
 ///
 /// The system automatically moves items between states based on
 /// viewing progress (95% threshold for completion).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct UserWatchState {
     /// List of actively watching items (typically 10-50 items)
     ///
     /// Ordered by last_watched timestamp (most recent first)
-    pub in_progress: Vec<InProgressItem>,
+    pub in_progress: HashMap<MediaId, InProgressItem>,
 
     /// Set of completed media IDs for efficient "watched" badge display
     ///
     /// Uses HashSet for O(1) lookup performance
     pub completed: HashSet<MediaId>,
+}
+
+// Custom serialization to handle HashMap with MediaId keys
+impl Serialize for UserWatchState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        
+        // Convert HashMap<MediaId, InProgressItem> to Vec<&InProgressItem> for serialization
+        let in_progress_vec: Vec<&InProgressItem> = self.in_progress.values().collect();
+        
+        let mut state = serializer.serialize_struct("UserWatchState", 2)?;
+        state.serialize_field("in_progress", &in_progress_vec)?;
+        state.serialize_field("completed", &self.completed)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for UserWatchState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct UserWatchStateHelper {
+            in_progress: Vec<InProgressItem>,
+            completed: Vec<MediaId>,
+        }
+        
+        let helper = UserWatchStateHelper::deserialize(deserializer)?;
+        
+        let mut in_progress_map = HashMap::new();
+        for item in helper.in_progress {
+            in_progress_map.insert(item.media_id.clone(), item);
+        }
+        
+        Ok(UserWatchState {
+            in_progress: in_progress_map,
+            completed: helper.completed.into_iter().collect(),
+        })
+    }
 }
 
 impl UserWatchState {
@@ -72,9 +118,7 @@ impl UserWatchState {
     }
 
     pub fn get_by_media_id(&self, media_id: &MediaId) -> Option<&InProgressItem> {
-        self.in_progress
-            .iter()
-            .find(|item| item.media_id == *media_id)
+        self.in_progress.get(media_id)
     }
 }
 
@@ -103,6 +147,20 @@ pub struct InProgressItem {
     pub duration: f32,
     /// Unix timestamp of last update
     pub last_watched: i64,
+}
+
+impl Eq for InProgressItem {}
+
+impl PartialEq for InProgressItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.media_id == other.media_id
+    }
+}
+
+impl Hash for InProgressItem {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.media_id.hash(state);
+    }
 }
 
 impl InProgressItem {
@@ -185,44 +243,40 @@ impl UserWatchState {
     /// Create a new empty watch state
     pub fn new() -> Self {
         Self {
-            in_progress: Vec::new(),
+            in_progress: HashMap::new(),
             completed: HashSet::new(),
         }
     }
 
     /// Update progress for a media item
-    pub fn update_progress(&mut self, media_id: MediaId, position: f32, duration: f32) {
+    pub fn update_progress(
+        &mut self,
+        media_id: MediaId,
+        position: f32,
+        duration: f32,
+    ) -> InProgressItem {
         let progress = WatchProgress::new(position / duration);
+        let progress_item = InProgressItem {
+            media_id,
+            position,
+            duration,
+            last_watched: chrono::Utc::now().timestamp(),
+        };
 
         if progress.is_completed() {
             // Move to completed
-            self.in_progress.retain(|item| item.media_id != media_id);
+            self.in_progress.retain(|k, v| k != &media_id);
             self.completed.insert(media_id);
         } else if progress.is_started() {
             // Update or insert in progress
-            if let Some(item) = self
-                .in_progress
-                .iter_mut()
-                .find(|item| item.media_id == media_id)
-            {
+            if let Some(item) = self.in_progress.get_mut(&media_id) {
                 item.position = position;
                 item.last_watched = chrono::Utc::now().timestamp();
             } else {
-                self.in_progress.push(InProgressItem {
-                    media_id,
-                    position,
-                    duration,
-                    last_watched: chrono::Utc::now().timestamp(),
-                });
+                self.in_progress.insert(media_id, progress_item.clone()); // TODO: Clone
             }
-
-            // Sort by last watched (most recent first)
-            self.in_progress
-                .sort_by(|a, b| b.last_watched.cmp(&a.last_watched));
-
-            // Limit to 50 items
-            self.in_progress.truncate(50);
         }
+        progress_item
     }
 
     /// Check if a media item is completed
@@ -233,20 +287,22 @@ impl UserWatchState {
     /// Get progress for a specific media item
     pub fn get_progress(&self, media_id: &MediaId) -> Option<WatchProgress> {
         self.in_progress
-            .iter()
-            .find(|item| item.media_id == *media_id)
+            .get(media_id)
             .map(|item| WatchProgress::new(item.position / item.duration))
     }
 
     /// Get continue watching items (sorted by last watched)
-    pub fn get_continue_watching(&self, limit: usize) -> &[InProgressItem] {
-        let end = limit.min(self.in_progress.len());
-        &self.in_progress[..end]
+    pub fn get_continue_watching(self, limit: usize) -> HashMap<MediaId, InProgressItem> {
+        self.in_progress
+        //let mut items: Vec<InProgressItem> = self.in_progress.values().cloned().collect();
+        //items.sort_by(|a, b| b.last_watched.cmp(&a.last_watched));
+        //items.truncate(limit);
+        //items
     }
 
     /// Clear watch progress for a specific item
     pub fn clear_progress(&mut self, media_id: &MediaId) {
-        self.in_progress.retain(|item| item.media_id != *media_id);
+        self.in_progress.remove(media_id);
         self.completed.remove(media_id);
     }
 }

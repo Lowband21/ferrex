@@ -285,6 +285,11 @@ pub enum CrossDomainEvent {
     TranscodingReady(url::Url), // Legacy: Streaming notifies player that stream is ready
 
     // UI events
+    
+    // Window management events
+    HideWindow,           // Hide the application window (e.g., for external MPV)
+    RestoreWindow(bool),  // Restore window with fullscreen state
+    SetWindowMode(iced::window::Mode), // Set specific window mode
 
     WindowResized(iced::Size),
     DatabaseCleared, // Database was cleared, refresh needed

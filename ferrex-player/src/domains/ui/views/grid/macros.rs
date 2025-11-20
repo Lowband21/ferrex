@@ -13,7 +13,7 @@ macro_rules! virtual_reference_grid {
         pub fn $name<'a>(
             items: &'a [$item_type],
             grid_state: &$crate::domains::ui::views::grid::virtual_list::VirtualGridState,
-            hovered_media_id: &Option<String>,
+            hovered_media_id: &Option<Uuid>,
             on_scroll: impl Fn(iced::widget::scrollable::Viewport) -> $crate::domains::ui::messages::Message + 'a,
             state: &'a $crate::state_refactored::State,
         ) -> iced::Element<'a, $crate::domains::ui::messages::Message> {
@@ -94,11 +94,12 @@ macro_rules! virtual_reference_grid {
                         };
 
 
+                        let item_id = item.id;
 
 
                         use $crate::infrastructure::api_types::{MediaId};
                         let item_watch_progress = if let Some(watch_state) = watch_state_opt {
-                            watch_state.get_watch_progress(&MediaId::from(item.id.clone())) // TODO: See if we can remove this clone
+                            watch_state.get_watch_progress(&MediaId::from(item_id)) // TODO: See if we can remove this clone
                         } else {
                             None
                         };

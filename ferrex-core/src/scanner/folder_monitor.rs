@@ -1,16 +1,19 @@
-use crate::database::traits::{MediaDatabaseTrait, FolderInventory, FolderScanFilters, FolderProcessingStatus, FolderType, FolderDiscoverySource};
-use crate::{Library, LibraryType, Result, MediaError};
+use crate::database::traits::{
+    FolderDiscoverySource, FolderInventory, FolderProcessingStatus, FolderScanFilters, FolderType,
+    MediaDatabaseTrait,
+};
+use crate::{Library, LibraryType, MediaError, Result};
+use chrono::Utc;
+use std::collections::HashSet;
+use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::{interval, MissedTickBehavior};
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use chrono::Utc;
-use std::path::{Path, PathBuf};
-use std::collections::HashSet;
-use std::pin::Pin;
-use std::future::Future;
 
 /// Configuration for the folder monitor
 #[derive(Debug, Clone)]
@@ -65,103 +68,127 @@ impl FolderMonitor {
             shutdown: Arc::new(RwLock::new(false)),
         }
     }
-    
+
     /// Start the folder monitor background task
     pub async fn start(self: Arc<Self>) -> Result<()> {
         let monitor = Arc::clone(&self);
-        
+
         tokio::spawn(async move {
-            info!("FolderMonitor started with interval of {} seconds", monitor.config.scan_interval_secs);
-            
+            info!(
+                "FolderMonitor started with interval of {} seconds",
+                monitor.config.scan_interval_secs
+            );
+
             let mut ticker = interval(Duration::from_secs(monitor.config.scan_interval_secs));
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-            
+
             loop {
                 ticker.tick().await;
-                
+
                 // Check shutdown flag
                 if *monitor.shutdown.read().await {
                     info!("FolderMonitor shutting down");
                     break;
                 }
-                
+
                 // Run inventory update for all libraries
                 if let Err(e) = monitor.run_inventory_cycle().await {
                     error!("Error in folder inventory cycle: {}", e);
                 }
             }
         });
-        
+
         Ok(())
     }
-    
+
     /// Stop the folder monitor
     pub async fn stop(&self) {
         *self.shutdown.write().await = true;
         info!("FolderMonitor stop signal sent");
     }
-    
+
     /// Discover folders for a specific library immediately
     /// This is useful when a library is created to populate inventory without waiting for next cycle
     pub async fn discover_library_folders_immediate(&self, library_id: &Uuid) -> Result<()> {
-        info!("Starting immediate folder discovery for library: {}", library_id);
-        
+        info!(
+            "Starting immediate folder discovery for library: {}",
+            library_id
+        );
+
         // Get the specific library
         let libraries = self.libraries.read().await;
         let library = libraries
             .iter()
             .find(|l| &l.id == library_id)
-            .ok_or_else(|| MediaError::NotFound(format!("Library {} not found in memory", library_id)))?
+            .ok_or_else(|| {
+                MediaError::NotFound(format!("Library {} not found in memory", library_id))
+            })?
             .clone(); // Clone to avoid holding the lock
-        
+
         drop(libraries); // Release the lock early
-        
+
         // Run inventory update for this specific library
         self.update_library_inventory(&library).await?;
-        
-        info!("Immediate folder discovery completed for library: {}", library_id);
+
+        info!(
+            "Immediate folder discovery completed for library: {}",
+            library_id
+        );
         Ok(())
     }
-    
+
     /// Run a single inventory cycle for all libraries
     async fn run_inventory_cycle(&self) -> Result<()> {
         let libraries = self.libraries.read().await.clone();
-        
+
         info!("Running inventory cycle for {} libraries", libraries.len());
-        
+
         for library in libraries {
             if !library.enabled {
-                debug!("Skipping disabled library: {} (ID: {})", library.name, library.id);
+                debug!(
+                    "Skipping disabled library: {} (ID: {})",
+                    library.name, library.id
+                );
                 continue;
             }
-            
-            info!("Starting folder inventory update for library: {} (ID: {}, Type: {:?})", 
-                library.name, library.id, library.library_type);
-            
+
+            info!(
+                "Starting folder inventory update for library: {} (ID: {}, Type: {:?})",
+                library.name, library.id, library.library_type
+            );
+
             if let Err(e) = self.update_library_inventory(&library).await {
-                error!("Failed to update inventory for library {} (ID: {}): {}", 
-                    library.name, library.id, e);
+                error!(
+                    "Failed to update inventory for library {} (ID: {}): {}",
+                    library.name, library.id, e
+                );
             } else {
-                info!("Successfully updated inventory for library: {} (ID: {})", 
-                    library.name, library.id);
+                info!(
+                    "Successfully updated inventory for library: {} (ID: {})",
+                    library.name, library.id
+                );
             }
-            
+
             // Process folders needing scan
             if let Err(e) = self.process_pending_folders(&library).await {
-                error!("Failed to process pending folders for library {} (ID: {}): {}", 
-                    library.name, library.id, e);
+                error!(
+                    "Failed to process pending folders for library {} (ID: {}): {}",
+                    library.name, library.id, e
+                );
             }
-            
+
             // Cleanup stale folders
             if let Err(e) = self.cleanup_stale_folders(&library).await {
-                error!("Failed to cleanup stale folders for library {} (ID: {}): {}", 
-                    library.name, library.id, e);
+                error!(
+                    "Failed to cleanup stale folders for library {} (ID: {}): {}",
+                    library.name, library.id, e
+                );
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Update folder inventory for a specific library
     async fn update_library_inventory(&self, library: &Library) -> Result<()> {
         // First, ensure the library exists in the database
@@ -169,28 +196,44 @@ impl FolderMonitor {
         match self.database.get_library(&library_id_str).await {
             Ok(Some(_)) => {
                 // Library exists, proceed with inventory
-                debug!("Library {} exists in database, updating inventory", library.name);
-            },
+                debug!(
+                    "Library {} exists in database, updating inventory",
+                    library.name
+                );
+            }
             Ok(None) => {
                 // Library doesn't exist, create it first
-                info!("Library {} not found in database, creating it first", library.name);
-                self.database.create_library(library.clone()).await
-                    .map_err(|e| MediaError::Internal(format!("Failed to create library {}: {}", library.name, e)))?;
+                info!(
+                    "Library {} not found in database, creating it first",
+                    library.name
+                );
+                self.database
+                    .create_library(library.clone())
+                    .await
+                    .map_err(|e| {
+                        MediaError::Internal(format!(
+                            "Failed to create library {}: {}",
+                            library.name, e
+                        ))
+                    })?;
                 info!("Library {} created successfully", library.name);
-            },
+            }
             Err(e) => {
                 error!("Failed to check library {} existence: {}", library.name, e);
-                return Err(MediaError::Internal(format!("Failed to check library existence: {}", e)));
+                return Err(MediaError::Internal(format!(
+                    "Failed to check library existence: {}",
+                    e
+                )));
             }
         }
-        
+
         // Now proceed with inventory update
         match library.library_type {
             LibraryType::Movies => self.inventory_movie_folders(library).await,
             LibraryType::TvShows => self.inventory_tv_folders(library).await,
         }
     }
-    
+
     /// Inventory movie folders in the library
     async fn inventory_movie_folders(&self, library: &Library) -> Result<()> {
         for path in &library.paths {
@@ -198,101 +241,132 @@ impl FolderMonitor {
                 warn!("Library path does not exist: {}", path.display());
                 continue;
             }
-            
-            // Traverse and inventory movie folders (root folder will be created by traverse)
-            self.traverse_movie_directory(library.id, path, None).await?;
+
+            let traverse_folder = if let Ok(Some(mut folder)) =
+                self.database.get_folder_by_path(library.id, path).await
+            {
+                folder.last_seen_at = Utc::now();
+
+                if let Some(_next_retry_at) = folder.next_retry_at {
+                    true
+                } else {
+                    self.database.upsert_folder(&folder).await?;
+                    false
+                }
+            } else {
+                true
+            };
+
+            if traverse_folder {
+                // Traverse and inventory movie folders (root folder will be created by traverse)
+                self.traverse_movie_directory(library.id, path, None)
+                    .await?;
+            }
         }
-        
+
         Ok(())
     }
-    
+
     /// Traverse a directory and inventory movie folders
-    fn traverse_movie_directory<'a>(&'a self, library_id: Uuid, dir: &'a Path, parent_id: Option<Uuid>) 
-        -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    fn traverse_movie_directory<'a>(
+        &'a self,
+        library_id: Uuid,
+        dir: &'a Path,
+        parent_id: Option<Uuid>,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
-        let entries = tokio::fs::read_dir(dir).await
-            .map_err(|e| MediaError::Internal(format!("Failed to read directory {:?}: {}", dir, e)))?;
-        
-        let mut entries = entries;
-        let mut video_files = Vec::new();
-        let mut subdirs = Vec::new();
-        
-        while let Some(entry) = entries.next_entry().await
-            .map_err(|e| MediaError::Internal(format!("Failed to read entry: {}", e)))? {
-            
-            let path = entry.path();
-            let metadata = entry.metadata().await
-                .map_err(|e| MediaError::Internal(format!("Failed to get metadata: {}", e)))?;
-            
-            if metadata.is_dir() {
-                subdirs.push(path);
-            } else if metadata.is_file() {
-                if let Some(ext) = path.extension() {
-                    let ext_str = ext.to_string_lossy().to_lowercase();
-                    if is_video_extension(&ext_str) {
-                        video_files.push((path, metadata.len()));
+            let entries = tokio::fs::read_dir(dir).await.map_err(|e| {
+                MediaError::Internal(format!("Failed to read directory {:?}: {}", dir, e))
+            })?;
+
+            let mut entries = entries;
+            let mut video_files = Vec::new();
+            let mut subdirs = Vec::new();
+
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .map_err(|e| MediaError::Internal(format!("Failed to read entry: {}", e)))?
+            {
+                let path = entry.path();
+                let metadata = entry
+                    .metadata()
+                    .await
+                    .map_err(|e| MediaError::Internal(format!("Failed to get metadata: {}", e)))?;
+
+                if metadata.is_dir() {
+                    subdirs.push(path);
+                } else if metadata.is_file() {
+                    if let Some(ext) = path.extension() {
+                        let ext_str = ext.to_string_lossy().to_lowercase();
+                        if is_video_extension(&ext_str) {
+                            video_files.push((path, metadata.len()));
+                        }
                     }
                 }
             }
-        }
-        
-        // Determine folder type based on content
-        let folder_type = if !video_files.is_empty() {
-            FolderType::Movie
-        } else if subdirs.len() > 0 {
-            FolderType::Unknown // Will be determined by subdirectory content
-        } else {
-            FolderType::Extra
-        };
-        
-        // Create folder inventory entry for this directory
-        // We create an entry for any directory that has content or subdirectories
-        let total_size: i64 = video_files.iter().map(|(_, size)| *size as i64).sum();
-        let file_types: HashSet<String> = video_files.iter()
-            .filter_map(|(path, _)| path.extension())
-            .map(|ext| ext.to_string_lossy().to_lowercase())
-            .collect();
-        
-        let folder_inventory = FolderInventory {
-            id: Uuid::new_v4(),
-            library_id,
-            folder_path: dir.to_string_lossy().to_string(),
-            folder_type,
-            parent_folder_id: parent_id,
-            discovered_at: Utc::now(),
-            last_seen_at: Utc::now(),
-            discovery_source: FolderDiscoverySource::Scan,
-            processing_status: FolderProcessingStatus::Pending,
-            last_processed_at: None,
-            processing_error: None,
-            processing_attempts: 0,
-            next_retry_at: None,
-            total_files: video_files.len() as i32,
-            processed_files: 0,
-            total_size_bytes: total_size,
-            file_types: file_types.into_iter().collect(),
-            last_modified: None,
-            metadata: serde_json::json!({
-                "subdirectory_count": subdirs.len(),
-                "video_file_count": video_files.len()
-            }),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-        
-        let folder_id = self.database.upsert_folder(&folder_inventory).await?;
-        
-        // Always recursively traverse subdirectories
-        for subdir in subdirs {
-            if let Err(e) = self.traverse_movie_directory(library_id, &subdir, Some(folder_id)).await {
-                warn!("Failed to traverse subdirectory {:?}: {}", subdir, e);
+
+            // Determine folder type based on content
+            let folder_type = if !video_files.is_empty() {
+                FolderType::Movie
+            } else if subdirs.len() > 0 {
+                FolderType::Unknown // Will be determined by subdirectory content
+            } else {
+                FolderType::Extra
+            };
+
+            // Create folder inventory entry for this directory
+            // We create an entry for any directory that has content or subdirectories
+            let total_size: i64 = video_files.iter().map(|(_, size)| *size as i64).sum();
+            let file_types: HashSet<String> = video_files
+                .iter()
+                .filter_map(|(path, _)| path.extension())
+                .map(|ext| ext.to_string_lossy().to_lowercase())
+                .collect();
+
+            let folder_inventory = FolderInventory {
+                id: Uuid::now_v7(),
+                library_id,
+                folder_path: dir.to_string_lossy().to_string(),
+                folder_type,
+                parent_folder_id: parent_id,
+                discovered_at: Utc::now(),
+                last_seen_at: Utc::now(),
+                discovery_source: FolderDiscoverySource::Scan,
+                processing_status: FolderProcessingStatus::Pending,
+                last_processed_at: None,
+                processing_error: None,
+                processing_attempts: 0,
+                next_retry_at: None,
+                total_files: video_files.len() as i32,
+                processed_files: 0,
+                total_size_bytes: total_size,
+                file_types: file_types.into_iter().collect(),
+                last_modified: None,
+                metadata: serde_json::json!({
+                    "subdirectory_count": subdirs.len(),
+                    "video_file_count": video_files.len()
+                }),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+
+            let folder_id = self.database.upsert_folder(&folder_inventory).await?;
+
+            // Always recursively traverse subdirectories
+            for subdir in subdirs {
+                if let Err(e) = self
+                    .traverse_movie_directory(library_id, &subdir, Some(folder_id))
+                    .await
+                {
+                    warn!("Failed to traverse subdirectory {:?}: {}", subdir, e);
+                }
             }
-        }
-        
-        Ok(())
+
+            Ok(())
         })
     }
-    
+
     /// Inventory TV show folders in the library
     async fn inventory_tv_folders(&self, library: &Library) -> Result<()> {
         for path in &library.paths {
@@ -300,111 +374,124 @@ impl FolderMonitor {
                 warn!("Library path does not exist: {}", path.display());
                 continue;
             }
-            
+
             // Traverse and inventory TV show folders (root folder will be created by traverse)
-            self.traverse_tv_directory(library.id, path, None, 0).await?;
+            self.traverse_tv_directory(library.id, path, None, 0)
+                .await?;
         }
-        
+
         Ok(())
     }
-    
+
     /// Traverse a directory and inventory TV show folders
-    fn traverse_tv_directory<'a>(&'a self, library_id: Uuid, dir: &'a Path, parent_id: Option<Uuid>, depth: usize) 
-        -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    fn traverse_tv_directory<'a>(
+        &'a self,
+        library_id: Uuid,
+        dir: &'a Path,
+        parent_id: Option<Uuid>,
+        depth: usize,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
-        let entries = tokio::fs::read_dir(dir).await
-            .map_err(|e| MediaError::Internal(format!("Failed to read directory {:?}: {}", dir, e)))?;
-        
-        let mut entries = entries;
-        let mut video_files = Vec::new();
-        let mut subdirs = Vec::new();
-        
-        while let Some(entry) = entries.next_entry().await
-            .map_err(|e| MediaError::Internal(format!("Failed to read entry: {}", e)))? {
-            
-            let path = entry.path();
-            let metadata = entry.metadata().await
-                .map_err(|e| MediaError::Internal(format!("Failed to get metadata: {}", e)))?;
-            
-            if metadata.is_dir() {
-                subdirs.push(path);
-            } else if metadata.is_file() {
-                if let Some(ext) = path.extension() {
-                    let ext_str = ext.to_string_lossy().to_lowercase();
-                    if is_video_extension(&ext_str) {
-                        video_files.push((path, metadata.len()));
+            let entries = tokio::fs::read_dir(dir).await.map_err(|e| {
+                MediaError::Internal(format!("Failed to read directory {:?}: {}", dir, e))
+            })?;
+
+            let mut entries = entries;
+            let mut video_files = Vec::new();
+            let mut subdirs = Vec::new();
+
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .map_err(|e| MediaError::Internal(format!("Failed to read entry: {}", e)))?
+            {
+                let path = entry.path();
+                let metadata = entry
+                    .metadata()
+                    .await
+                    .map_err(|e| MediaError::Internal(format!("Failed to get metadata: {}", e)))?;
+
+                if metadata.is_dir() {
+                    subdirs.push(path);
+                } else if metadata.is_file() {
+                    if let Some(ext) = path.extension() {
+                        let ext_str = ext.to_string_lossy().to_lowercase();
+                        if is_video_extension(&ext_str) {
+                            video_files.push((path, metadata.len()));
+                        }
                     }
                 }
             }
-        }
-        
-        // Determine folder type based on depth and content
-        let folder_type = match depth {
-            0 => FolderType::Root,
-            1 => FolderType::TvShow,
-            2 => {
-                // Check if this is a season folder
-                let dir_name = dir.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("");
-                
-                if is_season_folder(dir_name) {
-                    FolderType::Season
-                } else {
-                    FolderType::Extra
+
+            // Determine folder type based on depth and content
+            let folder_type = match depth {
+                0 => FolderType::Root,
+                1 => FolderType::TvShow,
+                2 => {
+                    // Check if this is a season folder
+                    let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+                    if is_season_folder(dir_name) {
+                        FolderType::Season
+                    } else {
+                        FolderType::Extra
+                    }
+                }
+                _ => FolderType::Extra,
+            };
+
+            // Create folder inventory entry for this directory
+            let total_size: i64 = video_files.iter().map(|(_, size)| *size as i64).sum();
+            let file_types: HashSet<String> = video_files
+                .iter()
+                .filter_map(|(path, _)| path.extension())
+                .map(|ext| ext.to_string_lossy().to_lowercase())
+                .collect();
+
+            let folder_inventory = FolderInventory {
+                id: Uuid::new_v4(),
+                library_id,
+                folder_path: dir.to_string_lossy().to_string(),
+                folder_type,
+                parent_folder_id: parent_id,
+                discovered_at: Utc::now(),
+                last_seen_at: Utc::now(),
+                discovery_source: FolderDiscoverySource::Scan,
+                processing_status: FolderProcessingStatus::Pending,
+                last_processed_at: None,
+                processing_error: None,
+                processing_attempts: 0,
+                next_retry_at: None,
+                total_files: video_files.len() as i32,
+                processed_files: 0,
+                total_size_bytes: total_size,
+                file_types: file_types.into_iter().collect(),
+                last_modified: None,
+                metadata: serde_json::json!({
+                    "depth": depth,
+                    "subdirectory_count": subdirs.len(),
+                    "video_file_count": video_files.len()
+                }),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+
+            let folder_id = self.database.upsert_folder(&folder_inventory).await?;
+
+            // Always recursively traverse subdirectories
+            for subdir in subdirs {
+                if let Err(e) = self
+                    .traverse_tv_directory(library_id, &subdir, Some(folder_id), depth + 1)
+                    .await
+                {
+                    warn!("Failed to traverse subdirectory {:?}: {}", subdir, e);
                 }
             }
-            _ => FolderType::Extra,
-        };
-        
-        // Create folder inventory entry for this directory
-        let total_size: i64 = video_files.iter().map(|(_, size)| *size as i64).sum();
-        let file_types: HashSet<String> = video_files.iter()
-            .filter_map(|(path, _)| path.extension())
-            .map(|ext| ext.to_string_lossy().to_lowercase())
-            .collect();
-        
-        let folder_inventory = FolderInventory {
-            id: Uuid::new_v4(),
-            library_id,
-            folder_path: dir.to_string_lossy().to_string(),
-            folder_type,
-            parent_folder_id: parent_id,
-            discovered_at: Utc::now(),
-            last_seen_at: Utc::now(),
-            discovery_source: FolderDiscoverySource::Scan,
-            processing_status: FolderProcessingStatus::Pending,
-            last_processed_at: None,
-            processing_error: None,
-            processing_attempts: 0,
-            next_retry_at: None,
-            total_files: video_files.len() as i32,
-            processed_files: 0,
-            total_size_bytes: total_size,
-            file_types: file_types.into_iter().collect(),
-            last_modified: None,
-            metadata: serde_json::json!({
-                "depth": depth,
-                "subdirectory_count": subdirs.len(),
-                "video_file_count": video_files.len()
-            }),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-        
-        let folder_id = self.database.upsert_folder(&folder_inventory).await?;
-        
-        // Always recursively traverse subdirectories
-        for subdir in subdirs {
-            if let Err(e) = self.traverse_tv_directory(library_id, &subdir, Some(folder_id), depth + 1).await {
-                warn!("Failed to traverse subdirectory {:?}: {}", subdir, e);
-            }
-        }
-        
-        Ok(())
+
+            Ok(())
         })
     }
-    
+
     /// Process folders that need scanning
     async fn process_pending_folders(&self, library: &Library) -> Result<()> {
         let filters = FolderScanFilters {
@@ -418,61 +505,85 @@ impl FolderMonitor {
             max_batch_size: Some(self.config.batch_size),
             error_retry_threshold: Some(self.config.error_retry_threshold),
         };
-        
+
         let folders = self.database.get_folders_needing_scan(&filters).await?;
-        
-        info!("Found {} folders needing scan in library {}", folders.len(), library.name);
-        
+
+        info!(
+            "Found {} folders needing scan in library {}",
+            folders.len(),
+            library.name
+        );
+
         for folder in folders {
             debug!("Processing folder: {}", folder.folder_path);
-            
+
             // Mark as processing
-            self.database.update_folder_status(
-                folder.id,
-                FolderProcessingStatus::Processing,
-                None
-            ).await?;
-            
+            self.database
+                .update_folder_status(folder.id, FolderProcessingStatus::Processing, None)
+                .await?;
+
             // Here you would typically trigger the actual media scanning for this folder
             // For now, we'll just mark it as completed
             // In a real implementation, this would integrate with the existing scanner
-            
+
             self.database.mark_folder_processed(folder.id).await?;
         }
-        
+
         Ok(())
     }
-    
+
     /// Cleanup stale folders that haven't been seen recently
     async fn cleanup_stale_folders(&self, library: &Library) -> Result<()> {
-        let deleted_count = self.database.cleanup_stale_folders(
-            library.id,
-            self.config.stale_folder_hours
-        ).await?;
-        
+        let deleted_count = self
+            .database
+            .cleanup_stale_folders(library.id, self.config.stale_folder_hours)
+            .await?;
+
         if deleted_count > 0 {
-            info!("Cleaned up {} stale folders from library {}", deleted_count, library.name);
+            info!(
+                "Cleaned up {} stale folders from library {}",
+                deleted_count, library.name
+            );
         }
-        
+
         Ok(())
     }
 }
 
 /// Check if a file extension is a video format
 fn is_video_extension(ext: &str) -> bool {
-    matches!(ext,
-        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" |
-        "m4v" | "mpg" | "mpeg" | "3gp" | "ogv" | "ts" | "m2ts" |
-        "mts" | "vob" | "divx" | "xvid" | "rmvb" | "rm" | "asf"
+    matches!(
+        ext,
+        "mp4"
+            | "mkv"
+            | "avi"
+            | "mov"
+            | "wmv"
+            | "flv"
+            | "webm"
+            | "m4v"
+            | "mpg"
+            | "mpeg"
+            | "3gp"
+            | "ogv"
+            | "ts"
+            | "m2ts"
+            | "mts"
+            | "vob"
+            | "divx"
+            | "xvid"
+            | "rmvb"
+            | "rm"
+            | "asf"
     )
 }
 
 /// Check if a folder name indicates a season folder
 fn is_season_folder(name: &str) -> bool {
     let lower = name.to_lowercase();
-    lower.starts_with("season") || 
-    lower.starts_with("s0") || 
-    lower.starts_with("s1") ||
-    lower.starts_with("series") ||
-    lower == "specials"
+    lower.starts_with("season")
+        || lower.starts_with("s0")
+        || lower.starts_with("s1")
+        || lower.starts_with("series")
+        || lower == "specials"
 }

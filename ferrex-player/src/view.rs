@@ -65,7 +65,7 @@ pub fn view(state: &State) -> Element<DomainMessage> {
             view_movie_detail(state, movie).map(DomainMessage::from)
         }
         ViewState::TvShowDetail { series_id, .. } => {
-            view_tv_show_detail(state, series_id.as_str()).map(DomainMessage::from)
+            view_tv_show_detail(state, series_id).map(DomainMessage::from)
         }
         ViewState::SeasonDetail {
             series_id,

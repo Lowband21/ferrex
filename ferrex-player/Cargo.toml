@@ -134,6 +134,7 @@ memory-stats = { version = "1.2", optional = true }
 default = []
 keyring = ["dep:keyring"]
 testing = []
+external-mpv-player = []
 
 # Profiling features (zero-cost when disabled)
 profile-with-puffin = [

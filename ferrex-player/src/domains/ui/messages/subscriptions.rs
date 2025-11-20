@@ -14,13 +14,11 @@ use iced::Subscription;
 pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let mut subscriptions = vec![];
 
-    // Always subscribe to window resize events
     subscriptions.push(
         iced::window::resize_events()
             .map(|(_id, size)| DomainMessage::Ui(Message::WindowResized(size))),
     );
 
-    // Animation transitions subscription
     if state
         .domains
         .ui

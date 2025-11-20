@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::fs;
 use tracing::{info, warn};
+use uuid::Uuid;
 
 /// Cache manager for transcoded content
 pub struct CacheManager {
@@ -74,7 +75,10 @@ impl CacheManager {
     }
 
     /// Get directory statistics
-    fn get_dir_stats<'a>(&'a self, dir: &'a Path) -> BoxFuture<'a, Result<(u64, usize, Option<SystemTime>)>> {
+    fn get_dir_stats<'a>(
+        &'a self,
+        dir: &'a Path,
+    ) -> BoxFuture<'a, Result<(u64, usize, Option<SystemTime>)>> {
         let dir = dir.to_path_buf();
         Box::pin(async move {
             let mut total_size = 0u64;
@@ -82,15 +86,29 @@ impl CacheManager {
             let mut oldest_modified = None;
 
             let mut entries = fs::read_dir(&dir).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            
-            if path.is_file() {
-                if let Ok(metadata) = entry.metadata().await {
-                    total_size += metadata.len();
-                    file_count += 1;
-                    
-                    if let Ok(modified) = metadata.modified() {
+            while let Some(entry) = entries.next_entry().await? {
+                let path = entry.path();
+
+                if path.is_file() {
+                    if let Ok(metadata) = entry.metadata().await {
+                        total_size += metadata.len();
+                        file_count += 1;
+
+                        if let Ok(modified) = metadata.modified() {
+                            match oldest_modified {
+                                None => oldest_modified = Some(modified),
+                                Some(current) if modified < current => {
+                                    oldest_modified = Some(modified)
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                } else if path.is_dir() {
+                    let sub_stats = self.get_dir_stats(&path).await?;
+                    total_size += sub_stats.0;
+                    file_count += sub_stats.1;
+                    if let Some(modified) = sub_stats.2 {
                         match oldest_modified {
                             None => oldest_modified = Some(modified),
                             Some(current) if modified < current => oldest_modified = Some(modified),
@@ -98,19 +116,7 @@ impl CacheManager {
                         }
                     }
                 }
-            } else if path.is_dir() {
-                let sub_stats = self.get_dir_stats(&path).await?;
-                total_size += sub_stats.0;
-                file_count += sub_stats.1;
-                if let Some(modified) = sub_stats.2 {
-                    match oldest_modified {
-                        None => oldest_modified = Some(modified),
-                        Some(current) if modified < current => oldest_modified = Some(modified),
-                        _ => {}
-                    }
-                }
             }
-        }
 
             Ok((total_size, file_count, oldest_modified))
         })
@@ -119,18 +125,18 @@ impl CacheManager {
     /// Clean up cache based on size and age constraints
     pub async fn cleanup(&self) -> Result<CleanupResult> {
         info!("Starting cache cleanup");
-        
+
         let entries = self.collect_cache_entries().await?;
         let total_size: u64 = entries.iter().map(|e| e.size).sum();
         let max_size_bytes = self.max_size_mb * 1_048_576;
-        
+
         let mut removed_count = 0;
         let mut removed_size = 0u64;
-        
+
         // Remove old files first
         let max_age = Duration::from_secs(self.max_age_days as u64 * 86400);
         let now = SystemTime::now();
-        
+
         for entry in &entries {
             if let Ok(age) = now.duration_since(entry.modified) {
                 if age > max_age {
@@ -143,24 +149,24 @@ impl CacheManager {
                 }
             }
         }
-        
+
         // If still over size limit, remove oldest files
         if total_size - removed_size > max_size_bytes {
             let mut sorted_entries = entries.clone();
             sorted_entries.sort_by_key(|e| e.modified);
-            
+
             let mut current_size = total_size - removed_size;
-            
+
             for entry in sorted_entries {
                 if current_size <= max_size_bytes {
                     break;
                 }
-                
+
                 // Skip if already removed
                 if !entry.path.exists() {
                     continue;
                 }
-                
+
                 if let Err(e) = self.remove_entry(&entry.path).await {
                     warn!("Failed to remove cache entry: {}", e);
                 } else {
@@ -170,13 +176,13 @@ impl CacheManager {
                 }
             }
         }
-        
+
         info!(
             "Cache cleanup completed: removed {} files, freed {:.2} MB",
             removed_count,
             removed_size as f64 / 1_048_576.0
         );
-        
+
         Ok(CleanupResult {
             removed_count,
             removed_size_mb: removed_size as f64 / 1_048_576.0,
@@ -186,7 +192,8 @@ impl CacheManager {
     /// Collect all cache entries
     async fn collect_cache_entries(&self) -> Result<Vec<CacheEntry>> {
         let mut entries = Vec::new();
-        self.collect_entries_recursive(&self.cache_dir, &mut entries).await?;
+        self.collect_entries_recursive(&self.cache_dir, &mut entries)
+            .await?;
         Ok(entries)
     }
 
@@ -198,10 +205,10 @@ impl CacheManager {
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let mut dir_entries = fs::read_dir(dir).await?;
-            
+
             while let Some(entry) = dir_entries.next_entry().await? {
                 let path = entry.path();
-                
+
                 if path.is_file() {
                     if let Ok(metadata) = entry.metadata().await {
                         if let Ok(modified) = metadata.modified() {
@@ -216,7 +223,7 @@ impl CacheManager {
                     self.collect_entries_recursive(&path, entries).await?;
                 }
             }
-            
+
             Ok(())
         })
     }
@@ -224,11 +231,15 @@ impl CacheManager {
     /// Remove a cache entry (file or directory)
     async fn remove_entry(&self, path: &Path) -> Result<()> {
         if path.is_file() {
-            fs::remove_file(path).await.context("Failed to remove file")?;
+            fs::remove_file(path)
+                .await
+                .context("Failed to remove file")?;
         } else if path.is_dir() {
-            fs::remove_dir_all(path).await.context("Failed to remove directory")?;
+            fs::remove_dir_all(path)
+                .await
+                .context("Failed to remove directory")?;
         }
-        
+
         // Try to remove empty parent directories
         if let Some(parent) = path.parent() {
             if parent != self.cache_dir {
@@ -239,14 +250,14 @@ impl CacheManager {
                 }
             }
         }
-        
+
         Ok(())
     }
 
     /// Clear entire cache
     pub async fn clear(&self) -> Result<()> {
         info!("Clearing entire cache");
-        
+
         let mut entries = fs::read_dir(&self.cache_dir).await?;
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
@@ -256,14 +267,14 @@ impl CacheManager {
                 fs::remove_file(path).await?;
             }
         }
-        
+
         info!("Cache cleared");
         Ok(())
     }
 
     /// Get cache path for a specific media and profile
     pub fn get_cache_path(&self, media_id: &str, profile_name: &str) -> PathBuf {
-        self.cache_dir.join(media_id).join(profile_name)
+        self.cache_dir.join(media_id.to_string()).join(profile_name)
     }
 
     /// Check if cached version exists
@@ -274,17 +285,13 @@ impl CacheManager {
     }
 
     /// Remove cached version for specific media and profile
-    pub async fn remove_cached_version(
-        &self,
-        media_id: &str,
-        profile_name: &str,
-    ) -> Result<()> {
+    pub async fn remove_cached_version(&self, media_id: &str, profile_name: &str) -> Result<()> {
         let cache_path = self.get_cache_path(media_id, profile_name);
         if cache_path.exists() {
             fs::remove_dir_all(cache_path).await?;
-            
+
             // Try to remove media directory if empty
-            let media_dir = self.cache_dir.join(media_id);
+            let media_dir = self.cache_dir.join(PathBuf::from(media_id.to_string()));
             if let Ok(mut entries) = fs::read_dir(&media_dir).await {
                 if entries.next_entry().await?.is_none() {
                     let _ = fs::remove_dir(media_dir).await;
@@ -316,10 +323,10 @@ impl CacheCleaner {
     pub fn start(self) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(self.interval);
-            
+
             loop {
                 interval.tick().await;
-                
+
                 if let Err(e) = self.manager.cleanup().await {
                     warn!("Cache cleanup failed: {}", e);
                 }

@@ -1,3 +1,4 @@
+use crate::api_types::{MovieID, SeriesID};
 use crate::media::*;
 use crate::LibraryType;
 use serde::{Deserialize, Serialize};
@@ -19,11 +20,11 @@ pub enum LibraryMediaCache {
         references: Vec<MovieReference>,
     },
     TvShows {
-        series_references: HashMap<String, SeriesReference>,
+        series_references: HashMap<Uuid, SeriesReference>,
         series_references_sorted: Vec<SeriesReference>,
         series_indices_sorted: Vec<String>,
-        season_references: HashMap<String, Vec<SeasonReference>>,
-        episode_references: HashMap<String, Vec<EpisodeReference>>,
+        season_references: HashMap<Uuid, Vec<SeasonReference>>,
+        episode_references: HashMap<Uuid, Vec<EpisodeReference>>,
     },
 }
 
@@ -55,13 +56,75 @@ impl LibraryMediaCache {
 
 // ===== Media Fetch Types =====
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Copy)]
 pub enum MediaId {
     Movie(MovieID),
     Series(SeriesID),
     Season(SeasonID),
     Episode(EpisodeID),
     Person(PersonID),
+}
+
+impl MediaId {
+    pub fn as_str(&self) -> String {
+        match &self {
+            MediaId::Movie(movie_id) => movie_id.as_str(),
+            MediaId::Series(series_id) => series_id.as_str(),
+            MediaId::Season(season_id) => season_id.as_str(),
+            MediaId::Episode(episode_id) => episode_id.as_str(),
+            MediaId::Person(person_id) => person_id.as_str(),
+        }
+    }
+
+    pub fn as_ref(&self) -> &Uuid {
+        match &self {
+            MediaId::Movie(movie_id) => movie_id.as_ref(),
+            MediaId::Series(series_id) => series_id.as_ref(),
+            MediaId::Season(season_id) => season_id.as_ref(),
+            MediaId::Episode(episode_id) => episode_id.as_ref(),
+            MediaId::Person(person_id) => person_id.as_ref(),
+        }
+    }
+
+    pub fn as_uuid(&self) -> Uuid {
+        match &self {
+            MediaId::Movie(movie_id) => movie_id.as_uuid(),
+            MediaId::Series(series_id) => series_id.as_uuid(),
+            MediaId::Season(season_id) => season_id.as_uuid(),
+            MediaId::Episode(episode_id) => episode_id.as_uuid(),
+            MediaId::Person(person_id) => person_id.as_uuid(),
+        }
+    }
+
+    pub fn sub_eq(&self, other: &MediaId) -> bool {
+        match (self, other) {
+            (MediaId::Movie(a), MediaId::Movie(b)) => a == b,
+            (MediaId::Series(a), MediaId::Series(b)) => a == b,
+            (MediaId::Season(a), MediaId::Season(b)) => a == b,
+            (MediaId::Episode(a), MediaId::Episode(b)) => a == b,
+            (MediaId::Person(a), MediaId::Person(b)) => a == b,
+            _ => false,
+        }
+    }
+
+    pub fn eq_movie(&self, other: &MovieID) -> bool {
+        match (self, other) {
+            (MediaId::Movie(MovieID(a)), MovieID(b)) => a == b,
+            _ => false,
+        }
+    }
+    pub fn eq_series(&self, other: &SeriesID) -> bool {
+        match (self, other) {
+            (MediaId::Series(SeriesID(a)), SeriesID(b)) => a == b,
+            _ => false,
+        }
+    }
+    pub fn eq_episode(&self, other: &EpisodeID) -> bool {
+        match (self, other) {
+            (MediaId::Episode(EpisodeID(a)), EpisodeID(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl std::fmt::Display for MediaId {
@@ -234,7 +297,7 @@ pub enum MediaEvent {
 
     // Delete events
     MediaDeleted {
-        id: String, // File ID - we don't know the media type at deletion time
+        id: MediaId,
     },
 
     // Scan events

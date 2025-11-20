@@ -236,6 +236,78 @@ impl ApiClient {
         let request = self.build_request(request).await;
         self.execute_request(request).await
     }
+    
+    /// POST request for endpoints that return 204 No Content
+    pub async fn post_no_content<T: Serialize>(&self, path: &str, body: &T) -> Result<()> {
+        let url = if path.starts_with("/api/") {
+            // For paths that already include /api/, use versioned URL
+            self.build_url(path.strip_prefix("/api/").unwrap())
+        } else {
+            // For other paths, use legacy URL
+            format!("{}{}", self.base_url, path)
+        };
+        
+        let request = self.client.post(&url).json(body);
+        let request = self.build_request(request).await;
+        
+        // Execute request with special handling for 204 No Content
+        let request_clone = request.try_clone();
+        let response = request.send().await?;
+        
+        match response.status() {
+            StatusCode::OK | StatusCode::NO_CONTENT => Ok(()),
+            StatusCode::UNAUTHORIZED => {
+                // Try to refresh token if we have a callback
+                if let Some(request_retry) = request_clone {
+                    if let Some(ref callback) = *self.refresh_callback.lock().await {
+                        info!("[ApiClient] Token expired, attempting refresh");
+                        match callback().await {
+                            Ok(new_token) => {
+                                info!("[ApiClient] Token refreshed successfully, retrying request");
+                                self.set_token(Some(new_token.clone())).await;
+                                
+                                // Rebuild request with new token and retry
+                                let retry_request = self.build_request(request_retry).await;
+                                let retry_response = retry_request.send().await?;
+                                
+                                match retry_response.status() {
+                                    StatusCode::OK | StatusCode::NO_CONTENT => return Ok(()),
+                                    _ => {
+                                        let error_text = retry_response
+                                            .text()
+                                            .await
+                                            .unwrap_or_else(|_| "Unknown error".to_string());
+                                        return Err(anyhow::anyhow!(
+                                            "Request failed after retry: {}",
+                                            error_text
+                                        ));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("[ApiClient] Token refresh failed: {}", e);
+                            }
+                        }
+                    }
+                }
+                
+                // Token refresh failed or not available
+                self.set_token(None).await;
+                Err(anyhow::anyhow!("Unauthorized - please login again"))
+            }
+            status => {
+                let error_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                Err(anyhow::anyhow!(
+                    "Request failed with status {}: {}",
+                    status,
+                    error_text
+                ))
+            }
+        }
+    }
 
     /// GET request with authentication
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
@@ -312,8 +384,8 @@ impl ApiClient {
 
     /// Update watch progress for a media item
     pub async fn update_progress(&self, request: &UpdateProgressRequest) -> Result<()> {
-        let _: serde_json::Value = self.post("/api/watch/progress", request).await?;
-        Ok(())
+        // This endpoint returns 204 No Content, so we need special handling
+        self.post_no_content("/api/watch/progress", request).await
     }
 
     /// Create initial admin user during setup
