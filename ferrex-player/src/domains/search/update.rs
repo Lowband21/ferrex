@@ -1,6 +1,8 @@
 //! Search domain update logic
 
 use iced::Task;
+use iced::widget::Id;
+use iced::widget::operation::focus;
 use std::time::Instant;
 
 use super::messages::Message;
@@ -26,10 +28,8 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
                 DomainUpdateResult::task(Task::none())
             } else {
                 // Keep focus on search input and debounce the search
-                use iced::widget::text_input;
                 DomainUpdateResult::task(Task::batch(vec![
-                    text_input::focus::<DomainMessage>(text_input::Id::new("search-input"))
-                        .map(|_| DomainMessage::NoOp),
+                    focus::<DomainMessage>(Id::new("search-input")).map(|_| DomainMessage::NoOp),
                     Task::perform(
                         async move {
                             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -138,10 +138,8 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
                 }
 
                 // Keep focus on search input when results arrive
-                use iced::widget::text_input;
                 DomainUpdateResult::task(Task::batch(vec![
-                    text_input::focus::<DomainMessage>(text_input::Id::new("search-input"))
-                        .map(|_| DomainMessage::NoOp),
+                    focus::<DomainMessage>(Id::new("search-input")).map(|_| DomainMessage::NoOp),
                 ]))
             } else {
                 DomainUpdateResult::task(Task::none())

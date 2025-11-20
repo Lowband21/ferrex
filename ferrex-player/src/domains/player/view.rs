@@ -37,7 +37,7 @@ impl PlayerDomainState {
                         self.last_valid_position, self.last_valid_duration
                     ))
                     .size(18),
-                    Space::with_height(Length::Fixed(20.0)),
+                    Space::new().height(Length::Fixed(20.0)),
                     text("External player (MPV) is handling playback").size(14),
                     text("The app will restore when playback ends").size(14),
                 ]
@@ -86,9 +86,9 @@ impl PlayerDomainState {
             let player_with_settings: iced::Element<Message, Theme> = if self.show_settings {
                 let settings = self.settings_panel();
                 let positioned_settings = container(row![
-                    Space::with_width(Length::Fill),
+                    Space::new().width(Length::Fill),
                     container(settings).style(theme::container_settings_panel_wrapper),
-                    Space::with_width(Length::Fixed(80.0)), // Offset from right edge
+                    Space::new().width(Length::Fixed(80.0)), // Offset from right edge
                 ])
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -149,7 +149,7 @@ impl PlayerDomainState {
             let loading_content = column![
                 // Static loading icon for now - can be animated later
                 text("⟳").size(64), // Using a refresh/loading unicode symbol
-                Space::with_height(Length::Fixed(20.0)),
+                Space::new().height(Length::Fixed(20.0)),
                 text("Loading video...")
                     .size(18)
                     .color(iced::Color::from_rgb(0.7, 0.7, 0.7)),
@@ -251,9 +251,9 @@ impl PlayerDomainState {
     fn quality_menu_overlay(&self) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
         // Position the menu near the quality button (bottom right)
         container(row![
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             container(self.build_quality_menu()).style(theme::container_subtitle_menu_wrapper),
-            Space::with_width(Length::Fixed(200.0)), // Offset from right edge
+            Space::new().width(Length::Fixed(200.0)), // Offset from right edge
         ])
         .width(Length::Fill)
         .height(Length::Fill)
@@ -270,9 +270,9 @@ impl PlayerDomainState {
     fn subtitle_menu_overlay(&self) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
         // Position the menu near the subtitle button (bottom right)
         container(row![
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             container(self.build_subtitle_menu()).style(theme::container_subtitle_menu_wrapper),
-            Space::with_width(Length::Fixed(100.0)), // Offset from right edge
+            Space::new().width(Length::Fixed(100.0)), // Offset from right edge
         ])
         .width(Length::Fill)
         .height(Length::Fill)

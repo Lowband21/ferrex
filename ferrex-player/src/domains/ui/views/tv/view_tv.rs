@@ -68,7 +68,7 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
                             text("Media Not Found")
                                 .size(24)
                                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                            Space::with_height(10),
+                            Space::new().height(10),
                             text("Repository error:")
                                 .size(16)
                                 .color(theme::MediaServerTheme::TEXT_SUBDUED),
@@ -102,7 +102,7 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
         .state
         .background_shader_state
         .calculate_content_offset_with_height(window_width, window_height);
-    content = content.push(Space::with_height(Length::Fixed(content_offset)));
+    content = content.push(Space::new().height(Length::Fixed(content_offset)));
 
     // Details column
     let mut details = column![].spacing(15).padding(20).width(Length::Fill);
@@ -284,7 +284,7 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
             button(
                 row![
                     icon_text(Icon::Play),
-                    Space::with_width(8),
+                    Space::new().width(8),
                     text(primary_label).size(16)
                 ]
                 .align_y(iced::Alignment::Center),
@@ -318,7 +318,7 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
                     button(
                         row![
                             icon_text(Icon::SkipBack),
-                            Space::with_width(8),
+                            Space::new().width(8),
                             text("Play from Beginning").size(16)
                         ]
                         .align_y(iced::Alignment::Center),
@@ -349,7 +349,7 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
             button(
                 row![
                     icon_text(Icon::Play),
-                    Space::with_width(8),
+                    Space::new().width(8),
                     text("Play").size(16)
                 ]
                 .align_y(iced::Alignment::Center),
@@ -379,13 +379,13 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
 
     // Add button row if we have buttons
     if !buttons.is_empty() {
-        details = details.push(Space::with_height(10));
+        details = details.push(Space::new().height(10));
         details = details.push(row(buttons).spacing(10).align_y(iced::Alignment::Center));
     }*/
 
     // Description
     if let Some(desc) = description {
-        details = details.push(Space::with_height(10));
+        details = details.push(Space::new().height(10));
         details = details.push(
             container(
                 text(desc.to_string())
@@ -417,7 +417,7 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
 
     // Seasons carousel - use the seasons we fetched above
     if !seasons.is_empty() {
-        content = content.push(Space::with_height(20));
+        content = content.push(Space::new().height(20));
 
         if let Some(carousel_state) = &state.domains.ui.state.show_seasons_carousel {
             // Build season cards lazily using windowed carousel with media_card!
@@ -548,7 +548,7 @@ pub fn view_season_detail<'a>(
                         text("Media Not Found")
                             .size(24)
                             .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                        Space::with_height(10),
+                        Space::new().height(10),
                         text("Repository error:")
                             .size(16)
                             .color(theme::MediaServerTheme::TEXT_SUBDUED),
@@ -577,7 +577,7 @@ pub fn view_season_detail<'a>(
         .state
         .background_shader_state
         .calculate_content_offset_with_height(window_width, window_height);
-    content = content.push(Space::with_height(Length::Fixed(content_offset)));
+    content = content.push(Space::new().height(Length::Fixed(content_offset)));
 
     // Poster element
     let mut poster = image_for(season.id.to_uuid())
@@ -620,7 +620,7 @@ pub fn view_season_detail<'a>(
     if let Some(season_details) = season.details()
         && let Some(desc) = season_details.overview.as_ref()
     {
-        details = details.push(Space::with_height(10));
+        details = details.push(Space::new().height(10));
         details = details.push(
             container(
                 text(desc.to_string())
@@ -649,7 +649,7 @@ pub fn view_season_detail<'a>(
         .unwrap_or_else(|_| Vec::new());
 
     if !episodes.is_empty() {
-        content = content.push(Space::with_height(20));
+        content = content.push(Space::new().height(20));
         if let Some(ep_cs) = &state.domains.ui.state.season_episodes_carousel {
             let eps_vec = episodes.clone();
             let ep_section = crate::domains::ui::views::carousel::windowed_media_carousel(
@@ -797,7 +797,7 @@ pub fn view_episode_detail<'a>(
                         text("Media Not Found")
                             .size(24)
                             .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                        Space::with_height(10),
+                        Space::new().height(10),
                         text("Repository error:")
                             .size(16)
                             .color(theme::MediaServerTheme::TEXT_SUBDUED),
@@ -826,7 +826,7 @@ pub fn view_episode_detail<'a>(
         .calculate_content_offset_with_height(window_width, window_height);
 
     let mut content = column![].spacing(20).padding(20);
-    content = content.push(Space::with_height(Length::Fixed(content_offset)));
+    content = content.push(Space::new().height(Length::Fixed(content_offset)));
 
     // Episode still image
     let still_element: Element<Message> = image_for(episode.id.to_uuid())
@@ -887,12 +887,12 @@ pub fn view_episode_detail<'a>(
         Message::PlayMediaWithId(MediaID::Episode(EpisodeID(episode.id.to_uuid()))),
         vec![],
     );
-    details = details.push(Space::with_height(10));
+    details = details.push(Space::new().height(10));
     details = details.push(button_row);
 
     // Overview
     if let Some(desc) = overview {
-        details = details.push(Space::with_height(20));
+        details = details.push(Space::new().height(20));
         details = details.push(
             container(
                 text(desc.to_string())
@@ -905,7 +905,7 @@ pub fn view_episode_detail<'a>(
     }
 
     // Layout
-    content = content.push(column![still_element, Space::with_height(20), details].spacing(10));
+    content = content.push(column![still_element, Space::new().height(20), details].spacing(10));
 
     // Create the main content container
     let content_container = container(content).width(Length::Fill);

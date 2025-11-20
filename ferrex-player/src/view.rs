@@ -123,7 +123,7 @@ pub fn view(state: &State) -> Element<'_, DomainMessage> {
                 has_controls,
             );
         let content_with_offset = column![
-            Space::with_height(Length::Fixed(top_padding)),
+            Space::new().height(Length::Fixed(top_padding)),
             scrollable_content,
         ]
         .width(Length::Fill)

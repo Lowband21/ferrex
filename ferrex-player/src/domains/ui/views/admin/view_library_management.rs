@@ -43,11 +43,11 @@ pub fn view_library_management(state: &State) -> Element<'_, Message> {
                 text("Access Denied")
                     .size(32)
                     .color(theme::MediaServerTheme::ERROR),
-                Space::with_height(20),
+                Space::new().height(20),
                 text("You don't have permission to view library settings")
                     .size(16)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::with_height(40),
+                Space::new().height(40),
                 button("Back to Admin Dashboard")
                     .on_press(Message::HideLibraryManagement)
                     .style(theme::Button::Secondary.style())
@@ -79,11 +79,11 @@ pub fn view_library_management(state: &State) -> Element<'_, Message> {
         )
         .on_press(Message::HideLibraryManagement)
         .style(theme::Button::Secondary.style()),
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
         text("Library Management")
             .size(28)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
     ]
     .align_y(iced::Alignment::Center);
 
@@ -94,7 +94,7 @@ pub fn view_library_management(state: &State) -> Element<'_, Message> {
                 .on_press(Message::ShowLibraryForm(None))
                 .style(theme::Button::Primary.style()),
         );
-        header_row = header_row.push(Space::with_width(10));
+        header_row = header_row.push(Space::new().width(10));
     }
 
     // Add Clear All Data button only if user can reset database
@@ -135,7 +135,7 @@ pub fn view_library_management(state: &State) -> Element<'_, Message> {
                     text("No Libraries Configured")
                         .size(24)
                         .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                    Space::with_height(10),
+                    Space::new().height(10),
                     text("Create a library to start managing your media collection.")
                         .size(16)
                         .color(theme::MediaServerTheme::TEXT_SUBDUED),
@@ -252,7 +252,7 @@ fn create_library_card<'a>(
                             text(library.name.to_string())
                                 .size(18)
                                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                            Space::with_width(10),
+                            Space::new().width(10),
                             status_text,
                         ]
                         .align_y(iced::Alignment::Center),
@@ -286,7 +286,7 @@ fn create_library_card<'a>(
                 text("No Libraries Configured")
                     .size(24)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::with_height(10),
+                Space::new().height(10),
                 text("Create a library to start managing your media collection.")
                     .size(16)
                     .color(theme::MediaServerTheme::TEXT_SUBDUED),
@@ -335,7 +335,7 @@ fn active_scans_panel(state: &State) -> Element<'_, Message> {
         ]
         .spacing(10)
         .align_y(iced::Alignment::Center),
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
         text(format!("{} running", scans.len()))
             .size(14)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
@@ -353,7 +353,7 @@ fn active_scans_panel(state: &State) -> Element<'_, Message> {
             ))
             .size(12)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             button("Refresh Metrics")
                 .on_press(Message::FetchScanMetrics)
                 .style(theme::Button::Secondary.style())
@@ -372,7 +372,7 @@ fn active_scans_panel(state: &State) -> Element<'_, Message> {
                     text("Scanner metrics not loaded")
                         .size(12)
                         .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                    Space::with_width(Length::Fill),
+                    Space::new().width(Length::Fill),
                     button("Load Metrics")
                         .on_press(Message::FetchScanMetrics)
                         .style(theme::Button::Secondary.style()),
@@ -390,7 +390,7 @@ fn active_scans_panel(state: &State) -> Element<'_, Message> {
                     text("No active scans at the moment")
                         .size(14)
                         .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                    Space::with_width(Length::Fill),
+                    Space::new().width(Length::Fill),
                     button("Start Scan")
                         .on_press(Message::NoOp)
                         .style(theme::Button::Secondary.style()),
@@ -474,15 +474,15 @@ fn active_scans_panel(state: &State) -> Element<'_, Message> {
                 text(format!("{completed_items}/{total_items} items"))
                     .size(13)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                Space::with_width(20),
+                Space::new().width(20),
                 text(format!("Retries: {retrying_items}"))
                     .size(13)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::with_width(20),
+                Space::new().width(20),
                 text(format!("Dead-lettered: {dead_lettered_items}"))
                     .size(13)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::with_width(20),
+                Space::new().width(20),
                 text(path_text)
                     .size(13)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
@@ -491,14 +491,14 @@ fn active_scans_panel(state: &State) -> Element<'_, Message> {
 
             let progress_bar = row![
                 container(
-                    container(Space::with_width(Length::Fixed(percent * 3.0)))
+                    container(Space::new().width(Length::Fixed(percent * 3.0)))
                         .height(6)
                         .style(theme::Container::ProgressBar.style()),
                 )
                 .width(Length::FillPortion(3))
                 .height(6)
                 .style(theme::Container::ProgressBarBackground.style()),
-                Space::with_width(10),
+                Space::new().width(10),
                 text(format!("{percent:.0}%"))
                     .size(13)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
@@ -566,14 +566,14 @@ fn active_scans_panel(state: &State) -> Element<'_, Message> {
                                 text(library_name)
                                     .size(16)
                                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                                Space::with_width(Length::Fixed(12.0)),
+                                Space::new().width(Length::Fixed(12.0)),
                                 status_badge,
                             ]
                             .align_y(iced::Alignment::Center)
                             .spacing(8),
-                            Space::with_height(8),
+                            Space::new().height(8),
                             progress_bar,
-                            Space::with_height(6),
+                            Space::new().height(6),
                             stats_row,
                         ]
                         .spacing(6)

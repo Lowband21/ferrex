@@ -8,9 +8,9 @@ use crate::domains::ui::types::BackdropAspectMode;
 use bytemuck::{Pod, Zeroable};
 use iced::advanced::graphics::Viewport;
 use iced::advanced::image::Id as ImageId;
-use iced::widget::shader::{Primitive, Program, Storage};
+use iced::widget::shader::{Primitive, Program};
 use iced::{Color, Element, Length, Rectangle, Vector, mouse, wgpu};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -339,6 +339,7 @@ const _: () = {
 };
 
 /// Pipeline state
+#[derive(Debug)]
 struct Pipeline {
     render_pipeline: wgpu::RenderPipeline,
     globals_bind_group_layout: Arc<wgpu::BindGroupLayout>,
@@ -349,18 +350,20 @@ struct Pipeline {
 }
 
 /// Per-primitive render data
+#[derive(Debug)]
 struct PrimitiveData {
     texture_bind_group: Option<wgpu::BindGroup>,
 }
 
 /// Texture info
+#[derive(Debug)]
 struct TextureInfo {
     texture: Arc<wgpu::Texture>,
     aspect_ratio: f32, // width / height
 }
 
 /// Shared state
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct State {
     globals_buffer: Option<wgpu::Buffer>,
     globals_bind_group: Option<wgpu::BindGroup>,
@@ -369,20 +372,14 @@ struct State {
     texture_bind_groups: HashMap<ImageId, wgpu::BindGroup>,
     // Per-primitive data for current frame
     primitive_data: HashMap<usize, PrimitiveData>,
-    // Track which primitives were prepared this frame
-    prepared_primitives: HashSet<usize>,
     // Track if default texture has been initialized
     default_texture_initialized: bool,
 }
 
-impl State {
-    /// Remove primitive data for primitives that weren't prepared this frame
-    fn trim(&mut self) {
-        self.primitive_data
-            .retain(|key, _| self.prepared_primitives.contains(key));
-        // Clear the prepared set for the next frame
-        self.prepared_primitives.clear();
-    }
+#[derive(Debug)]
+pub struct BackgroundRenderer {
+    pipeline: Pipeline,
+    state: State,
 }
 
 #[cfg_attr(
@@ -646,8 +643,18 @@ fn load_texture(
     profiling::all_functions
 )]
 impl Primitive for BackgroundPrimitive {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
+    type Renderer = BackgroundRenderer;
+
+    fn initialize(
+        &self,
+        device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Self::Renderer {
+        BackgroundRenderer {
+            pipeline: Pipeline::new(device, format),
+            state: State::default(),
+        }
     }
 
     #[cfg_attr(
@@ -660,34 +667,24 @@ impl Primitive for BackgroundPrimitive {
     )]
     fn prepare(
         &self,
+        renderer: &mut Self::Renderer,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-        storage: &mut Storage,
         _bounds: &Rectangle,
         viewport: &Viewport,
     ) {
-        // Initialize pipeline if needed
-        if !storage.has::<Pipeline>() {
-            storage.store(Pipeline::new(device, format));
-        }
+        let pipeline = &renderer.pipeline;
+        let state = &mut renderer.state;
 
-        // Initialize state if needed
-        if !storage.has::<State>() {
-            storage.store(State::default());
-        }
-
-        // Write transparent pixel to default texture on first prepare
-        let pipeline = storage.get::<Pipeline>().unwrap();
-        if !storage.get::<State>().unwrap().default_texture_initialized {
+        if !state.default_texture_initialized {
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
-                    texture: &pipeline.default_texture,
+                    texture: pipeline.default_texture.as_ref(),
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                &[0u8, 0u8, 0u8, 0u8], // Transparent black pixel
+                &[0u8, 0u8, 0u8, 0u8],
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(4),
@@ -699,28 +696,11 @@ impl Primitive for BackgroundPrimitive {
                     depth_or_array_layers: 1,
                 },
             );
-            storage
-                .get_mut::<State>()
-                .unwrap()
-                .default_texture_initialized = true;
+            state.default_texture_initialized = true;
         }
 
-        let (globals_layout, texture_layout, sampler) = {
-            let pipeline = storage.get::<Pipeline>().unwrap();
-            (
-                pipeline.globals_bind_group_layout.clone(),
-                pipeline.texture_bind_group_layout.clone(),
-                pipeline.sampler.clone(),
-            )
-        };
-
-        let state = storage.get_mut::<State>().unwrap();
-
-        // Create globals buffer if needed
         if state.globals_buffer.is_none() {
-            // WGSL uniform buffer alignment
-            // Using all vec4 types ensures proper alignment
-            const EXPECTED_SIZE: u64 = 496; // 31 * 16 bytes
+            const EXPECTED_SIZE: u64 = 496;
 
             let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Background Globals"),
@@ -731,7 +711,7 @@ impl Primitive for BackgroundPrimitive {
 
             let globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Background Globals Bind Group"),
-                layout: &globals_layout,
+                layout: pipeline.globals_bind_group_layout.as_ref(),
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
                     resource: globals_buffer.as_entire_binding(),
@@ -742,7 +722,6 @@ impl Primitive for BackgroundPrimitive {
             state.globals_bind_group = Some(globals_bind_group);
         }
 
-        // Handle texture loading for backdrop (either from BackdropGradient effect or from backdrop_handle)
         let backdrop_handle = match &self.effect {
             BackgroundEffect::BackdropGradient {
                 image_handle: Some(handle),
@@ -754,35 +733,36 @@ impl Primitive for BackgroundPrimitive {
         if let Some(handle) = backdrop_handle {
             let image_id = handle.id();
 
-            // Load texture if not cached
-            if !state.texture_cache.contains_key(&image_id)
-                && let Some((texture, aspect_ratio)) = load_texture(device, queue, handle)
-            {
-                state.texture_cache.insert(
-                    image_id,
-                    TextureInfo {
-                        texture,
-                        aspect_ratio,
-                    },
-                );
+            if !state.texture_cache.contains_key(&image_id) {
+                if let Some((texture, aspect_ratio)) = load_texture(device, queue, handle) {
+                    state.texture_cache.insert(
+                        image_id,
+                        TextureInfo {
+                            texture,
+                            aspect_ratio,
+                        },
+                    );
+                }
             }
 
-            // Create texture bind group if texture is available
             if state.texture_cache.contains_key(&image_id)
                 && !state.texture_bind_groups.contains_key(&image_id)
             {
-                let texture_info = state.texture_cache.get(&image_id).unwrap();
+                let texture_info = state
+                    .texture_cache
+                    .get(&image_id)
+                    .expect("texture cache entry must exist");
                 let texture_view = texture_info
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
 
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("Background Texture Bind Group"),
-                    layout: &texture_layout,
+                    layout: pipeline.texture_bind_group_layout.as_ref(),
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&sampler),
+                            resource: wgpu::BindingResource::Sampler(pipeline.sampler.as_ref()),
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
@@ -795,10 +775,7 @@ impl Primitive for BackgroundPrimitive {
             }
         }
 
-        // Calculate animation time
         let time = self.start_time.elapsed().as_secs_f32();
-
-        // Convert effect type to float
         let effect_type = match &self.effect {
             BackgroundEffect::Solid => 0.0,
             BackgroundEffect::Gradient => 1.0,
@@ -808,14 +785,18 @@ impl Primitive for BackgroundPrimitive {
             BackgroundEffect::BackdropGradient { .. } => 5.0,
         };
 
-        // Extract effect parameters
         let (effect_param1, effect_param2) = match &self.effect {
+            BackgroundEffect::Solid | BackgroundEffect::Gradient => (0.0, 0.0),
             BackgroundEffect::SubtleNoise { scale, speed } => (*scale, *speed),
             BackgroundEffect::FloatingParticles { count, size } => (*count as f32, *size),
             BackgroundEffect::WaveRipple {
                 frequency,
                 amplitude,
             } => (*frequency, *amplitude),
+            BackgroundEffect::BackdropGradient { .. } => (0.0, 0.0),
+        };
+
+        let (fade_start, fade_end) = match &self.effect {
             BackgroundEffect::BackdropGradient {
                 fade_start,
                 fade_end,
@@ -824,16 +805,7 @@ impl Primitive for BackgroundPrimitive {
             _ => (0.0, 0.0),
         };
 
-        // Update globals
         let transform: [f32; 16] = viewport.projection().into();
-
-        // Debug log scroll offset
-        if self.scroll_offset != 0.0 {
-            log::debug!(
-                "BackgroundShader prepare: scroll_offset = {}",
-                self.scroll_offset
-            );
-        }
 
         let mut globals = Globals {
             transform,
@@ -901,7 +873,6 @@ impl Primitive for BackgroundPrimitive {
                 0.0,
                 0.0,
             ],
-            // Initialize regions (all zeros)
             region1_bounds: [0.0; 4],
             region1_depth_params: [0.0; 4],
             region1_shadow_params: [0.0; 4],
@@ -920,11 +891,6 @@ impl Primitive for BackgroundPrimitive {
             region4_border_color: [0.0; 4],
         };
 
-        // Populate depth regions (up to 4)
-        //log::debug!(
-        //    "Populating {} depth regions into shader globals",
-        //    self.depth_layout.regions.len()
-        //);
         for (i, region) in self.depth_layout.regions.iter().take(4).enumerate() {
             let bounds = [
                 region.bounds.x,
@@ -989,18 +955,9 @@ impl Primitive for BackgroundPrimitive {
                     globals.region4_shadow_params = shadow_params;
                     globals.region4_border_color = border_color;
                 }
-                _ => unreachable!(),
+                _ => {}
             }
         }
-
-        // Update texture aspect ratio for any backdrop
-        let backdrop_handle = match &self.effect {
-            BackgroundEffect::BackdropGradient {
-                image_handle: Some(handle),
-                ..
-            } => Some(handle),
-            _ => self.backdrop_handle.as_ref(),
-        };
 
         if let Some(handle) = backdrop_handle {
             let image_id = handle.id();
@@ -1009,98 +966,43 @@ impl Primitive for BackgroundPrimitive {
             }
         }
 
-        queue.write_buffer(
-            state.globals_buffer.as_ref().unwrap(),
-            0,
-            bytemuck::cast_slice(&[globals]),
-        );
+        if let Some(buffer) = state.globals_buffer.as_ref() {
+            queue.write_buffer(buffer, 0, bytemuck::cast_slice(&[globals]));
+        }
 
-        // Store per-primitive data using stable program ID
-        let key = self.program_id;
-
-        // Determine which texture bind group to use
-        let backdrop_handle = match &self.effect {
-            BackgroundEffect::BackdropGradient {
-                image_handle: Some(handle),
-                ..
-            } => Some(handle),
-            _ => self.backdrop_handle.as_ref(),
-        };
-
-        let texture_bind_group = backdrop_handle.and_then(|handle| {
-            let image_id = handle.id();
-            state.texture_bind_groups.get(&image_id).cloned()
-        });
+        let texture_bind_group =
+            backdrop_handle.and_then(|handle| state.texture_bind_groups.get(&handle.id()).cloned());
 
         state
             .primitive_data
-            .insert(key, PrimitiveData { texture_bind_group });
-        state.prepared_primitives.insert(key);
-
-        // Clean up stale primitive data from previous frames
-        state.trim();
+            .insert(self.program_id, PrimitiveData { texture_bind_group });
     }
 
-    #[cfg_attr(
-        any(
-            feature = "profile-with-puffin",
-            feature = "profile-with-tracy",
-            feature = "profile-with-tracing"
-        ),
-        profiling::function
-    )]
-    fn render(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        storage: &Storage,
-        target: &wgpu::TextureView,
-        _clip_bounds: &Rectangle<u32>,
-    ) {
-        let pipeline = storage.get::<Pipeline>().unwrap();
-        let state = storage.get::<State>().unwrap();
-
-        let Some(globals_bind_group) = &state.globals_bind_group else {
-            return;
+    fn draw(&self, renderer: &Self::Renderer, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
+        let Some(globals_bind_group) = renderer.state.globals_bind_group.as_ref() else {
+            return false;
         };
 
-        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Background Render Pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load, // Preserve existing content
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        render_pass.set_pipeline(&pipeline.render_pipeline);
+        render_pass.set_pipeline(&renderer.pipeline.render_pipeline);
         render_pass.set_bind_group(0, globals_bind_group, &[]);
 
-        // Get per-primitive data using stable program ID
-        let key = self.program_id;
+        let bind_group = renderer
+            .state
+            .primitive_data
+            .get(&self.program_id)
+            .and_then(|data| data.texture_bind_group.as_ref());
 
-        let primitive_data = state.primitive_data.get(&key);
-
-        // Bind texture based on per-primitive data
-        if let Some(data) = primitive_data {
-            if let Some(texture_bind_group) = &data.texture_bind_group {
-                render_pass.set_bind_group(1, texture_bind_group, &[]);
-            } else {
-                // Use default texture
-                render_pass.set_bind_group(1, &*pipeline.default_texture_bind_group, &[]);
-            }
-        } else {
-            // No primitive data found
-            render_pass.set_bind_group(1, &*pipeline.default_texture_bind_group, &[]);
+        match bind_group {
+            Some(group) => render_pass.set_bind_group(1, group, &[]),
+            None => render_pass.set_bind_group(
+                1,
+                renderer.pipeline.default_texture_bind_group.as_ref(),
+                &[],
+            ),
         }
 
-        // Draw full-screen quad (4 vertices)
         render_pass.draw(0..4, 0..1);
+        true
     }
 }
 

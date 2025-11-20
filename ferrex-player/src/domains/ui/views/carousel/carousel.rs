@@ -31,7 +31,7 @@ pub fn media_carousel<'a>(
     state: &CarouselState,
 ) -> Element<'a, Message> {
     if all_items.is_empty() {
-        return container(Space::with_height(0)).into();
+        return container(Space::new().height(0)).into();
     }
 
     // Create navigation buttons
@@ -90,7 +90,7 @@ pub fn media_carousel<'a>(
     // Add spacer for items before visible range
     if visible_range.start > 0 {
         let spacer_width = visible_range.start as f32 * (state.item_width + state.item_spacing);
-        item_row = item_row.push(Space::with_width(Length::Fixed(spacer_width)));
+        item_row = item_row.push(Space::new().width(Length::Fixed(spacer_width)));
     }
 
     // Add only visible items
@@ -104,12 +104,12 @@ pub fn media_carousel<'a>(
     if visible_range.end < state.total_items {
         let remaining_items = state.total_items - visible_range.end;
         let spacer_width = remaining_items as f32 * (state.item_width + state.item_spacing);
-        item_row = item_row.push(Space::with_width(Length::Fixed(spacer_width)));
+        item_row = item_row.push(Space::new().width(Length::Fixed(spacer_width)));
     }
 
     // Create horizontal scrollable for items
     let items_scrollable = scrollable(row![
-        Space::with_width(20), // Left padding to start from container edge
+        Space::new().width(20), // Left padding to start from container edge
         item_row
     ])
     .id(state.scrollable_id.clone())
@@ -133,9 +133,9 @@ pub fn media_carousel<'a>(
                     text(title)
                         .size(24)
                         .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                    Space::with_width(Length::Fill),
+                    Space::new().width(Length::Fill),
                     // Navigation buttons
-                    row![left_button, Space::with_width(5), right_button,]
+                    row![left_button, Space::new().width(5), right_button,]
                         .align_y(iced::Alignment::Center),
                 ]
                 .align_y(iced::Alignment::Center)
@@ -144,7 +144,7 @@ pub fn media_carousel<'a>(
             .padding([0, 20]) // Horizontal padding
         )
         .padding([20, 0]), // Vertical padding
-        Space::with_height(15),
+        Space::new().height(15),
         // Scrollable carousel content extending to edges
         items_scrollable,
     ]

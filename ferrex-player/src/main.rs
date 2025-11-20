@@ -10,6 +10,10 @@ use common::messages::DomainMessage;
 use domains::ui::theme;
 use state_refactored::State;
 
+fn app_theme(_: &State) -> Theme {
+    theme::MediaServerTheme::theme()
+}
+
 fn init_logger() {
     Builder::new()
         .target(Target::Stdout)
@@ -167,7 +171,7 @@ fn main() -> iced::Result {
     .title("Ferrex Player")
     .subscription(subscriptions::subscription)
     .font(lucide_font_bytes())
-    .theme(|_| theme::MediaServerTheme::theme())
+    .theme(app_theme)
     .window(iced::window::Settings {
         size: iced::Size::new(1280.0, 720.0),
         resizable: true,

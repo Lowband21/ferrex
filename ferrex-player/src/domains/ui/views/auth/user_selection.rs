@@ -147,7 +147,7 @@ fn admin_session_indicator<'a>(admin_pin_unlock_enabled: bool) -> Element<'a, Do
                 .style(move |theme: &Theme| text::Style {
                     color: Some(theme_color(theme)),
                 }),
-            Space::with_width(Length::Fixed(8.0)),
+            Space::new().width(Length::Fixed(8.0)),
             text(status_text)
                 .size(14)
                 .style(move |theme: &Theme| text::Style {
@@ -234,7 +234,7 @@ fn user_button_internal<'a>(
                         ..Default::default()
                     }
                 }),
-            Space::with_width(Length::Fixed(16.0)),
+            Space::new().width(Length::Fixed(16.0)),
             column![
                 text(&user.display_name).size(18),
                 text(&user.username).size(14).style(|theme: &Theme| {
@@ -335,7 +335,7 @@ fn add_user_button<'a>() -> Element<'a, DomainMessage> {
                     ..Default::default()
                 }
             }),
-            Space::with_width(Length::Fixed(16.0)),
+            Space::new().width(Length::Fixed(16.0)),
             column![
                 text("Add User").size(18),
                 text("admin").size(14).style(|theme: &Theme| {

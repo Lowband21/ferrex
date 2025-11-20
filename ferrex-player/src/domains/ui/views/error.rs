@@ -22,7 +22,7 @@ pub fn view_video_error(error_message: &str) -> Element<'_, Message> {
         .padding(20),
     );
 
-    content = content.push(Space::with_height(Length::Fill));
+    content = content.push(Space::new().height(Length::Fill));
 
     // Error message
     content = content.push(
@@ -30,7 +30,7 @@ pub fn view_video_error(error_message: &str) -> Element<'_, Message> {
             text("Video Error")
                 .size(24)
                 .color(theme::MediaServerTheme::ERROR),
-            Space::with_height(20),
+            Space::new().height(20),
             container(
                 text(error_message)
                     .size(16)
@@ -38,7 +38,7 @@ pub fn view_video_error(error_message: &str) -> Element<'_, Message> {
             )
             .width(Length::Fixed(600.0))
             .align_x(iced::alignment::Horizontal::Center),
-            Space::with_height(40),
+            Space::new().height(40),
             button("Back to Library")
                 .on_press(Message::NavigateBack)
                 .style(theme::Button::Primary.style()),
@@ -46,7 +46,7 @@ pub fn view_video_error(error_message: &str) -> Element<'_, Message> {
         .align_x(iced::Alignment::Center),
     );
 
-    content = content.push(Space::with_height(Length::Fill));
+    content = content.push(Space::new().height(Length::Fill));
 
     container(content)
         .width(Length::Fill)

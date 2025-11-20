@@ -21,18 +21,18 @@ pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, Message> {
         text("Security Settings")
             .size(24)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        Space::with_height(20),
+        Space::new().height(20),
         // PIN management
         container(
             column![
                 text("PIN Settings")
                     .size(20)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                Space::with_height(10),
+                Space::new().height(10),
                 text("Your PIN is used for quick access on trusted devices")
                     .size(14)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::with_height(15),
+                Space::new().height(15),
                 button("Change PIN")
                     .on_press(Message::NoOp) // TODO: Implement PIN change
                     .style(theme::Button::Primary.style())
@@ -49,11 +49,11 @@ pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, Message> {
                 text("Password")
                     .size(20)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                Space::with_height(10),
+                Space::new().height(10),
                 text("Change your account password")
                     .size(14)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::with_height(15),
+                Space::new().height(15),
                 button("Change Password")
                     .on_press(Message::NoOp) // TODO: Implement password change
                     .style(theme::Button::Secondary.style())
@@ -70,16 +70,16 @@ pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, Message> {
                 text("Trusted Devices")
                     .size(20)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                Space::with_height(10),
+                Space::new().height(10),
                 text("Devices that can use PIN login")
                     .size(14)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::with_height(15),
+                Space::new().height(15),
                 // TODO: List trusted devices
                 text("This device: Trusted ✓")
                     .size(16)
                     .color(theme::MediaServerTheme::SUCCESS),
-                Space::with_height(10),
+                Space::new().height(10),
                 button("Manage Devices")
                     .on_press(Message::ShowDeviceManagement)
                     .style(theme::Button::Secondary.style())
@@ -90,7 +90,7 @@ pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, Message> {
         )
         .style(theme::Container::Card.style())
         .width(Length::Fill),
-        Space::with_height(30),
+        Space::new().height(30),
         button("Back")
             .on_press(Message::BackToSettings)
             .style(theme::Button::Secondary.style())

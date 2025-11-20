@@ -1,6 +1,6 @@
 use iced::{
     Element, Length,
-    widget::{Space, column, container, scrollable},
+    widget::{Id, Space, column, container, scrollable},
 };
 use std::ops::Range;
 
@@ -20,7 +20,7 @@ pub struct VirtualListState {
     /// Currently visible range
     pub visible_range: Range<usize>,
     /// Scrollable ID
-    pub scrollable_id: scrollable::Id,
+    pub scrollable_id: Id,
 }
 
 #[cfg_attr(
@@ -40,7 +40,7 @@ impl VirtualListState {
             viewport_height: 800.0, // Default, will be updated
             overscan: 5,            // Render 5 items above and below viewport
             visible_range: 0..0,
-            scrollable_id: scrollable::Id::unique(),
+            scrollable_id: Id::unique(),
         }
     }
 
@@ -112,7 +112,7 @@ pub fn virtual_list<'a, Message: 'a>(
     // Add spacer for items above viewport
     if state.visible_range.start > 0 {
         let spacer_height = state.visible_range.start as f32 * state.item_height;
-        content = content.push(Space::with_height(Length::Fixed(spacer_height)));
+        content = content.push(Space::new().height(Length::Fixed(spacer_height)));
     }
 
     // Add visible items
@@ -129,7 +129,7 @@ pub fn virtual_list<'a, Message: 'a>(
     if state.visible_range.end < state.total_items {
         let remaining_items = state.total_items - state.visible_range.end;
         let spacer_height = remaining_items as f32 * state.item_height;
-        content = content.push(Space::with_height(Length::Fixed(spacer_height)));
+        content = content.push(Space::new().height(Length::Fixed(spacer_height)));
     }
 
     scrollable(content)

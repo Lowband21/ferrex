@@ -203,5 +203,5 @@ pub fn subtitle<'a>(text_content: &'a str) -> Element<'a, DomainMessage> {
 
 /// Creates consistent vertical spacing
 pub fn spacing() -> Space {
-    Space::with_height(Length::Fixed(20.0))
+    Space::new().height(Length::Fixed(20.0))
 }

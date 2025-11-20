@@ -15,7 +15,7 @@ pub fn filter_button<'a>(active_filter_count: usize, is_open: bool) -> Element<'
     let button_content = if active_filter_count > 0 {
         row![
             icon_text_with_size(icon, 16.0),
-            Space::with_width(6),
+            Space::new().width(6),
             text(active_filter_count.to_string())
                 .size(14)
                 .color(theme::MediaServerTheme::TEXT_PRIMARY),

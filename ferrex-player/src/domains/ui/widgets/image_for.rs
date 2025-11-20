@@ -365,12 +365,22 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
 
                     image_service.get().request_image(request);
 
-                    create_loading_placeholder(bounds, image.radius, image.theme_color)
+                    create_loading_placeholder(
+                        bounds,
+                        image.radius,
+                        image.theme_color,
+                        request_hash,
+                    )
                 }
             }
         } else {
             // Service not initialized, show loading state
-            create_loading_placeholder(bounds, image.radius, image.theme_color)
+            create_loading_placeholder(
+                bounds,
+                image.radius,
+                image.theme_color,
+                request_hash,
+            )
         }
     }
 }
@@ -444,6 +454,7 @@ fn create_loading_placeholder<'a>(
     bounds: AnimatedPosterBounds,
     radius: f32,
     theme_color: Option<Color>,
+    request_hash: u64,
 ) -> Element<'a, Message> {
     // Create a placeholder handle - we'll use a 1x1 transparent pixel
     // The shader will render the theme color on the backface
@@ -460,7 +471,8 @@ fn create_loading_placeholder<'a>(
     // Create shader widget in initial sunken state
     // The PlaceholderSunken animation type will show backface with theme color
     // and apply sunken depth effect
-    rounded_image_shader(placeholder_handle, None)
+    // Use the request hash so the placeholder shares identity with the texture once it loads.
+    rounded_image_shader(placeholder_handle, Some(request_hash))
         .radius(radius)
         .with_animated_bounds(bounds)
         .theme_color(color)

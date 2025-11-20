@@ -107,7 +107,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
         text("Filters")
             .size(18)
             .color(MediaServerTheme::TEXT_PRIMARY),
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
         button(icon_text_with_size(Icon::X, 16.0))
             .padding([6, 8])
             .style(theme::Button::Icon.style())
@@ -125,14 +125,14 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
         ]
         .spacing(6),
         selects,
-        row![Space::with_width(Length::Fill), actions]
+        row![Space::new().width(Length::Fill), actions]
             .align_y(Alignment::Center)
             .spacing(12),
     ]
     .spacing(16);
 
     row![
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
         container(content)
             .padding(16)
             .width(Length::Fixed(420.0))

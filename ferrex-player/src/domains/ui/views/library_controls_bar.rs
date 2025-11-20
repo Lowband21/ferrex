@@ -72,7 +72,7 @@ pub fn view_library_controls_bar<'a>(
         sort_dropdown(current_sort),
         sort_order_toggle(current_order),
         filter_button(active_filter_count, is_filter_open),
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
         text(item_count.to_string()),
     ]
     .spacing(12)

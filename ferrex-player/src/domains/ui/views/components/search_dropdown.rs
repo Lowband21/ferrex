@@ -40,7 +40,7 @@ pub fn view_search_dropdown(state: &State) -> Option<Element<'_, Message>> {
             container(
                 row![
                     text("Searching...").size(14),
-                    Space::with_width(Length::Fill),
+                    Space::new().width(Length::Fill),
                     text("⏳").size(16)
                 ]
                 .align_y(Alignment::Center),
@@ -148,7 +148,7 @@ pub fn view_search_dropdown(state: &State) -> Option<Element<'_, Message>> {
 
     // Create transparent backdrop button that clears search when clicked
     let backdrop = button(
-        container(Space::new(Length::Fill, Length::Fill))
+        container(Space::new().width(Length::Fill).height(Length::Fill))
             .width(Length::Fill)
             .height(Length::Fill),
     )
@@ -219,7 +219,7 @@ fn view_search_result(result: &SearchResult, is_selected: bool) -> Element<'_, M
     // Add match score indicator (for debugging)
     if cfg!(debug_assertions) {
         content_row = content_row
-            .push(Space::with_width(Length::Fill))
+            .push(Space::new().width(Length::Fill))
             .push(text(format!("{:.0}%", result.match_score * 100.0)).size(11));
     }
 
@@ -268,9 +268,9 @@ pub fn view_search_fullscreen(state: &State) -> Element<'_, Message> {
                 crate::domains::search::messages::Message::SetMode(SearchMode::Dropdown)
             ))
             .style(ButtonStyle::Text.style()),
-        Space::with_width(Length::Fixed(20.0)),
+        Space::new().width(Length::Fixed(20.0)),
         text(format!("Search Results for \"{}\"", search_state.query)).size(18),
-        Space::with_width(Length::Fill),
+        Space::new().width(Length::Fill),
         text(format!("{} results", search_state.total_results)).size(14)
     ]
     .padding(20)
@@ -290,7 +290,7 @@ pub fn view_search_fullscreen(state: &State) -> Element<'_, Message> {
         results_column = results_column.push(
             container(column![
                 text("No results found").size(20),
-                Space::with_height(Length::Fixed(10.0)),
+                Space::new().height(Length::Fixed(10.0)),
                 text(format!(
                     "Try adjusting your search query \"{}\"",
                     search_state.query

@@ -30,7 +30,7 @@ where
     F: Fn(usize) -> Option<Element<'a, Message>>,
 {
     if total_items == 0 {
-        return container(Space::with_height(0)).into();
+        return container(Space::new().height(0)).into();
     }
 
     // Create navigation buttons
@@ -88,7 +88,7 @@ where
         const ITEM_WIDTH: f32 = 200.0;
         const ITEM_SPACING: f32 = 15.0;
         let spacer_width = state.visible_start as f32 * (ITEM_WIDTH + ITEM_SPACING);
-        item_row = item_row.push(Space::with_width(Length::Fixed(spacer_width)));
+        item_row = item_row.push(Space::new().width(Length::Fixed(spacer_width)));
     }
 
     // Only create cards for visible items
@@ -100,7 +100,12 @@ where
             _ => {
                 // Add placeholder for missing items
                 item_row = item_row.push(
-                    container(Space::new(200.0, 370.0)).style(theme::Container::Default.style()),
+                    container(
+                        Space::new()
+                            .width(Length::Fixed(200.0))
+                            .height(Length::Fixed(370.0)),
+                    )
+                    .style(theme::Container::Default.style()),
                 );
             }
         }
@@ -112,12 +117,12 @@ where
         const ITEM_SPACING: f32 = 15.0;
         let remaining_items = total_items - state.visible_end;
         let spacer_width = remaining_items as f32 * (ITEM_WIDTH + ITEM_SPACING);
-        item_row = item_row.push(Space::with_width(Length::Fixed(spacer_width)));
+        item_row = item_row.push(Space::new().width(Length::Fixed(spacer_width)));
     }
 
     // Create horizontal scrollable for items
     let items_scrollable = scrollable(row![
-        Space::with_width(20), // Left padding to start from container edge
+        Space::new().width(20), // Left padding to start from container edge
         item_row
     ])
     .id(state.scrollable_id.clone())
@@ -141,9 +146,9 @@ where
                     text(title)
                         .size(24)
                         .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                    Space::with_width(Length::Fill),
+                    Space::new().width(Length::Fill),
                     // Navigation buttons
-                    row![left_button, Space::with_width(5), right_button,]
+                    row![left_button, Space::new().width(5), right_button,]
                         .align_y(iced::Alignment::Center),
                 ]
                 .align_y(iced::Alignment::Center)
@@ -152,7 +157,7 @@ where
             .padding([0, 20]) // Horizontal padding
         )
         .padding([20, 0]), // Vertical padding
-        Space::with_height(15),
+        Space::new().height(15),
         // Scrollable carousel content extending to edges
         items_scrollable,
     ]

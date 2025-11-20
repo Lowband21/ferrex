@@ -13,13 +13,14 @@ use iced::wgpu;
 use iced::widget::image::Handle;
 use iced::widget::shader::Program;
 use iced::widget::shader::{Primitive, Storage};
-use iced::{Color, Element, Event, Length, Point, Rectangle, mouse};
-use iced_wgpu::image as wgpu_image;
-use iced_wgpu::primitive::PrimitiveBatchState;
-use rounded_image_batch_state::RoundedImageInstance;
-use std::any::TypeId;
+use iced::{Color, Element, Event, Length, Point, Rectangle, Size, mouse};
+use iced_wgpu::AtlasRegion;
+use iced_wgpu::primitive::{
+    BatchEncodeContext, BatchPrimitive, PrimitiveBatchState, register_batchable_type,
+};
+use rounded_image_batch_state::{PendingPrimitive, RoundedImageBatchState, RoundedImageInstance};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Dynamic bounds for animated posters
@@ -203,6 +204,14 @@ impl AnimationBehavior {
     }
 }
 
+static BATCH_REGISTRATION: OnceLock<()> = OnceLock::new();
+
+fn ensure_batch_registration() {
+    BATCH_REGISTRATION.get_or_init(|| {
+        register_batchable_type::<RoundedImagePrimitive>();
+    });
+}
+
 /// A shader program for rendering rounded images
 #[derive(Debug, Clone)]
 pub struct RoundedImageProgram {
@@ -250,6 +259,8 @@ impl Program<Message> for RoundedImageProgram {
         _cursor: mouse::Cursor,
         bounds: Rectangle,
     ) -> Self::Primitive {
+        ensure_batch_registration();
+
         // Use mouse position from state instead of cursor
         let mouse_position = state.mouse_position;
 
@@ -492,6 +503,7 @@ struct Instance {
 }
 
 /// Pipeline state (immutable after creation)
+#[allow(dead_code)]
 struct Pipeline {
     render_pipeline: wgpu::RenderPipeline,
     atlas_bind_group_layout: Arc<wgpu::BindGroupLayout>,
@@ -501,11 +513,13 @@ struct Pipeline {
 
 /// Per-primitive render data
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 struct PrimitiveData {
     instance_buffer: wgpu::Buffer,
 }
 
 /// Batched render data for all primitives in a frame
+#[allow(dead_code)]
 struct BatchedData {
     instance_buffer: Option<wgpu::Buffer>,
     instances: Vec<Instance>, // Accumulate instances across prepare calls
@@ -518,6 +532,7 @@ struct BatchedData {
 /// - Single render call draws all instances at once
 /// - Instances are cleared after render for next frame
 #[derive(Default)]
+#[allow(dead_code)]
 struct State {
     // Globals buffer and bind group (shared by all)
     globals_buffer: Option<wgpu::Buffer>,
@@ -727,200 +742,8 @@ impl Pipeline {
     ),
     profiling::function
 )]
-fn create_instance(
-    atlas_entry: Option<&wgpu_image::atlas::Entry>,
-    bounds: &Rectangle,
-    radius: f32,
-    animation: AnimationType,
-    load_time: Option<Instant>,
-    opacity: f32,
-    theme_color: Color,
-    animated_bounds: Option<&AnimatedPosterBounds>,
-    is_hovered: bool,
-    mouse_position: Option<Point>,
-    progress: Option<f32>,
-    progress_color: Color,
-) -> Instance {
-    // Extract UV coordinates and layer from the atlas entry
-    let (uv_min, uv_max, layer) = if let Some(entry) = atlas_entry {
-        match entry {
-            wgpu_image::atlas::Entry::Contiguous(allocation) => {
-                let (x, y) = allocation.position();
-                let size = allocation.size();
-                let layer = allocation.layer() as u32;
-                const ATLAS_SIZE: f32 = wgpu_image::atlas::SIZE as f32;
-                let uv_min = [x as f32 / ATLAS_SIZE, y as f32 / ATLAS_SIZE];
-                let uv_max = [
-                    (x + size.width) as f32 / ATLAS_SIZE,
-                    (y + size.height) as f32 / ATLAS_SIZE,
-                ];
-                (uv_min, uv_max, layer)
-            }
-            wgpu_image::atlas::Entry::Fragmented { size, fragments } => {
-                if let Some(first) = fragments.first() {
-                    let (x, y) = first.position;
-                    let layer = first.allocation.layer() as u32;
-                    const ATLAS_SIZE: f32 = wgpu_image::atlas::SIZE as f32;
-                    let uv_min = [x as f32 / ATLAS_SIZE, y as f32 / ATLAS_SIZE];
-                    let uv_max = [
-                        (x + size.width) as f32 / ATLAS_SIZE,
-                        (y + size.height) as f32 / ATLAS_SIZE,
-                    ];
-                    (uv_min, uv_max, layer)
-                } else {
-                    ([0.0, 0.0], [0.001, 0.001], 0)
-                }
-            }
-        }
-    } else {
-        ([0.0, 0.0], [0.001, 0.001], 0)
-    };
-
-    let (
-        actual_opacity,
-        rotation_y,
-        animation_progress,
-        z_depth,
-        scale,
-        shadow_intensity,
-        border_glow,
-    ) = if let Some(load_time) = load_time {
-        let elapsed = std::time::Instant::now().duration_since(load_time);
-        let animation = match animation {
-            AnimationType::Flip {
-                total_duration,
-                emerge_end,
-                flip_end,
-                rise_end,
-            } => {
-                if elapsed > total_duration {
-                    AnimationType::None
-                } else {
-                    AnimationType::Flip {
-                        total_duration,
-                        emerge_end,
-                        flip_end,
-                        rise_end,
-                    }
-                }
-            }
-            anim => anim,
-        };
-
-        calculate_animation_state(animation, elapsed, opacity)
-    } else {
-        (
-            0.7_f32,
-            std::f32::consts::PI,
-            0.0f32,
-            -10.0f32,
-            1.0f32,
-            0.0f32,
-            0.0f32,
-        )
-    };
-
-    // Calculate poster position and size
-    let (poster_position, poster_size) = if let Some(animated_bounds) = animated_bounds {
-        let offset_x = (bounds.width - animated_bounds.base_width) / 2.0;
-        let offset_y = (bounds.height - animated_bounds.base_height) / 2.0;
-        let poster_x = bounds.x + offset_x;
-        let poster_y = bounds.y + offset_y;
-        (
-            [poster_x, poster_y],
-            [animated_bounds.base_width, animated_bounds.base_height],
-        )
-    } else {
-        let border_padding = 3.0;
-        let poster_x = bounds.x + border_padding;
-        let poster_y = bounds.y + border_padding;
-        let poster_width = bounds.width - (border_padding * 2.0);
-        let poster_height = bounds.height - (border_padding * 2.0);
-        ([poster_x, poster_y], [poster_width, poster_height])
-    };
-
-    // Calculate overlay state
-    let animation_complete = match animation {
-        AnimationType::None => true,
-        AnimationType::PlaceholderSunken => true,
-        _ => animation_progress >= 0.999,
-    };
-
-    let show_overlay = if is_hovered && animation_complete {
-        1.0
-    } else {
-        0.0
-    };
-    let show_border = 1.0; // Always show border
-
-    // Calculate mouse position
-    let mouse_pos_normalized = if let Some(mouse_pos) = mouse_position {
-        let scaled_poster_width = poster_size[0] * scale;
-        let scaled_poster_height = poster_size[1] * scale;
-        let widget_to_poster_offset_x = if animated_bounds.is_some() {
-            (bounds.width - scaled_poster_width) / 2.0
-        } else {
-            0.0
-        };
-        let widget_to_poster_offset_y = if animated_bounds.is_some() {
-            (bounds.height - scaled_poster_height) / 2.0
-        } else {
-            0.0
-        };
-        let mouse_x_relative = mouse_pos.x - widget_to_poster_offset_x;
-        let mouse_y_relative = mouse_pos.y - widget_to_poster_offset_y;
-        let norm_x = mouse_x_relative / scaled_poster_width;
-        let norm_y = mouse_y_relative / scaled_poster_height;
-
-        if (-0.01..=1.01).contains(&norm_x) && (-0.01..=1.01).contains(&norm_y) {
-            [norm_x.clamp(0.0, 1.0), norm_y.clamp(0.0, 1.0)]
-        } else {
-            [-1.0, -1.0]
-        }
-    } else {
-        [-1.0, -1.0]
-    };
-
-    // Create instance data
-    Instance {
-        position_and_size: [
-            poster_position[0],
-            poster_position[1],
-            poster_size[0],
-            poster_size[1],
-        ],
-        radius_opacity_rotation_anim: [radius, actual_opacity, rotation_y, animation_progress],
-        theme_color_zdepth: [theme_color.r, theme_color.g, theme_color.b, z_depth],
-        scale_shadow_glow_type: [
-            scale,
-            shadow_intensity,
-            border_glow,
-            animation.as_u32() as f32,
-        ],
-        hover_overlay_border_progress: [
-            if is_hovered { 1.0 } else { 0.0 },
-            show_overlay,
-            show_border,
-            progress.unwrap_or(-1.0),
-        ],
-        mouse_pos_and_padding: [mouse_pos_normalized[0], mouse_pos_normalized[1], 0.0, 0.0],
-        progress_color_and_padding: [progress_color.r, progress_color.g, progress_color.b, 0.0],
-        atlas_uvs: [uv_min[0], uv_min[1], uv_max[0], uv_max[1]],
-        atlas_layer_and_padding: [layer as f32, 0.0, 0.0, 0.0],
-    }
-}
-
-/// Helper function to create an instance from image data
-#[cfg_attr(
-    any(
-        feature = "profile-with-puffin",
-        feature = "profile-with-tracy",
-        feature = "profile-with-tracing"
-    ),
-    profiling::function
-)]
-fn create_batch_instance(
-    atlas_entry: Option<&wgpu_image::atlas::Entry>,
+pub(super) fn create_batch_instance(
+    atlas_region: Option<AtlasRegion>,
     bounds: &Rectangle,
     radius: f32,
     animation: AnimationType,
@@ -932,41 +755,13 @@ fn create_batch_instance(
     mouse_position: Option<Point>,
     progress: Option<f32>,
     progress_color: Color,
-    calc_anim: bool,
 ) -> rounded_image_batch_state::RoundedImageInstance {
     // Extract UV coordinates and layer from the atlas entry
-    let (uv_min, uv_max, layer) = if let Some(entry) = atlas_entry {
-        match entry {
-            wgpu_image::atlas::Entry::Contiguous(allocation) => {
-                let (x, y) = allocation.position();
-                let size = allocation.size();
-                let layer = allocation.layer() as u32;
-                const ATLAS_SIZE: f32 = wgpu_image::atlas::SIZE as f32;
-                let uv_min = [x as f32 / ATLAS_SIZE, y as f32 / ATLAS_SIZE];
-                let uv_max = [
-                    (x + size.width) as f32 / ATLAS_SIZE,
-                    (y + size.height) as f32 / ATLAS_SIZE,
-                ];
-                (uv_min, uv_max, layer)
-            }
-            wgpu_image::atlas::Entry::Fragmented { size, fragments } => {
-                if let Some(first) = fragments.first() {
-                    let (x, y) = first.position;
-                    let layer = first.allocation.layer() as u32;
-                    const ATLAS_SIZE: f32 = wgpu_image::atlas::SIZE as f32;
-                    let uv_min = [x as f32 / ATLAS_SIZE, y as f32 / ATLAS_SIZE];
-                    let uv_max = [
-                        (x + size.width) as f32 / ATLAS_SIZE,
-                        (y + size.height) as f32 / ATLAS_SIZE,
-                    ];
-                    (uv_min, uv_max, layer)
-                } else {
-                    ([0.0, 0.0], [0.001, 0.001], 0)
-                }
-            }
-        }
+    let (uv_min, uv_max, layer) = if let Some(region) = atlas_region {
+        (region.uv_min, region.uv_max, region.layer)
     } else {
-        ([0.0, 0.0], [0.001, 0.001], 0)
+        // Use out-of-range UVs to signal placeholder/invalid to the shader.
+        ([-1.0, -1.0], [-1.0, -1.0], 0)
     };
 
     // Calculate animation state
@@ -1113,7 +908,7 @@ fn create_batch_instance(
     ),
     profiling::function
 )]
-fn create_placeholder_instance(
+pub(super) fn create_placeholder_instance(
     bounds: &Rectangle,
     radius: f32,
     theme_color: Color,
@@ -1266,320 +1061,60 @@ fn calculate_animation_state(
 }
 
 impl Primitive for RoundedImagePrimitive {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
+    type Renderer = ();
+
+    fn initialize(
+        &self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _format: wgpu::TextureFormat,
+    ) -> Self::Renderer {
+        ()
     }
 
-    #[cfg_attr(
-        any(
-            feature = "profile-with-puffin",
-            feature = "profile-with-tracy",
-            feature = "profile-with-tracing"
-        ),
-        profiling::function
-    )]
-    fn prepare_batched(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
-        format: wgpu::TextureFormat,
-        storage: &mut Storage,
-        bounds: &Rectangle,
-        viewport: &Viewport,
-        image_cache: &mut wgpu_image::Cache,
+    fn prepare(
+        &self,
+        _renderer: &mut Self::Renderer,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _bounds: &Rectangle,
+        _viewport: &Viewport,
     ) {
-        // Register batch state on first use if batching is enabled
-        let type_id = TypeId::of::<RoundedImagePrimitive>();
+        // Batched pipeline performs all rendering work.
+    }
+}
 
-        let has_batch = storage.has_batch_state(&type_id);
+impl BatchPrimitive for RoundedImagePrimitive {
+    type BatchState = RoundedImageBatchState;
 
-        if !has_batch {
-            // Register the batch state for this primitive type
-            let batch_state =
-                rounded_image_batch_state::RoundedImageBatchState::new(device, format);
-            storage.store_batch_state(type_id, Box::new(batch_state));
-            log::debug!("Registered RoundedImagePrimitive for batched rendering");
-        }
+    fn create_batch_state(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self::BatchState {
+        RoundedImageBatchState::new(device, format)
+    }
 
-        if has_batch {
-            let cached = image_cache.contains(&self.handle);
-
-            // Normal path with atlas upload
-            if let Some(batch_state) = storage.get_batch_state_mut(&type_id) {
-                // Downcast to our specific batch state type
-                if let Some(rounded_batch) = batch_state
-                    .as_any_mut()
-                    .downcast_mut::<rounded_image_batch_state::RoundedImageBatchState>(
-                ) {
-                    let load_time_from_widget = self.load_time.as_ref();
-                    let load_time = if self.animation != AnimationType::None {
-                        load_time_from_widget.or_else(|| rounded_batch.loaded_times.get(&self.id))
-                    } else {
-                        None
-                    };
-
-                    let instance = if cached {
-                        create_batch_instance(
-                            None, // No atlas entry yet
-                            bounds,
-                            self.radius,
-                            self.animation,
-                            load_time,
-                            self.opacity,
-                            self.theme_color,
-                            self.animated_bounds.as_ref(),
-                            self.is_hovered,
-                            self.mouse_position,
-                            self.progress,
-                            self.progress_color,
-                            cached,
-                        )
-                    } else {
-                        create_placeholder_instance(
-                            bounds,
-                            self.radius,
-                            self.theme_color,
-                            self.animated_bounds.as_ref(),
-                            self.progress,
-                            self.progress_color,
-                        )
-                    };
-
-                    rounded_batch.add_instance(
-                        self.id,
-                        instance,
-                        &self.handle,
-                        image_cache,
-                        device,
-                        encoder,
-                        cached,
-                    );
-                }
-            }
-
-            return; // Don't create individual buffers when batching
-        }
-
-        // Fallback to individual rendering
-        // Initialize pipeline if needed
-        if !storage.has::<Pipeline>() {
-            storage.store(Pipeline::new(device, format));
-        }
-
-        // Initialize state if needed
-        if !storage.has::<State>() {
-            storage.store(State::default());
-        }
-
-        // Setup globals if needed - extract what we need from pipeline first
-        let (globals_bind_group_layout, sampler) = {
-            let pipeline = storage.get::<Pipeline>().unwrap();
-            (
-                pipeline.globals_bind_group_layout.clone(),
-                pipeline.sampler.clone(),
-            )
-        };
-
-        let state = storage.get_mut::<State>().unwrap();
-
-        if state.globals_buffer.is_none() {
-            let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("rounded_image_globals"),
-                size: std::mem::size_of::<Globals>() as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-
-            let globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("rounded_image_globals"),
-                layout: &globals_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: globals_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&sampler),
-                    },
-                ],
-            });
-
-            state.globals_buffer = Some(globals_buffer);
-            state.globals_bind_group = Some(globals_bind_group);
-        }
-
-        // Update globals with current viewport
-        let transform: [f32; 16] = viewport.projection().into();
-        let globals = Globals {
-            transform,
-            scale_factor: viewport.scale_factor() as f32,
-            _padding: [0.0; 7], // 7 floats = 28 bytes padding to reach 96 bytes total
-        };
-        // Use write_buffer_with to avoid intermediate copy
-        match queue.write_buffer_with(
-            state.globals_buffer.as_ref().unwrap(),
-            0,
-            wgpu::BufferSize::new(std::mem::size_of::<Globals>() as u64).unwrap(),
-        ) {
-            Some(mut view) => {
-                view.copy_from_slice(bytemuck::cast_slice(&[globals]));
-            }
-            _ => {
-                log::error!("Failed to map globals buffer for writing");
-            }
-        }
-
-        let atlas_entry = image_cache.upload_raster(device, encoder, &self.handle);
-
-        // Create instance for this primitive
-        let instance = create_instance(
-            atlas_entry,
-            bounds,
-            self.radius,
-            self.animation,
-            self.load_time,
-            self.opacity,
-            self.theme_color,
-            self.animated_bounds.as_ref(),
-            self.is_hovered,
-            self.mouse_position,
-            self.progress,
-            self.progress_color,
+    fn encode_batch(&self, state: &mut Self::BatchState, context: &BatchEncodeContext<'_>) -> bool {
+        let transformed_bounds = Rectangle::new(
+            Point::new(context.bounds.x, context.bounds.y),
+            Size::new(context.bounds.width, context.bounds.height),
         );
 
-        #[cfg(any(
-            feature = "profile-with-puffin",
-            feature = "profile-with-tracy",
-            feature = "profile-with-tracing"
-        ))]
-        profiling::scope!("UI::RoundedImageShader::BufferAlloc");
-        let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Rounded Image Instance Buffer"),
-            size: std::mem::size_of::<Instance>() as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+        state.enqueue(PendingPrimitive {
+            id: self.id,
+            handle: self.handle.clone(),
+            // Use renderer-provided bounds so batched instances inherit scroll/scale transforms.
+            bounds: transformed_bounds,
+            radius: self.radius,
+            animation: self.animation,
+            load_time: self.load_time,
+            opacity: self.opacity,
+            theme_color: self.theme_color,
+            animated_bounds: self.animated_bounds,
+            is_hovered: self.is_hovered,
+            mouse_position: self.mouse_position,
+            progress: self.progress,
+            progress_color: self.progress_color,
         });
 
-        #[cfg(any(
-            feature = "profile-with-puffin",
-            feature = "profile-with-tracy",
-            feature = "profile-with-tracing"
-        ))]
-        profiling::scope!("UI::RoundedImageShader::BufferWrite");
-        // Write instance data to the buffer using write_buffer_with to avoid intermediate copy
-        match queue.write_buffer_with(
-            &instance_buffer,
-            0,
-            wgpu::BufferSize::new(std::mem::size_of::<Instance>() as u64).unwrap(),
-        ) {
-            Some(mut view) => {
-                view.copy_from_slice(bytemuck::cast_slice(&[instance]));
-            }
-            _ => {
-                log::error!("Failed to map instance buffer for writing");
-            }
-        }
-
-        let key = self as *const _ as usize;
-        state
-            .primitive_data
-            .insert(key, PrimitiveData { instance_buffer });
-    }
-
-    fn render_with_cache(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        storage: &Storage,
-        target: &wgpu::TextureView,
-        clip_bounds: &Rectangle<u32>,
-        image_cache: &wgpu_image::Cache,
-    ) {
-        // Skip individual rendering if batching is enabled
-        let type_id = TypeId::of::<RoundedImagePrimitive>();
-        if storage.has_batch_state(&type_id) {
-            return; // Batch state will handle rendering
-        }
-
-        #[cfg(any(
-            feature = "profile-with-puffin",
-            feature = "profile-with-tracy",
-            feature = "profile-with-tracing"
-        ))]
-        profiling::scope!(crate::infrastructure::profiling_scopes::scopes::VIEW_DRAW);
-
-        // Start GPU profiling span
-        let pipeline = storage.get::<Pipeline>().unwrap();
-        let state = storage.get::<State>().unwrap();
-
-        // Get globals bind group
-        let Some(globals_bind_group) = &state.globals_bind_group else {
-            log::warn!("Globals bind group not initialized");
-            return;
-        };
-
-        // Skip if no instances to render
-        if state.primitive_data.is_empty() {
-            return;
-        }
-
-        // Get per-primitive data using primitive address as key
-        let key = self as *const _ as usize;
-        let Some(primitive_data) = state.primitive_data.get(&key) else {
-            log::warn!("No data for primitive {:p}", self);
-            return;
-        };
-
-        // Get the atlas bind group from the image cache
-        let atlas_bind_group = image_cache.bind_group();
-
-        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Rounded Image Render Pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        // Set the render pipeline
-        render_pass.set_pipeline(&pipeline.render_pipeline);
-
-        // Bind the globals uniform buffer (group 0)
-        render_pass.set_bind_group(0, globals_bind_group, &[]);
-
-        // Bind the atlas texture array (group 1)
-        render_pass.set_bind_group(1, atlas_bind_group, &[]);
-
-        // Set the vertex buffer (instance data)
-        render_pass.set_vertex_buffer(0, primitive_data.instance_buffer.slice(..));
-
-        // Calculate proper scissor rect based on animated bounds
-        let (scissor_x, scissor_y, scissor_width, scissor_height) = {
-            (
-                clip_bounds.x,
-                clip_bounds.y,
-                clip_bounds.width.max(1),
-                clip_bounds.height.max(1),
-            )
-        };
-
-        render_pass.set_scissor_rect(scissor_x, scissor_y, scissor_width, scissor_height);
-
-        // Draw quad (4 vertices) with 1 instance
-        render_pass.draw(0..4, 0..1);
-
-        // Explicitly drop render pass before ending GPU span
-        drop(render_pass);
-
-        // End GPU profiling span
+        true
     }
 }
 

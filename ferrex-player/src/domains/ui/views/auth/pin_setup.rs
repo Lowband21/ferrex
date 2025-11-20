@@ -54,7 +54,7 @@ pub fn view_pin_setup<'a>(
             }),
     );
 
-    content = content.push(Space::with_height(Length::Fixed(8.0)));
+    content = content.push(Space::new().height(Length::Fixed(8.0)));
 
     content = content.push(
         container(pin_display(pin.as_str(), false))
@@ -73,7 +73,7 @@ pub fn view_pin_setup<'a>(
             }),
     );
 
-    content = content.push(Space::with_height(Length::Fixed(8.0)));
+    content = content.push(Space::new().height(Length::Fixed(8.0)));
 
     content = content.push(
         container(pin_display(confirm_pin.as_str(), true))
@@ -108,7 +108,7 @@ pub fn view_pin_setup<'a>(
 
     content = content.push(submit_button);
 
-    content = content.push(Space::with_height(Length::Fixed(12.0)));
+    content = content.push(Space::new().height(Length::Fixed(12.0)));
 
     // Skip button
     content = content

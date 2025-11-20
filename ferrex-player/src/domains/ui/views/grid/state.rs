@@ -1,4 +1,4 @@
-use iced::widget::scrollable;
+use iced::widget::{Id, scrollable};
 
 use std::ops::Range;
 
@@ -24,7 +24,7 @@ pub struct VirtualGridState {
     /// Currently visible item range
     pub visible_range: Range<usize>,
     /// Scrollable ID
-    pub scrollable_id: scrollable::Id,
+    pub scrollable_id: Id,
     /// Item width (calculated from viewport width)
     pub item_width: f32,
     /// Force refresh flag (for resize events)
@@ -41,16 +41,11 @@ pub struct VirtualGridState {
 )]
 impl VirtualGridState {
     pub fn new(total_items: usize, columns: usize, row_height: f32) -> Self {
-        Self::with_id(total_items, columns, row_height, scrollable::Id::unique())
+        Self::with_id(total_items, columns, row_height, Id::unique())
     }
 
     /// Create a new VirtualGridState with a specific scrollable ID
-    pub fn with_id(
-        total_items: usize,
-        columns: usize,
-        row_height: f32,
-        scrollable_id: scrollable::Id,
-    ) -> Self {
+    pub fn with_id(total_items: usize, columns: usize, row_height: f32, scrollable_id: Id) -> Self {
         let mut grid = Self {
             total_items,
             columns,

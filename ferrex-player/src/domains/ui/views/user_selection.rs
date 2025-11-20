@@ -100,7 +100,7 @@ impl UserSelectionView {
                 container(
                     column![
                         text("No users found").size(24),
-                        Space::with_height(20),
+                        Space::new().height(20),
                         button("Create New User")
                             .on_press(Message::ShowCreateUser)
                             .style(button_style())
@@ -148,9 +148,9 @@ impl UserSelectionView {
 
             container(
                 column![
-                    Space::with_height(60),
+                    Space::new().height(60),
                     title,
-                    Space::with_height(60),
+                    Space::new().height(60),
                     user_grid,
                 ]
                 .align_x(Alignment::Center)
@@ -192,7 +192,7 @@ impl UserSelectionView {
                     })
                     .align_x(iced::alignment::Horizontal::Center)
                     .align_y(iced::alignment::Vertical::Center),
-                Space::with_height(10),
+                Space::new().height(10),
                 text(display_name)
                     .size(18)
                     .color(FerrexTheme::Text.text_color()),
@@ -237,7 +237,7 @@ impl UserSelectionView {
                     })
                     .align_x(iced::alignment::Horizontal::Center)
                     .align_y(iced::alignment::Vertical::Center),
-                Space::with_height(10),
+                Space::new().height(10),
                 text("Add Profile")
                     .size(18)
                     .color(FerrexTheme::SubduedText.text_color()),

@@ -606,7 +606,7 @@ pub fn handle_exit_fullscreen(state: &mut State) -> Task<Message> {
     if state.domains.player.state.is_fullscreen {
         state.domains.player.state.is_fullscreen = false;
         let mode = iced::window::Mode::Windowed;
-        iced::window::get_latest().and_then(move |id| iced::window::set_mode(id, mode))
+        iced::window::latest().and_then(move |id| iced::window::set_mode(id, mode))
     } else {
         Task::none()
     }

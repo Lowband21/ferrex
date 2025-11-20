@@ -22,27 +22,27 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
         text("Preferences")
             .size(24)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        Space::with_height(20),
+        Space::new().height(20),
         // Playback section
         text("Playback")
             .size(20)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        Space::with_height(10),
+        Space::new().height(10),
         row![
             text("Auto-play next episode")
                 .size(16)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             toggler(true) // TODO: Connect to preferences
                 .on_toggle(|_| Message::NoOp),
         ]
         .align_y(iced::Alignment::Center),
-        Space::with_height(10),
+        Space::new().height(10),
         row![
             text("Preferred quality")
                 .size(16)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             pick_list(
                 vec![
                     PlaybackQuality::Auto,
@@ -58,12 +58,12 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
             .width(Length::Fixed(150.0)),
         ]
         .align_y(iced::Alignment::Center),
-        Space::with_height(10),
+        Space::new().height(10),
         row![
             text("Resume behavior")
                 .size(16)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             pick_list(
                 vec![
                     ResumeBehavior::Always,
@@ -76,22 +76,22 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
             .width(Length::Fixed(150.0)),
         ]
         .align_y(iced::Alignment::Center),
-        Space::with_height(20),
+        Space::new().height(20),
         // Subtitles section
         text("Subtitles")
             .size(20)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        Space::with_height(10),
+        Space::new().height(10),
         row![
             text("Show subtitles by default")
                 .size(16)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             toggler(false) // TODO: Connect to preferences
                 .on_toggle(|_| Message::NoOp),
         ]
         .align_y(iced::Alignment::Center),
-        Space::with_height(10),
+        Space::new().height(10),
         column![
             text("Subtitle size")
                 .size(16)
@@ -105,17 +105,17 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
             .align_y(iced::Alignment::Center),
         ]
         .spacing(5),
-        Space::with_height(20),
+        Space::new().height(20),
         // UI section
         text("User Interface")
             .size(20)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        Space::with_height(10),
+        Space::new().height(10),
         row![
             text("Library grid size")
                 .size(16)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             pick_list(
                 vec![GridSize::Small, GridSize::Medium, GridSize::Large],
                 Some(GridSize::Medium),
@@ -124,23 +124,23 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
             .width(Length::Fixed(150.0)),
         ]
         .align_y(iced::Alignment::Center),
-        Space::with_height(10),
+        Space::new().height(10),
         row![
             text("Show poster titles on hover")
                 .size(16)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             toggler(false) // TODO: Connect to preferences
                 .on_toggle(|_| Message::NoOp),
         ]
         .align_y(iced::Alignment::Center),
-        Space::with_height(30),
+        Space::new().height(30),
         row![
             button("Back")
                 .on_press(Message::BackToSettings)
                 .style(theme::Button::Secondary.style())
                 .padding([10, 20]),
-            Space::with_width(10),
+            Space::new().width(10),
             button("Save Changes")
                 .on_press(Message::NoOp) // TODO: Implement save
                 .style(theme::Button::Primary.style())

@@ -133,7 +133,7 @@ impl PinEntryView {
             )
             .padding(10)
         } else {
-            container(Space::with_height(26))
+            container(Space::new().height(26))
         };
 
         // Number pad
@@ -146,15 +146,15 @@ impl PinEntryView {
             .padding([10, 20]);
 
         let content = column![
-            Space::with_height(60),
+            Space::new().height(60),
             title,
             subtitle,
-            Space::with_height(40),
+            Space::new().height(40),
             pin_display,
             error_message,
-            Space::with_height(20),
+            Space::new().height(20),
             number_pad,
-            Space::with_height(40),
+            Space::new().height(40),
             back_button,
         ]
         .align_x(Alignment::Center)
@@ -283,7 +283,7 @@ impl PinEntryView {
             row2,
             row3,
             row4,
-            Space::with_height(20),
+            Space::new().height(20),
             submit_button,
         ]
         .spacing(button_spacing)

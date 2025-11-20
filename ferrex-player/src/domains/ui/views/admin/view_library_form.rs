@@ -39,7 +39,7 @@ pub fn view_library_form<'a>(
             )
             .on_press(Message::HideLibraryForm)
             .style(theme::Button::Secondary.style()),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             text(if form_data.editing {
                 "Edit Library"
             } else {
@@ -47,8 +47,8 @@ pub fn view_library_form<'a>(
             })
             .size(28)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            Space::with_width(Length::Fill),
-            Space::with_width(Length::Fixed(100.0)), // Balance the back button
+            Space::new().width(Length::Fill),
+            Space::new().width(Length::Fixed(100.0)), // Balance the back button
         ]
         .align_y(iced::Alignment::Center),
     );
@@ -110,7 +110,7 @@ pub fn view_library_form<'a>(
                     Some(form_data.library_type.as_str()),
                     |value| Message::UpdateLibraryFormType(value.to_string())
                 ),
-                Space::with_width(Length::Fixed(30.0)),
+                Space::new().width(Length::Fixed(30.0)),
                 radio(
                     "TV Shows",
                     "TvShows",
@@ -181,11 +181,11 @@ pub fn view_library_form<'a>(
     // Action buttons
     content = content.push(
         row![
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             button("Cancel")
                 .on_press(Message::HideLibraryForm)
                 .style(theme::Button::Secondary.style()),
-            Space::with_width(Length::Fixed(10.0)),
+            Space::new().width(Length::Fixed(10.0)),
             button(if form_data.editing {
                 "Update Library"
             } else {

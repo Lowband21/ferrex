@@ -21,23 +21,23 @@ pub fn view_user_profile<'a>(_state: &'a State) -> Element<'a, Message> {
         text("Profile Settings")
             .size(24)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        Space::with_height(20),
+        Space::new().height(20),
         text("Display Name")
             .size(16)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
         text_input("Enter display name", "").padding(10).size(16),
-        Space::with_height(15),
+        Space::new().height(15),
         text("Email (Optional)")
             .size(16)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
         text_input("Enter email", "").padding(10).size(16),
-        Space::with_height(30),
+        Space::new().height(30),
         row![
             button("Cancel")
                 .on_press(Message::BackToSettings)
                 .style(theme::Button::Secondary.style())
                 .padding([10, 20]),
-            Space::with_width(10),
+            Space::new().width(10),
             button("Save Changes")
                 .on_press(Message::NoOp) // TODO: Implement save
                 .style(theme::Button::Primary.style())

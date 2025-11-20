@@ -32,7 +32,7 @@ fn library_loading() -> Element<'static, Message> {
             text("Media Library")
                 .size(28)
                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            Space::with_height(Length::Fixed(100.0)),
+            Space::new().height(Length::Fixed(100.0)),
             text("Loading library...")
                 .size(20)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
@@ -70,7 +70,7 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                 container(
                     row![
                         text(error).color(theme::MediaServerTheme::ERROR),
-                        Space::with_width(Length::Fill),
+                        Space::new().width(Length::Fill),
                         button("×")
                             .on_press(Message::ClearError)
                             .style(theme::Button::Text.style()),
@@ -81,7 +81,7 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                 .style(theme::Container::Card.style())
                 .into()
             } else {
-                container(Space::with_height(0)).into()
+                container(Space::new().height(0)).into()
             };
 
         if !state.domains.ui.state.repo_accessor.is_initialized() {
@@ -89,13 +89,13 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
             container(
                 column![
                     error_section,
-                    Space::with_height(Length::Fill),
+                    Space::new().height(Length::Fill),
                     container(
                         column![
                             text("No media files found")
                                 .size(18)
                                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                            Space::with_height(20),
+                            Space::new().height(20),
                             text("Click 'Scan Library' to find media files")
                                 .size(14)
                                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
@@ -104,7 +104,7 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                         .spacing(10)
                     )
                     .align_x(iced::alignment::Horizontal::Center),
-                    Space::with_height(Length::Fill)
+                    Space::new().height(Length::Fill)
                 ]
                 .spacing(20)
                 .width(Length::Fill),

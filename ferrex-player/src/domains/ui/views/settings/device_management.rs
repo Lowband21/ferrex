@@ -93,7 +93,7 @@ pub fn view_device_management<'a>(state: &'a State) -> Element<'a, Message> {
             button(
                 row![
                     icon_text(Icon::ChevronLeft).size(20),
-                    Space::with_width(5),
+                    Space::new().width(5),
                     text("Back").size(16)
                 ]
                 .align_y(iced::Alignment::Center)
@@ -101,15 +101,15 @@ pub fn view_device_management<'a>(state: &'a State) -> Element<'a, Message> {
             .on_press(Message::BackToSettings)
             .style(theme::Button::Secondary.style())
             .padding([8, 16]),
-            Space::with_width(20),
+            Space::new().width(20),
             text("Device Management")
                 .size(28)
                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             button(
                 row![
                     icon_text(Icon::RefreshCw).size(16),
-                    Space::with_width(5),
+                    Space::new().width(5),
                     text("Refresh").size(14)
                 ]
                 .align_y(iced::Alignment::Center)
@@ -120,14 +120,14 @@ pub fn view_device_management<'a>(state: &'a State) -> Element<'a, Message> {
         ]
         .align_y(iced::Alignment::Center),
 
-        Space::with_height(20),
+        Space::new().height(20),
 
         // Description
         text("Manage devices that can access your account. You can revoke access for any device except the current one.")
             .size(16)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
 
-        Space::with_height(20),
+        Space::new().height(20),
 
         // Device list
         device_list_content
@@ -154,7 +154,7 @@ fn create_loading_view<'a>() -> Element<'a, Message> {
                 icon_text(Icon::Loader)
                     .size(24)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::with_width(10),
+                Space::new().width(10),
                 text("Loading devices...")
                     .size(16)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
@@ -176,17 +176,17 @@ fn create_error_view<'a>(error: &'a str) -> Element<'a, Message> {
                 icon_text(Icon::X)
                     .size(24)
                     .color(theme::MediaServerTheme::ERROR),
-                Space::with_width(10),
+                Space::new().width(10),
                 text("Failed to load devices")
                     .size(16)
                     .color(theme::MediaServerTheme::ERROR),
             ]
             .align_y(iced::Alignment::Center),
-            Space::with_height(10),
+            Space::new().height(10),
             text(error)
                 .size(14)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            Space::with_height(15),
+            Space::new().height(15),
             button("Retry")
                 .on_press(Message::RefreshDevices)
                 .style(theme::Button::Primary.style())
@@ -207,11 +207,11 @@ fn create_empty_view<'a>() -> Element<'a, Message> {
             icon_text(Icon::Smartphone)
                 .size(48)
                 .color(theme::MediaServerTheme::TEXT_SUBDUED),
-            Space::with_height(15),
+            Space::new().height(15),
             text("No devices found")
                 .size(18)
                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            Space::with_height(5),
+            Space::new().height(5),
             text("This is unusual. Try refreshing the list.")
                 .size(14)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
@@ -230,7 +230,7 @@ fn create_device_list<'a>(devices: &'a [UserDevice]) -> Element<'a, Message> {
 
     for device in devices {
         device_elements.push(create_device_card(device));
-        device_elements.push(Space::with_height(10).into());
+        device_elements.push(Space::new().height(10).into());
     }
 
     // Remove last spacer
@@ -267,16 +267,16 @@ fn create_device_card<'a>(device: &'a UserDevice) -> Element<'a, Message> {
                     } else {
                         theme::MediaServerTheme::TEXT_SECONDARY
                     }),
-                Space::with_width(15),
+                Space::new().width(15),
                 column![
                     row![
                         text(&device.device_name)
                             .size(18)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                         if device.is_current_device {
-                            Element::from(Space::with_width(8))
+                            Element::from(Space::new().width(8))
                         } else {
-                            Element::from(Space::with_width(0))
+                            Element::from(Space::new().width(0))
                         },
                         if device.is_current_device {
                             container(
@@ -302,11 +302,11 @@ fn create_device_card<'a>(device: &'a UserDevice) -> Element<'a, Message> {
                             .padding([2, 8])
                             .into()
                         } else {
-                            Element::from(Space::with_width(0))
+                            Element::from(Space::new().width(0))
                         }
                     ]
                     .align_y(iced::Alignment::Center),
-                    Space::with_height(2),
+                    Space::new().height(2),
                     text(format!("{} • {}", device.device_type, last_active_text))
                         .size(14)
                         .color(theme::MediaServerTheme::TEXT_SECONDARY),
@@ -317,13 +317,13 @@ fn create_device_card<'a>(device: &'a UserDevice) -> Element<'a, Message> {
                                 .color(theme::MediaServerTheme::TEXT_SUBDUED),
                         )
                     } else {
-                        Space::with_height(0).into()
+                        Space::new().height(0).into()
                     }
                 ]
                 .spacing(2),
             ]
             .align_y(iced::Alignment::Center),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             // Actions
             if device.is_current_device {
                 Element::from(
@@ -339,7 +339,7 @@ fn create_device_card<'a>(device: &'a UserDevice) -> Element<'a, Message> {
                     button(
                         row![
                             icon_text(Icon::X).size(14),
-                            Space::with_width(5),
+                            Space::new().width(5),
                             text("Revoke").size(14)
                         ]
                         .align_y(iced::Alignment::Center),

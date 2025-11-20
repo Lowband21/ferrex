@@ -158,7 +158,7 @@ impl PasswordLoginView {
             })
             .width(350)
         } else {
-            container(Space::with_height(0))
+            container(Space::new().height(0))
         };
 
         // Submit button
@@ -205,20 +205,20 @@ impl PasswordLoginView {
 
         // Main content
         let content = column![
-            Space::with_height(60),
+            Space::new().height(60),
             title,
             subtitle,
-            Space::with_height(40),
+            Space::new().height(40),
             username_input,
-            Space::with_height(16),
+            Space::new().height(16),
             password_row,
-            Space::with_height(12),
+            Space::new().height(12),
             remember_device,
-            Space::with_height(20),
+            Space::new().height(20),
             error_message,
-            Space::with_height(8),
+            Space::new().height(8),
             submit_button,
-            Space::with_height(40),
+            Space::new().height(40),
             back_button,
         ]
         .align_x(Alignment::Center)

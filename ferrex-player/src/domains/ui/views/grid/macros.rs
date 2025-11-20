@@ -61,7 +61,7 @@ macro_rules! virtual_reference_grid {
             }
 
             // Add top padding to prevent content from touching header
-            //content = content.push(Space::with_height(header::HEIGHT * 2.0));
+            //content = content.push(Space::new().height(header::HEIGHT * 2.0));
 
             // Calculate total rows
             let total_rows = (len + grid_state.columns - 1) / grid_state.columns;
@@ -70,7 +70,7 @@ macro_rules! virtual_reference_grid {
             let start_row = grid_state.visible_range.start / grid_state.columns;
             if start_row > 0 {
                 let spacer_height = start_row as f32 * grid_state.row_height;
-                content = content.push(Space::with_height(Length::Fixed(spacer_height)));
+                content = content.push(Space::new().height(Length::Fixed(spacer_height)));
             }
 
             let watch_state_opt = state.domains.media.state.get_watch_state();
@@ -138,8 +138,9 @@ macro_rules! virtual_reference_grid {
                         let total_card_height = poster::TOTAL_CARD_HEIGHT
                             + 2.0 * $crate::infrastructure::constants::animation::calculate_vertical_padding(poster::BASE_HEIGHT);
                         row_content = row_content.push(
-                            container(Space::new(
+                            container(Space::new().width(
                                 container_width,
+                            ).height(
                                 total_card_height,
                             ))
                             .style($crate::domains::ui::theme::Container::Default.style()),
@@ -154,7 +155,7 @@ macro_rules! virtual_reference_grid {
                         for _ in items_in_last_row..grid_state.columns {
                             let (container_width, _) =
                                 $crate::infrastructure::constants::calculations::get_container_dimensions(1.0);
-                            row_content = row_content.push(Space::with_width(container_width));
+                            row_content = row_content.push(Space::new().width(container_width));
                         }
                     }
                 }
@@ -173,11 +174,11 @@ macro_rules! virtual_reference_grid {
             let remaining_rows = total_rows.saturating_sub(end_row);
             if remaining_rows > 0 {
                 let spacer_height = remaining_rows as f32 * grid_state.row_height;
-                content = content.push(Space::with_height(Length::Fixed(spacer_height)));
+                content = content.push(Space::new().height(Length::Fixed(spacer_height)));
             }
 
             // Add some padding at the bottom
-            content = content.push(Space::with_height(grid::BOTTOM_PADDING));
+            content = content.push(Space::new().height(grid::BOTTOM_PADDING));
 
             let total_height = total_rows as f32 * grid_state.row_height
                 + grid::TOP_PADDING

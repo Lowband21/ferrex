@@ -6,7 +6,7 @@ use crate::{
     state_refactored::State,
 };
 use ferrex_core::LibraryID;
-use iced::widget::text_input::Id;
+use iced::widget::Id;
 use iced::{
     Element, Length,
     widget::{Space, Stack, button, container, row, text, text_input},
@@ -60,7 +60,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 );
             }
 
-            left_section_items.push(Space::with_width(20).into()); // Gap between buttons and library tabs
+            left_section_items.push(Space::new().width(20).into()); // Gap between buttons and library tabs
 
             // Library tabs
             left_section_items.push(
@@ -158,7 +158,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .height(HEIGHT)
                         .into()
                     } else {
-                        Space::with_width(HEIGHT).into()
+                        Space::new().width(HEIGHT).into()
                     };
                 element
             });
@@ -191,7 +191,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         container(left_section)
                             .padding([0, 15])
                             .align_y(iced::alignment::Vertical::Center),
-                        Space::with_width(Length::Fill),
+                        Space::new().width(Length::Fill),
                         container(right_section)
                             .padding([0, 15])
                             .align_y(iced::alignment::Vertical::Center),
@@ -274,7 +274,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                             .height(HEIGHT)
                             .into()
                         } else {
-                            Space::with_width(HEIGHT).into()
+                            Space::new().width(HEIGHT).into()
                         };
                     admin_element
                 },
@@ -310,7 +310,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         container(left_section)
                             .padding([0, 15])
                             .align_y(iced::alignment::Vertical::Center),
-                        Space::with_width(Length::Fill),
+                        Space::new().width(Length::Fill),
                         container(right_section)
                             .padding([0, 15])
                             .align_y(iced::alignment::Vertical::Center),
@@ -393,7 +393,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .height(HEIGHT)
                         .into()
                     } else {
-                        Space::with_width(HEIGHT).into()
+                        Space::new().width(HEIGHT).into()
                     };
                 element
             });
@@ -430,7 +430,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         container(left_section)
                             .padding([0, 15])
                             .align_y(iced::alignment::Vertical::Center),
-                        Space::with_width(Length::Fill),
+                        Space::new().width(Length::Fill),
                         container(right_section)
                             .padding([0, 15])
                             .align_y(iced::alignment::Vertical::Center),
@@ -515,7 +515,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         container(left_section)
                             .padding([0, 15])
                             .align_y(iced::alignment::Vertical::Center),
-                        Space::with_width(Length::Fill),
+                        Space::new().width(Length::Fill),
                         container(right_section)
                             .padding([0, 15])
                             .align_y(iced::alignment::Vertical::Center),
@@ -647,7 +647,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
         }
         _ => {
             // No header for other views
-            Space::with_height(0).into()
+            Space::new().height(0).into()
         }
     }
 }

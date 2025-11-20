@@ -233,7 +233,7 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         // Window management events
         CrossDomainEvent::HideWindow => {
             log::info!("[CrossDomain] Hide window requested");
-            iced::window::get_latest().and_then(|id| {
+            iced::window::latest().and_then(|id| {
                 log::info!("Hiding window with id: {:?}", id);
                 //iced::window::set_mode(id, iced::window::Mode::Fullscreen)
                 iced::window::minimize(id, true)
@@ -245,7 +245,7 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
                 "[CrossDomain] Restore window requested (fullscreen: {})",
                 fullscreen
             );
-            let minimize_task = iced::window::get_latest().and_then(|id| {
+            let minimize_task = iced::window::latest().and_then(|id| {
                 log::info!("Hiding window with id: {:?}", id);
                 //iced::window::set_mode(id, iced::window::Mode::Fullscreen)
                 iced::window::minimize(id, true)
@@ -256,7 +256,7 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
             } else {
                 iced::window::Mode::Windowed
             };
-            let restore_task = iced::window::get_latest().and_then(move |id| {
+            let restore_task = iced::window::latest().and_then(move |id| {
                 log::info!("Re storing window {:?} to mode: {:?}", id, mode);
                 iced::window::set_mode(id, mode)
             });
@@ -265,7 +265,7 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
 
         CrossDomainEvent::SetWindowMode(mode) => {
             log::info!("[CrossDomain] Set window mode: {:?}", mode);
-            iced::window::get_latest().and_then(move |id| {
+            iced::window::latest().and_then(move |id| {
                 log::info!("Setting window {:?} to mode: {:?}", id, mode);
                 iced::window::set_mode(id, mode)
             })

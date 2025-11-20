@@ -262,11 +262,11 @@ fn create_user_carousel<'a>(
         // Navigation row
         container(
             row![
-                Space::with_width(Length::Fill),
+                Space::new().width(Length::Fill),
                 left_button,
-                Space::with_width(10),
+                Space::new().width(10),
                 right_button,
-                Space::with_width(Length::Fill),
+                Space::new().width(Length::Fill),
             ]
             .align_y(Alignment::Center)
         )
@@ -342,7 +342,7 @@ fn create_user_avatar<'a>(
                     ..Default::default()
                 }
             }),
-        Space::with_height(8),
+        Space::new().height(8),
         // User name
         text(&user.display_name)
             .size(14)
@@ -445,7 +445,7 @@ fn create_add_user_button<'a>() -> Element<'a, DomainMessage> {
                 ..Default::default()
             }
         }),
-        Space::with_height(8),
+        Space::new().height(8),
         // "Add User" text
         text("Add User")
             .size(14)

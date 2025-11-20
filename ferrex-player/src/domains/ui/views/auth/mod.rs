@@ -194,38 +194,38 @@ pub fn view_first_run_setup<'a>(
 
     let mut content = column![
         title,
-        Space::with_height(8),
+        Space::new().height(8),
         subtitle,
-        Space::with_height(32),
+        Space::new().height(32),
         text("Username").size(14),
-        Space::with_height(4),
+        Space::new().height(4),
         username_input,
-        Space::with_height(16),
+        Space::new().height(16),
         text("Display Name").size(14),
-        Space::with_height(4),
+        Space::new().height(4),
         display_name_input,
-        Space::with_height(16),
+        Space::new().height(16),
         text("Password").size(14),
-        Space::with_height(4),
+        Space::new().height(4),
         password_input,
-        Space::with_height(16),
+        Space::new().height(16),
         text("Confirm Password").size(14),
-        Space::with_height(4),
+        Space::new().height(4),
         confirm_password_input,
-        Space::with_height(8),
+        Space::new().height(8),
         show_password_checkbox,
-        Space::with_height(16),
+        Space::new().height(16),
         text("Setup Token").size(14),
-        Space::with_height(4),
+        Space::new().height(4),
         setup_token_input,
-        Space::with_height(32),
+        Space::new().height(32),
         create_button,
     ]
     .width(Length::Fixed(400.0))
     .align_x(Alignment::Center);
 
     if let Some(err) = error {
-        content = content.push(Space::with_height(16)).push(
+        content = content.push(Space::new().height(16)).push(
             container(text(err).size(14).size(14))
                 .padding(12)
                 .style(theme::Container::ErrorBox.style()),

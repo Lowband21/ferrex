@@ -1,9 +1,11 @@
 use iced::widget::image::Handle;
-use iced::widget::shader::{Primitive, Program, Storage};
+use iced::widget::shader::{Primitive, Program};
 use iced::{Element, Length};
 use iced::{Rectangle, mouse};
-use iced_wgpu::image as wgpu_image;
-use iced_wgpu::wgpu;
+use iced_wgpu::primitive::{
+    BatchEncodeContext, BatchPrimitive, PrepareContext, PrimitiveBatchState, RenderContext,
+};
+use iced_wgpu::{ImageCache, wgpu};
 
 use crate::domains::ui::messages::Message;
 
@@ -60,36 +62,109 @@ impl Program<Message> for TexturePreloaderProgram {
 }
 
 impl Primitive for TexturePreloaderPrimitive {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
+    type Renderer = ();
+
+    fn initialize(
+        &self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _format: wgpu::TextureFormat,
+    ) -> Self::Renderer {
+        ()
     }
 
-    fn prepare_batched(
-        &mut self,
-        device: &wgpu::Device,
+    fn prepare(
+        &self,
+        _renderer: &mut Self::Renderer,
+        _device: &wgpu::Device,
         _queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
-        _format: wgpu::TextureFormat,
-        _storage: &mut Storage,
         _bounds: &Rectangle,
         _viewport: &iced::advanced::graphics::Viewport,
-        image_cache: &mut wgpu_image::Cache,
     ) {
-        // Upload each handle to the atlas via iced's cache
-        for handle in &self.handles {
-            let _ = image_cache.upload_raster(device, encoder, handle);
+        // Upload work handled through batch path
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct TexturePreloaderBatchState {
+    pending_handles: Vec<Handle>,
+}
+
+impl TexturePreloaderBatchState {
+    fn enqueue(&mut self, handles: impl IntoIterator<Item = Handle>) {
+        self.pending_handles.extend(handles);
+    }
+}
+
+impl PrimitiveBatchState for TexturePreloaderBatchState {
+    type InstanceData = ();
+
+    fn new(_device: &wgpu::Device, _format: wgpu::TextureFormat) -> Self
+    where
+        Self: Sized,
+    {
+        Self::default()
+    }
+
+    fn add_instance(&mut self, _instance: Self::InstanceData) {}
+
+    fn prepare(&mut self, context: &mut PrepareContext<'_>) {
+        #[cfg(any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ))]
+        profiling::scope!("TexturePreloaderBatchState::prepare");
+
+        let Some(image_cache) = context.resources.image_cache() else {
+            self.pending_handles.clear();
+            return;
+        };
+
+        for handle in self.pending_handles.drain(..) {
+            let _ = image_cache.ensure_raster_region(context.device, context.encoder, &handle);
         }
     }
 
-    fn render_with_cache(
+    fn render(
         &self,
-        _encoder: &mut wgpu::CommandEncoder,
-        _storage: &Storage,
-        _target: &wgpu::TextureView,
-        _clip_bounds: &Rectangle<u32>,
-        _image_cache: &wgpu_image::Cache,
+        _render_pass: &mut wgpu::RenderPass<'_>,
+        _context: &mut RenderContext<'_>,
+        _range: std::ops::Range<u32>,
     ) {
-        // No drawing
+        // Nothing to render
+    }
+
+    fn trim(&mut self) {
+        self.pending_handles.clear();
+    }
+
+    fn instance_count(&self) -> usize {
+        self.pending_handles.len()
+    }
+}
+
+impl BatchPrimitive for TexturePreloaderPrimitive {
+    type BatchState = TexturePreloaderBatchState;
+
+    fn create_batch_state(
+        _device: &wgpu::Device,
+        _format: wgpu::TextureFormat,
+    ) -> Self::BatchState {
+        TexturePreloaderBatchState::default()
+    }
+
+    fn encode_batch(
+        &self,
+        state: &mut Self::BatchState,
+        _context: &BatchEncodeContext<'_>,
+    ) -> bool {
+        if self.handles.is_empty() {
+            return true;
+        }
+
+        state.enqueue(self.handles.iter().cloned());
+        true
     }
 }
 

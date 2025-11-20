@@ -49,7 +49,7 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 .state
                 .background_shader_state
                 .calculate_content_offset_with_height(window_width, window_height);
-            content = content.push(Space::with_height(Length::Fixed(content_offset)));
+            content = content.push(Space::new().height(Length::Fixed(content_offset)));
 
             let mut poster_element = image_for(media_id.to_uuid())
                 .size(ImageSize::Full)
@@ -204,7 +204,7 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 if let Some(rating) = movie_details.vote_average {
                     let mut rating_row = row![
                         text("★").size(16).color(theme::MediaServerTheme::WARNING),
-                        Space::with_width(5),
+                        Space::new().width(5),
                         text(format!("{:.1}", rating))
                             .size(14)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY)
@@ -229,14 +229,14 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 vec![], // No additional buttons yet
             );
 
-            details = details.push(Space::with_height(10));
+            details = details.push(Space::new().height(10));
             details = details.push(button_row);
 
             // Metadata sections
             if let Some(ref movie_details) = movie_details_opt {
                 // Synopsis
                 if let Some(desc) = &movie_details.overview {
-                    details = details.push(Space::with_height(20));
+                    details = details.push(Space::new().height(20));
                     details = details.push(text("Synopsis").size(20));
                     details = details.push(
                         container(text(desc.to_string()).size(14))
@@ -252,7 +252,7 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                             .map(|company| company.name.as_str())
                             .collect::<Vec<_>>()
                             .join(", ");
-                        details = details.push(Space::with_height(15));
+                        details = details.push(Space::new().height(15));
                         details = details.push(row![
                             text("Production: ")
                                 .size(14)
@@ -276,7 +276,7 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
 
             // Technical details section - displayed as cards below the poster
             if let ArchivedOption::Some(metadata) = &movie.file.media_file_metadata {
-                let mut tech_row = row![Space::with_width(20)].spacing(8); // Start padding and tighter spacing
+                let mut tech_row = row![Space::new().width(20)].spacing(8); // Start padding and tighter spacing
 
                 // Resolution
                 if let ArchivedOption::Some(width) = metadata.width
@@ -298,7 +298,7 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                     let video_card = container(
                         row![
                             icon_text(Icon::Film).size(14),
-                            Space::with_width(5),
+                            Space::new().width(5),
                             text(codec.to_string())
                                 .size(14)
                                 .color(theme::MediaServerTheme::TEXT_PRIMARY)
@@ -316,7 +316,7 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                     let audio_card = container(
                         row![
                             icon_text(Icon::Volume2).size(14),
-                            Space::with_width(5),
+                            Space::new().width(5),
                             text(codec.to_string())
                                 .size(14)
                                 .color(theme::MediaServerTheme::TEXT_PRIMARY)
@@ -463,7 +463,7 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 text("Media Not Found")
                     .size(24)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::with_height(10),
+                Space::new().height(10),
                 text("Repository error: yoke not loaded.")
                     .size(16)
                     .color(theme::MediaServerTheme::TEXT_SUBDUED),

@@ -70,7 +70,7 @@ pub fn view_credential_entry<'a>(
     // Error message
     if let Some(err) = error {
         content = content.push(error_message(err));
-        content = content.push(Space::with_height(Length::Fixed(12.0)));
+        content = content.push(Space::new().height(Length::Fixed(12.0)));
     }
 
     // Attempts remaining warning
@@ -84,7 +84,7 @@ pub fn view_credential_entry<'a>(
                     color: Some(theme.extended_palette().danger.base.color),
                 }),
         );
-        content = content.push(Space::with_height(Length::Fixed(8.0)));
+        content = content.push(Space::new().height(Length::Fixed(8.0)));
     }
 
     // Input field
@@ -100,7 +100,7 @@ pub fn view_credential_entry<'a>(
                     .width(Length::Fill),
             );
 
-            content = content.push(Space::with_height(Length::Fixed(8.0)));
+            content = content.push(Space::new().height(Length::Fixed(8.0)));
 
             // Password visibility toggle
             content = content.push(
@@ -110,7 +110,7 @@ pub fn view_credential_entry<'a>(
                     .spacing(8),
             );
 
-            content = content.push(Space::with_height(Length::Fixed(8.0)));
+            content = content.push(Space::new().height(Length::Fixed(8.0)));
 
             // Remember device checkbox
             content = content.push(
@@ -151,7 +151,7 @@ pub fn view_credential_entry<'a>(
 
     content = content.push(submit_button);
 
-    content = content.push(Space::with_height(Length::Fixed(12.0)));
+    content = content.push(Space::new().height(Length::Fixed(12.0)));
 
     // Back button
     content =
@@ -203,7 +203,7 @@ fn pin_input<'a>(value: &str, max_length: u8) -> Element<'a, DomainMessage> {
 
     column![
         row(digits).spacing(12).align_y(Alignment::Center),
-        Space::with_height(Length::Fixed(20.0)),
+        Space::new().height(Length::Fixed(20.0)),
         // Numeric keypad
         numeric_keypad(value)
     ]
@@ -322,7 +322,7 @@ fn numeric_keypad<'a>(current_value: &str) -> Element<'a, DomainMessage> {
         ]
         .spacing(8),
         row![
-            Space::with_width(Length::Fixed(button_size)),
+            Space::new().width(Length::Fixed(button_size)),
             create_digit_button('0'),
             backspace_button,
         ]

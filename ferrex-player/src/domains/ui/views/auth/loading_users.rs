@@ -19,7 +19,7 @@ pub fn view_loading_users<'a>() -> Element<'a, DomainMessage> {
             )
             .width(Length::Fill)
             .align_x(iced::alignment::Horizontal::Center),
-            Space::with_height(Length::Fixed(20.0)),
+            Space::new().height(Length::Fixed(20.0)),
             text("Loading users...")
                 .size(18)
                 .align_x(iced::alignment::Horizontal::Center),

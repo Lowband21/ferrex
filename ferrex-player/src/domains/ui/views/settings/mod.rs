@@ -64,7 +64,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
             button(
                 row![
                     icon_text(Icon::ChevronLeft).size(20),
-                    Space::with_width(5),
+                    Space::new().width(5),
                     text("Back").size(16)
                 ]
                 .align_y(iced::Alignment::Center)
@@ -72,11 +72,11 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
             .on_press(Message::NavigateHome)
             .style(theme::Button::Secondary.style())
             .padding([8, 16]),
-            Space::with_width(20),
+            Space::new().width(20),
             text("User Settings")
                 .size(28)
                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             if let Some(user) = &current_user {
                 Element::new(
                     text(format!("Logged in as: {}", user.display_name))
@@ -84,7 +84,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
                         .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 )
             } else {
-                Space::with_width(0).into()
+                Space::new().width(0).into()
             }
         ]
         .align_y(iced::Alignment::Center),
@@ -125,7 +125,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
             column![
                 row![
                     text("🎨").size(24),
-                    Space::with_width(15),
+                    Space::new().width(15),
                     column![
                         text("Dark Mode")
                             .size(18)
@@ -135,7 +135,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
                             .color(theme::MediaServerTheme::TEXT_SECONDARY),
                     ]
                     .spacing(5),
-                    Space::with_width(Length::Fill),
+                    Space::new().width(Length::Fill),
                     toggler(false) // TODO: Connect to actual theme state
                         .on_toggle(|_| Message::NoOp), // TODO: Implement theme toggle
                 ]
@@ -150,7 +150,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
             column![
                 row![
                     text("🔓").size(24),
-                    Space::with_width(15),
+                    Space::new().width(15),
                     column![
                         text("Auto-login")
                             .size(18)
@@ -160,7 +160,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
                             .color(theme::MediaServerTheme::TEXT_SECONDARY),
                     ]
                     .spacing(5),
-                    Space::with_width(Length::Fill),
+                    Space::new().width(Length::Fill),
                     toggler(state.domains.settings.preferences.auto_login_enabled)
                         .on_toggle(Message::ToggleAutoLogin),
                 ]
@@ -170,12 +170,12 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
         )
         .style(theme::Container::Card.style())
         .width(Length::Fill),
-        Space::with_height(20),
+        Space::new().height(20),
         // Logout button
         button(
             row![
                 icon_text(Icon::LogOut),
-                Space::with_width(10),
+                Space::new().width(10),
                 text("Logout").size(16),
             ]
             .align_y(iced::Alignment::Center),
@@ -213,7 +213,7 @@ fn create_settings_section<'a>(
         container(
             row![
                 text(icon).size(24),
-                Space::with_width(15),
+                Space::new().width(15),
                 column![
                     text(title)
                         .size(18)
@@ -223,7 +223,7 @@ fn create_settings_section<'a>(
                         .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 ]
                 .spacing(5),
-                Space::with_width(Length::Fill),
+                Space::new().width(Length::Fill),
                 icon_text(Icon::ChevronRight)
                     .size(20)
                     .color(theme::MediaServerTheme::TEXT_SUBDUED),

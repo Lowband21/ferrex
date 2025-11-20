@@ -13,6 +13,7 @@ use crate::{
 };
 use ferrex_core::{EpisodeLike, Media, MediaIDLike, MediaLike, MediaType, MovieLike, SortOrder};
 use iced::Task;
+use iced::widget::{operation::scroll_to, scrollable::AbsoluteOffset};
 use std::time::Instant;
 
 /// Check if user has PIN - returns a task that sends a Settings message
@@ -113,9 +114,9 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                             scroll_position,
                             library_id
                         );
-                        iced::widget::scrollable::scroll_to::<DomainMessage>(
+                        scroll_to::<DomainMessage>(
                             scrollable_id,
-                            iced::widget::scrollable::AbsoluteOffset {
+                            AbsoluteOffset {
                                 x: 0.0,
                                 y: scroll_position,
                             },
@@ -229,10 +230,9 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                         let ui = &state.domains.ui.state;
                         let has_genres = !ui.selected_genres.is_empty();
                         let has_decade = ui.selected_decade.is_some();
-                        let has_resolution = ui.selected_resolution
-                            != ferrex_core::UiResolution::Any;
-                        let has_watch =
-                            ui.selected_watch_status != ferrex_core::UiWatchStatus::Any;
+                        let has_resolution =
+                            ui.selected_resolution != ferrex_core::UiResolution::Any;
+                        let has_watch = ui.selected_watch_status != ferrex_core::UiWatchStatus::Any;
                         let has_search = !ui.search_query.trim().is_empty();
                         has_genres || has_decade || has_resolution || has_watch || has_search
                     };
@@ -653,9 +653,9 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                                         scroll_position,
                                         tab_id
                                     );
-                                    iced::widget::scrollable::scroll_to::<DomainMessage>(
+                                    scroll_to::<DomainMessage>(
                                         scrollable_id,
-                                        iced::widget::scrollable::AbsoluteOffset {
+                                        AbsoluteOffset {
                                             x: 0.0,
                                             y: scroll_position,
                                         },
@@ -785,9 +785,9 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                     if let crate::domains::ui::tabs::TabState::Library(lib_state) = tab {
                         let scroll_position = lib_state.grid_state.scroll_position;
                         let scrollable_id = lib_state.grid_state.scrollable_id.clone();
-                        iced::widget::scrollable::scroll_to::<DomainMessage>(
+                        scroll_to::<DomainMessage>(
                             scrollable_id,
-                            iced::widget::scrollable::AbsoluteOffset {
+                            AbsoluteOffset {
                                 x: 0.0,
                                 y: scroll_position,
                             },

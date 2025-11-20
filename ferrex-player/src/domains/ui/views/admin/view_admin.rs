@@ -31,11 +31,11 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
                 text("Access Denied")
                     .size(32)
                     .color(theme::MediaServerTheme::ERROR),
-                Space::with_height(20),
+                Space::new().height(20),
                 text("You don't have permission to access admin settings")
                     .size(16)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::with_height(40),
+                Space::new().height(40),
                 button("Back to Library")
                     .on_press(Message::HideAdminDashboard)
                     .style(theme::Button::Secondary.style())
@@ -63,12 +63,12 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
             )
             .on_press(Message::HideAdminDashboard)
             .style(theme::Button::Secondary.style()),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             text("Admin Dashboard")
                 .size(32)
                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            Space::with_width(Length::Fill),
-            Space::with_width(Length::Fixed(100.0)), // Balance the back button
+            Space::new().width(Length::Fill),
+            Space::new().width(Length::Fixed(100.0)), // Balance the back button
         ]
         .align_y(iced::Alignment::Center),
     );
@@ -88,7 +88,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
                 column![
                     row![
                         text("📚").size(32),
-                        Space::with_width(15),
+                        Space::new().width(15),
                         column![
                             text("Library Management")
                                 .size(20)
@@ -100,7 +100,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
                         .spacing(5),
                     ]
                     .align_y(iced::Alignment::Center),
-                    Space::with_height(20),
+                    Space::new().height(20),
                     button("Manage Libraries")
                         .on_press(Message::ShowLibraryManagement)
                         .style(theme::Button::Primary.style())
@@ -119,14 +119,14 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
     // User Management section (only if user can manage users)
     if permissions.can_view_users() {
         if has_row_1_content {
-            sections_row_1 = sections_row_1.push(Space::with_width(20));
+            sections_row_1 = sections_row_1.push(Space::new().width(20));
         }
         sections_row_1 = sections_row_1.push(
             container(
                 column![
                     row![
                         text("👥").size(32),
-                        Space::with_width(15),
+                        Space::new().width(15),
                         column![
                             text("User Management")
                                 .size(20)
@@ -138,7 +138,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
                         .spacing(5),
                     ]
                     .align_y(iced::Alignment::Center),
-                    Space::with_height(20),
+                    Space::new().height(20),
                     button("Manage Users")
                         .on_press(Message::NoOp) // TODO: Implement user management view
                         .style(theme::Button::Primary.style())
@@ -161,7 +161,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
                 column![
                     row![
                         text("⚙️").size(32),
-                        Space::with_width(15),
+                        Space::new().width(15),
                         column![
                             text("Server Settings")
                                 .size(20)
@@ -173,7 +173,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
                         .spacing(5),
                     ]
                     .align_y(iced::Alignment::Center),
-                    Space::with_height(20),
+                    Space::new().height(20),
                     button("Server Settings")
                         .on_press(Message::NoOp) // TODO: Implement server settings
                         .style(theme::Button::Secondary.style())
@@ -192,14 +192,14 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
     // Dev Tools section (only if user can reset database or is admin)
     if permissions.can_reset_database() {
         if has_row_2_content {
-            sections_row_2 = sections_row_2.push(Space::with_width(20));
+            sections_row_2 = sections_row_2.push(Space::new().width(20));
         }
         sections_row_2 = sections_row_2.push(
             container(
                 column![
                     row![
                         text("🔧").size(32),
-                        Space::with_width(15),
+                        Space::new().width(15),
                         column![
                             text("Developer Tools")
                                 .size(20)
@@ -211,7 +211,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
                         .spacing(5),
                     ]
                     .align_y(iced::Alignment::Center),
-                    Space::with_height(20),
+                    Space::new().height(20),
                     button("Dev Tools")
                         .on_press(Message::ShowClearDatabaseConfirm)
                         .style(theme::Button::Danger.style())
@@ -244,11 +244,11 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
                     text("Limited Access")
                         .size(24)
                         .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                    Space::with_height(10),
+                    Space::new().height(10),
                     text("You have access to the admin dashboard but no specific admin features are available with your current permissions.")
                         .size(16)
                         .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                    Space::with_height(20),
+                    Space::new().height(20),
                     text("Contact an administrator to request additional permissions.")
                         .size(14)
                         .color(theme::MediaServerTheme::TEXT_SUBDUED),

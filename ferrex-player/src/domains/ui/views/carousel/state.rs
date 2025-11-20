@@ -1,4 +1,4 @@
-use iced::widget::scrollable::Id as ScrollableId;
+use iced::widget::Id as ScrollableId;
 
 // Carousel state for managing carousel UI
 #[derive(Debug, Clone)]

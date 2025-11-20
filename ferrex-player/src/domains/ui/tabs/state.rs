@@ -10,6 +10,7 @@ use ferrex_core::{
     ArchivedSeriesReference, LibraryID, MediaID, MediaIDLike, MediaOps, MovieID, SeriesID, SortBy,
     SortOrder,
 };
+use iced::widget::Id;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -250,7 +251,7 @@ impl LibraryTabState {
             LibraryType::Series => CachedMedia::TvShows(Vec::new()),
         };
 
-        let scrollable_id = iced::widget::scrollable::Id::new(format!("library-{}", library_id));
+        let scrollable_id = Id::from(format!("library-{}", library_id));
         let grid_state = VirtualGridState::with_id(
             0,
             5,

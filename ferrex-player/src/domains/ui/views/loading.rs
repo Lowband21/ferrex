@@ -36,7 +36,7 @@ pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Mes
         .padding(20),
     );
 
-    content = content.push(Space::with_height(Length::Fill));
+    content = content.push(Space::new().height(Length::Fill));
 
     // Loading indicator with status
     let mut loading_content = column![].spacing(20).align_x(iced::Alignment::Center);
@@ -91,7 +91,7 @@ pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Mes
     if let Some(TranscodingStatus::Processing { progress }) =
         &state.domains.streaming.state.transcoding_status
     {
-        loading_content = loading_content.push(Space::with_height(10));
+        loading_content = loading_content.push(Space::new().height(10));
         loading_content = loading_content.push(
             container(progress_bar(0.0..=1.0, *progress))
                 .width(Length::Fixed(300.0))
@@ -101,7 +101,7 @@ pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Mes
 
     // Additional info
     if state.domains.streaming.state.using_hls {
-        loading_content = loading_content.push(Space::with_height(20));
+        loading_content = loading_content.push(Space::new().height(20));
         loading_content = loading_content.push(
             column![
                 text("✓ Non-blocking adaptive streaming enabled")
@@ -116,7 +116,7 @@ pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Mes
         );
     }
 
-    loading_content = loading_content.push(Space::with_height(20));
+    loading_content = loading_content.push(Space::new().height(20));
     loading_content = loading_content.push(
         text(url)
             .size(12)
@@ -124,7 +124,7 @@ pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Mes
     );
 
     content = content.push(loading_content);
-    content = content.push(Space::with_height(Length::Fill));
+    content = content.push(Space::new().height(Length::Fill));
 
     container(content)
         .width(Length::Fill)

@@ -561,19 +561,20 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         linear_rgb = input.theme_color * 0.5;
     } else {
         // Front face: build cross-fade from dimmed placeholder to texture
-        // Invalid UVs are set to a tiny range (0.001, 0.001) when image fails to load
-        let uv_range = length(input.tex_coord);
+        // Invalid UVs are now signaled by out-of-range coordinates (negative or > 1.0)
+        let uv = input.tex_coord;
         let placeholder_rgb = input.theme_color * 0.5;
-        if uv_range < 0.01 {  // Detect invalid/fallback UVs
-        // No valid texture, use placeholder only
-        linear_rgb = placeholder_rgb;
-        alpha = 1.0;
+        let uv_oob = any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0));
+        if uv_oob {
+            // No valid texture, use placeholder only
+            linear_rgb = placeholder_rgb;
+            alpha = 1.0;
         } else {
             // Valid UVs - sample the poster texture from atlas
             let sampled_color = textureSample(
                 atlas_texture,
                 atlas_sampler,
-                input.tex_coord,
+                uv,
                 i32(input.atlas_layer)
             );
             // Atlas uses Rgba8UnormSrgb: GPU converts sRGB to linear when sampling

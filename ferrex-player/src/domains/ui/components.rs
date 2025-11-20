@@ -24,7 +24,7 @@ use rkyv::rancor::Error;
 )]
 pub fn create_cast_scrollable(cast: &[ArchivedCastMember]) -> Element<'static, Message> {
     if cast.is_empty() {
-        return Space::new(0, 0).into();
+        return Space::new().into();
     }
 
     let mut content = column![].spacing(10);
@@ -179,7 +179,7 @@ pub fn create_action_button_row<'a>(
 pub fn create_technical_details<'a>(
     metadata: &'a crate::infrastructure::api_types::MediaFileMetadata,
 ) -> Element<'a, Message> {
-    let mut tech_row = row![Space::with_width(20)].spacing(8);
+    let mut tech_row = row![Space::new().width(20)].spacing(8);
 
     // Resolution
     if let Some(width) = metadata.width
@@ -201,7 +201,7 @@ pub fn create_technical_details<'a>(
         let video_card = container(
             row![
                 icon_text(Icon::Film).size(14),
-                Space::with_width(5),
+                Space::new().width(5),
                 text(codec)
                     .size(14)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY)
@@ -219,7 +219,7 @@ pub fn create_technical_details<'a>(
         let audio_card = container(
             row![
                 icon_text(Icon::Volume2).size(14),
-                Space::with_width(5),
+                Space::new().width(5),
                 text(codec)
                     .size(14)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY)
@@ -282,7 +282,7 @@ pub fn create_technical_details<'a>(
     container(
         column![
             text("Technical Details").size(20),
-            Space::with_height(10),
+            Space::new().height(10),
             tech_details
         ]
         .spacing(5),

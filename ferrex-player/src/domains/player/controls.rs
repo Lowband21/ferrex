@@ -39,7 +39,7 @@ impl PlayerDomainState {
                     // Left side - navigation buttons with spacing
                     row![
                         icon_button(Icon::ArrowLeft, Some(Message::NavigateBack)),
-                        Space::with_width(Length::Fixed(5.0)),
+                        Space::new().width(Length::Fixed(5.0)),
                         icon_button(Icon::House, Some(Message::NavigateHome)),
                     ]
                     .align_y(Alignment::Center),
@@ -58,7 +58,7 @@ impl PlayerDomainState {
                             // HDR indicator
                             if self.is_hdr_content {
                                 row![
-                                    Space::with_width(Length::Fixed(10.0)),
+                                    Space::new().width(Length::Fixed(10.0)),
                                     container(text("HDR").size(12).color([1.0, 0.8, 0.0, 1.0]))
                                         .padding([2, 6])
                                         .style(theme::container_hdr_badge),
@@ -87,13 +87,13 @@ impl PlayerDomainState {
             )
             .width(Length::Fill),
             // Spacer to push controls to bottom
-            Space::with_height(Length::Fill),
+            Space::new().height(Length::Fill),
             // Bottom controls
             column![
                 // Seek bar - no padding so it reaches edges
                 self.build_seek_bar(),
                 // Spacer between seek bar and controls (40px to match bottom padding)
-                //Space::with_height(Length::Fixed(15.0)),
+                //Space::new().height(Length::Fixed(15.0)),
                 // Control buttons - with padding
                 container(self.build_control_buttons())
                     .padding(
@@ -146,13 +146,13 @@ impl PlayerDomainState {
 
         // Build the visual seek bar (4px height)
         let seek_bar_visual = container(row![
-            container(Space::with_height(bar_height))
+            container(Space::new().height(bar_height))
                 .width(Length::FillPortion(played_portion))
                 .style(theme::container_seek_bar_progress),
-            //container(Space::with_height(bar_height))
+            //container(Space::new().height(bar_height))
             //    .width(Length::FillPortion(buffered_portion))
             //    .style(theme::container_seek_bar_buffered),
-            container(Space::with_height(bar_height))
+            container(Space::new().height(bar_height))
                 .width(Length::FillPortion(unplayed_portion))
                 .style(move |theme| theme::container_seek_bar_background(
                     theme,
@@ -170,7 +170,7 @@ impl PlayerDomainState {
             // Stack: transparent hit area with visual bar centered
             container(stack![
                 // Transparent hit area
-                container(Space::new(Length::Fill, hit_area_height)),
+                container(Space::new().width(Length::Fill).height(hit_area_height),),
                 // Visual bar centered vertically
                 container(seek_bar_visual)
                     .width(Length::Fill)
@@ -205,7 +205,7 @@ impl PlayerDomainState {
                         .padding(8)
                         .into()
                 } else {
-                    Space::with_width(Length::Shrink).into()
+                    Space::new().width(Length::Shrink).into()
                 };
 
             row![
@@ -283,7 +283,7 @@ impl PlayerDomainState {
                             crate::infrastructure::constants::player_controls::CONTROL_BUTTONS_HEIGHT
                         )
                         .align_y(iced::alignment::Vertical::Center),
-                        Space::with_width(Length::Fixed(20.0)),
+                        Space::new().width(Length::Fixed(20.0)),
                         // Subtitle button (with indicator if text subtitles are available)
                         if self
                             .available_subtitle_tracks
@@ -349,21 +349,21 @@ impl PlayerDomainState {
                 // Header
                 row![
                     text("Player Settings").size(20).style(theme::text_bright),
-                    Space::with_width(Length::Fill),
+                    Space::new().width(Length::Fill),
                     button(text(Icon::X.unicode()).font(lucide_font()).size(20))
                         .on_press(Message::ToggleSettings)
                         .style(theme::button_ghost)
                         .padding(4),
                 ]
                 .align_y(Alignment::Center),
-                Space::with_height(Length::Fixed(10.0)),
+                Space::new().height(Length::Fixed(10.0)),
                 // Playback section
                 text("Playback").size(15).style(theme::text_muted),
-                Space::with_height(Length::Fixed(8.0)),
+                Space::new().height(Length::Fixed(8.0)),
                 // Playback speed
                 row![
                     text("Speed:").size(14),
-                    Space::with_width(Length::Fill),
+                    Space::new().width(Length::Fill),
                     pick_list(
                         &[0.5, 0.75, 1.0, 1.25, 1.5, 2.0][..],
                         Some(self.playback_speed),
@@ -373,11 +373,11 @@ impl PlayerDomainState {
                     .style(theme::pick_list_dark::<f64>),
                 ]
                 .align_y(Alignment::Center),
-                Space::with_height(Length::Fixed(10.0)),
+                Space::new().height(Length::Fixed(10.0)),
                 // Aspect ratio
                 row![
                     text("Aspect Ratio:").size(14),
-                    Space::with_width(Length::Fill),
+                    Space::new().width(Length::Fill),
                     pick_list(
                         &[
                             ContentFit::Contain,
@@ -393,22 +393,22 @@ impl PlayerDomainState {
                     .style(theme::pick_list_dark::<ContentFit>),
                 ]
                 .align_y(Alignment::Center),
-                Space::with_height(Length::Fixed(15.0)),
+                Space::new().height(Length::Fixed(15.0)),
                 // Audio & Subtitles section
                 text("Audio & Subtitles").size(15).style(theme::text_muted),
-                Space::with_height(Length::Fixed(8.0)),
+                Space::new().height(Length::Fixed(8.0)),
                 // Audio track selection
                 self.build_audio_track_selector(),
-                Space::with_height(Length::Fixed(10.0)),
+                Space::new().height(Length::Fixed(10.0)),
                 // Subtitle controls
                 self.build_subtitle_controls(),
-                Space::with_height(Length::Fixed(10.0)),
+                Space::new().height(Length::Fixed(10.0)),
                 // HDR information
                 if self.is_hdr_content {
                     container(
                         column![
                             text("HDR Information").size(13).style(theme::text_muted),
-                            Space::with_height(Length::Fixed(4.0)),
+                            Space::new().height(Length::Fixed(4.0)),
                             text("HDR content detected")
                                 .size(11)
                                 .style(theme::text_bright),
@@ -453,25 +453,25 @@ impl PlayerDomainState {
                     .padding(6)
                     .style(theme::container_subtle)
                 } else {
-                    container(Space::with_height(0))
+                    container(Space::new().height(0))
                 },
-                Space::with_height(Length::Fixed(10.0)),
+                Space::new().height(Length::Fixed(10.0)),
                 // External playback
                 row![
                     text("External:").size(14),
-                    Space::with_width(Length::Fill),
+                    Space::new().width(Length::Fill),
                     button(text("Play Externally").size(14))
                         .on_press(Message::PlayExternal)
                         .style(theme::button_transparent)
                         .padding(6),
                 ]
                 .align_y(Alignment::Center),
-                Space::with_height(Length::Fixed(10.0)),
+                Space::new().height(Length::Fixed(10.0)),
                 // Keyboard shortcuts info (more compact)
                 container(
                     column![
                         text("Shortcuts").size(13).style(theme::text_muted),
-                        Space::with_height(Length::Fixed(4.0)),
+                        Space::new().height(Length::Fixed(4.0)),
                         text("Space: Play/Pause").size(11).style(theme::text_dim),
                         text("A/S: Audio/Subtitle cycle")
                             .size(11)
@@ -508,7 +508,7 @@ impl PlayerDomainState {
         } else {
             row![
                 text("Audio Track:").size(14),
-                Space::with_width(Length::Fill),
+                Space::new().width(Length::Fill),
                 pick_list(
                     self.available_audio_tracks.clone(),
                     self.available_audio_tracks
@@ -561,7 +561,7 @@ impl PlayerDomainState {
 
             row![
                 text("Subtitles:").size(14),
-                Space::with_width(Length::Fill),
+                Space::new().width(Length::Fill),
                 pick_list(subtitle_options, current_selection, |option| match option {
                     SubtitleOption::Disabled => Message::SubtitleTrackSelected(None),
                     SubtitleOption::Track(track) =>
@@ -582,14 +582,14 @@ impl PlayerDomainState {
             // Header
             row![
                 text("Video Settings").size(16).style(theme::text_bright),
-                Space::with_width(Length::Fill),
+                Space::new().width(Length::Fill),
                 button(text(Icon::X.unicode()).font(lucide_font()).size(16))
                     .on_press(Message::ToggleQualityMenu)
                     .style(theme::button_ghost)
                     .padding(2),
             ]
             .align_y(Alignment::Center),
-            Space::with_height(Length::Fixed(15.0)),
+            Space::new().height(Length::Fixed(15.0)),
         ]
         .spacing(5);
 
@@ -606,14 +606,14 @@ impl PlayerDomainState {
                 // Header
                 row![
                     text("Subtitles").size(16).style(theme::text_bright),
-                    Space::with_width(Length::Fill),
+                    Space::new().width(Length::Fill),
                     button(text(Icon::X.unicode()).font(lucide_font()).size(16))
                         .on_press(Message::ToggleSubtitleMenu)
                         .style(theme::button_ghost)
                         .padding(2),
                 ]
                 .align_y(Alignment::Center),
-                Space::with_height(Length::Fixed(15.0)),
+                Space::new().height(Length::Fixed(15.0)),
                 // Disabled option
                 button({
                     let check_icon: Element<Message> = if !self.subtitles_enabled {
@@ -622,12 +622,12 @@ impl PlayerDomainState {
                             .size(14)
                             .into()
                     } else {
-                        Space::with_width(Length::Fixed(14.0)).into()
+                        Space::new().width(Length::Fixed(14.0)).into()
                     };
 
                     row![
                         check_icon,
-                        Space::with_width(Length::Fixed(8.0)),
+                        Space::new().width(Length::Fixed(8.0)),
                         text("Disabled").size(14),
                     ]
                     .align_y(Alignment::Center)
@@ -636,7 +636,7 @@ impl PlayerDomainState {
                 .width(Length::Fill)
                 .style(theme::button_menu_item)
                 .padding([6, 10]),
-                Space::with_height(Length::Fixed(5.0)),
+                Space::new().height(Length::Fixed(5.0)),
                 // Subtitle tracks (text-based only)
                 column(
                     self.available_subtitle_tracks
@@ -653,12 +653,12 @@ impl PlayerDomainState {
                                         .size(14)
                                         .into()
                                 } else {
-                                    Space::with_width(Length::Fixed(14.0)).into()
+                                    Space::new().width(Length::Fixed(14.0)).into()
                                 };
 
                                 row![
                                     check_icon,
-                                    Space::with_width(Length::Fixed(8.0)),
+                                    Space::new().width(Length::Fixed(8.0)),
                                     text(format_subtitle_track(track)).size(14),
                                 ]
                                 .align_y(Alignment::Center)
