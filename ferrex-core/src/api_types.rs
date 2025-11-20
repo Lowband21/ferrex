@@ -31,10 +31,12 @@ impl LibraryMediaCache {
     pub fn is_empty(&self) -> bool {
         match self {
             LibraryMediaCache::Movies { references } => references.is_empty(),
-            LibraryMediaCache::TvShows { series_references, .. } => series_references.is_empty(),
+            LibraryMediaCache::TvShows {
+                series_references, ..
+            } => series_references.is_empty(),
         }
     }
-    
+
     pub fn new(library_type: LibraryType) -> Self {
         match library_type {
             LibraryType::Movies => LibraryMediaCache::Movies {
@@ -71,6 +73,30 @@ impl std::fmt::Display for MediaId {
             MediaId::Episode(id) => write!(f, "Episode({})", id.as_str()),
             MediaId::Person(id) => write!(f, "Person({})", id.as_str()),
         }
+    }
+}
+
+impl From<MovieID> for MediaId {
+    fn from(id: MovieID) -> Self {
+        MediaId::Movie(id)
+    }
+}
+
+impl From<SeriesID> for MediaId {
+    fn from(id: SeriesID) -> Self {
+        MediaId::Series(id)
+    }
+}
+
+impl From<SeasonID> for MediaId {
+    fn from(id: SeasonID) -> Self {
+        MediaId::Season(id)
+    }
+}
+
+impl From<EpisodeID> for MediaId {
+    fn from(id: EpisodeID) -> Self {
+        MediaId::Episode(id)
     }
 }
 

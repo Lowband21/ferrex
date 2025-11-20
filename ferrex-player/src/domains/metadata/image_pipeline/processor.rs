@@ -34,7 +34,13 @@ impl ImageProcessor for DefaultImageProcessor {
         let options = options.clone();
 
         // Process in thread pool to avoid blocking
-        let result = tokio::task::spawn_blocking(move || process_image_sync(&data, options))
+        let result = tokio::task::spawn_blocking(move || {
+            // Profile sync processing in thread pool
+            #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+            profiling::scope!("Image::ProcessSync");
+            
+            process_image_sync(&data, options)
+        })
             .await
             .map_err(|e| ImagePipelineError::Processing(e.to_string()))?;
 
@@ -71,6 +77,10 @@ impl ImageProcessor for DefaultImageProcessor {
 }
 
 fn process_image_sync(data: &[u8], options: ProcessOptions) -> Result<ProcessedImage> {
+    // Profile image decoding
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!("Image::Decode");
+    
     // Decode image
     let img =
         image::load_from_memory(data).map_err(|e| ImagePipelineError::Decode(e.to_string()))?;
@@ -86,6 +96,10 @@ fn process_image_sync(data: &[u8], options: ProcessOptions) -> Result<ProcessedI
         crate::domains::metadata::image_types::ImageSize::Profile => (120, 180), // 2:3 aspect ratio for cast
     };
 
+    // Profile image resizing
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!("Image::Resize");
+    
     // Resize if needed
     let processed = if img.width() > target_width || img.height() > target_height {
         img.thumbnail(target_width, target_height)

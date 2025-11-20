@@ -70,6 +70,15 @@ pub struct BatchFetchHelper {
 
 impl BatchFetchHelper {
     /// Create a new batch fetch helper
+    /// Handle metadata domain messages by routing to appropriate handlers
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     pub fn new(
         api_service: Arc<ApiClientAdapter>,
         media_store: Arc<std::sync::RwLock<MediaStore>>,
@@ -271,6 +280,15 @@ impl BatchFetchHelper {
 
     /// Create batches using the same strategy as BatchMetadataFetcher
     /// First batch: up to 30 items, subsequent batches: 100 items each
+    /// Handle metadata domain messages by routing to appropriate handlers
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     fn create_batches(&self, media_ids: Vec<MediaId>) -> Vec<Vec<MediaId>> {
         let mut batches = Vec::new();
         let mut start = 0;

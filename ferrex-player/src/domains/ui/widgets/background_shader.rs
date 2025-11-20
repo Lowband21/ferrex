@@ -200,6 +200,14 @@ impl<Message> Program<Message> for BackgroundShaderProgram {
     type State = ();
     type Primitive = BackgroundPrimitive;
 
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     fn draw(
         &self,
         _state: &Self::State,
@@ -385,6 +393,14 @@ impl State {
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl Pipeline {
     fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         // Load shader - add timestamp to force recompilation
@@ -544,6 +560,14 @@ impl Pipeline {
 }
 
 /// Load texture from image handle
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn load_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -621,7 +645,27 @@ fn load_texture(
     Some((Arc::new(texture), aspect_ratio))
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl Primitive for BackgroundPrimitive {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     fn prepare(
         &self,
         device: &wgpu::Device,
@@ -790,12 +834,15 @@ impl Primitive for BackgroundPrimitive {
 
         // Update globals
         let transform: [f32; 16] = viewport.projection().into();
-        
+
         // Debug log scroll offset
         if self.scroll_offset != 0.0 {
-            log::debug!("BackgroundShader prepare: scroll_offset = {}", self.scroll_offset);
+            log::debug!(
+                "BackgroundShader prepare: scroll_offset = {}",
+                self.scroll_offset
+            );
         }
-        
+
         let mut globals = Globals {
             transform,
             time_and_resolution: [
@@ -1002,6 +1049,14 @@ impl Primitive for BackgroundPrimitive {
         state.trim();
     }
 
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     fn render(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1082,11 +1137,19 @@ pub struct BackgroundShader {
     header_offset: f32,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl BackgroundShader {
     /// Create a new background shader with default settings
     pub fn new() -> Self {
-        use crate::domains::ui::transitions::generate_random_gradient_center;
         use crate::domains::ui::theme::MediaServerTheme;
+        use crate::domains::ui::transitions::generate_random_gradient_center;
 
         let primary = MediaServerTheme::SOFT_GREY_DARK;
         let secondary = MediaServerTheme::SOFT_GREY_LIGHT;

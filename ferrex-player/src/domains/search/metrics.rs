@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
-use serde::{Deserialize, Serialize};
 
 /// Maximum number of performance samples to keep in history
 const MAX_HISTORY_SIZE: usize = 100;
@@ -33,6 +33,14 @@ impl Default for PerformanceHistory {
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl PerformanceHistory {
     pub fn new() -> Self {
         Self {
@@ -54,19 +62,22 @@ impl PerformanceHistory {
         if queue.len() >= MAX_HISTORY_SIZE {
             queue.pop_front();
         }
-        
+
         if let Some(latency) = metric.network_latency {
             if self.network_latency_samples.len() >= MAX_HISTORY_SIZE {
                 self.network_latency_samples.pop_front();
             }
             self.network_latency_samples.push_back(latency);
         }
-        
+
         queue.push_back(metric);
     }
 
     /// Get average execution time for a strategy
-    pub fn get_average_execution_time(&self, strategy: super::types::SearchStrategy) -> Option<Duration> {
+    pub fn get_average_execution_time(
+        &self,
+        strategy: super::types::SearchStrategy,
+    ) -> Option<Duration> {
         let metrics = match strategy {
             super::types::SearchStrategy::Client => &self.client_metrics,
             super::types::SearchStrategy::Server => &self.server_metrics,
@@ -82,9 +93,9 @@ impl PerformanceHistory {
             .filter(|m| m.success)
             .map(|m| m.execution_time)
             .sum();
-        
+
         let count = metrics.iter().filter(|m| m.success).count();
-        
+
         if count == 0 {
             None
         } else {
@@ -119,7 +130,10 @@ impl PerformanceHistory {
     }
 
     /// Get 95th percentile execution time for a strategy
-    pub fn get_p95_execution_time(&self, strategy: super::types::SearchStrategy) -> Option<Duration> {
+    pub fn get_p95_execution_time(
+        &self,
+        strategy: super::types::SearchStrategy,
+    ) -> Option<Duration> {
         let metrics = match strategy {
             super::types::SearchStrategy::Client => &self.client_metrics,
             super::types::SearchStrategy::Server => &self.server_metrics,
@@ -142,7 +156,11 @@ impl PerformanceHistory {
     }
 
     /// Check if recent performance indicates issues
-    pub fn has_recent_failures(&self, strategy: super::types::SearchStrategy, threshold: f32) -> bool {
+    pub fn has_recent_failures(
+        &self,
+        strategy: super::types::SearchStrategy,
+        threshold: f32,
+    ) -> bool {
         let metrics = match strategy {
             super::types::SearchStrategy::Client => &self.client_metrics,
             super::types::SearchStrategy::Server => &self.server_metrics,
@@ -176,11 +194,11 @@ pub struct NetworkMonitor {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ConnectionQuality {
-    Excellent,  // < 50ms latency, no errors
-    Good,       // < 150ms latency, few errors
-    Fair,       // < 500ms latency, some errors
-    Poor,       // > 500ms latency or many errors
-    Offline,    // No connection
+    Excellent, // < 50ms latency, no errors
+    Good,      // < 150ms latency, few errors
+    Fair,      // < 500ms latency, some errors
+    Poor,      // > 500ms latency or many errors
+    Offline,   // No connection
 }
 
 impl NetworkMonitor {
@@ -210,7 +228,8 @@ impl NetworkMonitor {
 
         // Clear old errors
         let now = Instant::now();
-        self.recent_errors.retain(|&t| now.duration_since(t) < Duration::from_secs(60));
+        self.recent_errors
+            .retain(|&t| now.duration_since(t) < Duration::from_secs(60));
     }
 
     /// Update network status based on a failed operation
@@ -244,7 +263,10 @@ impl NetworkMonitor {
     }
 
     pub fn should_prefer_client(&self) -> bool {
-        matches!(self.connection_quality, ConnectionQuality::Poor | ConnectionQuality::Offline)
+        matches!(
+            self.connection_quality,
+            ConnectionQuality::Poor | ConnectionQuality::Offline
+        )
     }
 }
 
@@ -335,8 +357,12 @@ impl StrategyWeights {
         }
 
         // Adjust based on execution times
-        if let Some(client_time) = history.get_average_execution_time(super::types::SearchStrategy::Client) {
-            if let Some(server_time) = history.get_average_execution_time(super::types::SearchStrategy::Server) {
+        if let Some(client_time) =
+            history.get_average_execution_time(super::types::SearchStrategy::Client)
+        {
+            if let Some(server_time) =
+                history.get_average_execution_time(super::types::SearchStrategy::Server)
+            {
                 let time_ratio = client_time.as_millis() as f32 / server_time.as_millis() as f32;
                 if time_ratio > 2.0 {
                     self.client_weight *= 0.5;

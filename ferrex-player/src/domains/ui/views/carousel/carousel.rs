@@ -16,6 +16,14 @@ pub enum CarouselMessage {
 }
 
 /// Create a Netflix-style media carousel
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn media_carousel<'a>(
     section_id: String,
     title: &'a str,

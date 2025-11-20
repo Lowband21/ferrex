@@ -25,6 +25,14 @@ pub enum EasingFunction {
     EaseOutExpo,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl EasingFunction {
     /// Apply the easing function to a progress value (0.0 to 1.0)
     pub fn apply(&self, t: f32) -> f32 {
@@ -62,6 +70,14 @@ pub struct Transition<T: Clone> {
     pub progress: f32,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl<T: Clone> Transition<T> {
     /// Create a new transition
     pub fn new(initial_value: T, duration: Duration, easing: EasingFunction) -> Self {
@@ -130,6 +146,14 @@ pub struct ColorTransitionState {
     pub secondary: Transition<iced::Color>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl ColorTransitionState {
     /// Create a new color transition state
     pub fn new(primary: iced::Color, secondary: iced::Color) -> Self {
@@ -189,6 +213,14 @@ pub struct BackdropTransitionState {
     pub scale: Transition<f32>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl BackdropTransitionState {
     /// Create a new backdrop transition state
     pub fn new() -> Self {

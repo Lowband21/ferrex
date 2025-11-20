@@ -2,8 +2,10 @@ use crate::common::ui_utils::icon_text;
 use crate::domains::metadata::image_types;
 use crate::domains::ui::messages::Message;
 use crate::infrastructure::api_types;
-use crate::infrastructure::api_types::{MediaDetailsOption, SeriesReference, TmdbDetails};
-use crate::{media_card, state_refactored::State, domains::ui::theme};
+use crate::infrastructure::api_types::{
+    MediaDetailsOption, SeriesReference, TmdbDetails, WatchProgress,
+};
+use crate::{domains::ui::theme, media_card, state_refactored::State};
 
 use ferrex_core::CastMember;
 use iced::Font;
@@ -13,12 +15,19 @@ use iced::{
 };
 use lucide_icons::Icon;
 
-/// Create a movie card with state for watch status
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn movie_reference_card_with_state<'a>(
     movie: &'a crate::infrastructure::api_types::MovieReference,
     is_hovered: bool,
     is_visible: bool,
-    state: Option<&'a State>,
+    watch_progress: Option<WatchProgress>,
 ) -> Element<'a, Message> {
     use crate::infrastructure::api_types::{MediaDetailsOption, TmdbDetails};
 
@@ -48,14 +57,6 @@ pub fn movie_reference_card_with_state<'a>(
         image_types::Priority::Preload
     };
 
-    // Get watch progress from state if available
-    let watch_progress = state.and_then(|s| {
-        s.domains
-            .media
-            .state
-            .get_media_progress(&ferrex_core::api_types::MediaId::Movie(movie.id.clone()))
-    });
-
     // Create the image element with progress indicator
     use crate::domains::ui::widgets::image_for;
     use iced::widget::{button, column, container, mouse_area, text};
@@ -63,10 +64,10 @@ pub fn movie_reference_card_with_state<'a>(
 
     let media_id = ferrex_core::api_types::MediaId::Movie(movie.id.clone());
 
-    // Create image with watch progress
+    // Create image with watch progress and scroll tier
     let mut img = image_for(media_id.clone())
         .size(image_types::ImageSize::Poster)
-        .rounded(8.0)
+        .rounded(4.0)
         .width(Length::Fixed(200.0))
         .height(Length::Fixed(300.0))
         .animation(crate::domains::ui::widgets::AnimationType::enhanced_flip())
@@ -86,10 +87,10 @@ pub fn movie_reference_card_with_state<'a>(
         }
     }
 
-    // Add progress indicator - default to unwatched (0.0) if no watch state
-    let progress = watch_progress.unwrap_or(0.0);
+    if let Some(progress) = watch_progress {
+        img = img.progress(progress.as_percentage());
+    }
     //log::debug!("Movie {:?} watch progress: {:?} -> {}", movie.id, watch_progress, progress);
-    img = img.progress(progress);
 
     // Use theme color for progress indicator if available
     if let Some(theme_color_str) = &movie.theme_color {
@@ -132,12 +133,20 @@ pub fn movie_reference_card_with_state<'a>(
     .spacing(5)
     .into()
 }
-/// Create a series card with state for watch status
+
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn series_reference_card_with_state<'a>(
     series: &'a SeriesReference,
     is_hovered: bool,
     is_visible: bool,
-    state: Option<&'a State>,
+    _watch_status: Option<WatchProgress>, // Number of remaining episodes equal to integer from watch_status, individual episode watch progress can be passed with the decimal part
 ) -> Element<'a, Message> {
     let title = series.title.as_str();
     let series_id = series.id.as_str();
@@ -157,50 +166,80 @@ pub fn series_reference_card_with_state<'a>(
         image_types::Priority::Preload
     };
 
-    // Extract episode count for badge
-    let episode_count = match &series.details {
-        MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
-            details.number_of_episodes.unwrap_or(0) as usize
-        }
-        _ => 0,
-    };
+    use crate::domains::ui::widgets::image_for;
+    use iced::widget::{button, column, container, mouse_area, text};
+    use iced::Length;
 
-    // Create episode count badge for series
-    let badge_element: Option<Element<'a, Message>> = if episode_count > 0 {
-        Some(crate::domains::ui::widgets::episode_count_badge(episode_count).into())
-    } else {
-        None
-    };
+    let media_id = ferrex_core::api_types::MediaId::Series(series.id.clone());
 
-    // Use the media_card! macro for consistent card creation
-    media_card! {
-        type: Series,
-        data: series,
-        {
-            id: ferrex_core::api_types::MediaId::Series(series.id.clone()),
-            title: title,
-            subtitle: &info,
-            image: {
-                key: series_id,
-                type: Poster,
-                fallback: "📺",
-            },
-            size: Medium,
-            on_click: Message::ViewTvShow(series.id.clone()),
-            on_play: Message::ViewTvShow(series.id.clone()),
-            hover_icon: lucide_icons::Icon::LayoutGrid,
-            badge: badge_element,
-            is_hovered: is_hovered,
-            priority: priority,
+    // Create image with scroll tier
+    let mut img = image_for(media_id.clone())
+        .size(image_types::ImageSize::Poster)
+        .rounded(4.0)
+        .width(Length::Fixed(200.0))
+        .height(Length::Fixed(300.0))
+        .animation(crate::domains::ui::widgets::AnimationType::enhanced_flip())
+        .placeholder(lucide_icons::Icon::Tv)
+        .priority(priority)
+        .is_hovered(is_hovered)
+        .on_play(Message::ViewTvShow(series.id.clone()))
+        .on_click(Message::ViewTvShow(series.id.clone()));
+
+    // Add theme color if available
+    if let Some(theme_color_str) = &series.theme_color {
+        if let Ok(color) = crate::domains::ui::views::macros::parse_hex_color(theme_color_str) {
+            img = img.theme_color(color);
         }
     }
+
+    // Create the full card manually to match media_card! structure
+    let image_element: Element<'_, Message> = img.into();
+
+    // Wrap with hover detection
+    let image_with_hover = mouse_area(image_element)
+        .on_enter(Message::MediaHovered(series_id.to_string()))
+        .on_exit(Message::MediaUnhovered(series_id.to_string()));
+
+    // Create poster button
+    let poster_element = button(image_with_hover)
+        .on_press(Message::ViewTvShow(series.id.clone()))
+        .padding(0)
+        .style(theme::Button::MediaCard.style());
+
+    // Create text content
+    let text_content = column![
+        text(title).size(14),
+        text(info)
+            .size(12)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+    ]
+    .spacing(2);
+
+    // Final card layout
+    column![
+        poster_element,
+        container(text_content)
+            .padding(5)
+            .width(Length::Fixed(200.0))
+            .height(Length::Fixed(60.0))
+    ]
+    .spacing(5)
+    .into()
 }
-/// Create a season card with access to state for episode count
-/// Takes owned SeasonReference to avoid lifetime issues in immediate mode UI
+
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn season_reference_card_with_state<'a>(
     season: crate::infrastructure::api_types::SeasonReference,
     is_hovered: bool,
     state: Option<&'a crate::state_refactored::State>,
+    _watch_status: Option<WatchProgress>, // Number of remaining episodes equal to integer from watch_status, individual episode watch progress can be passed with the decimal part
 ) -> Element<'a, Message> {
     use crate::infrastructure::api_types::{MediaDetailsOption, TmdbDetails};
 
@@ -273,11 +312,20 @@ pub fn season_reference_card_with_state<'a>(
         }
     }
 }
-/// Create an episode card with state for watch status
+
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn episode_reference_card_with_state<'a>(
     episode: &'a crate::infrastructure::api_types::EpisodeReference,
     is_hovered: bool,
     state: Option<&'a State>,
+    _watch_status: Option<WatchProgress>, // Number of remaining episodes equal to integer from watch_status, individual episode watch progress can be passed with the decimal part
 ) -> Element<'a, Message> {
     use crate::domains::metadata::image_types::{ImageSize, Priority};
     use crate::domains::ui::views::macros::truncate_text;
@@ -422,7 +470,14 @@ pub fn episode_reference_card_with_state<'a>(
     .into()
 }
 
-/// Create a scrollable cast section for movies and TV shows
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn create_cast_scrollable<'a>(cast: &'a [CastMember]) -> Element<'a, Message> {
     if cast.is_empty() {
         return Space::new(0, 0).into();
@@ -451,7 +506,14 @@ pub fn create_cast_scrollable<'a>(cast: &'a [CastMember]) -> Element<'a, Message
     content.push(cast_scroll).into()
 }
 
-/// Helper function to create a cast member card with profile image
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn create_cast_card<'a>(actor: &'a CastMember) -> Element<'a, Message> {
     let card_width = 120.0;
     let image_height = 180.0;
@@ -503,7 +565,13 @@ fn create_cast_card<'a>(actor: &'a CastMember) -> Element<'a, Message> {
 
 /// Create the backdrop aspect ratio toggle button
 pub fn create_backdrop_aspect_button<'a>(state: &'a State) -> Element<'a, Message> {
-    let aspect_button_text = match state.domains.ui.state.background_shader_state.backdrop_aspect_mode {
+    let aspect_button_text = match state
+        .domains
+        .ui
+        .state
+        .background_shader_state
+        .backdrop_aspect_mode
+    {
         crate::domains::ui::types::BackdropAspectMode::Auto => "Auto",
         crate::domains::ui::types::BackdropAspectMode::Force21x9 => "21:9",
     };

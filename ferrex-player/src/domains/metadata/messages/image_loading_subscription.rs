@@ -32,6 +32,18 @@ pub fn image_loading(
     };
 
     Subscription::run_with(subscription, |sub| {
+        #[cfg(any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ))]
+        profiling::register_thread!("Image Loader Stream");
+        #[cfg(any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ))]
+        profiling::scope!("ImageLoaderSubscription");
         image_loader_stream(
             sub.server_url.clone(),
             Arc::clone(&sub.receiver),
@@ -60,8 +72,9 @@ fn image_loader_stream(
         async move {
             match state {
                 ImageLoaderState::Running(last_request_time) => {
+                    /*
                     // Throttle to one request every 25ms
-                    const THROTTLE_MS: u64 = 25;
+                    const THROTTLE_MS: u64 = 0;
 
                     // Check if we need to wait before processing the next request
                     if let Some(last_time) = last_request_time {
@@ -95,7 +108,7 @@ fn image_loader_stream(
                             log::debug!("Could not lock receiver mutex, will retry");
                             false
                         }
-                    };
+                    }; */
 
                     // Get the next request from the priority queue
                     // We check for work regardless of wake-up signal to process any queued items
@@ -142,6 +155,7 @@ fn image_loader_stream(
                             crate::domains::metadata::image_types::ImageSize::Profile => "profile", // Person profile images
                         };
 
+                        /*
                         // Debug logging for episode image requests
                         if matches!(
                             &request.media_id,
@@ -151,7 +165,7 @@ fn image_loader_stream(
                                     "Episode image request: size={:?}, category={}, media_type={}, id={}",
                                     request.size, category, media_type, id
                                 );
-                        }
+                        } */
 
                         // Server uses /images/{type}/{id}/{category}/{index} pattern
                         // For now, always use index 0 (first image)
@@ -185,6 +199,7 @@ fn image_loader_stream(
                             } // Profile size
                         };
 
+                        // Todo: elminate this check and just do proper input validation
                         let url = if server_url.ends_with('/') {
                             format!(
                                 "{}images/{}/{}/{}/0{}",
@@ -250,8 +265,6 @@ fn image_loader_stream(
                             ImageLoaderState::Running(Some(std::time::Instant::now())),
                         ))
                     } else {
-                        // No request available, sleep briefly
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                         Some((Message::NoOp, ImageLoaderState::Running(last_request_time)))
                     }
                 }

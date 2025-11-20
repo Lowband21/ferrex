@@ -3,7 +3,14 @@ use crate::common::messages::DomainMessage;
 use crate::state_refactored::State;
 use iced::Subscription;
 
-/// Creates all UI-related subscriptions
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let mut subscriptions = vec![];
 

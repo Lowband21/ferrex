@@ -28,8 +28,18 @@ pub struct BatchMetadataFetcher {
 }
 
 impl BatchMetadataFetcher {
-    /// Create a new batch metadata fetcher
-    pub fn new(api_service: Arc<ApiClientAdapter>, media_store: Arc<std::sync::RwLock<MediaStore>>) -> Self {
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
+    pub fn new(
+        api_service: Arc<ApiClientAdapter>,
+        media_store: Arc<std::sync::RwLock<MediaStore>>,
+    ) -> Self {
         let helper = BatchFetchHelper::new(Arc::clone(&api_service), Arc::clone(&media_store));
         Self {
             api_service,
@@ -39,14 +49,28 @@ impl BatchMetadataFetcher {
         }
     }
 
-    /// Check if metadata fetching is complete
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     pub fn is_complete(&self) -> bool {
         let complete = self.is_complete.load(Ordering::Relaxed);
         log::debug!("[BatchMetadataFetcher] is_complete check: {}", complete);
         complete
     }
 
-    /// Reset the completion state for future re-runs
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     pub fn reset(&self) {
         log::info!("[BatchMetadataFetcher] Resetting is_complete flag");
         self.is_complete.store(false, Ordering::Relaxed);
@@ -67,14 +91,15 @@ impl BatchMetadataFetcher {
             library_id
         );
 
-        // Filter items that need metadata (details == Endpoint variant)
         let items_needing_metadata: Vec<MediaId> = media_refs
             .into_iter()
             .filter_map(|media_ref| {
                 // Only process movies and series, skip seasons/episodes
                 match media_ref.media_type() {
                     "movie" | "series" => {
-                        if crate::infrastructure::api_types::needs_details_fetch(media_ref.as_ref().details()) {
+                        if crate::infrastructure::api_types::needs_details_fetch(
+                            media_ref.as_ref().details(),
+                        ) {
                             Some(media_ref.as_ref().id())
                         } else {
                             None
@@ -96,18 +121,15 @@ impl BatchMetadataFetcher {
             library_id
         );
 
-        // Create batches: first 30, then 100s
         let mut batches = Vec::new();
         let mut start = 0;
 
-        // First batch: up to 30 items
         let first_batch_size = std::cmp::min(30, items_needing_metadata.len());
         if first_batch_size > 0 {
             batches.push(items_needing_metadata[0..first_batch_size].to_vec());
             start = first_batch_size;
         }
 
-        // Remaining batches: 100 items each
         while start < items_needing_metadata.len() {
             let end = std::cmp::min(start + 100, items_needing_metadata.len());
             batches.push(items_needing_metadata[start..end].to_vec());
@@ -131,6 +153,17 @@ impl BatchMetadataFetcher {
             let api_service = Arc::clone(&self.api_service);
 
             let async_task = tokio::spawn(async move {
+                // Register this background thread with the profiler
+                #[cfg(any(
+                    feature = "profile-with-puffin",
+                    feature = "profile-with-tracy",
+                    feature = "profile-with-tracing"
+                ))]
+                crate::infrastructure::async_profiling::register_profiler_thread(format!(
+                    "Metadata::BatchFetcher_{}",
+                    batch_index
+                ));
+
                 log::info!(
                     "Processing batch {} ({} items) for library {}",
                     batch_index,
@@ -138,13 +171,43 @@ impl BatchMetadataFetcher {
                     library_id
                 );
 
-                match crate::domains::media::library::fetch_media_details_batch(
+                // Profile the async batch fetch operation
+                #[cfg(any(
+                    feature = "profile-with-puffin",
+                    feature = "profile-with-tracy",
+                    feature = "profile-with-tracing"
+                ))]
+                let result = crate::infrastructure::async_profiling::profile_async(
+                    "Metadata::FetchBatch",
+                    crate::domains::media::library::fetch_media_details_batch(
+                        &api_service,
+                        library_id,
+                        batch.clone(),
+                    ),
+                )
+                .await;
+
+                #[cfg(not(any(
+                    feature = "profile-with-puffin",
+                    feature = "profile-with-tracy",
+                    feature = "profile-with-tracing"
+                )))]
+                let result = crate::domains::media::library::fetch_media_details_batch(
                     &api_service,
                     library_id,
                     batch,
                 )
-                .await
-                {
+                .await;
+
+                // Mark frame boundary after batch processing
+                #[cfg(any(
+                    feature = "profile-with-puffin",
+                    feature = "profile-with-tracy",
+                    feature = "profile-with-tracing"
+                ))]
+                crate::infrastructure::async_profiling::mark_frame_boundary();
+
+                match result {
                     Ok(batch_response) => {
                         log::info!(
                             "Batch {} for library {} completed: {} items fetched, {} errors",
@@ -166,25 +229,33 @@ impl BatchMetadataFetcher {
                             // Only check movies and series for metadata status
                             if matches!(item.media_type(), "movie" | "series") {
                                 let title = item.as_ref().title();
-                                if crate::infrastructure::api_types::needs_details_fetch(item.as_ref().details()) {
+                                if crate::infrastructure::api_types::needs_details_fetch(
+                                    item.as_ref().details(),
+                                ) {
                                     still_endpoints += 1;
-                                    log::warn!("BATCH ISSUE: {} '{}' still has Endpoint after batch fetch!", 
+                                    log::warn!("BATCH ISSUE: {} '{}' still has Endpoint after batch fetch!",
                                         item.media_type(), title);
                                 } else {
                                     has_details += 1;
-                                    log::debug!("{} '{}' has full Details after batch fetch", 
-                                        item.media_type(), title);
+                                    log::debug!(
+                                        "{} '{}' has full Details after batch fetch",
+                                        item.media_type(),
+                                        title
+                                    );
                                 }
                             }
                         }
-                        
+
                         if still_endpoints > 0 {
                             log::error!(
                                 "BATCH FETCH PROBLEM: {} items still have Endpoint (not Details) after batch fetch! {} have Details.",
                                 still_endpoints, has_details
                             );
                         } else {
-                            log::info!("Batch fetch successful: All {} items have full Details", has_details);
+                            log::info!(
+                                "Batch fetch successful: All {} items have full Details",
+                                has_details
+                            );
                         }
 
                         // Return the batch results for event emission
@@ -267,8 +338,11 @@ impl BatchMetadataFetcher {
         self: Arc<Self>,
         libraries: Vec<(Uuid, Vec<MediaReference>)>,
     ) {
-        log::info!("Processing {} libraries directly (no tasks)", libraries.len());
-        
+        log::info!(
+            "Processing {} libraries directly (no tasks)",
+            libraries.len()
+        );
+
         // NOTE: We do NOT use batch mode here anymore!
         // Batch mode should only be used for the initial reference load,
         // not for metadata fetching which happens incrementally.
@@ -289,7 +363,9 @@ impl BatchMetadataFetcher {
                     // Only process movies and series, skip seasons/episodes
                     match media_ref.media_type() {
                         "movie" | "series" => {
-                            if crate::infrastructure::api_types::needs_details_fetch(media_ref.as_ref().details()) {
+                            if crate::infrastructure::api_types::needs_details_fetch(
+                                media_ref.as_ref().details(),
+                            ) {
                                 Some(media_ref.as_ref().id())
                             } else {
                                 None
@@ -370,7 +446,11 @@ impl BatchMetadataFetcher {
                         // Log errors (but only in debug mode to reduce noise)
                         if log::log_enabled!(log::Level::Debug) {
                             for (media_id, error) in batch_response.errors {
-                                log::debug!("Failed to fetch metadata for {:?}: {}", media_id, error);
+                                log::debug!(
+                                    "Failed to fetch metadata for {:?}: {}",
+                                    media_id,
+                                    error
+                                );
                             }
                         }
 
@@ -386,7 +466,10 @@ impl BatchMetadataFetcher {
                                     library_id
                                 );
                             } else {
-                                log::error!("Failed to acquire MediaStore write lock for batch {}", batch_index);
+                                log::error!(
+                                    "Failed to acquire MediaStore write lock for batch {}",
+                                    batch_index
+                                );
                             }
                         }
                     }
@@ -416,15 +499,21 @@ impl BatchMetadataFetcher {
         self: Arc<Self>,
         libraries: Vec<(Uuid, Vec<MediaReference>)>,
     ) -> Vec<(Uuid, BatchFetchResult)> {
-        log::info!("[BatchMetadataFetcher] Processing {} libraries with verification", libraries.len());
-        
+        log::info!(
+            "[BatchMetadataFetcher] Processing {} libraries with verification",
+            libraries.len()
+        );
+
         let results = self.helper.batch_fetch_multiple_libraries(libraries).await;
-        
+
         // Mark processing as complete
         self.is_complete.store(true, Ordering::Relaxed);
-        
-        log::info!("[BatchMetadataFetcher] All libraries processed with verification - {} results", results.len());
-        
+
+        log::info!(
+            "[BatchMetadataFetcher] All libraries processed with verification - {} results",
+            results.len()
+        );
+
         results
     }
 }

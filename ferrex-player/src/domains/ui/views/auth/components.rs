@@ -6,7 +6,14 @@ use iced::{
     Alignment, Element, Length, Theme,
 };
 
-/// Creates a centered auth container with consistent styling
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn auth_container<'a>(
     content: impl Into<Element<'a, DomainMessage>>,
 ) -> Container<'a, DomainMessage> {
@@ -18,7 +25,14 @@ pub fn auth_container<'a>(
         .padding(20)
 }
 
-/// Creates an auth card container with consistent styling
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn auth_card<'a>(
     content: impl Into<Element<'a, DomainMessage>>,
 ) -> Container<'a, DomainMessage> {

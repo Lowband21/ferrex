@@ -1,8 +1,8 @@
 //! High-performance profiling infrastructure using the `profiling` crate
-//! 
+//!
 //! This module provides a thin abstraction over the `profiling` crate,
 //! which itself abstracts over multiple profiling backends (puffin, tracy, etc).
-//! 
+//!
 //! Features:
 //! - Zero-cost when profiling features are disabled
 //! - Multiple backend support (puffin, tracy, tracing)
@@ -22,19 +22,19 @@ use parking_lot::RwLock;
 /// Multi-tier profiling system with feature-gated backends
 pub struct Profiler {
     enabled: AtomicBool,
-    
+
     #[cfg(feature = "profiling-stats")]
     frame_counter: AtomicU64,
-    
+
     #[cfg(feature = "profiling-stats")]
     frame_times: RwLock<Histogram<u64>>,
-    
+
     #[cfg(feature = "profiling-stats")]
     last_report: RwLock<Instant>,
-    
+
     #[cfg(feature = "memory-stats")]
     baseline_memory: AtomicU64,
-    
+
     #[cfg(feature = "memory-stats")]
     peak_memory: AtomicU64,
 }
@@ -46,96 +46,98 @@ impl Profiler {
         {
             puffin::set_scopes_on(true);
             log::info!("Puffin profiling enabled");
-            
+
             // Start puffin server if puffin_http is available
-            #[cfg(feature = "puffin-server")]
+            #[cfg(any(feature = "puffin-server", feature = "profile-with-puffin"))]
             {
                 let server_addr = "127.0.0.1:8585";
                 let puffin_server = puffin_http::Server::new(server_addr).unwrap();
-                
+
                 // Set the profiler callback to send data to the server
                 puffin::set_scopes_on(true);
-                
+
                 log::info!("Puffin data server started on {}", server_addr);
-                log::info!("To view profiling data, run: puffin_viewer --url {}", server_addr);
-                
+                log::info!(
+                    "To view profiling data, run: puffin_viewer --url {}",
+                    server_addr
+                );
+
                 // Keep server alive for the entire application lifetime
                 std::mem::forget(puffin_server);
             }
         }
-        
+
         // Initialize tracy if enabled - no special setup needed
         #[cfg(feature = "profile-with-tracy")]
         {
             log::info!("Tracy profiling enabled");
         }
-        
+
         #[cfg(feature = "memory-stats")]
         let initial_memory = memory_stats::memory_stats()
             .map(|s| s.physical_mem)
             .unwrap_or(0);
-        
+
         Arc::new(Self {
             enabled: AtomicBool::new(true),
-            
+
             #[cfg(feature = "profiling-stats")]
             frame_counter: AtomicU64::new(0),
-            
+
             #[cfg(feature = "profiling-stats")]
             frame_times: RwLock::new(
-                Histogram::new_with_bounds(1, 1_000_000, 3)
-                    .expect("Failed to create histogram")
+                Histogram::new_with_bounds(1, 1_000_000, 3).expect("Failed to create histogram"),
             ),
-            
+
             #[cfg(feature = "profiling-stats")]
             last_report: RwLock::new(Instant::now()),
-            
+
             #[cfg(feature = "memory-stats")]
             baseline_memory: AtomicU64::new(initial_memory as u64),
-            
+
             #[cfg(feature = "memory-stats")]
             peak_memory: AtomicU64::new(initial_memory as u64),
         })
     }
-    
+
     /// Enable or disable profiling at runtime
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Relaxed);
-        
+
         #[cfg(feature = "profile-with-puffin")]
         puffin::set_scopes_on(enabled);
     }
-    
+
     /// Check if profiling is enabled
     pub fn is_enabled(&self) -> bool {
         self.enabled.load(Ordering::Relaxed)
     }
-    
+
     /// Mark the beginning of a new frame
     pub fn begin_frame(&self) {
         // Call the profiling crate's finish_frame macro for puffin
         // This tells puffin that the previous frame has ended and a new one begins
         profiling::finish_frame!();
-        
+
         #[cfg(feature = "profiling-stats")]
         {
             self.frame_counter.fetch_add(1, Ordering::Relaxed);
         }
-        
+
         #[cfg(feature = "memory-stats")]
         {
             self.update_memory_stats();
         }
     }
-    
+
     /// Record frame timing
     #[cfg(feature = "profiling-stats")]
     pub fn record_frame_time(&self, duration: Duration) {
         let micros = duration.as_micros() as u64;
-        
+
         if let Some(mut histogram) = self.frame_times.try_write() {
             let _ = histogram.record(micros);
-            
+
             // Report statistics every second
             let mut last_report = self.last_report.write();
             if last_report.elapsed() > Duration::from_secs(1) {
@@ -144,12 +146,12 @@ impl Profiler {
             }
         }
     }
-    
+
     /// Report frame statistics
     #[cfg(feature = "profiling-stats")]
     fn report_statistics(&self, histogram: &Histogram<u64>) {
         let frame_count = self.frame_counter.load(Ordering::Relaxed);
-        
+
         log::info!(
             "Frame stats - Count: {}, P50: {}μs, P95: {}μs, P99: {}μs, Max: {}μs",
             frame_count,
@@ -158,19 +160,20 @@ impl Profiler {
             histogram.value_at_percentile(99.0),
             histogram.max()
         );
-        
+
         // Check for frame budget violations
         let p95 = histogram.value_at_percentile(95.0);
-        if p95 > 16_667 {  // 16.67ms for 60fps
+        if p95 > 16_667 {
+            // 16.67ms for 60fps
             log::warn!("Frame budget violation: P95 = {}μs (target: 16667μs)", p95);
         }
     }
-    
+
     /// Get current frame statistics
     #[cfg(feature = "profiling-stats")]
     pub fn get_frame_stats(&self) -> FrameStats {
         let histogram = self.frame_times.read();
-        
+
         FrameStats {
             count: self.frame_counter.load(Ordering::Relaxed),
             p50_micros: histogram.value_at_percentile(50.0),
@@ -179,13 +182,13 @@ impl Profiler {
             max_micros: histogram.max(),
         }
     }
-    
+
     /// Update memory statistics
     #[cfg(feature = "memory-stats")]
     pub fn update_memory_stats(&self) {
         if let Ok(stats) = memory_stats::memory_stats() {
             let current = stats.physical_mem as u64;
-            
+
             // Update peak memory if needed
             let mut peak = self.peak_memory.load(Ordering::Relaxed);
             while current > peak {
@@ -201,14 +204,14 @@ impl Profiler {
             }
         }
     }
-    
+
     /// Get current memory statistics
     #[cfg(feature = "memory-stats")]
     pub fn get_memory_stats(&self) -> MemoryStats {
         let stats = memory_stats::memory_stats().ok();
         let baseline = self.baseline_memory.load(Ordering::Relaxed);
         let peak = self.peak_memory.load(Ordering::Relaxed);
-        
+
         MemoryStats {
             current_bytes: stats.as_ref().map(|s| s.physical_mem as u64).unwrap_or(0),
             peak_bytes: peak,
@@ -251,15 +254,16 @@ lazy_static::lazy_static! {
 pub fn init() {
     // Force lazy_static initialization
     let _ = &*PROFILER;
-    
+
     // Register main thread with profiling backends
     profiling::register_thread!("Main Thread");
-    
+
     // For puffin, we need to ensure scopes are enabled
     #[cfg(feature = "profile-with-puffin")]
     puffin::set_scopes_on(true);
-    
-    log::info!("Profiling system initialized with features: {}",
+
+    log::info!(
+        "Profiling system initialized with features: {}",
         [
             #[cfg(feature = "profile-with-puffin")]
             "puffin",
@@ -269,7 +273,8 @@ pub fn init() {
             "tracing",
             #[cfg(feature = "profiling-stats")]
             "stats",
-        ].join(", ")
+        ]
+        .join(", ")
     );
 }
 
@@ -294,13 +299,13 @@ pub fn shutdown() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_profiler_creation() {
         let profiler = Profiler::new();
         assert!(profiler.is_enabled());
     }
-    
+
     #[test]
     fn test_profiler_toggle() {
         let profiler = Profiler::new();
@@ -309,18 +314,18 @@ mod tests {
         profiler.set_enabled(true);
         assert!(profiler.is_enabled());
     }
-    
+
     #[test]
     fn test_profiling_macros() {
         // Test that profiling macros compile
         profiling::scope!("test_operation");
-        
+
         #[profiling::function]
         fn test_function() {
             // Some work
             std::thread::sleep(Duration::from_millis(1));
         }
-        
+
         test_function();
     }
 }

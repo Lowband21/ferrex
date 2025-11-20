@@ -1,6 +1,6 @@
+use crate::common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult};
 use crate::domains::auth::messages as auth;
 use crate::state_refactored::State;
-use crate::common::messages::{DomainUpdateResult, DomainMessage, CrossDomainEvent};
 use iced::Task;
 use log::{error, info};
 
@@ -11,11 +11,15 @@ macro_rules! wrap_task {
     };
 }
 
-/// Handle auth domain messages - returns DomainUpdateResult for cross-domain events
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateResult {
-    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
-    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::AUTH_UPDATE);
-    
     match message {
         // Core auth flow
         auth::Message::CheckAuthStatus => {
@@ -23,7 +27,9 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
         }
 
         auth::Message::AuthStatusConfirmedWithPin => {
-            wrap_task!(super::update_handlers::auth_updates::handle_auth_status_confirmed_with_pin(state))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_auth_status_confirmed_with_pin(state)
+            )
         }
 
         auth::Message::CheckSetupStatus => {
@@ -31,26 +37,41 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
         }
 
         auth::Message::SetupStatusChecked(needs_setup) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_setup_status_checked(state, needs_setup))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_setup_status_checked(
+                    state,
+                    needs_setup
+                )
+            )
         }
 
         auth::Message::AutoLoginCheckComplete => {
-            wrap_task!(super::update_handlers::auth_updates::handle_auto_login_check_complete(state))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_auto_login_check_complete(state)
+            )
         }
 
         auth::Message::AutoLoginSuccessful(user) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_auto_login_successful(state, user))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_auto_login_successful(state, user)
+            )
         }
 
         // User management
-        auth::Message::LoadUsers => wrap_task!(super::update_handlers::auth_updates::handle_load_users(state)),
+        auth::Message::LoadUsers => wrap_task!(
+            super::update_handlers::auth_updates::handle_load_users(state)
+        ),
 
         auth::Message::UsersLoaded(result) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_users_loaded(state, result))
+            wrap_task!(super::update_handlers::auth_updates::handle_users_loaded(
+                state, result
+            ))
         }
 
         auth::Message::SelectUser(user_id) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_select_user(state, user_id))
+            wrap_task!(super::update_handlers::auth_updates::handle_select_user(
+                state, user_id
+            ))
         }
 
         auth::Message::ShowCreateUser => {
@@ -63,7 +84,9 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
 
         // PIN authentication
         auth::Message::ShowPinEntry(user) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_show_pin_entry(state, user))
+            wrap_task!(super::update_handlers::auth_updates::handle_show_pin_entry(
+                state, user
+            ))
         }
 
         auth::Message::PinDigitPressed(digit) => {
@@ -71,17 +94,27 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
         }
 
         auth::Message::PinBackspace => {
-            wrap_task!(super::update_handlers::auth_updates::handle_pin_backspace(state))
+            wrap_task!(super::update_handlers::auth_updates::handle_pin_backspace(
+                state
+            ))
         }
 
-        auth::Message::PinClear => wrap_task!(super::update_handlers::auth_updates::handle_pin_clear(state)),
+        auth::Message::PinClear => wrap_task!(
+            super::update_handlers::auth_updates::handle_pin_clear(state)
+        ),
 
-        auth::Message::PinSubmit => wrap_task!(super::update_handlers::auth_updates::handle_pin_submit(state)),
+        auth::Message::PinSubmit => wrap_task!(
+            super::update_handlers::auth_updates::handle_pin_submit(state)
+        ),
 
         // Login results
         auth::Message::LoginSuccess(user, permissions) => {
             // Handle login success with cross-domain events
-            let task = super::update_handlers::auth_updates::handle_login_success(state, user.clone(), permissions.clone());
+            let task = super::update_handlers::auth_updates::handle_login_success(
+                state,
+                user.clone(),
+                permissions.clone(),
+            );
             let events = vec![
                 CrossDomainEvent::UserAuthenticated(user, permissions),
                 CrossDomainEvent::AuthenticationComplete,
@@ -89,26 +122,29 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
             DomainUpdateResult::with_events(task.map(DomainMessage::Auth), events)
         }
 
-        auth::Message::LoginError(error) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_login_error(state, error))
-        }
-
         auth::Message::WatchStatusLoaded(result) => {
-            let task = super::update_handlers::auth_updates::handle_watch_status_loaded(state, result.clone());
-            
+            let task = super::update_handlers::auth_updates::handle_watch_status_loaded(
+                state,
+                result.clone(),
+            );
+
             // For successful manual login, emit AuthenticationComplete to trigger library loading
             // This only happens after manual auth (not auto-login which goes through LoginSuccess)
             let events = if result.is_ok() && state.is_authenticated {
-                log::info!("[Auth] WatchStatusLoaded after manual auth - emitting AuthenticationComplete");
+                log::info!(
+                    "[Auth] WatchStatusLoaded after manual auth - emitting AuthenticationComplete"
+                );
                 vec![CrossDomainEvent::AuthenticationComplete]
             } else {
                 vec![]
             };
-            
+
             DomainUpdateResult::with_events(task.map(DomainMessage::Auth), events)
         }
 
-        auth::Message::Logout => wrap_task!(super::update_handlers::auth_updates::handle_logout(state)),
+        auth::Message::Logout => {
+            wrap_task!(super::update_handlers::auth_updates::handle_logout(state))
+        }
 
         auth::Message::LogoutComplete => {
             // Handle logout complete with cross-domain events
@@ -124,27 +160,39 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
 
         // Password login
         auth::Message::ShowPasswordLogin(username) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_show_password_login(state, username))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_show_password_login(state, username)
+            )
         }
 
         auth::Message::PasswordLoginUpdateUsername(username) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_password_login_update_username(
-                state, username,
-            ))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_password_login_update_username(
+                    state, username,
+                )
+            )
         }
 
         auth::Message::PasswordLoginUpdatePassword(password) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_password_login_update_password(
-                state, password,
-            ))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_password_login_update_password(
+                    state, password,
+                )
+            )
         }
 
         auth::Message::PasswordLoginToggleVisibility => {
-            wrap_task!(super::update_handlers::auth_updates::handle_password_login_toggle_visibility(state))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_password_login_toggle_visibility(
+                    state
+                )
+            )
         }
 
         auth::Message::PasswordLoginToggleRemember => {
-            wrap_task!(super::update_handlers::auth_updates::handle_password_login_toggle_remember(state))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_password_login_toggle_remember(state)
+            )
         }
 
         auth::Message::PasswordLoginSubmit => {
@@ -153,27 +201,47 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
 
         // Device auth flow
         auth::Message::DeviceStatusChecked(user, result) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_device_status_checked(state, user, result))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_device_status_checked(
+                    state, user, result
+                )
+            )
         }
 
         auth::Message::UpdateCredential(input) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_auth_flow_update_credential(state, input))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_auth_flow_update_credential(
+                    state, input
+                )
+            )
         }
 
         auth::Message::SubmitCredential => {
-            wrap_task!(super::update_handlers::auth_updates::handle_auth_flow_submit_credential(state))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_auth_flow_submit_credential(state)
+            )
         }
 
         auth::Message::TogglePasswordVisibility => {
-            wrap_task!(super::update_handlers::auth_updates::handle_auth_flow_toggle_password_visibility(state))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_auth_flow_toggle_password_visibility(
+                    state
+                )
+            )
         }
 
         auth::Message::ToggleRememberDevice => {
-            wrap_task!(super::update_handlers::auth_updates::handle_auth_flow_toggle_remember_device(state))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_auth_flow_toggle_remember_device(
+                    state
+                )
+            )
         }
 
         auth::Message::AuthResult(result) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_auth_flow_auth_result(state, result))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_auth_flow_auth_result(state, result)
+            )
         }
 
         auth::Message::SetupPin => {
@@ -193,7 +261,9 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
         }
 
         auth::Message::PinSet(result) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_auth_flow_pin_set(state, result))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_auth_flow_pin_set(state, result)
+            )
         }
 
         auth::Message::Retry => {
@@ -206,41 +276,57 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
 
         // First-run setup
         auth::Message::FirstRunUpdateUsername(username) => {
-            wrap_task!(super::update_handlers::first_run_updates::handle_update_username(state, username))
+            wrap_task!(
+                super::update_handlers::first_run_updates::handle_update_username(state, username)
+            )
         }
 
         auth::Message::FirstRunUpdateDisplayName(display_name) => {
-            wrap_task!(super::update_handlers::first_run_updates::handle_update_display_name(
-                state,
-                display_name,
-            ))
+            wrap_task!(
+                super::update_handlers::first_run_updates::handle_update_display_name(
+                    state,
+                    display_name,
+                )
+            )
         }
 
         auth::Message::FirstRunUpdatePassword(password) => {
-            wrap_task!(super::update_handlers::first_run_updates::handle_update_password(state, password))
+            wrap_task!(
+                super::update_handlers::first_run_updates::handle_update_password(state, password)
+            )
         }
 
         auth::Message::FirstRunUpdateConfirmPassword(confirm_password) => {
-            wrap_task!(super::update_handlers::first_run_updates::handle_update_confirm_password(
-                state,
-                confirm_password,
-            ))
+            wrap_task!(
+                super::update_handlers::first_run_updates::handle_update_confirm_password(
+                    state,
+                    confirm_password,
+                )
+            )
         }
 
         auth::Message::FirstRunTogglePasswordVisibility => {
-            wrap_task!(super::update_handlers::first_run_updates::handle_toggle_password_visibility(state))
+            wrap_task!(
+                super::update_handlers::first_run_updates::handle_toggle_password_visibility(state)
+            )
         }
 
         auth::Message::FirstRunSubmit => {
-            wrap_task!(super::update_handlers::first_run_updates::handle_submit(state))
+            wrap_task!(super::update_handlers::first_run_updates::handle_submit(
+                state
+            ))
         }
 
         auth::Message::FirstRunSuccess => {
-            wrap_task!(super::update_handlers::first_run_updates::handle_success(state))
+            wrap_task!(super::update_handlers::first_run_updates::handle_success(
+                state
+            ))
         }
 
         auth::Message::FirstRunError(error) => {
-            wrap_task!(super::update_handlers::first_run_updates::handle_error(state, error))
+            wrap_task!(super::update_handlers::first_run_updates::handle_error(
+                state, error
+            ))
         }
 
         // Admin PIN unlock management
@@ -253,20 +339,32 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
         }
 
         auth::Message::AdminPinUnlockToggled(result) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_admin_pin_unlock_toggled(state, result))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_admin_pin_unlock_toggled(
+                    state, result
+                )
+            )
         }
 
         // Admin setup flow
         auth::Message::UpdateSetupField(field) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_update_setup_field(state, field))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_update_setup_field(state, field)
+            )
         }
 
         auth::Message::ToggleSetupPasswordVisibility => {
-            wrap_task!(super::update_handlers::auth_updates::handle_toggle_setup_password_visibility(state))
+            wrap_task!(
+                super::update_handlers::auth_updates::handle_toggle_setup_password_visibility(
+                    state
+                )
+            )
         }
 
         auth::Message::SubmitSetup => {
-            wrap_task!(super::update_handlers::auth_updates::handle_submit_setup(state))
+            wrap_task!(super::update_handlers::auth_updates::handle_submit_setup(
+                state
+            ))
         }
 
         auth::Message::SetupComplete(access_token, refresh_token) => {
@@ -278,7 +376,9 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
         }
 
         auth::Message::SetupError(error) => {
-            wrap_task!(super::update_handlers::auth_updates::handle_setup_error(state, error))
+            wrap_task!(super::update_handlers::auth_updates::handle_setup_error(
+                state, error
+            ))
         }
 
         // Command execution
@@ -291,6 +391,14 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
 }
 
 /// Handle auth command execution
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn handle_auth_command(state: &mut State, command: auth::AuthCommand) -> DomainUpdateResult {
     info!("Executing auth command: {}", command.sanitized_display());
 
@@ -350,14 +458,23 @@ async fn execute_auth_command(
             new_pin,
         } => {
             // TODO: Add change_device_pin method to AuthService trait
-            auth::AuthCommandResult::Error("PIN change not yet implemented in AuthService".to_string())
+            auth::AuthCommandResult::Error(
+                "PIN change not yet implemented in AuthService".to_string(),
+            )
         }
     }
 }
 
-/// Handle auth command result
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn handle_auth_command_result(
-    state: &mut State,
+    _state: &mut State,
     command: auth::AuthCommand,
     result: auth::AuthCommandResult,
 ) -> DomainUpdateResult {
@@ -381,10 +498,10 @@ fn handle_auth_command_result(
                     crate::common::messages::CrossDomainEvent::AuthCommandCompleted(
                         command.clone(),
                         result.clone(),
-                    )
+                    ),
                 ],
             };
-            
+
             DomainUpdateResult::with_events(Task::none(), events)
         }
         auth::AuthCommandResult::Error(error) => {
@@ -393,7 +510,11 @@ fn handle_auth_command_result(
             // Emit completion event even for failures so settings can handle the error
             DomainUpdateResult::with_events(
                 Task::none(),
-                vec![crate::common::messages::CrossDomainEvent::AuthCommandCompleted(command, result)]
+                vec![
+                    crate::common::messages::CrossDomainEvent::AuthCommandCompleted(
+                        command, result,
+                    ),
+                ],
             )
         }
     }

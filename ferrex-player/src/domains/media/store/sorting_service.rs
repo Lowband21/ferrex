@@ -1,13 +1,13 @@
 //! Background sorting service for MediaStore
-//! 
+//!
 //! This module handles all sorting operations in a performant manner,
 //! including background thread execution and intelligent caching.
 
 use super::core::MediaStore;
 use crate::domains::ui::types::{SortBy, SortOrder};
-use ferrex_core::{MovieReference, SeriesReference};
 use ferrex_core::query::sorting::fields::*;
 use ferrex_core::query::sorting::strategy::{FieldSort, SortStrategy};
+use ferrex_core::{MovieReference, SeriesReference};
 use std::sync::Arc;
 
 /// Service for handling MediaStore sorting operations
@@ -29,14 +29,14 @@ impl SortingService {
         sort_order: SortOrder,
     ) -> Result<(), String> {
         let store = Arc::clone(&self.media_store);
-        
+
         tokio::task::spawn_blocking(move || {
             let mut store = store.write().unwrap();
             store.set_movie_sort(sort_by, sort_order);
         })
         .await
         .map_err(|e| format!("Failed to sort movies: {}", e))?;
-        
+
         Ok(())
     }
 
@@ -47,14 +47,14 @@ impl SortingService {
         sort_order: SortOrder,
     ) -> Result<(), String> {
         let store = Arc::clone(&self.media_store);
-        
+
         tokio::task::spawn_blocking(move || {
             let mut store = store.write().unwrap();
             store.set_series_sort(sort_by, sort_order);
         })
         .await
         .map_err(|e| format!("Failed to sort series: {}", e))?;
-        
+
         Ok(())
     }
 
@@ -66,13 +66,13 @@ impl SortingService {
     ) -> Result<(), String> {
         let movies_future = self.sort_movies_async(sort_by, sort_order);
         let series_future = self.sort_series_async(sort_by, sort_order);
-        
+
         // Execute both sorts in parallel
         let (movies_result, series_result) = tokio::join!(movies_future, series_future);
-        
+
         movies_result?;
         series_result?;
-        
+
         Ok(())
     }
 }
@@ -81,14 +81,14 @@ impl SortingService {
 pub mod strategies {
     use super::*;
     use ferrex_core::MediaRef;
-    
+
     /// Create an optimized sorting strategy for movies
     pub fn create_movie_sort_strategy(
         sort_by: SortBy,
         sort_order: SortOrder,
     ) -> Box<dyn Fn(&mut Vec<MovieReference>) + Send + Sync> {
         let reverse = matches!(sort_order, SortOrder::Descending);
-        
+
         Box::new(move |movies: &mut Vec<MovieReference>| {
             match sort_by {
                 SortBy::Title => {
@@ -169,14 +169,14 @@ pub mod strategies {
             }
         })
     }
-    
+
     /// Create an optimized sorting strategy for series
     pub fn create_series_sort_strategy(
         sort_by: SortBy,
         sort_order: SortOrder,
     ) -> Box<dyn Fn(&mut Vec<SeriesReference>) + Send + Sync> {
         let reverse = matches!(sort_order, SortOrder::Descending);
-        
+
         Box::new(move |series: &mut Vec<SeriesReference>| {
             match sort_by {
                 SortBy::Title => {

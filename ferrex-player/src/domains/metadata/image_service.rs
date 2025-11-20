@@ -42,6 +42,14 @@ pub struct UnifiedImageService {
     max_concurrent: usize,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl UnifiedImageService {
     pub fn new(max_concurrent: usize) -> (Self, mpsc::UnboundedReceiver<()>) {
         let (load_sender, load_receiver) = mpsc::unbounded_channel();
@@ -58,9 +66,13 @@ impl UnifiedImageService {
     }
 
     pub fn get(&self, request: &ImageRequest) -> Option<Handle> {
-        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        #[cfg(any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ))]
         profiling::scope!("ImageService::get");
-        
+
         self.cache
             .get(request)
             .and_then(|entry| match &entry.state {
@@ -84,9 +96,13 @@ impl UnifiedImageService {
     }
 
     pub fn request_image(&self, request: ImageRequest) {
-        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        #[cfg(any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ))]
         profiling::scope!("ImageService::request_image");
-        
+
         //log::info!("Requesting image with request: {:#?}", request);
         // Check if already cached
         if let Some(mut entry) = self.cache.get_mut(&request) {
@@ -235,20 +251,19 @@ impl UnifiedImageService {
     pub fn get_next_request(&self) -> Option<ImageRequest> {
         let mut queue = self.queue.lock().ok()?;
 
-        // Only process one at a time for staggered loading effect
-        // This ensures images load sequentially, not in parallel
-        if !self.loading.is_empty() {
+        if self.loading.len() > self.max_concurrent {
             return None;
         }
 
-        // Pop highest priority item
-        while let Some((request, _priority)) = queue.pop() {
+        if let Some((request, _priority)) = queue.pop() {
             if !self.loading.contains_key(&request) {
                 return Some(request);
+            } else {
+                None
             }
+        } else {
+            None
         }
-
-        None
     }
 
     pub fn cleanup_stale_entries(&self, max_age: std::time::Duration) {
@@ -274,164 +289,3 @@ impl UnifiedImageService {
         }
     }
 }
-
-/*
-// URL Resolution - uses endpoints from server response types
-pub async fn resolve_image_url(request: &ImageRequest, state: &State) -> Result<String, String> {
-    match &request.media_id {
-        MediaId::Movie(id) => resolve_movie_url(id, state).await,
-        MediaId::Series(id) => resolve_series_url(id, state).await,
-        MediaId::Season(id) => resolve_season_url(id, state).await,
-        MediaId::Episode(id) => resolve_episode_url(id, state).await,
-        MediaId::Person(id) => resolve_person_url(id, state).await,
-    }
-}
-
-async fn resolve_movie_url(id: &MovieID, state: &State) -> Result<String, String> {
-    // Find the movie reference
-    if let Some(reference) = find_movie_reference(id, state) {
-        match &reference.details {
-            MediaDetailsOption::Endpoint(endpoint) => {
-                // Use the endpoint directly from server
-                Ok(format!("{}{}", state.server_url, endpoint))
-            }
-            MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
-                // Use TMDB poster path if available
-                if let Some(poster_path) = &details.poster_path {
-                    Ok(crate::infrastructure::api_types::get_tmdb_image_url(poster_path))
-                } else {
-                    Err("No poster available".to_string())
-                }
-            }
-            _ => Err("Invalid movie details type".to_string()),
-        }
-    } else {
-        Err("Movie not found".to_string())
-    }
-}
-
-async fn resolve_series_url(id: &SeriesID, state: &State) -> Result<String, String> {
-    // Find the series reference
-    if let Some(reference) = find_series_reference(id, state) {
-        match &reference.details {
-            MediaDetailsOption::Endpoint(endpoint) => {
-                // Use the endpoint directly from server
-                Ok(format!("{}{}", state.server_url, endpoint))
-            }
-            MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
-                // Use TMDB poster path if available
-                if let Some(poster_path) = &details.poster_path {
-                    Ok(crate::infrastructure::api_types::get_tmdb_image_url(poster_path))
-                } else {
-                    Err("No poster available".to_string())
-                }
-            }
-            _ => Err("Invalid series details type".to_string()),
-        }
-    } else {
-        Err("Series not found".to_string())
-    }
-}
-
-async fn resolve_season_url(id: &SeasonID, state: &State) -> Result<String, String> {
-    // Find the season reference
-    if let Some(reference) = find_season_reference(id, state) {
-        match &reference.details {
-            MediaDetailsOption::Endpoint(endpoint) => {
-                // Use the endpoint directly from server
-                Ok(format!("{}{}", state.server_url, endpoint))
-            }
-            MediaDetailsOption::Details(TmdbDetails::Season(details)) => {
-                // Use cached endpoint or TMDB poster path
-                if let Some(poster_path) = &details.poster_path {
-                    // Check if this is already a cached endpoint (starts with /images/)
-                    if poster_path.starts_with("/images/") {
-                        Ok(format!("{}{}", state.server_url, poster_path))
-                    } else {
-                        // It's a TMDB path
-                        Ok(crate::infrastructure::api_types::get_tmdb_image_url(poster_path))
-                    }
-                } else {
-                    Err("No poster available for season".to_string())
-                }
-            }
-            _ => Err("Invalid season details type".to_string()),
-        }
-    } else {
-        Err("Season not found".to_string())
-    }
-}
-
-async fn resolve_episode_url(id: &EpisodeID, state: &State) -> Result<String, String> {
-    // Episodes use still images, not posters
-    if let Some(reference) = find_episode_reference(id, state) {
-        match &reference.details {
-            MediaDetailsOption::Endpoint(endpoint) => {
-                // Use the endpoint directly from server
-                Ok(format!("{}{}", state.server_url, endpoint))
-            }
-            MediaDetailsOption::Details(TmdbDetails::Episode(details)) => {
-                // Use cached endpoint or TMDB still path
-                if let Some(still_path) = &details.still_path {
-                    // Check if this is already a cached endpoint (starts with /images/)
-                    if still_path.starts_with("/images/") {
-                        Ok(format!("{}{}", state.server_url, still_path))
-                    } else {
-                        // It's a TMDB path
-                        Ok(crate::infrastructure::api_types::get_tmdb_image_url(still_path))
-                    }
-                } else {
-                    Err("No still image available".to_string())
-                }
-            }
-            _ => Err("Invalid episode details type".to_string()),
-        }
-    } else {
-        Err("Episode not found".to_string())
-    }
-}
-
-async fn resolve_person_url(id: &ferrex_core::media::PersonID, state: &State) -> Result<String, String> {
-    // Person images are served directly from the API endpoint
-    // We don't need to look up references since person images are cached separately
-    // The URL pattern is /images/person/{id}/profile/0
-    Ok(format!("{}/images/person/{}/profile/0", state.server_url, id.as_str()))
-}
-
-// Helper functions to find references in state
-fn find_movie_reference(id: &MovieID, state: &State) -> Option<MovieReference> {
-    if let Ok(store) = state.media_store.read() {
-        store.get(&MediaId::Movie(id.clone()))
-            .and_then(|media| media.as_movie().cloned())
-    } else {
-        None
-    }
-}
-
-fn find_series_reference(id: &SeriesID, state: &State) -> Option<SeriesReference> {
-    if let Ok(store) = state.media_store.read() {
-        store.get(&MediaId::Series(id.clone()))
-            .and_then(|media| media.as_series().cloned())
-    } else {
-        None
-    }
-}
-
-fn find_season_reference(id: &SeasonID, state: &State) -> Option<SeasonReference> {
-    if let Ok(store) = state.media_store.read() {
-        store.get(&MediaId::Season(id.clone()))
-            .and_then(|media| media.as_season().cloned())
-    } else {
-        None
-    }
-}
-
-fn find_episode_reference(id: &EpisodeID, state: &State) -> Option<EpisodeReference> {
-    if let Ok(store) = state.media_store.read() {
-        store.get(&MediaId::Episode(id.clone()))
-            .and_then(|media| media.as_episode().cloned())
-    } else {
-        None
-    }
-}
-*/

@@ -3,12 +3,19 @@
 //! Allows users to edit their display name, email, and avatar
 
 use crate::domains::ui::messages::Message;
-use crate::state_refactored::State;
 use crate::domains::ui::theme;
+use crate::state_refactored::State;
 use iced::widget::{button, column, container, row, text, text_input, Space};
 use iced::{Element, Length};
 
-/// User profile settings view
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_user_profile<'a>(_state: &'a State) -> Element<'a, Message> {
     let content = column![
         text("Profile Settings")

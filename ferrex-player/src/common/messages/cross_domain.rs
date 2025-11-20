@@ -5,12 +5,20 @@
 //! necessary cross-domain workflows.
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::domains::{auth, library, media, ui};
 use crate::domains::ui::scroll_manager::ScrollStateExt;
+use crate::domains::{auth, library, media, ui};
 use crate::state_refactored::State;
 use iced::Task;
 use std::sync::Arc;
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMessage> {
     log::debug!("[CrossDomain] Processing event: {:?}", event);
 
@@ -109,10 +117,10 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         // Library events
         CrossDomainEvent::LibrarySelected(library_id) => {
             state.domains.library.state.current_library_id = Some(library_id);
-            
+
             // Restore scroll state for the new library context
             state.restore_library_scroll_state(Some(library_id));
-            
+
             Task::batch(vec![
                 Task::done(DomainMessage::Library(
                     library::messages::Message::SelectLibrary(Some(library_id)),
@@ -123,10 +131,10 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         }
         CrossDomainEvent::LibrarySelectAll => {
             state.domains.library.state.current_library_id = None;
-            
+
             // Restore scroll state for the global context (all libraries)
             state.restore_library_scroll_state(None);
-            
+
             Task::batch(vec![
                 Task::done(DomainMessage::Library(
                     library::messages::Message::SelectLibrary(None),
@@ -160,9 +168,9 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
                     // Small delay to ensure media store is fully populated
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 },
-                |_| DomainMessage::Search(
-                    crate::domains::search::messages::Message::RunCalibration
-                )
+                |_| {
+                    DomainMessage::Search(crate::domains::search::messages::Message::RunCalibration)
+                },
             )
         }
 
@@ -206,7 +214,10 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         CrossDomainEvent::ClearMediaStore
         | CrossDomainEvent::ClearLibraries
         | CrossDomainEvent::ClearCurrentShowData => {
-            log::info!("[CrossDomain] Cleanup event {:?} - handled by domain event handlers", event);
+            log::info!(
+                "[CrossDomain] Cleanup event {:?} - handled by domain event handlers",
+                event
+            );
             // Special handling for ClearLibraries to reset current_library_id
             if matches!(event, CrossDomainEvent::ClearLibraries) {
                 state.domains.library.state.current_library_id = None;
@@ -345,7 +356,9 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
 
 /// Handle authentication completion - trigger initial data loading
 fn handle_authentication_complete(state: &State) -> Task<DomainMessage> {
-    log::info!("[CrossDomain] AuthenticationComplete event received - triggering initial data load");
+    log::info!(
+        "[CrossDomain] AuthenticationComplete event received - triggering initial data load"
+    );
 
     // Guard against duplicate library loading
     if !state.domains.library.state.libraries.is_empty() {
@@ -368,7 +381,10 @@ fn handle_authentication_complete(state: &State) -> Task<DomainMessage> {
     )));
 
     // Additional initialization tasks can be added here
-    log::info!("[CrossDomain] Batching {} tasks for post-auth initialization", tasks.len());
+    log::info!(
+        "[CrossDomain] Batching {} tasks for post-auth initialization",
+        tasks.len()
+    );
 
     Task::batch(tasks)
 }

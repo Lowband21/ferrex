@@ -1,55 +1,24 @@
 use crate::domains::ui::messages::Message;
-use crate::infrastructure::constants::{calculations, grid, poster, scale_presets};
-use ferrex_core::{MovieReference, SeriesReference};
+use crate::infrastructure::api_types::{MovieReference, SeriesReference, WatchProgress};
 use iced::{
-    widget::{column, container, row},
-    Element, Length,
+    widget::{column, row},
+    Element,
 };
+use tokio::sync::watch;
 
-/// Calculate grid layout parameters for consistent spacing
-fn calculate_grid_layout(window_width: f32) -> (usize, f32) {
-    // Calculate columns using centralized logic with default scale
-    let columns = calculations::calculate_columns(window_width, scale_presets::DEFAULT_SCALE);
-
-    // Calculate padding for centered layout
-    let padding =
-        calculations::calculate_grid_padding(window_width, columns, scale_presets::DEFAULT_SCALE);
-
-    (columns, padding)
-}
-
-/// Creates a grid from a list of elements
-fn create_grid<'a>(
-    items: Vec<Element<'a, Message>>,
-    items_per_row: usize,
-    spacing: f32,
-) -> Element<'a, Message> {
-    let mut rows = column![].spacing(grid::ROW_SPACING);
-    let mut current_row = row![].spacing(spacing);
-
-    let total_items = items.len();
-    for (i, item) in items.into_iter().enumerate() {
-        current_row = current_row.push(item);
-
-        if (i + 1) % items_per_row == 0 || i == total_items - 1 {
-            rows = rows.push(
-                container(current_row)
-                    .width(Length::Fill)
-                    .align_x(iced::alignment::Horizontal::Center),
-            );
-            current_row = row![].spacing(spacing);
-        }
-    }
-
-    rows.into()
-}
-
-// Helper functions with explicit lifetimes for the macro
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn create_movie_card<'a>(
     movie: &'a MovieReference,
     hovered_media_id: &Option<String>,
     is_visible: bool,
-    state: &'a crate::state_refactored::State,
+    watch_progress: Option<WatchProgress>,
 ) -> Element<'a, Message> {
     let is_hovered = hovered_media_id
         .as_ref()
@@ -59,15 +28,23 @@ fn create_movie_card<'a>(
         movie,
         is_hovered,
         is_visible,
-        Some(state),
+        watch_progress,
     )
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn create_series_card<'a>(
     series: &'a SeriesReference,
     hovered_media_id: &Option<String>,
     is_visible: bool,
-    state: &'a crate::state_refactored::State,
+    watch_progress: Option<WatchProgress>,
 ) -> Element<'a, Message> {
     let is_hovered = hovered_media_id
         .as_ref()
@@ -77,7 +54,7 @@ fn create_series_card<'a>(
         series,
         is_hovered,
         is_visible,
-        Some(state),
+        watch_progress,
     )
 }
 

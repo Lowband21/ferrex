@@ -1,11 +1,11 @@
 //! Search domain - handles all search functionality
 
+pub mod calibrator;
 pub mod messages;
+pub mod metrics;
 pub mod service;
 pub mod types;
 pub mod update;
-pub mod metrics;
-pub mod calibrator;
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use iced::Task;
@@ -25,40 +25,55 @@ pub struct SearchDomain {
 }
 
 impl SearchDomain {
-    /// Create a new search domain
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     pub fn new(
         media_store: Arc<StdRwLock<crate::domains::media::store::MediaStore>>,
-        api_service: Option<Arc<crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter>>,
+        api_service: Option<
+            Arc<crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter>,
+        >,
     ) -> Self {
         Self {
             state: SearchState::default(),
             service: Arc::new(SearchService::new(media_store, api_service)),
         }
     }
-    
-    /// Create a new search domain with enhanced features
+
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     pub fn new_with_metrics(
         media_store: Arc<StdRwLock<crate::domains::media::store::MediaStore>>,
-        api_service: Option<Arc<crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter>>,
+        api_service: Option<
+            Arc<crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter>,
+        >,
     ) -> Self {
         let mut state = SearchState::default();
         // Enable the enhanced decision engine with metrics
         state.decision_engine = types::SearchDecisionEngine::new_with_metrics();
-        
+
         Self {
             state,
             service: Arc::new(SearchService::new(media_store, api_service)),
         }
     }
-    
-    /// Run calibration to determine optimal search strategy
+
     pub async fn calibrate(&mut self) -> Task<DomainMessage> {
         let service = self.service.clone();
-        
+
         Task::perform(
-            async move {
-                calibrator::SearchCalibrator::calibrate(&service).await
-            },
+            async move { calibrator::SearchCalibrator::calibrate(&service).await },
             move |results| {
                 // Store calibration results in the decision engine
                 DomainMessage::Search(Message::_CalibrationComplete(results))
@@ -67,6 +82,14 @@ impl SearchDomain {
     }
 
     /// Handle cross-domain events
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
         match event {
             // NOTE: MediaStoreRefreshed moved to direct Search messages in Task 2.10
@@ -85,6 +108,14 @@ impl SearchDomain {
     }
 
     /// Emit cross-domain event
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     pub fn emit_event(&self, event: SearchEvent) -> CrossDomainEvent {
         match event {
             SearchEvent::ResultSelected(media_ref) => {

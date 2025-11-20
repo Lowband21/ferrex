@@ -11,10 +11,22 @@ use iced::Task;
 
 /// Main settings update handler
 /// Returns a DomainUpdateResult containing both the task and any events to emit
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn update_settings(state: &mut State, message: Message) -> DomainUpdateResult {
-    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
     profiling::scope!(crate::infrastructure::profiling_scopes::scopes::SETTINGS_UPDATE);
-    
+
     match message {
         // Navigation
         Message::ShowProfile => navigation::handle_show_profile(state),
@@ -67,7 +79,9 @@ pub fn update_settings(state: &mut State, message: Message) -> DomainUpdateResul
         Message::LoadDevices => device_management::handle_load_devices(state),
         Message::DevicesLoaded(result) => device_management::handle_devices_loaded(state, result),
         Message::RefreshDevices => device_management::handle_refresh_devices(state),
-        Message::RevokeDevice(device_id) => device_management::handle_revoke_device(state, device_id),
+        Message::RevokeDevice(device_id) => {
+            device_management::handle_revoke_device(state, device_id)
+        }
         Message::DeviceRevoked(result) => device_management::handle_device_revoked(state, result),
     }
 }

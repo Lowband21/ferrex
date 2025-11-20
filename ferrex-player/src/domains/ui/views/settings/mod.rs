@@ -21,7 +21,14 @@ pub mod preferences;
 pub mod profile;
 pub mod security;
 
-/// Main settings view entry point
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_user_settings<'a>(state: &'a State) -> Element<'a, Message> {
     match &state.domains.settings.current_view {
         SettingsView::Main => view_main_settings(state),
@@ -32,11 +39,20 @@ pub fn view_user_settings<'a>(state: &'a State) -> Element<'a, Message> {
     }
 }
 
-/// Main settings page
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
     // RUS-136: Get current user from auth domain state instead of auth_manager
     let current_user: Option<ferrex_core::user::User> = match &state.domains.auth.state.auth_flow {
-        crate::domains::auth::types::AuthenticationFlow::Authenticated { user, .. } => Some(user.clone()),
+        crate::domains::auth::types::AuthenticationFlow::Authenticated { user, .. } => {
+            Some(user.clone())
+        }
         _ => None,
     };
 

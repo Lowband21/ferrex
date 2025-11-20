@@ -31,6 +31,14 @@ impl Default for PasswordLoginView {
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl PasswordLoginView {
     /// Create a new password login view
     pub fn new() -> Self {

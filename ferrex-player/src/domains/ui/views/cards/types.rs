@@ -33,10 +33,10 @@ impl CardSize {
     /// Get the corner radius appropriate for this size
     pub fn radius(&self) -> f32 {
         match self {
-            CardSize::Small => 6.0,
-            CardSize::Medium => 8.0,
-            CardSize::Large => 12.0,
-            CardSize::Wide => 8.0,
+            CardSize::Small => 4.0,
+            CardSize::Medium => 4.0,
+            CardSize::Large => 8.0,
+            CardSize::Wide => 12.0,
             CardSize::Custom(w, _) => {
                 // Scale radius based on width
                 (w / 200.0 * 8.0).clamp(4.0, 16.0)

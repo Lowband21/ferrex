@@ -25,20 +25,20 @@
 //! };
 //!
 //! let mut watch_state = UserWatchState::new();
-//! 
+//!
 //! // Update progress for a movie
 //! let request = UpdateProgressRequest {
 //!     media_id: MediaId::Movie(MovieID::new("123".to_string()).unwrap()),
 //!     position: 1800.0,  // 30 minutes
 //!     duration: 7200.0,  // 2 hours
 //! };
-//! 
+//!
 //! watch_state.update_progress(request.media_id, request.position, request.duration);
 //! ```
 
+use crate::{api_types::MediaId, User};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use crate::api_types::MediaId;
 
 /// User's complete watch state across all media
 ///
@@ -51,14 +51,31 @@ use crate::api_types::MediaId;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserWatchState {
     /// List of actively watching items (typically 10-50 items)
-    /// 
+    ///
     /// Ordered by last_watched timestamp (most recent first)
     pub in_progress: Vec<InProgressItem>,
-    
+
     /// Set of completed media IDs for efficient "watched" badge display
     ///
     /// Uses HashSet for O(1) lookup performance
     pub completed: HashSet<MediaId>,
+}
+
+impl UserWatchState {
+    pub fn get_watch_progress(&self, media_id: &MediaId) -> Option<WatchProgress> {
+        if self.completed.contains(media_id) {
+            Some(WatchProgress::new(1.0))
+        } else {
+            self.get_by_media_id(media_id)
+                .map(|item| item.to_watch_progress())
+        }
+    }
+
+    pub fn get_by_media_id(&self, media_id: &MediaId) -> Option<&InProgressItem> {
+        self.in_progress
+            .iter()
+            .find(|item| item.media_id == *media_id)
+    }
 }
 
 /// Item currently being watched
@@ -88,6 +105,12 @@ pub struct InProgressItem {
     pub last_watched: i64,
 }
 
+impl InProgressItem {
+    pub fn to_watch_progress(&self) -> WatchProgress {
+        WatchProgress::from(self)
+    }
+}
+
 /// Filter for watch status queries
 ///
 /// Used to filter media by watch status in query operations.
@@ -100,9 +123,9 @@ pub enum WatchStatusFilter {
     /// Media watched to completion (progress >= 95%)
     Completed,
     /// Media watched within the specified number of days
-    RecentlyWatched { 
+    RecentlyWatched {
         /// Number of days to look back
-        days: u32 
+        days: u32,
     },
 }
 
@@ -135,20 +158,26 @@ impl WatchProgress {
     pub fn new(progress: f32) -> Self {
         WatchProgress(progress.clamp(0.0, 1.0))
     }
-    
+
     /// Get the progress as a percentage (0.0 to 1.0)
     pub fn as_percentage(&self) -> f32 {
         self.0
     }
-    
+
     /// Check if this item is considered completed (>95%)
     pub fn is_completed(&self) -> bool {
         self.0 > 0.95
     }
-    
+
     /// Check if this item has been started
     pub fn is_started(&self) -> bool {
         self.0 > 0.0
+    }
+}
+
+impl From<&InProgressItem> for WatchProgress {
+    fn from(item: &InProgressItem) -> Self {
+        WatchProgress::new(item.position / item.duration)
     }
 }
 
@@ -160,18 +189,22 @@ impl UserWatchState {
             completed: HashSet::new(),
         }
     }
-    
+
     /// Update progress for a media item
     pub fn update_progress(&mut self, media_id: MediaId, position: f32, duration: f32) {
         let progress = WatchProgress::new(position / duration);
-        
+
         if progress.is_completed() {
             // Move to completed
             self.in_progress.retain(|item| item.media_id != media_id);
             self.completed.insert(media_id);
         } else if progress.is_started() {
             // Update or insert in progress
-            if let Some(item) = self.in_progress.iter_mut().find(|item| item.media_id == media_id) {
+            if let Some(item) = self
+                .in_progress
+                .iter_mut()
+                .find(|item| item.media_id == media_id)
+            {
                 item.position = position;
                 item.last_watched = chrono::Utc::now().timestamp();
             } else {
@@ -182,33 +215,35 @@ impl UserWatchState {
                     last_watched: chrono::Utc::now().timestamp(),
                 });
             }
-            
+
             // Sort by last watched (most recent first)
-            self.in_progress.sort_by(|a, b| b.last_watched.cmp(&a.last_watched));
-            
+            self.in_progress
+                .sort_by(|a, b| b.last_watched.cmp(&a.last_watched));
+
             // Limit to 50 items
             self.in_progress.truncate(50);
         }
     }
-    
+
     /// Check if a media item is completed
     pub fn is_completed(&self, media_id: &MediaId) -> bool {
         self.completed.contains(media_id)
     }
-    
+
     /// Get progress for a specific media item
     pub fn get_progress(&self, media_id: &MediaId) -> Option<WatchProgress> {
-        self.in_progress.iter()
+        self.in_progress
+            .iter()
             .find(|item| item.media_id == *media_id)
             .map(|item| WatchProgress::new(item.position / item.duration))
     }
-    
+
     /// Get continue watching items (sorted by last watched)
     pub fn get_continue_watching(&self, limit: usize) -> &[InProgressItem] {
         let end = limit.min(self.in_progress.len());
         &self.in_progress[..end]
     }
-    
+
     /// Clear watch progress for a specific item
     pub fn clear_progress(&mut self, media_id: &MediaId) {
         self.in_progress.retain(|item| item.media_id != *media_id);

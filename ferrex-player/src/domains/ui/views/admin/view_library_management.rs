@@ -1,6 +1,7 @@
 //! Library management view with permission-based controls
 
 use crate::{
+    domains::ui::theme,
     domains::{
         auth::permissions,
         auth::permissions::StatePermissionExt,
@@ -9,7 +10,6 @@ use crate::{
     },
     infrastructure::api_types::LibraryType,
     state_refactored::State,
-    domains::ui::theme,
 };
 use ferrex_core::Library;
 use iced::{
@@ -28,7 +28,14 @@ fn lucide_font() -> iced::Font {
     iced::Font::with_name("lucide")
 }
 
-/// Library Management View
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_library_management(state: &State) -> Element<Message> {
     let permissions = state.permission_checker();
 

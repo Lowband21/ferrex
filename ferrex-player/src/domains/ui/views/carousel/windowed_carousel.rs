@@ -11,6 +11,14 @@ use lucide_icons::Icon;
 use super::{CarouselMessage, CarouselState};
 
 /// Create a windowed media carousel that only renders visible items
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn windowed_media_carousel<'a, F>(
     section_id: String,
     title: &'a str,

@@ -1,8 +1,8 @@
 use ferrex_core::{rbac::UserPermissions, user::User};
 use uuid::Uuid;
 
-use crate::domains::auth::manager::{DeviceAuthStatus, PlayerAuthResult};
 use crate::domains::auth::dto::UserListItemDto;
+use crate::domains::auth::manager::{DeviceAuthStatus, PlayerAuthResult};
 
 pub mod commands;
 pub mod subscriptions;
@@ -45,7 +45,6 @@ pub enum Message {
 
     // Login results
     LoginSuccess(User, UserPermissions),
-    LoginError(String),
     WatchStatusLoaded(Result<ferrex_core::watch_status::UserWatchState, String>),
     Logout,
     LogoutComplete,
@@ -83,7 +82,7 @@ pub enum Message {
     FirstRunSuccess,
     FirstRunError(String),
 
-    // Admin setup flow  
+    // Admin setup flow
     UpdateSetupField(SetupField),
     ToggleSetupPasswordVisibility,
     SubmitSetup,
@@ -94,7 +93,7 @@ pub enum Message {
     EnableAdminPinUnlock,
     DisableAdminPinUnlock,
     AdminPinUnlockToggled(Result<bool, String>), // enabled, error
-    
+
     // Command execution
     ExecuteCommand(AuthCommand),
     CommandResult(AuthCommand, AuthCommandResult),
@@ -110,10 +109,16 @@ impl Message {
             Self::UpdateConfirmPin(_) => "UpdateConfirmPin(***)".to_string(),
             Self::PasswordLoginUpdatePassword(_) => "PasswordLoginUpdatePassword(***)".to_string(),
             Self::FirstRunUpdatePassword(_) => "FirstRunUpdatePassword(***)".to_string(),
-            Self::FirstRunUpdateConfirmPassword(_) => "FirstRunUpdateConfirmPassword(***)".to_string(),
-            Self::UpdateSetupField(SetupField::Password(_)) => "UpdateSetupField(Password(***)".to_string(),
-            Self::UpdateSetupField(SetupField::ConfirmPassword(_)) => "UpdateSetupField(ConfirmPassword(***)".to_string(),
-            
+            Self::FirstRunUpdateConfirmPassword(_) => {
+                "FirstRunUpdateConfirmPassword(***)".to_string()
+            }
+            Self::UpdateSetupField(SetupField::Password(_)) => {
+                "UpdateSetupField(Password(***)".to_string()
+            }
+            Self::UpdateSetupField(SetupField::ConfirmPassword(_)) => {
+                "UpdateSetupField(ConfirmPassword(***)".to_string()
+            }
+
             // Non-sensitive messages - show full debug representation
             _ => format!("{:?}", self),
         }
@@ -145,7 +150,6 @@ impl Message {
 
             // Login results
             Self::LoginSuccess(_, _) => "Auth::LoginSuccess",
-            Self::LoginError(_) => "Auth::LoginError",
             Self::WatchStatusLoaded(_) => "Auth::WatchStatusLoaded",
             Self::Logout => "Auth::Logout",
             Self::LogoutComplete => "Auth::LogoutComplete",
@@ -194,7 +198,7 @@ impl Message {
             Self::EnableAdminPinUnlock => "Auth::EnableAdminPinUnlock",
             Self::DisableAdminPinUnlock => "Auth::DisableAdminPinUnlock",
             Self::AdminPinUnlockToggled(_) => "Auth::AdminPinUnlockToggled",
-            
+
             // Command execution
             Self::ExecuteCommand(_) => "Auth::ExecuteCommand",
             Self::CommandResult(_, _) => "Auth::CommandResult",

@@ -7,6 +7,14 @@ use crate::state_refactored::State;
 use iced::Task;
 
 /// Handle toggle auto-login preference
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_toggle_auto_login(state: &mut State, enabled: bool) -> DomainUpdateResult {
     let auth_service = state.domains.settings.auth_service.clone();
     let api_service = state.domains.settings.api_service.clone();
@@ -15,7 +23,10 @@ pub fn handle_toggle_auto_login(state: &mut State, enabled: bool) -> DomainUpdat
     let task = Task::perform(
         async move {
             // First update the device-specific setting
-            auth_service.set_auto_login(enabled).await.map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            auth_service
+                .set_auto_login(enabled)
+                .await
+                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
             // Then update the user preference in the database
             let request = serde_json::json!({
@@ -23,10 +34,7 @@ pub fn handle_toggle_auto_login(state: &mut State, enabled: bool) -> DomainUpdat
             });
 
             api_service
-                .put::<serde_json::Value, serde_json::Value>(
-                    "/api/users/me/preferences",
-                    &request,
-                )
+                .put::<serde_json::Value, serde_json::Value>("/api/users/me/preferences", &request)
                 .await
                 .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -38,7 +46,10 @@ pub fn handle_toggle_auto_login(state: &mut State, enabled: bool) -> DomainUpdat
 }
 
 /// Handle auto-login toggled result
-pub fn handle_auto_login_toggled(state: &mut State, result: Result<bool, String>) -> DomainUpdateResult {
+pub fn handle_auto_login_toggled(
+    state: &mut State,
+    result: Result<bool, String>,
+) -> DomainUpdateResult {
     match result {
         Ok(enabled) => {
             // Update UI state to reflect the change

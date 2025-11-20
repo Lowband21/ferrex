@@ -1,11 +1,22 @@
 use crate::{
     common::messages::{CrossDomainEvent, DomainUpdateResult},
-    domains::media::library::MediaFile, domains::media::messages::Message,
-    domains::player::video::load_video, domains::ui::types::ViewState, state_refactored::State,
+    domains::media::library::MediaFile,
+    domains::media::messages::Message,
+    domains::player::video::load_video,
+    domains::ui::types::ViewState,
+    state_refactored::State,
 };
 use iced::Task;
 
 /// Handle play media request
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_play_media(state: &mut State, media: MediaFile) -> DomainUpdateResult {
     log::info!("Playing media: {} (id: {})", media.filename, media.id);
     log::info!("Media path: {:?}", media.path);
@@ -130,14 +141,14 @@ pub fn handle_play_media(state: &mut State, media: MediaFile) -> DomainUpdateRes
 
             {
                 // For direct streaming, send messages to load video
-                DomainUpdateResult::task(
-                    Task::batch(vec![
-                        Task::done(crate::common::messages::DomainMessage::Media(Message::_LoadVideo)),
-                        Task::done(crate::common::messages::DomainMessage::Player(
-                            crate::domains::player::messages::Message::VideoReadyToPlay
-                        ))
-                    ])
-                )
+                DomainUpdateResult::task(Task::batch(vec![
+                    Task::done(crate::common::messages::DomainMessage::Media(
+                        Message::_LoadVideo,
+                    )),
+                    Task::done(crate::common::messages::DomainMessage::Player(
+                        crate::domains::player::messages::Message::VideoReadyToPlay,
+                    )),
+                ]))
             }
         }
         Err(e) => {

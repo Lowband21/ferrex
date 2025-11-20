@@ -1,17 +1,33 @@
 use crate::domains::ui::messages::Message;
 use crate::domains::ui::theme;
 use crate::domains::ui::views::carousel::windowed_media_carousel;
+use crate::infrastructure::api_types::MediaId;
 use crate::state_refactored::State;
 use iced::{
     widget::{column, container, scrollable, text},
     Element, Length,
 };
+use tokio::sync::watch;
 
 // Helper function for carousel view used in All mode
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_all_content(state: &State) -> Element<Message> {
-    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
     profiling::scope!(crate::infrastructure::profiling_scopes::scopes::VIEW_RENDER);
-    
+
+    let watch_state_opt = state.domains.media.state.get_watch_state();
+
     let mut content = column![].spacing(30).padding(20);
 
     // TV Shows carousel - use ViewModel
@@ -26,6 +42,7 @@ pub fn view_all_content(state: &State) -> Element<Message> {
             state.all_view_model.tv_carousel(),
             move |idx| {
                 series_list.get(idx).map(|series| {
+                    let series_id = series.id.clone();
                     let is_hovered = state
                         .domains
                         .ui
@@ -33,12 +50,18 @@ pub fn view_all_content(state: &State) -> Element<Message> {
                         .hovered_media_id
                         .as_ref()
                         .map(|s| s.as_str())
-                        == Some(series.id.as_str());
+                        == Some(series_id.as_str());
+
+                    let item_watch_progress = if let Some(watch_state) = watch_state_opt {
+                        watch_state.get_watch_progress(&MediaId::from(series_id))
+                    } else {
+                        None
+                    };
                     crate::domains::ui::components::series_reference_card_with_state(
                         series,
                         is_hovered,
                         false,
-                        Some(state),
+                        item_watch_progress,
                     )
                 })
             },
@@ -59,6 +82,7 @@ pub fn view_all_content(state: &State) -> Element<Message> {
             state.all_view_model.movies_carousel(),
             move |idx| {
                 movies_list.get(idx).map(|movie| {
+                    let movie_id = movie.id.clone();
                     let is_hovered = state
                         .domains
                         .ui
@@ -66,12 +90,18 @@ pub fn view_all_content(state: &State) -> Element<Message> {
                         .hovered_media_id
                         .as_ref()
                         .map(|s| s.as_str())
-                        == Some(movie.id.as_str());
+                        == Some(movie_id.as_str());
+
+                    let item_watch_progress = if let Some(watch_state) = watch_state_opt {
+                        watch_state.get_watch_progress(&MediaId::from(movie_id))
+                    } else {
+                        None
+                    };
                     crate::domains::ui::components::movie_reference_card_with_state(
                         movie,
                         is_hovered,
                         false,
-                        Some(state),
+                        item_watch_progress,
                     )
                 })
             },

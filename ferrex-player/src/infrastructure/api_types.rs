@@ -77,6 +77,8 @@ pub use ferrex_core::library::Library;
 
 pub use ferrex_core::LibraryType;
 
+pub use ferrex_core::watch_status::{UserWatchState, WatchProgress};
+
 // Conversion utilities for backward compatibility during migration
 
 use crate::domains::media::library::{

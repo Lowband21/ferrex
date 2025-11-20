@@ -1,13 +1,19 @@
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
-    domains::library,
-    domains::ui::messages as ui,
-    domains::ui::scroll_manager::ScrollStateExt,
-    domains::ui::types::{DisplayMode, ViewState},
-    domains::ui::view_models::ViewModel,
-    domains::ui::views::carousel::CarouselMessage,
+    domains::{
+        library,
+        ui::{
+            messages as ui,
+            scroll_manager::ScrollStateExt,
+            types::{DisplayMode, ViewState},
+            view_models::ViewModel,
+            views::carousel::CarouselMessage,
+        },
+    },
+    infrastructure::api_types::{MediaId, MediaReference},
     state_refactored::State,
 };
+use glib::Priority;
 use iced::Task;
 use std::sync::Arc;
 
@@ -19,12 +25,7 @@ fn check_user_has_pin() -> DomainUpdateResult {
     )))
 }
 
-/// Handle UI domain messages
-/// Returns a DomainUpdateResult containing both the task and any events to emit
 pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult {
-    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
-    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::UI_UPDATE);
-    
     match message {
         ui::Message::SetDisplayMode(display_mode) => {
             state.domains.ui.state.display_mode = display_mode;
@@ -33,12 +34,11 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             match display_mode {
                 DisplayMode::Curated => {
                     // Activate the All tab with scroll restoration
-                    state
-                        .tab_manager
-                        .set_active_tab_with_scroll(
-                            crate::domains::ui::tabs::TabId::All,
-                            &mut state.domains.ui.state.scroll_manager
-                        );
+                    state.tab_manager.set_active_tab_with_scroll(
+                        crate::domains::ui::tabs::TabId::All,
+                        &mut state.domains.ui.state.scroll_manager,
+                        state.window_size.width,
+                    );
                     log::info!("Tab activated: All (Curated mode)");
 
                     // Note: All tab uses carousel view, not scrollable grid, so no scroll restoration needed
@@ -55,12 +55,11 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
 
                     // Activate the library tab if we have a library selected
                     if let Some(lib_id) = library_id {
-                        state
-                            .tab_manager
-                            .set_active_tab_with_scroll(
-                                crate::domains::ui::tabs::TabId::Library(lib_id),
-                                &mut state.domains.ui.state.scroll_manager
-                            );
+                        state.tab_manager.set_active_tab_with_scroll(
+                            crate::domains::ui::tabs::TabId::Library(lib_id),
+                            &mut state.domains.ui.state.scroll_manager,
+                            state.window_size.width,
+                        );
                         log::info!("Tab activated: Library({}) (Library mode)", lib_id);
                     }
 
@@ -83,12 +82,11 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         }
         ui::Message::SelectLibraryAndMode(library_id) => {
             // NEW ARCHITECTURE: Activate the library tab in TabManager with scroll restoration
-            state
-                .tab_manager
-                .set_active_tab_with_scroll(
-                    crate::domains::ui::tabs::TabId::Library(library_id),
-                    &mut state.domains.ui.state.scroll_manager
-                );
+            state.tab_manager.set_active_tab_with_scroll(
+                crate::domains::ui::tabs::TabId::Library(library_id),
+                &mut state.domains.ui.state.scroll_manager,
+                state.window_size.width,
+            );
             log::info!("Tab activated: Library({})", library_id);
 
             // Create scroll restoration task for the newly active tab
@@ -266,124 +264,74 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             state.domains.ui.state.error_message = None;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::MoviesGridScrolled(viewport) => {
-            let task = super::update_handlers::scroll_updates::handle_movies_grid_scrolled(
-                state, viewport,
-            );
-            DomainUpdateResult::task(task.map(DomainMessage::Ui))
-        }
-        ui::Message::TvShowsGridScrolled(viewport) => {
-            let task = super::update_handlers::scroll_updates::handle_tv_shows_grid_scrolled(
-                state, viewport,
-            );
-            DomainUpdateResult::task(task.map(DomainMessage::Ui))
-        }
         ui::Message::TabGridScrolled(viewport) => {
             let task =
                 super::update_handlers::scroll_updates::handle_tab_grid_scrolled(state, viewport);
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
         ui::Message::CheckScrollStopped => {
+            use crate::domains::metadata::image_types::{ImageRequest, ImageSize, Priority};
             // Check if scrolling has actually stopped
             if let Some(last_time) = state.domains.ui.state.last_scroll_time {
                 let elapsed = last_time.elapsed();
 
                 // Only process if enough time has passed since last scroll event
-                if elapsed >= std::time::Duration::from_millis(
+                let priority = if elapsed >= std::time::Duration::from_millis(
                     crate::infrastructure::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS
                 ) {
-                    // Double-check that we're not still scrolling
-                    if state.domains.ui.state.scroll_velocity > 0.0 {
-                        // Still have velocity, might be mid-scroll
-                        log::debug!("CheckScrollStopped called but velocity still {:.0} px/s, ignoring",
-                                  state.domains.ui.state.scroll_velocity);
-                        DomainUpdateResult::task(Task::none())
-                    } else {
-                        // Scrolling has truly stopped
-                        log::info!("Scrolling confirmed stopped after {:.0}ms, upgrading visible poster priorities",
-                                  elapsed.as_millis());
-
-                        // Re-request visible items with Priority::Visible
-                        if let Some(image_service) = crate::infrastructure::service_registry::get_image_service() {
-                            use crate::domains::metadata::image_types::{ImageRequest, ImageSize, Priority};
-                            use ferrex_core::api_types::MediaId;
-
-                            // When in Library view, we need to check what content is currently shown
-                            // based on the current library type or selected tab
-                            let visible_items = match state.domains.ui.state.view {
-                                ViewState::Library => {
-                                    // Get visible items from all view models since we don't know which is active
-                                    // The view models will only return items if they have visible content
-                                    // Get visible items from active tab
-                                    let mut items = state.all_view_model.get_visible_items();
-                                    let tv_items = crate::domains::ui::view_models::VisibleItems {
-                                        movies: vec![],
-                                        series: vec![],
-                                    };
-                                    let all_items = state.all_view_model.get_visible_items();
-
-                                    // Combine all visible items
-                                    items.movies.extend(all_items.movies);
-                                    items.series.extend(tv_items.series);
-                                    items.series.extend(all_items.series);
-
-                                    items
-                                }
-                                _ => {
-                                    // For other views, just get from all view model
-                                    ViewModel::get_visible_items(&state.all_view_model)
-                                }
-                            };
-
-                            log::info!("Re-requesting {} movies and {} series with VISIBLE priority",
-                                      visible_items.movies.len(), visible_items.series.len());
-
-                            // Re-request movie posters with Visible priority
-                            for movie in visible_items.movies {
-                                let request = ImageRequest {
-                                    media_id: MediaId::Movie(movie.id.clone()),
-                                    size: ImageSize::Poster,
-                                    priority: Priority::Visible,
-                                };
-                                image_service.get().request_image(request);
-                            }
-
-                            // Re-request series posters with Visible priority
-                            for series in visible_items.series {
-                                let request = ImageRequest {
-                                    media_id: MediaId::Series(series.id.clone()),
-                                    size: ImageSize::Poster,
-                                    priority: Priority::Visible,
-                                };
-                                image_service.get().request_image(request);
-                            }
-                        }
-
-                        // Clear scroll velocity and fast scrolling flag
-                        state.domains.ui.state.scroll_velocity = 0.0;
-                        state.domains.ui.state.fast_scrolling = false;
-                        state.domains.ui.state.scroll_stopped_time = Some(std::time::Instant::now());
-
-                        DomainUpdateResult::task(Task::none())
-                    }
+                    state.domains.ui.state.scroll_stopped_time = Some(std::time::Instant::now());
+                    log::info!("Scroll STOPPED after {:.0}ms", elapsed.as_millis());
+                    Priority::Visible
                 } else {
-                    // Not enough time has passed, ignore this check
-                    DomainUpdateResult::task(Task::none())
+                    Priority::Preload
+                };
+
+                // Re-request visible items with Priority::Visible
+                if let Some(image_service) =
+                    crate::infrastructure::service_registry::get_image_service()
+                {
+                    // Get visible items from the active tab
+                    let visible_items = state.tab_manager.get_active_tab_visible_items();
+
+                    // Count for logging
+                    let mut movie_count = 0;
+                    let mut series_count = 0;
+
+                    // Process each visible item and request its image with high priority
+                    for media_ref in visible_items {
+                        let media_id = match &media_ref {
+                            MediaReference::Movie(movie) => {
+                                movie_count += 1;
+                                MediaId::Movie(movie.id.clone())
+                            }
+                            MediaReference::Series(series) => {
+                                series_count += 1;
+                                MediaId::Series(series.id.clone())
+                            }
+                            MediaReference::Season(_) | MediaReference::Episode(_) => {
+                                // For now, skip seasons and episodes as they're not shown in grids
+                                continue;
+                            }
+                        };
+
+                        let request = ImageRequest {
+                            media_id,
+                            size: ImageSize::Poster,
+                            priority,
+                        };
+                        image_service.get().request_image(request);
+                    }
+
+                    log::info!(
+                        "Re-requested {} movies and {} series with VISIBLE priority",
+                        movie_count,
+                        series_count
+                    );
                 }
+                DomainUpdateResult::task(Task::none())
             } else {
-                // No last scroll time recorded
                 DomainUpdateResult::task(Task::none())
             }
-        }
-        ui::Message::RecalculateGridsAfterResize => {
-            // Force recalculation of visible items for both grids
-            // Force recalculation of visible items
-            // Note: visible_range fields don't exist in current state
-
-            // Queue recalculation on next scroll event or view update
-            log::debug!("Grid recalculation queued after resize");
-
-            DomainUpdateResult::task(Task::none())
         }
         ui::Message::DetailViewScrolled(viewport) => DomainUpdateResult::task(
             super::update_handlers::scroll_updates::handle_detail_view_scrolled(state, viewport)
@@ -413,12 +361,11 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             // MediaStore is the single source of truth
 
             // For curated mode (All libraries), activate the All tab with scroll restoration
-            state
-                .tab_manager
-                .set_active_tab_with_scroll(
-                    crate::domains::ui::tabs::TabId::All,
-                    &mut state.domains.ui.state.scroll_manager
-                );
+            state.tab_manager.set_active_tab_with_scroll(
+                crate::domains::ui::tabs::TabId::All,
+                &mut state.domains.ui.state.scroll_manager,
+                state.window_size.width,
+            );
             state.tab_manager.refresh_active_tab();
             log::debug!("NavigateHome: Activated All tab for curated view");
 
@@ -469,15 +416,16 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                         } else {
                             crate::domains::ui::tabs::TabId::All
                         };
-                        
+
                         // Use the scroll-aware tab switching which automatically restores position
                         state.tab_manager.set_active_tab_with_scroll(
                             tab_id,
-                            &mut state.domains.ui.state.scroll_manager
+                            &mut state.domains.ui.state.scroll_manager,
+                            state.window_size.width,
                         );
-                        
+
                         state.tab_manager.refresh_active_tab();
-                        
+
                         // Explicitly restore scroll position after tab switch
                         let scroll_task = if let Some(tab) = state.tab_manager.get_tab(tab_id) {
                             if let Some(grid_state) = tab.grid_state() {
@@ -501,12 +449,12 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                         } else {
                             Task::none()
                         };
-                        
+
                         log::debug!(
                             "NavigateBack: Restored tab state for library {:?}",
                             library_id
                         );
-                        
+
                         // Reset colors and update depth regions for library view
                         state
                             .domains
@@ -514,7 +462,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                             .state
                             .background_shader_state
                             .reset_to_view_colors(&previous_view);
-                        
+
                         state
                             .domains
                             .ui
@@ -526,7 +474,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                                 state.window_size.height,
                                 state.domains.library.state.current_library_id,
                             );
-                        
+
                         return DomainUpdateResult::task(scroll_task);
                     }
                     _ => {
@@ -981,7 +929,9 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             // NEW ARCHITECTURE: Refresh TabManager tabs with sorted data
             // This ensures the tab-based views show the newly sorted content
             // Refresh only the active tab for better performance
-            state.tab_manager.mark_tab_needs_refresh(state.tab_manager.active_tab_id());
+            state
+                .tab_manager
+                .mark_tab_needs_refresh(state.tab_manager.active_tab_id());
             state.tab_manager.refresh_active_tab();
             log::info!("TabManager: All tabs refreshed with sorted data from MediaStore");
 

@@ -7,6 +7,14 @@ use iced::{
 };
 use iced_video_player::VideoPlayer;
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl PlayerDomainState {
     /// Build the main player view
     pub fn view(&self) -> Element<Message> {
@@ -99,9 +107,9 @@ impl PlayerDomainState {
         } else {
             // No video loaded and not loading - show minimal view
             container(
-                column![
-                    text("No video loaded").size(24).color(iced::Color::from_rgb(0.7, 0.7, 0.7)),
-                ]
+                column![text("No video loaded")
+                    .size(24)
+                    .color(iced::Color::from_rgb(0.7, 0.7, 0.7)),]
                 .align_x(iced::Alignment::Center)
                 .spacing(10),
             )

@@ -1,144 +1,20 @@
 use std::time::{Duration, Instant};
 
 use crate::{
-    domains::ui::{
-        messages::Message,
-        scroll_manager::ScrollStateExt,
-        tabs::{TabId, TabState},
-    },
-    infrastructure::performance_config::scrolling::{
-        FAST_SCROLL_THRESHOLD, SCROLL_STOP_DEBOUNCE_MS,
-    },
+    domains::ui::{messages::Message, scroll_manager::ScrollStateExt, tabs::TabState},
+    infrastructure::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS,
     state_refactored::State,
 };
 use iced::{widget::scrollable::Viewport, Task};
 
-pub fn handle_movies_grid_scrolled(state: &mut State, viewport: Viewport) -> Task<Message> {
-    // Calculate scroll velocity
-    let current_position = viewport.absolute_offset().y;
-    let now = Instant::now();
-
-    // Add current sample to the queue
-    state
-        .domains
-        .ui
-        .state
-        .scroll_samples
-        .push_back((now, current_position));
-
-    // Keep only the last 5 samples
-    while state.domains.ui.state.scroll_samples.len() > 5 {
-        state.domains.ui.state.scroll_samples.pop_front();
-    }
-
-    // Calculate velocity if we have at least 2 samples
-    if state.domains.ui.state.scroll_samples.len() >= 2 {
-        let oldest = state.domains.ui.state.scroll_samples.front().unwrap();
-        let newest = state.domains.ui.state.scroll_samples.back().unwrap();
-
-        let time_delta = newest.0.duration_since(oldest.0).as_secs_f32();
-        if time_delta > 0.0 {
-            let position_delta = newest.1 - oldest.1;
-            state.domains.ui.state.scroll_velocity = (position_delta / time_delta).abs();
-
-            // Determine if we're fast scrolling
-            let was_fast_scrolling = state.domains.ui.state.fast_scrolling;
-            state.domains.ui.state.fast_scrolling =
-                state.domains.ui.state.scroll_velocity > FAST_SCROLL_THRESHOLD;
-
-            // Log state changes
-            if was_fast_scrolling != state.domains.ui.state.fast_scrolling {
-                log::info!(
-                    "Scroll mode changed: {} (velocity: {:.0} px/s)",
-                    if state.domains.ui.state.fast_scrolling {
-                        "FAST"
-                    } else {
-                        "NORMAL"
-                    },
-                    state.domains.ui.state.scroll_velocity
-                );
-            }
-
-            // Reset scroll stopped time when actively scrolling
-            state.domains.ui.state.scroll_stopped_time = None;
-        }
-    }
-
-    state.domains.ui.state.last_scroll_position = current_position;
-    state.domains.ui.state.last_scroll_time = Some(now);
-
-    // Visibility is already updated above with the grid state update
-
-    // Metadata reprioritization no longer needed - batch fetching handles all items
-
-    // Schedule a check for scroll stop
-    Task::perform(
-        async move {
-            tokio::time::sleep(Duration::from_millis(SCROLL_STOP_DEBOUNCE_MS)).await;
-        },
-        |_| Message::CheckScrollStopped,
-    )
-}
-
-pub fn handle_tv_shows_grid_scrolled(state: &mut State, viewport: Viewport) -> Task<Message> {
-    // Use same velocity tracking as movies grid
-    let current_position = viewport.absolute_offset().y;
-    let now = Instant::now();
-
-    state
-        .domains
-        .ui
-        .state
-        .scroll_samples
-        .push_back((now, current_position));
-    while state.domains.ui.state.scroll_samples.len() > 5 {
-        state.domains.ui.state.scroll_samples.pop_front();
-    }
-
-    if state.domains.ui.state.scroll_samples.len() >= 2 {
-        let oldest = state.domains.ui.state.scroll_samples.front().unwrap();
-        let newest = state.domains.ui.state.scroll_samples.back().unwrap();
-
-        let time_delta = newest.0.duration_since(oldest.0).as_secs_f32();
-        if time_delta > 0.0 {
-            let position_delta = newest.1 - oldest.1;
-            state.domains.ui.state.scroll_velocity = (position_delta / time_delta).abs();
-
-            let was_fast_scrolling = state.domains.ui.state.fast_scrolling;
-            state.domains.ui.state.fast_scrolling =
-                state.domains.ui.state.scroll_velocity > FAST_SCROLL_THRESHOLD;
-
-            if was_fast_scrolling != state.domains.ui.state.fast_scrolling {
-                log::info!(
-                    "TV scroll mode changed: {} (velocity: {:.0} px/s)",
-                    if state.domains.ui.state.fast_scrolling {
-                        "FAST"
-                    } else {
-                        "NORMAL"
-                    },
-                    state.domains.ui.state.scroll_velocity
-                );
-            }
-
-            state.domains.ui.state.scroll_stopped_time = None;
-        }
-    }
-
-    state.domains.ui.state.last_scroll_position = current_position;
-
-    // Visibility is already updated above with the grid state update
-
-    // Metadata reprioritization no longer needed - batch fetching handles all items
-    state.domains.ui.state.last_scroll_time = Some(now);
-
-    Task::perform(
-        async move {
-            tokio::time::sleep(Duration::from_millis(SCROLL_STOP_DEBOUNCE_MS)).await;
-        },
-        |_| Message::CheckScrollStopped,
-    )
-}
-
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_detail_view_scrolled(state: &mut State, viewport: Viewport) -> Task<Message> {
     // Update scroll offset for fixed backdrop
     let scroll_offset = viewport.absolute_offset().y;
@@ -164,9 +40,14 @@ pub fn handle_detail_view_scrolled(state: &mut State, viewport: Viewport) -> Tas
     Task::none()
 }
 
-// NEW TAB-AWARE SCROLL HANDLERS
-
-/// Handle scroll events for tab-based grid views
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_tab_grid_scrolled(state: &mut State, viewport: Viewport) -> Task<Message> {
     // Get the active tab and update its scroll state
     let active_tab_id = state.tab_manager.active_tab_id();
@@ -183,76 +64,51 @@ pub fn handle_tab_grid_scrolled(state: &mut State, viewport: Viewport) -> Task<M
             }
         }
     }
-    
+
     // Save scroll position to ScrollPositionManager for persistence
     let scroll_state = crate::domains::ui::scroll_manager::ScrollState::from_viewport(viewport);
-    state.domains.ui.state.scroll_manager.save_tab_scroll(&active_tab_id, scroll_state);
-    
+    state
+        .domains
+        .ui
+        .state
+        .scroll_manager
+        .save_tab_scroll(&active_tab_id, scroll_state);
+
     log::trace!(
         "Tab {:?} scroll saved to manager at position {}",
         active_tab_id,
         viewport.absolute_offset().y
     );
 
-    // Calculate scroll velocity for performance optimization
+    // Track scroll position and timing
     let current_position = viewport.absolute_offset().y;
     let now = Instant::now();
 
-    // Add current sample to the queue
-    state
-        .domains
-        .ui
-        .state
-        .scroll_samples
-        .push_back((now, current_position));
-
-    // Keep only the last 5 samples
-    while state.domains.ui.state.scroll_samples.len() > 5 {
-        state.domains.ui.state.scroll_samples.pop_front();
-    }
-
-    // Calculate velocity if we have at least 2 samples
-    if state.domains.ui.state.scroll_samples.len() >= 2 {
-        let oldest = state.domains.ui.state.scroll_samples.front().unwrap();
-        let newest = state.domains.ui.state.scroll_samples.back().unwrap();
-
-        let time_delta = newest.0.duration_since(oldest.0).as_secs_f32();
-        if time_delta > 0.0 {
-            let position_delta = newest.1 - oldest.1;
-            state.domains.ui.state.scroll_velocity = (position_delta / time_delta).abs();
-
-            // Determine if we're fast scrolling
-            let was_fast_scrolling = state.domains.ui.state.fast_scrolling;
-            state.domains.ui.state.fast_scrolling =
-                state.domains.ui.state.scroll_velocity > FAST_SCROLL_THRESHOLD;
-
-            // Log state changes
-            if was_fast_scrolling != state.domains.ui.state.fast_scrolling {
-                log::info!(
-                    "Tab {} scroll mode changed: {} (velocity: {:.0} px/s)",
-                    active_tab_id,
-                    if state.domains.ui.state.fast_scrolling {
-                        "FAST"
-                    } else {
-                        "NORMAL"
-                    },
-                    state.domains.ui.state.scroll_velocity
-                );
-            }
-
-            // Reset scroll stopped time when actively scrolling
-            state.domains.ui.state.scroll_stopped_time = None;
-        }
-    }
-
+    // Reset scroll stopped time when actively scrolling
+    state.domains.ui.state.scroll_stopped_time = None;
     state.domains.ui.state.last_scroll_position = current_position;
     state.domains.ui.state.last_scroll_time = Some(now);
 
-    // Schedule a check for scroll stop
-    Task::perform(
-        async move {
-            tokio::time::sleep(Duration::from_millis(SCROLL_STOP_DEBOUNCE_MS)).await;
-        },
-        |_| Message::CheckScrollStopped,
-    )
+    // Rate-limit task creation: only create a new task if enough time has passed
+    // This prevents flooding the subscription channel during rapid scrolling
+    let should_create_task = state
+        .domains
+        .ui
+        .state
+        .last_check_task_created
+        .map(|last| last.elapsed() >= Duration::from_millis(SCROLL_STOP_DEBOUNCE_MS / 2))
+        .unwrap_or(true);
+
+    if should_create_task {
+        state.domains.ui.state.last_check_task_created = Some(now);
+        Task::perform(
+            async move {
+                tokio::time::sleep(Duration::from_millis(SCROLL_STOP_DEBOUNCE_MS)).await;
+            },
+            |_| Message::CheckScrollStopped,
+        )
+    } else {
+        // Too soon since last task creation, skip to avoid channel overflow
+        Task::none()
+    }
 }

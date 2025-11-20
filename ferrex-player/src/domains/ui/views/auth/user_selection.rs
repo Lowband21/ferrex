@@ -9,7 +9,14 @@ use iced::{
     Alignment, Element, Length, Theme,
 };
 
-/// Shows the user selection screen
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_user_selection<'a>(
     users: &'a [UserListItemDto],
     error: Option<&'a str>,
@@ -18,7 +25,14 @@ pub fn view_user_selection<'a>(
     view_user_selection_with_admin_state(users, error, false, user_permissions)
 }
 
-/// Shows the user selection screen with admin session state
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_user_selection_with_admin_state<'a>(
     users: &'a [UserListItemDto],
     error: Option<&'a str>,
@@ -105,7 +119,14 @@ pub fn view_user_selection_with_admin_state<'a>(
     auth_container(card).into()
 }
 
-/// Creates an admin session state indicator
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn admin_session_indicator<'a>(admin_pin_unlock_enabled: bool) -> Element<'a, DomainMessage> {
     let (icon_text, status_text) = if admin_pin_unlock_enabled {
         ("🔓", "PIN Available")
@@ -151,7 +172,14 @@ fn admin_session_indicator<'a>(admin_pin_unlock_enabled: bool) -> Element<'a, Do
     .into()
 }
 
-/// Creates a user selection button with authentication method indicator
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn user_button_with_auth_method<'a>(
     user: &'a UserListItemDto,
     admin_pin_unlock_enabled: bool,
@@ -164,7 +192,14 @@ fn user_button<'a>(user: &'a UserListItemDto) -> Element<'a, DomainMessage> {
     user_button_internal(user, false)
 }
 
-/// Internal user button implementation
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn user_button_internal<'a>(
     user: &'a UserListItemDto,
     admin_pin_unlock_enabled: bool,
@@ -269,7 +304,14 @@ fn user_button_internal<'a>(
     .into()
 }
 
-/// Creates an "Add User" button for admin users
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn add_user_button<'a>() -> Element<'a, DomainMessage> {
     button(
         row![

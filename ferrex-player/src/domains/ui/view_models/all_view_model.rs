@@ -25,7 +25,7 @@ pub struct AllViewModel {
 
     /// Series IDs in sorted order (lightweight indices, not cloned data)
     sorted_series_ids: Vec<MediaId>,
-    
+
     /// Cached movies and series for rendering (only cloned when IDs change)
     cached_movies: Vec<MovieReference>,
     cached_series: Vec<SeriesReference>,
@@ -37,6 +37,14 @@ pub struct AllViewModel {
     tv_carousel: CarouselState,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl AllViewModel {
     /// Create a new AllViewModel
     pub fn new(store: Arc<RwLock<MediaStore>>) -> Self {
@@ -61,10 +69,10 @@ impl AllViewModel {
     pub fn set_library_filter(&mut self, library_id: Option<Uuid>) {
         if self.library_id != library_id {
             self.library_id = library_id;
-            self.refresh_from_store();  // AllViewModel doesn't use needs_refresh flag
+            self.refresh_from_store(); // AllViewModel doesn't use needs_refresh flag
         }
     }
-    
+
     /// Get current library filter
     pub fn current_library_filter(&self) -> Option<Uuid> {
         self.library_id
@@ -116,7 +124,7 @@ impl ViewModel for AllViewModel {
 
             // Get movies and extract just their IDs (lightweight operation)
             let movies_refs = store.get_movies(self.library_id);
-            
+
             // Store only IDs - no cloning of full MovieReference objects
             let new_movie_ids: Vec<MediaId> = movies_refs
                 .iter()
@@ -136,7 +144,7 @@ impl ViewModel for AllViewModel {
                 self.cached_movies = movies_refs.into_iter().cloned().collect();
                 self.sorted_movie_ids = new_movie_ids;
             }
-            
+
             if new_series_ids != self.sorted_series_ids {
                 log::trace!("AllViewModel: Series IDs changed, updating cached series");
                 self.cached_series = series_refs.into_iter().cloned().collect();
@@ -153,7 +161,8 @@ impl ViewModel for AllViewModel {
             // Update carousel item counts
             self.movies_carousel
                 .set_total_items(self.sorted_movie_ids.len());
-            self.tv_carousel.set_total_items(self.sorted_series_ids.len());
+            self.tv_carousel
+                .set_total_items(self.sorted_series_ids.len());
         }
     }
 
@@ -205,7 +214,8 @@ impl ViewModel for AllViewModel {
                 if let Some(id) = self.sorted_movie_ids.get(idx) {
                     if let Some(media) = store.get(id) {
                         if let Some(movie) = media.as_movie() {
-                            if crate::infrastructure::api_types::needs_details_fetch(&movie.details) {
+                            if crate::infrastructure::api_types::needs_details_fetch(&movie.details)
+                            {
                                 items.push((id.clone(), FetchPriority::High));
                             }
                         }
@@ -218,7 +228,9 @@ impl ViewModel for AllViewModel {
                 if let Some(id) = self.sorted_series_ids.get(idx) {
                     if let Some(media) = store.get(id) {
                         if let Some(series) = media.as_series() {
-                            if crate::infrastructure::api_types::needs_details_fetch(&series.details) {
+                            if crate::infrastructure::api_types::needs_details_fetch(
+                                &series.details,
+                            ) {
                                 items.push((id.clone(), FetchPriority::High));
                             }
                         }
@@ -236,7 +248,8 @@ impl ViewModel for AllViewModel {
                 if let Some(id) = self.sorted_movie_ids.get(idx) {
                     if let Some(media) = store.get(id) {
                         if let Some(movie) = media.as_movie() {
-                            if crate::infrastructure::api_types::needs_details_fetch(&movie.details) {
+                            if crate::infrastructure::api_types::needs_details_fetch(&movie.details)
+                            {
                                 items.push((id.clone(), FetchPriority::Medium));
                             }
                         }
@@ -246,14 +259,16 @@ impl ViewModel for AllViewModel {
 
             // Series preload (next page)
             let series_preload_start = self.tv_carousel.visible_end;
-            let series_preload_end =
-                (series_preload_start + self.tv_carousel.items_per_page).min(self.sorted_series_ids.len());
+            let series_preload_end = (series_preload_start + self.tv_carousel.items_per_page)
+                .min(self.sorted_series_ids.len());
 
             for idx in series_preload_start..series_preload_end {
                 if let Some(id) = self.sorted_series_ids.get(idx) {
                     if let Some(media) = store.get(id) {
                         if let Some(series) = media.as_series() {
-                            if crate::infrastructure::api_types::needs_details_fetch(&series.details) {
+                            if crate::infrastructure::api_types::needs_details_fetch(
+                                &series.details,
+                            ) {
                                 items.push((id.clone(), FetchPriority::Medium));
                             }
                         }
@@ -270,5 +285,3 @@ impl ViewModel for AllViewModel {
         // This is called after scroll events
     }
 }
-
-

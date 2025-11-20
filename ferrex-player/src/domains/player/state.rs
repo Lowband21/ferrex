@@ -43,7 +43,7 @@ pub struct PlayerDomainState {
     pub is_muted: bool,
     pub playback_speed: f64,
     pub aspect_ratio: AspectRatio,
-    
+
     // Playlist control (NEW - for Phase 2 direct commands)
     pub is_shuffle_enabled: bool,
     pub is_repeat_enabled: bool,
@@ -140,6 +140,14 @@ impl Default for PlayerDomainState {
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl PlayerDomainState {
     pub fn reset(&mut self) {
         self.current_media = None;

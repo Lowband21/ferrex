@@ -23,6 +23,14 @@ pub struct ScrollState {
     pub visible_range: Option<(usize, usize)>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl ScrollState {
     /// Create from just a scroll position (for simple views)
     pub fn from_position(position: f32) -> Self {
@@ -135,6 +143,14 @@ pub struct ScrollPositionManager {
     states: HashMap<String, ScrollState>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl ScrollPositionManager {
     /// Create a new scroll position manager
     pub fn new() -> Self {
@@ -167,39 +183,60 @@ impl ScrollPositionManager {
         let key = Self::library_scroll_key(library_id);
         self.get_state(&key)
     }
-    
+
     /// Save scroll state for a specific tab
-    pub fn save_tab_scroll(&mut self, tab_id: &crate::domains::ui::tabs::TabId, state: ScrollState) {
+    pub fn save_tab_scroll(
+        &mut self,
+        tab_id: &crate::domains::ui::tabs::TabId,
+        state: ScrollState,
+    ) {
         let key = Self::tab_scroll_key(tab_id);
-        let position = state.position;  // Save position before moving state
+        let position = state.position; // Save position before moving state
         self.save_state(key, state);
-        log::debug!("Saved scroll state for tab {:?} at position {}", tab_id, position);
+        log::debug!(
+            "Saved scroll state for tab {:?} at position {}",
+            tab_id,
+            position
+        );
     }
-    
+
     /// Get scroll state for a specific tab
     pub fn get_tab_scroll(&self, tab_id: &crate::domains::ui::tabs::TabId) -> Option<&ScrollState> {
         let key = Self::tab_scroll_key(tab_id);
         let state = self.get_state(&key);
         if let Some(s) = state {
-            log::debug!("Retrieved scroll state for tab {:?} at position {}", tab_id, s.position);
+            log::debug!(
+                "Retrieved scroll state for tab {:?} at position {}",
+                tab_id,
+                s.position
+            );
         }
         state
     }
-    
+
     /// Clear scroll state for a specific tab
     pub fn clear_tab_scroll(&mut self, tab_id: &crate::domains::ui::tabs::TabId) {
         let key = Self::tab_scroll_key(tab_id);
         self.clear_state(&key);
     }
-    
+
     /// Save state for a specific ViewModel's library view
-    pub fn save_viewmodel_library_scroll(&mut self, source: &str, library_id: Option<Uuid>, state: ScrollState) {
+    pub fn save_viewmodel_library_scroll(
+        &mut self,
+        source: &str,
+        library_id: Option<Uuid>,
+        state: ScrollState,
+    ) {
         let key = Self::viewmodel_library_scroll_key(source, library_id);
         self.save_state(key, state);
     }
-    
+
     /// Get state for a specific ViewModel's library view
-    pub fn get_viewmodel_library_scroll(&self, source: &str, library_id: Option<Uuid>) -> Option<&ScrollState> {
+    pub fn get_viewmodel_library_scroll(
+        &self,
+        source: &str,
+        library_id: Option<Uuid>,
+    ) -> Option<&ScrollState> {
         let key = Self::viewmodel_library_scroll_key(source, library_id);
         self.get_state(&key)
     }
@@ -237,7 +274,7 @@ impl ScrollPositionManager {
             None => "library.all".to_string(),
         }
     }
-    
+
     /// Generate key for tab-specific scroll state
     fn tab_scroll_key(tab_id: &crate::domains::ui::tabs::TabId) -> String {
         match tab_id {
@@ -245,7 +282,7 @@ impl ScrollPositionManager {
             crate::domains::ui::tabs::TabId::Library(id) => format!("tab.library.{}", id),
         }
     }
-    
+
     /// Generate key for ViewModel-specific library scroll state
     fn viewmodel_library_scroll_key(source: &str, library_id: Option<Uuid>) -> String {
         match library_id {
@@ -333,7 +370,7 @@ pub trait ScrollStateExt {
     fn save_current_view_scroll(&mut self, state: ScrollState);
     fn restore_current_view_scroll(&self) -> Option<&ScrollState>;
     fn restore_library_scroll_state(&mut self, library_id: Option<Uuid>);
-    
+
     // ViewModel-specific methods
     fn save_movies_vm_scroll(&mut self, library_id: Option<Uuid>, state: ScrollState);
     fn restore_movies_vm_scroll(&self, library_id: Option<Uuid>) -> Option<&ScrollState>;
@@ -343,6 +380,14 @@ pub trait ScrollStateExt {
     fn restore_all_vm_scroll(&self, library_id: Option<Uuid>) -> Option<&ScrollState>;
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl ScrollStateExt for crate::state_refactored::State {
     fn save_scroll_state(&mut self, view_key: String, state: ScrollState) {
         self.domains
@@ -405,32 +450,31 @@ impl ScrollStateExt for crate::state_refactored::State {
     }
 
     fn restore_library_scroll_state(&mut self, library_id: Option<Uuid>) {
-        // Restore library scroll state through TabManager with scroll position management
         if library_id.is_some() {
-            // Activate the library tab if we have a library ID
             if let Some(lib_id) = library_id {
                 self.tab_manager.set_active_tab_with_scroll(
                     crate::domains::ui::tabs::TabId::Library(lib_id),
-                    &mut self.domains.ui.state.scroll_manager
+                    &mut self.domains.ui.state.scroll_manager,
+                    self.window_size.width,
                 );
             }
         } else {
-            // Activate the All tab for curated view
             self.tab_manager.set_active_tab_with_scroll(
                 crate::domains::ui::tabs::TabId::All,
-                &mut self.domains.ui.state.scroll_manager
+                &mut self.domains.ui.state.scroll_manager,
+                self.window_size.width,
             );
         }
-        
+
         // TabManager has already restored scroll position, just refresh content
         self.tab_manager.refresh_active_tab();
-        
+
         log::debug!(
             "Restored library scroll state through TabManager for library_id: {:?}",
             library_id
         );
     }
-    
+
     // ViewModel-specific implementations
     fn save_movies_vm_scroll(&mut self, library_id: Option<Uuid>, state: ScrollState) {
         self.domains
@@ -439,7 +483,7 @@ impl ScrollStateExt for crate::state_refactored::State {
             .scroll_manager
             .save_viewmodel_library_scroll("movies_vm", library_id, state);
     }
-    
+
     fn restore_movies_vm_scroll(&self, library_id: Option<Uuid>) -> Option<&ScrollState> {
         self.domains
             .ui
@@ -447,7 +491,7 @@ impl ScrollStateExt for crate::state_refactored::State {
             .scroll_manager
             .get_viewmodel_library_scroll("movies_vm", library_id)
     }
-    
+
     fn save_tv_vm_scroll(&mut self, library_id: Option<Uuid>, state: ScrollState) {
         self.domains
             .ui
@@ -455,7 +499,7 @@ impl ScrollStateExt for crate::state_refactored::State {
             .scroll_manager
             .save_viewmodel_library_scroll("tv_vm", library_id, state);
     }
-    
+
     fn restore_tv_vm_scroll(&self, library_id: Option<Uuid>) -> Option<&ScrollState> {
         self.domains
             .ui
@@ -463,7 +507,7 @@ impl ScrollStateExt for crate::state_refactored::State {
             .scroll_manager
             .get_viewmodel_library_scroll("tv_vm", library_id)
     }
-    
+
     fn save_all_vm_scroll(&mut self, library_id: Option<Uuid>, state: ScrollState) {
         self.domains
             .ui
@@ -471,7 +515,7 @@ impl ScrollStateExt for crate::state_refactored::State {
             .scroll_manager
             .save_viewmodel_library_scroll("all_vm", library_id, state);
     }
-    
+
     fn restore_all_vm_scroll(&self, library_id: Option<Uuid>) -> Option<&ScrollState> {
         self.domains
             .ui

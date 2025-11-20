@@ -6,6 +6,14 @@ use crate::{
 use iced::Task;
 
 /// Handle media discovered from server events
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_media_discovered(
     state: &mut State,
     references: Vec<MediaReference>,
@@ -68,6 +76,14 @@ pub fn handle_media_discovered(
 }
 
 /// Handle media updated from server events
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_media_updated(state: &mut State, reference: MediaReference) -> Task<Message> {
     match &reference {
         MediaReference::Movie(movie) => {
@@ -174,6 +190,14 @@ pub fn handle_media_updated(state: &mut State, reference: MediaReference) -> Tas
 }
 
 /// Handle media deleted from server events
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_media_deleted(state: &mut State, file_id: String) -> Task<Message> {
     log::info!("Media file deleted: {}", file_id);
 

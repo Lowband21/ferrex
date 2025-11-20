@@ -7,23 +7,45 @@ use std::time::Duration;
 
 /// Scrolling performance configuration
 pub mod scrolling {
-
-    /// Velocity threshold (pixels/second) to switch to fast scrolling mode
-    /// Lower values = more aggressive fast mode activation
-    pub const FAST_SCROLL_THRESHOLD: f32 = 5000.0;
-
-    // Minimum velocity to skip poster loading entirely
-    //pub const MIN_VELOCITY_FOR_POSTER_SKIP: f32 = 1000.0;
-
     /// Time to wait before considering scroll stopped (milliseconds)
     /// Lower values = quicker poster loading after scroll
-    pub const SCROLL_STOP_DEBOUNCE_MS: u64 = 150;
+    pub const SCROLL_STOP_DEBOUNCE_MS: u64 = 10;
+
+    /// Velocity thresholds for LOD tiers (pixels/second)
+    /// These control when different quality levels are used
+    pub const TIER_SLOW_THRESHOLD: f32 = 7000.0; // Below this = Stopped tier
+    pub const TIER_MEDIUM_THRESHOLD: f32 = 10000.0; // Slow to Medium transition
+    pub const TIER_FAST_THRESHOLD: f32 = 20000.0; // Medium to Fast transition
+    pub const TIER_VERYFAST_THRESHOLD: f32 = 50000.0; // Fast to VeryFast transition
+
+    /// Hysteresis to prevent rapid tier switching
+    /// Applied as +/- buffer around thresholds
+    pub const TIER_HYSTERESIS: f32 = 200.0;
+
+    /// Delay before processing deferred image queue (milliseconds)
+    /// Images skipped during fast scrolling are loaded after this delay
+    pub const DEFERRED_LOAD_DELAY_MS: u64 = 200;
 
     // Number of rows to preload ahead of visible area
     //pub const PRELOAD_AHEAD_ROWS: usize = 2;
 
     // Number of rows to preload below visible area
     //pub const PRELOAD_BELOW_ROWS: usize = 5;
+}
+
+/// Texture upload budgeting configuration
+pub mod texture_upload {
+    /// Maximum texture uploads allowed per frame
+    /// Each upload takes ~3ms, so 8 uploads = 24ms (leaves room in 16ms frame budget)
+    /// Adjust based on target hardware:
+    /// - Low-end: 5-6 uploads
+    /// - Mid-range: 8-10 uploads
+    /// - High-end: 12-15 uploads
+    pub const MAX_UPLOADS_PER_FRAME: u32 = 3;
+
+    /// Maximum size of deferred upload queue
+    /// Prevents unbounded memory growth during rapid scrolling
+    pub const DEFERRED_QUEUE_MAX_SIZE: usize = 100;
 }
 
 /// Poster loading performance configuration

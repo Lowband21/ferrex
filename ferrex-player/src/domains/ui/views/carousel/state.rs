@@ -37,6 +37,14 @@ impl Default for CarouselState {
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl CarouselState {
     /// Create a new carousel state with the given total items
     pub fn new(total_items: usize) -> Self {

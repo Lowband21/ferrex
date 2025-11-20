@@ -35,11 +35,8 @@ pub enum Message {
     ClearError, // Clear current error state
 
     // Scrolling
-    MoviesGridScrolled(scrollable::Viewport),
-    TvShowsGridScrolled(scrollable::Viewport),
-    TabGridScrolled(scrollable::Viewport),    // Unified scroll message for tab system
-    CheckScrollStopped,                       // Check if scrolling has stopped
-    RecalculateGridsAfterResize,              // Recalculate grid states after window resize
+    TabGridScrolled(scrollable::Viewport), // Unified scroll message for tab system
+    CheckScrollStopped,                    // Check if scrolling has stopped
     DetailViewScrolled(scrollable::Viewport), // Scroll events in detail views
 
     // Window events
@@ -51,7 +48,7 @@ pub enum Message {
 
     // Header navigation
     NavigateHome,
-    NavigateBack,  // Navigate to previous view in history
+    NavigateBack, // Navigate to previous view in history
     UpdateSearchQuery(String),
     ExecuteSearch,
     ShowLibraryMenu,
@@ -180,11 +177,8 @@ impl Message {
             Self::ClearError => "UI::ClearError",
 
             // Scrolling
-            Self::MoviesGridScrolled(_) => "UI::MoviesGridScrolled",
-            Self::TvShowsGridScrolled(_) => "UI::TvShowsGridScrolled",
             Self::TabGridScrolled(_) => "UI::TabGridScrolled",
             Self::CheckScrollStopped => "UI::CheckScrollStopped",
-            Self::RecalculateGridsAfterResize => "UI::RecalculateGridsAfterResize",
             Self::DetailViewScrolled(_) => "UI::DetailViewScrolled",
 
             // Window events
@@ -332,17 +326,10 @@ impl std::fmt::Debug for Message {
             Self::ClearDatabase => write!(f, "UI::ClearDatabase"),
             Self::DatabaseCleared(_) => write!(f, "UI::DatabaseCleared"),
             Self::ClearError => write!(f, "UI::ClearError"),
-            Self::MoviesGridScrolled(viewport) => {
-                write!(f, "UI::MoviesGridScrolled({:?})", viewport)
-            }
-            Self::TvShowsGridScrolled(viewport) => {
-                write!(f, "UI::TvShowsGridScrolled({:?})", viewport)
-            }
             Self::TabGridScrolled(viewport) => {
                 write!(f, "UI::TabGridScrolled({:?})", viewport)
             }
             Self::CheckScrollStopped => write!(f, "UI::CheckScrollStopped"),
-            Self::RecalculateGridsAfterResize => write!(f, "UI::RecalculateGridsAfterResize"),
             Self::DetailViewScrolled(viewport) => {
                 write!(f, "UI::DetailViewScrolled({:?})", viewport)
             }

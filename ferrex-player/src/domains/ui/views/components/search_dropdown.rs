@@ -11,7 +11,14 @@ use crate::state_refactored::State;
 
 type Message = DomainMessage;
 
-/// Render the search dropdown overlay
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_search_dropdown(state: &State) -> Option<Element<Message>> {
     let search_state = &state.domains.search.state;
 
@@ -138,18 +145,18 @@ pub fn view_search_dropdown(state: &State) -> Option<Element<Message>> {
 
     // Use Stack to layer backdrop and dropdown
     use iced::widget::Stack;
-    
+
     // Create transparent backdrop button that clears search when clicked
     let backdrop = button(
         container(Space::new(Length::Fill, Length::Fill))
             .width(Length::Fill)
-            .height(Length::Fill)
+            .height(Length::Fill),
     )
     .on_press(DomainMessage::Search(
-        crate::domains::search::messages::Message::ClearSearch
+        crate::domains::search::messages::Message::ClearSearch,
     ))
-    .style(|_theme: &iced::Theme, _status: button::Status| {
-        button::Style {
+    .style(
+        |_theme: &iced::Theme, _status: button::Status| button::Style {
             background: Some(iced::Background::Color(Color::TRANSPARENT)),
             border: iced::Border {
                 color: Color::TRANSPARENT,
@@ -159,8 +166,8 @@ pub fn view_search_dropdown(state: &State) -> Option<Element<Message>> {
             shadow: iced::Shadow::default(),
             text_color: Color::TRANSPARENT,
             snap: false,
-        }
-    })
+        },
+    )
     .width(Length::Fill)
     .height(Length::Fill);
 
@@ -172,7 +179,7 @@ pub fn view_search_dropdown(state: &State) -> Option<Element<Message>> {
                 container(dropdown_content)
                     .padding(Padding::from([65.0, 0.0])) // Position below header
                     .width(Length::Fill)
-                    .center_x(Length::Fill)
+                    .center_x(Length::Fill),
             )
             .width(Length::Fill)
             .height(Length::Fill)
@@ -243,7 +250,14 @@ fn get_media_icon(media_ref: &MediaReference) -> &'static str {
     }
 }
 
-/// View for full-screen search mode
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_search_fullscreen(state: &State) -> Element<Message> {
     let search_state = &state.domains.search.state;
 
@@ -325,7 +339,14 @@ pub fn view_search_fullscreen(state: &State) -> Element<Message> {
     .into()
 }
 
-/// Render a search result in full-screen mode (larger format)
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn view_search_result_fullscreen(result: &SearchResult) -> Element<Message> {
     let mut content_row = row![].spacing(16).align_y(Alignment::Center);
 

@@ -48,7 +48,10 @@ pub struct LibraryDomainState {
 }
 
 impl LibraryDomainState {
-    pub fn new(media_store: Arc<StdRwLock<MediaStore>>, api_service: Option<Arc<ApiClientAdapter>>) -> Self {
+    pub fn new(
+        media_store: Arc<StdRwLock<MediaStore>>,
+        api_service: Option<Arc<ApiClientAdapter>>,
+    ) -> Self {
         Self {
             libraries: Vec::new(),
             current_library_id: None,
@@ -71,6 +74,14 @@ pub struct LibraryDomain {
     pub state: LibraryDomainState,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl LibraryDomain {
     pub fn new(state: LibraryDomainState) -> Self {
         Self { state }

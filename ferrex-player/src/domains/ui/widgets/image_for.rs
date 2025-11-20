@@ -16,7 +16,17 @@ use crate::{
 use ferrex_core::api_types::MediaId;
 use iced::{widget::image::Handle, Color, Element, Length};
 use lucide_icons::Icon;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::time::Duration;
+
+/// Cached image data to avoid repeated lookups
+#[derive(Debug, Clone)]
+struct CachedImageData {
+    handle: Handle,
+    loaded_at: Option<std::time::Instant>,
+    request_hash: u64,
+}
 
 /// A declarative image widget that integrates with UnifiedImageService
 pub struct ImageFor {
@@ -35,10 +45,20 @@ pub struct ImageFor {
     on_click: Option<Message>,
     progress: Option<f32>,
     progress_color: Option<Color>,
+    // Optimization: Cache to avoid repeated lookups
+    cached_data: Option<CachedImageData>,
 }
 
 impl ImageFor {
     /// Create a new image widget for the given media ID
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     pub fn new(media_id: MediaId) -> Self {
         // Determine default size based on media type
         let (default_size, default_icon) = match &media_id {
@@ -65,6 +85,7 @@ impl ImageFor {
             on_click: None,
             progress: None,
             progress_color: None,
+            cached_data: None,
         }
     }
 
@@ -186,8 +207,13 @@ pub fn image_for(media_id: impl Into<MediaId>) -> ImageFor {
 
 // Note: From implementations for MediaId types are handled in api_types module
 
+// Thread-local cache for the image service to avoid repeated lookups
+thread_local! {
+    static CACHED_IMAGE_SERVICE: std::cell::RefCell<Option<crate::infrastructure::service_registry::ImageServiceHandle>> = std::cell::RefCell::new(None);
+}
+
 impl<'a> From<ImageFor> for Element<'a, Message> {
-    fn from(image: ImageFor) -> Self {
+    fn from(mut image: ImageFor) -> Self {
         // Get fixed dimensions for layout
         let width = match image.width {
             Length::Fixed(w) => w,
@@ -208,49 +234,88 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
             priority: image.priority,
         };
 
+        // Calculate request hash for cache invalidation
+        let request_hash = {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            request.media_id.hash(&mut hasher);
+            (request.size as u8).hash(&mut hasher);
+            //(request.priority as u8).hash(&mut hasher);
+            hasher.finish()
+        };
+
+        // Fast path: Check if we have cached data and it's still valid
+        if let Some(cached) = &image.cached_data {
+            if cached.request_hash == request_hash {
+                // Profile cache reuse (fast path)
+                #[cfg(any(
+                    feature = "profile-with-puffin",
+                    feature = "profile-with-tracy",
+                    feature = "profile-with-tracing"
+                ))]
+                profiling::scope!("UI::Poster::CacheReuse::FastPath");
+
+                // Reuse cached data without service lookup or DashMap access
+                return create_shader_from_cached(
+                    cached.handle.clone(),
+                    request_hash,
+                    cached.loaded_at,
+                    &image,
+                    bounds,
+                );
+            }
+        }
+
+        // Slow path: Get or cache the image service (thread-local optimization)
+        let image_service = CACHED_IMAGE_SERVICE.with(|cache| {
+            let mut cached = cache.borrow_mut();
+            if cached.is_none() {
+                *cached = service_registry::get_image_service();
+            }
+            cached.clone()
+        });
+
         // Check if we have access to the image service
-        if let Some(image_service) = service_registry::get_image_service() {
-            // Profile cache check
-            #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
-            profiling::scope!(crate::infrastructure::profiling_scopes::scopes::POSTER_CACHE_HIT);
-            
+        if let Some(image_service) = image_service {
             // Check the cache first
             if let Some((handle, loaded_at)) = image_service.get().get_with_load_time(&request) {
-                //log::debug!("image_for: Cache HIT for {:?}", request.media_id);
-                //log::debug!("  - loaded_at from get_with_load_time: {:?}", loaded_at);
-                //log::debug!("  - animation type: {:?}", image.animation);
-                //log::debug!("  - theme_color: {:?}", image.theme_color);
+                #[cfg(any(
+                    feature = "profile-with-puffin",
+                    feature = "profile-with-tracy",
+                    feature = "profile-with-tracing"
+                ))]
+                profiling::scope!("image_for::CacheHit");
 
-                // We have a cached image, use it with the rounded shader
-                let mut shader: rounded_image_shader::RoundedImage = rounded_image_shader(handle)
-                    .radius(image.radius)
-                    .with_animated_bounds(bounds)
-                    .is_hovered(image.is_hovered);
+                image.cached_data = Some(CachedImageData {
+                    handle: handle.clone(),
+                    loaded_at,
+                    request_hash,
+                });
 
-                // Set theme color if provided
+                let mut shader: rounded_image_shader::RoundedImage =
+                    rounded_image_shader(handle, Some(request_hash))
+                        .radius(image.radius)
+                        .with_animated_bounds(bounds)
+                        .is_hovered(image.is_hovered);
+
                 if let Some(color) = image.theme_color {
                     shader = shader.theme_color(color);
                 }
 
-                // Always set up button callbacks so they work when hovering
-                // Use the play callback if provided by the caller
                 if let Some(play_msg) = image.on_play.clone() {
                     shader = shader.on_play(play_msg);
                 }
-                // Use the click callback for empty space (details page)
+
                 if let Some(click_msg) = image.on_click.clone() {
                     shader = shader.on_click(click_msg);
                 }
 
-                // Set the actual load time if available
+                /*
                 if let Some(load_time) = loaded_at {
-                    //log::debug!("  - Setting load_time on shader: {:?}", load_time);
                     shader = shader.with_load_time(load_time);
                 } else {
-                    //log::debug!("  - No load_time, not setting on shader");
-                }
+                } */
 
-                // Determine if we should animate based on how recently the image was loaded
+                /*
                 let should_animate = if let Some(load_time) = loaded_at {
                     // Get animation duration
                     let animation_duration = match image.animation {
@@ -261,47 +326,27 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                         AnimationType::PlaceholderSunken => Duration::from_secs(0), // No animation for placeholder
                     };
 
-                    //log::debug!("  - animation type: {:?}", image.animation);
-                    //log::debug!("  - animation duration: {:?}", animation_duration);
-
                     // Check if image was loaded recently (within 2x animation duration)
                     // This gives us a window where animations will play even if there's
                     // a slight delay between loading and display
                     let elapsed = load_time.elapsed();
-                    let should = elapsed <= animation_duration * 2;
-
-                    //log::debug!("  - elapsed since load: {:?}", elapsed);
-                    //log::debug!("  - should_animate: {} (elapsed <= {:?})", should, animation_duration * 2);
+                    let should = elapsed <= animation_duration * 10;
 
                     should
                 } else {
-                    // No load time available
-                    //log::debug!("  - should_animate: false (no load time)");
                     false
-                };
+                }; */
 
-                if should_animate {
-                    // Apply animation (load time already set above)
-                    //log::debug!("  - APPLYING animation: {:?}", image.animation);
-                    shader = shader.with_animation(image.animation);
-                } else {
-                    // No animation for images loaded too long ago
-                    //log::debug!("  - NO animation applied");
-                    // Still need to set animation type to None so overlay can show
-                    shader = shader.with_animation(AnimationType::None);
-                }
+                //if should_animate {
+                shader = shader.with_animation(image.animation);
+                //} else {
+                //shader = shader.with_animation(AnimationType::None);
+                //}
 
                 // Set progress indicator if provided
                 if let Some(progress) = image.progress {
                     shader = shader.progress(progress);
 
-                    /*
-                    // Use theme color as default progress color if not specified
-                    let progress_color = image
-                        .progress_color
-                        .or(image.theme_color)
-                        .unwrap_or(Color::from_rgb(0.0, 0.47, 1.0)); // Default blue
-                    */
                     let progress_color = Color::from_rgb(0.0, 0.47, 1.0); // Default blue
 
                     shader = shader.progress_color(progress_color);
@@ -309,21 +354,14 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
 
                 shader.into()
             } else {
-                // Not in cache, request it and show loading state
-                //log::debug!(
-                //    "image_for: Cache MISS for {:?}, requesting...",
-                //    request.media_id
-                //);
-                //log::debug!(
-                //    "  - Creating placeholder with theme_color: {:?}",
-                //    image.theme_color
-                //);
-
                 // Profile image request for loading
-                #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
-                profiling::scope!(crate::infrastructure::profiling_scopes::scopes::POSTER_LOAD);
-                
-                // Request the image - throttling happens in the loader thread
+                #[cfg(any(
+                    feature = "profile-with-puffin",
+                    feature = "profile-with-tracy",
+                    feature = "profile-with-tracing"
+                ))]
+                profiling::scope!("image_for::CacheMiss");
+
                 image_service.get().request_image(request);
 
                 create_loading_placeholder(bounds, image.radius, image.theme_color)
@@ -335,7 +373,84 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
     }
 }
 
-/// Create a loading placeholder using the shader widget
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
+fn create_shader_from_cached<'a>(
+    handle: Handle,
+    request_hash: u64,
+    loaded_at: Option<std::time::Instant>,
+    image: &ImageFor,
+    bounds: AnimatedPosterBounds,
+) -> Element<'a, Message> {
+    // Check if we should skip atlas upload for VeryFast scrolling
+    let mut shader = rounded_image_shader(handle, Some(request_hash))
+        .radius(image.radius)
+        .with_animated_bounds(bounds)
+        .is_hovered(image.is_hovered);
+
+    // Set theme color if provided
+    if let Some(color) = image.theme_color {
+        shader = shader.theme_color(color);
+    }
+
+    // Set up button callbacks
+    if let Some(play_msg) = image.on_play.clone() {
+        shader = shader.on_play(play_msg);
+    }
+    if let Some(click_msg) = image.on_click.clone() {
+        shader = shader.on_click(click_msg);
+    }
+
+    // Set load time if available
+    /*
+    if let Some(load_time) = loaded_at {
+        shader = shader.with_load_time(load_time);
+    }
+
+    // Determine animation based on load time
+    let should_animate = if let Some(load_time) = loaded_at {
+        let animation_duration = match image.animation {
+            AnimationType::None => Duration::from_secs(0),
+            AnimationType::Fade { duration } => duration,
+            AnimationType::Flip { duration } => duration,
+            AnimationType::EnhancedFlip { total_duration, .. } => total_duration,
+            AnimationType::PlaceholderSunken => Duration::from_secs(0),
+        };
+        load_time.elapsed() <= animation_duration * 2
+    } else {
+        false
+    };*/
+
+    //if should_animate {
+    shader = shader.with_animation(image.animation);
+    //} else {
+    //shader = shader.with_animation(AnimationType::None);
+    //}
+
+    // Set progress indicator if provided
+    if let Some(progress) = image.progress {
+        shader = shader.progress(progress);
+        let progress_color = Color::from_rgb(0.0, 0.47, 1.0);
+        shader = shader.progress_color(progress_color);
+    }
+
+    shader.into()
+}
+
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn create_loading_placeholder<'a>(
     bounds: AnimatedPosterBounds,
     radius: f32,
@@ -356,35 +471,13 @@ fn create_loading_placeholder<'a>(
     // Create shader widget in initial sunken state
     // The PlaceholderSunken animation type will show backface with theme color
     // and apply sunken depth effect
-    rounded_image_shader(placeholder_handle)
+    rounded_image_shader(placeholder_handle, None)
         .radius(radius)
         .with_animated_bounds(bounds)
         .theme_color(color)
         .with_animation(AnimationType::PlaceholderSunken)
         .is_hovered(false) // Placeholders are never hovered
         .into()
-}
-
-/// Linear interpolation between two colors
-fn lerp_color(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
-    let t = t.clamp(0.0, 1.0);
-    [
-        a[0] + (b[0] - a[0]) * t,
-        a[1] + (b[1] - a[1]) * t,
-        a[2] + (b[2] - a[2]) * t,
-        a[3] + (b[3] - a[3]) * t,
-    ]
-}
-
-/// Darken a color by a factor (0.0 = black, 1.0 = original color)
-fn darken_color(color: Color, factor: f32) -> Color {
-    let factor = factor.clamp(0.0, 1.0);
-    Color::from_rgba(
-        color.r * factor,
-        color.g * factor,
-        color.b * factor,
-        color.a,
-    )
 }
 
 /// Extension trait for creating image widgets from media references

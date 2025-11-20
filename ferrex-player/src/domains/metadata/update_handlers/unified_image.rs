@@ -11,8 +11,14 @@ pub fn handle_unified_image_loaded(
     //log::info!("Unified image loaded: {:?}", request);
 
     // Update the unified image service cache with the loaded handle
-    state.domains.metadata.state.image_service.mark_loaded(&request, handle.clone());
+    state
+        .domains
+        .metadata
+        .state
+        .image_service
+        .mark_loaded(&request, handle.clone());
 
+    /*
     // Check if this is a backdrop for the current detail view
     let should_refresh = match (&state.domains.ui.state.view, &request.media_id, &request.size) {
         (
@@ -40,7 +46,7 @@ pub fn handle_unified_image_loaded(
             true
         }
         _ => false,
-    };
+    }; */
 
     // The image is now loaded in the cache, UI will pick it up on next render
     // No need for cross-domain events here
@@ -56,7 +62,12 @@ pub fn handle_unified_image_load_failed(
     log::error!("Unified image load failed: {:?} - {}", request, error);
 
     // Mark the request as failed in the unified image service
-    state.domains.metadata.state.image_service.mark_failed(&request, error);
+    state
+        .domains
+        .metadata
+        .state
+        .image_service
+        .mark_failed(&request, error);
 
     Task::none()
 }

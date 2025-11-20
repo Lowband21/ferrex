@@ -1,10 +1,9 @@
-use crate::domains::auth::dto::{UserDto, UserListItemDto};
+use crate::domains::auth::dto::UserListItemDto;
 use crate::domains::auth::errors::{
-    AuthError, AuthResult, DeviceError, NetworkError, StorageError, TokenError, ValidationError,
+    AuthError, AuthResult, DeviceError, NetworkError, StorageError, TokenError,
 };
 use crate::domains::auth::state_types::{AuthState, AuthStateStore};
-use anyhow::Result;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
 use ferrex_core::auth::{AuthResult as ServerAuthResult, DeviceInfo, Platform};
 use ferrex_core::rbac::UserPermissions;
@@ -14,31 +13,29 @@ use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use keyring::Entry;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{OnceCell, RwLock};
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 use crate::domains::auth::hardware_fingerprint::generate_hardware_fingerprint;
-use crate::domains::auth::permissions::StatePermissionExt;
 use crate::domains::auth::storage::{AuthStorage, StoredAuth};
 use crate::infrastructure::api_client::ApiClient;
 
+#[allow(dead_code)] // TODO: Evaluate keychain use
 const KEYCHAIN_SERVICE: &str = "ferrex-media-player";
+#[allow(dead_code)] // Evaluate keychain use
 const KEYCHAIN_ACCOUNT: &str = "auth-token";
 
 /// JWT Token expiry buffer - refresh tokens 1 minute before they expire
 /// This provides a reasonable buffer to prevent race conditions without being too aggressive
 const TOKEN_EXPIRY_BUFFER_SECONDS: i64 = 60;
 
-/// Refresh token request structure
 #[derive(Debug, Serialize)]
 struct RefreshTokenRequest {
     refresh_token: String,
 }
 
-/// JWT Claims structure for parsing token expiry
 #[derive(Debug, Deserialize)]
 struct JwtClaims {
     /// Token expiration time (Unix timestamp)
@@ -49,7 +46,6 @@ struct JwtClaims {
     sub: Option<String>,
 }
 
-/// Device authentication status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceAuthStatus {
     pub device_registered: bool,
@@ -57,7 +53,6 @@ pub struct DeviceAuthStatus {
     pub remaining_attempts: Option<u8>,
 }
 
-/// Player-specific auth result with user and permissions
 #[derive(Debug, Clone)]
 pub struct PlayerAuthResult {
     pub user: User,
@@ -65,7 +60,6 @@ pub struct PlayerAuthResult {
     pub device_has_pin: bool,
 }
 
-/// Device identity stored on disk
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeviceIdentity {
     pub id: Uuid,
@@ -75,7 +69,6 @@ pub struct DeviceIdentity {
 }
 
 impl DeviceIdentity {
-    /// Load device identity from disk
     pub async fn load() -> AuthResult<Option<Self>> {
         let path = Self::config_path()?;
         if !path.exists() {
@@ -90,7 +83,6 @@ impl DeviceIdentity {
         Ok(Some(identity))
     }
 
-    /// Save device identity to disk
     pub async fn save(&self) -> AuthResult<()> {
         let path = Self::config_path()?;
         if let Some(parent) = path.parent() {
@@ -106,7 +98,6 @@ impl DeviceIdentity {
         Ok(())
     }
 
-    /// Get the path to the device identity file
     fn config_path() -> AuthResult<PathBuf> {
         let proj_dirs = ProjectDirs::from("", "ferrex", "media-player").ok_or_else(|| {
             AuthError::Storage(StorageError::InitFailed(
@@ -117,7 +108,6 @@ impl DeviceIdentity {
     }
 }
 
-/// Device-aware login request
 #[derive(Debug, Serialize)]
 pub struct DeviceLoginRequest {
     pub username: String,
@@ -126,7 +116,6 @@ pub struct DeviceLoginRequest {
     pub remember_device: bool,
 }
 
-/// PIN login request
 #[derive(Debug, Serialize)]
 pub struct PinLoginRequest {
     pub user_id: Uuid,
@@ -134,7 +123,6 @@ pub struct PinLoginRequest {
     pub pin: String,
 }
 
-/// Set PIN request
 #[derive(Debug, Serialize)]
 pub struct SetPinRequest {
     pub device_id: Uuid,
@@ -144,7 +132,7 @@ pub struct SetPinRequest {
 /// Authentication state manager
 ///
 /// ## Token Persistence Behavior
-/// 
+///
 /// The AuthManager handles authentication token persistence across app restarts:
 ///
 /// ### Token Storage
@@ -182,7 +170,6 @@ pub struct AuthManager {
 }
 
 impl AuthManager {
-    /// Create a new auth manager
     pub fn new(api_client: ApiClient) -> Self {
         let auth_storage = match AuthStorage::new() {
             Ok(storage) => Arc::new(storage),
@@ -191,8 +178,7 @@ impl AuthManager {
                     "Failed to create auth storage: {}. Auth persistence will be disabled.",
                     e
                 );
-                // Create a dummy storage that will fail all operations
-                // In a real implementation, you might want to handle this differently
+                // TODO: Fix this panic
                 panic!("Unable to create auth storage: {}", e);
             }
         };
@@ -204,31 +190,32 @@ impl AuthManager {
             device_fingerprint: OnceCell::new(),
             auth_storage,
         };
-        
+
         // Set up the refresh callback for automatic token refresh on 401
         let api_client_clone = api_client.clone();
         let auth_manager_for_callback = manager.clone();
         tokio::spawn(async move {
-            api_client_clone.set_refresh_callback(move || {
-                let auth_manager = auth_manager_for_callback.clone();
-                async move {
-                    auth_manager.refresh_access_token_internal().await
-                        .map_err(|e| anyhow::anyhow!("Token refresh failed: {}", e))
-                }
-            }).await;
+            api_client_clone
+                .set_refresh_callback(move || {
+                    let auth_manager = auth_manager_for_callback.clone();
+                    async move {
+                        auth_manager
+                            .refresh_access_token_internal()
+                            .await
+                            .map_err(|e| anyhow::anyhow!("Token refresh failed: {}", e))
+                    }
+                })
+                .await;
         });
-        
+
         manager
     }
 
-    /// Get access to the auth storage
     pub fn auth_storage(&self) -> &Arc<AuthStorage> {
         &self.auth_storage
     }
 
-    /// Load stored authentication from encrypted storage and return auth data without applying it
     pub async fn load_from_keychain(&self) -> AuthResult<Option<StoredAuth>> {
-        // First ensure we have device identity with hardware fingerprint
         let hardware_fingerprint = generate_hardware_fingerprint().await.map_err(|e| {
             AuthError::Storage(StorageError::InitFailed(format!(
                 "Failed to get hardware fingerprint: {}",
@@ -236,7 +223,6 @@ impl AuthManager {
             )))
         })?;
 
-        // Try to load from encrypted storage using hardware fingerprint as key
         match self.auth_storage.load_auth(&hardware_fingerprint).await {
             Ok(Some(stored_auth)) => {
                 info!(
@@ -244,21 +230,28 @@ impl AuthManager {
                     stored_auth.user.username
                 );
 
-                // Log token details for debugging
                 info!(
                     "Loaded token (first 50 chars): {}...",
-                    &stored_auth.token.access_token.chars().take(50).collect::<String>()
+                    &stored_auth
+                        .token
+                        .access_token
+                        .chars()
+                        .take(50)
+                        .collect::<String>()
                 );
                 info!(
                     "Token stored at: {}, expires_in: {} seconds",
                     stored_auth.stored_at, stored_auth.token.expires_in
                 );
-                
+
                 // First check device trust expiry (30-day persistence)
                 if let Some(device_trust_expires) = stored_auth.device_trust_expires_at {
                     let now = Utc::now();
                     if now > device_trust_expires {
-                        warn!("Device trust expired (was valid until {})", device_trust_expires);
+                        warn!(
+                            "Device trust expired (was valid until {})",
+                            device_trust_expires
+                        );
                         self.clear_keychain().await?;
                         return Ok(None);
                     }
@@ -272,39 +265,48 @@ impl AuthManager {
                     let elapsed = Utc::now().signed_duration_since(stored_auth.stored_at);
                     let elapsed_seconds = elapsed.num_seconds();
                     let remaining_seconds = stored_auth.token.expires_in as i64 - elapsed_seconds;
-                    
+
                     info!(
                         "Non-JWT token: elapsed {} seconds, remaining {} seconds",
                         elapsed_seconds, remaining_seconds
                     );
-                    
+
                     if remaining_seconds <= TOKEN_EXPIRY_BUFFER_SECONDS {
                         // Token expired but device trust still valid - we can refresh
-                        if stored_auth.device_trust_expires_at.is_some() && !stored_auth.token.refresh_token.is_empty() {
+                        if stored_auth.device_trust_expires_at.is_some()
+                            && !stored_auth.token.refresh_token.is_empty()
+                        {
                             info!("Token expired but device trust valid - attempting refresh");
-                            
+
                             // Set up auth state for refresh
-                            let permissions = stored_auth.permissions.clone().unwrap_or_else(|| UserPermissions {
-                                user_id: stored_auth.user.id,
-                                roles: Vec::new(),
-                                permissions: std::collections::HashMap::new(),
-                                permission_details: None,
-                            });
+                            let permissions =
+                                stored_auth.permissions.clone().unwrap_or_else(|| {
+                                    UserPermissions {
+                                        user_id: stored_auth.user.id,
+                                        roles: Vec::new(),
+                                        permissions: std::collections::HashMap::new(),
+                                        permission_details: None,
+                                    }
+                                });
                             self.auth_state.authenticate(
                                 stored_auth.user.clone(),
                                 stored_auth.token.clone(),
                                 permissions,
                                 stored_auth.server_url.clone(),
                             );
-                            
+
                             // Set token for API client
-                            self.api_client.set_token(Some(stored_auth.token.clone())).await;
-                            
+                            self.api_client
+                                .set_token(Some(stored_auth.token.clone()))
+                                .await;
+
                             // Try to refresh
                             match self.refresh_access_token().await {
                                 Ok(()) => {
                                     // Reload the refreshed auth
-                                    if let Ok(Some(refreshed)) = self.auth_storage.load_auth(&hardware_fingerprint).await {
+                                    if let Ok(Some(refreshed)) =
+                                        self.auth_storage.load_auth(&hardware_fingerprint).await
+                                    {
                                         info!("[AuthManager] Successfully refreshed expired token");
                                         return Ok(Some(refreshed));
                                     }
@@ -323,37 +325,49 @@ impl AuthManager {
                             return Ok(None);
                         }
                     }
-                    
-                    info!("Non-JWT token still valid with {} seconds remaining", remaining_seconds);
+
+                    info!(
+                        "Non-JWT token still valid with {} seconds remaining",
+                        remaining_seconds
+                    );
                 } else {
                     // For JWT tokens, use the standard expiry check
                     if is_token_expired(&stored_auth.token) {
                         // Token expired but device trust still valid - we can refresh
-                        if stored_auth.device_trust_expires_at.is_some() && !stored_auth.token.refresh_token.is_empty() {
+                        if stored_auth.device_trust_expires_at.is_some()
+                            && !stored_auth.token.refresh_token.is_empty()
+                        {
                             info!("JWT expired but device trust valid - attempting refresh");
-                            
+
                             // Set up auth state for refresh
-                            let permissions = stored_auth.permissions.clone().unwrap_or_else(|| UserPermissions {
-                                user_id: stored_auth.user.id,
-                                roles: Vec::new(),
-                                permissions: std::collections::HashMap::new(),
-                                permission_details: None,
-                            });
+                            let permissions =
+                                stored_auth.permissions.clone().unwrap_or_else(|| {
+                                    UserPermissions {
+                                        user_id: stored_auth.user.id,
+                                        roles: Vec::new(),
+                                        permissions: std::collections::HashMap::new(),
+                                        permission_details: None,
+                                    }
+                                });
                             self.auth_state.authenticate(
                                 stored_auth.user.clone(),
                                 stored_auth.token.clone(),
                                 permissions,
                                 stored_auth.server_url.clone(),
                             );
-                            
+
                             // Set token for API client
-                            self.api_client.set_token(Some(stored_auth.token.clone())).await;
-                            
+                            self.api_client
+                                .set_token(Some(stored_auth.token.clone()))
+                                .await;
+
                             // Try to refresh
                             match self.refresh_access_token().await {
                                 Ok(()) => {
                                     // Reload the refreshed auth
-                                    if let Ok(Some(refreshed)) = self.auth_storage.load_auth(&hardware_fingerprint).await {
+                                    if let Ok(Some(refreshed)) =
+                                        self.auth_storage.load_auth(&hardware_fingerprint).await
+                                    {
                                         info!("[AuthManager] Successfully refreshed expired JWT");
                                         return Ok(Some(refreshed));
                                     }
@@ -470,7 +484,7 @@ impl AuthManager {
     pub async fn refresh_access_token(&self) -> AuthResult<()> {
         self.refresh_access_token_internal().await.map(|_| ())
     }
-    
+
     /// Internal refresh method that returns the new token for API client callback
     async fn refresh_access_token_internal(&self) -> AuthResult<AuthToken> {
         // Get current refresh token
@@ -478,9 +492,9 @@ impl AuthManager {
             AuthState::Authenticated { token, .. } => Some(token.refresh_token.clone()),
             _ => None,
         });
-        
-        let refresh_token = refresh_token
-            .ok_or_else(|| AuthError::Token(TokenError::NotAuthenticated))?;
+
+        let refresh_token =
+            refresh_token.ok_or_else(|| AuthError::Token(TokenError::NotAuthenticated))?;
 
         if refresh_token.is_empty() {
             return Err(AuthError::Token(TokenError::RefreshTokenMissing));
@@ -492,12 +506,14 @@ impl AuthManager {
         let response: AuthToken = {
             // Create a new client without callback for this request
             let temp_client = ApiClient::new(self.api_client.base_url().to_string());
-            temp_client.set_token(Some(AuthToken {
-                access_token: String::new(),
-                refresh_token: refresh_token.clone(),
-                expires_in: 0,
-            })).await;
-            
+            temp_client
+                .set_token(Some(AuthToken {
+                    access_token: String::new(),
+                    refresh_token: refresh_token.clone(),
+                    expires_in: 0,
+                }))
+                .await;
+
             temp_client
                 .post("/api/auth/refresh", &RefreshTokenRequest { refresh_token })
                 .await
@@ -508,13 +524,19 @@ impl AuthManager {
         };
 
         // Get current state details
-        let (user, permissions, server_url) = self.auth_state.with_state(|state| match state {
-            AuthState::Authenticated { user, permissions, server_url, .. } => {
-                Some((user.clone(), permissions.clone(), server_url.clone()))
-            }
-            _ => None,
-        }).ok_or_else(|| AuthError::Token(TokenError::NotAuthenticated))?;
-        
+        let (user, permissions, server_url) = self
+            .auth_state
+            .with_state(|state| match state {
+                AuthState::Authenticated {
+                    user,
+                    permissions,
+                    server_url,
+                    ..
+                } => Some((user.clone(), permissions.clone(), server_url.clone())),
+                _ => None,
+            })
+            .ok_or_else(|| AuthError::Token(TokenError::NotAuthenticated))?;
+
         // Update auth state with new token
         self.auth_state.authenticate(
             user.clone(),
@@ -522,13 +544,13 @@ impl AuthManager {
             permissions.clone(),
             server_url.clone(),
         );
-        
+
         // Update API client token
         self.api_client.set_token(Some(response.clone())).await;
-        
+
         // Save to storage
         self.save_current_auth().await?;
-        
+
         info!("[AuthManager] Successfully refreshed access token");
         Ok(response)
     }
@@ -543,7 +565,10 @@ impl AuthManager {
                 permissions,
                 server_url,
             } => {
-                info!("Saving auth with token expiring in {} seconds", token.expires_in);
+                info!(
+                    "Saving auth with token expiring in {} seconds",
+                    token.expires_in
+                );
                 let now = Utc::now();
                 Some(StoredAuth {
                     token: token.clone(),
@@ -555,7 +580,7 @@ impl AuthManager {
                     device_trust_expires_at: Some(now + chrono::Duration::days(30)),
                     refresh_token: Some(token.refresh_token.clone()),
                 })
-            },
+            }
             _ => None,
         });
 
@@ -598,8 +623,11 @@ impl AuthManager {
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
-        info!("Login received token with expires_in: {} seconds ({} minutes)", 
-              token.expires_in, token.expires_in / 60);
+        info!(
+            "Login received token with expires_in: {} seconds ({} minutes)",
+            token.expires_in,
+            token.expires_in / 60
+        );
 
         // Set token in API client
         self.api_client.set_token(Some(token.clone())).await;
@@ -814,14 +842,18 @@ impl AuthManager {
         // Extract actual expiry from the JWT token
         let expires_in = extract_token_expiry(&result.session_token)
             .and_then(|secs| {
-                info!("JWT token expires in {} seconds ({} minutes)", secs, secs / 60);
+                info!(
+                    "JWT token expires in {} seconds ({} minutes)",
+                    secs,
+                    secs / 60
+                );
                 u32::try_from(secs).ok()
             })
             .unwrap_or_else(|| {
                 warn!("Could not extract token expiry, using default 1 hour");
                 3600
             });
-        
+
         // Set token in API client
         let token = AuthToken {
             access_token: result.session_token.clone(),
@@ -889,7 +921,8 @@ impl AuthManager {
 
                                 // Add device trust expiry if not present (30 days from now)
                                 if stored_auth.device_trust_expires_at.is_none() {
-                                    stored_auth.device_trust_expires_at = Some(Utc::now() + chrono::Duration::days(30));
+                                    stored_auth.device_trust_expires_at =
+                                        Some(Utc::now() + chrono::Duration::days(30));
                                 }
 
                                 // Save to new storage
@@ -1035,18 +1068,23 @@ impl AuthManager {
     }
 
     /// Get all users (for user selection screen)
-    /// 
+    ///
     /// This method sends the device fingerprint to get appropriate user information
     /// based on whether the device is known/trusted.
     pub async fn get_all_users(&self) -> AuthResult<Vec<UserListItemDto>> {
         // Generate device fingerprint
-        let fingerprint = crate::domains::auth::hardware_fingerprint::generate_hardware_fingerprint()
-            .await
-            .map_err(|e| AuthError::Device(DeviceError::FingerprintGeneration(e.to_string())))?;
-        
+        let fingerprint =
+            crate::domains::auth::hardware_fingerprint::generate_hardware_fingerprint()
+                .await
+                .map_err(|e| {
+                    AuthError::Device(DeviceError::FingerprintGeneration(e.to_string()))
+                })?;
+
         // Check if we have an active auth token
-        let has_auth = self.auth_state.with_state(|state| matches!(state, AuthState::Authenticated { .. }));
-        
+        let has_auth = self
+            .auth_state
+            .with_state(|state| matches!(state, AuthState::Authenticated { .. }));
+
         let users: Vec<UserListItemDto> = if has_auth {
             // Use authenticated endpoint for better information
             self.api_client
@@ -1058,32 +1096,35 @@ impl AuthManager {
             // Build request with custom header
             let client = reqwest::Client::new();
             let url = format!("{}/api/v1/users/public", self.api_client.base_url());
-            
+
             let response = client
                 .get(&url)
                 .header("X-Device-Fingerprint", fingerprint)
                 .send()
                 .await
                 .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
-            
+
             if !response.status().is_success() {
                 let status = response.status();
                 let error_text = response.text().await.unwrap_or_else(|_| status.to_string());
-                return Err(AuthError::Network(NetworkError::RequestFailed(
-                    format!("Failed to get users: {}", error_text)
-                )));
+                return Err(AuthError::Network(NetworkError::RequestFailed(format!(
+                    "Failed to get users: {}",
+                    error_text
+                ))));
             }
-            
+
             response
                 .json::<ferrex_core::api_types::ApiResponse<Vec<UserListItemDto>>>()
                 .await
                 .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?
                 .data
-                .ok_or_else(|| AuthError::Network(NetworkError::RequestFailed(
-                    "No data in response".to_string()
-                )))?
+                .ok_or_else(|| {
+                    AuthError::Network(NetworkError::RequestFailed(
+                        "No data in response".to_string(),
+                    ))
+                })?
         };
-        
+
         Ok(users)
     }
 
@@ -1296,19 +1337,28 @@ fn is_token_expired_impl(token: &AuthToken) -> bool {
     if parts.len() != 3 {
         // Not a JWT token - likely a simple session token
         // For non-JWT tokens, use the expires_in field and stored_at time
-        info!("Token is not JWT format (parts: {}), using expires_in field", parts.len());
-        
+        info!(
+            "Token is not JWT format (parts: {}), using expires_in field",
+            parts.len()
+        );
+
         // We can't check expiry for non-JWT tokens without stored_at time
         // So we'll consider them valid if expires_in > buffer
         if token.expires_in > TOKEN_EXPIRY_BUFFER_SECONDS as u32 {
-            info!("Non-JWT token still valid based on expires_in: {} seconds", token.expires_in);
+            info!(
+                "Non-JWT token still valid based on expires_in: {} seconds",
+                token.expires_in
+            );
             return false;
         } else {
-            warn!("Non-JWT token expired based on expires_in: {} seconds", token.expires_in);
+            warn!(
+                "Non-JWT token expired based on expires_in: {} seconds",
+                token.expires_in
+            );
             return true;
         }
     }
-    
+
     // Try to decode the JWT header without validation to check expiry
     match decode_header(&token.access_token) {
         Ok(_) => {
@@ -1330,7 +1380,7 @@ fn is_token_expired_impl(token: &AuthToken) -> bool {
                         let now = Utc::now().timestamp();
                         let seconds_until_expiry = exp - now;
                         let is_expired = now >= exp - TOKEN_EXPIRY_BUFFER_SECONDS;
-                        
+
                         if is_expired {
                             info!(
                                 "JWT token considered expired: {} seconds until actual expiry (buffer: {} seconds)",
@@ -1342,7 +1392,7 @@ fn is_token_expired_impl(token: &AuthToken) -> bool {
                                 seconds_until_expiry
                             );
                         }
-                        
+
                         is_expired
                     } else {
                         // No expiry claim, consider it expired
@@ -1386,10 +1436,13 @@ fn extract_token_expiry(token_str: &str) -> Option<i64> {
     let parts: Vec<&str> = token_str.split('.').collect();
     if parts.len() != 3 {
         // Not a JWT token - likely a simple session token
-        info!("Token is not JWT format (parts: {}), cannot extract expiry", parts.len());
+        info!(
+            "Token is not JWT format (parts: {}), cannot extract expiry",
+            parts.len()
+        );
         return None;
     }
-    
+
     // Try to decode the JWT header without validation to check expiry
     match decode_header(token_str) {
         Ok(_) => {
@@ -1400,18 +1453,17 @@ fn extract_token_expiry(token_str: &str) -> Option<i64> {
             validation.leeway = 0;
 
             // Try to decode with a dummy key (signature validation is disabled)
-            match decode::<JwtClaims>(
-                token_str,
-                &DecodingKey::from_secret(b"dummy"),
-                &validation,
-            ) {
+            match decode::<JwtClaims>(token_str, &DecodingKey::from_secret(b"dummy"), &validation) {
                 Ok(token_data) => {
                     // Calculate seconds until expiry
                     if let Some(exp) = token_data.claims.exp {
                         let now = Utc::now().timestamp();
                         let seconds_until_expiry = exp - now;
                         if seconds_until_expiry > 0 {
-                            info!("Extracted JWT expiry: {} seconds from now", seconds_until_expiry);
+                            info!(
+                                "Extracted JWT expiry: {} seconds from now",
+                                seconds_until_expiry
+                            );
                             Some(seconds_until_expiry)
                         } else {
                             warn!("JWT token already expired");

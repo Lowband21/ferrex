@@ -50,20 +50,37 @@ use iced::Task;
 
 /// Domain-aware update function that routes messages to appropriate handlers
 /// and collects events from DomainUpdateResult for cross-domain communication
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn update(state: &mut State, message: DomainMessage) -> Task<DomainMessage> {
+    let update = iced::debug::time("ferrex-player::update");
     // Mark the beginning of a new frame for profiling
-    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
     {
         // Call finish_frame for puffin to mark frame boundaries
         profiling::finish_frame!();
     }
-    
+
     // Get message name for profiling and debug logging
     let message_name = message.name();
-    
-    // Profile this update operation
-    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
-    profiling::scope!(message_name);
+
+    // Profile specific message processing
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
+    profiling::function_scope!(message_name);
 
     // Log direct message routing for validation
     #[cfg(debug_assertions)]
@@ -78,75 +95,76 @@ pub fn update(state: &mut State, message: DomainMessage) -> Task<DomainMessage> 
 
     // Process the message and collect any events
     let update_result = match message {
-            // Route auth messages to the auth domain handler
-            DomainMessage::Auth(auth_msg) => update_auth(state, auth_msg),
+        // Route auth messages to the auth domain handler
+        DomainMessage::Auth(auth_msg) => update_auth(state, auth_msg),
 
-            // Route library messages to the library domain handler
-            DomainMessage::Library(library_msg) => update_library(state, library_msg),
+        // Route library messages to the library domain handler
+        DomainMessage::Library(library_msg) => update_library(state, library_msg),
 
-            // Route media messages to the media domain handler
-            DomainMessage::Media(media_msg) => update_media(state, media_msg),
+        // Route media messages to the media domain handler
+        DomainMessage::Media(media_msg) => update_media(state, media_msg),
 
-            // Route player messages to the player domain handler
-            DomainMessage::Player(player_msg) => update_player(
-                &mut state.domains.player.state,
-                player_msg,
-                state.window_size,
-            ),
+        // Route player messages to the player domain handler
+        DomainMessage::Player(player_msg) => update_player(
+            &mut state.domains.player.state,
+            player_msg,
+            state.window_size,
+        ),
 
-            // Route metadata messages to the metadata domain handler
-            DomainMessage::Metadata(metadata_msg) => update_metadata(state, metadata_msg),
+        // Route metadata messages to the metadata domain handler
+        DomainMessage::Metadata(metadata_msg) => update_metadata(state, metadata_msg),
 
-            // Route UI messages to the UI domain handler
-            DomainMessage::Ui(ui_msg) => update_ui(state, ui_msg),
+        // Route UI messages to the UI domain handler
+        DomainMessage::Ui(ui_msg) => update_ui(state, ui_msg),
 
-            // Route streaming messages to the streaming domain handler
-            DomainMessage::Streaming(streaming_msg) => update_streaming(state, streaming_msg),
+        // Route streaming messages to the streaming domain handler
+        DomainMessage::Streaming(streaming_msg) => update_streaming(state, streaming_msg),
 
-            // Route settings messages to the settings domain handler
-            DomainMessage::Settings(settings_msg) => update_settings(state, settings_msg),
+        // Route settings messages to the settings domain handler
+        DomainMessage::Settings(settings_msg) => update_settings(state, settings_msg),
 
-            // Route user management messages to the user management domain handler
-            DomainMessage::UserManagement(user_mgmt_msg) => {
-                update_user_management(state, user_mgmt_msg)
-            }
-
-            // Route search messages to the search domain handler
-            DomainMessage::Search(search_msg) => search_update::update(state, search_msg),
-
-            // Cross-domain messages
-            DomainMessage::NoOp => DomainUpdateResult::task(Task::none()),
-
-            DomainMessage::ClearError => {
-                state.domains.ui.state.error_message = None;
-                DomainUpdateResult::task(Task::none())
-            }
-
-            DomainMessage::Event(event) => {
-                // Process cross-domain events and trigger appropriate domain actions
-                log::info!("[Update] Processing cross-domain event: {:?}", event);
-                DomainUpdateResult::task(crate::common::messages::cross_domain::handle_event(
-                    state, event,
-                ))
-            }
-
-            DomainMessage::Tick => {
-                // Periodic tick for UI updates or polling
-                DomainUpdateResult::task(Task::none())
-            }
-        };
-
-        // Process any events that were collected
-        let mut tasks = vec![update_result.task];
-
-        // If there are events to broadcast, handle them
-        for event in update_result.events {
-            //log::debug!("[Update] Broadcasting event from DomainUpdateResult: {:?}", event);
-            tasks.push(crate::common::messages::cross_domain::handle_event(
-                state, event,
-            ));
+        // Route user management messages to the user management domain handler
+        DomainMessage::UserManagement(user_mgmt_msg) => {
+            update_user_management(state, user_mgmt_msg)
         }
 
+        // Route search messages to the search domain handler
+        DomainMessage::Search(search_msg) => search_update::update(state, search_msg),
+
+        // Cross-domain messages
+        DomainMessage::NoOp => DomainUpdateResult::task(Task::none()),
+
+        DomainMessage::ClearError => {
+            state.domains.ui.state.error_message = None;
+            DomainUpdateResult::task(Task::none())
+        }
+
+        DomainMessage::Event(event) => {
+            // Process cross-domain events and trigger appropriate domain actions
+            log::info!("[Update] Processing cross-domain event: {:?}", event);
+            DomainUpdateResult::task(crate::common::messages::cross_domain::handle_event(
+                state, event,
+            ))
+        }
+
+        DomainMessage::Tick => {
+            // Periodic tick for UI updates or polling
+            DomainUpdateResult::task(Task::none())
+        }
+    };
+
+    // Process any events that were collected
+    let mut tasks = vec![update_result.task];
+
+    // If there are events to broadcast, handle them
+    for event in update_result.events {
+        //log::debug!("[Update] Broadcasting event from DomainUpdateResult: {:?}", event);
+        tasks.push(crate::common::messages::cross_domain::handle_event(
+            state, event,
+        ));
+    }
+
+    update.finish();
     // Batch all tasks together
     Task::batch(tasks)
 }

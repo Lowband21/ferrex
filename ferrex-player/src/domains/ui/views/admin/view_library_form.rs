@@ -1,8 +1,8 @@
 use crate::{
     common::ui_utils::{icon_text, Icon},
     domains::library::{messages::Message, types::LibraryFormData},
-    state_refactored::State,
     domains::ui::theme,
+    state_refactored::State,
 };
 use iced::{
     widget::{
@@ -11,7 +11,14 @@ use iced::{
     Element, Length,
 };
 
-// Library Form View
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_library_form<'a>(
     state: &'a State,
     form_data: &'a LibraryFormData,

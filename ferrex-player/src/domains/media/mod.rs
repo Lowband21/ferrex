@@ -12,15 +12,14 @@ pub mod update_handlers;
 
 use self::services::MediaQueryService;
 use self::store::MediaStore;
-pub use self::store::{MediaStoreSorting, MediaStoreQuerying};
+pub use self::store::{MediaStoreQuerying, MediaStoreSorting};
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::domains::media::messages::Message as MediaMessage;
 use crate::domains::media::models::SeasonDetails;
 use crate::infrastructure::{
-    api_types::{EpisodeReference, SeasonReference},
     adapters::api_client_adapter::ApiClientAdapter,
+    api_types::{EpisodeReference, SeasonReference, UserWatchState},
 };
-use ferrex_core::watch_status::UserWatchState;
 use ferrex_core::MediaId;
 use iced::Task;
 use std::sync::{Arc, RwLock as StdRwLock};
@@ -45,10 +44,21 @@ pub struct MediaDomainState {
     pub current_library_id: Option<Uuid>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl MediaDomainState {
-    pub fn new(media_store: Arc<StdRwLock<MediaStore>>, api_service: Option<Arc<ApiClientAdapter>>) -> Self {
+    pub fn new(
+        media_store: Arc<StdRwLock<MediaStore>>,
+        api_service: Option<Arc<ApiClientAdapter>>,
+    ) -> Self {
         let query_service = Arc::new(MediaQueryService::new(Arc::clone(&media_store)));
-        
+
         Self {
             user_watch_state: None,
             current_season_details: None,
@@ -80,6 +90,10 @@ impl MediaDomainState {
         } else {
             0
         }
+    }
+
+    pub fn get_watch_state(&self) -> &Option<UserWatchState> {
+        &self.user_watch_state
     }
 
     /// Get the watch progress for a specific media item
@@ -143,6 +157,14 @@ pub struct MediaDomain {
     pub state: MediaDomainState,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl MediaDomain {
     pub fn new(state: MediaDomainState) -> Self {
         Self { state }

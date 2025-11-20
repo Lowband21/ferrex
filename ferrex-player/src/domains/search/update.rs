@@ -8,11 +8,14 @@ use super::types::{SearchDecisionEngine, SearchMode, SearchStrategy};
 use crate::common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult};
 use crate::state_refactored::State;
 
-/// Handle search domain messages
 pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
-    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
-    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::SEARCH_UPDATE);
-    
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
+    profiling::scope!("search_update");
+
     match message {
         Message::UpdateQuery(query) => {
             state.domains.search.state.query = query.clone();
@@ -24,19 +27,17 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             } else {
                 // Keep focus on search input and debounce the search
                 use iced::widget::text_input;
-                DomainUpdateResult::task(
-                    Task::batch(vec![
-                        text_input::focus::<DomainMessage>(text_input::Id::new("search-input"))
-                            .map(|_| DomainMessage::NoOp),
-                        Task::perform(
-                            async move {
-                                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                                query
-                            },
-                            |query| DomainMessage::Search(Message::SearchDebounced(query)),
-                        ),
-                    ])
-                )
+                DomainUpdateResult::task(Task::batch(vec![
+                    text_input::focus::<DomainMessage>(text_input::Id::new("search-input"))
+                        .map(|_| DomainMessage::NoOp),
+                    Task::perform(
+                        async move {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                            query
+                        },
+                        |query| DomainMessage::Search(Message::SearchDebounced(query)),
+                    ),
+                ]))
             }
         }
 
@@ -67,7 +68,9 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             // Clear search after selection
             state.domains.search.state.clear();
 
-            DomainUpdateResult::task(Task::perform(async move { event }, |event| DomainMessage::Event(event)))
+            DomainUpdateResult::task(Task::perform(async move { event }, |event| {
+                DomainMessage::Event(event)
+            }))
         }
 
         Message::LoadMore => {
@@ -136,12 +139,10 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
 
                 // Keep focus on search input when results arrive
                 use iced::widget::text_input;
-                DomainUpdateResult::task(
-                    Task::batch(vec![text_input::focus::<DomainMessage>(
-                        text_input::Id::new("search-input"),
-                    )
-                    .map(|_| DomainMessage::NoOp)])
+                DomainUpdateResult::task(Task::batch(vec![text_input::focus::<DomainMessage>(
+                    text_input::Id::new("search-input"),
                 )
+                .map(|_| DomainMessage::NoOp)]))
             } else {
                 DomainUpdateResult::task(Task::none())
             }
@@ -192,7 +193,9 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
         Message::RequestMediaDetails(media_ref) => {
             // Request details from media domain
             let event = CrossDomainEvent::RequestMediaDetails(media_ref);
-            DomainUpdateResult::task(Task::perform(async move { event }, |event| DomainMessage::Event(event)))
+            DomainUpdateResult::task(Task::perform(async move { event }, |event| {
+                DomainMessage::Event(event)
+            }))
         }
 
         Message::RefreshFromMediaStore => {
@@ -225,18 +228,22 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             log::info!("Starting search calibration...");
             let service = state.domains.search.service.clone();
 
-            DomainUpdateResult::task(
-                Task::perform(
-                    async move { super::calibrator::SearchCalibrator::calibrate(&service).await },
-                    |results| DomainMessage::Search(Message::_CalibrationComplete(results)),
-                )
-            )
+            DomainUpdateResult::task(Task::perform(
+                async move { super::calibrator::SearchCalibrator::calibrate(&service).await },
+                |results| DomainMessage::Search(Message::_CalibrationComplete(results)),
+            ))
         }
     }
 }
 
-/// Execute search with current query
 fn handle_execute_search(state: &mut State, switch_to_fullscreen: bool) -> DomainUpdateResult {
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
+    profiling::function_scope!("execute search");
+
     let query = state.domains.search.state.query.clone();
 
     if query.is_empty() {
@@ -253,18 +260,16 @@ fn handle_execute_search(state: &mut State, switch_to_fullscreen: bool) -> Domai
         let results = cached.results.clone();
         let total_count = cached.total_count;
 
-        return DomainUpdateResult::task(
-            Task::perform(
-                async move { (query, results, total_count) },
-                |(query, results, total_count)| {
-                    DomainMessage::Search(Message::ResultsReceived {
-                        query,
-                        results,
-                        total_count,
-                    })
-                },
-            )
-        );
+        return DomainUpdateResult::task(Task::perform(
+            async move { (query, results, total_count) },
+            |(query, results, total_count)| {
+                DomainMessage::Search(Message::ResultsReceived {
+                    query,
+                    results,
+                    total_count,
+                })
+            },
+        ));
     }
 
     // Determine search strategy using the enhanced decision engine
@@ -302,9 +307,8 @@ fn handle_execute_search(state: &mut State, switch_to_fullscreen: bool) -> Domai
     let fuzzy = state.domains.search.state.fuzzy_matching;
     let search_state = state.domains.search.state.clone();
 
-    DomainUpdateResult::task(
-        Task::perform(
-            async move {
+    DomainUpdateResult::task(Task::perform(
+        async move {
             // TODO: Switch to search_with_metrics when we implement proper message batching
             match service
                 .search(&query, &fields, strategy, library_id, fuzzy)
@@ -325,22 +329,29 @@ fn handle_execute_search(state: &mut State, switch_to_fullscreen: bool) -> Domai
             }),
             Err(error) => DomainMessage::Search(Message::SearchError(error)),
         },
-        )
-    )
+    ))
 }
 
-/// Handle selecting a search result
 fn handle_select_result(
     state: &mut State,
     media_ref: crate::infrastructure::api_types::MediaReference,
 ) -> DomainUpdateResult {
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
+    profiling::scope!("select search result");
+
     // Clear search after selection
     state.domains.search.state.clear();
 
     // Use cross-domain event for navigation
     let event = CrossDomainEvent::NavigateToMedia(media_ref);
 
-    DomainUpdateResult::task(Task::perform(async move { event }, |event| DomainMessage::Event(event)))
+    DomainUpdateResult::task(Task::perform(async move { event }, |event| {
+        DomainMessage::Event(event)
+    }))
 }
 
 /// Calculate how complete our local data is

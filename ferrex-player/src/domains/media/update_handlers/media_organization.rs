@@ -9,10 +9,18 @@ use crate::{
             view_models::ViewModel,
         },
     },
-    infrastructure::api_types::{SeriesReference},
+    infrastructure::api_types::SeriesReference,
     state_refactored::State,
 };
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_media_organized(
     state: &mut State,
     _movies: Vec<MediaFile>,
@@ -50,7 +58,10 @@ pub fn handle_toggle_sort_order(state: &mut State) -> Task<Message> {
         SortOrder::Ascending => SortOrder::Descending,
         SortOrder::Descending => SortOrder::Ascending,
     };
-    log::info!("Toggled sort order to: {:?}", state.domains.ui.state.sort_order);
+    log::info!(
+        "Toggled sort order to: {:?}",
+        state.domains.ui.state.sort_order
+    );
 
     // NEW ARCHITECTURE: ViewModels use state.sort_by and state.sort_order directly
     // Refresh ViewModels to apply new sort settings

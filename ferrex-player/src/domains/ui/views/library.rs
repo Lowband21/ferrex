@@ -14,6 +14,14 @@ use iced::{
 };
 use lucide_icons::Icon;
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn library_loading() -> Element<'static, Message> {
     container(
         column![
@@ -37,11 +45,17 @@ fn library_loading() -> Element<'static, Message> {
     .into()
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_library(state: &State) -> Element<Message> {
-    // Profile the library view operation
-    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
-    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::LIBRARY_VIEW);
-    
+    let view_library = iced::debug::time("view::view_library");
+
     if state.loading {
         // Loading state
         library_loading()
@@ -103,13 +117,6 @@ pub fn view_library(state: &State) -> Element<Message> {
             .style(theme::Container::Default.style())
             .into()
         } else {
-            // Choose view based on display mode first, then library selection
-            /*log::debug!("[Library View] Rendering with library.current_library_id = {:?}, ui.current_library_id = {:?}, ui.display_mode = {:?}",
-                state.domains.library.state.current_library_id,
-                state.domains.ui.state.current_library_id,
-                state.domains.ui.state.display_mode
-            );*/
-
             // Check display mode FIRST to ensure Curated mode always shows all content
             let library_content = match state.domains.ui.state.display_mode {
                 DisplayMode::Curated => {
@@ -138,7 +145,6 @@ pub fn view_library(state: &State) -> Element<Message> {
                                         &lib_state.grid_state,
                                         &state.domains.ui.state.hovered_media_id,
                                         Message::TabGridScrolled,
-                                        state.domains.ui.state.fast_scrolling,
                                         state,
                                     )
                                 }
@@ -155,7 +161,6 @@ pub fn view_library(state: &State) -> Element<Message> {
                                         &lib_state.grid_state,
                                         &state.domains.ui.state.hovered_media_id,
                                         Message::TabGridScrolled,
-                                        state.domains.ui.state.fast_scrolling,
                                         state,
                                     )
                                 }
@@ -186,17 +191,13 @@ pub fn view_library(state: &State) -> Element<Message> {
             if state.domains.library.state.show_scan_progress
                 && state.domains.library.state.scan_progress.is_some()
             {
-                //log::info!("Showing scan overlay - show_scan_progress: true, scan_progress: Some");
+                view_library.finish();
                 create_scan_progress_overlay(
                     main_content,
                     &state.domains.library.state.scan_progress,
                 )
             } else {
-                //log::debug!(
-                //    "Not showing scan overlay - show_scan_progress: {}, scan_progress: {}",
-                //    state.show_scan_progress,
-                //    state.scan_progress.is_some()
-                //);
+                view_library.finish();
                 main_content.into()
             }
         }

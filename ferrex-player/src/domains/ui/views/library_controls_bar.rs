@@ -14,6 +14,14 @@ use uuid::Uuid;
 
 /// Creates the library controls bar that appears below the header
 /// This bar contains sort and filter controls and is only visible when viewing specific libraries
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_library_controls_bar<'a>(
     state: &'a State,
     selected_library: Option<Uuid>,
@@ -26,7 +34,7 @@ pub fn view_library_controls_bar<'a>(
     // Get current sort settings from state
     let current_sort = state.domains.ui.state.sort_by;
     let current_order = state.domains.ui.state.sort_order;
-    
+
     // TODO: Get active filter count from state when filters are implemented
     let active_filter_count = 0;
     let is_filter_open = false;

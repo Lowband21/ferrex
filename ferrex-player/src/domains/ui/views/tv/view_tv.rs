@@ -14,7 +14,14 @@ use iced::{
     Element, Length,
 };
 
-// TV Show detail views
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_tv_show_detail<'a>(state: &'a State, _show_name: &'a str) -> Element<'a, Message> {
     let mut content = column![].spacing(20);
 
@@ -46,12 +53,22 @@ pub fn view_tv_show_detail<'a>(state: &'a State, _show_name: &'a str) -> Element
     };
 
     // Use MediaQueryService (clean architecture)
-    let series_ref = state.domains.media.state.query_service.get_series(&series_id);
+    let series_ref = state
+        .domains
+        .media
+        .state
+        .query_service
+        .get_series(&series_id);
 
     if let Some(series_ref) = series_ref {
         // Use MediaQueryService to get seasons (clean architecture)
-        let seasons = state.domains.media.state.query_service.get_seasons_for_series(&series_id);
-        
+        let seasons = state
+            .domains
+            .media
+            .state
+            .query_service
+            .get_seasons_for_series(&series_id);
+
         let poster_element: Element<Message> = image_for(MediaId::Series(series_id.clone()))
             .size(ImageSize::Full)
             .width(Length::Fixed(300.0))
@@ -136,7 +153,12 @@ pub fn view_tv_show_detail<'a>(state: &'a State, _show_name: &'a str) -> Element
 
             if let Some(season) = first_season {
                 // Use MediaQueryService to get episodes (clean architecture)
-                let episodes = state.domains.media.state.query_service.get_episodes_for_season(&season.id);
+                let episodes = state
+                    .domains
+                    .media
+                    .state
+                    .query_service
+                    .get_episodes_for_season(&season.id);
                 episodes.into_iter().next()
             } else {
                 None
@@ -207,9 +229,11 @@ pub fn view_tv_show_detail<'a>(state: &'a State, _show_name: &'a str) -> Element
                     .cloned()
                     .map(|season| {
                         crate::domains::ui::components::season_reference_card_with_state(
+                            // We need to pass watch status here
                             season,
                             false,
                             Some(state),
+                            None,
                         )
                     })
                     .collect();
@@ -272,6 +296,14 @@ pub fn view_tv_show_detail<'a>(state: &'a State, _show_name: &'a str) -> Element
         .into()
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_season_detail<'a>(
     state: &'a State,
     series_id: &'a SeriesID,
@@ -640,6 +672,14 @@ pub fn view_season_detail<'a>(
         .into()
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_episode_detail<'a>(
     state: &'a State,
     episode_id: &'a EpisodeID,

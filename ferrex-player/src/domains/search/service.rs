@@ -9,8 +9,8 @@ use crate::infrastructure::services::api::ApiService;
 use ferrex_core::query::types::{SearchField, SearchQuery};
 use ferrex_core::query::{MediaQuery, MediaQueryBuilder};
 
-use super::types::{SearchDecisionEngine, SearchResult, SearchStrategy};
 use super::metrics::SearchPerformanceMetrics;
+use super::types::{SearchDecisionEngine, SearchResult, SearchStrategy};
 use chrono::Datelike;
 use std::time::Instant;
 
@@ -25,9 +25,19 @@ pub struct SearchService {
 
 impl SearchService {
     /// Create a new search service
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     pub fn new(
         media_store: Arc<StdRwLock<MediaStore>>,
-        api_service: Option<Arc<crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter>>,
+        api_service: Option<
+            Arc<crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter>,
+        >,
     ) -> Self {
         Self {
             media_store,
@@ -36,11 +46,18 @@ impl SearchService {
     }
 
     /// Check if network is available (api_service is present)
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     pub fn has_network(&self) -> bool {
         self.api_service.is_some()
     }
 
-    /// Execute a search with the given query and strategy
     pub async fn search(
         &self,
         query: &str,
@@ -55,8 +72,7 @@ impl SearchService {
             SearchStrategy::Hybrid => self.search_hybrid(query, fields, library_id, fuzzy).await,
         }
     }
-    
-    /// Execute a search with performance measurement
+
     pub async fn search_with_metrics(
         &self,
         query: &str,
@@ -68,16 +84,22 @@ impl SearchService {
         let start = Instant::now();
         let query_length = query.len();
         let field_count = fields.len();
-        
-        log::debug!("Search starting - Strategy: {:?}, Query: '{}', Fields: {:?}", 
-            strategy, query, fields);
-        
-        let result = self.search(query, fields, strategy, library_id, fuzzy).await;
-        
+
+        log::debug!(
+            "Search starting - Strategy: {:?}, Query: '{}', Fields: {:?}",
+            strategy,
+            query,
+            fields
+        );
+
+        let result = self
+            .search(query, fields, strategy, library_id, fuzzy)
+            .await;
+
         let execution_time = start.elapsed();
         let result_count = result.as_ref().map(|r| r.len()).unwrap_or(0);
         let success = result.is_ok();
-        
+
         log::info!(
             "Search completed - Strategy: {:?}, Time: {}ms, Results: {}, Success: {}",
             strategy,
@@ -85,7 +107,7 @@ impl SearchService {
             result_count,
             success
         );
-        
+
         let metric = SearchPerformanceMetrics {
             strategy,
             query_length,
@@ -96,11 +118,19 @@ impl SearchService {
             network_latency: None, // Will be populated for server searches
             timestamp: start,
         };
-        
+
         (result, metric)
     }
 
     /// Client-side search using MediaStore
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     fn search_client(
         &self,
         query: &str,
@@ -212,7 +242,6 @@ impl SearchService {
         Ok(results)
     }
 
-    /// Server-side search using API
     async fn search_server(
         &self,
         query: &str,
@@ -278,7 +307,6 @@ impl SearchService {
         Ok(results)
     }
 
-    /// Hybrid search - try client first, fallback to server for missing data
     async fn search_hybrid(
         &self,
         query: &str,
@@ -321,6 +349,14 @@ impl SearchService {
     }
 
     /// Match a movie against search query
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     fn match_movie(
         &self,
         movie: &MovieReference,
@@ -374,6 +410,14 @@ impl SearchService {
     }
 
     /// Match a series against search query
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     fn match_series(
         &self,
         series: &SeriesReference,
@@ -427,6 +471,14 @@ impl SearchService {
     }
 
     /// Calculate match score between text and query
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     fn calculate_match_score(&self, text: &str, query: &str, _fuzzy: bool) -> Option<f32> {
         let text_lower = text.to_lowercase();
         let query_lower = query.to_lowercase();
@@ -493,6 +545,14 @@ impl SearchService {
     }
 
     /// Convert API response with status to SearchResult format
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     fn convert_api_results_from_status(
         &self,
         response: Vec<ferrex_core::query::MediaReferenceWithStatus>,
@@ -504,7 +564,6 @@ impl SearchService {
             .collect()
     }
 
-    /// Convert API response to SearchResult format
     fn convert_api_results(&self, response: Vec<MediaReference>, query: &str) -> Vec<SearchResult> {
         response
             .into_iter()
@@ -512,7 +571,14 @@ impl SearchService {
             .collect()
     }
 
-    /// Convert a single MediaReference to SearchResult
+    #[cfg_attr(
+        any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ),
+        profiling::function
+    )]
     fn convert_media_ref_to_result(&self, media_ref: MediaReference, query: &str) -> SearchResult {
         match &media_ref {
             MediaReference::Movie(movie) => SearchResult {

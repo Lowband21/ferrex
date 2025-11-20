@@ -3,8 +3,8 @@
 //! Allows users to view and manage their authenticated devices
 
 use crate::domains::ui::messages::Message;
-use crate::state_refactored::State;
 use crate::domains::ui::theme;
+use crate::state_refactored::State;
 use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Border, Element, Length, Theme};
 use lucide_icons::Icon;
@@ -38,6 +38,14 @@ pub enum DeviceManagementMessage {
     RefreshDevices,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl DeviceManagementState {
     pub fn new() -> Self {
         Self::default()
@@ -66,7 +74,14 @@ fn lucide_font() -> iced::Font {
     iced::Font::with_name("lucide")
 }
 
-/// Device management view
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_device_management<'a>(state: &'a State) -> Element<'a, Message> {
     let device_state = &state.domains.settings.device_management_state;
 
@@ -161,39 +176,6 @@ fn create_loading_view<'a>() -> Element<'a, Message> {
     .into()
 }
 
-/// Create error view with owned string
-fn create_error_view_owned<'a>(error: String) -> Element<'a, Message> {
-    container(
-        column![
-            row![
-                icon_text(Icon::X)
-                    .size(24)
-                    .color(theme::MediaServerTheme::ERROR),
-                Space::with_width(10),
-                text("Failed to load devices")
-                    .size(16)
-                    .color(theme::MediaServerTheme::ERROR),
-            ]
-            .align_y(iced::Alignment::Center),
-            Space::with_height(10),
-            text(error)
-                .size(14)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            Space::with_height(15),
-            button("Retry")
-                .on_press(Message::RefreshDevices)
-                .style(theme::Button::Primary.style())
-                .padding([8, 16]),
-        ]
-        .padding(40)
-        .align_x(iced::Alignment::Center),
-    )
-    .style(theme::Container::Card.style())
-    .width(Length::Fill)
-    .into()
-}
-
-/// Create error view
 fn create_error_view<'a>(error: &'a str) -> Element<'a, Message> {
     container(
         column![

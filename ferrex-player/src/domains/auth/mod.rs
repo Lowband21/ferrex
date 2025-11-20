@@ -1,30 +1,24 @@
 //! Authentication domain
-//! 
+//!
 //! Contains all authentication-related state and logic moved from the monolithic State
 
-pub mod messages;
-pub mod update;
-pub mod update_handlers;
 pub mod dto;
 pub mod errors;
+pub mod hardware_fingerprint;
 pub mod manager;
+pub mod messages;
+pub mod permissions;
+pub mod security;
 pub mod service;
 pub mod state_types;
 pub mod storage;
-pub mod hardware_fingerprint;
-pub mod permissions;
-pub mod security;
 pub mod types;
+pub mod update;
+pub mod update_handlers;
 
-// Testing module is available when compiling tests or with test feature
-// TODO: Re-enable after fixing AuthTestContext implementation
-// #[cfg(any(test, feature = "testing"))]
-// pub mod testing;
-
-use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use self::messages::Message as AuthMessage;
 use crate::domains::ui::views::first_run::FirstRunState;
+use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use ferrex_core::rbac::UserPermissions;
 use iced::Task;
 
@@ -35,21 +29,25 @@ pub use manager::AuthManager;
 pub use service::AuthService;
 pub use types::AuthenticationFlow;
 
-/// Authentication domain state - moved from monolithic State
 pub struct AuthDomainState {
-    // From State struct:
     pub api_service: std::sync::Arc<ApiClientAdapter>,
     pub is_authenticated: bool,
     pub auth_flow: AuthenticationFlow,
     pub user_permissions: Option<UserPermissions>,
     pub first_run_state: FirstRunState,
     pub auto_login_enabled: bool,
-    /// Trait-based authentication service (Ports & Adapters)
-    pub auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>, 
+    pub auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl AuthDomainState {
-    /// Create a new AuthDomainState with required services
     pub fn new(
         api_service: std::sync::Arc<ApiClientAdapter>,
         auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
@@ -85,16 +83,17 @@ pub struct AuthDomain {
     pub state: AuthDomainState,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl AuthDomain {
     pub fn new(state: AuthDomainState) -> Self {
         Self { state }
-    }
-
-    /// Update function - delegates to existing update_auth logic
-    pub fn update(&mut self, message: AuthMessage) -> Task<DomainMessage> {
-        // This will call the existing update_auth function
-        // For now, we return Task::none() to make it compile
-        Task::none()
     }
 
     pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
@@ -110,4 +109,3 @@ impl AuthDomain {
         }
     }
 }
-

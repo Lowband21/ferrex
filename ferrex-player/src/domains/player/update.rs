@@ -7,14 +7,26 @@ use std::time::Duration;
 
 /// Handle player domain messages
 /// Returns a DomainUpdateResult containing both the task and any events to emit
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn update_player(
     state: &mut PlayerDomainState,
     message: Message,
     window_size: iced::Size,
 ) -> DomainUpdateResult {
-    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
     profiling::scope!(crate::infrastructure::profiling_scopes::scopes::PLAYER_UPDATE);
-    
+
     match message {
         Message::PlayMedia(_media) => {
             // This is handled in main.rs as it needs access to server_url
@@ -25,18 +37,18 @@ pub fn update_player(
             // Reset player state and navigate back
             state.reset();
             // Send direct UI domain message for navigation
-            DomainUpdateResult::task(
-                Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack))
-            )
+            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                ui::messages::Message::NavigateBack,
+            )))
         }
-        
+
         Message::NavigateHome => {
             // Reset player state and navigate home
             state.reset();
             // Send direct UI domain message for navigation
-            DomainUpdateResult::task(
-                Task::done(DomainMessage::Ui(ui::messages::Message::NavigateHome))
-            )
+            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                ui::messages::Message::NavigateHome,
+            )))
         }
 
         Message::Play => {
@@ -75,12 +87,10 @@ pub fn update_player(
             ));
             state.reset();
             // Navigate back after stopping
-            DomainUpdateResult::task(
-                Task::batch(vec![
-                    update_task,
-                    Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack))
-                ])
-            )
+            DomainUpdateResult::task(Task::batch(vec![
+                update_task,
+                Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack)),
+            ]))
         }
 
         Message::Seek(position) => {
@@ -124,9 +134,11 @@ pub fn update_player(
                 state.update_controls(true);
 
                 // Send progress update after seek completes
-                return DomainUpdateResult::task(Task::done(crate::common::messages::DomainMessage::Media(
-                    crate::domains::media::messages::Message::SendProgressUpdate,
-                )));
+                return DomainUpdateResult::task(Task::done(
+                    crate::common::messages::DomainMessage::Media(
+                        crate::domains::media::messages::Message::SendProgressUpdate,
+                    ),
+                ));
             }
             DomainUpdateResult::task(Task::none())
         }
@@ -246,11 +258,9 @@ pub fn update_player(
             // For now, forward to Media domain which incorrectly handles player functionality
             // TODO: This should be handled directly in Player domain after migration
             log::info!("[Player] Video ready to play - forwarding to Media domain (temporary)");
-            DomainUpdateResult::task(
-                Task::done(DomainMessage::Media(
-                    crate::domains::media::messages::Message::_LoadVideo
-                ))
-            )
+            DomainUpdateResult::task(Task::done(DomainMessage::Media(
+                crate::domains::media::messages::Message::_LoadVideo,
+            )))
         }
 
         Message::EndOfStream => {
@@ -344,7 +354,7 @@ pub fn update_player(
             // TODO: Update to use proper fullscreen mode when Iced is updated
             //iced::Settings::fullscreen;
             DomainUpdateResult::task(
-                iced::window::get_latest().and_then(move |id| iced::window::set_mode(id, mode))
+                iced::window::get_latest().and_then(move |id| iced::window::set_mode(id, mode)),
             )
         }
 
@@ -367,7 +377,7 @@ pub fn update_player(
             let percentage = (point.x / window_size.width).clamp(0.0, 1.0) as f64;
             let duration = state.source_duration.unwrap_or(state.duration);
             let seek_position = percentage * duration;
-            
+
             // Store for potential click-to-seek
             state.last_seek_position = Some(seek_position);
 
@@ -692,38 +702,36 @@ pub fn update_player(
             }
             DomainUpdateResult::task(Task::none())
         }
-        
+
         // New Phase 2 direct command handlers
         Message::SeekTo(duration) => {
             // Convert Duration to f64 seconds and delegate to existing Seek handler
             let position = duration.as_secs_f64();
             update_player(state, Message::Seek(position), window_size)
         }
-        
+
         Message::ToggleShuffle => {
             // Toggle shuffle state
             state.is_shuffle_enabled = !state.is_shuffle_enabled;
             log::info!("Shuffle toggled to: {}", state.is_shuffle_enabled);
             DomainUpdateResult::task(Task::none())
         }
-        
+
         Message::ToggleRepeat => {
             // Toggle repeat state
             state.is_repeat_enabled = !state.is_repeat_enabled;
             log::info!("Repeat toggled to: {}", state.is_repeat_enabled);
             DomainUpdateResult::task(Task::none())
         }
-        
+
         Message::LoadTrack(media_id) => {
             // Load a specific track by MediaId
             log::info!("Loading track with ID: {:?}", media_id);
             // This will be connected to the media store in Task 2.7
             // For now, just acknowledge the command
-            DomainUpdateResult::task(
-                Task::done(DomainMessage::Media(
-                    crate::domains::media::messages::Message::LoadMediaById(media_id)
-                ))
-            )
+            DomainUpdateResult::task(Task::done(DomainMessage::Media(
+                crate::domains::media::messages::Message::LoadMediaById(media_id),
+            )))
         }
     }
 }

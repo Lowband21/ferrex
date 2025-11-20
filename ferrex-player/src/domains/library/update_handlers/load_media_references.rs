@@ -17,6 +17,14 @@ use ferrex_core::SeriesReference;
 use iced::Task;
 use uuid::Uuid;
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl State {
     /// Load media references for a library using the new API
     pub fn load_library_media_references(&mut self, library_id: Uuid) -> Task<Message> {
@@ -59,31 +67,35 @@ impl State {
         // NEW ARCHITECTURE: Use BatchCoordinator for efficient initial load
         // Initialize tasks list that will be returned
         let mut tasks = Vec::new();
-        
+
         // Process initial load asynchronously - this populates the MediaStore with ALL media types
         let media_store = Arc::clone(&self.domains.media.state.media_store);
         let items_to_load = response.media.clone();
         let items_count = items_to_load.len();
-        
+
         let batch_task = Task::perform(
             async move {
                 let coordinator = crate::domains::media::store::BatchCoordinator::new(media_store);
-                
+
                 // Process as initial load - preserve server sorting
                 // Use smaller chunks for better UI responsiveness
                 let config = crate::domains::media::store::BatchConfig {
-                    is_initial_load: true,  // Skip client-side sorting
-                    preserve_order: true,   // Keep server's sort order
-                    max_batch_size: 250,    // Smaller chunks for better responsiveness
+                    is_initial_load: true, // Skip client-side sorting
+                    preserve_order: true,  // Keep server's sort order
+                    max_batch_size: 250,   // Smaller chunks for better responsiveness
                     use_background_thread: true,
                 };
-                
+
                 // Convert to library data format - includes movies, series, seasons, and episodes
                 let library_data = vec![(library_id, items_to_load)];
-                
+
                 match coordinator.process_initial_load(library_data).await {
                     Ok(_) => {
-                        log::info!("MediaStore successfully loaded with {} items from library {}", items_count, library_id);
+                        log::info!(
+                            "MediaStore successfully loaded with {} items from library {}",
+                            items_count,
+                            library_id
+                        );
                         true
                     }
                     Err(e) => {
@@ -99,9 +111,9 @@ impl State {
                 Message::NoOp
             },
         );
-        
+
         tasks.push(batch_task);
-        
+
         // Log the counts for debugging
         let mut endpoint_count = 0;
         let mut details_count = 0;
@@ -109,7 +121,7 @@ impl State {
         let mut series_count = 0;
         let mut seasons_count = 0;
         let mut episodes_count = 0;
-        
+
         for media_ref in &response.media {
             match media_ref {
                 MediaReference::Movie(movie) => {
@@ -140,12 +152,12 @@ impl State {
                 }
             }
         }
-        
+
         log::info!(
             "Library {} contains {} movies, {} series, {} seasons, {} episodes ({} endpoint refs, {} detail refs)",
             library_id, movies_count, series_count, seasons_count, episodes_count, endpoint_count, details_count
         );
-        
+
         // Log summary for debugging
         log::info!(
             "Passing {} total items to MediaStore (including {} seasons)",
@@ -155,7 +167,10 @@ impl State {
 
         // ViewModels will be refreshed automatically when MediaStore batch ends
         // DO NOT refresh here - it causes partial data to be shown
-        log::debug!("MediaStore loaded with {} items - ViewModels will refresh when batch completes", items_count);
+        log::debug!(
+            "MediaStore loaded with {} items - ViewModels will refresh when batch completes",
+            items_count
+        );
 
         // Clone media references for immediate queueing
         let media_refs_for_queue = response.media.clone();
@@ -324,9 +339,17 @@ impl State {
 
         // Log which media is being updated
         if let Some(movie) = media.as_movie() {
-            log::debug!("Updating movie: {} ({})", movie.title.as_str(), movie.id.as_str())
+            log::debug!(
+                "Updating movie: {} ({})",
+                movie.title.as_str(),
+                movie.id.as_str()
+            )
         } else if let Some(series) = media.as_series() {
-            log::debug!("Updating series: {} ({})", series.title.as_str(), series.id.as_str())
+            log::debug!(
+                "Updating series: {} ({})",
+                series.title.as_str(),
+                series.id.as_str()
+            )
         }
 
         // NEW ARCHITECTURE: Update MediaStore
@@ -436,8 +459,7 @@ impl State {
                 // Update in all library caches that contain this movie
                 for (_, cache) in self.domains.library.state.library_media_cache.iter_mut() {
                     if let LibraryMediaCache::Movies { references } = cache {
-                        if let Some(cached_movie) =
-                            references.iter_mut().find(|m| m.id == movie.id)
+                        if let Some(cached_movie) = references.iter_mut().find(|m| m.id == movie.id)
                         {
                             *cached_movie = movie.clone();
                         }

@@ -18,6 +18,14 @@ pub struct PinEntryView {
     max_pin_length: usize,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl PinEntryView {
     /// Create a new PIN entry view
     pub fn new(username: String, display_name: String) -> Self {

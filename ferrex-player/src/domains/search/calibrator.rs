@@ -1,8 +1,8 @@
-use std::time::{Duration, Instant};
-use ferrex_core::media::MediaReference;
-use ferrex_core::query::types::SearchField;
 use super::service::SearchService;
 use super::types::SearchStrategy;
+use ferrex_core::media::MediaReference;
+use ferrex_core::query::types::SearchField;
+use std::time::{Duration, Instant};
 
 /// Lightweight calibration results
 #[derive(Debug, Clone)]
@@ -34,45 +34,52 @@ impl SearchCalibrator {
     /// This should be called once at startup and periodically in background
     pub async fn calibrate(service: &SearchService) -> CalibrationResults {
         let mut results = CalibrationResults::default();
-        
+
         // Test queries - simple and likely to return results
         let test_queries = ["the", "a", "movie"];
-        
+
         // Test client performance (always available)
         let client_start = Instant::now();
         for query in &test_queries {
-            let _ = service.search(
-                query,
-                &[SearchField::Title],
-                SearchStrategy::Client,
-                None,
-                false,
-            ).await;
+            let _ = service
+                .search(
+                    query,
+                    &[SearchField::Title],
+                    SearchStrategy::Client,
+                    None,
+                    false,
+                )
+                .await;
         }
         let client_duration = client_start.elapsed();
-        results.client_baseline_ms = Some((client_duration.as_millis() / test_queries.len() as u128) as u64);
-        
+        results.client_baseline_ms =
+            Some((client_duration.as_millis() / test_queries.len() as u128) as u64);
+
         // Test server performance (if available)
         if service.has_network() {
             let server_start = Instant::now();
             let mut server_success = false;
-            
+
             for query in &test_queries {
-                if let Ok(_) = service.search(
-                    query,
-                    &[SearchField::Title],
-                    SearchStrategy::Server,
-                    None,
-                    false,
-                ).await {
+                if let Ok(_) = service
+                    .search(
+                        query,
+                        &[SearchField::Title],
+                        SearchStrategy::Server,
+                        None,
+                        false,
+                    )
+                    .await
+                {
                     server_success = true;
                 }
             }
-            
+
             if server_success {
                 let server_duration = server_start.elapsed();
-                results.server_baseline_ms = Some((server_duration.as_millis() / test_queries.len() as u128) as u64);
-                
+                results.server_baseline_ms =
+                    Some((server_duration.as_millis() / test_queries.len() as u128) as u64);
+
                 // Estimate network latency (rough approximation)
                 if let Some(client_ms) = results.client_baseline_ms {
                     if let Some(server_ms) = results.server_baseline_ms {
@@ -83,41 +90,44 @@ impl SearchCalibrator {
                 }
             }
         }
-        
+
         // Determine optimal strategy based on calibration
         results.optimal_strategy = Self::determine_optimal_strategy(&results);
         results.calibrated_at = Instant::now();
-        
+
         results
     }
-    
+
     /// Quick network check without full search
     pub async fn check_network_latency(service: &SearchService) -> Option<Duration> {
         if !service.has_network() {
             return None;
         }
-        
+
         let start = Instant::now();
         // Try a minimal server query
-        match service.search(
-            "test",
-            &[SearchField::Title],
-            SearchStrategy::Server,
-            None,
-            false,
-        ).await {
+        match service
+            .search(
+                "test",
+                &[SearchField::Title],
+                SearchStrategy::Server,
+                None,
+                false,
+            )
+            .await
+        {
             Ok(_) => Some(start.elapsed()),
             Err(_) => None,
         }
     }
-    
+
     fn determine_optimal_strategy(results: &CalibrationResults) -> SearchStrategy {
         match (results.client_baseline_ms, results.server_baseline_ms) {
             (Some(client), Some(server)) => {
                 // If server is more than 2x slower, prefer client
                 if server > client * 2 {
                     SearchStrategy::Client
-                } 
+                }
                 // If server is significantly faster, prefer it
                 else if client > server * 2 {
                     SearchStrategy::Server

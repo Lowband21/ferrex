@@ -1,4 +1,7 @@
-use crate::{common::{Icon, icon_text}, domains::ui::theme};
+use crate::{
+    common::{icon_text, Icon},
+    domains::ui::theme,
+};
 use iced::{
     widget::{button, column, container, row, text, Space},
     Element, Length,
@@ -7,7 +10,14 @@ use iced::{
 use crate::domains::ui::messages::Message;
 use crate::infrastructure::api_types::{ScanProgress, ScanStatus};
 
-// Create scan progress overlay
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn create_scan_progress_overlay<'a>(
     content: impl Into<Element<'a, Message>>,
     scan_progress: &Option<ScanProgress>,

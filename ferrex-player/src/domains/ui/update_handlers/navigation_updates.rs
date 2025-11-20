@@ -11,6 +11,14 @@ use ferrex_core::{EpisodeID, SeasonID, SeriesID};
 
 /// Updates background shader depth regions when transitioning to a detail view
 /// This ensures smooth animation from current regions to new regions
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn prepare_depth_regions_for_transition(state: &mut State, new_view: &ViewState) {
     // Update depth regions for the new view BEFORE changing view state
     // This triggers the fade animation between different depth layouts
@@ -27,6 +35,14 @@ fn prepare_depth_regions_for_transition(state: &mut State, new_view: &ViewState)
         );
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_view_details(state: &mut State, media: MediaFile) -> Task<Message> {
     log::info!("Viewing details for: {}", media.display_title());
 
@@ -85,6 +101,14 @@ pub fn handle_view_details(state: &mut State, media: MediaFile) -> Task<Message>
     Task::none()
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_view_movie_details(state: &mut State, movie: MovieReference) -> Task<Message> {
     log::info!(
         "Viewing movie details for: {} (id: {})",
@@ -224,6 +248,14 @@ pub fn handle_view_movie_details(state: &mut State, movie: MovieReference) -> Ta
     fetch_task.map(|_| Message::NoOp)
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Message> {
     log::info!("Viewing TV show: {:?}", series_id);
 
@@ -548,6 +580,14 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
     Task::batch([fetch_task, existing_task])
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_view_season(
     state: &mut State,
     series_id: SeriesID,
@@ -616,7 +656,7 @@ pub fn handle_view_season(
     // Update depth regions for season detail view (uses same regions as movie/series for now)
     // TODO: Add season-specific depth regions in the future
     prepare_depth_regions_for_transition(state, &new_view);
-    
+
     // Change the view state
     state.domains.ui.state.view = new_view;
 
@@ -624,6 +664,14 @@ pub fn handle_view_season(
     fetch_task.map(|_| Message::NoOp)
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Message> {
     log::info!("Viewing episode: {}", episode_id.as_str());
 
@@ -659,7 +707,7 @@ pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Mes
     // Update depth regions for episode detail view (uses same regions as movie/series for now)
     // TODO: Add episode-specific depth regions in the future
     prepare_depth_regions_for_transition(state, &new_view);
-    
+
     // Change the view state
     state.domains.ui.state.view = new_view;
 
@@ -667,6 +715,14 @@ pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Mes
     fetch_task.map(|_| Message::NoOp)
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_navigate_home(state: &mut State) -> Task<Message> {
     state.domains.ui.state.view = ViewState::Library;
 
@@ -680,6 +736,14 @@ pub fn handle_navigate_home(state: &mut State) -> Task<Message> {
     Task::done(Message::AggregateAllLibraries)
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_exit_fullscreen(state: &mut State) -> Task<Message> {
     // Only exit fullscreen if we're actually in fullscreen
     if state.domains.player.state.is_fullscreen {
@@ -691,6 +755,14 @@ pub fn handle_exit_fullscreen(state: &mut State) -> Task<Message> {
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_toggle_backdrop_aspect_mode(state: &mut State) -> Task<Message> {
     // Toggle between Auto and Force21x9 modes
     state
@@ -721,8 +793,14 @@ pub fn handle_toggle_backdrop_aspect_mode(state: &mut State) -> Task<Message> {
     Task::none()
 }
 
-/// Helper function to save current scroll state based on the current view
-/// This efficiently saves scroll positions for library grid views with proper library context
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn save_current_scroll_state(state: &mut State) {
     let current_view = state.domains.ui.state.view.clone();
     let library_id = state.domains.library.state.current_library_id;

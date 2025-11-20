@@ -11,6 +11,14 @@ use crate::domains::ui::types::ViewState;
 use crate::state_refactored::State;
 
 // Helper functions
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn close_video(state: &mut State) {
     if let Some(mut video) = state.domains.player.state.video_opt.take() {
         log::info!("Closing video");
@@ -24,6 +32,14 @@ pub fn close_video(state: &mut State) {
     state.domains.player.state.seeking = false;
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Message> {
     // Check if video is already loaded or loading
     if state.domains.player.state.video_opt.is_some() {

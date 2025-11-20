@@ -3,13 +3,20 @@
 //! Allows users to customize their viewing experience
 
 use crate::domains::ui::messages::Message;
-use crate::state_refactored::State;
 use crate::domains::ui::theme;
+use crate::state_refactored::State;
 use ferrex_core::user::{GridSize, PlaybackQuality, ResumeBehavior};
 use iced::widget::{button, column, container, pick_list, row, slider, text, toggler, Space};
 use iced::{Element, Length};
 
-/// User preferences view
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
     let content = column![
         text("Preferences")

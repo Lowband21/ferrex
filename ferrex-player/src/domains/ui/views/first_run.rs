@@ -22,6 +22,14 @@ pub struct FirstRunState {
 }
 
 /// Render the first-run setup view
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_first_run<'a>(
     state: &'a State,
     setup_state: &'a FirstRunState,

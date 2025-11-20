@@ -6,6 +6,14 @@ use iced::Task;
 use uuid::Uuid;
 
 /// Handles LibrariesLoaded message
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_libraries_loaded(
     state: &mut State,
     result: Result<Vec<Library>, String>,
@@ -15,11 +23,14 @@ pub fn handle_libraries_loaded(
         Ok(libraries) => {
             log::info!("Loaded {} libraries", libraries.len());
             state.domains.library.state.libraries = libraries;
-            
+
             // Register libraries with TabManager for tab creation
             state.update_tab_manager_libraries();
-            log::info!("Registered {} libraries with TabManager", state.domains.library.state.libraries.len());
-            
+            log::info!(
+                "Registered {} libraries with TabManager",
+                state.domains.library.state.libraries.len()
+            );
+
             // Refresh the All tab immediately even if no media is loaded yet
             // This ensures the UI is responsive and shows empty state if needed
             state.tab_manager.refresh_active_tab();

@@ -3,11 +3,22 @@ use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::state_refactored::State;
 use iced::Task;
 
-/// Handle metadata domain messages by routing to appropriate handlers
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResult {
-    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
     profiling::scope!(crate::infrastructure::profiling_scopes::scopes::METADATA_UPDATE);
-    
+
     match message {
         Message::InitializeService => {
             log::info!("Metadata service initialization requested");

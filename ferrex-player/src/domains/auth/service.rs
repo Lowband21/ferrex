@@ -1,35 +1,32 @@
 //! Production AuthService implementation
-//! 
+//!
 //! This is the real authentication service that contains the business logic.
 //! Unlike test mocks, this implements actual requirements.
 
 use crate::domains::auth::errors::{AuthError, AuthResult, DeviceError};
-use ferrex_core::user::{User, UserPreferences};
-use ferrex_core::rbac::{UserPermissions, Role};
-use ferrex_core::auth::device::{DeviceRegistration, Platform};
-use uuid::Uuid;
-use std::sync::Arc;
-use std::collections::HashMap;
-use tokio::sync::RwLock;
 use chrono::Utc;
+use ferrex_core::auth::device::{DeviceRegistration, Platform};
+use ferrex_core::rbac::{Role, UserPermissions};
+use ferrex_core::user::{User, UserPreferences};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use uuid::Uuid;
 
-/// Session token for authenticated users  
 #[derive(Debug, Clone)]
 pub struct SessionToken {
     pub user_id: Uuid,
     pub token: String,
     pub is_admin: bool,
-    pub device_id: Option<String>, // Track which device this session is for
+    pub device_id: Option<String>,
 }
 
-/// User PIN storage
 #[derive(Debug, Clone)]
 struct UserPin {
     user_id: Uuid,
     pin_hash: String, // TODO: Properly hash PINs
 }
 
-/// Track failed authentication attempts for rate limiting
 #[derive(Debug, Clone)]
 struct FailedAttempts {
     user_id: Uuid,
@@ -38,28 +35,20 @@ struct FailedAttempts {
     locked_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-/// Production authentication service
-/// 
-/// This service implements the actual business rules for authentication
-/// and user management as specified in USER_MANAGEMENT_REQUIREMENTS.md
 pub struct AuthService {
-    // We'll use a simple in-memory store for now, but this could be
+    // In-memory store for now, but this could be
     // replaced with a database connection in the future
     users: Arc<RwLock<Vec<User>>>,
     user_pins: Arc<RwLock<Vec<UserPin>>>,
     active_sessions: Arc<RwLock<Vec<SessionToken>>>,
     device_registrations: Arc<RwLock<Vec<DeviceRegistration>>>,
-    
-    // Track if an admin session is currently active (for PIN auth requirement)
-    admin_session_active: Arc<RwLock<Option<Uuid>>>, // Store admin user ID if active
-    
-    // Track failed authentication attempts for rate limiting
+
+    admin_session_active: Arc<RwLock<Option<Uuid>>>,
+
     failed_attempts: Arc<RwLock<Vec<FailedAttempts>>>,
-    
-    // Track auto-login settings per device-user pair
+
     auto_login_enabled: Arc<RwLock<HashMap<(String, Uuid), bool>>>,
-    
-    // Virtual time for testing - defaults to 0 (uses real time)
+
     #[cfg(any(test, feature = "testing"))]
     time_offset: Arc<RwLock<chrono::Duration>>,
 }
@@ -78,21 +67,20 @@ impl AuthService {
             time_offset: Arc::new(RwLock::new(chrono::Duration::zero())),
         }
     }
-    
-    /// Get current time (can be virtual in tests)
+
     async fn now(&self) -> chrono::DateTime<chrono::Utc> {
         #[cfg(any(test, feature = "testing"))]
         {
             let offset = self.time_offset.read().await;
             Utc::now() + *offset
         }
-        
+
         #[cfg(not(any(test, feature = "testing")))]
         {
             Utc::now()
         }
     }
-    
+
     /// Advance virtual time for testing
     #[cfg(any(test, feature = "testing"))]
     pub async fn advance_time(&self, duration: chrono::Duration) {
@@ -100,31 +88,27 @@ impl AuthService {
         *offset = *offset + duration;
     }
 
-    /// Check if this is the first run (no users exist)
+    /// Check if no users exist
     pub async fn is_first_run(&self) -> bool {
         let users = self.users.read().await;
         users.is_empty()
     }
 
-    /// Create a user with the specified credentials
-    /// 
-    /// Business Rule: The first user automatically becomes an admin
-    pub async fn create_user(&self, username: String, password: String) -> AuthResult<Uuid> {
+    // TODO: Why are we ignoring the password?
+    pub async fn create_user(&self, username: String, _password: String) -> AuthResult<Uuid> {
         let mut users = self.users.write().await;
-        
-        // Check if username already exists
+
         if users.iter().any(|u| u.username == username) {
             return Err(AuthError::UserAlreadyExists(username));
         }
 
         let user_id = Uuid::new_v4();
-        let is_first_user = users.is_empty();
+        let _is_first_user = users.is_empty();
 
-        // Create user with default preferences
         let user = User {
             id: user_id,
             username: username.clone(),
-            display_name: username, // Use username as display name initially
+            display_name: username,
             avatar_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -139,11 +123,12 @@ impl AuthService {
     }
 
     /// Get user permissions
-    /// 
+    ///
     /// Business Rule: First user automatically gets admin role
     pub async fn get_user_permissions(&self, user_id: Uuid) -> AuthResult<UserPermissions> {
         let users = self.users.read().await;
-        let _user = users.iter()
+        let _user = users
+            .iter()
             .find(|u| u.id == user_id)
             .ok_or(AuthError::UserNotFound(user_id))?;
 
@@ -160,7 +145,7 @@ impl AuthService {
                 is_system: true,
                 created_at: chrono::Utc::now().timestamp(),
             });
-            
+
             // Add admin permissions
             permissions.insert("user:create".to_string(), true);
             permissions.insert("user:delete".to_string(), true);
@@ -181,9 +166,7 @@ impl AuthService {
     /// Get user by ID
     pub async fn get_user(&self, user_id: Uuid) -> Option<User> {
         let users = self.users.read().await;
-        users.iter()
-            .find(|u| u.id == user_id)
-            .cloned()
+        users.iter().find(|u| u.id == user_id).cloned()
     }
 
     /// Get all users (for testing purposes)
@@ -193,7 +176,7 @@ impl AuthService {
     }
 
     /// Authenticate user and return session token
-    /// 
+    ///
     /// Business Rule: Authentication creates a session for tracking
     /// Admin authentication activates admin session for PIN auth
     /// Business Rule: Account locks after 5 failed attempts
@@ -202,36 +185,36 @@ impl AuthService {
         if self.is_account_locked(user_id).await {
             return Err(AuthError::AccountLocked);
         }
-        
+
         let users = self.users.read().await;
-        let user = users.iter()
-            .find(|u| u.id == user_id)
-            .ok_or_else(|| {
-                // Record failed attempt for unknown user (just return error)
-                AuthError::UserNotFound(user_id)
-            })?;
+        let user = users.iter().find(|u| u.id == user_id).ok_or_else(|| {
+            // Record failed attempt for unknown user (just return error)
+            AuthError::UserNotFound(user_id)
+        })?;
 
         // TODO: Properly verify password hash
         // For now, we just check if the password matches what we stored
         // In real implementation, this would verify against hashed password
-        
+
         // For testing: password should match username + "_pass" or various test patterns
-        let is_valid_password = password == format!("{}_pass", user.username) || 
-                                password.starts_with("password") ||
-                                password == "correct_password" ||
-                                password.starts_with("pass");  // Allow "pass1", "pass2", etc.
-        
+        let is_valid_password = password == format!("{}_pass", user.username)
+            || password.starts_with("password")
+            || password == "correct_password"
+            || password.starts_with("pass"); // Allow "pass1", "pass2", etc.
+
         if !is_valid_password {
             // Record failed attempt
             self.record_failed_attempt(user_id).await;
             return Err(AuthError::Internal("Invalid password".to_string()));
         }
-        
+
         // Clear failed attempts on successful authentication
         self.clear_failed_attempts(user_id).await;
 
         // Check if this user is admin - first user is always admin
-        let user_index = users.iter().position(|u| u.id == user_id)
+        let user_index = users
+            .iter()
+            .position(|u| u.id == user_id)
             .ok_or(AuthError::UserNotFound(user_id))?;
         let is_admin = user_index == 0; // First user (index 0) is admin
 
@@ -245,7 +228,7 @@ impl AuthService {
         // Store the session
         let mut sessions = self.active_sessions.write().await;
         sessions.push(session.clone());
-        
+
         // If admin authenticated, mark admin session as active
         if is_admin {
             let mut admin_active = self.admin_session_active.write().await;
@@ -256,44 +239,49 @@ impl AuthService {
     }
 
     /// Authenticate user with device tracking
-    /// 
+    ///
     /// Business Rule: Track device for auto-login and session management
     /// Business Rule: Another user logging in on same device disables auto-login for previous users
     /// Business Rule: Account locks after 5 failed attempts
-    pub async fn authenticate_with_device(&self, user_id: Uuid, password: String, device_id: String) -> AuthResult<SessionToken> {
+    pub async fn authenticate_with_device(
+        &self,
+        user_id: Uuid,
+        password: String,
+        device_id: String,
+    ) -> AuthResult<SessionToken> {
         // Check if account is locked
         if self.is_account_locked(user_id).await {
             return Err(AuthError::AccountLocked);
         }
-        
+
         let users = self.users.read().await;
-        let user = users.iter()
-            .find(|u| u.id == user_id)
-            .ok_or_else(|| {
-                // Record failed attempt for unknown user (just return error)
-                AuthError::UserNotFound(user_id)
-            })?;
+        let user = users.iter().find(|u| u.id == user_id).ok_or_else(|| {
+            // Record failed attempt for unknown user (just return error)
+            AuthError::UserNotFound(user_id)
+        })?;
 
         // TODO: Properly verify password hash
         // For now, we just check if the password matches what we stored
-        
+
         // For testing: password should match username + "_pass" or various test patterns
-        let is_valid_password = password == format!("{}_pass", user.username) || 
-                                password.starts_with("password") ||
-                                password == "correct_password" ||
-                                password.starts_with("pass");  // Allow "pass1", "pass2", etc.
-        
+        let is_valid_password = password == format!("{}_pass", user.username)
+            || password.starts_with("password")
+            || password == "correct_password"
+            || password.starts_with("pass"); // Allow "pass1", "pass2", etc.
+
         if !is_valid_password {
             // Record failed attempt
             self.record_failed_attempt(user_id).await;
             return Err(AuthError::Internal("Invalid password".to_string()));
         }
-        
+
         // Clear failed attempts on successful authentication
         self.clear_failed_attempts(user_id).await;
 
         // Check if this user is admin - first user is always admin
-        let user_index = users.iter().position(|u| u.id == user_id)
+        let user_index = users
+            .iter()
+            .position(|u| u.id == user_id)
             .ok_or(AuthError::UserNotFound(user_id))?;
         let is_admin = user_index == 0; // First user (index 0) is admin
 
@@ -305,7 +293,7 @@ impl AuthService {
                 .filter(|((dev, uid), _)| dev == &device_id && *uid != user_id)
                 .map(|((dev, uid), _)| (dev.clone(), *uid))
                 .collect();
-            
+
             for key in keys_to_remove {
                 auto_login.remove(&key);
             }
@@ -321,7 +309,7 @@ impl AuthService {
         // Store the session
         let mut sessions = self.active_sessions.write().await;
         sessions.push(session.clone());
-        
+
         // If admin authenticated, mark admin session as active
         if is_admin {
             let mut admin_active = self.admin_session_active.write().await;
@@ -332,73 +320,86 @@ impl AuthService {
     }
 
     /// Enable auto-login for a user on a specific device
-    /// 
+    ///
     /// Business Rule: Auto-login must be explicitly enabled per device
     pub async fn enable_auto_login(&self, user_id: Uuid, device_id: String) -> AuthResult<()> {
         // Verify user exists
         let users = self.users.read().await;
-        let _ = users.iter()
+        let _ = users
+            .iter()
             .find(|u| u.id == user_id)
             .ok_or(AuthError::UserNotFound(user_id))?;
-        
+
         // Enable auto-login for this device-user pair
         let mut auto_login = self.auto_login_enabled.write().await;
         auto_login.insert((device_id, user_id), true);
-        
+
         Ok(())
     }
 
     /// Attempt auto-login for a device
-    /// 
+    ///
     /// Business Rule: Auto-login works only if explicitly enabled for device-user pair
     pub async fn attempt_auto_login(&self, device_id: String) -> AuthResult<SessionToken> {
         let auto_login = self.auto_login_enabled.read().await;
-        
+
         // Find any user with auto-login enabled for this device
-        let user_id = auto_login.iter()
+        let user_id = auto_login
+            .iter()
             .find(|((dev, _), enabled)| dev == &device_id && **enabled)
             .map(|((_, user_id), _)| *user_id)
             .ok_or(AuthError::AutoLoginNotEnabled)?;
-        
+
         // Create session without password verification
         let users = self.users.read().await;
-        let user_index = users.iter().position(|u| u.id == user_id)
+        let user_index = users
+            .iter()
+            .position(|u| u.id == user_id)
             .ok_or(AuthError::UserNotFound(user_id))?;
         let is_admin = user_index == 0;
-        
+
         let session = SessionToken {
             user_id,
             token: format!("session_{}", Uuid::new_v4()),
             is_admin,
             device_id: Some(device_id),
         };
-        
+
         // Store the session
         let mut sessions = self.active_sessions.write().await;
         sessions.push(session.clone());
-        
+
         // If admin authenticated, mark admin session as active
         if is_admin {
             let mut admin_active = self.admin_session_active.write().await;
             *admin_active = Some(user_id);
         }
-        
+
         Ok(session)
     }
 
     /// Check if auto-login is enabled for a user on a specific device
     pub async fn is_auto_login_enabled(&self, user_id: Uuid, device_id: String) -> bool {
         let auto_login = self.auto_login_enabled.read().await;
-        auto_login.get(&(device_id, user_id)).copied().unwrap_or(false)
+        auto_login
+            .get(&(device_id, user_id))
+            .copied()
+            .unwrap_or(false)
     }
 
     /// Setup PIN for user
-    /// 
+    ///
     /// Business Rule: PIN setup requires admin session (except for admins themselves)
-    pub async fn setup_pin(&self, user_id: Uuid, pin: String, admin_session: Option<SessionToken>) -> AuthResult<()> {
+    pub async fn setup_pin(
+        &self,
+        user_id: Uuid,
+        pin: String,
+        admin_session: Option<SessionToken>,
+    ) -> AuthResult<()> {
         // Check if user exists
         let users = self.users.read().await;
-        let _user = users.iter()
+        let _user = users
+            .iter()
             .find(|u| u.id == user_id)
             .ok_or(AuthError::UserNotFound(user_id))?;
 
@@ -407,10 +408,14 @@ impl AuthService {
 
         // Business Rule: PIN setup requires admin session unless user is admin themselves
         if !is_first_user {
-            let admin_session = admin_session.ok_or(AuthError::Permission("PIN setup requires admin session".to_string()))?;
-            
+            let admin_session = admin_session.ok_or(AuthError::Permission(
+                "PIN setup requires admin session".to_string(),
+            ))?;
+
             if !admin_session.is_admin {
-                return Err(AuthError::Permission("Only admin can setup PINs for other users".to_string()));
+                return Err(AuthError::Permission(
+                    "Only admin can setup PINs for other users".to_string(),
+                ));
             }
         }
 
@@ -427,14 +432,14 @@ impl AuthService {
 
         Ok(())
     }
-    
+
     // Device trust methods
-    
+
     /// Trust a device for a user (30-day default expiry per requirements)
     pub async fn trust_device(&self, user_id: Uuid, device_id: String) -> AuthResult<()> {
         let mut registrations = self.device_registrations.write().await;
         let now = self.now().await;
-        
+
         // Create a device registration with 30-day expiry
         let registration = DeviceRegistration {
             id: Uuid::new_v4(),
@@ -452,51 +457,59 @@ impl AuthService {
             revoked_by: None,
             revoked_at: None,
         };
-        
+
         registrations.push(registration);
         Ok(())
     }
-    
+
     /// Check if a device is trusted for a user
     pub async fn is_device_trusted(&self, user_id: Uuid, device_id: &str) -> bool {
         let registrations = self.device_registrations.read().await;
         let now = self.now().await;
-        
+
         // Find a valid registration for this user and device
         registrations.iter().any(|reg| {
-            reg.user_id == user_id 
-            && reg.device_name == device_id 
-            && !reg.revoked
-            && reg.expires_at.map_or(true, |exp| exp > now)  // Check expiry against virtual time
+            reg.user_id == user_id
+                && reg.device_name == device_id
+                && !reg.revoked
+                && reg.expires_at.map_or(true, |exp| exp > now) // Check expiry against virtual time
         })
     }
-    
+
     /// Authenticate user with password (device-aware)
-    /// 
+    ///
     /// Business Rule: Password authentication always works regardless of device trust
     /// Business Rule: Password auth works even during PIN lockout (fallback)
-    pub async fn authenticate_with_password(&self, user_id: Uuid, password: String, device_id: String) -> AuthResult<SessionToken> {
+    pub async fn authenticate_with_password(
+        &self,
+        user_id: Uuid,
+        password: String,
+        device_id: String,
+    ) -> AuthResult<SessionToken> {
         // Don't check account lock status - password is the fallback mechanism
         let users = self.users.read().await;
-        let user = users.iter()
+        let user = users
+            .iter()
             .find(|u| u.id == user_id)
             .ok_or(AuthError::UserNotFound(user_id))?;
 
         // For testing: password should match username + "_pass" or various test patterns
-        let is_valid_password = password == format!("{}_pass", user.username) || 
-                                password.starts_with("password") ||
-                                password == "correct_password" ||
-                                password.starts_with("pass");  // Allow "pass1", "pass2", etc.
-        
+        let is_valid_password = password == format!("{}_pass", user.username)
+            || password.starts_with("password")
+            || password == "correct_password"
+            || password.starts_with("pass"); // Allow "pass1", "pass2", etc.
+
         if !is_valid_password {
             return Err(AuthError::Internal("Invalid password".to_string()));
         }
-        
+
         // Clear failed attempts on successful password authentication
         self.clear_failed_attempts(user_id).await;
 
         // Check if this user is admin - first user is always admin
-        let user_index = users.iter().position(|u| u.id == user_id)
+        let user_index = users
+            .iter()
+            .position(|u| u.id == user_id)
             .ok_or(AuthError::UserNotFound(user_id))?;
         let is_admin = user_index == 0;
 
@@ -510,7 +523,7 @@ impl AuthService {
         // Store the session
         let mut sessions = self.active_sessions.write().await;
         sessions.push(session.clone());
-        
+
         // If admin authenticated, mark admin session as active
         if is_admin {
             let mut admin_active = self.admin_session_active.write().await;
@@ -519,31 +532,38 @@ impl AuthService {
 
         Ok(session)
     }
-    
+
     /// Authenticate user with PIN
-    /// 
+    ///
     /// Business Rules:
     /// - Admin users CANNOT use PIN on untrusted devices (security requirement)
     /// - Standard users can only use PIN if admin session is active
     /// - PIN must be previously configured
     /// - Rate limiting with lockout after multiple failed attempts
-    pub async fn authenticate_with_pin(&self, user_id: Uuid, pin: String, device_id: String) -> AuthResult<SessionToken> {
+    pub async fn authenticate_with_pin(
+        &self,
+        user_id: Uuid,
+        pin: String,
+        device_id: String,
+    ) -> AuthResult<SessionToken> {
         // Check if account is locked
         if self.is_account_locked(user_id).await {
             return Err(AuthError::AccountLocked);
         }
-        
+
         // Check if user exists
         let users = self.users.read().await;
-        let user_index = users.iter().position(|u| u.id == user_id)
+        let user_index = users
+            .iter()
+            .position(|u| u.id == user_id)
             .ok_or(AuthError::UserNotFound(user_id))?;
         let is_admin = user_index == 0; // First user is admin
-        
+
         // Critical security check: Admin cannot use PIN on untrusted device
         if is_admin && !self.is_device_trusted(user_id, &device_id).await {
             return Err(AuthError::AdminRequiresPassword);
         }
-        
+
         // Standard users need active admin session for PIN auth
         if !is_admin {
             let admin_active = self.admin_session_active.read().await;
@@ -551,23 +571,24 @@ impl AuthService {
                 return Err(AuthError::AdminSessionRequired);
             }
         }
-        
+
         // Check if PIN is set and verify it
         let pins = self.user_pins.read().await;
-        let user_pin = pins.iter()
+        let user_pin = pins
+            .iter()
             .find(|p| p.user_id == user_id)
             .ok_or(AuthError::PinNotSet)?;
-        
+
         // Verify PIN (TODO: This should compare hashes, not plain text)
         if user_pin.pin_hash != pin {
             // Record failed attempt
             self.record_failed_attempt(user_id).await;
             return Err(AuthError::IncorrectPin);
         }
-        
+
         // Clear failed attempts on successful authentication
         self.clear_failed_attempts(user_id).await;
-        
+
         // Create session
         let session = SessionToken {
             user_id,
@@ -575,23 +596,29 @@ impl AuthService {
             is_admin,
             device_id: Some(device_id), // Store device for this session
         };
-        
+
         // Store the session
         let mut sessions = self.active_sessions.write().await;
         sessions.push(session.clone());
-        
+
         Ok(session)
     }
-    
+
     /// Revoke device trust
-    /// 
+    ///
     /// Business Rule: Only admin can revoke device trust
-    pub async fn revoke_device(&self, device_id: String, admin_session: SessionToken) -> AuthResult<()> {
+    pub async fn revoke_device(
+        &self,
+        device_id: String,
+        admin_session: SessionToken,
+    ) -> AuthResult<()> {
         // Verify admin session
         if !admin_session.is_admin {
-            return Err(AuthError::Permission("Only admin can revoke devices".to_string()));
+            return Err(AuthError::Permission(
+                "Only admin can revoke devices".to_string(),
+            ));
         }
-        
+
         // Find and revoke the device
         let mut registrations = self.device_registrations.write().await;
         for reg in registrations.iter_mut() {
@@ -602,57 +629,58 @@ impl AuthService {
                 return Ok(());
             }
         }
-        
+
         Err(AuthError::Device(DeviceError::NotRegistered))
     }
-    
+
     /// Clear admin session (for testing PIN auth requirements)
     pub async fn clear_admin_session(&self) {
         let mut admin_active = self.admin_session_active.write().await;
         *admin_active = None;
     }
-    
+
     /// Set admin session as active (for testing)
     pub async fn set_admin_session_active(&self, admin_id: Uuid) {
         let mut admin_active = self.admin_session_active.write().await;
         *admin_active = Some(admin_id);
     }
-    
+
     /// Check if admin session is active
     pub async fn is_admin_session_active(&self) -> bool {
         let admin_active = self.admin_session_active.read().await;
         admin_active.is_some()
     }
-    
+
     /// Check if a session is valid
     pub async fn is_session_valid(&self, session: &SessionToken) -> bool {
         let sessions = self.active_sessions.read().await;
         sessions.iter().any(|s| s.token == session.token)
     }
-    
+
     /// Count active sessions for a user
     pub async fn count_active_sessions(&self, user_id: Uuid) -> usize {
         let sessions = self.active_sessions.read().await;
         sessions.iter().filter(|s| s.user_id == user_id).count()
     }
-    
+
     /// Get all active sessions for a user
     pub async fn get_user_sessions(&self, user_id: Uuid) -> Vec<SessionToken> {
         let sessions = self.active_sessions.read().await;
-        sessions.iter()
+        sessions
+            .iter()
             .filter(|s| s.user_id == user_id)
             .cloned()
             .collect()
     }
-    
+
     /// End a session
-    /// 
+    ///
     /// Business Rule: Normal logout (app closure) keeps auto-login enabled
     /// Use logout_manual() for explicit user logout that disables auto-login
     pub async fn logout(&self, session: SessionToken) -> AuthResult<()> {
         let mut sessions = self.active_sessions.write().await;
         sessions.retain(|s| s.token != session.token);
-        
+
         // If this was an admin session, clear admin session active
         if session.is_admin {
             let mut admin_active = self.admin_session_active.write().await;
@@ -660,43 +688,45 @@ impl AuthService {
                 *admin_active = None;
             }
         }
-        
+
         // Note: Auto-login is NOT disabled on normal logout (app closure)
         // Only manual/explicit logout disables auto-login
-        
+
         Ok(())
     }
-    
+
     /// Manual logout - user explicitly chooses to logout
-    /// 
+    ///
     /// Business Rule: Manual logout disables auto-login for the device
     pub async fn logout_manual(&self, session: SessionToken) -> AuthResult<()> {
         // First do normal logout
         self.logout(session.clone()).await?;
-        
+
         // Then disable auto-login for this device-user pair
         if let Some(device_id) = session.device_id {
             let mut auto_login = self.auto_login_enabled.write().await;
             auto_login.remove(&(device_id, session.user_id));
         }
-        
+
         Ok(())
     }
-    
+
     /// Get the device associated with a session
     pub async fn get_session_device(&self, session: &SessionToken) -> Option<String> {
         let sessions = self.active_sessions.read().await;
-        sessions.iter()
+        sessions
+            .iter()
             .find(|s| s.token == session.token)
             .and_then(|s| s.device_id.clone())
     }
-    
+
     /// Check if an account is locked due to failed attempts
     pub async fn is_account_locked(&self, user_id: Uuid) -> bool {
         let attempts = self.failed_attempts.read().await;
         let now = self.now().await;
-        
-        attempts.iter()
+
+        attempts
+            .iter()
             .find(|a| a.user_id == user_id)
             .map(|a| {
                 // Check if account is locked and lockout hasn't expired
@@ -704,12 +734,12 @@ impl AuthService {
             })
             .unwrap_or(false)
     }
-    
+
     /// Record a failed authentication attempt
     async fn record_failed_attempt(&self, user_id: Uuid) {
         let mut attempts = self.failed_attempts.write().await;
         let now = self.now().await;
-        
+
         // Find or create the user's attempt record
         if let Some(attempt) = attempts.iter_mut().find(|a| a.user_id == user_id) {
             // Reset count if last attempt was more than 5 minutes ago
@@ -720,7 +750,7 @@ impl AuthService {
             } else {
                 attempt.count += 1;
                 attempt.last_attempt = now;
-                
+
                 // Lock account after 5 failed attempts (for 5 minutes)
                 if attempt.count >= 5 {
                     attempt.locked_until = Some(now + chrono::Duration::minutes(5));
@@ -736,7 +766,7 @@ impl AuthService {
             });
         }
     }
-    
+
     /// Clear failed attempts on successful authentication
     async fn clear_failed_attempts(&self, user_id: Uuid) {
         let mut attempts = self.failed_attempts.write().await;
@@ -744,7 +774,7 @@ impl AuthService {
     }
 
     /// Delete a user (admin only)
-    /// 
+    ///
     /// Business Rules:
     /// - Only admins can delete users
     /// - Deleting a user invalidates all their sessions
@@ -755,14 +785,14 @@ impl AuthService {
         if !admin_session.is_admin {
             return Err(AuthError::InsufficientPermissions);
         }
-        
+
         // Verify the admin session is valid
         let sessions = self.active_sessions.read().await;
         if !sessions.iter().any(|s| s.token == admin_session.token) {
             return Err(AuthError::NotAuthenticated);
         }
         drop(sessions);
-        
+
         // Remove the user
         let mut users = self.users.write().await;
         let user_exists = users.iter().any(|u| u.id == user_id);
@@ -771,17 +801,17 @@ impl AuthService {
         }
         users.retain(|u| u.id != user_id);
         drop(users);
-        
+
         // Invalidate all sessions for this user
         let mut sessions = self.active_sessions.write().await;
         sessions.retain(|s| s.user_id != user_id);
         drop(sessions);
-        
+
         // Remove all trusted devices for this user
         let mut devices = self.device_registrations.write().await;
         devices.retain(|d| d.user_id != user_id);
         drop(devices);
-        
+
         // Remove all auto-login settings for this user
         let mut auto_login = self.auto_login_enabled.write().await;
         let keys_to_remove: Vec<(String, Uuid)> = auto_login
@@ -789,21 +819,21 @@ impl AuthService {
             .filter(|((_, uid), _)| *uid == user_id)
             .map(|((dev, uid), _)| (dev.clone(), *uid))
             .collect();
-        
+
         for key in keys_to_remove {
             auto_login.remove(&key);
         }
         drop(auto_login);
-        
+
         // Remove user PINs
         let mut pins = self.user_pins.write().await;
         pins.retain(|p| p.user_id != user_id);
         drop(pins);
-        
+
         // Remove failed attempts
         let mut attempts = self.failed_attempts.write().await;
         attempts.retain(|a| a.user_id != user_id);
-        
+
         Ok(())
     }
 }

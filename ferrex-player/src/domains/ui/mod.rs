@@ -17,8 +17,8 @@ pub mod views;
 pub mod widgets;
 // pub mod shaders; // Removed - shaders are part of widgets module
 
-use self::views::carousel::CarouselState;
 pub use self::types::{SortBy, SortOrder};
+use self::views::carousel::CarouselState;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::domains::ui::background_state::BackgroundShaderState;
 use crate::domains::ui::messages::Message as UIMessage;
@@ -43,17 +43,15 @@ pub struct UIDomainState {
     pub window_size: iced::Size,
     pub expanded_shows: HashSet<String>,
     pub hovered_media_id: Option<String>,
-    
+
     // Library filtering
     pub current_library_id: Option<Uuid>,
 
     // Scroll-related state
-    pub scroll_velocity: f32,
     pub last_scroll_position: f32,
-    pub scroll_samples: VecDeque<(Instant, f32)>,
-    pub fast_scrolling: bool,
     pub scroll_stopped_time: Option<Instant>,
     pub last_scroll_time: Option<Instant>,
+    pub last_check_task_created: Option<Instant>, // Rate-limit CheckScrollStopped task creation
     pub scroll_manager: ScrollPositionManager,
 
     // Background and visual state
@@ -90,12 +88,10 @@ impl Default for UIDomainState {
             expanded_shows: HashSet::new(),
             hovered_media_id: None,
             current_library_id: None,
-            scroll_velocity: 0.0,
             last_scroll_position: 0.0,
-            scroll_samples: VecDeque::new(),
-            fast_scrolling: false,
             scroll_stopped_time: None,
             last_scroll_time: None,
+            last_check_task_created: None,
             scroll_manager: ScrollPositionManager::new(),
             background_shader_state: BackgroundShaderState::default(),
             search_query: String::new(),
@@ -110,15 +106,21 @@ impl Default for UIDomainState {
     }
 }
 
-impl UIDomainState {
-
-}
+impl UIDomainState {}
 
 #[derive(Debug)]
 pub struct UIDomain {
     pub state: UIDomainState,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl UIDomain {
     pub fn new(state: UIDomainState) -> Self {
         Self { state }
@@ -134,7 +136,10 @@ impl UIDomain {
     pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
         match event {
             CrossDomainEvent::LibraryChanged(library_id) => {
-                log::info!("UI domain handling LibraryChanged event for library {}", library_id);
+                log::info!(
+                    "UI domain handling LibraryChanged event for library {}",
+                    library_id
+                );
                 // Store the library ID in UI domain state
                 self.state.current_library_id = Some(*library_id);
                 // Library has been selected - now switch to Library display mode
@@ -162,19 +167,23 @@ impl UIDomain {
             }
             CrossDomainEvent::RequestViewModelRefresh => {
                 // Refresh all ViewModels when media has been loaded
-                log::info!("UI domain received RequestViewModelRefresh event - display_mode: {:?}, current_library_id: {:?}", 
+                log::info!("UI domain received RequestViewModelRefresh event - display_mode: {:?}, current_library_id: {:?}",
                     self.state.display_mode, self.state.current_library_id);
-                    
+
                 // Ensure we're in a valid display mode
                 if matches!(self.state.display_mode, DisplayMode::Curated) {
                     // Good - show all libraries
                     log::info!("UI: In Curated mode - will show all libraries");
-                } else if matches!(self.state.display_mode, DisplayMode::Library) && self.state.current_library_id.is_none() {
+                } else if matches!(self.state.display_mode, DisplayMode::Library)
+                    && self.state.current_library_id.is_none()
+                {
                     // Bad state - Library mode but no library selected
-                    log::warn!("UI: In Library mode but no library selected - switching to Curated");
+                    log::warn!(
+                        "UI: In Library mode but no library selected - switching to Curated"
+                    );
                     self.state.display_mode = DisplayMode::Curated;
                 }
-                
+
                 Task::done(DomainMessage::Ui(UIMessage::RefreshViewModels))
             }
             _ => Task::none(),

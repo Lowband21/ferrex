@@ -79,6 +79,14 @@ pub struct MediaStoreNotifier {
     debounce_ms: u64,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl MediaStoreNotifier {
     /// Create a new notifier with default 100ms debounce
     pub fn new() -> Self {
@@ -681,9 +689,13 @@ impl MediaStore {
 
     /// Update the sorted movie indices based on current sort criteria
     pub fn update_sorted_movie_ids(&mut self) {
-        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        #[cfg(any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ))]
         profiling::scope!("MediaStore::update_sorted_movie_ids");
-        
+
         use ferrex_core::query::sorting::strategy::FieldSort;
 
         // Get all movie IDs without cloning the HashSet
@@ -798,9 +810,13 @@ impl MediaStore {
 
     /// Update the sorted series indices based on current sort criteria
     pub fn update_sorted_series_ids(&mut self) {
-        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        #[cfg(any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ))]
         profiling::scope!("MediaStore::update_sorted_series_ids");
-        
+
         use ferrex_core::query::sorting::strategy::FieldSort;
 
         // Get all series IDs without cloning the HashSet
@@ -909,9 +925,13 @@ impl MediaStore {
 
     /// Get all movies, optionally filtered by library
     pub fn get_movies(&self, library_id: Option<Uuid>) -> Vec<&MovieReference> {
-        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        #[cfg(any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ))]
         profiling::scope!("MediaStore::get_movies");
-        
+
         // Use sorted indices for predictable order
         match library_id {
             Some(lib_id) => {
@@ -938,9 +958,13 @@ impl MediaStore {
 
     /// Get all series, optionally filtered by library
     pub fn get_series(&self, library_id: Option<Uuid>) -> Vec<&SeriesReference> {
-        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        #[cfg(any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ))]
         profiling::scope!("MediaStore::get_series");
-        
+
         // Use sorted indices for predictable order
         match library_id {
             Some(lib_id) => {

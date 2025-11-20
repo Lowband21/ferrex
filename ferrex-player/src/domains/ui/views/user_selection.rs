@@ -16,6 +16,14 @@ pub struct UserSelectionView {
     error: Option<String>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl UserSelectionView {
     /// Create a new user selection view
     pub fn new() -> Self {

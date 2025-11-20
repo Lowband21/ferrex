@@ -6,6 +6,7 @@
 pub mod common;
 pub mod domains;
 pub mod infrastructure;
+//pub mod rendering;
 pub mod state_refactored;
 pub mod subscriptions;
 pub mod update;

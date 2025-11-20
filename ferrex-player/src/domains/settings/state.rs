@@ -126,6 +126,14 @@ impl Default for SecurityState {
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl SecurityState {
     /// Clear all sensitive data
     pub fn clear_sensitive_data(&mut self) {
@@ -144,6 +152,14 @@ impl SecurityState {
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl PasswordChangeState {
     pub fn new() -> Self {
         Self {
@@ -187,6 +203,14 @@ impl PasswordChangeState {
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl PinChangeState {
     pub fn new(is_new_pin: bool) -> Self {
         Self {

@@ -1,8 +1,6 @@
-use crate::common::messages::CrossDomainEvent;
 use crate::domains::auth::manager::DeviceAuthStatus;
 use crate::domains::auth::messages as auth;
 use crate::domains::auth::security::secure_credential::SecureCredential;
-use crate::domains::auth::state_types::AuthState;
 use crate::domains::metadata::batch_fetcher;
 use crate::infrastructure::services::api::ApiService;
 use crate::state_refactored::State;
@@ -324,15 +322,6 @@ pub fn handle_login_success(
     )
 }
 
-/// Handle login error
-pub fn handle_login_error(state: &mut State, error: String) -> Task<auth::Message> {
-    log::error!("Login failed: {}", error);
-
-    // This is now handled by the AuthFlow handlers
-    // Legacy login error handling - can be removed once all views are migrated
-    Task::none()
-}
-
 /// Handle back to user selection
 pub fn handle_back_to_user_selection(state: &mut State) -> Task<auth::Message> {
     use crate::domains::auth::types::AuthenticationFlow;
@@ -646,7 +635,9 @@ pub fn handle_watch_status_loaded(
         state.batch_metadata_fetcher = Some(batch_fetcher);
         log::info!("[BatchMetadataFetcher] Initialized ONCE after auth flow completed");
     } else {
-        log::warn!("[BatchMetadataFetcher] Already initialized - preventing duplicate initialization");
+        log::warn!(
+            "[BatchMetadataFetcher] Already initialized - preventing duplicate initialization"
+        );
     }
 
     // Authentication flow is complete

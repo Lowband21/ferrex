@@ -57,6 +57,14 @@ impl Default for BackgroundShaderState {
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl BackgroundShaderState {
     /// Updates depth regions based on the current view and window size
     pub fn update_depth_lines(
@@ -110,7 +118,7 @@ impl BackgroundShaderState {
                 // If we have a specific library selected (not "All" view), add a region for the controls bar
                 let content_start = if current_library_id.is_some() {
                     let controls_height = header_height; // Controls bar is same height as header
-                    
+
                     // Controls bar region (slightly less sunken than header)
                     self.depth_layout.regions.push(DepthRegion {
                         bounds: iced::Rectangle {
@@ -131,7 +139,7 @@ impl BackgroundShaderState {
                             opacity: 1.0,
                         }),
                     });
-                    
+
                     header_height + controls_height
                 } else {
                     header_height
@@ -154,7 +162,10 @@ impl BackgroundShaderState {
                     border: None,
                 });
 
-                log::debug!("Added library regions with controls: {}", current_library_id.is_some());
+                log::debug!(
+                    "Added library regions with controls: {}",
+                    current_library_id.is_some()
+                );
             }
             ViewState::MovieDetail { .. }
             | ViewState::TvShowDetail { .. }
@@ -289,7 +300,7 @@ impl BackgroundShaderState {
             }
         }
     }
-    
+
     /// Reset colors to library view defaults with smooth transition
     pub fn reset_to_library_colors(&mut self) {
         use crate::domains::ui::theme::MediaServerTheme;
@@ -298,16 +309,16 @@ impl BackgroundShaderState {
             MediaServerTheme::LIBRARY_BG_SECONDARY,
         );
     }
-    
+
     /// Reset colors to specific view defaults
     pub fn reset_to_view_colors(&mut self, view: &super::types::ViewState) {
         use crate::domains::ui::theme::MediaServerTheme;
-        
+
         match view {
-            super::types::ViewState::Library |
-            super::types::ViewState::LibraryManagement |
-            super::types::ViewState::AdminDashboard |
-            super::types::ViewState::UserSettings => {
+            super::types::ViewState::Library
+            | super::types::ViewState::LibraryManagement
+            | super::types::ViewState::AdminDashboard
+            | super::types::ViewState::UserSettings => {
                 // All these views use library default colors
                 self.reset_to_library_colors();
             }

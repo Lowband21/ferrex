@@ -15,6 +15,14 @@ use iced::{
 };
 
 /// Shows the credential entry screen (password or PIN)
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_credential_entry<'a>(
     user: &'a User,
     input_type: &'a CredentialType,

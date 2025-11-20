@@ -2,8 +2,8 @@
 //!
 //! Contains all metadata-related state and logic moved from the monolithic State
 
-pub mod batch_fetcher;
 pub mod batch_fetch_helper;
+pub mod batch_fetcher;
 pub mod image_pipeline;
 pub mod image_service;
 pub mod image_types;
@@ -47,6 +47,14 @@ pub struct MetadataDomainState {
     pub api_service: Option<Arc<ApiClientAdapter>>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl MetadataDomainState {
     pub fn new(
         server_url: String,
@@ -71,9 +79,13 @@ impl MetadataDomainState {
         library_id: Uuid,
         media_id: MediaId,
     ) -> Task<DomainMessage> {
-        #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+        #[cfg(any(
+            feature = "profile-with-puffin",
+            feature = "profile-with-tracy",
+            feature = "profile-with-tracing"
+        ))]
         profiling::scope!(crate::infrastructure::profiling_scopes::scopes::METADATA_FETCH);
-        
+
         // Check if the media already has details in MediaStore
         if let Ok(store) = self.media_store.read() {
             if let Some(media_ref) = store.get(&media_id) {
@@ -125,6 +137,14 @@ pub struct MetadataDomain {
     pub state: MetadataDomainState,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl MetadataDomain {
     pub fn new(state: MetadataDomainState) -> Self {
         Self { state }

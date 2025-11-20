@@ -136,7 +136,14 @@ pub fn position_badge(
         .into()
 }
 
-/// Create an animated entrance for cards
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn entrance_animation(
     content: Element<'static, Message>,
     animation_type: types::AnimationType,

@@ -1,7 +1,9 @@
 use crate::domains::media::store::MediaStore;
+use crate::infrastructure::api_types::{
+    EpisodeReference, MovieReference, SeasonReference, SeriesReference,
+};
 use crate::infrastructure::api_types::{MediaId, MediaReference};
-use crate::infrastructure::api_types::{MovieReference, SeriesReference, SeasonReference, EpisodeReference};
-use ferrex_core::media::{SeriesID, MovieID, SeasonID, EpisodeID};
+use ferrex_core::media::{EpisodeID, MovieID, SeasonID, SeriesID};
 use std::sync::{Arc, RwLock as StdRwLock};
 use uuid::Uuid;
 
@@ -11,6 +13,14 @@ pub struct MediaQueryService {
     media_store: Arc<StdRwLock<MediaStore>>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl MediaQueryService {
     pub fn new(media_store: Arc<StdRwLock<MediaStore>>) -> Self {
         Self { media_store }
@@ -28,8 +38,8 @@ impl MediaQueryService {
     /// Check if a specific library has media
     pub fn has_media_in_library(&self, library_id: Uuid) -> bool {
         if let Ok(store) = self.media_store.read() {
-            !store.get_movies(Some(library_id)).is_empty() || 
-            !store.get_series(Some(library_id)).is_empty()
+            !store.get_movies(Some(library_id)).is_empty()
+                || !store.get_series(Some(library_id)).is_empty()
         } else {
             false
         }
@@ -38,8 +48,9 @@ impl MediaQueryService {
     /// Get a series by ID
     pub fn get_series(&self, series_id: &SeriesID) -> Option<SeriesReference> {
         if let Ok(store) = self.media_store.read() {
-            if let Some(MediaReference::Series(series)) = 
-                store.get(&MediaId::Series(series_id.clone())) {
+            if let Some(MediaReference::Series(series)) =
+                store.get(&MediaId::Series(series_id.clone()))
+            {
                 Some(series.clone())
             } else {
                 None
@@ -52,8 +63,8 @@ impl MediaQueryService {
     /// Get a movie by ID
     pub fn get_movie(&self, movie_id: &MovieID) -> Option<MovieReference> {
         if let Ok(store) = self.media_store.read() {
-            if let Some(MediaReference::Movie(movie)) = 
-                store.get(&MediaId::Movie(movie_id.clone())) {
+            if let Some(MediaReference::Movie(movie)) = store.get(&MediaId::Movie(movie_id.clone()))
+            {
                 Some(movie.clone())
             } else {
                 None
@@ -66,8 +77,9 @@ impl MediaQueryService {
     /// Get a season by ID
     pub fn get_season(&self, season_id: &SeasonID) -> Option<SeasonReference> {
         if let Ok(store) = self.media_store.read() {
-            if let Some(MediaReference::Season(season)) = 
-                store.get(&MediaId::Season(season_id.clone())) {
+            if let Some(MediaReference::Season(season)) =
+                store.get(&MediaId::Season(season_id.clone()))
+            {
                 Some(season.clone())
             } else {
                 None
@@ -80,8 +92,9 @@ impl MediaQueryService {
     /// Get an episode by ID
     pub fn get_episode(&self, episode_id: &EpisodeID) -> Option<EpisodeReference> {
         if let Ok(store) = self.media_store.read() {
-            if let Some(MediaReference::Episode(episode)) = 
-                store.get(&MediaId::Episode(episode_id.clone())) {
+            if let Some(MediaReference::Episode(episode)) =
+                store.get(&MediaId::Episode(episode_id.clone()))
+            {
                 Some(episode.clone())
             } else {
                 None
@@ -101,13 +114,11 @@ impl MediaQueryService {
     /// Get title for any media ID
     pub fn get_media_title(&self, media_id: &MediaId) -> Option<String> {
         if let Ok(store) = self.media_store.read() {
-            store.get(media_id).map(|media_ref| {
-                match media_ref {
-                    MediaReference::Movie(m) => m.title.as_str().to_string(),
-                    MediaReference::Series(s) => s.title.as_str().to_string(),
-                    MediaReference::Season(s) => format!("Season {}", s.season_number),
-                    MediaReference::Episode(e) => format!("Episode {}", e.episode_number),
-                }
+            store.get(media_id).map(|media_ref| match media_ref {
+                MediaReference::Movie(m) => m.title.as_str().to_string(),
+                MediaReference::Series(s) => s.title.as_str().to_string(),
+                MediaReference::Season(s) => format!("Season {}", s.season_number),
+                MediaReference::Episode(e) => format!("Episode {}", e.episode_number),
             })
         } else {
             None
@@ -117,7 +128,8 @@ impl MediaQueryService {
     /// Get all seasons for a series
     pub fn get_seasons_for_series(&self, series_id: &SeriesID) -> Vec<SeasonReference> {
         if let Ok(store) = self.media_store.read() {
-            store.get_seasons(series_id.as_str())
+            store
+                .get_seasons(series_id.as_str())
                 .into_iter()
                 .cloned()
                 .collect()
@@ -129,7 +141,8 @@ impl MediaQueryService {
     /// Get all episodes for a season
     pub fn get_episodes_for_season(&self, season_id: &SeasonID) -> Vec<EpisodeReference> {
         if let Ok(store) = self.media_store.read() {
-            store.get_episodes(season_id.as_str())
+            store
+                .get_episodes(season_id.as_str())
                 .into_iter()
                 .cloned()
                 .collect()
@@ -143,12 +156,12 @@ impl MediaQueryService {
         // Get all seasons for this series, then get all episodes for each season
         let seasons = self.get_seasons_for_series(series_id);
         let mut all_episodes = Vec::new();
-        
+
         for season in seasons {
             let episodes = self.get_episodes_for_season(&season.id);
             all_episodes.extend(episodes);
         }
-        
+
         all_episodes
     }
 

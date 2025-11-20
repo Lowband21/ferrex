@@ -1,16 +1,25 @@
 use super::messages::Message;
 use super::StreamingDomainState;
-use crate::state_refactored::State;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
+use crate::state_refactored::State;
 use iced::Task;
 
-/// Handle streaming domain messages
-///
-/// This handler is part of the domain message architecture migration.
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn update_streaming(state: &mut State, message: Message) -> DomainUpdateResult {
-    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
     profiling::scope!(crate::infrastructure::profiling_scopes::scopes::STREAMING_UPDATE);
-    
+
     match message {
         // Transcoding messages
         Message::TranscodingStarted(result) => {
@@ -84,11 +93,9 @@ fn handle_master_playlist_ready(
         state.domains.streaming.state.master_playlist = Some(playlist);
 
         // Now that we confirmed the playlist exists, send direct message to Player domain
-        DomainUpdateResult::task(
-            Task::done(crate::common::messages::DomainMessage::Player(
-                crate::domains::player::messages::Message::VideoReadyToPlay
-            ))
-        )
+        DomainUpdateResult::task(Task::done(crate::common::messages::DomainMessage::Player(
+            crate::domains::player::messages::Message::VideoReadyToPlay,
+        )))
     } else {
         log::error!("Master playlist check failed - retrying in 2 seconds");
         // Retry checking after a delay

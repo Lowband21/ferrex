@@ -19,6 +19,14 @@ use iced::{
     Element, Length,
 };
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_movie_detail<'a>(state: &'a State, movie: &'a MovieReference) -> Element<'a, Message> {
     // Create the main content with proper spacing from top
     let mut content = column![].spacing(20);

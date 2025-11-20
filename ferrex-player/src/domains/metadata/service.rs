@@ -10,8 +10,8 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use super::messages::Message;
-use crate::infrastructure::api_types::{MediaId, MediaReference};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
+use crate::infrastructure::api_types::{MediaId, MediaReference};
 
 /// Priority levels for fetch requests
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -68,6 +68,14 @@ pub struct MetadataFetchService {
     queued_count: Arc<Mutex<HashMap<FetchPriority, usize>>>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl MetadataFetchService {
     /// Create a new metadata fetch service with the specified number of workers
     pub fn new(
@@ -118,11 +126,17 @@ impl MetadataFetchService {
                         worker_id
                     );
                     tokio::spawn(async move {
+                        #[cfg(any(
+                            feature = "profile-with-puffin",
+                            feature = "profile-with-tracy",
+                            feature = "profile-with-tracing"
+                        ))]
+                        profiling::register_thread!("Metadata Fetch Worker");
                         log::info!("Metadata fetch worker {} started", worker_id);
 
                         // Constants for batching
                         const BATCH_SIZE: usize = 100;
-                        const BATCH_TIMEOUT: Duration = Duration::from_millis(500);
+                        const BATCH_TIMEOUT: Duration = Duration::from_millis(1000);
                         const HIGH_PRIORITY_BATCH_SIZE: usize = 30; // Optimized for initial visible items
 
                         while !shutdown.load(AtomicOrdering::Relaxed) {

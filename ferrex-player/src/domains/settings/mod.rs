@@ -26,15 +26,26 @@ pub struct SettingsDomainState {
     pub user_permissions: Option<UserPermissions>,
     pub auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
     pub api_service: std::sync::Arc<ApiClientAdapter>,
-    pub settings_service: std::sync::Arc<dyn crate::infrastructure::services::settings::SettingsService>, 
+    pub settings_service:
+        std::sync::Arc<dyn crate::infrastructure::services::settings::SettingsService>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl SettingsDomainState {
     /// Create a new SettingsDomainState with required services
     pub fn new(
         auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
         api_service: std::sync::Arc<ApiClientAdapter>,
-        settings_service: std::sync::Arc<dyn crate::infrastructure::services::settings::SettingsService>,
+        settings_service: std::sync::Arc<
+            dyn crate::infrastructure::services::settings::SettingsService,
+        >,
     ) -> Self {
         Self {
             current_view: state::SettingsView::default(),
@@ -63,9 +74,18 @@ pub struct SettingsDomain {
     pub user_permissions: Option<UserPermissions>,
     pub auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
     pub api_service: std::sync::Arc<ApiClientAdapter>,
-    pub settings_service: std::sync::Arc<dyn crate::infrastructure::services::settings::SettingsService>, 
+    pub settings_service:
+        std::sync::Arc<dyn crate::infrastructure::services::settings::SettingsService>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl SettingsDomain {
     pub fn new(state: SettingsDomainState) -> Self {
         Self {

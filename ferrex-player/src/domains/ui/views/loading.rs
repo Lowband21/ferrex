@@ -16,6 +16,14 @@ fn lucide_font() -> iced::Font {
     iced::Font::with_name("lucide")
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Message> {
     let mut content = column![].spacing(20).align_x(iced::Alignment::Center);
 
@@ -85,7 +93,9 @@ pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Mes
     );
 
     // Show progress bar if transcoding
-    if let Some(TranscodingStatus::Processing { progress }) = &state.domains.streaming.state.transcoding_status {
+    if let Some(TranscodingStatus::Processing { progress }) =
+        &state.domains.streaming.state.transcoding_status
+    {
         loading_content = loading_content.push(Space::with_height(10));
         loading_content = loading_content.push(
             container(progress_bar(0.0..=1.0, *progress))

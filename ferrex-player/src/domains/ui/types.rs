@@ -38,6 +38,14 @@ pub enum ViewState {
     UserSettings, // User settings and preferences view
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl ViewState {
     /// Returns true if this view should show the main header
     pub fn has_header(&self) -> bool {
@@ -111,8 +119,6 @@ pub struct LayoutRegions {
     pub has_sidebar: bool,
     pub content_padding: f32,
 }
-
-
 
 /// Display mode for library-centric content organization
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

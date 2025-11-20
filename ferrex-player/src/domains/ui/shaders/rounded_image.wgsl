@@ -2,9 +2,12 @@
 // Provides GPU-accelerated rounded rectangle clipping with anti-aliasing
 
 struct Globals {
-    transform: mat4x4<f32>,
-    scale_factor: f32,
-    _padding: vec3<f32>, // Padding to align to 16 bytes
+    transform: mat4x4<f32>,  // 64 bytes
+    scale_factor: f32,       // 4 bytes
+    _padding1: f32,          // 4 bytes padding
+    _padding2: f32,          // 4 bytes padding  
+    _padding3: f32,          // 4 bytes padding
+    _padding4: vec4<f32>,    // 16 bytes padding - total struct is 96 bytes
 }
 
 
@@ -18,28 +21,31 @@ struct VertexInput {
     @location(4) hover_overlay_border_progress: vec4<f32>, // is_hovered, show_overlay, show_border, progress
     @location(5) mouse_pos_and_padding: vec4<f32>,       // mouse_position.xy, unused, unused
     @location(6) progress_color_and_padding: vec4<f32>,  // progress_color.rgb, unused
+    @location(7) atlas_uvs: vec4<f32>,                   // atlas_uv_min.xy, atlas_uv_max.xy
+    @location(8) atlas_layer_and_padding: vec4<f32>,     // atlas_layer, unused, unused, unused
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) tex_coord: vec2<f32>,
+    @location(0) tex_coord: vec2<f32>,          // Texture coordinates in atlas space
     @location(1) corner_radius_normalized: f32, // Corner radius as fraction of size
     @location(2) opacity: f32,                  // Pass opacity to fragment shader
     @location(3) is_backface: f32,              // 1.0 if showing back of card, 0.0 if front
     @location(4) theme_color: vec3<f32>,         // Theme color for backface
     @location(5) shadow_params: vec4<f32>,      // shadow_intensity, z_depth, scale, border_glow
-    @location(6) local_pos: vec2<f32>,          // Position within poster for effects
+    @location(6) local_pos: vec2<f32>,          // Position within poster for effects (widget space 0-1)
     @location(7) animation_type: f32,           // Animation type for shader-specific effects
     @location(8) animation_progress: f32,        // Animation progress for debug visualization
     @location(9) hover_overlay_params: vec3<f32>, // is_hovered, show_overlay, show_border
     @location(10) mouse_position: vec2<f32>,    // Mouse position (normalized 0-1)
     @location(11) progress: f32,                // Progress percentage
     @location(12) progress_color: vec3<f32>,    // Progress bar color
+    @location(13) atlas_layer: f32,             // Atlas texture array layer
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
-@group(1) @binding(1) var texture_sampler: sampler;
-@group(1) @binding(2) var image_texture: texture_2d<f32>;
+@group(0) @binding(1) var atlas_sampler: sampler;
+@group(1) @binding(0) var atlas_texture: texture_2d_array<f32>;
 
 // Generate vertex positions and texture coordinates for a quad
 fn vertex_position(vertex_index: u32) -> vec2<f32> {
@@ -57,15 +63,18 @@ fn vertex_position(vertex_index: u32) -> vec2<f32> {
 fn apply_flip_rotation(pos: vec2<f32>, center: vec2<f32>, rotation_y: f32) -> vec3<f32> {
     // Translate to origin (center of image)
     let translated = pos - center;
-    
-    // Full trig calculation for smooth front face rotation
-    let cos_theta = cos(rotation_y);
-    let sin_theta = sin(rotation_y);
-    
-    // Rotate around Y-axis (x changes, y stays the same)
+
+    // Use higher precision trig calculations
+    // Add small smoothing to rotation for less jumpy animation
+    let smoothed_rotation = rotation_y;
+    let cos_theta = cos(smoothed_rotation);
+    let sin_theta = sin(smoothed_rotation);
+
+    // Rotate around Y-axis with higher precision
+    // X coordinate rotates, Y stays fixed
     let rotated_x = translated.x * cos_theta;
     let rotated_z = translated.x * sin_theta;
-    
+
     // Return 3D position (add back center x, keep y)
     return vec3<f32>(rotated_x + center.x, pos.y, rotated_z);
 }
@@ -74,19 +83,19 @@ fn apply_flip_rotation(pos: vec2<f32>, center: vec2<f32>, rotation_y: f32) -> ve
 fn apply_3d_transform(pos: vec2<f32>, center: vec2<f32>, z_depth: f32, scale: f32) -> vec2<f32> {
     // Apply scale from center
     let scaled = center + (pos - center) * scale;
-    
+
     // Apply perspective based on z-depth
     // Positive z comes toward viewer, negative z goes away
     let perspective_factor = 1.0 / (1.0 - z_depth * 0.001);
     let perspectived = center + (scaled - center) * perspective_factor;
-    
+
     return perspectived;
 }
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    
+
     // Unpack vec4 attributes
     let position = input.position_and_size.xy;
     let size = input.position_and_size.zw;
@@ -106,94 +115,109 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     let progress = input.hover_overlay_border_progress.w;
     let mouse_position = input.mouse_pos_and_padding.xy;
     let progress_color = input.progress_color_and_padding.xyz;
-    
+    let atlas_uv_min = input.atlas_uvs.xy;
+    let atlas_uv_max = input.atlas_uvs.zw;
+    let atlas_layer = input.atlas_layer_and_padding.x;
+
     // Generate quad vertex position (0,0) to (1,1)
     let vertex_pos = vertex_position(input.vertex_index);
-    
+
     // Calculate position within bounds using instance data
     // These positions are in logical pixels
     let position_final = position + vertex_pos * size;
     let center = position + size * 0.5;
-    
+
     // Apply 3D transformations
     var transformed_pos: vec2<f32>;
-    
+
     // First apply scale and z-depth transformations
     transformed_pos = apply_3d_transform(position_final, center, z_depth, scale);
-    
-    // Apply flip effect
-    if abs(rotation_y) > 0.0001 {  // Very small threshold just to avoid unnecessary computation at exactly 0
-        // For backface (rotation > PI/2), use cheap squeeze effect instead of full 3D
-        if rotation_y > 1.5708 {  // PI/2
-            // Backface showing - squeeze horizontally
-            // Animation goes from PI (full width) to PI/2 (squeezed to line)
-            // Map rotation from PI to PI/2 into scale from 1 to 0
-            let backface_progress = (rotation_y - 1.5708) / 1.5708;  // 1 to 0 as we rotate from PI to PI/2
-            let squeeze_scale = backface_progress;  // 1 to 0 (full width to squeezed)
-            
-            // Simple horizontal squeeze
-            transformed_pos = vec2<f32>(
-                center.x + (transformed_pos.x - center.x) * squeeze_scale,
-                transformed_pos.y
-            );
-        } else {
-            // Front face showing - use full 3D rotation for realistic perspective
-            let rotated_3d = apply_flip_rotation(transformed_pos, center, rotation_y);
-            // Smooth perspective calculation
-            let perspective_scale = 1.0 / (1.0 + rotated_3d.z * 0.001);
-            transformed_pos = vec2<f32>(
-                center.x + (rotated_3d.x - center.x) * perspective_scale,
-                rotated_3d.y
-            );
-        }
+
+    // Flip effect
+    if abs(rotation_y) > 0.00001 {
+        let pi = 3.14159265359;
+        let pi_half = 1.5708;
+
+        // Normalize rotation to [0, PI] range for consistent behavior
+        let norm_rotation = rotation_y - floor(rotation_y / pi) * pi;
+
+        // Smooth transition function that peaks at PI/2
+        // This creates a natural "squeeze" effect at the flip point
+        let flip_progress = sin(norm_rotation);
+
+        // Scale X based on the cosine of rotation
+        // This naturally goes to 0 at PI/2 and back to 1
+        let scale_x = abs(cos(norm_rotation));
+
+        // Apply the transformation
+        transformed_pos.x = center.x + (transformed_pos.x - center.x) * scale_x;
+
+        // Optional: Add subtle perspective for more realism
+        // The perspective effect is proportional to the flip progress
+        let perspective_offset = flip_progress * 0.001;
+        let z_depth = sin(norm_rotation) * 100.0; // Depth for perspective
+        let perspective_scale = 1.0 / (1.0 + z_depth * perspective_offset);
+
+        transformed_pos.x = center.x + (transformed_pos.x - center.x) * scale_x * perspective_scale;
+        transformed_pos.y = center.y + (transformed_pos.y - center.y) * perspective_scale;
     }
-    
+
     // Extract viewport dimensions from the projection matrix scale
     let viewport_width = 2.0 / globals.transform[0][0];
     let viewport_height = 2.0 / abs(globals.transform[1][1]);
-    
+
     // Convert logical positions to physical pixels
     let physical_pos = transformed_pos * globals.scale_factor;
-    
+
     // Apply standard orthographic projection
     // Map [0, viewport_width] to [-1, 1] and [0, viewport_height] to [1, -1] (Y is flipped)
     let clip_x = (physical_pos.x / viewport_width) * 2.0 - 1.0;
     let clip_y = 1.0 - (physical_pos.y / viewport_height) * 2.0;
-    
+
     output.clip_position = vec4<f32>(clip_x, clip_y, 0.0, 1.0);
-    
-    // Pass texture coordinates (flip horizontally if showing back)
-    // Show backface when rotation is past 90 degrees (including exactly at PI)
+
+    // Calculate texture coordinates in atlas space
+    // vertex_pos is 0-1 in widget space, map to atlas UV coordinates
     let is_backface = select(0.0, 1.0, rotation_y >= 1.5708); // >= PI/2 (90 degrees), branchless
-    output.tex_coord = vec2<f32>(mix(vertex_pos.x, 1.0 - vertex_pos.x, is_backface), vertex_pos.y);
-    
+    let widget_u = mix(vertex_pos.x, 1.0 - vertex_pos.x, is_backface);
+    let widget_v = vertex_pos.y;
+
+    // Map widget UVs (0-1) to atlas UVs
+    output.tex_coord = vec2<f32>(
+        mix(atlas_uv_min.x, atlas_uv_max.x, widget_u),
+        mix(atlas_uv_min.y, atlas_uv_max.y, widget_v)
+    );
+
     // Pass normalized corner radius (as fraction of smaller dimension)
     let min_dimension = min(size.x, size.y);
     output.corner_radius_normalized = radius / min_dimension;
     output.opacity = opacity;
     output.is_backface = is_backface;
     output.theme_color = theme_color;
-    
+
     // Pack shadow parameters
     output.shadow_params = vec4<f32>(shadow_intensity, z_depth, scale, border_glow);
-    
+
     // Local position for effects (normalized 0-1 within poster)
     output.local_pos = vertex_pos;
-    
+
     // Pass animation type and progress
     output.animation_type = animation_type;
     output.animation_progress = animation_progress;
-    
+
     // Pass hover and overlay parameters
     output.hover_overlay_params = vec3<f32>(is_hovered, show_overlay, show_border);
-    
+
     // Pass mouse position
     output.mouse_position = mouse_position;
-    
+
     // Pass progress data
     output.progress = progress;
     output.progress_color = progress_color;
-    
+
+    // Pass atlas layer
+    output.atlas_layer = atlas_layer;
+
     return output;
 }
 
@@ -218,13 +242,13 @@ fn rounded_rect_sdf_normalized(p: vec2<f32>, radius_normalized: f32) -> f32 {
 fn apply_shadow(color: vec3<f32>, local_pos: vec2<f32>, shadow_intensity: f32, z_depth: f32) -> vec3<f32> {
     // Shadow is darker at the bottom and lighter at the top
     let shadow_gradient = 1.0 - (local_pos.y * 0.3);
-    
+
     // Shadow gets stronger with positive z-depth (coming toward viewer)
     let depth_factor = smoothstep(-10.0, 15.0, z_depth);
-    
+
     // Calculate shadow darkening
     let shadow_amount = shadow_intensity * shadow_gradient * depth_factor * 0.4;
-    
+
     // Apply shadow by darkening the color
     return color * (1.0 - shadow_amount);
 }
@@ -235,17 +259,17 @@ fn apply_inner_shadow(color: vec3<f32>, local_pos: vec2<f32>, z_depth: f32) -> v
     if z_depth >= 0.0 {
         return color;
     }
-    
+
     // Distance from edges
     let edge_dist = min(
         min(local_pos.x, 1.0 - local_pos.x),
         min(local_pos.y, 1.0 - local_pos.y)
     );
-    
+
     // Inner shadow intensity based on edge distance
     let shadow_intensity = 1.0 - smoothstep(0.0, 0.15, edge_dist);
     let depth_factor = abs(z_depth) / 10.0;
-    
+
     return color * (1.0 - shadow_intensity * depth_factor * 0.5);
 }
 
@@ -254,17 +278,17 @@ fn apply_border_glow(color: vec4<f32>, dist_normalized: f32, glow_intensity: f32
     if glow_intensity <= 0.0 {
         return color;
     }
-    
+
     // Create glow around the border
     let glow_dist = abs(dist_normalized);
     // Use cheaper approximation instead of exp()
     // exp(-x*3) ≈ 1/(1 + 3x + 4.5x²) for small x
     let glow_factor = glow_dist * 3.0;
     let glow = glow_intensity / (1.0 + glow_factor + glow_factor * glow_factor * 1.5);
-    
+
     // Add subtle blue-white glow
     let glow_color = vec3<f32>(0.8, 0.9, 1.0);
-    
+
     return vec4<f32>(
         mix(color.rgb, glow_color, glow * 0.3),
         color.a
@@ -276,14 +300,14 @@ fn render_drop_shadow(tex_coord: vec2<f32>, radius_normalized: f32, shadow_inten
     // Shadow offset based on z-depth
     let shadow_offset = vec2<f32>(0.02, 0.03) * z_depth / 10.0;
     let shadow_coord = tex_coord - shadow_offset;
-    
+
     // Calculate distance from shadow shape
     let shadow_dist = rounded_rect_sdf_normalized(shadow_coord, radius_normalized);
-    
+
     // Shadow blur based on z-depth
     let blur_radius = 0.05 * (1.0 + z_depth / 10.0);
     let shadow_alpha = 1.0 - smoothstep(-blur_radius, blur_radius, shadow_dist);
-    
+
     // Shadow color (dark with transparency)
     let shadow_color = vec3<f32>(0.0, 0.0, 0.0);
     return vec4<f32>(shadow_color, shadow_alpha * shadow_intensity * 0.5);
@@ -307,7 +331,7 @@ fn button_sdf(p: vec2<f32>, center: vec2<f32>, size: vec2<f32>, corner_radius: f
     let adjusted_p = vec2<f32>(p.x * aspect_ratio, p.y);
     let adjusted_center = vec2<f32>(center.x * aspect_ratio, center.y);
     let adjusted_size = vec2<f32>(size.x * aspect_ratio, size.y);
-    
+
     let half_size = adjusted_size * 0.5;
     let d = abs(adjusted_p - adjusted_center) - half_size + corner_radius;
     return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - corner_radius;
@@ -323,7 +347,7 @@ fn square_button_sdf(p: vec2<f32>, center: vec2<f32>, size: f32, corner_radius: 
     let adjusted_center = vec2<f32>(center.x, center.y);
     // Make the button wider in texture space so it appears square in screen space
     let adjusted_size = vec2<f32>(size / aspect_ratio, size);
-    
+
     let half_size = adjusted_size * 0.5;
     let d = abs(adjusted_p - adjusted_center) - half_size + corner_radius;
     return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - corner_radius;
@@ -335,21 +359,21 @@ fn play_icon_sdf(p: vec2<f32>, center: vec2<f32>, size: f32) -> f32 {
     // The button itself handles the aspect ratio
     let rel_p = p - center;
     let half_size = size * 0.5;
-    
+
     // Triangle vertices (pointing right) - symmetric triangle
     let v1 = vec2<f32>(-half_size * 0.5, -half_size * 0.866); // 60 degree triangle
     let v2 = vec2<f32>(-half_size * 0.5, half_size * 0.866);
     let v3 = vec2<f32>(half_size, 0.0);
-    
+
     // SDF for triangle using edge distances
     let e1 = v2 - v1;
     let e2 = v3 - v2;
     let e3 = v1 - v3;
-    
+
     let d1 = dot(rel_p - v1, vec2<f32>(-e1.y, e1.x)) / length(e1);
     let d2 = dot(rel_p - v2, vec2<f32>(-e2.y, e2.x)) / length(e2);
     let d3 = dot(rel_p - v3, vec2<f32>(-e3.y, e3.x)) / length(e3);
-    
+
     return max(max(d1, d2), d3);
 }
 
@@ -357,20 +381,20 @@ fn play_icon_sdf(p: vec2<f32>, center: vec2<f32>, size: f32) -> f32 {
 fn edit_icon_sdf(p: vec2<f32>, center: vec2<f32>, size: f32) -> f32 {
     // Standard poster aspect ratio is 2:3 (width:height)
     let aspect_ratio = 2.0 / 3.0;
-    
+
     // Adjust coordinates to compensate for aspect ratio
     let adjusted_p = vec2<f32>(p.x * aspect_ratio, p.y);
     let adjusted_center = vec2<f32>(center.x * aspect_ratio, center.y);
-    
+
     let rel_p = adjusted_p - adjusted_center;
     let half_size = size * 0.5;
-    
+
     // Simple pencil shape: rotated rectangle
     let rotated_p = vec2<f32>(
         rel_p.x * 0.707 + rel_p.y * 0.707,
         -rel_p.x * 0.707 + rel_p.y * 0.707
     );
-    
+
     let rect_size = vec2<f32>(half_size * 0.3 * aspect_ratio, half_size * 1.5);
     let d = abs(rotated_p) - rect_size;
     return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
@@ -380,12 +404,12 @@ fn edit_icon_sdf(p: vec2<f32>, center: vec2<f32>, size: f32) -> f32 {
 fn dots_icon_sdf(p: vec2<f32>, center: vec2<f32>, size: f32) -> f32 {
     let dot_radius = size * 0.15;
     let spacing = size * 0.45; // Increased spacing between dots
-    
+
     // Note: circle_sdf already handles aspect ratio internally
     let d1 = circle_sdf(p, center + vec2<f32>(-spacing, 0.0), dot_radius);
     let d2 = circle_sdf(p, center, dot_radius);
     let d3 = circle_sdf(p, center + vec2<f32>(spacing, 0.0), dot_radius);
-    
+
     return min(min(d1, d2), d3);
 }
 
@@ -395,23 +419,23 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
     if hover_dist >= 0.0 {
         return vec4<f32>(0.0);
     }
-    
+
     // Check if mouse is valid (not -1, -1)
     let has_mouse = mouse_pos.x >= 0.0 && mouse_pos.y >= 0.0;
-    
+
     var button_color = vec4<f32>(0.0);
-    
+
     // Center play button - using circle for cleaner appearance
     let center_button_pos = vec2<f32>(0.5, 0.5);
     let center_button_radius = 0.08; // 8% of poster size (circle radius)
     let center_button_dist = circle_sdf(tex_coord, center_button_pos, center_button_radius);
-    
+
     // Check if mouse is over center button
     let center_hover = has_mouse && circle_sdf(mouse_pos, center_button_pos, center_button_radius) < 0.0;
-    
+
     // For circles, we need proper anti-aliasing
     let aa_width = 0.002; // Anti-aliasing width
-    
+
     if center_button_dist < -aa_width {
         // Fully inside button
         if center_hover {
@@ -422,7 +446,7 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
             let border_thickness = 0.004; // Slightly thicker border for visibility
             let inner_radius = center_button_radius - border_thickness;
             let inner_dist = circle_sdf(tex_coord, center_button_pos, inner_radius);
-            
+
             if inner_dist < -aa_width {
                 // Inside transparent grey area
                 button_color = vec4<f32>(0.0, 0.0, 0.0, 0.6);
@@ -446,7 +470,7 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
             button_color = vec4<f32>(1.0, 1.0, 1.0, t);
         }
     }
-    
+
     // Play icon - render on top of button background
     if center_button_dist < 0.0 {
         let play_icon_size = center_button_radius * 0.7; // Icon is 70% of button radius
@@ -461,17 +485,17 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
             button_color = mix(button_color, icon_color, icon_alpha);
         }
     }
-    
+
     // Top-right edit button (icon only, no background)
     let edit_button_pos = vec2<f32>(0.85, 0.15);
     let edit_base_radius = 0.06;
     // Check hover at full size for consistent hit area
     let edit_hover = has_mouse && circle_sdf(mouse_pos, edit_button_pos, edit_base_radius) < 0.0;
-    
+
     // Scale and opacity based on hover - larger base size
     let edit_scale = select(0.9, 1.1, edit_hover); // 90% when not hovered, 110% when hovered
     let edit_opacity = select(0.7, 1.0, edit_hover); // 70% opacity when not hovered
-    
+
     // Edit icon only - no background
     let edit_icon_scale = 0.045 * edit_scale; // Slightly larger base size
     let edit_dist = edit_icon_sdf(tex_coord, edit_button_pos, edit_icon_scale);
@@ -480,17 +504,17 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
         let icon_color = vec4<f32>(1.0, 1.0, 1.0, icon_alpha);
         button_color = mix(button_color, icon_color, icon_color.a);
     }
-    
+
     // Bottom-right more options button (icon only, no background)
     let dots_button_pos = vec2<f32>(0.85, 0.85);
     let dots_base_radius = 0.06;
     // Check hover at full size for consistent hit area
     let dots_hover = has_mouse && circle_sdf(mouse_pos, dots_button_pos, dots_base_radius) < 0.0;
-    
+
     // Scale and opacity based on hover - larger base size
     let dots_scale = select(0.9, 1.1, dots_hover); // 90% when not hovered, 110% when hovered
     let dots_opacity = select(0.7, 1.0, dots_hover); // 70% opacity when not hovered
-    
+
     // Dots icon only - no background
     let dots_icon_scale = 0.045 * dots_scale; // Slightly larger base size
     let dots_dist = dots_icon_sdf(tex_coord, dots_button_pos, dots_icon_scale);
@@ -499,7 +523,7 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
         let icon_color = vec4<f32>(1.0, 1.0, 1.0, icon_alpha);
         button_color = mix(button_color, icon_color, icon_color.a);
     }
-    
+
     return button_color;
 }
 
@@ -507,44 +531,58 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     var linear_rgb: vec3<f32>;
     var alpha: f32 = 1.0;
-    
+
     // Extract shadow parameters
     let shadow_intensity = input.shadow_params.x;
     let z_depth = input.shadow_params.y;
     let scale = input.shadow_params.z;
     let border_glow = input.shadow_params.w;
-    
+
     // Extract hover state for early-out optimization
     let is_hovered = input.hover_overlay_params.x;
     let show_overlay = input.hover_overlay_params.y;
     let is_animating = input.animation_progress < 0.99;
-    
+
     // For backface, use theme color with dimming
     if input.is_backface > 0.5 {
         // Dim the theme color by 30% for backface (matching placeholder)
         linear_rgb = input.theme_color * 0.7;
     } else {
-        // Front face: sample and display the poster texture
-        let sampled_color = textureSample(image_texture, texture_sampler, input.tex_coord);
-        // With Rgba8UnormSrgb format, GPU auto-converts sRGB to linear when sampling
-        // So sampled_color is already in linear space - no manual conversion needed!
-        linear_rgb = sampled_color.rgb;
-        alpha = sampled_color.a;
+        // Front face: check if we have valid atlas UVs
+        // Invalid UVs are set to a tiny range (0.001, 0.001) when image fails to load
+        let uv_range = length(input.tex_coord);
+        if uv_range < 0.01 {  // Detect invalid/fallback UVs
+            // No valid texture, use theme color
+            linear_rgb = input.theme_color * 0.7;
+        } else {
+            // Valid UVs - sample the poster texture from atlas
+            let sampled_color = textureSample(
+                atlas_texture,
+                atlas_sampler,
+                input.tex_coord,
+                i32(input.atlas_layer)
+            );
+            // Atlas uses Rgba8UnormSrgb: GPU converts sRGB to linear when sampling
+            linear_rgb = sampled_color.rgb;
+            alpha = sampled_color.a;
+        }
     }
-    
+
     // Calculate SDF once for reuse
-    let dist_normalized = rounded_rect_sdf_normalized(input.tex_coord, input.corner_radius_normalized);
-    let fw = length(fwidth(input.tex_coord));
+    // Use local_pos (widget space) for SDF calculations, not tex_coord (atlas space)
+    let dist_normalized = rounded_rect_sdf_normalized(input.local_pos, input.corner_radius_normalized);
+    let fw = length(fwidth(input.local_pos));
     let rounded_alpha = 1.0 - smoothstep(-fw, fw, dist_normalized);
-    
+
     // FAST PATH: Skip expensive calculations for non-hovered, non-animating posters
     // But still render progress indicators and borders
     let needs_full_render = show_overlay > 0.5 || is_animating || abs(z_depth) > 0.01 || shadow_intensity > 0.01;
-    
+
     if !needs_full_render {
         // Fast path - skip shadows and complex effects
-        var fast_color = vec4<f32>(linear_to_srgb(linear_rgb), alpha * rounded_alpha * input.opacity);
-        
+        // Keep in linear space - GPU will convert to sRGB if framebuffer is sRGB
+        var fast_color = vec4<f32>(linear_rgb, alpha * rounded_alpha * input.opacity);
+
         // Always render border (simple version)
         if is_hovered > 0.5 {
             // Hovered border
@@ -554,7 +592,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 let outer_alpha = 1.0 - smoothstep(border_width - 0.001, border_width, dist_normalized);
                 let border_alpha = min(inner_alpha, outer_alpha);
                 fast_color = vec4<f32>(
-                    mix(fast_color.rgb, linear_to_srgb(input.progress_color), border_alpha),
+                    mix(fast_color.rgb, input.progress_color, border_alpha),
                     max(fast_color.a, border_alpha)
                 );
             }
@@ -568,43 +606,43 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 );
             }
         }
-        
+
         // Check for watch status corner only after animation completes
         if input.progress >= 0.0 && dist_normalized < 0.0 && input.animation_progress >= 0.99 {
             let aspect_ratio = 2.0 / 3.0;
             let fold_size_x = input.corner_radius_normalized * 2.5;
             let fold_size_y = fold_size_x * aspect_ratio;
             let corner_origin = vec2<f32>(1.0, 0.0);
-            let rel_pos = input.tex_coord - corner_origin;
-            
+            let rel_pos = input.local_pos - corner_origin;
+
             let normalized_x = rel_pos.x / fold_size_x;
             let normalized_y = rel_pos.y / fold_size_y;
             let in_triangle = rel_pos.x <= 0.0 && rel_pos.y >= 0.0 && (normalized_y - normalized_x) <= 1.0;
-            
+
             if in_triangle {
                 let a = 1.0 / fold_size_x;
                 let b = -1.0 / fold_size_y;
                 let c = 1.0;
                 let diagonal_dist = abs(a * rel_pos.x + b * rel_pos.y + c) / sqrt(a*a + b*b);
                 let triangle_alpha = smoothstep(-0.005, 0.005, diagonal_dist);
-                
+
                 var indicator_opacity = select(0.85, 0.6, input.progress > 0.0);
                 indicator_opacity = select(indicator_opacity, 0.2, input.progress >= 0.95);
-                
-                let indicator_color_srgb = linear_to_srgb(input.progress_color);
-                let indicator_with_alpha = vec4<f32>(indicator_color_srgb, indicator_opacity * triangle_alpha);
+
+                // Keep colors in linear space
+                let indicator_with_alpha = vec4<f32>(input.progress_color, indicator_opacity * triangle_alpha);
                 fast_color = mix(fast_color, indicator_with_alpha, indicator_with_alpha.a);
             }
         }
-        
+
         // Check for progress bar only after animation completes
         if input.progress > 0.0 && input.progress < 0.95 && input.animation_progress >= 0.99 {
             let bar_start_y = 1.0 - 0.03;
-            if input.tex_coord.y >= bar_start_y && dist_normalized < 0.0 {
+            if input.local_pos.y >= bar_start_y && dist_normalized < 0.0 {
                 let edge_fade = smoothstep(0.0, -0.01, dist_normalized);
-                if input.tex_coord.x <= input.progress {
-                    let bar_color = linear_to_srgb(input.progress_color);
-                    let bar_with_alpha = vec4<f32>(bar_color, 0.8 * edge_fade);
+                if input.local_pos.x <= input.progress {
+                    // Keep colors in linear space
+                    let bar_with_alpha = vec4<f32>(input.progress_color, 0.8 * edge_fade);
                     fast_color = mix(fast_color, bar_with_alpha, bar_with_alpha.a);
                 } else {
                     let bg_color = vec4<f32>(0.0, 0.0, 0.0, 0.4 * edge_fade);
@@ -612,11 +650,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 }
             }
         }
-        
+
         return fast_color;
     }
-    
-    
+
+
     // Apply shadow effects only when actually visible
     if shadow_intensity > 0.01 && abs(z_depth) > 0.01 {
         linear_rgb = apply_shadow(linear_rgb, input.local_pos, shadow_intensity, z_depth);
@@ -625,62 +663,62 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             linear_rgb = apply_inner_shadow(linear_rgb, input.local_pos, z_depth);
         }
     }
-    
+
     // SDF and alpha already calculated at the beginning of the function
-    
+
     // Apply alpha clipping and opacity (rounded_alpha already computed)
     let final_alpha = alpha * rounded_alpha * input.opacity;
-    
-    // Convert back to sRGB for display
-    var final_color = vec4<f32>(linear_to_srgb(linear_rgb), final_alpha);
-    
+
+    // Keep in linear space - GPU handles sRGB conversion if needed
+    var final_color = vec4<f32>(linear_rgb, final_alpha);
+
     // Apply border glow effect
     final_color = apply_border_glow(final_color, dist_normalized, border_glow);
-    
+
     // Render drop shadow only when significantly elevated
     if z_depth > 1.0 && shadow_intensity > 0.1 {
-        let shadow = render_drop_shadow(input.tex_coord, input.corner_radius_normalized, shadow_intensity, z_depth);
+        let shadow = render_drop_shadow(input.local_pos, input.corner_radius_normalized, shadow_intensity, z_depth);
         // Composite shadow behind the main image
         final_color = mix(shadow, final_color, final_color.a);
     }
-    
-    
-    
+
+
+
     // Extract remaining hover parameters (show_overlay and is_hovered already extracted above)
     let show_border = input.hover_overlay_params.z;
-    
+
     // Render overlay when hovered and animation complete
     if show_overlay > 0.5 {
-        let hover_dist = rounded_rect_sdf_normalized(input.tex_coord, input.corner_radius_normalized);
-        
+        let hover_dist = rounded_rect_sdf_normalized(input.local_pos, input.corner_radius_normalized);
+
         // Dark tinted background (only inside poster bounds)
         if hover_dist < 0.0 {
             let overlay_tint = vec4<f32>(0.0, 0.0, 0.0, 0.5);
             final_color = mix(final_color, overlay_tint, overlay_tint.a);
         }
-        
-        // Render overlay buttons with mouse position
-        let button_color = render_overlay_buttons(input.tex_coord, hover_dist, input.mouse_position, input.theme_color, input.progress_color);
+
+        // Render overlay buttons with mouse position (use widget space local_pos)
+        let button_color = render_overlay_buttons(input.local_pos, hover_dist, input.mouse_position, input.theme_color, input.progress_color);
         if button_color.a > 0.0 {
             final_color = mix(final_color, button_color, button_color.a);
         }
     }
-    
+
     // Always render border - optimized approach
     {
         // Distance already calculated earlier as dist_normalized
         let poster_dist = dist_normalized;
-        
+
         // Select border width based on hover state
         let border_width = select(0.004, 0.005, is_hovered > 0.5);
-        
+
         // Simplified border detection
         let is_in_hovered_border = is_hovered > 0.5 && abs(poster_dist) < border_width;
         let is_in_unhovered_border = is_hovered < 0.5 && poster_dist < 0.0 && poster_dist > -border_width;
-        
+
         if is_in_hovered_border || is_in_unhovered_border {
             var border_alpha: f32;
-            
+
             if is_hovered > 0.5 {
                 // Hovered: border expands outward
                 let inner_alpha = smoothstep(-border_width, -border_width + 0.001, poster_dist);
@@ -690,7 +728,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 // Not hovered: thin border inside
                 border_alpha = smoothstep(-border_width, -border_width + 0.001, poster_dist);
             }
-            
+
             if border_alpha > 0.0 {
                 // Select border color based on hover state
                 let border_color = select(
@@ -698,8 +736,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                     input.progress_color,       // Progress color when hovered
                     is_hovered > 0.5
                 );
-                
-                // Apply border with proper alpha blending
+
+                // Apply border with proper alpha blending (border_color already in linear space)
                 final_color = vec4<f32>(
                     mix(final_color.rgb, border_color, border_alpha),
                     max(final_color.a, border_alpha)
@@ -707,33 +745,33 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             }
         }
     }
-    
+
     // Render watch status corner indicator if progress is valid and animation is complete
     if input.progress >= 0.0 && input.animation_progress >= 0.99 {
         // Standard poster aspect ratio is 2:3 (width:height)
         let aspect_ratio = 2.0 / 3.0;
-        
+
         // Create a triangular indicator shaped like a folded corner
         // Adjust the size to account for aspect ratio so it appears square
         let fold_size_x = input.corner_radius_normalized * 2.5;
         let fold_size_y = fold_size_x * aspect_ratio;
-        
+
         // Top-right corner origin
         let corner_origin = vec2<f32>(1.0, 0.0);
-        let rel_pos = input.tex_coord - corner_origin;
-        
+        let rel_pos = input.local_pos - corner_origin;
+
         // Simple right triangle check - like a corner folded down
         // Triangle with vertices at: (0,0), (-fold_size_x,0), (0,fold_size_y)
         // Adjust the diagonal check to account for different x and y sizes
         let normalized_x = rel_pos.x / fold_size_x;
         let normalized_y = rel_pos.y / fold_size_y;
-        let in_triangle = rel_pos.x <= 0.0 && 
-                         rel_pos.y >= 0.0 && 
+        let in_triangle = rel_pos.x <= 0.0 &&
+                         rel_pos.y >= 0.0 &&
                          (normalized_y - normalized_x) <= 1.0;
-        
+
         // Also check against the rounded corner boundary
-        let corner_dist = rounded_rect_sdf_normalized(input.tex_coord, input.corner_radius_normalized);
-        
+        let corner_dist = rounded_rect_sdf_normalized(input.local_pos, input.corner_radius_normalized);
+
         if in_triangle && corner_dist < 0.0 {
             // Calculate distance to diagonal edge for smooth anti-aliasing
             // Pre-compute reciprocals to avoid divisions
@@ -747,51 +785,50 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             let diagonal_dist = abs(a * rel_pos.x + b * rel_pos.y + c) * inv_norm;
             let edge_softness = 0.005;
             let triangle_alpha = smoothstep(-edge_softness, edge_softness, diagonal_dist);
-            
+
             // Determine opacity based on watch status using select
             var indicator_opacity = select(0.85, 0.6, input.progress > 0.0);
             indicator_opacity = select(indicator_opacity, 0.2, input.progress >= 0.95);
-            
-            // Apply the indicator color
-            let indicator_color_srgb = linear_to_srgb(input.progress_color);
-            let indicator_with_alpha = vec4<f32>(indicator_color_srgb, indicator_opacity * triangle_alpha);
-            
+
+            // Apply the indicator color (keep in linear space)
+            let indicator_with_alpha = vec4<f32>(input.progress_color, indicator_opacity * triangle_alpha);
+
             // Blend the indicator over the current color
             final_color = mix(final_color, indicator_with_alpha, indicator_with_alpha.a);
         }
     }
-    
+
     // Render progress bar at bottom for in-progress media (after animation completes)
     if input.progress > 0.0 && input.progress < 0.95 && input.animation_progress >= 0.99 {
         // Progress bar dimensions
         let bar_height = 0.02; // 2% of poster height
         let bar_margin = 0.01; // 1% margin from bottom
-        
-        // Check if we're in the progress bar area
-        if input.tex_coord.y > (1.0 - bar_height - bar_margin) {
+
+        // Check if we're in the progress bar area (use widget space)
+        if input.local_pos.y > (1.0 - bar_height - bar_margin) {
             // Calculate progress bar boundaries
             let bar_start_y = 1.0 - bar_height - bar_margin;
             let bar_end_y = 1.0 - bar_margin;
-            
+
             // Check if we're within the bar height
-            if input.tex_coord.y >= bar_start_y && input.tex_coord.y <= bar_end_y {
+            if input.local_pos.y >= bar_start_y && input.local_pos.y <= bar_end_y {
                 // Only show bar within poster bounds (including rounded corners)
-                let poster_dist = rounded_rect_sdf_normalized(input.tex_coord, input.corner_radius_normalized);
+                let poster_dist = rounded_rect_sdf_normalized(input.local_pos, input.corner_radius_normalized);
                 if poster_dist < 0.0 {
                     // Apply smooth fade at the very edges for anti-aliasing
                     let edge_fade = smoothstep(0.0, -0.01, poster_dist);
-                    
+
                     // Use select for branchless progress bar rendering
-                    let is_filled = input.tex_coord.x <= input.progress;
-                    let bar_color = linear_to_srgb(input.progress_color);
+                    let is_filled = input.local_pos.x <= input.progress;
+                    // Keep colors in linear space
                     let bar_alpha = select(0.4, 0.8, is_filled) * edge_fade;
-                    let bar_rgb = select(vec3<f32>(0.0, 0.0, 0.0), bar_color, is_filled);
+                    let bar_rgb = select(vec3<f32>(0.0, 0.0, 0.0), input.progress_color, is_filled);
                     let bar_with_alpha = vec4<f32>(bar_rgb, bar_alpha);
                     final_color = mix(final_color, bar_with_alpha, bar_with_alpha.a);
                 }
             }
         }
     }
-    
+
     return final_color;
 }

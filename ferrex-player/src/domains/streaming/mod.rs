@@ -60,18 +60,32 @@ impl std::fmt::Debug for StreamingDomainState {
             .field("transcoding_check_count", &self.transcoding_check_count)
             .field("hls_client", &self.hls_client.is_some())
             .field("master_playlist", &self.master_playlist.is_some())
-            .field("current_variant_playlist", &self.current_variant_playlist.is_some())
+            .field(
+                "current_variant_playlist",
+                &self.current_variant_playlist.is_some(),
+            )
             .field("current_segment_index", &self.current_segment_index)
             .field("segment_buffer_count", &self.segment_buffer.len())
-            .field("last_bandwidth_measurement", &self.last_bandwidth_measurement)
+            .field(
+                "last_bandwidth_measurement",
+                &self.last_bandwidth_measurement,
+            )
             .field("quality_switch_count", &self.quality_switch_count)
             .finish()
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl StreamingDomainState {
     pub fn new(
-        media_store: Arc<StdRwLock<MediaStore>>, 
+        media_store: Arc<StdRwLock<MediaStore>>,
         api_service: Arc<ApiClientAdapter>,
         streaming_service: Arc<dyn crate::infrastructure::services::streaming::StreamingApiService>,
     ) -> Self {
@@ -118,6 +132,14 @@ pub struct StreamingDomain {
     pub state: StreamingDomainState,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl StreamingDomain {
     pub fn new(state: StreamingDomainState) -> Self {
         Self { state }

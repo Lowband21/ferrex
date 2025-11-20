@@ -46,7 +46,7 @@ pub mod animation {
     }
 
     /// Default animation duration in milliseconds
-    pub const DEFAULT_DURATION_MS: u64 = 600;
+    pub const DEFAULT_DURATION_MS: u64 = 1000;
 }
 
 /// Grid layout constants

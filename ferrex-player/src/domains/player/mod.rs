@@ -33,8 +33,19 @@ pub struct PlayerDomain {
     pub current_library_id: Option<Uuid>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl PlayerDomain {
-    pub fn new(media_store: Arc<StdRwLock<MediaStore>>, api_service: Option<Arc<ApiClientAdapter>>) -> Self {
+    pub fn new(
+        media_store: Arc<StdRwLock<MediaStore>>,
+        api_service: Option<Arc<ApiClientAdapter>>,
+    ) -> Self {
         Self {
             state: PlayerDomainState::default(),
             media_store,

@@ -5,60 +5,67 @@ use crate::{
     infrastructure::api_types::MediaReference, infrastructure::constants::layout::header::HEIGHT,
     state_refactored::State,
 };
+use iced::widget::text_input::Id;
 use iced::{
     widget::{button, container, row, text, text_input, Space, Stack},
     Element, Length,
 };
-use iced::widget::text_input::Id;
 use lucide_icons::Icon;
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
     match &state.domains.ui.state.view {
         ViewState::Library => {
             // New header layout: Left (Home, Back if history exists, Library tabs), Center (Search), Right (Controls)
             let mut left_section_items = vec![];
-            
+
             // Home button
             left_section_items.push(
                 button(
                     container(icon_text(Icon::House))
                         .center_x(Length::Fill)
-                        .center_y(Length::Fill)
+                        .center_y(Length::Fill),
                 )
                 .on_press(Message::NavigateHome)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
-                .into()
+                .into(),
             );
-            
+
             // Back button (only if navigation history exists)
             if !state.domains.ui.state.navigation_history.is_empty() {
                 left_section_items.push(
                     button(
                         container(icon_text(Icon::ChevronLeft))
                             .center_x(Length::Fill)
-                            .center_y(Length::Fill)
+                            .center_y(Length::Fill),
                     )
                     .on_press(Message::NavigateBack)
                     .style(theme::Button::HeaderIcon.style())
                     .width(Length::Fixed(HEIGHT))
                     .height(HEIGHT)
-                    .into()
+                    .into(),
                 );
             }
-            
+
             left_section_items.push(Space::with_width(20).into()); // Gap between buttons and library tabs
-            
+
             // Library tabs
             left_section_items.push(
                 container(create_library_tabs(state))
                     .align_y(iced::alignment::Vertical::Center)
-                    .into()
+                    .into(),
             );
-            
-            let left_section = row(left_section_items)
-                .align_y(iced::Alignment::Center);
+
+            let left_section = row(left_section_items).align_y(iced::Alignment::Center);
 
             // Center section - Search (always visible)
             let center_section = container(
@@ -199,37 +206,36 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
         | ViewState::EpisodeDetail { .. } => {
             // Simplified header for detail views
             let mut left_section_items = vec![];
-            
+
             // Home button
             left_section_items.push(
                 button(
                     container(icon_text(Icon::House))
                         .center_x(Length::Fill)
-                        .center_y(Length::Fill)
+                        .center_y(Length::Fill),
                 )
                 .on_press(Message::NavigateHome)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
-                .into()
+                .into(),
             );
-            
+
             // Back button (always shown in detail views since we came from somewhere)
             left_section_items.push(
                 button(
                     container(icon_text(Icon::ChevronLeft))
                         .center_x(Length::Fill)
-                        .center_y(Length::Fill)
+                        .center_y(Length::Fill),
                 )
                 .on_press(Message::NavigateBack)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
-                .into()
+                .into(),
             );
-            
-            let left_section = row(left_section_items)
-                .align_y(iced::Alignment::Center);
+
+            let left_section = row(left_section_items).align_y(iced::Alignment::Center);
 
             // Right section - same controls as library view
             let right_section = row![
@@ -312,37 +318,36 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
         }
         ViewState::LibraryManagement => {
             let mut left_section_items = vec![];
-            
+
             // Home button
             left_section_items.push(
                 button(
                     container(icon_text(Icon::House))
                         .center_x(Length::Fill)
-                        .center_y(Length::Fill)
+                        .center_y(Length::Fill),
                 )
                 .on_press(Message::NavigateHome)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
-                .into()
+                .into(),
             );
-            
+
             // Back button (always shown since we came from library)
             left_section_items.push(
                 button(
                     container(icon_text(Icon::ChevronLeft))
                         .center_x(Length::Fill)
-                        .center_y(Length::Fill)
+                        .center_y(Length::Fill),
                 )
                 .on_press(Message::NavigateBack)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
-                .into()
+                .into(),
             );
-            
-            let left_section = row(left_section_items)
-                .align_y(iced::Alignment::Center);
+
+            let left_section = row(left_section_items).align_y(iced::Alignment::Center);
 
             Stack::new()
                 .push(
@@ -372,37 +377,36 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
         }
         ViewState::AdminDashboard => {
             let mut left_section_items = vec![];
-            
+
             // Home button
             left_section_items.push(
                 button(
                     container(icon_text(Icon::House))
                         .center_x(Length::Fill)
-                        .center_y(Length::Fill)
+                        .center_y(Length::Fill),
                 )
                 .on_press(Message::NavigateHome)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
-                .into()
+                .into(),
             );
-            
+
             // Back button (always shown since we came from somewhere)
             left_section_items.push(
                 button(
                     container(icon_text(Icon::ChevronLeft))
                         .center_x(Length::Fill)
-                        .center_y(Length::Fill)
+                        .center_y(Length::Fill),
                 )
                 .on_press(Message::NavigateBack)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
-                .into()
+                .into(),
             );
-            
-            let left_section = row(left_section_items)
-                .align_y(iced::Alignment::Center);
+
+            let left_section = row(left_section_items).align_y(iced::Alignment::Center);
 
             Stack::new()
                 .push(
@@ -438,9 +442,9 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
 }
 
 fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
-    use crate::domains::ui::types::DisplayMode;
     use crate::domains::ui::tabs::TabId;
-    
+    use crate::domains::ui::types::DisplayMode;
+
     if state.domains.library.state.libraries.is_empty() {
         // No libraries configured - show only curated view
         row![
@@ -454,7 +458,7 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
     } else {
         // Show library tabs
         let mut tabs_vec: Vec<Element<Message>> = Vec::new();
-        
+
         // Check if "All" tab is active
         let is_all_active = state.tab_manager.active_tab_id() == TabId::All;
         let all_button_style = if is_all_active {
@@ -462,7 +466,7 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
         } else {
             theme::Button::HeaderIcon.style()
         };
-        
+
         // Add "All" tab - shows curated collections from all libraries
         tabs_vec.push(
             button(container(text("All").size(14)).center_y(Length::Fill))
@@ -472,7 +476,7 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
                 .height(HEIGHT)
                 .into(),
         );
-        
+
         // Add individual library tabs
         for library in state
             .domains
@@ -489,7 +493,7 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
             } else {
                 theme::Button::HeaderIcon.style()
             };
-            
+
             tabs_vec.push(
                 button(container(text(&library.name).size(14)).center_y(Length::Fill))
                     .on_press(Message::SelectLibraryAndMode(library.id.clone()))
@@ -503,16 +507,34 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn get_detail_title(state: &State) -> String {
     match &state.domains.ui.state.view {
         ViewState::MovieDetail { movie, .. } => movie.title.as_str().to_string(),
         ViewState::TvShowDetail { series_id, .. } => {
             // Use MediaQueryService (clean architecture)
-            state.domains.media.state.query_service.get_series_title(series_id)
+            state
+                .domains
+                .media
+                .state
+                .query_service
+                .get_series_title(series_id)
         }
         ViewState::SeasonDetail { series_id, .. } => {
             // Use MediaQueryService (clean architecture)
-            state.domains.media.state.query_service.get_series_title(series_id)
+            state
+                .domains
+                .media
+                .state
+                .query_service
+                .get_series_title(series_id)
         }
         ViewState::EpisodeDetail { .. } => "Episode".to_string(),
         _ => String::new(),

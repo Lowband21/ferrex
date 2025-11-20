@@ -136,6 +136,14 @@ impl Default for SearchState {
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl SearchState {
     /// Check if we should execute a new search (debouncing)
     pub fn should_search(&self) -> bool {
@@ -246,6 +254,14 @@ pub struct SearchDecisionEngine {
     network_monitor: Option<Box<super::metrics::NetworkMonitor>>,
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl SearchDecisionEngine {
     /// Create a new simple decision engine (no metrics)
     pub fn new_simple() -> Self {

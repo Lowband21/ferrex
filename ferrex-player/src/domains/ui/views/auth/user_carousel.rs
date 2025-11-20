@@ -31,6 +31,14 @@ impl Default for UserCarouselState {
     }
 }
 
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
 impl UserCarouselState {
     /// Create new state with users
     pub fn new(users: Vec<crate::domains::auth::dto::UserListItemDto>) -> Self {
@@ -122,19 +130,20 @@ pub fn view_user_selection_with_carousel<'a>(
     user_permissions: Option<&'a ferrex_core::rbac::UserPermissions>,
 ) -> Element<'a, DomainMessage> {
     // Create a static carousel state that will persist between renders
-    static CAROUSEL_STATE: std::sync::OnceLock<std::sync::Mutex<CarouselState>> = std::sync::OnceLock::new();
-    
+    static CAROUSEL_STATE: std::sync::OnceLock<std::sync::Mutex<CarouselState>> =
+        std::sync::OnceLock::new();
+
     let carousel_state = CAROUSEL_STATE.get_or_init(|| {
         std::sync::Mutex::new(CarouselState::new_with_dimensions(users.len(), 120.0, 20.0))
     });
-    
+
     // Update carousel state if user count changed
     if let Ok(mut state) = carousel_state.lock() {
         if state.total_items != users.len() {
             state.set_total_items(users.len());
         }
     }
-    
+
     let mut content = column![title("Select User"), spacing(),];
 
     // Show error if present
@@ -300,12 +309,9 @@ fn create_user_carousel_from_data<'a>(
         .width(Length::Fill)
         .height(Length::Fixed(200.0));
 
-    column![
-        carousel_content,
-        spacing(),
-    ]
-    .width(Length::Fill)
-    .into()
+    column![carousel_content, spacing(),]
+        .width(Length::Fill)
+        .into()
 }
 
 /// Create a user avatar item for the carousel

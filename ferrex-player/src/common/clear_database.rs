@@ -74,10 +74,7 @@ pub fn handle_database_cleared(
 
             // Reset scroll positions
             state.domains.ui.state.last_scroll_position = 0.0;
-            state.domains.ui.state.scroll_velocity = 0.0;
-            state.domains.ui.state.fast_scrolling = false;
             state.domains.ui.state.scroll_stopped_time = None;
-            state.domains.ui.state.scroll_samples.clear();
 
             // Reset TabManager tabs
             state.tab_manager = crate::domains::ui::tabs::TabManager::new(

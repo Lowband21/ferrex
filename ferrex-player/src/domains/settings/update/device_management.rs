@@ -11,6 +11,14 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 /// Handle loading devices when the view is shown or refreshed
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_load_devices(state: &mut State) -> DomainUpdateResult {
     info!("Loading user devices");
     state.domains.settings.device_management_state.loading = true;

@@ -13,7 +13,14 @@ use iced::{
     Alignment, Element, Length, Theme,
 };
 
-/// Shows the PIN setup screen
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_pin_setup<'a>(
     user: &'a User,
     pin: &'a SecureCredential,
@@ -112,7 +119,14 @@ pub fn view_pin_setup<'a>(
     auth_container(card).into()
 }
 
-/// Creates a PIN display
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn pin_display<'a>(value: &str, is_confirm: bool) -> Element<'a, DomainMessage> {
     let digits: Vec<Element<'a, DomainMessage>> = (0..4)
         .map(|i| {
@@ -155,7 +169,14 @@ fn pin_display<'a>(value: &str, is_confirm: bool) -> Element<'a, DomainMessage> 
     row(digits).spacing(8).align_y(Alignment::Center).into()
 }
 
-/// Creates a numeric keypad for PIN setup
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 fn numeric_keypad<'a>(current_value: &str, is_confirm: bool) -> Element<'a, DomainMessage> {
     let button_size = 60.0;
 

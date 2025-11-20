@@ -53,7 +53,7 @@ impl State {
         ));
         let api_client = crate::infrastructure::api_client::ApiClient::new(server_url.clone());
         let (image_service, _receiver) =
-            crate::domains::metadata::image_service::UnifiedImageService::new(8);
+            crate::domains::metadata::image_service::UnifiedImageService::new(16);
 
         // Create service builder/toggles first (used by multiple domains)
         let service_builder = crate::infrastructure::services::ServiceBuilder::new();

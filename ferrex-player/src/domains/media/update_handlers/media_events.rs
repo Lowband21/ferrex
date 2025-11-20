@@ -6,6 +6,14 @@ use ferrex_core::MediaEvent;
 use iced::Task;
 
 /// Handle incoming media events from the server via SSE
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn handle_media_event_received(state: &mut State, event: MediaEvent) -> Task<Message> {
     match event {
         MediaEvent::MovieAdded { movie } => {

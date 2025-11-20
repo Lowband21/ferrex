@@ -5,7 +5,7 @@
 
 use crate::{
     domains::auth::permissions::StatePermissionExt, domains::ui::messages::Message,
-    state_refactored::State, domains::ui::theme,
+    domains::ui::theme, state_refactored::State,
 };
 use iced::{
     widget::{button, column, container, row, text, Space},
@@ -13,17 +13,22 @@ use iced::{
 };
 use lucide_icons::Icon;
 
-// Helper function to create icon text
 fn icon_text(icon: Icon) -> text::Text<'static> {
     text(icon.unicode()).font(lucide_font()).size(20)
 }
 
-// Get the lucide font
 fn lucide_font() -> iced::Font {
     iced::Font::with_name("lucide")
 }
 
-/// Admin Dashboard View
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_admin_dashboard(state: &State) -> Element<Message> {
     let permissions = state.permission_checker();
 

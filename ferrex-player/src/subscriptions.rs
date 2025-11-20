@@ -6,6 +6,13 @@ use iced::Subscription;
 
 /// Composes all domain subscriptions into a single batch
 pub fn subscription(state: &State) -> Subscription<DomainMessage> {
+    // Profile the entire subscription evaluation
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!("Application::Subscription::Total");
+    // Profile subscription composition
+    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    profiling::scope!("Subscription::Composition");
+    
     let mut subscriptions = vec![
         // Auth domain subscriptions
         crate::domains::auth::messages::subscriptions::subscription(state),

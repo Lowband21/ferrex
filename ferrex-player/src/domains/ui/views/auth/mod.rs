@@ -19,10 +19,19 @@ pub use components::*;
 pub use credential_entry::view_credential_entry;
 pub use loading_users::view_loading_users;
 pub use pin_setup::view_pin_setup;
-pub use user_carousel::{view_user_carousel, view_user_selection_with_carousel, UserCarouselMessage, UserCarouselState};
+pub use user_carousel::{
+    view_user_carousel, view_user_selection_with_carousel, UserCarouselMessage, UserCarouselState,
+};
 pub use user_selection::view_user_selection;
 
-/// Main authentication view that delegates to appropriate sub-views based on auth flow state
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_auth<'a>(
     auth_flow: &'a AuthenticationFlow,
     user_permissions: Option<&'a ferrex_core::rbac::UserPermissions>,
@@ -31,7 +40,7 @@ pub fn view_auth<'a>(
 
     match auth_flow {
         CheckingSetup => view_loading_users(), // Show loading while checking
-        
+
         CheckingAutoLogin => view_loading_users(), // Show loading while checking auto-login
 
         FirstRunSetup {
@@ -98,7 +107,14 @@ pub fn view_auth<'a>(
     }
 }
 
-/// View for first-run admin setup
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
 pub fn view_first_run_setup<'a>(
     username: &str,
     password: &crate::domains::auth::security::secure_credential::SecureCredential,
