@@ -55,7 +55,27 @@ pub fn view(
             state.domains.auth.state.user_permissions.as_ref(),
         )
         .map(DomainMessage::from);
-        return auth_content;
+
+        // Extend the background shader to auth views with a simple gradient
+        let mut bg_shader = state
+            .domains
+            .ui
+            .state
+            .background_shader_state
+            .build_shader(&state.domains.ui.state.view);
+
+        bg_shader = bg_shader.effect(BackgroundEffect::Gradient);
+
+        let bg_shader_element: Element<ui::messages::Message> = bg_shader.into();
+        let bg_shader_mapped: Element<DomainMessage> =
+            bg_shader_element.map(DomainMessage::from);
+
+        return Stack::new()
+            .push(bg_shader_mapped)
+            .push(auth_content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
     }
 
     // Get the view content

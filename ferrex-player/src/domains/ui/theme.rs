@@ -3,6 +3,9 @@ use iced::{
     widget::{button, container, scrollable, slider, text_input},
 };
 
+use crate::domains::ui::types::ViewState;
+use crate::state::State;
+
 /// Pure black theme with high contrast electric blue accents
 #[derive(Debug, Clone, Copy)]
 pub struct MediaServerTheme;
@@ -53,7 +56,63 @@ impl MediaServerTheme {
 
     pub fn theme() -> Theme {
         let mut palette = theme::Palette::DARK;
-        palette.background = Color::TRANSPARENT;
+        // Default to an opaque background to avoid app-wide transparency.
+        palette.background = Self::BACKGROUND;
+        palette.text = Self::TEXT_PRIMARY;
+        palette.primary = Self::ACCENT_BLUE;
+        palette.success = Self::SUCCESS;
+        palette.danger = Self::ERROR;
+
+        Theme::custom("Ferrex Dark", palette)
+    }
+
+    /// Choose a theme based on application state and window.
+    ///
+    /// - Uses an opaque background everywhere by default.
+    /// - Switches to a transparent background only for the main window
+    ///   when showing the Player view with the Subwave Wayland backend
+    ///   active (so the video subsurface can render behind the controls).
+    pub fn theme_for_state(state: &State, window: Option<iced::window::Id>) -> Theme {
+        let mut palette = theme::Palette::DARK;
+
+        // Default to opaque background
+        let mut use_transparent_bg = false;
+
+        // Only consider transparency on the main window when actually
+        // presenting the player view with a Wayland subsurface backend.
+        if let Some(main_id) = state
+            .windows
+            .get(crate::domains::ui::windows::WindowKind::Main)
+        {
+            if window.map(|w| w == main_id).unwrap_or(true)
+                && matches!(state.domains.ui.state.view, ViewState::Player)
+            {
+                if let Some(video) = state.domains.player.state.video_opt.as_ref() {
+                    // Only make the background transparent when using Wayland.
+                    // Treat any preference other than ForceAppsink on Wayland as Wayland-backed,
+                    // which includes PreferWayland.
+                    let pref = video.backend();
+                    if std::env::var("WAYLAND_DISPLAY").is_ok() {
+                        use_transparent_bg = !matches!(
+                            pref,
+                            subwave_unified::video::BackendPreference::ForceAppsink
+                        );
+                    } else {
+                        // On non-Wayland, only enable if explicitly forced to Wayland
+                        use_transparent_bg = matches!(
+                            pref,
+                            subwave_unified::video::BackendPreference::ForceWayland
+                        );
+                    }
+                }
+            }
+        }
+
+        palette.background = if use_transparent_bg {
+            Color::TRANSPARENT
+        } else {
+            Self::BACKGROUND
+        };
         palette.text = Self::TEXT_PRIMARY;
         palette.primary = Self::ACCENT_BLUE;
         palette.success = Self::SUCCESS;

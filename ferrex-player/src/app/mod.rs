@@ -82,8 +82,8 @@ fn default_settings() -> Settings {
     }
 }
 
-fn app_theme(_: &State) -> Theme {
-    crate::domains::ui::theme::MediaServerTheme::theme()
+fn app_theme(state: &State) -> Theme {
+    crate::domains::ui::theme::MediaServerTheme::theme_for_state(state, None)
 }
 
 /// Convenience helper for tests to construct an application with custom presets.

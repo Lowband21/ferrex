@@ -230,8 +230,11 @@ fn main() -> iced::Result {
             "Ferrex Player".to_string()
         }
     })
-    .theme(|_state: &State, _window| {
-        ferrex_player::domains::ui::theme::MediaServerTheme::theme()
+    .theme(|state: &State, window| {
+        ferrex_player::domains::ui::theme::MediaServerTheme::theme_for_state(
+            state,
+            Some(window),
+        )
     })
     .run()
 }
