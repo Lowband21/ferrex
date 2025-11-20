@@ -148,6 +148,55 @@ pub mod player_controls {
     pub const TOP_BAR_PADDING: f32 = 15.0;
 }
 
+/// Search window layout constants
+pub mod search {
+    /// Fixed width of the dedicated search window
+    pub const WINDOW_WIDTH: f32 = 620.0;
+
+    /// Fixed height of the dedicated search window
+    pub const WINDOW_HEIGHT: f32 = 440.0;
+
+    /// Vertical offset below the main header when spawning the window
+    pub const WINDOW_VERTICAL_OFFSET: f32 = 8.0;
+
+    const WINDOW_VERTICAL_PADDING: f32 = 16.0 * 2.0; // Container padding (top + bottom)
+    const SECTION_SPACING: f32 = 16.0; // Spacing between header/input/results
+
+    const HEADER_ICON_SIZE: f32 = 36.0;
+    const HEADER_VERTICAL_PADDING: f32 = 12.0 * 2.0;
+
+    /// Total rendered height of the header block
+    pub const HEADER_HEIGHT: f32 = HEADER_ICON_SIZE + HEADER_VERTICAL_PADDING;
+
+    const INPUT_BUTTON_HEIGHT: f32 = 46.0;
+    const INPUT_PANEL_VERTICAL_PADDING: f32 = 12.0 * 2.0;
+
+    /// Total rendered height of the input/search controls block
+    pub const INPUT_PANEL_HEIGHT: f32 = INPUT_BUTTON_HEIGHT + INPUT_PANEL_VERTICAL_PADDING;
+
+    /// Effective viewport height available for the scrollable results area
+    pub const RESULTS_VIEWPORT_HEIGHT: f32 = WINDOW_HEIGHT
+        - WINDOW_VERTICAL_PADDING
+        - HEADER_HEIGHT
+        - INPUT_PANEL_HEIGHT
+        - SECTION_SPACING * 2.0;
+
+    const RESULT_ICON_SIZE: f32 = 48.0;
+    const RESULT_VERTICAL_PADDING: f32 = 14.0 * 2.0;
+
+    /// Height of a single result row (without inter-row spacing)
+    pub const RESULT_ROW_HEIGHT: f32 = RESULT_ICON_SIZE + RESULT_VERTICAL_PADDING;
+
+    /// Spacing applied between result rows within the column layout
+    pub const RESULT_ROW_SPACING: f32 = 6.0;
+
+    /// Height of the footer summary row that shows total results
+    pub const RESULTS_FOOTER_HEIGHT: f32 = 29.0;
+
+    /// Half viewport step used for snap scrolling increments
+    pub const RESULTS_HALF_STEP: f32 = RESULTS_VIEWPORT_HEIGHT / 2.0;
+}
+
 /// User preference scales
 pub mod scale_presets {
     /// Normal scale factor

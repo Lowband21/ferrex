@@ -390,12 +390,7 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
             }
         } else {
             // Service not initialized, show loading state
-            create_loading_placeholder(
-                bounds,
-                image.radius,
-                image.theme_color,
-                request_hash,
-            )
+            create_loading_placeholder(bounds, image.radius, image.theme_color, request_hash)
         }
     }
 }

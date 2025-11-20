@@ -4,6 +4,7 @@ use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::ui;
 use ferrex_core::player_prelude::{MediaID, MovieID};
 use iced::Task;
+use iced::window::Mode;
 use std::time::Duration;
 
 /// Handle player domain messages
@@ -471,35 +472,9 @@ pub fn update_player(
                 "End of stream - finalizing playback and navigating back"
             );
 
-            // Capture position and duration for progress update
+            // Capture position and duration for final progress update
             if let Some(media_id) = state.current_media_id {
-                let position = state.last_valid_position;
-                let duration = state.last_valid_duration;
-
-                // Send final progress update with captured data
-                let progress_task = Task::done(crate::common::messages::DomainMessage::Media(
-                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
-                        media_id, position, duration,
-                    ),
-                ));
-
-                // Check if we should play next episode
-                let next_episode_task = if let Some(media_id) =
-                    &state.current_media_id
-                {
-                    // Only auto-play next episode if this is an episode
-                    if let ferrex_core::MediaID::Episode(_) = media_id {
-                        log::info!(
-                            "Current media is an episode, checking for next episode"
-                        );
-                        Task::done(crate::common::messages::DomainMessage::Media(
-                            crate::domains::media::messages::Message::PlayNextEpisode,
-                        ))
-                    } else {
-                        Task::none()
-                    }
-                };
-
+                // Prefer backend position if video is still present
                 let (position, duration) =
                     if let Some(video) = &mut state.video_opt {
                         (
@@ -510,10 +485,18 @@ pub fn update_player(
                         (state.last_valid_position, state.last_valid_duration)
                     };
 
-                DomainUpdateResult::task(Task::batch(vec![
-                    progress_task,
-                    next_episode_task,
-                ]))
+                // Send final progress update, then reset, then navigate back
+                let tasks = Task::batch(vec![
+                    Task::done(crate::common::messages::DomainMessage::Media(
+                        crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                            media_id, position, duration,
+                        ),
+                    )),
+                    Task::done(DomainMessage::Player(Message::ResetAfterStop)),
+                    Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack)),
+                ]);
+
+                DomainUpdateResult::task(tasks)
             } else {
                 // No media id - just reset and navigate back
                 let tasks = Task::batch(vec![
@@ -643,6 +626,19 @@ pub fn update_player(
                     mode,
                 )],
             )
+        }
+
+        Message::DisableFullscreen => {
+            if state.is_fullscreen {
+                DomainUpdateResult::with_events(
+                    Task::none(),
+                    vec![crate::common::messages::CrossDomainEvent::SetWindowMode(
+                        Mode::Windowed,
+                    )],
+                )
+            } else {
+                DomainUpdateResult::task(Task::none())
+            }
         }
 
         Message::ToggleSettings => {
@@ -1026,17 +1022,18 @@ pub fn update_player(
                 state.external_mpv_handle = None;
                 state.external_mpv_active = false;
 
-                let tasks = Task::batch(vec![
+                // Compose progress + reset + navigate tasks
+                let all_tasks = Task::batch(vec![
+                    progress_task,
                     Task::done(DomainMessage::Player(Message::ResetAfterStop)),
                     Task::done(DomainMessage::Ui(
                         ui::messages::Message::NavigateBack,
                     )),
-                    progress_task,
                 ]);
 
-                // Emit RestoreWindow event
+                // Emit RestoreWindow event with composed tasks
                 DomainUpdateResult::with_events(
-                    progress_task,
+                    all_tasks,
                     vec![crate::common::messages::CrossDomainEvent::RestoreWindow(
                         final_fullscreen,
                     )],

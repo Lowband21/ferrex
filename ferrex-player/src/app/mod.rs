@@ -7,6 +7,7 @@ use iced::{
 use crate::common::messages::DomainMessage;
 use crate::state::State;
 use crate::{subscriptions, update, view};
+use iced::Element;
 
 pub mod bootstrap;
 pub mod presets;
@@ -22,10 +23,18 @@ pub fn application(
     let config = Arc::new(config);
 
     let boot_config = Arc::clone(&config);
+    fn view_adapter(state: &State) -> Element<'_, DomainMessage> {
+        let id = state
+            .windows
+            .get(crate::domains::ui::windows::WindowKind::Main)
+            .unwrap_or_default();
+        view::view(state, id)
+    }
+
     iced::application(
         move || bootstrap::runtime_boot(&boot_config),
         update::update,
-        view::view,
+        view_adapter,
     )
     .settings(default_settings())
     .title("Ferrex Player")
@@ -66,10 +75,18 @@ pub fn application_with_presets(
     let config = Arc::new(config);
     let boot_config = Arc::clone(&config);
 
+    fn view_adapter(state: &State) -> Element<'_, DomainMessage> {
+        let id = state
+            .windows
+            .get(crate::domains::ui::windows::WindowKind::Main)
+            .unwrap_or_default();
+        view::view(state, id)
+    }
+
     iced::application(
         move || bootstrap::runtime_boot(&boot_config),
         update::update,
-        view::view,
+        view_adapter,
     )
     .settings(default_settings())
     .title("Ferrex Player")

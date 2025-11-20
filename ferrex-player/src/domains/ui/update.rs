@@ -42,68 +42,33 @@ pub fn update_ui(
 ) -> DomainUpdateResult {
     match message {
         ui::Message::OpenSearchWindow => {
-            let settings = iced::window::Settings {
-                size: iced::Size::new(800.0, 560.0),
-                resizable: true,
-                decorations: true,
-                transparent: true,
-                // Ensure closing this window does not exit the app
-                ..Default::default()
-            };
-
-            let task = iced::window::open(settings).and_then(|id| {
-                Task::done(DomainMessage::Ui(ui::Message::SearchWindowOpened(id)))
-            });
-
-            DomainUpdateResult::task(task)
+            crate::domains::ui::windows::controller::open_search(state, None)
         }
         ui::Message::OpenSearchWindowWithSeed(seed) => {
-            // Update query (and maintain scroll state) + open window
-            let update_task = super::update_handlers::search_updates::update_search_query(
-                state,
-                seed,
-            )
-            .task;
-
-            let settings = iced::window::Settings {
-                size: iced::Size::new(800.0, 560.0),
-                resizable: true,
-                decorations: true,
-                transparent: true,
-                ..Default::default()
-            };
-
-            let open_task = iced::window::open(settings).and_then(|id| {
-                Task::done(DomainMessage::Ui(ui::Message::SearchWindowOpened(id)))
-            });
-
-            DomainUpdateResult::task(Task::batch([update_task, open_task]))
+            let result = crate::domains::ui::windows::controller::open_search(state, Some(seed));
+            result
         }
         ui::Message::SearchWindowOpened(id) => {
             state.search_window_id = Some(id);
-
-            // Focus the new window and the search input field
-            let focus_input = iced::widget::text_input::focus::<DomainMessage>(
-                iced::widget::text_input::Id::new("search-input"),
-            );
-
-            let focus_window = iced::window::gain_focus(id);
-
-            DomainUpdateResult::task(Task::batch([focus_window, focus_input]))
+            crate::domains::ui::windows::controller::on_search_opened(state, id)
+        }
+        ui::Message::MainWindowOpened(id) => {
+            state
+                .windows
+                .set(crate::domains::ui::windows::WindowKind::Main, id);
+            DomainUpdateResult::task(Task::none())
+        }
+        ui::Message::RawWindowClosed(id) => {
+            crate::domains::ui::windows::controller::on_raw_window_closed(state, id)
         }
         ui::Message::FocusSearchWindow => {
-            if let Some(id) = state.search_window_id {
-                DomainUpdateResult::task(iced::window::gain_focus(id))
-            } else {
-                DomainUpdateResult::task(Task::none())
-            }
+            crate::domains::ui::windows::controller::focus_search(state)
+        }
+        ui::Message::FocusSearchInput => {
+            crate::domains::ui::windows::controller::focus_search_input(state)
         }
         ui::Message::CloseSearchWindow => {
-            if let Some(id) = state.search_window_id.take() {
-                DomainUpdateResult::task(iced::window::close(id))
-            } else {
-                DomainUpdateResult::task(Task::none())
-            }
+            crate::domains::ui::windows::controller::close_search(state)
         }
         ui::Message::SetDisplayMode(display_mode) => {
             state.domains.ui.state.display_mode = display_mode;
@@ -960,10 +925,22 @@ pub fn update_ui(
             }
         }
         ui::Message::UpdateSearchQuery(query) => {
-            super::update_handlers::update_search_query(state, query)
+            let mut result = super::update_handlers::update_search_query(state, query);
+
+            if state
+                .windows
+                .get(crate::domains::ui::windows::WindowKind::Search)
+                .is_none()
+            {
+                let open = crate::domains::ui::windows::controller::open_search(state, None);
+                result.task = Task::batch([result.task, open.task]);
+                result.events.extend(open.events);
+            }
+
+            result
         }
         ui::Message::BeginSearchFromKeyboard(seed) => {
-            super::update_handlers::begin_search_from_keyboard(state, seed)
+            crate::domains::ui::windows::controller::open_search(state, Some(seed))
         }
         ui::Message::ExecuteSearch => {
             // Forward directly to search domain

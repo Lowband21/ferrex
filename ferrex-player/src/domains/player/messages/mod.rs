@@ -49,6 +49,7 @@ pub enum Message {
     // UI control
     ShowControls,
     ToggleFullscreen,
+    DisableFullscreen,
     ToggleSettings,
     MouseMoved(iced::Point),
     VideoClicked,
@@ -134,6 +135,7 @@ impl fmt::Debug for Message {
             // UI control
             Message::ShowControls => write!(f, "ShowControls"),
             Message::ToggleFullscreen => write!(f, "ToggleFullscreen"),
+            Message::DisableFullscreen => write!(f, "DisableFullscreen"),
             Message::ToggleSettings => write!(f, "ToggleSettings"),
             Message::MouseMoved(point) => write!(f, "MouseMoved({:?})", point),
             Message::VideoClicked => write!(f, "VideoClicked"),
@@ -170,7 +172,6 @@ impl fmt::Debug for Message {
                 write!(f, "ExternalPlaybackStarted")
             }
             Message::ProgressHeartbeat => write!(f, "ProgressHeartbeat"),
-
             Message::ExternalPlaybackUpdate { position, duration } => {
                 write!(
                     f,

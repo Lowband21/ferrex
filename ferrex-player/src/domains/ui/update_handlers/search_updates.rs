@@ -2,6 +2,7 @@ use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::search::{messages as search_messages, types::SearchMode};
 use crate::state::State;
 use iced::Task;
+use iced::widget::operation::scroll_to;
 
 /// Apply a UI-originated query change to the search domain while maintaining UI scroll state.
 pub fn update_search_query(state: &mut State, query: String) -> DomainUpdateResult {
@@ -13,7 +14,7 @@ pub fn update_search_query(state: &mut State, query: String) -> DomainUpdateResu
                 let scroll_position = lib_state.grid_state.scroll_position;
                 let scrollable_id = lib_state.grid_state.scrollable_id.clone();
 
-                iced::widget::scrollable::scroll_to::<DomainMessage>(
+                scroll_to::<DomainMessage>(
                     scrollable_id,
                     iced::widget::scrollable::AbsoluteOffset {
                         x: 0.0,

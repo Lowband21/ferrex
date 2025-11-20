@@ -5,24 +5,23 @@
 //! the widget `encode_batch` phase and lazily uploaded during `prepare` once the
 //! frame budget and texture cache state are known.
 
-use crate::infra::{
-    constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME,
-    widgets::poster::{
-        poster_animation_types::{AnimatedPosterBounds, PosterAnimationType},
-        render_pipeline::{create_batch_instance, create_placeholder_instance},
-    },
+use crate::infra::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME;
+use crate::infra::widgets::poster::poster_animation_types::{
+    AnimatedPosterBounds, PosterAnimationType,
 };
-
+use crate::infra::widgets::poster::render_pipeline::{
+    create_batch_instance, create_placeholder_instance,
+};
 use bytemuck::{Pod, Zeroable};
-use iced::{Color, Point, Rectangle as LayoutRect, widget::image::Handle};
-use iced_wgpu::{
-    primitive::{
-        PrepareContext, PrimitiveBatchState, RenderContext,
-        buffer_manager::InstanceBufferManager,
-    },
-    wgpu,
+use iced::widget::image::Handle;
+use iced::{Color, Point, Rectangle as LayoutRect};
+use iced_wgpu::primitive::{
+    buffer_manager::InstanceBufferManager, PrepareContext, PrimitiveBatchState, RenderContext,
 };
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use iced_wgpu::{core, wgpu, AtlasRegion};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Instant;
 
 /// GPU instance payload for a poster primitive.
 #[repr(C)]

@@ -15,6 +15,7 @@ pub mod update_handlers;
 pub mod view_models;
 pub mod views;
 pub mod widgets;
+pub mod windows;
 pub mod yoke_cache;
 
 use self::views::carousel::CarouselState;

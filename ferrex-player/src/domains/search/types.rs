@@ -1,10 +1,13 @@
 //! Search domain types and state management
 
-use ferrex_core::player_prelude::{LibraryID, SearchField};
+use ferrex_core::LibraryID;
+use ferrex_core::query::types::SearchField;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::infra::api_types::Media;
+
+pub const SEARCH_RESULTS_SCROLL_ID: &str = "search-window-results";
 
 /// Search UI mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +86,10 @@ pub struct SearchState {
     pub page_size: usize,
     /// Selected result index (for keyboard navigation)
     pub selected_index: Option<usize>,
+    /// Current scroll offset of the search window results list (in pixels)
+    pub window_scroll_offset: f32,
+    /// Indicates that escape was pressed once and next press should close
+    pub escape_pending: bool,
     /// Search result cache (query -> results)
     pub cache: HashMap<String, CachedSearchResults>,
     /// Cache TTL
@@ -119,6 +126,8 @@ impl Default for SearchState {
             displayed_results: 0,
             page_size: 10, // Show 10 results in dropdown
             selected_index: None,
+            window_scroll_offset: 0.0,
+            escape_pending: false,
             cache: HashMap::new(),
             cache_ttl: Duration::from_secs(300), // 5 minute cache
             last_search_time: None,
@@ -196,9 +205,11 @@ impl SearchState {
         self.results.clear();
         self.is_searching = false;
         self.selected_index = None;
+        self.window_scroll_offset = 0.0;
         self.error = None;
         self.total_results = 0;
         self.displayed_results = 0;
+        self.escape_pending = false;
     }
 
     /// Navigate selection up
@@ -241,6 +252,7 @@ impl SearchState {
             SearchMode::Dropdown => 10,
             SearchMode::FullScreen => 50,
         };
+        self.escape_pending = false;
     }
 }
 

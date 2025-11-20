@@ -1,6 +1,13 @@
-use ferrex_player::app::{self, AppConfig};
+use ferrex_player::app::AppConfig;
+use ferrex_player::common::messages::DomainMessage;
+use ferrex_player::domains;
+use ferrex_player::state::State;
+use ferrex_player::{subscriptions, update, view};
 
 use env_logger::{Builder, Target};
+use iced::window;
+use iced::{Font, Task, Theme};
+use iced_aw::ICED_AW_FONT_BYTES;
 use log::LevelFilter;
 
 fn init_logger() {
@@ -45,6 +52,163 @@ fn main() -> iced::Result {
     tracy_client::Client::start();
 
     let config = AppConfig::from_environment();
+    let server_url = config.server_url().to_string();
 
-    app::application(config).run()
+    let init = move || {
+        // Create state using the new constructor
+        let mut state = State::new(server_url.clone());
+
+        // Initialize the global service registry
+        ferrex_player::infra::service_registry::init_registry(
+            state.image_service.clone(),
+        );
+
+        // Extract auth_service for use in the auth task
+        let auth_service = state.domains.auth.state.auth_service.clone();
+
+        let lib_id = state
+            .domains
+            .library
+            .state
+            .current_library_id
+            .map(|library_id| library_id.to_uuid());
+
+        // Initialize depth lines for the default library view
+        state
+            .domains
+            .ui
+            .state
+            .background_shader_state
+            .update_depth_lines(
+                &state.domains.ui.state.view,
+                state.window_size.width,
+                state.window_size.height,
+                lib_id,
+            );
+
+        // Check for stored authentication
+        let auth_task = Task::perform(
+            async move {
+                log::info!("[Auth] Checking for stored authentication...");
+
+                match auth_service.load_from_keychain().await {
+                    Ok(Some(stored_auth)) => {
+                        log::info!(
+                            "[Auth] Found stored auth for user: {}",
+                            stored_auth.user.username
+                        );
+
+                        // Check if auto-login is enabled for this user
+                        let auto_login_enabled = auth_service
+                            .is_auto_login_enabled(&stored_auth.user.id)
+                            .await
+                            .unwrap_or(false)
+                            && stored_auth.user.preferences.auto_login_enabled;
+
+                        log::info!("[Auth] Auto-login enabled: {}", auto_login_enabled);
+
+                        if auto_login_enabled {
+                            // Apply the stored auth
+                            match auth_service.apply_stored_auth(stored_auth).await {
+                                Ok(()) => {
+                                    log::info!("[Auth] Auto-login successful");
+                                    Ok::<Option<bool>, String>(Some(true))
+                                }
+                                Err(e) => {
+                                    log::error!("[Auth] Failed to apply stored auth: {}", e);
+                                    Ok::<Option<bool>, String>(Some(false))
+                                }
+                            }
+                        } else {
+                            log::info!("[Auth] Auto-login disabled");
+                            Ok::<Option<bool>, String>(Some(false))
+                        }
+                    }
+                    Ok(None) => {
+                        log::info!("[Auth] No stored auth found");
+                        Ok::<Option<bool>, String>(None)
+                    }
+                    Err(e) => {
+                        log::error!("[Auth] Error loading stored auth: {}", e);
+                        Ok::<Option<bool>, String>(None)
+                    }
+                }
+            },
+            |result| match result {
+                Ok(Some(true)) => {
+                    log::info!("[Auth] Auto-login enabled, sending CheckAuthStatus");
+                    DomainMessage::Auth(domains::auth::messages::Message::CheckAuthStatus)
+                }
+                Ok(Some(false)) | Ok(None) => {
+                    log::info!("[Auth] Auto-login disabled or no stored auth, sending LoadUsers");
+                    DomainMessage::Auth(domains::auth::messages::Message::LoadUsers)
+                }
+                Err(e) => {
+                    log::error!("[Auth] Error during auth check: {}", e);
+                    DomainMessage::Auth(domains::auth::messages::Message::LoadUsers)
+                }
+            },
+        );
+
+        // Note: Library loading will happen after authentication
+        (state, auth_task)
+    };
+
+    let mut settings = iced::Settings::default();
+    settings.id = Some("ferrex-player".to_string()); // pick the same name as your .desktop file
+    settings.antialiasing = true;
+    settings.default_font = Font::MONOSPACE;
+
+    iced::daemon::<State, DomainMessage, Theme, iced_wgpu::Renderer>(
+        move || {
+            let (mut state, auth_task) = init();
+
+            // Explicitly open the main window for daemon-based multi-window
+            let (main_id, open) = window::open(window::Settings {
+                size: iced::Size::new(1280.0, 720.0),
+                resizable: true,
+                decorations: true,
+                transparent: true,
+                ..Default::default()
+            });
+
+            // Track main window id immediately
+            state
+                .windows
+                .set(crate::domains::ui::windows::WindowKind::Main, main_id);
+
+            // Batch auth + open main
+            let boot = Task::batch([
+                auth_task,
+                open.map(|_| DomainMessage::NoOp),
+                Task::done(DomainMessage::Ui(
+                    domains::ui::messages::Message::MainWindowOpened(main_id),
+                )),
+            ]);
+
+            (state, boot)
+        },
+        update::update,
+        view::view,
+    )
+    .settings(settings)
+    .subscription(subscriptions::subscription)
+    .font(ICED_AW_FONT_BYTES)
+    .font(lucide_icons::lucide_font_bytes())
+    .title(|state: &State, window_id| {
+        if state
+            .windows
+            .get(crate::domains::ui::windows::WindowKind::Search)
+            .is_some_and(|id| id == window_id)
+        {
+            "Ferrex Search".to_string()
+        } else {
+            "Ferrex Player".to_string()
+        }
+    })
+    .theme(|_state: &State, _window| {
+        ferrex_player::domains::ui::theme::MediaServerTheme::theme()
+    })
+    .run()
 }
+

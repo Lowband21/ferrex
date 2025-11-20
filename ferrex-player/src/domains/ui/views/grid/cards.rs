@@ -485,7 +485,7 @@ pub fn series_reference_card_with_state<'a>(
 pub fn season_reference_card_with_state<'a, Season: MaybeYoked>(
     season: Season,
     is_hovered: bool,
-    state: Option<&'a crate::state_refactored::State>,
+    state: Option<&'a crate::state::State>,
     _watch_status: Option<WatchProgress>, // Number of remaining episodes equal to integer from watch_status, individual episode watch progress can be passed with the decimal part
 )where
         Season::InnerRef: SeasonLike,

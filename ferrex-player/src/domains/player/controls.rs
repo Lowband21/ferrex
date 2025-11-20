@@ -172,9 +172,7 @@ impl PlayerDomainState {
         .height(bar_height);
 
         // Create interactive area using mouse_area
-        // Note: For proper seek position calculation, we need the seek bar's bounds.
-        // This would ideally be set via a layout event, but iced doesn't currently provide that.
-        // As a workaround, we assume the seek bar spans the full window width.
+        // Note: ideally we'd have the seek bar's bounds.
         mouse_area(
             // Stack: transparent hit area with visual bar centered
             container(stack![

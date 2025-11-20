@@ -30,6 +30,8 @@ pub enum Message {
     SelectNext,
     /// Select current highlighted result
     SelectCurrent,
+    /// Handle escape press inside search window
+    HandleEscape,
 
     // Internal events
     /// Debounced search trigger
@@ -77,6 +79,7 @@ impl std::fmt::Debug for Message {
             Self::SelectPrevious => write!(f, "SelectPrevious"),
             Self::SelectNext => write!(f, "SelectNext"),
             Self::SelectCurrent => write!(f, "SelectCurrent"),
+            Self::HandleEscape => write!(f, "HandleEscape"),
 
             // Internal events
             Self::SearchDebounced(query) => {
@@ -147,6 +150,7 @@ impl Message {
             Self::SelectPrevious => "SelectPrevious",
             Self::SelectNext => "SelectNext",
             Self::SelectCurrent => "SelectCurrent",
+            Self::HandleEscape => "HandleEscape",
             Self::SearchDebounced(_) => "SearchDebounced",
             Self::ResultsReceived { .. } => "ResultsReceived",
             Self::SearchError(_) => "SearchError",

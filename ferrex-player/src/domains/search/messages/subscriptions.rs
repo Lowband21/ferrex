@@ -9,8 +9,12 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         return Subscription::none();
     }
 
+    if state.search_window_id.is_some() {
+        return Subscription::none();
+    }
+
     iced::keyboard::on_key_press(|key, modifiers| {
-        use iced::keyboard::{Key, key::Named};
+        use iced::keyboard::Key;
 
         if modifiers.control() || modifiers.alt() || modifiers.logo() {
             return None;
@@ -19,17 +23,21 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         match key {
             Key::Character(value) => {
                 let text = value.as_str();
-                if text.is_empty() {
+                if text.len() != 1 {
                     return None;
                 }
 
-                Some(DomainMessage::Ui(UiMessage::BeginSearchFromKeyboard(
+                let mut chars = text.chars();
+                let ch = chars.next().unwrap();
+
+                if !ch.is_ascii_alphanumeric() {
+                    return None;
+                }
+
+                Some(DomainMessage::Ui(UiMessage::OpenSearchWindowWithSeed(
                     text.to_string(),
                 )))
             }
-            Key::Named(Named::Space) => Some(DomainMessage::Ui(
-                UiMessage::BeginSearchFromKeyboard(" ".to_owned()),
-            )),
             _ => None,
         }
     })

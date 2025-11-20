@@ -31,7 +31,15 @@ use iced::{Element, Font, Length};
     ),
     profiling::function
 )]
-pub fn view(state: &State) -> Element<'_, DomainMessage> {
+pub fn view(state: &State, window_id: iced::window::Id) -> Element<'_, DomainMessage> {
+    // Dedicated Search window content
+    if state
+        .windows
+        .get(crate::domains::ui::windows::WindowKind::Search)
+        .is_some_and(|id| id == window_id)
+    {
+        return crate::domains::ui::views::components::view_search_window(state);
+    }
     let view = iced::debug::time("ferrex-player::view");
     // Check for first-run setup
     // Check authentication state
@@ -249,27 +257,7 @@ pub fn view(state: &State) -> Element<'_, DomainMessage> {
     };
 
     view.finish();
-    // Check search mode and render appropriate view
-    if state.domains.search.state.mode
-        == crate::domains::search::types::SearchMode::FullScreen
-    {
-        // Show full-screen search view
-        crate::domains::ui::views::components::view_search_fullscreen(state)
-    } else {
-        match crate::domains::ui::views::components::view_search_dropdown(state)
-        {
-            Some(search_dropdown) => {
-                // Wrap the main content in a stack with the search dropdown overlay
-                Stack::new()
-                    .push(result)
-                    .push(search_dropdown)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into()
-            }
-            _ => result,
-        }
-    }
+    result
 }
 
 #[cfg_attr(

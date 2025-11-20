@@ -10,7 +10,7 @@ use crate::{
         auth::{AuthDomainState, AuthManager},
         library::LibraryDomainState,
         media::MediaDomainState,
-        metadata::{MetadataDomainState, image_service::UnifiedImageService},
+        metadata::{image_service::UnifiedImageService, MetadataDomainState},
         player::PlayerDomain,
         search::SearchDomain,
         settings::SettingsDomainState,
@@ -20,11 +20,11 @@ use crate::{
             tabs::{TabId, TabManager},
             types::DisplayMode,
             views::carousel::CarouselState,
+            windows::WindowManager,
         },
         user_management::UserManagementDomainState,
     },
     infra::{
-        ServiceBuilder,
         adapters::{ApiClientAdapter, AuthManagerAdapter},
         api_client::ApiClient,
         constants::animation::{
@@ -39,6 +39,7 @@ use crate::{
             streaming::StreamingApiAdapter,
             user_management::UserAdminApiAdapter,
         },
+        ServiceBuilder,
         widgets::poster::poster_animation_types::PosterAnimationType,
     },
 };
@@ -83,6 +84,9 @@ pub struct State {
 
     /// Secondary windows
     pub search_window_id: Option<iced::window::Id>,
+
+    /// Window management
+    pub windows: WindowManager,
 
     /// MediaRepo for new architecture - single source of truth for media/library data
     pub media_repo: Arc<StdRwLock<Option<MediaRepo>>>,
@@ -283,6 +287,7 @@ impl State {
             window_position: None,
             is_fullscreen: false,
             search_window_id: None,
+            windows: WindowManager::new(),
             media_repo,
         }
     }

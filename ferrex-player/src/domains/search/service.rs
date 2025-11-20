@@ -13,6 +13,9 @@ use super::types::{SearchResult, SearchStrategy};
 use chrono::Datelike;
 use std::time::Instant;
 
+const SERVER_SEARCH_LIMIT: usize = 50;
+
+/// Service for executing searches
 #[derive(Debug)]
 pub struct SearchService {
     /// API service for server-backed searching (optional)
@@ -383,7 +386,7 @@ impl SearchService {
             query_builder = query_builder.search_in(query, fields.to_vec());
         }
 
-        let media_query = query_builder.build();
+        let media_query = query_builder.limit(SERVER_SEARCH_LIMIT).build();
 
         // Log the query being sent for debugging
         log::debug!(
@@ -727,10 +730,12 @@ impl SearchService {
                             .map(|date| date.year())
                     })
                 }),
-                poster_url: movie
-                    .details
-                    .as_movie()
-                    .and_then(|details| details.poster_path.clone()),
+                poster_url: match &movie.details {
+                    ferrex_core::MediaDetailsOption::Details(
+                        ferrex_core::TmdbDetails::Movie(details),
+                    ) => details.poster_path.clone(),
+                    _ => None,
+                },
                 match_score: 1.0, // Server results assumed to be relevant
                 match_field: SearchField::All,
                 library_id: Some(movie.file.library_id),

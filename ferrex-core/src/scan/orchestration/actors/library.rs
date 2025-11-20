@@ -960,11 +960,7 @@ mod tests {
         let enqueued = events
             .iter()
             .find_map(|event| {
-                if let LibraryActorEvent::EnqueueFolderScan {
-                    correlation_id,
-                    ..
-                } = event
-                {
+                if let LibraryActorEvent::EnqueueFolderScan { correlation_id, .. } = event {
                     Some(*correlation_id)
                 } else {
                     None
@@ -1020,10 +1016,9 @@ mod tests {
         // redundant and could reintroduce the incomplete-state bug these guards
         // were meant to avoid.
         assert!(
-            responses.iter().all(|event| !matches!(
-                event,
-                LibraryActorEvent::EnqueueFolderScan { .. }
-            )),
+            responses
+                .iter()
+                .all(|event| !matches!(event, LibraryActorEvent::EnqueueFolderScan { .. })),
             "fs events during bulk should not enqueue additional scans"
         );
 
@@ -1036,11 +1031,8 @@ mod tests {
         let root = temp.path().to_path_buf();
         let queue = Arc::new(RecordingQueue::default());
         let publisher = Arc::new(RecordingPublisher::default());
-        let mut actor = make_actor_with_publisher(
-            Arc::clone(&queue),
-            root.clone(),
-            Arc::clone(&publisher),
-        );
+        let mut actor =
+            make_actor_with_publisher(Arc::clone(&queue), root.clone(), Arc::clone(&publisher));
         let library_id = actor.config.library.id;
         let correlation = Uuid::now_v7();
 
@@ -1126,11 +1118,7 @@ mod tests {
         let enqueued = responses
             .iter()
             .find_map(|event| {
-                if let LibraryActorEvent::EnqueueFolderScan {
-                    correlation_id,
-                    ..
-                } = event
-                {
+                if let LibraryActorEvent::EnqueueFolderScan { correlation_id, .. } = event {
                     Some(*correlation_id)
                 } else {
                     None

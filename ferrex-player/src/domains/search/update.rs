@@ -1,16 +1,16 @@
 //! Search domain update logic (global, server-backed)
 
 use iced::Task;
-use iced::widget::Id;
-use iced::widget::operation::focus;
+use iced::widget::operation::snap_to;
 use std::time::Instant;
 
 use super::messages::Message;
-use super::types::{SearchMode, SearchStrategy};
-use crate::common::messages::{
-    CrossDomainEvent, DomainMessage, DomainUpdateResult,
-};
+use super::types::{SEARCH_RESULTS_SCROLL_ID, SearchMode, SearchStrategy};
+use crate::common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult};
+use crate::domains::ui::{messages as ui_messages, windows::focus};
+use crate::infra::constants::layout::search as search_layout;
 use crate::state::State;
+use iced::widget::scrollable::RelativeOffset;
 
 pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
     #[cfg(any(
@@ -22,6 +22,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
 
     match message {
         Message::UpdateQuery(query) => {
+            state.domains.search.state.escape_pending = false;
             state.domains.search.state.query = query.clone();
             state.domains.search.state.selected_index = None;
 
@@ -31,7 +32,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             } else {
                 // Keep focus on search input and debounce the search
                 DomainUpdateResult::task(Task::batch(vec![
-                    focus::<DomainMessage>(Id::new("search-input"))
+                    focus::focus_active_search_input(state)
                         .map(|_| DomainMessage::NoOp),
                     Task::perform(
                         async move {
@@ -78,10 +79,13 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             // Clear search after selection
             state.domains.search.state.clear();
 
-            DomainUpdateResult::task(Task::perform(
-                async move { event },
-                DomainMessage::Event,
-            ))
+            let navigation_task =
+                Task::perform(async move { event }, |event| DomainMessage::Event(event));
+            DomainUpdateResult::task(Task::batch([
+                navigation_task,
+                Task::done(DomainMessage::Ui(ui_messages::Message::CloseSearchWindow)),
+            ]))
+        }
         }
 
         Message::LoadMore => {
@@ -107,22 +111,68 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
         }
 
         Message::SelectPrevious => {
-            state.domains.search.state.select_previous();
+            if state.domains.search.state.escape_pending {
+                state.domains.search.state.select_previous();
+                let scroll_task = scroll_selected_into_view(state);
+                return DomainUpdateResult::task(scroll_task);
+            }
             DomainUpdateResult::task(Task::none())
         }
 
         Message::SelectNext => {
-            state.domains.search.state.select_next();
+            if state.domains.search.state.escape_pending {
+                state.domains.search.state.select_next();
+                let scroll_task = scroll_selected_into_view(state);
+                return DomainUpdateResult::task(scroll_task);
+            }
             DomainUpdateResult::task(Task::none())
         }
 
         Message::SelectCurrent => {
-            if let Some(result) =
-                state.domains.search.state.get_selected().cloned()
-            {
-                handle_select_result(state, result.media_ref)
+            let selected_media = {
+                let search_state = &mut state.domains.search.state;
+
+                let result = if let Some(selected) = search_state.get_selected().cloned() {
+                    Some(selected)
+                } else if let Some(first) = search_state.results.first().cloned() {
+                    search_state.selected_index = Some(0);
+                    Some(first)
+                } else {
+                    None
+                };
+
+                search_state.escape_pending = false;
+
+                result.map(|res| res.media_ref)
+            };
+
+            if let Some(media_ref) = selected_media {
+                let mut result = handle_select_result(state, media_ref);
+                result.task = Task::batch([
+                    result.task,
+                    Task::done(DomainMessage::Ui(ui_messages::Message::CloseSearchWindow)),
+                ]);
+                result
             } else {
                 DomainUpdateResult::task(Task::none())
+            }
+        }
+
+        Message::HandleEscape => {
+            if state.domains.search.state.escape_pending {
+                state.domains.search.state.escape_pending = false;
+                DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                    ui_messages::Message::CloseSearchWindow,
+                )))
+            } else {
+                {
+                    let search_state = &mut state.domains.search.state;
+                    if search_state.selected_index.is_none() && !search_state.results.is_empty() {
+                        search_state.selected_index = Some(0);
+                    }
+                    search_state.escape_pending = true;
+                }
+                DomainUpdateResult::task(scroll_selected_into_view(state))
             }
         }
 
@@ -139,6 +189,11 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
                     total_count.min(state.domains.search.state.page_size);
                 state.domains.search.state.is_searching = false;
                 state.domains.search.state.error = None;
+                state.domains.search.state.escape_pending = false;
+                state.domains.search.state.window_scroll_offset = 0.0;
+                if state.search_window_id.is_some() {
+                    state.domains.search.state.selected_index = None;
+                }
 
                 // Record metrics if available
                 if let Some(metric) =
@@ -154,7 +209,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
 
                 // Keep focus on search input when results arrive
                 DomainUpdateResult::task(Task::batch(vec![
-                    focus::<DomainMessage>(Id::new("search-input"))
+                    focus::focus_active_search_input(state)
                         .map(|_| DomainMessage::NoOp),
                 ]))
             } else {
@@ -311,7 +366,6 @@ fn handle_execute_search(
     // Always search globally; ignore any library filter
     let library_id = None;
     let fuzzy = state.domains.search.state.fuzzy_matching;
-    let search_state = state.domains.search.state.clone();
 
     DomainUpdateResult::task(Task::perform(
         async move {
@@ -361,4 +415,79 @@ fn handle_select_result(
     }))
 }
 
-// NOTE: Local data completeness heuristics are deferred; server search is authoritative for now.
+fn scroll_selected_into_view(state: &mut State) -> Task<DomainMessage> {
+    if state.search_window_id.is_none() {
+        return Task::none();
+    }
+
+    let search_state = &mut state.domains.search.state;
+    let Some(selected_index) = search_state.selected_index else {
+        return Task::none();
+    };
+
+    let total = search_state.results.len();
+    if total == 0 {
+        search_state.window_scroll_offset = 0.0;
+        return Task::none();
+    }
+
+    let viewport_height = search_layout::RESULTS_VIEWPORT_HEIGHT;
+    let row_height = search_layout::RESULT_ROW_HEIGHT;
+    let row_spacing = search_layout::RESULT_ROW_SPACING;
+    let half_step = search_layout::RESULTS_HALF_STEP;
+
+    if viewport_height <= 0.0 || half_step <= 0.0 {
+        return Task::none();
+    }
+
+    let row_pitch = row_height + row_spacing;
+    let mut content_height =
+        row_height * (total as f32) + row_spacing * (total.saturating_sub(1) as f32);
+
+    if search_state.total_results > 0 {
+        content_height += row_spacing + search_layout::RESULTS_FOOTER_HEIGHT;
+    }
+
+    if content_height <= viewport_height {
+        search_state.window_scroll_offset = 0.0;
+        return Task::none();
+    }
+
+    let max_offset = (content_height - viewport_height).max(0.0);
+    let mut offset = search_state.window_scroll_offset.clamp(0.0, max_offset);
+
+    let row_top = (selected_index as f32) * row_pitch;
+    let row_bottom = row_top + row_height;
+
+    let viewport_top = offset;
+    let viewport_bottom = offset + viewport_height;
+
+    if row_top < viewport_top {
+        let needed = viewport_top - row_top;
+        let steps = (needed / half_step).ceil().max(1.0);
+        offset = (offset - steps * half_step).max(0.0);
+    } else if row_bottom > viewport_bottom {
+        let needed = row_bottom - viewport_bottom;
+        let steps = (needed / half_step).ceil().max(1.0);
+        offset = (offset + steps * half_step).min(max_offset);
+    }
+
+    if half_step > 0.0 {
+        offset = (offset / half_step).round() * half_step;
+    }
+    offset = offset.clamp(0.0, max_offset);
+
+    if (offset - search_state.window_scroll_offset).abs() <= f32::EPSILON {
+        return Task::none();
+    }
+
+    search_state.window_scroll_offset = offset;
+
+    if max_offset <= f32::EPSILON {
+        return Task::none();
+    }
+
+    let y = (offset / max_offset).clamp(0.0, 1.0);
+
+    snap_to(SEARCH_RESULTS_SCROLL_ID, RelativeOffset { x: 0.0, y })
+}

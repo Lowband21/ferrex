@@ -6,7 +6,6 @@ use crate::{
     state::State,
 };
 use ferrex_core::player_prelude::LibraryID;
-use iced::widget::Id;
 use iced::{
     Element, Length,
     widget::{Space, Stack, button, container, row, text, text_input},
@@ -72,43 +71,28 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             let left_section =
                 row(left_section_items).align_y(iced::Alignment::Center);
 
-            // Center section - Search (always visible)
+            // Center section left empty to keep layout balanced
             let center_section = container(
-                row![
-                    container(
-                        text_input(
-                            "Search...",
-                            &state.domains.search.state.query
-                        )
-                        .id(Id::new("search-input"))
-                        .on_input(Message::UpdateSearchQuery)
-                        .on_submit(Message::ExecuteSearch)
-                        .style(theme::TextInput::header_search())
-                        .padding([15, 12])
-                        .size(14)
-                        .width(Length::Fixed(300.0))
-                    )
-                    .height(HEIGHT)
-                    .center_y(Length::Fill),
-                    button(
-                        container(icon_text_with_size(Icon::Search, 16.0))
-                            .center_x(Length::Fill)
-                            .center_y(Length::Fill)
-                    )
-                    .on_press(Message::ExecuteSearch)
-                    .style(theme::Button::HeaderIcon.style())
-                    .width(Length::Fixed(HEIGHT))
-                    .height(HEIGHT)
-                ]
-                .align_y(iced::Alignment::Center),
+                Space::new().width(Length::Shrink).height(HEIGHT),
             )
+            .width(Length::Shrink)
             .height(HEIGHT)
             .align_x(iced::alignment::Horizontal::Center)
             .align_y(iced::alignment::Vertical::Center);
 
             // Right section - Controls
+            let search_button = button(
+                container(icon_text_with_size(Icon::Search, 16.0))
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill),
+            )
+            .on_press(Message::OpenSearchWindow)
+            .style(theme::Button::HeaderIcon.style())
+            .width(Length::Fixed(HEIGHT))
+            .height(HEIGHT);
+
             let right_section = row![
-                // Fullscreen toggle
+                search_button,
                 button(
                     container(icon_text_with_size(
                         if state.is_fullscreen {
@@ -119,7 +103,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         16.0,
                     ))
                     .center_x(Length::Fill)
-                    .center_y(Length::Fill)
+                    .center_y(Length::Fill),
                 )
                 .on_press(Message::ToggleFullscreen)
                 .style(theme::Button::HeaderIcon.style())
@@ -248,39 +232,25 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             let left_section =
                 row(left_section_items).align_y(iced::Alignment::Center);
 
-            // Center section - Search (always visible for global search)
-            let center_section = container(
-                row![
-                    container(
-                        text_input("Search...", &state.domains.search.state.query)
-                            .id(Id::new("search-input"))
-                            .on_input(Message::UpdateSearchQuery)
-                            .on_submit(Message::ExecuteSearch)
-                            .style(theme::TextInput::header_search())
-                            .padding([15, 12])
-                            .size(14)
-                            .width(Length::Fixed(300.0))
-                    )
-                    .height(HEIGHT)
-                    .center_y(Length::Fill),
-                    button(
-                        container(icon_text_with_size(Icon::Search, 16.0))
-                            .center_x(Length::Fill)
-                            .center_y(Length::Fill)
-                    )
-                    .on_press(Message::ExecuteSearch)
-                    .style(theme::Button::HeaderIcon.style())
-                    .width(Length::Fixed(HEIGHT))
-                    .height(HEIGHT)
-                ]
-                .align_y(iced::Alignment::Center),
-            )
-            .height(HEIGHT)
-            .align_x(iced::alignment::Horizontal::Center)
-            .align_y(iced::alignment::Vertical::Center);
+            let center_section = container(Space::new().width(Length::Shrink).height(HEIGHT))
+                .width(Length::Shrink)
+                .height(HEIGHT)
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center);
 
             // Right section - same controls as library view
+            let search_button = button(
+                container(icon_text_with_size(Icon::Search, 16.0))
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill),
+            )
+            .on_press(Message::OpenSearchWindow)
+            .style(theme::Button::HeaderIcon.style())
+            .width(Length::Fixed(HEIGHT))
+            .height(HEIGHT);
+
             let right_section = row![
+                search_button,
                 // Fullscreen toggle
                 button(
                     container(icon_text_with_size(
@@ -322,7 +292,6 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     };
                     admin_element
                 },
-                // Profile placeholder
                 button(
                     container(icon_text_with_size(Icon::UserPen, 16.0))
                         .center_x(Length::Fill)

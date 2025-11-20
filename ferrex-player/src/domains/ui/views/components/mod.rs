@@ -2,4 +2,4 @@
 
 pub mod search_dropdown;
 
-pub use search_dropdown::{view_search_dropdown, view_search_fullscreen};
+pub use search_dropdown::{view_search_dropdown, view_search_fullscreen, view_search_window};

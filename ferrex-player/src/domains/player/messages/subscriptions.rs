@@ -43,13 +43,29 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         );
     }
 
-    // Keyboard shortcuts (same as media previously, but route to Player)
-    subs.push(keyboard_shortcuts());
+    // Player specific keyboard control
+    subs.push(keyboard_shortcuts(state));
 
     Subscription::batch(subs)
 }
 
-fn keyboard_shortcuts() -> Subscription<DomainMessage> {
+fn keyboard_shortcuts(state: &State) -> Subscription<DomainMessage> {
+    if state.search_window_id.is_some() {
+        return Subscription::none();
+    }
+
+    let is_player_view = matches!(
+        &state.domains.ui.state.view,
+        crate::domains::ui::types::ViewState::Player
+    );
+
+    let has_internal_video = state.domains.player.state.video_opt.is_some()
+        && !state.domains.player.state.external_mpv_active;
+
+    if !(is_player_view && has_internal_video) {
+        return Subscription::none();
+    }
+
     iced::keyboard::on_key_press(|key, modifiers| {
         use iced::keyboard::{key::Named, Key};
         let msg = match key {
@@ -70,7 +86,7 @@ fn keyboard_shortcuts() -> Subscription<DomainMessage> {
             }
             Key::Named(Named::ArrowUp) => Some(Message::SetVolume(1.1)),
             Key::Named(Named::ArrowDown) => Some(Message::SetVolume(0.9)),
-            Key::Named(Named::Escape) => Some(Message::ToggleFullscreen),
+            Key::Named(Named::Escape) => None,
             Key::Character(c) if c.as_str() == "f" || c.as_str() == "F" => {
                 Some(Message::ToggleFullscreen)
             }
