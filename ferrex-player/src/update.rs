@@ -34,6 +34,7 @@
 //! - Events from DomainUpdateResult are batched
 //! - Profiling tracks message processing time
 
+use crate::common::focus::FocusMessage;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::auth::update::update_auth;
 use crate::domains::library::update::update_library;
@@ -138,6 +139,36 @@ pub fn update(
         // Route search messages to the search domain handler
         DomainMessage::Search(search_msg) => {
             search_update::update(state, search_msg)
+        }
+
+        // Handle global focus coordination
+        DomainMessage::Focus(focus_msg) => {
+            let task = match focus_msg {
+                FocusMessage::Activate(area) => {
+                    if let Some(id) = state.focus.activate(area) {
+                        iced::widget::operation::focus(id)
+                    } else {
+                        Task::none()
+                    }
+                }
+                FocusMessage::Clear => {
+                    state.focus.clear();
+                    Task::none()
+                }
+                FocusMessage::Traverse { backwards } => {
+                    if state.focus.allow_traversal() {
+                        if backwards {
+                            iced::widget::operation::focus_previous()
+                        } else {
+                            iced::widget::operation::focus_next()
+                        }
+                    } else {
+                        Task::none()
+                    }
+                }
+            };
+
+            DomainUpdateResult::task(task)
         }
 
         // Cross-domain messages

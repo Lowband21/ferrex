@@ -10,6 +10,7 @@ mod pin_setup;
 mod user_carousel;
 mod user_selection;
 
+use crate::common::focus::ids;
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::types::{
     AuthenticationFlow, SetupClaimStatus, SetupClaimUi,
@@ -153,6 +154,7 @@ pub fn view_first_run_setup<'a>(
             auth::Message::UpdateSetupField(auth::SetupField::Username(s))
                 .into()
         })
+        .id(ids::auth_first_run_username())
         .padding(12)
         .size(16)
         .style(theme::TextInput::style());
@@ -162,6 +164,7 @@ pub fn view_first_run_setup<'a>(
             auth::Message::UpdateSetupField(auth::SetupField::DisplayName(s))
                 .into()
         })
+        .id(ids::auth_first_run_display_name())
         .padding(12)
         .size(16)
         .style(theme::TextInput::style());
@@ -172,6 +175,7 @@ pub fn view_first_run_setup<'a>(
                 .into()
         })
         .secure(!show_password)
+        .id(ids::auth_first_run_password())
         .padding(12)
         .size(16)
         .style(theme::TextInput::style());
@@ -185,6 +189,7 @@ pub fn view_first_run_setup<'a>(
                 .into()
             })
             .secure(!show_password)
+            .id(ids::auth_first_run_confirm_password())
             .padding(12)
             .size(16)
             .style(theme::TextInput::style());
@@ -200,6 +205,7 @@ pub fn view_first_run_setup<'a>(
                 auth::Message::UpdateSetupField(auth::SetupField::SetupToken(s))
                     .into()
             })
+            .id(ids::auth_first_run_setup_token())
             .padding(12)
             .size(16)
             .style(theme::TextInput::style());
@@ -275,6 +281,7 @@ pub fn view_first_run_setup<'a>(
     let device_name_input =
         text_input("Player Name (appears in audit logs)", &claim.device_name)
             .on_input(|s| auth::Message::UpdateClaimDeviceName(s).into())
+            .id(ids::auth_first_run_device_name())
             .padding(12)
             .size(16)
             .style(theme::TextInput::style());

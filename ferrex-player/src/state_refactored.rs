@@ -3,6 +3,7 @@
 //! This new State structure delegates domain-specific state to the DomainRegistry,
 //! keeping only the view models and cross-cutting concerns at the top level.
 
+use crate::common::focus::FocusManager;
 use crate::domains::DomainRegistry;
 use crate::domains::auth::AuthDomainState;
 use crate::domains::auth::AuthManager;
@@ -46,6 +47,9 @@ use std::sync::Arc;
 pub struct State {
     /// Domain registry containing all domain-specific state
     pub domains: DomainRegistry,
+
+    /// Central focus manager for coordinating keyboard traversal
+    pub focus: FocusManager,
 
     /// Tab manager for independent tab states (NEW ARCHITECTURE)
     pub tab_manager: TabManager,
@@ -254,6 +258,7 @@ impl State {
 
         Self {
             domains,
+            focus: FocusManager::default(),
             tab_manager,
             server_url: server_url.clone(),
             api_service,

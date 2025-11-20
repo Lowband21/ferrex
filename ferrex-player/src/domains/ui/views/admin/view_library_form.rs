@@ -1,4 +1,5 @@
 use crate::{
+    common::focus::ids,
     common::ui_utils::{Icon, icon_text},
     domains::library::types::LibraryFormData,
     domains::ui::messages::Message,
@@ -92,6 +93,7 @@ pub fn view_library_form<'a>(
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             text_input("Enter library name", &form_data.name)
                 .on_input(Message::UpdateLibraryFormName)
+                .id(ids::library_form_name())
                 .padding(10)
                 .size(16),
         ]
@@ -138,6 +140,7 @@ pub fn view_library_form<'a>(
                 &form_data.paths
             )
             .on_input(Message::UpdateLibraryFormPaths)
+            .id(ids::library_form_paths())
             .padding(10)
             .size(16),
         ]
@@ -155,6 +158,7 @@ pub fn view_library_form<'a>(
                 .color(theme::MediaServerTheme::TEXT_DIMMED),
             text_input("60", &form_data.scan_interval_minutes)
                 .on_input(Message::UpdateLibraryFormScanInterval)
+                .id(ids::library_form_scan_interval())
                 .padding(10)
                 .size(16),
         ]

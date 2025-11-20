@@ -1,6 +1,7 @@
 #[cfg(feature = "demo")]
 use crate::infrastructure::api_types::DemoStatus;
 use crate::{
+    common::focus::{FocusArea, FocusMessage},
     common::messages::{DomainMessage, DomainUpdateResult},
     domains::{
         library::update_handlers::fetch_libraries,
@@ -287,12 +288,29 @@ pub fn update_library(
             let task = super::update_handlers::library_management::handle_show_library_form(
                 state, library,
             );
-            DomainUpdateResult::task(task.map(DomainMessage::Library))
+            let focus_task =
+                if state.domains.library.state.library_form_data.is_some() {
+                    Task::done(DomainMessage::Focus(FocusMessage::Activate(
+                        FocusArea::LibraryForm,
+                    )))
+                } else {
+                    Task::none()
+                };
+
+            DomainUpdateResult::task(Task::batch(vec![
+                task.map(DomainMessage::Library),
+                focus_task,
+            ]))
         }
 
         Message::HideLibraryForm => {
             let task = super::update_handlers::library_management::handle_hide_library_form(state);
-            DomainUpdateResult::task(task.map(DomainMessage::Library))
+            let clear_task =
+                Task::done(DomainMessage::Focus(FocusMessage::Clear));
+            DomainUpdateResult::task(Task::batch(vec![
+                task.map(DomainMessage::Library),
+                clear_task,
+            ]))
         }
 
         Message::UpdateLibraryFormName(name) => {

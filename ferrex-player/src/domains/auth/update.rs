@@ -1,4 +1,5 @@
 use super::update_handlers::*;
+use crate::common::focus::{FocusArea, FocusMessage};
 use crate::common::messages::{
     CrossDomainEvent, DomainMessage, DomainUpdateResult,
 };
@@ -41,7 +42,23 @@ pub fn update_auth(
         }
 
         auth::Message::SetupStatusChecked(needs_setup) => {
-            wrap_task!(handle_setup_status_checked(state, needs_setup,))
+            let setup_task = handle_setup_status_checked(state, needs_setup)
+                .map(DomainMessage::Auth);
+
+            let focus_task = if needs_setup
+                && matches!(
+                    state.domains.auth.state.auth_flow,
+                    crate::domains::auth::types::AuthenticationFlow::FirstRunSetup { .. }
+                )
+            {
+                Task::done(DomainMessage::Focus(FocusMessage::Activate(
+                    FocusArea::AuthFirstRunSetup,
+                )))
+            } else {
+                Task::none()
+            };
+
+            DomainUpdateResult::task(Task::batch(vec![setup_task, focus_task]))
         }
 
         auth::Message::AutoLoginCheckComplete => {
@@ -97,8 +114,10 @@ pub fn update_auth(
                 CrossDomainEvent::UserAuthenticated(user, permissions),
                 CrossDomainEvent::AuthenticationComplete,
             ];
+            let focus_clear =
+                Task::done(DomainMessage::Focus(FocusMessage::Clear));
             DomainUpdateResult::with_events(
-                task.map(DomainMessage::Auth),
+                Task::batch(vec![task.map(DomainMessage::Auth), focus_clear]),
                 events,
             )
         }
@@ -169,7 +188,23 @@ pub fn update_auth(
 
         // Device auth flow
         auth::Message::DeviceStatusChecked(user, result) => {
-            wrap_task!(handle_device_status_checked(state, user, result))
+            let device_task = handle_device_status_checked(state, user, result)
+                .map(DomainMessage::Auth);
+
+            let focus_task = match &state.domains.auth.state.auth_flow {
+                crate::domains::auth::types::AuthenticationFlow::EnteringCredentials {
+                    input_type: crate::domains::auth::types::CredentialType::Password,
+                    ..
+                } => Task::done(DomainMessage::Focus(FocusMessage::Activate(
+                    FocusArea::AuthPasswordEntry,
+                ))),
+                crate::domains::auth::types::AuthenticationFlow::EnteringCredentials { .. } => {
+                    Task::done(DomainMessage::Focus(FocusMessage::Clear))
+                }
+                _ => Task::none(),
+            };
+
+            DomainUpdateResult::task(Task::batch(vec![device_task, focus_task]))
         }
 
         auth::Message::UpdateCredential(input) => {

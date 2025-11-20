@@ -4,6 +4,7 @@ use super::components::{
     auth_card, auth_container, error_message, primary_button, secondary_button,
     spacing, title,
 };
+use crate::common::focus::ids;
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::messages as auth;
 use crate::domains::auth::security::secure_credential::SecureCredential;
@@ -106,6 +107,7 @@ pub fn view_credential_entry<'a>(
                         auth::Message::SubmitCredential,
                     ))
                     .secure(!show_password)
+                    .id(ids::auth_password_entry())
                     .padding(12)
                     .size(16)
                     .width(Length::Fill),

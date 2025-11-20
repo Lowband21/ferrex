@@ -1,6 +1,7 @@
 pub mod cross_domain;
 
 // Message types are now defined in their respective domains
+use crate::common::focus::FocusMessage;
 use crate::domains::auth;
 use crate::domains::library;
 use crate::domains::media;
@@ -144,6 +145,9 @@ pub enum DomainMessage {
     /// Search domain
     Search(search::messages::Message),
 
+    /// Focus orchestration
+    Focus(FocusMessage),
+
     /// Cross-domain coordination messages
     NoOp,
     Tick,
@@ -212,6 +216,12 @@ impl From<search::messages::Message> for DomainMessage {
     }
 }
 
+impl From<FocusMessage> for DomainMessage {
+    fn from(msg: FocusMessage) -> Self {
+        DomainMessage::Focus(msg)
+    }
+}
+
 impl DomainMessage {
     pub fn name(&self) -> &'static str {
         match self {
@@ -225,6 +235,7 @@ impl DomainMessage {
             Self::Settings(msg) => msg.name(),
             Self::UserManagement(msg) => msg.name(),
             Self::Search(msg) => msg.as_str(),
+            Self::Focus(msg) => msg.name(),
             Self::NoOp => "DomainMessage::NoOp",
             Self::Tick => "DomainMessage::Tick",
             Self::ClearError => "DomainMessage::ClearError",
@@ -256,6 +267,7 @@ impl std::fmt::Debug for DomainMessage {
                 write!(f, "DomainMessage::UserManagement({:?})", msg)
             }
             Self::Search(msg) => write!(f, "DomainMessage::Search({:?})", msg),
+            Self::Focus(msg) => write!(f, "DomainMessage::Focus({:?})", msg),
             Self::NoOp => write!(f, "DomainMessage::NoOp"),
             Self::Tick => write!(f, "DomainMessage::Tick"),
             Self::ClearError => write!(f, "DomainMessage::ClearError"),
