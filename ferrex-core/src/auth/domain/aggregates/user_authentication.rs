@@ -6,7 +6,8 @@ use uuid::Uuid;
 use crate::auth::AuthCrypto;
 use crate::auth::domain::aggregates::{DeviceSession, DeviceStatus};
 use crate::auth::domain::events::AuthEvent;
-use crate::auth::domain::value_objects::{DeviceFingerprint, PinPolicy, SessionToken};
+use crate::auth::domain::value_objects::{DeviceFingerprint, PinCode, PinPolicy, SessionToken};
+use crate::auth::domain::value_objects::PinCodeError;
 
 /// Errors that can occur during user authentication
 #[derive(Debug, Error)]
@@ -60,6 +61,12 @@ pub struct UserAuthentication {
     /// When the account lock expires
     locked_until: Option<DateTime<Utc>>,
 
+    /// User-level PIN credential (hashed client proof)
+    user_pin: Option<PinCode>,
+
+    /// Last time the PIN was updated
+    pin_updated_at: Option<DateTime<Utc>>,
+
     /// Device sessions by device fingerprint
     device_sessions: HashMap<String, DeviceSession>,
 
@@ -84,6 +91,8 @@ impl UserAuthentication {
         is_locked: bool,
         failed_login_attempts: u8,
         locked_until: Option<DateTime<Utc>>,
+        user_pin: Option<PinCode>,
+        pin_updated_at: Option<DateTime<Utc>>,
         device_sessions: HashMap<String, DeviceSession>,
         max_devices: usize,
         last_login: Option<DateTime<Utc>>,
@@ -96,6 +105,8 @@ impl UserAuthentication {
             is_locked,
             failed_login_attempts,
             locked_until,
+            user_pin,
+            pin_updated_at,
             device_sessions,
             max_devices,
             last_login,
@@ -113,11 +124,59 @@ impl UserAuthentication {
             is_locked: false,
             failed_login_attempts: 0,
             locked_until: None,
+            user_pin: None,
+            pin_updated_at: None,
             device_sessions: HashMap::new(),
             max_devices,
             last_login: None,
             events: Vec::new(),
         }
+    }
+
+    /// Whether the user currently has a configured PIN.
+    pub fn has_user_pin(&self) -> bool {
+        self.user_pin.is_some()
+    }
+
+    /// Timestamp of the last PIN update, if any.
+    pub fn pin_updated_at(&self) -> Option<DateTime<Utc>> {
+        self.pin_updated_at
+    }
+
+    /// Configure or replace the user-level PIN using a client-derived proof.
+    pub fn set_user_pin(
+        &mut self,
+        client_proof: &str,
+        policy: &PinPolicy,
+        crypto: &AuthCrypto,
+    ) -> Result<(), PinCodeError> {
+        let pin = PinCode::new(client_proof.to_string(), policy, crypto)?;
+        self.user_pin = Some(pin);
+        self.pin_updated_at = Some(Utc::now());
+        Ok(())
+    }
+
+    /// Remove the configured user-level PIN.
+    pub fn clear_user_pin(&mut self) {
+        self.user_pin = None;
+        self.pin_updated_at = None;
+    }
+
+    /// Verify a client proof against the stored user-level PIN hash.
+    pub fn verify_user_pin(
+        &self,
+        client_proof: &str,
+        crypto: &AuthCrypto,
+    ) -> Result<bool, PinCodeError> {
+        match &self.user_pin {
+            Some(pin) => pin.verify(client_proof, crypto),
+            None => Ok(false),
+        }
+    }
+
+    /// Get the stored PIN hash if present.
+    pub fn pin_hash(&self) -> Option<&str> {
+        self.user_pin.as_ref().map(|pin| pin.hash())
     }
 
     /// Authenticate with username and password
@@ -258,12 +317,30 @@ impl UserAuthentication {
     pub fn authenticate_device(
         &mut self,
         fingerprint: &DeviceFingerprint,
-        pin: &str,
+        pin_proof: &str,
         max_attempts: u8,
         session_lifetime: Duration,
+        crypto: &AuthCrypto,
     ) -> Result<SessionToken, UserAuthenticationError> {
+        {
+            let session = self.get_device_session(fingerprint)?;
+            session.ensure_pin_available(max_attempts)?;
+        }
+
+        let verified = self.verify_user_pin(pin_proof, crypto)
+            .map_err(|_| UserAuthenticationError::InvalidCredentials)?;
+
+        if !verified {
+            let session = self.get_device_session(fingerprint)?;
+            let err = session.register_pin_failure(max_attempts);
+            let device_events = session.take_events();
+            self.events.extend(device_events);
+            return Err(err.into());
+        }
+
         let session = self.get_device_session(fingerprint)?;
-        let token = session.authenticate_with_pin(pin, max_attempts, session_lifetime)?;
+        session.record_pin_success();
+        let token = session.issue_pin_session(session_lifetime)?;
 
         // Collect events from device session
         let device_events = session.take_events();
@@ -276,11 +353,15 @@ impl UserAuthentication {
     pub fn set_device_pin(
         &mut self,
         fingerprint: &DeviceFingerprint,
-        pin: String,
+        pin_proof: String,
         policy: &PinPolicy,
+        crypto: &AuthCrypto,
     ) -> Result<(), UserAuthenticationError> {
+        self.set_user_pin(&pin_proof, policy, crypto)
+            .map_err(|_| UserAuthenticationError::InvalidCredentials)?;
+
         let session = self.get_device_session(fingerprint)?;
-        session.set_pin(pin, policy)?;
+        session.mark_trusted_after_pin_setup();
 
         // Collect events from device session
         let device_events = session.take_events();

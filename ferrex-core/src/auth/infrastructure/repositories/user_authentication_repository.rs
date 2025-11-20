@@ -5,6 +5,7 @@ use std::fmt;
 use uuid::Uuid;
 
 use crate::auth::domain::aggregates::UserAuthentication;
+use crate::auth::domain::value_objects::PinCode;
 use crate::auth::domain::repositories::UserAuthenticationRepository;
 use std::collections::HashMap;
 
@@ -37,7 +38,9 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
                 u.failed_login_attempts,
                 u.locked_until,
                 u.last_login,
-                uc.password_hash
+                uc.password_hash,
+                uc.pin_hash,
+                uc.pin_updated_at
             FROM users u
             INNER JOIN user_credentials uc ON u.id = uc.user_id
             WHERE u.id = $1
@@ -59,6 +62,8 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
                     row.is_locked,
                     failed_attempts,
                     row.locked_until,
+                    row.pin_hash.map(PinCode::from_hash),
+                    row.pin_updated_at,
                     HashMap::new(),
                     10, // max_devices hardcoded for now
                     row.last_login,
@@ -80,7 +85,9 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
                 u.failed_login_attempts,
                 u.locked_until,
                 u.last_login,
-                uc.password_hash
+                uc.password_hash,
+                uc.pin_hash,
+                uc.pin_updated_at
             FROM users u
             INNER JOIN user_credentials uc ON u.id = uc.user_id
             WHERE u.username = $1
@@ -102,6 +109,8 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
                     row.is_locked,
                     failed_attempts,
                     row.locked_until,
+                    row.pin_hash.map(PinCode::from_hash),
+                    row.pin_updated_at,
                     HashMap::new(),
                     10, // max_devices hardcoded for now
                     row.last_login,
@@ -122,11 +131,15 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
             r#"
             UPDATE user_credentials
             SET password_hash = $2,
+                pin_hash = $3,
+                pin_updated_at = $4,
                 updated_at = NOW()
             WHERE user_id = $1
             "#,
             user_id,
-            user_auth.password_hash()
+            user_auth.password_hash(),
+            user_auth.pin_hash(),
+            user_auth.pin_updated_at()
         )
         .execute(&self.pool)
         .await?;

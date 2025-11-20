@@ -12,12 +12,14 @@ use crate::auth::domain::aggregates::{
 };
 use crate::auth::domain::events::AuthEvent;
 use crate::auth::domain::repositories::{
-    AuthEventRepository, AuthSessionRepository, DeviceSessionRepository, RefreshTokenRepository,
-    UserAuthenticationRepository,
+    AuthEventRepository, AuthSessionRecord, AuthSessionRepository, DeviceSessionRepository,
+    RefreshTokenRepository, UserAuthenticationRepository,
 };
 use crate::auth::domain::value_objects::{
-    DeviceFingerprint, PinPolicy, RefreshToken, RevocationReason, SessionScope, SessionToken,
+    DeviceFingerprint, RefreshToken, RevocationReason, SessionScope, SessionToken,
 };
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthenticationError {
@@ -46,6 +48,7 @@ pub struct AuthenticationService {
     session_store: Arc<dyn AuthSessionRepository>,
     crypto: Arc<AuthCrypto>,
     event_repo: Option<Arc<dyn AuthEventRepository>>,
+    challenge_repo: Option<Arc<dyn crate::auth::domain::repositories::DeviceChallengeRepository>>,
 }
 
 #[derive(Debug, Clone)]
@@ -132,11 +135,20 @@ impl AuthenticationService {
             session_store,
             crypto,
             event_repo: None,
+            challenge_repo: None,
         }
     }
 
     pub fn with_event_repository(mut self, event_repo: Arc<dyn AuthEventRepository>) -> Self {
         self.event_repo = Some(event_repo);
+        self
+    }
+
+    pub fn with_challenge_repository(
+        mut self,
+        repo: Arc<dyn crate::auth::domain::repositories::DeviceChallengeRepository>,
+    ) -> Self {
+        self.challenge_repo = Some(repo);
         self
     }
 
@@ -299,17 +311,16 @@ impl AuthenticationService {
         }
     }
 
-    /// Authenticate using PIN on a registered device
+    /// Authenticate using a client-derived PIN proof on a registered device
     pub async fn authenticate_with_pin(
         &self,
         user_id: Uuid,
         device_fingerprint: &DeviceFingerprint,
-        pin: &str,
+        pin_proof: &str,
     ) -> Result<SessionToken, AuthenticationError> {
         let bundle = self
-            .authenticate_device_with_pin(user_id, device_fingerprint, pin)
-            .await
-            .map_err(AuthenticationError::from)?;
+            .authenticate_device_with_pin(user_id, device_fingerprint, pin_proof)
+            .await?;
 
         Ok(bundle.session_token)
     }
@@ -359,6 +370,7 @@ impl AuthenticationService {
                 refresh_token.expires_at(),
                 refresh_token.family_id(),
                 refresh_generation,
+                session_scope,
             )
             .await?;
 
@@ -373,29 +385,57 @@ impl AuthenticationService {
         })
     }
 
+    /// Authenticate using a client-derived PIN proof with a device fingerprint
     pub async fn authenticate_device_with_pin(
         &self,
         user_id: Uuid,
         device_fingerprint: &DeviceFingerprint,
-        pin: &str,
+        pin_proof: &str,
     ) -> Result<TokenBundle, AuthenticationError> {
+        // Load user and device session separately
+        let mut user = self
+            .user_repo
+            .find_by_id(user_id)
+            .await
+            .map_err(AuthenticationError::from)?
+            .ok_or(AuthenticationError::UserNotFound)?;
+
         let mut session = self
             .session_repo
             .find_by_user_and_fingerprint(user_id, device_fingerprint)
             .await?
             .ok_or(AuthenticationError::DeviceNotFound)?;
 
-        let auth_result = session.authenticate_with_pin(pin, 3, Duration::hours(24));
+        // Enforce trust window (remember-me): require password after 30 days of inactivity
+        if Utc::now() - session.last_activity() > Duration::days(30) {
+            // Persist any state changes (none here) then reject
+            return Err(AuthenticationError::DeviceNotTrusted);
+        }
 
-        let session_token = match auth_result {
-            Ok(token) => token,
-            Err(err) => {
-                let events = session.take_events();
-                self.session_repo.save(&session).await?;
-                self.publish_events(events, AuthEventContext::default())
-                    .await?;
-                return Err(map_device_pin_error(err));
-            }
+        // Enforce lockout gate then verify the user-level PIN proof
+        if let Err(err) = session.ensure_pin_available(3) {
+            let events = session.take_events();
+            self.session_repo.save(&session).await?;
+            self.publish_events(events, AuthEventContext::default()).await?;
+            return Err(map_device_pin_error(err));
+        }
+
+        let verified = user
+            .verify_user_pin(pin_proof, &self.crypto)
+            .map_err(|_| AuthenticationError::InvalidPin)?;
+
+        let session_token = if verified {
+            session.record_pin_success();
+            session
+                .issue_pin_session(Duration::hours(24))
+                .map_err(|_| AuthenticationError::InvalidCredentials)?
+        } else {
+            let err = session.register_pin_failure(3);
+            let events = session.take_events();
+            // persist device changes (failed attempt)
+            self.session_repo.save(&session).await?;
+            self.publish_events(events, AuthEventContext::default()).await?;
+            return Err(map_device_pin_error(err));
         };
 
         let persisted_hash = self.crypto.hash_token(session_token.as_str());
@@ -441,6 +481,7 @@ impl AuthenticationService {
                 refresh_token.expires_at(),
                 refresh_token.family_id(),
                 refresh_generation,
+                SessionScope::Playback,
             )
             .await?;
 
@@ -491,12 +532,24 @@ impl AuthenticationService {
             .mark_used(record.id, RevocationReason::Rotation)
             .await?;
 
+        if record.origin_scope == SessionScope::Playback && record.device_session_id.is_none() {
+            // Sticky scope enforcement: playback-origin refresh must remain tied to a device
+            return Err(AuthenticationError::InvalidCredentials);
+        }
+
         if let Some(device_session_id) = record.device_session_id {
             let mut session = self
                 .session_repo
                 .find_by_id(device_session_id)
                 .await?
                 .ok_or(AuthenticationError::DeviceNotFound)?;
+
+            // Enforce trust window for playback-origin refreshes
+            if record.origin_scope == SessionScope::Playback
+                && Utc::now() - session.last_activity() > Duration::days(30)
+            {
+                return Err(AuthenticationError::DeviceNotTrusted);
+            }
 
             let session_token = session
                 .refresh_token(Duration::hours(24))
@@ -551,6 +604,7 @@ impl AuthenticationService {
                     refresh_token.expires_at(),
                     refresh_token.family_id(),
                     refresh_generation,
+                    SessionScope::Playback,
                 )
                 .await?;
 
@@ -607,6 +661,7 @@ impl AuthenticationService {
                     refresh_token.expires_at(),
                     refresh_token.family_id(),
                     refresh_generation,
+                    SessionScope::Full,
                 )
                 .await?;
 
@@ -622,10 +677,13 @@ impl AuthenticationService {
         }
     }
 
+    /// Authenticate using a client-derived PIN proof against a device session id
     pub async fn authenticate_with_pin_session(
         &self,
         device_session_id: Uuid,
-        pin: &str,
+        pin_proof: &str,
+        challenge_id: Uuid,
+        device_signature: &[u8],
     ) -> Result<TokenBundle, AuthenticationError> {
         let mut session = self
             .session_repo
@@ -635,17 +693,78 @@ impl AuthenticationService {
 
         let user_id = session.user_id();
 
-        let auth_result = session.authenticate_with_pin(pin, 3, Duration::hours(24));
+        // Load user for verification
+        let mut user = self
+            .user_repo
+            .find_by_id(user_id)
+            .await
+            .map_err(AuthenticationError::from)?
+            .ok_or(AuthenticationError::UserNotFound)?;
 
-        let session_token = match auth_result {
-            Ok(token) => token,
-            Err(err) => {
-                let events = session.take_events();
-                self.session_repo.save(&session).await?;
-                self.publish_events(events, AuthEventContext::default())
-                    .await?;
-                return Err(map_device_pin_error(err));
+        // Verify possession first if repo configured
+        if let Some(challenges) = self.challenge_repo.as_ref() {
+            use crate::auth::domain::repositories::DeviceChallengeRepository as _;
+            // Atomically consume challenge if fresh
+            let consumed = challenges
+                .consume_if_fresh(challenge_id)
+                .await
+                .map_err(AuthenticationError::from)?
+                .ok_or(AuthenticationError::InvalidCredentials)?;
+
+            let (challenged_session, nonce) = consumed;
+            if challenged_session != device_session_id {
+                return Err(AuthenticationError::InvalidCredentials);
             }
+
+            // Verify signature using device public key
+            let (alg_opt, pk_opt) = (session.device_key_alg(), session.device_public_key());
+            let (alg, pk) = match (alg_opt, pk_opt) {
+                (Some(a), Some(k)) => (a, k),
+                _ => return Err(AuthenticationError::DeviceNotTrusted),
+            };
+
+            let verified = verify_device_signature(
+                alg,
+                pk,
+                challenge_id,
+                &nonce,
+                user_id,
+                device_signature,
+            )
+            .map_err(|e| AuthenticationError::DatabaseError(anyhow::anyhow!(e)))?;
+            if !verified {
+                // Do not increment device failed_attempts for possession failures
+                return Err(AuthenticationError::InvalidCredentials);
+            }
+        }
+
+        // Enforce trust window (remember-me): require password after 30 days of inactivity
+        if Utc::now() - session.last_activity() > Duration::days(30) {
+            return Err(AuthenticationError::DeviceNotTrusted);
+        }
+
+        if let Err(err) = session.ensure_pin_available(3) {
+            let events = session.take_events();
+            self.session_repo.save(&session).await?;
+            self.publish_events(events, AuthEventContext::default()).await?;
+            return Err(map_device_pin_error(err));
+        }
+
+        let verified = user
+            .verify_user_pin(pin_proof, &self.crypto)
+            .map_err(|_| AuthenticationError::InvalidPin)?;
+
+        let session_token = if verified {
+            session.record_pin_success();
+            session
+                .issue_pin_session(Duration::hours(24))
+                .map_err(|_| AuthenticationError::InvalidCredentials)?
+        } else {
+            let err = session.register_pin_failure(3);
+            let events = session.take_events();
+            self.session_repo.save(&session).await?;
+            self.publish_events(events, AuthEventContext::default()).await?;
+            return Err(map_device_pin_error(err));
         };
 
         let persisted_hash = self.crypto.hash_token(session_token.as_str());
@@ -691,6 +810,7 @@ impl AuthenticationService {
                 refresh_token.expires_at(),
                 refresh_token.family_id(),
                 refresh_generation,
+                SessionScope::Playback,
             )
             .await?;
 
@@ -705,39 +825,60 @@ impl AuthenticationService {
         })
     }
 
-    /// Register a new device for a user
-    pub async fn register_device(
+    pub async fn find_session_by_id(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Option<AuthSessionRecord>, AuthenticationError> {
+        self.session_store
+            .find_by_id(session_id)
+            .await
+            .map_err(AuthenticationError::from)
+    }
+
+    pub async fn list_sessions_for_user(
         &self,
         user_id: Uuid,
-        device_fingerprint: DeviceFingerprint,
-        device_name: String,
-        pin: String,
-    ) -> Result<DeviceSession, AuthenticationError> {
-        // Check if device is already registered
-        if let Some(_existing) = self
-            .session_repo
-            .find_by_user_and_fingerprint(user_id, &device_fingerprint)
-            .await?
-        {
-            return Err(AuthenticationError::InvalidCredentials); // Device already exists
-        }
-
-        // Create new device session
-        let mut session = DeviceSession::new(user_id, device_fingerprint, device_name);
-
-        // Set the PIN to make device trusted
-        let policy = PinPolicy::default();
-        session
-            .set_pin(pin, &policy)
-            .map_err(|_| AuthenticationError::InvalidPin)?;
-
-        let events = session.take_events();
-        self.session_repo.save(&session).await?;
-        self.publish_events(events, AuthEventContext::default())
-            .await?;
-
-        Ok(session)
+    ) -> Result<Vec<AuthSessionRecord>, AuthenticationError> {
+        self.session_store
+            .list_by_user(user_id)
+            .await
+            .map_err(AuthenticationError::from)
     }
+
+    pub async fn revoke_session_by_id(
+        &self,
+        session_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<(), AuthenticationError> {
+        self.session_store
+            .revoke_by_id(session_id, reason)
+            .await
+            .map_err(AuthenticationError::from)?;
+        self.refresh_repo
+            .revoke_for_session(session_id, reason)
+            .await
+            .map_err(AuthenticationError::from)?;
+        Ok(())
+    }
+
+    pub async fn revoke_all_sessions_for_user(
+        &self,
+        user_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<(), AuthenticationError> {
+        self.session_store
+            .revoke_by_user(user_id, reason)
+            .await
+            .map_err(AuthenticationError::from)?;
+        self.refresh_repo
+            .revoke_for_user(user_id, reason)
+            .await
+            .map_err(AuthenticationError::from)?;
+        Ok(())
+    }
+
+    /// Register a new device for a user
+    // Note: device registration is handled by DeviceTrustService.
 
     /// Revoke a specific device
     pub async fn revoke_device(
@@ -809,6 +950,38 @@ impl AuthenticationService {
         }
         Ok(())
     }
+
+    /// Create a short-lived device possession challenge nonce
+    pub async fn create_device_challenge(
+        &self,
+        device_session_id: Uuid,
+        ttl_seconds: i64,
+    ) -> Result<(Uuid, Vec<u8>), AuthenticationError> {
+        use rand::RngCore;
+        let repo = self
+            .challenge_repo
+            .as_ref()
+            .ok_or_else(|| AuthenticationError::DatabaseError(anyhow::anyhow!(
+                "device challenge repository not configured"
+            )))?;
+
+        // Ensure the device exists
+        let _ = self
+            .session_repo
+            .find_by_id(device_session_id)
+            .await?
+            .ok_or(AuthenticationError::DeviceNotFound)?;
+
+        let mut nonce = vec![0u8; 32];
+        rand::thread_rng().fill_bytes(&mut nonce);
+        let expires_at = Utc::now() + Duration::seconds(ttl_seconds.max(30));
+
+        let id = repo
+            .insert_challenge(device_session_id, &nonce, expires_at)
+            .await
+            .map_err(AuthenticationError::from)?;
+        Ok((id, nonce))
+    }
 }
 
 fn map_device_pin_error(err: DeviceSessionError) -> AuthenticationError {
@@ -832,5 +1005,96 @@ fn map_user_auth_error(err: UserAuthenticationError) -> AuthenticationError {
         U::AccountLocked => AE::TooManyFailedAttempts,
         U::UserNotFound => AE::UserNotFound,
         other => AE::DatabaseError(anyhow::anyhow!("unexpected auth error: {other}")),
+    }
+}
+
+fn verify_device_signature(
+    alg: &str,
+    pk_b64: &str,
+    challenge_id: Uuid,
+    nonce: &[u8],
+    user_id: Uuid,
+    signature: &[u8],
+) -> Result<bool, String> {
+    match alg {
+        "ed25519" => {
+            use ed25519_dalek::{Signature, VerifyingKey};
+
+            let pk_bytes = BASE64
+                .decode(pk_b64)
+                .map_err(|e| format!("invalid base64 public key: {e}"))?;
+            if pk_bytes.len() != 32 {
+                return Err(format!(
+                    "unexpected ed25519 public key length: {}",
+                    pk_bytes.len()
+                ));
+            }
+            let vk = VerifyingKey::from_bytes(
+                pk_bytes
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| "failed to parse verifying key")?,
+            )
+            .map_err(|e| format!("invalid verifying key: {e}"))?;
+
+            // Construct message (v1): "Ferrex-PIN-v1" || challenge_id || nonce || user_id
+            const CTX: &[u8] = b"Ferrex-PIN-v1";
+            let mut msg = Vec::with_capacity(CTX.len() + 16 + nonce.len() + 16);
+            msg.extend_from_slice(CTX);
+            msg.extend_from_slice(challenge_id.as_bytes());
+            msg.extend_from_slice(nonce);
+            msg.extend_from_slice(user_id.as_bytes());
+
+            let sig = Signature::from_slice(signature)
+                .map_err(|e| format!("invalid signature bytes: {e}"))?;
+            Ok(vk.verify_strict(&msg, &sig).is_ok())
+        }
+        other => Err(format!("unsupported device key algorithm: {other}")),
+    }
+}
+
+impl AuthenticationService {
+    /// Verify device possession by atomically consuming the given challenge and
+    /// checking the provided signature against the stored device public key.
+    pub async fn verify_device_possession(
+        &self,
+        device_session_id: Uuid,
+        challenge_id: Uuid,
+        device_signature: &[u8],
+    ) -> Result<(), AuthenticationError> {
+        let session = self
+            .session_repo
+            .find_by_id(device_session_id)
+            .await?
+            .ok_or(AuthenticationError::DeviceNotFound)?;
+
+        let user_id = session.user_id();
+        let repo = self
+            .challenge_repo
+            .as_ref()
+            .ok_or_else(|| AuthenticationError::DatabaseError(anyhow::anyhow!(
+                "device challenge repository not configured"
+            )))?;
+        let consumed = repo
+            .consume_if_fresh(challenge_id)
+            .await
+            .map_err(AuthenticationError::from)?
+            .ok_or(AuthenticationError::InvalidCredentials)?;
+        let (challenged_session, nonce) = consumed;
+        if challenged_session != device_session_id {
+            return Err(AuthenticationError::InvalidCredentials);
+        }
+
+        let (alg_opt, pk_opt) = (session.device_key_alg(), session.device_public_key());
+        let (alg, pk) = match (alg_opt, pk_opt) {
+            (Some(a), Some(k)) => (a, k),
+            _ => return Err(AuthenticationError::DeviceNotTrusted),
+        };
+        let verified = verify_device_signature(alg, pk, challenge_id, &nonce, user_id, device_signature)
+        .map_err(|e| AuthenticationError::DatabaseError(anyhow::anyhow!(e)))?;
+        if !verified {
+            return Err(AuthenticationError::InvalidCredentials);
+        }
+        Ok(())
     }
 }

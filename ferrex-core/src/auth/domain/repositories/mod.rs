@@ -49,6 +49,7 @@ pub struct RefreshTokenRecord {
     pub revoked: bool,
     pub revoked_reason: Option<String>,
     pub used_count: i32,
+    pub origin_scope: SessionScope,
 }
 
 #[async_trait]
@@ -63,6 +64,7 @@ pub trait RefreshTokenRepository: Send + Sync {
         expires_at: DateTime<Utc>,
         family_id: Uuid,
         generation: i32,
+        origin_scope: SessionScope,
     ) -> Result<Uuid>;
 
     async fn get_active_refresh_token(
@@ -81,10 +83,13 @@ pub trait RefreshTokenRepository: Send + Sync {
         device_session_id: Uuid,
         reason: RevocationReason,
     ) -> Result<()>;
+
+    async fn revoke_for_session(&self, session_id: Uuid, reason: RevocationReason) -> Result<()>;
 }
 
 #[async_trait]
 pub trait AuthSessionRepository: Send + Sync {
+    async fn find_by_id(&self, session_id: Uuid) -> Result<Option<AuthSessionRecord>>;
     async fn insert_session(
         &self,
         user_id: Uuid,
@@ -101,6 +106,8 @@ pub trait AuthSessionRepository: Send + Sync {
 
     async fn touch(&self, session_id: Uuid) -> Result<()>;
 
+    async fn list_by_user(&self, user_id: Uuid) -> Result<Vec<AuthSessionRecord>>;
+
     async fn revoke_by_user(&self, user_id: Uuid, reason: RevocationReason) -> Result<()>;
 
     async fn revoke_by_device(
@@ -108,6 +115,36 @@ pub trait AuthSessionRepository: Send + Sync {
         device_session_id: Uuid,
         reason: RevocationReason,
     ) -> Result<()>;
+
+    async fn revoke_by_id(&self, session_id: Uuid, reason: RevocationReason) -> Result<()>;
+}
+
+#[derive(Debug, Clone)]
+pub struct DeviceChallengeRecord {
+    pub id: Uuid,
+    pub device_session_id: Uuid,
+    pub nonce: Vec<u8>,
+    pub issued_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub used: bool,
+}
+
+#[async_trait]
+pub trait DeviceChallengeRepository: Send + Sync {
+    async fn insert_challenge(
+        &self,
+        device_session_id: Uuid,
+        nonce: &[u8],
+        expires_at: DateTime<Utc>,
+    ) -> Result<Uuid>;
+
+    async fn get(&self, id: Uuid) -> Result<Option<DeviceChallengeRecord>>;
+
+    async fn mark_used(&self, id: Uuid) -> Result<()>;
+
+    /// Atomically mark a challenge as used if it is unused and not expired,
+    /// returning (device_session_id, nonce) on success.
+    async fn consume_if_fresh(&self, id: Uuid) -> Result<Option<(Uuid, Vec<u8>)>>;
 }
 
 #[derive(Debug, Clone)]
@@ -116,8 +153,12 @@ pub struct AuthSessionRecord {
     pub user_id: Uuid,
     pub device_session_id: Option<Uuid>,
     pub scope: SessionScope,
+    pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub last_activity: DateTime<Utc>,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+    pub metadata: Value,
     pub revoked: bool,
 }
 

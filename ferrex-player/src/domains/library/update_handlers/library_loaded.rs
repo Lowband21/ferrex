@@ -2,16 +2,15 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::domains::library::messages::Message;
-use crate::infrastructure::adapters::ApiClientAdapter;
-use crate::infrastructure::repository::repository::MediaRepo;
 use crate::infrastructure::services::api::ApiService;
+use crate::infrastructure::repository::repository::MediaRepo;
 use crate::state_refactored::State;
 use ferrex_core::api_routes::v1;
 use iced::Task;
 use rkyv::util::AlignedVec;
 
 /// Fetch all libraries
-pub async fn fetch_libraries(api_service: Arc<ApiClientAdapter>) -> anyhow::Result<AlignedVec> {
+pub async fn fetch_libraries(api_service: Arc<dyn ApiService>) -> anyhow::Result<AlignedVec> {
     let now = Instant::now();
     let bytes: AlignedVec = api_service
         .as_ref()

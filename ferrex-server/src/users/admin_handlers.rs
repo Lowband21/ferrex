@@ -3,11 +3,14 @@ use axum::{
     http::StatusCode,
     Extension, Json,
 };
-use ferrex_core::{api_types::ApiResponse, user::User};
+use ferrex_core::{
+    api_types::ApiResponse, auth::domain::services::AuthenticationError, user::User,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
+    application::auth::AuthFacadeError,
     infra::{
         app_state::AppState,
         errors::{AppError, AppResult},
@@ -69,7 +72,11 @@ pub async fn list_all_users(
     // Convert to AdminUserInfo with session counts and roles
     let mut admin_users = Vec::new();
     for user in users {
-        let sessions = state.unit_of_work.users.get_user_sessions(user.id).await?;
+        let sessions = state
+            .auth_facade
+            .list_user_sessions(user.id)
+            .await
+            .map_err(map_facade_error)?;
         let permissions = state
             .unit_of_work
             .rbac
@@ -217,7 +224,11 @@ pub async fn get_user_sessions_admin(
         .ok_or_else(|| AppError::not_found("User not found"))?;
 
     // Get user sessions
-    let sessions = state.unit_of_work.users.get_user_sessions(user_id).await?;
+    let sessions = state
+        .auth_facade
+        .list_user_sessions(user_id)
+        .await
+        .map_err(map_facade_error)?;
 
     Ok(Json(ApiResponse::success(sessions)))
 }
@@ -228,8 +239,11 @@ pub async fn revoke_user_session_admin(
     Extension(admin): Extension<User>,
     Path((user_id, session_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<StatusCode> {
-    // Delete the session
-    state.unit_of_work.users.delete_session(session_id).await?;
+    state
+        .auth_facade
+        .revoke_user_session(user_id, session_id)
+        .await
+        .map_err(map_facade_error)?;
 
     // Log admin action
     tracing::info!(
@@ -279,7 +293,11 @@ pub async fn get_admin_stats(
     // Get session count (simplified - in production you'd want a dedicated query)
     let mut active_sessions = 0;
     for user in &users {
-        let sessions = state.unit_of_work.users.get_user_sessions(user.id).await?;
+        let sessions = state
+            .auth_facade
+            .list_user_sessions(user.id)
+            .await
+            .map_err(map_facade_error)?;
         active_sessions += sessions.len() as i64;
     }
 
@@ -299,4 +317,37 @@ pub async fn get_admin_stats(
     };
 
     Ok(Json(ApiResponse::success(stats)))
+}
+
+fn map_facade_error(err: AuthFacadeError) -> AppError {
+    match err {
+        AuthFacadeError::Authentication(err) => map_auth_error(err),
+        AuthFacadeError::UserNotFound => AppError::not_found("User not found".to_string()),
+        AuthFacadeError::Storage(err) => AppError::internal(format!("Storage error: {err}")),
+        other => AppError::internal(format!("Auth facade error: {other}")),
+    }
+}
+
+fn map_auth_error(err: AuthenticationError) -> AppError {
+    match err {
+        AuthenticationError::InvalidCredentials | AuthenticationError::InvalidPin => {
+            AppError::forbidden("Invalid credentials".to_string())
+        }
+        AuthenticationError::UserNotFound => AppError::not_found("User not found".to_string()),
+        AuthenticationError::DeviceNotFound => {
+            AppError::not_found("Device session not found".to_string())
+        }
+        AuthenticationError::DeviceNotTrusted => {
+            AppError::forbidden("Device is not trusted".to_string())
+        }
+        AuthenticationError::TooManyFailedAttempts => {
+            AppError::rate_limited("Too many failed attempts".to_string())
+        }
+        AuthenticationError::SessionExpired => {
+            AppError::unauthorized("Session expired".to_string())
+        }
+        AuthenticationError::DatabaseError(e) => {
+            AppError::internal(format!("Authentication error: {e}"))
+        }
+    }
 }

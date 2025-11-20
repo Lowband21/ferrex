@@ -1,4 +1,5 @@
 pub mod admin_handlers;
+pub mod admin_user_management;
 pub mod auth;
 pub mod role_handlers;
 pub mod security_settings_handlers;

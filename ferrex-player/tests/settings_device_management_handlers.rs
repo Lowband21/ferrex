@@ -69,8 +69,8 @@ fn new_state_with_service(service: Option<Arc<dyn SettingsService>>) -> State {
     state
 }
 
-#[test]
-fn handle_load_devices_without_service_is_noop() {
+#[tokio::test(flavor = "current_thread")]
+async fn handle_load_devices_without_service_is_noop() {
     let mut state = new_state_with_service(None);
     assert!(
         state
@@ -113,8 +113,8 @@ fn handle_load_devices_without_service_is_noop() {
     );
 }
 
-#[test]
-fn handle_devices_loaded_success_updates_state() {
+#[tokio::test(flavor = "current_thread")]
+async fn handle_devices_loaded_success_updates_state() {
     let mut state = new_state_with_service(None);
     state.domains.settings.device_management_state.loading = true;
     let devices = vec![UserDevice {
@@ -143,8 +143,8 @@ fn handle_devices_loaded_success_updates_state() {
     );
 }
 
-#[test]
-fn handle_revoke_device_invalid_id_is_noop() {
+#[tokio::test(flavor = "current_thread")]
+async fn handle_revoke_device_invalid_id_is_noop() {
     let mut state = new_state_with_service(Some(Arc::new(MockSettingsServiceOk)));
     let _task = ferrex_player::domains::settings::update::device_management::handle_revoke_device(
         &mut state,

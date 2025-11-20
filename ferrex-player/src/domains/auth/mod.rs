@@ -18,6 +18,7 @@ pub mod update_handlers;
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
+use crate::infrastructure::services::api::ApiService;
 use ferrex_core::player_prelude::UserPermissions;
 use iced::Task;
 
@@ -29,7 +30,7 @@ pub use service::AuthService;
 pub use types::AuthenticationFlow;
 
 pub struct AuthDomainState {
-    pub api_service: std::sync::Arc<ApiClientAdapter>,
+    pub api_service: std::sync::Arc<dyn ApiService>,
     pub is_authenticated: bool,
     pub auth_flow: AuthenticationFlow,
     pub user_permissions: Option<UserPermissions>,
@@ -47,7 +48,7 @@ pub struct AuthDomainState {
 )]
 impl AuthDomainState {
     pub fn new(
-        api_service: std::sync::Arc<ApiClientAdapter>,
+        api_service: std::sync::Arc<dyn ApiService>,
         auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
     ) -> Self {
         Self {
@@ -64,7 +65,7 @@ impl AuthDomainState {
 impl std::fmt::Debug for AuthDomainState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuthDomainState")
-            .field("api_service", &"ApiClientAdapter(..)")
+            .field("api_service", &"ApiService(..)")
             .field("is_authenticated", &self.is_authenticated)
             .field("auth_flow", &self.auth_flow)
             .field("user_permissions", &self.user_permissions)

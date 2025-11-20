@@ -9,7 +9,7 @@ use crate::auth::AuthCrypto;
 use crate::auth::domain::aggregates::{DeviceSession, DeviceStatus};
 use crate::auth::domain::repositories::{DevicePinStatus, DeviceSessionRepository};
 use crate::auth::domain::value_objects::{
-    DeviceFingerprint, PinCode, RevocationReason, SessionScope, SessionToken,
+    DeviceFingerprint, RevocationReason, SessionScope, SessionToken,
 };
 
 #[derive(sqlx::FromRow, Debug)]
@@ -18,8 +18,10 @@ struct DeviceSessionRecord {
     user_id: Uuid,
     device_fingerprint: String,
     device_name: String,
+    device_public_key: Option<String>,
+    device_key_alg: Option<String>,
     status: String,
-    pin_hash: Option<String>,
+    pin_configured: bool,
     failed_attempts: i16,
     created_at: DateTime<Utc>,
     last_activity: DateTime<Utc>,
@@ -58,8 +60,10 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 ds.user_id,
                 ds.device_fingerprint,
                 ds.device_name,
+                ds.device_public_key,
+                ds.device_key_alg::text AS device_key_alg,
                 ds.status::text AS "status!",
-                ds.pin_hash,
+                (uc.pin_hash IS NOT NULL) AS "pin_configured!",
                 ds.failed_attempts,
                 ds.created_at,
                 ds.last_activity,
@@ -68,6 +72,7 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 sess.created_at AS session_created_at,
                 sess.expires_at AS session_expires_at
             FROM auth_device_sessions ds
+            INNER JOIN user_credentials uc ON uc.user_id = ds.user_id
             LEFT JOIN LATERAL (
                 SELECT
                     s.session_token_hash,
@@ -103,8 +108,10 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 ds.user_id,
                 ds.device_fingerprint,
                 ds.device_name,
+                ds.device_public_key,
+                ds.device_key_alg::text AS device_key_alg,
                 ds.status::text AS "status!",
-                ds.pin_hash,
+                (uc.pin_hash IS NOT NULL) AS "pin_configured!",
                 ds.failed_attempts,
                 ds.created_at,
                 ds.last_activity,
@@ -113,6 +120,7 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 sess.created_at AS session_created_at,
                 sess.expires_at AS session_expires_at
             FROM auth_device_sessions ds
+            INNER JOIN user_credentials uc ON uc.user_id = ds.user_id
             LEFT JOIN LATERAL (
                 SELECT
                     s.session_token_hash,
@@ -146,8 +154,10 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 ds.user_id,
                 ds.device_fingerprint,
                 ds.device_name,
+                ds.device_public_key,
+                ds.device_key_alg::text AS device_key_alg,
                 ds.status::text AS "status!",
-                ds.pin_hash,
+                (uc.pin_hash IS NOT NULL) AS "pin_configured!",
                 ds.failed_attempts,
                 ds.created_at,
                 ds.last_activity,
@@ -156,6 +166,7 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 sess.created_at AS session_created_at,
                 sess.expires_at AS session_expires_at
             FROM auth_device_sessions ds
+            INNER JOIN user_credentials uc ON uc.user_id = ds.user_id
             LEFT JOIN LATERAL (
                 SELECT
                     s.session_token_hash,
@@ -182,22 +193,22 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
     }
 
     async fn save(&self, session: &DeviceSession) -> Result<Option<Uuid>> {
-        let pin_hash = session.pin_hash();
         let status = status_to_db(session.status());
         let failed_attempts: i16 = session
             .failed_attempts()
             .try_into()
             .context("failed attempts exceeds database representation")?;
 
-        sqlx::query!(
-            r#"
-            INSERT INTO auth_device_sessions (
+            sqlx::query!(
+                r#"
+                INSERT INTO auth_device_sessions (
                 id,
                 user_id,
                 device_fingerprint,
                 device_name,
+                device_public_key,
+                device_key_alg,
                 status,
-                pin_hash,
                 failed_attempts,
                 first_authenticated_by,
                 first_authenticated_at,
@@ -209,19 +220,21 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 $2,
                 $3,
                 $4,
-                ($5)::text::auth_device_status,
-                $6,
-                $7,
-                $2,
+                $5,
+                ($6)::text::auth_device_key_alg,
+                ($7)::text::auth_device_status,
                 $8,
+                $2,
                 $9,
                 $10,
-                $11
-            )
+                $11,
+                $12
+                )
             ON CONFLICT (id) DO UPDATE SET
                 device_name = EXCLUDED.device_name,
+                device_public_key = COALESCE(EXCLUDED.device_public_key, auth_device_sessions.device_public_key),
+                device_key_alg = COALESCE(EXCLUDED.device_key_alg, auth_device_sessions.device_key_alg),
                 status = EXCLUDED.status,
-                pin_hash = EXCLUDED.pin_hash,
                 failed_attempts = EXCLUDED.failed_attempts,
                 last_seen_at = EXCLUDED.last_seen_at,
                 last_activity = EXCLUDED.last_activity,
@@ -244,12 +257,13 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
             session.user_id(),
             session.device_fingerprint().as_str(),
             session.device_name(),
+            session.device_public_key(),
+            session.device_key_alg(),
             status,
-            pin_hash,
             failed_attempts,
             session.created_at(),
             session.last_activity(),
-            session.last_activity(),
+            session.created_at(),
             session.created_at()
         )
         .execute(&self.pool)
@@ -359,10 +373,11 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
         let rows = sqlx::query(
             r#"
             SELECT
-                user_id,
-                (pin_hash IS NOT NULL) AS has_pin
-            FROM auth_device_sessions
-            WHERE device_fingerprint = $1
+                ds.user_id,
+                (uc.pin_hash IS NOT NULL) AS has_pin
+            FROM auth_device_sessions ds
+            INNER JOIN user_credentials uc ON uc.user_id = ds.user_id
+            WHERE ds.device_fingerprint = $1
             "#,
         )
         .bind(fingerprint.as_str())
@@ -384,8 +399,6 @@ impl PostgresDeviceSessionRepository {
     fn hydrate_session(&self, row: DeviceSessionRecord) -> Result<DeviceSession> {
         let fingerprint = DeviceFingerprint::from_hash(row.device_fingerprint)
             .context("invalid device fingerprint stored in database")?;
-
-        let pin = row.pin_hash.map(PinCode::from_hash);
 
         let session_token = match (
             row.session_token_hash,
@@ -413,12 +426,20 @@ impl PostgresDeviceSessionRepository {
             fingerprint,
             row.device_name,
             status,
-            pin,
+            row.pin_configured,
             session_token,
             failed_attempts,
             row.created_at,
             row.last_activity,
         ))
+        .map(|mut s| {
+            if let Some(alg) = row.device_key_alg.as_ref() {
+                if let Some(pk) = row.device_public_key.as_ref() {
+                    s.set_device_public_key(alg.clone(), pk.clone());
+                }
+            }
+            s
+        })
     }
 }
 

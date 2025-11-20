@@ -1,6 +1,5 @@
 use crate::domains::library::messages::Message;
 use crate::infrastructure::{
-    adapters::ApiClientAdapter,
     api_types::{Media, MediaID},
     services::api::ApiService,
 };
@@ -23,7 +22,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 struct MediaEventsId {
     server_url: String,
-    api: Arc<ApiClientAdapter>,
+    api: Arc<dyn ApiService>,
 }
 
 impl PartialEq for MediaEventsId {
@@ -44,7 +43,7 @@ impl Hash for MediaEventsId {
 /// Creates a subscription to server-sent events for library media changes
 pub fn media_events(
     server_url: String,
-    api_service: Arc<ApiClientAdapter>,
+    api_service: Arc<dyn ApiService>,
 ) -> Subscription<Message> {
     Subscription::run_with(
         MediaEventsId {
@@ -80,11 +79,11 @@ struct MediaEventState {
     task_handle: Option<tokio::task::JoinHandle<()>>,
     retry_count: u32,
     max_retries: u32,
-    api_service: Arc<ApiClientAdapter>,
+    api_service: Arc<dyn ApiService>,
 }
 
 impl MediaEventState {
-    fn new(server_url: String, api_service: Arc<ApiClientAdapter>) -> Self {
+    fn new(server_url: String, api_service: Arc<dyn ApiService>) -> Self {
         Self {
             server_url,
             event_receiver: None,

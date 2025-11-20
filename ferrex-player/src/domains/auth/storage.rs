@@ -79,6 +79,117 @@ impl AuthStorage {
         Ok(Self { cache_path })
     }
 
+    fn device_key_path(&self) -> PathBuf {
+        self.cache_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("device_key.enc")
+    }
+
+    /// Save device private key encrypted with a random wrapping key (not derived from fingerprint)
+    pub async fn save_device_key(&self, private_key: &[u8]) -> Result<()> {
+        // Create or load wrapping key from filesystem
+        let wrap_path = self
+            .cache_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("device_key_wrap.key");
+        let wrap_key = if wrap_path.exists() {
+            tokio::fs::read(&wrap_path).await?
+        } else {
+            let mut key = [0u8; 32];
+            getrandom::getrandom(&mut key)
+                .map_err(|e| anyhow::anyhow!("rng failed: {}", e))?;
+            if let Some(parent) = wrap_path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            tokio::fs::write(&wrap_path, &key).await?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = tokio::fs::metadata(&wrap_path).await?.permissions();
+                perms.set_mode(0o600);
+                tokio::fs::set_permissions(&wrap_path, perms).await?;
+            }
+            key.to_vec()
+        };
+
+        // Derive encryption key from wrap key via HKDF-SHA256 (no Argon2 for random keys)
+        let hk = hkdf::Hkdf::<sha2::Sha256>::new(None, &wrap_key);
+        let mut okm = [0u8; 32];
+        hk.expand(b"ferrex-device-key-v1", &mut okm)
+            .map_err(|_| anyhow::anyhow!("HKDF expand failed"))?;
+        let key = *Key::<Aes256Gcm>::from_slice(&okm);
+        let cipher = Aes256Gcm::new(&key);
+        let nonce_bytes = Aes256Gcm::generate_nonce(&mut OsRng);
+        let ciphertext = cipher
+            .encrypt(&nonce_bytes, private_key)
+            .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
+        let encrypted = EncryptedAuthData {
+            nonce: BASE64.encode(nonce_bytes),
+            ciphertext: BASE64.encode(ciphertext),
+            encrypted_at: Utc::now(),
+            version: 2,
+            salt: None,
+        };
+        let json = serde_json::to_string_pretty(&encrypted)?;
+        let path = self.device_key_path();
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::write(&path, json).await?;
+        Ok(())
+    }
+
+    /// Load device private key if present
+    pub async fn load_device_key(&self) -> Result<Option<Vec<u8>>> {
+        let path = self.device_key_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let data = tokio::fs::read_to_string(&path).await?;
+        let encrypted: EncryptedAuthData = serde_json::from_str(&data)?;
+        // Load or create wrap key
+        let wrap_path = self
+            .cache_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("device_key_wrap.key");
+        let wrap_key = if wrap_path.exists() {
+            tokio::fs::read(&wrap_path).await?
+        } else {
+            return Ok(None);
+        };
+        // Derive encryption key
+        let key = if let Some(salt_str) = encrypted.salt.as_ref() {
+            // Backward compatibility: older format used Argon2id + random salt
+            let salt = SaltString::from_b64(salt_str)
+                .map_err(|e| anyhow::anyhow!("Invalid salt format: {}", e))?;
+            let params = Params::new(ARGON2_MEM_COST, ARGON2_TIME_COST, ARGON2_PARALLELISM, Some(32))
+                .map_err(|e| anyhow::anyhow!("Invalid Argon2 parameters: {}", e))?;
+            let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+            let mut out = [0u8; 32];
+            argon2
+                .hash_password_into(&wrap_key, salt.as_str().as_bytes(), &mut out)
+                .map_err(|e| anyhow::anyhow!("Key derivation failed: {}", e))?;
+            *Key::<Aes256Gcm>::from_slice(&out)
+        } else {
+            // New format: HKDF-SHA256
+            let hk = hkdf::Hkdf::<sha2::Sha256>::new(None, &wrap_key);
+            let mut okm = [0u8; 32];
+            hk.expand(b"ferrex-device-key-v1", &mut okm)
+                .map_err(|_| anyhow::anyhow!("HKDF expand failed"))?;
+            *Key::<Aes256Gcm>::from_slice(&okm)
+        };
+        let cipher = Aes256Gcm::new(&key);
+        let nonce_bytes = BASE64.decode(encrypted.nonce)?;
+        let ciphertext = BASE64.decode(encrypted.ciphertext)?;
+        let plaintext = cipher
+            .decrypt(Nonce::from_slice(&nonce_bytes), ciphertext.as_ref())
+            .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;
+        Ok(Some(plaintext))
+    }
+
     /// Get path to auth cache file
     pub fn cache_path(&self) -> &PathBuf {
         &self.cache_path

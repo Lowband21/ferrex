@@ -1,6 +1,5 @@
 use crate::{
     auth::device::{AuthenticatedDevice, DeviceUpdateParams},
-    auth::{AuthEvent, DeviceUserCredential, SessionDeviceSession},
     error::Result,
     image::{
         MediaImageKind,
@@ -609,41 +608,7 @@ pub trait MediaDatabaseTrait: Send + Sync {
     // Query system
     async fn query_media(&self, query: &MediaQuery) -> Result<Vec<MediaWithStatus>>;
 
-    // Device authentication methods
-    /// Register a new authenticated device
-    async fn register_device(&self, device: &AuthenticatedDevice) -> Result<()>;
-
-    /// Get device by fingerprint
-    async fn get_device_by_fingerprint(
-        &self,
-        fingerprint: &str,
-    ) -> Result<Option<AuthenticatedDevice>>;
-
-    /// Get device by id
-    async fn get_device_by_id(&self, device_id: Uuid) -> Result<Option<AuthenticatedDevice>>;
-
-    /// Get all devices for a user
-    async fn get_user_devices(&self, user_id: Uuid) -> Result<Vec<AuthenticatedDevice>>;
-
-    /// Update device information
-    async fn update_device(&self, device_id: Uuid, updates: &DeviceUpdateParams) -> Result<()>;
-
-    /// Revoke a device
-    async fn revoke_device(&self, device_id: Uuid, revoked_by: Uuid) -> Result<()>;
-
-    /// Create or update device-user credential
-    async fn upsert_device_credential(&self, credential: &DeviceUserCredential) -> Result<()>;
-
-    /// Get device credential for user
-    async fn get_device_credential(
-        &self,
-        user_id: Uuid,
-        device_id: Uuid,
-    ) -> Result<Option<DeviceUserCredential>>;
-
-    /// Update PIN for device-user
-    async fn update_device_pin(&self, user_id: Uuid, device_id: Uuid, pin_hash: &str)
-    -> Result<()>;
+    // Device authentication methods (legacy: removed in favor of auth domain repositories)
 
     /// Update failed login attempts
     async fn update_device_failed_attempts(
@@ -654,24 +619,8 @@ pub trait MediaDatabaseTrait: Send + Sync {
         locked_until: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<()>;
 
-    /// Create device session
-    async fn create_device_session(&self, session: &SessionDeviceSession) -> Result<()>;
-
-    /// Get sessions by device
-    async fn get_device_sessions(&self, device_id: Uuid) -> Result<Vec<SessionDeviceSession>>;
-
-    /// Revoke all sessions for a device
-    async fn revoke_device_sessions(&self, device_id: Uuid) -> Result<()>;
-
-    /// Log authentication event
-    async fn log_auth_event(&self, event: &AuthEvent) -> Result<()>;
-
-    /// Get authentication events for user
-    async fn get_user_auth_events(&self, user_id: Uuid, limit: usize) -> Result<Vec<AuthEvent>>;
-
-    /// Get authentication events for device
-    async fn get_device_auth_events(&self, device_id: Uuid, limit: usize)
-    -> Result<Vec<AuthEvent>>;
+    // Kept intentionally empty. Use auth/domain repositories for device trust,
+    // sessions, and audit events.
 
     // Folder inventory management methods
     /// Get folders that need scanning based on filters

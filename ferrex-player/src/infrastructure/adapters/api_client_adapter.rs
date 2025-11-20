@@ -5,7 +5,7 @@
 use async_trait::async_trait;
 use rkyv::rancor::Error;
 use rkyv::util::AlignedVec;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -22,7 +22,7 @@ use ferrex_core::player_prelude::{
     FilterIndicesRequest, IndicesResponse, LatestProgressResponse, Library, LibraryID,
     LibraryMediaResponse, Media, MediaID, MediaQuery, MediaWithStatus, ScanCommandAcceptedResponse,
     ScanCommandRequest, ScanConfig, ScanMetrics, SortBy, SortOrder, StartScanRequest,
-    UpdateLibraryRequest, UpdateProgressRequest, User, UserWatchState,
+    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions, UserWatchState,
 };
 use ferrex_core::player_prelude::{MediaIDLike, hash_filter_spec};
 use parking_lot::RwLock;
@@ -180,13 +180,6 @@ impl ApiClientAdapter {
 
 #[async_trait]
 impl ApiService for ApiClientAdapter {
-    async fn get<T: for<'de> Deserialize<'de>>(&self, path: &str) -> RepositoryResult<T> {
-        self.client
-            .get(path)
-            .await
-            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
-    }
-
     async fn get_rkyv(
         &self,
         path: &str,
@@ -207,37 +200,11 @@ impl ApiService for ApiClientAdapter {
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
     }
 
-    async fn post<T: for<'de> Deserialize<'de>, B: Serialize + Send + Sync>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> RepositoryResult<T> {
+    async fn fetch_libraries(&self) -> RepositoryResult<Vec<Library>> {
         self.client
-            .post(path, body)
+            .get(v1::libraries::COLLECTION)
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
-    }
-
-    async fn put<T: for<'de> Deserialize<'de>, B: Serialize + Send + Sync>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> RepositoryResult<T> {
-        self.client
-            .put(path, body)
-            .await
-            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
-    }
-
-    async fn delete<T: for<'de> Deserialize<'de>>(&self, path: &str) -> RepositoryResult<T> {
-        self.client
-            .delete(path)
-            .await
-            .map_err(|e| RepositoryError::DeleteFailed(e.to_string()))
-    }
-
-    async fn fetch_libraries(&self) -> RepositoryResult<Vec<Library>> {
-        self.get(v1::libraries::COLLECTION).await
     }
 
     async fn fetch_library_media(&self, library_id: Uuid) -> RepositoryResult<Vec<Media>> {
@@ -275,7 +242,12 @@ impl ApiService for ApiClientAdapter {
             status: String,
         }
 
-        match self.get::<HealthResponse>("/health").await {
+        match self
+            .client
+            .get::<HealthResponse>("/health")
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+        {
             Ok(response) => Ok(response.status == "ok" || response.status == "healthy"),
             Err(_) => Ok(false),
         }
@@ -316,10 +288,21 @@ impl ApiService for ApiClientAdapter {
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
     }
 
+    async fn fetch_filtered_indices(
+        &self,
+        library_id: Uuid,
+        spec: &FilterIndicesRequest,
+    ) -> RepositoryResult<Vec<u32>> {
+        ApiClientAdapter::fetch_filtered_indices(self, library_id, spec).await
+    }
+
     async fn check_setup_status(&self) -> RepositoryResult<SetupStatus> {
         // ApiClient's check_setup_status returns bool, but we need SetupStatus
         // Call the endpoint directly to get the full status
-        self.get::<SetupStatus>(v1::setup::STATUS).await
+        self.client
+            .get(v1::setup::STATUS)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
     }
 
     async fn create_initial_admin(
@@ -340,9 +323,27 @@ impl ApiService for ApiClientAdapter {
         self.client.set_token(Some(token.clone())).await;
 
         // Now get the user info
-        let user: User = self.get(v1::users::CURRENT).await?;
+        let user: User = self
+            .client
+            .get(v1::users::CURRENT)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
 
         Ok((user, token))
+    }
+
+    async fn fetch_current_user(&self) -> RepositoryResult<User> {
+        self.client
+            .get(v1::users::CURRENT)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn fetch_my_permissions(&self) -> RepositoryResult<UserPermissions> {
+        self.client
+            .get(v1::roles::MY_PERMISSIONS)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
     }
 
     async fn start_setup_claim(
@@ -361,13 +362,6 @@ impl ApiService for ApiClientAdapter {
     ) -> RepositoryResult<ConfirmClaimResponse> {
         self.client
             .confirm_setup_claim(&claim_code)
-            .await
-            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
-    }
-
-    async fn get_public<T: for<'de> Deserialize<'de>>(&self, path: &str) -> RepositoryResult<T> {
-        self.client
-            .get_public(path)
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
     }

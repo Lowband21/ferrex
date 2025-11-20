@@ -122,11 +122,15 @@ dashmap.workspace = true
 priority-queue = "^2.5.0"
 rand.workspace = true
 base64 = "^0.22"
+ed25519-dalek = { version = "2", default-features = false, features = ["rand_core"] }
+getrandom = "^0.2"
 num_cpus = "^1"
+rand_core = "^0.6"
 
 # Encryption for local auth storage
 aes-gcm.workspace = true
 sha2.workspace = true
+hkdf = "^0.12"
 
 # JWT parsing for token validation
 jsonwebtoken = { workspace = true }
@@ -152,7 +156,7 @@ yoke = "^0.8"
 
 [features]
 default = []
-testing = []
+iced_tester = ["iced/tester"]
 hot = ["iced/hot"]
 demo = ["ferrex-core/demo"]
 
@@ -183,6 +187,7 @@ fake = "^4"
 quickcheck = "^1.0"
 proptest = "^1.7"
 rand.workspace = true
+iced_test = { git = "https://github.com/Lowband21/iced-ferrex.git" }
 
 # Performance benchmarking
 criterion = { version = "^0.7", features = ["html_reports"] }

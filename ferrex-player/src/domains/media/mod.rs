@@ -10,6 +10,7 @@ use crate::domains::media::messages::Message as MediaMessage;
 use crate::infrastructure::repository::{Accessor, ReadWrite};
 use crate::infrastructure::{
     adapters::api_client_adapter::ApiClientAdapter, api_types::UserWatchState,
+    services::api::ApiService,
 };
 use ferrex_core::player_prelude::{InProgressItem, MediaID, MediaIDLike, SeasonDetails};
 use iced::Task;
@@ -26,7 +27,7 @@ pub struct MediaDomainState {
     pub last_ui_refresh_for_progress: Option<std::time::Instant>, // Track last UI refresh for debouncing
 
     pub repo_accessor: Accessor<ReadWrite>,
-    pub api_service: Option<Arc<ApiClientAdapter>>,
+    pub api_service: Option<Arc<dyn ApiService>>,
 }
 
 #[cfg_attr(
@@ -40,7 +41,7 @@ pub struct MediaDomainState {
 impl MediaDomainState {
     pub fn new(
         repo_accessor: Accessor<ReadWrite>,
-        api_service: Option<Arc<ApiClientAdapter>>,
+        api_service: Option<Arc<dyn ApiService>>,
     ) -> Self {
         //let query_service = Arc::new(MediaQueryService::new(Arc::clone(&media_store)));
 

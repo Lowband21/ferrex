@@ -5,6 +5,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
+use base64::Engine as _;
 use chrono::Utc;
 use ferrex_core::{
     api_types::ApiResponse,
@@ -38,7 +39,12 @@ const PIN_ROTATION_MAX_ATTEMPTS: u8 = 5;
 #[derive(Debug, Deserialize)]
 pub struct PinAuthRequest {
     pub device_id: Uuid,
-    pub pin: String,
+    /// Client-derived PIN proof (raw PIN must never be sent)
+    pub client_proof: String,
+    /// Challenge id obtained from PIN challenge endpoint
+    pub challenge_id: Uuid,
+    /// Base64-encoded device signature over (nonce || user_id || device_fp)
+    pub device_signature: String,
 }
 
 /// Authenticate using PIN - requires admin session on device
@@ -68,9 +74,18 @@ pub async fn authenticate_with_pin(
         admin_session.user_id
     );
 
+    let sig = base64::engine::general_purpose::STANDARD
+        .decode(request.device_signature.as_bytes())
+        .map_err(|_| AppError::bad_request("invalid device_signature encoding".to_string()))?;
+
     let bundle = state
         .auth_service()
-        .authenticate_with_pin_session(request.device_id, &request.pin)
+        .authenticate_with_pin_session(
+            request.device_id,
+            &request.client_proof,
+            request.challenge_id,
+            &sig,
+        )
         .await
         .map_err(map_auth_error)?;
 

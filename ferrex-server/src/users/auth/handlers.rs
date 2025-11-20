@@ -1,3 +1,4 @@
+use crate::users::map_auth_facade_error;
 use axum::{Extension, Json, extract::State, http::StatusCode};
 use chrono::Utc;
 use ferrex_core::{
@@ -160,25 +161,11 @@ pub async fn logout(
         .await
         .map_err(|_| AppError::internal("Failed to update user preferences"))?;
 
-    // Delete all refresh tokens for this user (logout from all devices)
     state
-        .unit_of_work
-        .users
-        .delete_user_refresh_tokens(user.id)
+        .auth_facade
+        .revoke_all_user_sessions(user.id)
         .await
-        .map_err(|_| AppError::internal("Failed to invalidate refresh tokens"))?;
-
-    // Get all sessions for this user and delete them
-    let sessions = state
-        .unit_of_work
-        .users
-        .get_user_sessions(user.id)
-        .await
-        .map_err(|_| AppError::internal("Failed to get user sessions"))?;
-
-    for session in sessions {
-        let _ = state.unit_of_work.users.delete_session(session.id).await;
-    }
+        .map_err(map_auth_facade_error)?;
 
     Ok(StatusCode::NO_CONTENT)
 }

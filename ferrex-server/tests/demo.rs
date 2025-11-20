@@ -10,7 +10,9 @@ use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use ferrex_core::demo::{DemoLibraryPlan, DemoSeedOptions, DemoSeedPlan};
 use ferrex_core::types::library::LibraryType;
-use ferrex_server::demo::{DemoCoordinator, DemoPlanProvider, prepare_demo_database};
+use ferrex_server::db::{DEMO_DATABASE_NAME, prepare_demo_database};
+use ferrex_server::demo::{DemoCoordinator, DemoPlanProvider};
+use reqwest::Url;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
@@ -179,8 +181,16 @@ async fn demo_reset_preserves_libraries_and_cleans_files(pool: PgPool) -> Result
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn prepare_demo_database_recreates_database(_pool: PgPool) -> Result<()> {
-    let base_url =
+    let raw_base_url =
         std::env::var("DATABASE_URL").context("DATABASE_URL should be set for sqlx::test")?;
+    let mut base_url = Url::parse(&raw_base_url).context("DATABASE_URL must be valid URL")?;
+    let current_db = base_url.path().trim_start_matches('/');
+
+    if current_db.is_empty() || current_db.eq_ignore_ascii_case(DEMO_DATABASE_NAME) {
+        base_url.set_path("/ferrex_demo_test_primary");
+    }
+
+    let base_url: String = base_url.into();
 
     let demo_url = prepare_demo_database(&base_url).await?;
 

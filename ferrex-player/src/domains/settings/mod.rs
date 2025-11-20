@@ -9,6 +9,7 @@ pub mod update;
 use self::messages::Message as SettingsMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
+use crate::infrastructure::services::api::ApiService;
 use ferrex_core::player_prelude::UserPermissions;
 use iced::Task;
 
@@ -25,7 +26,7 @@ pub struct SettingsDomainState {
     // References needed by settings domain
     pub user_permissions: Option<UserPermissions>,
     pub auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
-    pub api_service: std::sync::Arc<ApiClientAdapter>,
+    pub api_service: std::sync::Arc<dyn ApiService>,
     pub settings_service:
         std::sync::Arc<dyn crate::infrastructure::services::settings::SettingsService>,
 }
@@ -42,7 +43,7 @@ impl SettingsDomainState {
     /// Create a new SettingsDomainState with required services
     pub fn new(
         auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
-        api_service: std::sync::Arc<ApiClientAdapter>,
+        api_service: std::sync::Arc<dyn ApiService>,
         settings_service: std::sync::Arc<
             dyn crate::infrastructure::services::settings::SettingsService,
         >,
@@ -73,7 +74,7 @@ pub struct SettingsDomain {
     // References needed by settings domain
     pub user_permissions: Option<UserPermissions>,
     pub auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
-    pub api_service: std::sync::Arc<ApiClientAdapter>,
+    pub api_service: std::sync::Arc<dyn ApiService>,
     pub settings_service:
         std::sync::Arc<dyn crate::infrastructure::services::settings::SettingsService>,
 }

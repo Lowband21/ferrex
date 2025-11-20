@@ -299,6 +299,23 @@ impl DeviceTrustService {
         Ok(())
     }
 
+    /// Attach and persist a device public key for possession validation
+    pub async fn set_device_public_key(
+        &self,
+        device_session_id: Uuid,
+        alg: String,
+        public_key: String,
+    ) -> Result<(), DeviceTrustError> {
+        let mut session = self
+            .session_repo
+            .find_by_id(device_session_id)
+            .await?
+            .ok_or(DeviceTrustError::DeviceNotFound)?;
+
+        session.set_device_public_key(alg, public_key);
+        self.persist_session(&mut session, None).await
+    }
+
     async fn publish_events(
         &self,
         events: Vec<AuthEvent>,
@@ -328,7 +345,7 @@ mod tests {
         DevicePinStatus, RefreshTokenRecord, RefreshTokenRepository,
     };
     use crate::auth::domain::value_objects::RevocationReason;
-    use crate::auth::domain::value_objects::{DeviceFingerprint, PinPolicy, SessionScope};
+    use crate::auth::domain::value_objects::{DeviceFingerprint, SessionScope};
     use async_trait::async_trait;
     use chrono::{DateTime, Utc};
     use futures::FutureExt;
@@ -461,6 +478,10 @@ mod tests {
 
     #[async_trait]
     impl AuthSessionRepository for RecordingSessionRepo {
+        async fn find_by_id(&self, _session_id: Uuid) -> anyhow::Result<Option<AuthSessionRecord>> {
+            Ok(None)
+        }
+
         async fn insert_session(
             &self,
             _user_id: Uuid,
@@ -492,6 +513,10 @@ mod tests {
             Ok(())
         }
 
+        async fn list_by_user(&self, _user_id: Uuid) -> anyhow::Result<Vec<AuthSessionRecord>> {
+            Ok(Vec::new())
+        }
+
         async fn revoke_by_user(
             &self,
             _user_id: Uuid,
@@ -509,6 +534,15 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(_device_session_id);
+            Ok(())
+        }
+
+        async fn revoke_by_id(
+            &self,
+            session_id: Uuid,
+            _reason: RevocationReason,
+        ) -> anyhow::Result<()> {
+            self.revoked_devices.lock().unwrap().push(session_id);
             Ok(())
         }
     }
@@ -536,6 +570,7 @@ mod tests {
             _expires_at: DateTime<Utc>,
             _family_id: Uuid,
             _generation: i32,
+            _origin_scope: crate::auth::domain::value_objects::SessionScope,
         ) -> anyhow::Result<Uuid> {
             Ok(Uuid::now_v7())
         }
@@ -580,6 +615,14 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(_device_session_id);
+            Ok(())
+        }
+
+        async fn revoke_for_session(
+            &self,
+            _session_id: Uuid,
+            _reason: RevocationReason,
+        ) -> anyhow::Result<()> {
             Ok(())
         }
     }
@@ -688,9 +731,7 @@ mod tests {
         let fingerprint = sample_fingerprint();
         let mut session = DeviceSession::new(user_id, fingerprint.clone(), "Existing".to_string());
         let _ = session.take_events();
-        session
-            .set_pin("4826".to_string(), &PinPolicy::default())
-            .unwrap();
+        // No user-level PIN needed for device limit tests; inserting a device session is sufficient
         let _ = session.take_events();
         device_repo.save(&session).await.unwrap();
 

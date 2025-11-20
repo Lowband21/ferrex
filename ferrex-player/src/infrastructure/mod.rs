@@ -22,7 +22,7 @@ pub mod repository;
 pub mod service_registry;
 pub mod services;
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "iced_tester"))]
 pub mod testing;
 
 // Re-export commonly used items
@@ -40,7 +40,7 @@ pub use config::Config;
 pub use profiling::PROFILER;
 
 // Export profiling scope definitions
-pub use profiling_scopes::{PerformanceTargets, analyze_performance, scopes};
+pub use profiling_scopes::{analyze_performance, scopes, PerformanceTargets};
 
 // For backward compatibility when no profiling features are enabled
 #[cfg(not(any(
@@ -50,8 +50,8 @@ pub use profiling_scopes::{PerformanceTargets, analyze_performance, scopes};
     feature = "profiling-stats"
 )))]
 pub mod profiling {
-    use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
 
     pub struct Profiler {
         enabled: AtomicBool,

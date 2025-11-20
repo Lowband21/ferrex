@@ -7,6 +7,7 @@ use axum::{
 };
 use ferrex_core::{
     api_types::ApiResponse,
+    auth::domain::services::{AuthenticationError, PasswordChangeActor, PasswordChangeRequest},
     rbac::{self, UserPermissions},
     user::User,
     user_management::{ListUsersOptions, UserAdminRecord},
@@ -15,11 +16,14 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::infra::{
-    app_state::AppState,
-    errors::{AppError, AppResult},
-};
 use crate::users::{CreateUserParams, UpdateUserParams, UserService};
+use crate::{
+    application::auth::AuthFacadeError,
+    infra::{
+        app_state::AppState,
+        errors::{AppError, AppResult},
+    },
+};
 
 #[derive(Debug, Deserialize)]
 pub struct ListUsersQuery {
@@ -51,6 +55,7 @@ pub struct UpdateUserRequest {
     pub avatar_url: Option<String>,
     pub is_active: Option<bool>,
     pub role_ids: Option<Vec<Uuid>>,
+    pub new_password: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -195,13 +200,40 @@ pub async fn update_user(
         )
         .await?;
 
+    if let Some(new_password) = request.new_password.as_ref() {
+        state
+            .auth_facade
+            .change_password(PasswordChangeRequest {
+                user_id,
+                new_password: new_password.clone(),
+                current_password: None,
+                actor: PasswordChangeActor::AdminInitiated {
+                    admin_user_id: current_user.id,
+                },
+                context: None,
+            })
+            .await
+            .map_err(map_auth_facade_error)?;
+
+        info!(
+            target: "user.admin",
+            user_id = %user_id,
+            actor = %current_user.id,
+            action = "reset-password"
+        );
+    }
+
     let permissions = state
         .unit_of_work
         .rbac
         .get_user_permissions(user.id)
         .await?;
 
-    let sessions = state.unit_of_work.users.get_user_sessions(user.id).await?;
+    let sessions = state
+        .auth_facade
+        .list_user_sessions(user.id)
+        .await
+        .map_err(map_auth_facade_error)?;
 
     let response = UserResponse {
         id: user.id,
@@ -256,6 +288,23 @@ pub async fn delete_user(
     );
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub fn map_auth_facade_error(err: AuthFacadeError) -> AppError {
+    match err {
+        AuthFacadeError::UserNotFound => AppError::not_found("User not found"),
+        AuthFacadeError::Storage(inner) => AppError::from(inner),
+        AuthFacadeError::Authentication(inner) => match inner {
+            AuthenticationError::InvalidCredentials => AppError::bad_request("Invalid credentials"),
+            AuthenticationError::UserNotFound => AppError::not_found("User not found"),
+            AuthenticationError::TooManyFailedAttempts => {
+                AppError::forbidden("Too many failed attempts")
+            }
+            other => AppError::internal(other.to_string()),
+        },
+        AuthFacadeError::DeviceTrust(inner) => AppError::internal(inner.to_string()),
+        AuthFacadeError::PinManagement(inner) => AppError::internal(inner.to_string()),
+    }
 }
 
 fn user_record_to_response(record: UserAdminRecord) -> UserResponse {

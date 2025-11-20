@@ -6,8 +6,8 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::{AuthEventContext, map_domain_events};
-use crate::auth::domain::aggregates::DeviceSession;
-use crate::auth::domain::aggregates::DeviceSessionError;
+use crate::auth::AuthCrypto;
+use crate::auth::domain::aggregates::{DeviceSession, DeviceSessionError, UserAuthentication};
 use crate::auth::domain::repositories::{
     AuthEventRepository, DeviceSessionRepository, UserAuthenticationRepository,
 };
@@ -41,6 +41,7 @@ pub struct PinManagementService {
     user_repo: Arc<dyn UserAuthenticationRepository>,
     session_repo: Arc<dyn DeviceSessionRepository>,
     event_repo: Arc<dyn AuthEventRepository>,
+    crypto: Arc<AuthCrypto>,
 }
 
 impl fmt::Debug for PinManagementService {
@@ -58,11 +59,13 @@ impl PinManagementService {
         user_repo: Arc<dyn UserAuthenticationRepository>,
         session_repo: Arc<dyn DeviceSessionRepository>,
         event_repo: Arc<dyn AuthEventRepository>,
+        crypto: Arc<AuthCrypto>,
     ) -> Self {
         Self {
             user_repo,
             session_repo,
             event_repo,
+            crypto,
         }
     }
 
@@ -77,13 +80,15 @@ impl PinManagementService {
     ) -> Result<(), PinManagementError> {
         let mut ctx = context.unwrap_or_default();
         ctx.insert_metadata("operation", json!("set"));
-        let mut session = self.load_session(user_id, fingerprint).await?;
+        let (mut user, mut session) = self.load_session(user_id, fingerprint).await?;
 
-        session
-            .set_pin(new_pin, policy)
-            .map_err(|err| map_pin_error(err, false))?;
+        user
+            .set_user_pin(&new_pin, policy, &self.crypto)
+            .map_err(|_| PinManagementError::InvalidPinFormat)?;
 
-        self.persist_session(&mut session, ctx).await
+        session.mark_trusted_after_pin_setup();
+
+        self.persist_state(&user, &mut session, ctx).await
     }
 
     /// Rotate an existing PIN after verifying the current value.
@@ -99,17 +104,31 @@ impl PinManagementService {
     ) -> Result<(), PinManagementError> {
         let mut ctx = context.unwrap_or_default();
         ctx.insert_metadata("operation", json!("rotate"));
-        let mut session = self.load_session(user_id, fingerprint).await?;
+        let (mut user, mut session) = self.load_session(user_id, fingerprint).await?;
 
         session
-            .verify_pin(current_pin, max_attempts)
+            .ensure_pin_available(max_attempts)
             .map_err(|err| map_pin_error(err, true))?;
 
-        session
-            .set_pin(new_pin, policy)
-            .map_err(|err| map_pin_error(err, false))?;
+        let verified = user
+            .verify_user_pin(current_pin, &self.crypto)
+            .map_err(|_| PinManagementError::PinVerificationFailed)?;
 
-        self.persist_session(&mut session, ctx).await
+        if !verified {
+            let err = session.register_pin_failure(max_attempts);
+            let mapped = map_pin_error(err, true);
+            self.persist_state(&user, &mut session, ctx.clone())
+                .await?;
+            return Err(mapped);
+        }
+
+        user
+            .set_user_pin(&new_pin, policy, &self.crypto)
+            .map_err(|_| PinManagementError::InvalidPinFormat)?;
+
+        session.mark_trusted_after_pin_setup();
+
+        self.persist_state(&user, &mut session, ctx).await
     }
 
     /// Remove the configured PIN, returning the device to a pending trust state.
@@ -123,16 +142,28 @@ impl PinManagementService {
     ) -> Result<(), PinManagementError> {
         let mut ctx = context.unwrap_or_default();
         ctx.insert_metadata("operation", json!("clear"));
-        let mut session = self.load_session(user_id, fingerprint).await?;
+        let (mut user, mut session) = self.load_session(user_id, fingerprint).await?;
 
         session
-            .verify_pin(current_pin, max_attempts)
-            .map_err(|err| map_pin_error(err, true))?;
-        session
-            .clear_pin()
+            .ensure_pin_available(max_attempts)
             .map_err(|err| map_pin_error(err, true))?;
 
-        self.persist_session(&mut session, ctx).await
+        let verified = user
+            .verify_user_pin(current_pin, &self.crypto)
+            .map_err(|_| PinManagementError::PinVerificationFailed)?;
+
+        if !verified {
+            let err = session.register_pin_failure(max_attempts);
+            let mapped = map_pin_error(err, true);
+            self.persist_state(&user, &mut session, ctx.clone())
+                .await?;
+            return Err(mapped);
+        }
+
+        user.clear_user_pin();
+        session.clear_pin_association().map_err(|err| map_pin_error(err, true))?;
+
+        self.persist_state(&user, &mut session, ctx).await
     }
 
     /// Force clear a PIN without verifying the current value. Intended for
@@ -147,12 +178,11 @@ impl PinManagementService {
         let mut ctx = context.unwrap_or_default();
         ctx.insert_metadata("operation", json!("force_clear"));
 
-        let mut session = self.load_session(user_id, fingerprint).await?;
-        session
-            .clear_pin()
-            .map_err(|err| map_pin_error(err, false))?;
+        let (mut user, mut session) = self.load_session(user_id, fingerprint).await?;
+        user.clear_user_pin();
+        session.clear_pin_association().map_err(|err| map_pin_error(err, false))?;
 
-        self.persist_session(&mut session, ctx).await
+        self.persist_state(&user, &mut session, ctx).await
     }
 
     /// Verify a PIN without issuing a session token.
@@ -163,18 +193,34 @@ impl PinManagementService {
         pin: &str,
         max_attempts: u8,
     ) -> Result<(), PinManagementError> {
-        let mut session = self.load_session(user_id, fingerprint).await?;
+        let (user, mut session) = self.load_session(user_id, fingerprint).await?;
+
         session
-            .verify_pin(pin, max_attempts)
+            .ensure_pin_available(max_attempts)
             .map_err(|err| map_pin_error(err, true))?;
-        Ok(())
+
+        let verified = user
+            .verify_user_pin(pin, &self.crypto)
+            .map_err(|_| PinManagementError::PinVerificationFailed)?;
+
+        if verified {
+            session.record_pin_success();
+            self.persist_state(&user, &mut session, AuthEventContext::default())
+                .await?;
+            Ok(())
+        } else {
+            let err = map_pin_error(session.register_pin_failure(max_attempts), true);
+            self.persist_state(&user, &mut session, AuthEventContext::default())
+                .await?;
+            Err(err)
+        }
     }
 
     async fn load_session(
         &self,
         user_id: Uuid,
         fingerprint: &DeviceFingerprint,
-    ) -> Result<DeviceSession, PinManagementError> {
+    ) -> Result<(UserAuthentication, DeviceSession), PinManagementError> {
         let user = self
             .user_repo
             .find_by_id(user_id)
@@ -199,15 +245,17 @@ impl PinManagementService {
             return Err(PinManagementError::DeviceRevoked);
         }
 
-        Ok(session)
+        Ok((user, session))
     }
 
-    async fn persist_session(
+    async fn persist_state(
         &self,
+        user: &UserAuthentication,
         session: &mut DeviceSession,
         context: AuthEventContext,
     ) -> Result<(), PinManagementError> {
         let events = session.take_events();
+        self.user_repo.save(user).await?;
         self.session_repo.save(session).await?;
 
         if !events.is_empty() {
@@ -385,9 +433,14 @@ mod tests {
         .unwrap()
     }
 
+    fn test_crypto() -> Arc<AuthCrypto> {
+        Arc::new(AuthCrypto::new("test-pepper", "test-token").expect("crypto"))
+    }
+
     fn build_service(
         user: UserAuthentication,
         session: DeviceSession,
+        crypto: Arc<AuthCrypto>,
     ) -> (
         PinManagementService,
         Arc<InMemoryDeviceRepo>,
@@ -406,17 +459,25 @@ mod tests {
 
         device_repo.save(&session).now_or_never().unwrap().unwrap();
 
-        let service = PinManagementService::new(user_repo, device_repo.clone(), event_repo.clone());
+        let service =
+            PinManagementService::new(user_repo, device_repo.clone(), event_repo.clone(), crypto);
         (service, device_repo, event_repo, user_id, fingerprint)
     }
 
     #[tokio::test]
     async fn set_pin_trusts_device_and_logs_events() {
-        let user = sample_user();
+        let mut user = sample_user();
         let mut session =
             DeviceSession::new(user.user_id(), sample_fingerprint(), "Test".to_string());
         let _ = session.take_events();
-        let (service, device_repo, event_repo, user_id, fingerprint) = build_service(user, session);
+        let crypto = test_crypto();
+        user
+            .set_user_pin("0000", &PinPolicy::default(), crypto.as_ref())
+            .unwrap_or_else(|_| panic!("failed to install initial pin"));
+        session.mark_trusted_after_pin_setup();
+        let _ = session.take_events();
+        let (service, device_repo, event_repo, user_id, fingerprint) =
+            build_service(user, session, crypto.clone());
 
         service
             .set_pin(
@@ -447,13 +508,17 @@ mod tests {
 
     #[tokio::test]
     async fn force_clear_pin_removes_pin_without_current_value() {
-        let user = sample_user();
+        let mut user = sample_user();
         let mut session =
             DeviceSession::new(user.user_id(), sample_fingerprint(), "Trusted".to_string());
-        session
-            .set_pin("1357".to_string(), &PinPolicy::default())
+        let crypto = test_crypto();
+        user
+            .set_user_pin("1357", &PinPolicy::default(), crypto.as_ref())
             .unwrap();
-        let (service, device_repo, event_repo, user_id, fingerprint) = build_service(user, session);
+        session.mark_trusted_after_pin_setup();
+        let _ = session.take_events();
+        let (service, device_repo, event_repo, user_id, fingerprint) =
+            build_service(user, session, crypto.clone());
 
         service
             .force_clear_pin(user_id, &fingerprint, None)
@@ -478,17 +543,19 @@ mod tests {
 
     #[tokio::test]
     async fn rotate_pin_requires_current_value() {
-        let user = sample_user();
+        let mut user = sample_user();
         let mut session =
             DeviceSession::new(user.user_id(), sample_fingerprint(), "Test".to_string());
         let _ = session.take_events();
-        session
-            .set_pin("4861".to_string(), &PinPolicy::default())
+        let crypto = test_crypto();
+        user
+            .set_user_pin("4861", &PinPolicy::default(), crypto.as_ref())
             .unwrap();
+        session.mark_trusted_after_pin_setup();
         let _ = session.take_events();
 
         let (service, _device_repo, _event_repo, user_id, fingerprint) =
-            build_service(user, session);
+            build_service(user, session, crypto.clone());
 
         let result = service
             .rotate_pin(
@@ -510,16 +577,19 @@ mod tests {
 
     #[tokio::test]
     async fn clear_pin_returns_device_to_pending_state() {
-        let user = sample_user();
+        let mut user = sample_user();
         let mut session =
             DeviceSession::new(user.user_id(), sample_fingerprint(), "Test".to_string());
         let _ = session.take_events();
-        session
-            .set_pin("1357".to_string(), &PinPolicy::default())
+        let crypto = test_crypto();
+        user
+            .set_user_pin("1357", &PinPolicy::default(), crypto.as_ref())
             .unwrap();
+        session.mark_trusted_after_pin_setup();
         let _ = session.take_events();
 
-        let (service, device_repo, event_repo, user_id, fingerprint) = build_service(user, session);
+        let (service, device_repo, event_repo, user_id, fingerprint) =
+            build_service(user, session, crypto.clone());
 
         service
             .clear_pin(user_id, &fingerprint, "1357", 3, None)

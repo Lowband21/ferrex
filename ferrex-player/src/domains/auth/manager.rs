@@ -5,9 +5,14 @@ use crate::domains::auth::errors::{
 use crate::domains::auth::state_types::{AuthState, AuthStateStore};
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
+use ed25519_dalek::ed25519::signature::SignerMut;
 use ferrex_core::api_routes::v1;
 use ferrex_core::auth::domain::value_objects::SessionScope;
 use ferrex_core::auth::{AuthResult as ServerAuthResult, DeviceInfo};
+use ed25519_dalek::{Signer, Signature, SigningKey, VerifyingKey};
+use rand_core::OsRng;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use ferrex_core::player_prelude::{
     ApiResponse, AuthToken, LoginRequest, Platform, RegisterRequest, User, UserPermissions,
 };
@@ -123,19 +128,28 @@ pub struct DeviceLoginRequest {
     pub password: String,
     pub device_info: Option<DeviceInfo>,
     pub remember_device: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_public_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_key_alg: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct PinLoginRequest {
-    pub user_id: Uuid,
     pub device_id: Uuid,
-    pub pin: String,
+    /// Client-derived PIN proof (PHC string)
+    pub client_proof: String,
+    pub challenge_id: Uuid,
+    pub device_signature: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct SetPinRequest {
     pub device_id: Uuid,
-    pub pin: String,
+    /// Client-derived PIN proof (PHC string)
+    pub client_proof: String,
+    pub challenge_id: Uuid,
+    pub device_signature: String,
 }
 
 /// Authentication state manager
@@ -868,8 +882,62 @@ impl AuthManager {
     /// Set PIN for current device
     pub async fn set_device_pin(&self, pin: String) -> AuthResult<()> {
         let device_id = self.get_or_create_device_id().await?;
+        let user = self
+            .get_current_user()
+            .await
+            .ok_or(AuthError::NotAuthenticated)?;
 
-        let request = SetPinRequest { device_id, pin };
+        // Load signing key
+        let signing_key_bytes = self
+            .auth_storage
+            .load_device_key()
+            .await
+            .map_err(|e| {
+                error!("failed to load device key: {e}");
+                AuthError::Storage(StorageError::InitFailed(
+                    "device key unavailable".to_string(),
+                ))
+            })?
+            .ok_or_else(|| AuthError::Storage(StorageError::InitFailed("device key not found".to_string())))?;
+        let signing_key = SigningKey::from_bytes(
+            signing_key_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| AuthError::Storage(StorageError::InitFailed("invalid device key".to_string())))?,
+        );
+
+        // Request a challenge
+        #[derive(serde::Serialize)]
+        struct ChallengeReq { device_id: Uuid }
+        #[derive(serde::Deserialize)]
+        struct ChallengeResp { challenge_id: Uuid, nonce: String, expires_in_secs: i64 }
+
+        let challenge: ChallengeResp = self
+            .api_client
+            .post(v1::auth::device::PIN_CHALLENGE, &ChallengeReq { device_id })
+            .await
+            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+
+        let nonce = BASE64
+            .decode(challenge.nonce.as_bytes())
+            .map_err(|_| AuthError::Storage(StorageError::InitFailed("invalid nonce".to_string())))?;
+        // Build message v1: "Ferrex-PIN-v1" || challenge_id || nonce || user_id
+        const CTX: &[u8] = b"Ferrex-PIN-v1";
+        let mut msg = Vec::with_capacity(CTX.len() + 16 + nonce.len() + 16);
+        msg.extend_from_slice(CTX);
+        msg.extend_from_slice(challenge.challenge_id.as_bytes());
+        msg.extend_from_slice(&nonce);
+        msg.extend_from_slice(user.id.as_bytes());
+        let sig: Signature = signing_key.sign(&msg);
+        let sig_b64 = BASE64.encode(sig.to_bytes());
+
+        let client_proof = Self::derive_client_pin_proof(&pin, user.id);
+        let request = SetPinRequest {
+            device_id,
+            client_proof,
+            challenge_id: challenge.challenge_id,
+            device_signature: sig_b64,
+        };
 
         self.api_client
             .post::<_, serde_json::Value>(v1::auth::device::SET_PIN, &request)
@@ -885,15 +953,72 @@ impl AuthManager {
 
         #[derive(serde::Serialize)]
         struct ChangePinRequest {
-            device_id: String,
-            current_pin: String,
-            new_pin: String,
+            device_id: Uuid,
+            current_proof: String,
+            new_proof: String,
+            challenge_id: Uuid,
+            device_signature: String,
         }
 
+        let user = self
+            .get_current_user()
+            .await
+            .ok_or(AuthError::NotAuthenticated)?;
+        let current_proof = Self::derive_client_pin_proof(&current_pin, user.id);
+        let new_proof = Self::derive_client_pin_proof(&new_pin, user.id);
+        // Load signing key
+        let signing_key_bytes = self
+            .auth_storage
+            .load_device_key()
+            .await
+            .map_err(|e| {
+                error!("failed to load device key: {e}");
+                AuthError::Storage(StorageError::InitFailed(
+                    "device key unavailable".to_string(),
+                ))
+            })?
+            .ok_or_else(|| AuthError::Storage(StorageError::InitFailed("device key not found".to_string())))?;
+        let signing_key = SigningKey::from_bytes(
+            signing_key_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| AuthError::Storage(StorageError::InitFailed("invalid device key".to_string())))?,
+        );
+
+        // Request a challenge
+        #[derive(serde::Serialize)]
+        struct ChallengeReq { device_id: Uuid }
+        #[derive(serde::Deserialize)]
+        struct ChallengeResp { challenge_id: Uuid, nonce: String, expires_in_secs: i64 }
+        let challenge: ChallengeResp = self
+            .api_client
+            .post(v1::auth::device::PIN_CHALLENGE, &ChallengeReq { device_id })
+            .await
+            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let nonce = BASE64
+            .decode(challenge.nonce.as_bytes())
+            .map_err(|_| AuthError::Storage(StorageError::InitFailed("invalid nonce".to_string())))?;
+        // Build message v1: "Ferrex-PIN-v1" || challenge_id || nonce || user_id
+        const CTX: &[u8] = b"Ferrex-PIN-v1";
+        let mut msg = Vec::with_capacity(CTX.len() + 16 + nonce.len() + 16);
+        msg.extend_from_slice(CTX);
+        msg.extend_from_slice(challenge.challenge_id.as_bytes());
+        msg.extend_from_slice(&nonce);
+        // user id needed
+        let user = self
+            .get_current_user()
+            .await
+            .ok_or(AuthError::NotAuthenticated)?;
+        msg.extend_from_slice(user.id.as_bytes());
+        let sig: Signature = signing_key.sign(&msg);
+        let sig_b64 = BASE64.encode(sig.to_bytes());
+
         let request = ChangePinRequest {
-            device_id: device_id.to_string(),
-            current_pin,
-            new_pin,
+            device_id,
+            current_proof,
+            new_proof,
+            challenge_id: challenge.challenge_id,
+            device_signature: sig_b64,
         };
 
         self.api_client
@@ -1290,11 +1415,59 @@ impl AuthManager {
             })?),
         };
 
+        // Load or create a device keypair
+        let device_fingerprint = generate_hardware_fingerprint().await.map_err(|e| {
+            AuthError::Storage(StorageError::InitFailed(format!(
+                "Failed to get hardware fingerprint: {}",
+                e
+            )))
+        })?;
+
+        let signing_key = match self
+            .auth_storage
+            .load_device_key()
+            .await
+            .map_err(|e| {
+                error!("failed to load device key: {e}");
+                AuthError::Storage(StorageError::InitFailed(
+                    "device key unavailable".to_string(),
+                ))
+            })?
+        {
+            Some(bytes) => SigningKey::from_bytes(
+                bytes
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| AuthError::Storage(StorageError::InitFailed(
+                        "invalid stored device key".to_string(),
+                    )))?,
+            ),
+            None => {
+                let mut rng = OsRng;
+                let sk = SigningKey::generate(&mut rng);
+                // Persist the 32-byte secret
+                self.auth_storage
+                    .save_device_key(sk.to_bytes().as_slice())
+                    .await
+                    .map_err(|e| {
+                        error!("failed to persist device key: {e}");
+                        AuthError::Storage(StorageError::WriteFailed(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "failed to persist device key",
+                        )))
+                    })?;
+                sk
+            }
+        };
+        let public_key_b64 = BASE64.encode(VerifyingKey::from(&signing_key).to_bytes());
+
         let request = DeviceLoginRequest {
             username,
             password,
             device_info: Some(device_info),
             remember_device,
+            device_public_key: Some(public_key_b64),
+            device_key_alg: Some("ed25519".to_string()),
         };
 
         let result: ServerAuthResult = self
@@ -1341,11 +1514,61 @@ impl AuthManager {
         pin: String,
     ) -> AuthResult<PlayerAuthResult> {
         let device_id = self.get_or_create_device_id().await?;
+        // Obtain device fingerprint and signing key
+        let device_fingerprint = generate_hardware_fingerprint().await.map_err(|e| {
+            AuthError::Storage(StorageError::InitFailed(format!(
+                "Failed to get hardware fingerprint: {}",
+                e
+            )))
+        })?;
+        let signing_key_bytes = self
+            .auth_storage
+            .load_device_key()
+            .await
+            .map_err(|e| {
+                error!("failed to load device key: {e}");
+                AuthError::Storage(StorageError::InitFailed(
+                    "device key unavailable".to_string(),
+                ))
+            })?
+            .ok_or_else(|| AuthError::Storage(StorageError::InitFailed("device key not found".to_string())))?;
+        let signing_key = SigningKey::from_bytes(
+            signing_key_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| AuthError::Storage(StorageError::InitFailed("invalid device key".to_string())))?,
+        );
 
+        // Request a challenge
+        #[derive(serde::Serialize)]
+        struct ChallengeReq { device_id: Uuid }
+        #[derive(serde::Deserialize)]
+        struct ChallengeResp { challenge_id: Uuid, nonce: String, expires_in_secs: i64 }
+
+        let challenge: ChallengeResp = self
+            .api_client
+            .post(v1::auth::device::PIN_CHALLENGE, &ChallengeReq { device_id })
+            .await
+            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+
+        let nonce = BASE64
+            .decode(challenge.nonce.as_bytes())
+            .map_err(|_| AuthError::Storage(StorageError::InitFailed("invalid nonce".to_string())))?;
+        // Build message v1: "Ferrex-PIN-v1" || challenge_id || nonce || user_id
+        const CTX: &[u8] = b"Ferrex-PIN-v1";
+        let mut msg = Vec::with_capacity(CTX.len() + 16 + nonce.len() + 16);
+        msg.extend_from_slice(CTX);
+        msg.extend_from_slice(challenge.challenge_id.as_bytes());
+        msg.extend_from_slice(&nonce);
+        msg.extend_from_slice(user_id.as_bytes());
+        let sig: Signature = signing_key.sign(&msg);
+        let sig_b64 = BASE64.encode(sig.to_bytes());
+        let client_proof = Self::derive_client_pin_proof(&pin, user_id);
         let request = PinLoginRequest {
-            user_id,
             device_id,
-            pin,
+            client_proof,
+            challenge_id: challenge.challenge_id,
+            device_signature: sig_b64,
         };
 
         let result: ServerAuthResult = self
@@ -1374,6 +1597,50 @@ impl AuthManager {
             device_has_pin: true, // If PIN login succeeded, they have a PIN
         })
     }
+
+/// Derive a deterministic client-side PIN proof (PHC string) scoped to a user.
+///
+/// Construction:
+/// - password material = pin || user_id (UUID bytes)
+/// - salt (deterministic) = first 16 bytes of SHA-256("ferrex.pin.v1|" || user_id-uuid)
+/// - Argon2id params: m=64MiB, t=3, p=1, outlen=32
+fn derive_client_pin_proof(pin: &str, user_id: Uuid) -> String {
+    use argon2::{Algorithm, Argon2, Params, ParamsBuilder, Version};
+    use argon2::password_hash::{PasswordHasher, SaltString};
+    use sha2::{Digest, Sha256};
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+
+    // Password material: pin || user_id bytes
+    let mut material = Vec::with_capacity(pin.len() + 16);
+    material.extend_from_slice(pin.as_bytes());
+    material.extend_from_slice(user_id.as_bytes());
+
+    // Deterministic salt from user id
+    let mut hasher = Sha256::new();
+    hasher.update(b"ferrex.pin.v1|");
+    hasher.update(user_id.to_string().as_bytes());
+    let digest = hasher.finalize();
+    let salt_bytes = &digest[..16];
+    let salt_b64 = BASE64.encode(salt_bytes);
+    let salt = SaltString::from_b64(&salt_b64).expect("valid base64 salt");
+
+    // Argon2id params
+    let params: Params = ParamsBuilder::new()
+        .m_cost(64 * 1024)
+        .t_cost(3)
+        .p_cost(1)
+        .output_len(32)
+        .build()
+        .expect("valid argon2 params");
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+
+    // Produce PHC string (hash_password formats as PHC)
+    let phc = argon2
+        .hash_password(&material, &salt)
+        .expect("argon2 hash")
+        .to_string();
+    phc
+}
 
     /// Enable admin PIN unlock (stub for now)
     pub async fn enable_admin_pin_unlock(&self) -> AuthResult<()> {

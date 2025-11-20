@@ -5,16 +5,18 @@ use ferrex_core::{
     application::unit_of_work::AppUnitOfWork,
     auth::domain::{
         aggregates::DeviceSession,
+        repositories::AuthSessionRecord,
         services::{
             AuthEventContext, AuthenticationError, AuthenticationService, DeviceTrustError,
             DeviceTrustService, PasswordChangeActor, PasswordChangeRequest, PinManagementError,
             PinManagementService, TokenBundle,
         },
-        value_objects::{DeviceFingerprint, PinPolicy},
+        value_objects::{DeviceFingerprint, PinPolicy, RevocationReason},
     },
     database::ports::users::UsersRepository,
-    user::User,
+    user::{User, UserSession},
 };
+use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -226,6 +228,45 @@ impl AuthApplicationFacade {
         Ok(())
     }
 
+    pub async fn list_user_sessions(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<UserSession>, AuthFacadeError> {
+        let records = self.auth_service.list_sessions_for_user(user_id).await?;
+        Ok(records.into_iter().map(Self::map_session_record).collect())
+    }
+
+    pub async fn revoke_user_session(
+        &self,
+        user_id: Uuid,
+        session_id: Uuid,
+    ) -> Result<(), AuthFacadeError> {
+        let record = self
+            .auth_service
+            .find_session_by_id(session_id)
+            .await?
+            .ok_or(AuthenticationError::SessionExpired)?;
+
+        if record.user_id != user_id {
+            return Err(AuthFacadeError::Authentication(
+                AuthenticationError::InvalidCredentials,
+            ));
+        }
+
+        self.auth_service
+            .revoke_session_by_id(session_id, RevocationReason::UserLogout)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn revoke_all_user_sessions(&self, user_id: Uuid) -> Result<(), AuthFacadeError> {
+        self.auth_service
+            .revoke_all_sessions_for_user(user_id, RevocationReason::UserLogout)
+            .await?;
+        Ok(())
+    }
+
     pub async fn rotate_device_pin(
         &self,
         user_id: Uuid,
@@ -262,5 +303,25 @@ impl AuthApplicationFacade {
             .clear_pin(user_id, fingerprint, current_pin, max_attempts, context)
             .await?;
         Ok(())
+    }
+}
+
+impl AuthApplicationFacade {
+    fn map_session_record(record: AuthSessionRecord) -> UserSession {
+        let device_name = record
+            .metadata
+            .get("device_name")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string());
+
+        UserSession {
+            id: record.id,
+            user_id: record.user_id,
+            device_name,
+            ip_address: record.ip_address,
+            user_agent: record.user_agent,
+            last_active: record.last_activity.timestamp_millis(),
+            created_at: record.created_at.timestamp_millis(),
+        }
     }
 }

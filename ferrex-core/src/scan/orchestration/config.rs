@@ -129,6 +129,18 @@ pub struct RetryConfig {
     pub max_attempts: u16,
     pub backoff_base_ms: u64,
     pub backoff_max_ms: u64,
+    /// Attempts that should receive the "fast retry" treatment for user-visible scans.
+    pub fast_retry_attempts: u16,
+    /// Multiplier applied to base delay while in the fast retry window.
+    pub fast_retry_factor: f32,
+    /// When a library accumulates this many retry-heavy jobs we slow the whole queue.
+    pub heavy_library_attempt_threshold: u16,
+    /// Slowdown multiplier applied when a library is considered under stress.
+    pub heavy_library_slowdown_factor: f32,
+    /// Percentage-based jitter to spread out retries.
+    pub jitter_ratio: f32,
+    /// Minimum jitter in milliseconds so tiny jobs still randomise a bit.
+    pub jitter_min_ms: u64,
 }
 
 impl RetryConfig {
@@ -147,6 +159,12 @@ impl Default for RetryConfig {
             max_attempts: 5,
             backoff_base_ms: 2_000,
             backoff_max_ms: 5 * 60 * 1_000,
+            fast_retry_attempts: 2,
+            fast_retry_factor: 0.35,
+            heavy_library_attempt_threshold: 4,
+            heavy_library_slowdown_factor: 1.8,
+            jitter_ratio: 0.25,
+            jitter_min_ms: 250,
         }
     }
 }

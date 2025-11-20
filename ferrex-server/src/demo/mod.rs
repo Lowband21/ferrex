@@ -1,5 +1,6 @@
 #![cfg(feature = "demo")]
 
+use reqwest::Url;
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
@@ -8,11 +9,11 @@ use ferrex_core::providers::TmdbApiProvider;
 use ferrex_core::rbac::roles;
 use ferrex_core::types::LibraryID;
 use ferrex_core::types::library::LibraryType;
-use sqlx::{Connection, PgConnection};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+pub use crate::db::{derive_demo_database_url, prepare_demo_database};
 use crate::infra::app_state::AppState;
 use crate::infra::config::Config;
 use crate::users::UserService;
@@ -27,6 +28,7 @@ pub trait DemoPlanProvider: Send + Sync {
     ) -> Result<demo::DemoSeedPlan>;
 }
 
+#[derive(Debug)]
 pub struct TmdbPlanProvider {
     tmdb: Arc<TmdbApiProvider>,
 }
@@ -221,7 +223,9 @@ impl DemoCoordinator {
             .await
             .context("failed to ensure admin role exists")?;
 
-        if service
+        if state
+            .unit_of_work
+            .users
             .get_user_by_username(&self.username)
             .await
             .context("failed to check demo user existence")?
@@ -290,84 +294,4 @@ impl DemoStatus {
     pub fn is_empty(&self) -> bool {
         self.libraries.is_empty()
     }
-}
-
-pub fn derive_demo_database_url(base: &str) -> Result<String> {
-    let mut url = Url::parse(base).context("invalid PostgreSQL URL")?;
-    let current_path = url.path().trim_start_matches('/');
-    if current_path.is_empty() {
-        return Err(anyhow!("database URL must include database name"));
-    }
-    if current_path.ends_with("_demo") {
-        return Ok(base.to_string());
-    }
-    let new_name = format!("{}_demo", current_path);
-    url.set_path(&format!("/{}", new_name));
-    Ok(url.into())
-}
-
-/// Drop and recreate the demo database derived from the provided base URL before use.
-///
-/// Ensures every demo boot starts from a clean database while leaving the user's
-/// primary database untouched.
-pub async fn prepare_demo_database(base: &str) -> Result<String> {
-    let base_url = Url::parse(base).context("invalid PostgreSQL URL")?;
-    let base_name = base_url.path().trim_start_matches('/');
-    if base_name.is_empty() {
-        return Err(anyhow!("database URL must include database name"));
-    }
-    if base_name.ends_with("_demo") {
-        return Err(anyhow!(
-            "Refusing to prepare demo database because the base URL already points at a demo database"
-        ));
-    }
-
-    let demo_url = derive_demo_database_url(base)?;
-    let demo_name = Url::parse(&demo_url)
-        .context("invalid derived demo database URL")?
-        .path()
-        .trim_start_matches('/')
-        .to_string();
-
-    let mut admin_url = base_url.clone();
-    admin_url.set_path("/postgres");
-    let admin_url = admin_url.into_string();
-
-    let mut connection = PgConnection::connect(&admin_url)
-        .await
-        .with_context(|| format!("failed to connect to admin database via {}", admin_url))?;
-
-    sqlx::query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1")
-        .bind(&demo_name)
-        .execute(&mut connection)
-        .await
-        .context("failed to terminate active demo connections")?;
-
-    let quoted_name = quote_ident(&demo_name);
-    let drop_stmt = format!("DROP DATABASE IF EXISTS {}", quoted_name);
-    sqlx::query(&drop_stmt)
-        .execute(&mut connection)
-        .await
-        .context("failed to drop existing demo database")?;
-
-    let create_stmt = format!("CREATE DATABASE {}", quoted_name);
-    sqlx::query(&create_stmt)
-        .execute(&mut connection)
-        .await
-        .context("failed to create demo database")?;
-
-    Ok(demo_url)
-}
-
-fn quote_ident(value: &str) -> String {
-    let mut out = String::with_capacity(value.len() + 2);
-    out.push('"');
-    for ch in value.chars() {
-        if ch == '"' {
-            out.push('"');
-        }
-        out.push(ch);
-    }
-    out.push('"');
-    out
 }

@@ -3,9 +3,13 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use ferrex_core::user::{User, UserSession};
+use ferrex_core::{
+    auth::domain::services::AuthenticationError,
+    user::{User, UserSession},
+};
 use uuid::Uuid;
 
+use crate::application::auth::AuthFacadeError;
 use crate::infra::{
     app_state::AppState,
     errors::{AppError, AppResult},
@@ -16,7 +20,11 @@ pub async fn get_user_sessions_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> AppResult<Json<Vec<UserSession>>> {
-    let sessions = state.unit_of_work.users.get_user_sessions(user.id).await?;
+    let sessions = state
+        .auth_facade
+        .list_user_sessions(user.id)
+        .await
+        .map_err(map_facade_error)?;
 
     Ok(Json(sessions))
 }
@@ -27,24 +35,11 @@ pub async fn delete_session_handler(
     Extension(user): Extension<User>,
     Path(session_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
-    // Get the session to verify ownership
-    let sessions = state.unit_of_work.users.get_user_sessions(user.id).await?;
-
-    // Check if the session belongs to the user
-    if !sessions.iter().any(|s| s.id == session_id) {
-        return Err(AppError::forbidden("You can only delete your own sessions"));
-    }
-
-    // Delete the session
     state
-        .unit_of_work
-        .users
-        .delete_session(session_id)
+        .auth_facade
+        .revoke_user_session(user.id, session_id)
         .await
-        .map_err(|_| AppError::internal("Failed to delete session"))?;
-
-    // Also delete any refresh tokens associated with this session
-    // Note: This is handled by the database implementation
+        .map_err(map_facade_error)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -66,26 +61,44 @@ pub async fn delete_all_sessions_handler(
         .await
         .map_err(|_| AppError::internal("Failed to update user preferences"))?;
 
-    // Get all sessions
-    let sessions = state
-        .unit_of_work
-        .users
-        .get_user_sessions(user.id)
-        .await
-        .map_err(|_| AppError::internal("Failed to get user sessions"))?;
-
-    // Delete each session
-    for session in sessions {
-        let _ = state.unit_of_work.users.delete_session(session.id).await;
-    }
-
-    // Delete all refresh tokens
     state
-        .unit_of_work
-        .users
-        .delete_user_refresh_tokens(user.id)
+        .auth_facade
+        .revoke_all_user_sessions(user.id)
         .await
-        .map_err(|_| AppError::internal("Failed to delete refresh tokens"))?;
+        .map_err(map_facade_error)?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn map_facade_error(err: AuthFacadeError) -> AppError {
+    match err {
+        AuthFacadeError::Authentication(auth_err) => map_auth_error(auth_err),
+        AuthFacadeError::UserNotFound => AppError::not_found("User not found".to_string()),
+        AuthFacadeError::Storage(e) => AppError::internal(format!("Storage error: {e}")),
+        other => AppError::internal(format!("Auth facade error: {other}")),
+    }
+}
+
+fn map_auth_error(err: AuthenticationError) -> AppError {
+    match err {
+        AuthenticationError::InvalidCredentials | AuthenticationError::InvalidPin => {
+            AppError::forbidden("Invalid credentials".to_string())
+        }
+        AuthenticationError::UserNotFound => AppError::not_found("User not found".to_string()),
+        AuthenticationError::DeviceNotFound => {
+            AppError::not_found("Device session not found".to_string())
+        }
+        AuthenticationError::DeviceNotTrusted => {
+            AppError::forbidden("Device is not trusted".to_string())
+        }
+        AuthenticationError::TooManyFailedAttempts => {
+            AppError::rate_limited("Too many failed attempts".to_string())
+        }
+        AuthenticationError::SessionExpired => {
+            AppError::unauthorized("Session expired".to_string())
+        }
+        AuthenticationError::DatabaseError(e) => {
+            AppError::internal(format!("Authentication storage error: {e}"))
+        }
+    }
 }

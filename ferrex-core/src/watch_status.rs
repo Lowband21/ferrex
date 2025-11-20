@@ -18,17 +18,17 @@
 //! ## Example
 //!
 //! ```no_run
-//! use ferrex_core::{
-//!     watch_status::{UserWatchState, UpdateProgressRequest},
-//!     api_types::MediaID,
-//!     media::MovieID,
+//! use ferrex_core::player_prelude::{
+//!     MediaID, MediaIDLike, MovieID, UpdateProgressRequest, UserWatchState,
 //! };
 //!
 //! let mut watch_state = UserWatchState::new();
 //!
 //! // Update progress for a movie
+//! let movie = MediaID::Movie(MovieID::new());
 //! let request = UpdateProgressRequest {
-//!     media_id: MediaID::Movie(MovieID::new("123".to_string()).unwrap()),
+//!     media_id: movie.to_uuid(),
+//!     media_type: movie.media_type(),
 //!     position: 1800.0,  // 30 minutes
 //!     duration: 7200.0,  // 2 hours
 //! };

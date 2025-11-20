@@ -17,6 +17,7 @@ use self::messages::Message;
 use self::state::PlayerDomainState;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
+use crate::infrastructure::services::api::ApiService;
 use ferrex_core::player_prelude::LibraryID;
 use iced::Task;
 use std::sync::Arc;
@@ -30,7 +31,7 @@ pub struct PlayerDomain {
     pub state: PlayerDomainState,
     // Cross-domain dependencies
     //pub media_store: Arc<StdRwLock<MediaStore>>,
-    pub api_service: Option<Arc<ApiClientAdapter>>,
+    pub api_service: Option<Arc<dyn ApiService>>,
     pub current_library_id: Option<LibraryID>,
 }
 
@@ -45,7 +46,7 @@ pub struct PlayerDomain {
 impl PlayerDomain {
     pub fn new(
         //media_store: Arc<StdRwLock<MediaStore>>,
-        api_service: Option<Arc<ApiClientAdapter>>,
+        api_service: Option<Arc<dyn ApiService>>,
     ) -> Self {
         Self {
             state: PlayerDomainState::default(),

@@ -11,6 +11,7 @@ pub mod update_handlers;
 use self::types::LibraryFormData;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
+use crate::infrastructure::services::api::ApiService;
 use crate::infrastructure::repository::accessor::{Accessor, ReadWrite};
 use ferrex_core::player_prelude::{
     LibraryID, LibraryMediaCache, ScanConfig, ScanMetrics, ScanProgressEvent, ScanSnapshotDto,
@@ -37,14 +38,14 @@ pub struct LibraryDomainState {
     pub scan_metrics: Option<ScanMetrics>,
     pub scan_config: Option<ScanConfig>,
 
-    pub api_service: Option<Arc<ApiClientAdapter>>,
+    pub api_service: Option<Arc<dyn ApiService>>,
 
     pub repo_accessor: Accessor<ReadWrite>,
 }
 
 impl LibraryDomainState {
     pub fn new(
-        api_service: Option<Arc<ApiClientAdapter>>,
+        api_service: Option<Arc<dyn ApiService>>,
         repo_accessor: Accessor<ReadWrite>,
     ) -> Self {
         Self {

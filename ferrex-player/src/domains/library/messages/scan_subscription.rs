@@ -9,7 +9,7 @@ use uuid::Uuid;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use crate::infrastructure::{adapters::ApiClientAdapter, services::api::ApiService};
+use crate::infrastructure::services::api::ApiService;
 
 use futures::stream::BoxStream;
 
@@ -17,7 +17,7 @@ use futures::stream::BoxStream;
 struct ScanProgressId {
     server_url: String,
     scan_id: Uuid,
-    api: Arc<ApiClientAdapter>,
+    api: Arc<dyn ApiService>,
 }
 
 impl PartialEq for ScanProgressId {
@@ -39,11 +39,11 @@ impl Hash for ScanProgressId {
 }
 
 /// Creates a subscription to monitor library scan progress via Server-Sent Events (SSE)
-pub fn scan_progress(
-    server_url: String,
-    api_service: Arc<ApiClientAdapter>,
-    scan_id: Uuid,
-) -> Subscription<Message> {
+    pub fn scan_progress(
+        server_url: String,
+        api_service: Arc<dyn ApiService>,
+        scan_id: Uuid,
+    ) -> Subscription<Message> {
     Subscription::run_with(
         ScanProgressId {
             server_url: server_url.clone(),
@@ -77,11 +77,11 @@ struct ScanState {
     scan_id: Uuid,
     event_receiver: Option<mpsc::UnboundedReceiver<ScanEvent>>,
     task_handle: Option<tokio::task::JoinHandle<()>>,
-    api_service: Arc<ApiClientAdapter>,
+    api_service: Arc<dyn ApiService>,
 }
 
 impl ScanState {
-    fn new(server_url: String, scan_id: Uuid, api_service: Arc<ApiClientAdapter>) -> Self {
+    fn new(server_url: String, scan_id: Uuid, api_service: Arc<dyn ApiService>) -> Self {
         Self {
             server_url,
             scan_id,

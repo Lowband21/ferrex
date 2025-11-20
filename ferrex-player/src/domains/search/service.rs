@@ -20,7 +20,7 @@ pub struct SearchService {
     /// Reference to the media store for client-side searching
     //media_store: Arc<StdRwLock<MediaStore>>,
     /// API service for server-side searching (optional)
-    api_service: Option<Arc<crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter>>,
+    api_service: Option<Arc<dyn ApiService>>,
 }
 
 impl SearchService {
@@ -35,9 +35,7 @@ impl SearchService {
     )]
     pub fn new(
         //media_store: Arc<StdRwLock<MediaStore>>,
-        api_service: Option<
-            Arc<crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter>,
-        >,
+        api_service: Option<Arc<dyn ApiService>>,
     ) -> Self {
         Self {
             //media_store,

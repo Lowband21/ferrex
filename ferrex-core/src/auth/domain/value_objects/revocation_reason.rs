@@ -18,6 +18,8 @@ pub enum RevocationReason {
     PasswordChange,
     /// Administrator forced a password reset.
     AdminPasswordReset,
+    /// User explicitly logged out of a session.
+    UserLogout,
 }
 
 impl RevocationReason {
@@ -29,6 +31,7 @@ impl RevocationReason {
             Self::SessionReplaced => "replaced_by_new_token",
             Self::PasswordChange => "password_change",
             Self::AdminPasswordReset => "admin_password_reset",
+            Self::UserLogout => "user_logout",
         }
     }
 }

@@ -36,7 +36,9 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
         expires_at: chrono::DateTime<chrono::Utc>,
         family_id: Uuid,
         generation: i32,
+        origin_scope: crate::auth::domain::value_objects::SessionScope,
     ) -> Result<Uuid> {
+        let scope_str = origin_scope.as_str();
         let record = sqlx::query!(
             r#"
             INSERT INTO auth_refresh_tokens (
@@ -49,9 +51,10 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
                 metadata,
                 device_name,
                 family_id,
-                generation
+                generation,
+                origin_scope
             )
-            VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb, NULL, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb, NULL, $7, $8, $9)
             RETURNING id
             "#,
             user_id,
@@ -61,7 +64,8 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
             issued_at,
             expires_at,
             family_id,
-            generation
+            generation,
+            scope_str
         )
         .fetch_one(&self.pool)
         .await?;
@@ -87,7 +91,8 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
                 revoked_reason,
                 family_id,
                 generation AS "generation?",
-                used_count AS "used_count?"
+                used_count AS "used_count?",
+                origin_scope
             FROM auth_refresh_tokens
             WHERE token_hash = $1
             "#,
@@ -115,6 +120,12 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
                 )
                 .context("failed to hydrate refresh token from database")?;
 
+                let origin_scope = match row.origin_scope.as_str() {
+                    "full" => crate::auth::domain::value_objects::SessionScope::Full,
+                    "playback" => crate::auth::domain::value_objects::SessionScope::Playback,
+                    other => return Err(anyhow::anyhow!(format!("invalid origin_scope: {other}"))),
+                };
+
                 Ok(RefreshTokenRecord {
                     id: row.id,
                     user_id: row.user_id,
@@ -124,6 +135,7 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
                     revoked: row.revoked,
                     revoked_reason: row.revoked_reason,
                     used_count: row.used_count.unwrap_or_default(),
+                    origin_scope,
                 })
             })
             .transpose()?)
@@ -201,6 +213,25 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
               AND revoked = FALSE
             "#,
             device_session_id,
+            reason.as_str()
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn revoke_for_session(&self, session_id: Uuid, reason: RevocationReason) -> Result<()> {
+        sqlx::query!(
+            r#"
+            UPDATE auth_refresh_tokens
+            SET revoked = TRUE,
+                revoked_at = NOW(),
+                revoked_reason = COALESCE(revoked_reason, $2)
+            WHERE session_id = $1
+              AND revoked = FALSE
+            "#,
+            session_id,
             reason.as_str()
         )
         .execute(&self.pool)

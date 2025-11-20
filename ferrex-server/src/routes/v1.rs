@@ -40,6 +40,7 @@ use crate::{
         },
         user_handlers, user_management, watch_status_handlers,
     },
+    users::admin_user_management,
 };
 
 /// Create all v1 API routes
@@ -58,6 +59,10 @@ pub fn create_v1_router(state: AppState) -> Router<AppState> {
         .route(
             v1::auth::device::PIN_LOGIN,
             post(auth::device_handlers::pin_login),
+        )
+        .route(
+            v1::auth::device::PIN_CHALLENGE,
+            post(auth::device_handlers::pin_challenge),
         )
         .route(
             v1::auth::device::STATUS,
@@ -100,6 +105,10 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
             post(auth::device_handlers::set_device_pin),
         )
         .route(
+            v1::auth::device::CHANGE_PIN,
+            post(auth::device_handlers::change_device_pin),
+        )
+        .route(
             v1::auth::device::LIST,
             get(auth::device_handlers::list_user_devices),
         )
@@ -127,6 +136,10 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         // User endpoints
         //
         .route(v1::users::CURRENT, get(auth::handlers::get_current_user))
+        .route(
+            v1::users::CHANGE_PASSWORD,
+            put(user_handlers::change_password_handler),
+        )
         // Note: User profile management routes moved to new user management API
         .route(
             v1::users::sessions::COLLECTION,
@@ -313,13 +326,15 @@ fn create_metadata_routes() -> Router<AppState> {
 fn create_admin_routes(state: AppState) -> Router<AppState> {
     let router = Router::new()
         .route(v1::admin::USERS, get(admin_handlers::list_all_users))
+        .route(v1::admin::USERS, post(admin_user_management::admin_create_user))
         .route(
             v1::admin::USER_ROLES,
             put(admin_handlers::assign_user_roles),
         )
+        .route(v1::admin::USER_ITEM, put(admin_user_management::admin_update_user))
         .route(
             v1::admin::USER_ITEM,
-            axum::routing::delete(admin_handlers::delete_user_admin),
+            axum::routing::delete(admin_user_management::admin_delete_user),
         )
         .route(
             v1::admin::USER_SESSIONS,

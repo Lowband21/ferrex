@@ -36,12 +36,12 @@ use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::auth::{
     AuthCrypto,
     domain::repositories::{
-        AuthEventRepository, AuthSessionRepository, DeviceSessionRepository,
+        AuthEventRepository, AuthSessionRepository, DeviceChallengeRepository, DeviceSessionRepository,
         RefreshTokenRepository, UserAuthenticationRepository,
     },
     domain::services::{AuthenticationService, DeviceTrustService, PinManagementService},
     infrastructure::repositories::{
-        PostgresAuthEventRepository, PostgresAuthSessionRepository,
+        PostgresAuthEventRepository, PostgresAuthSessionRepository, PostgresDeviceChallengeRepository,
         PostgresDeviceSessionRepository, PostgresRefreshTokenRepository,
         PostgresUserAuthRepository,
     },
@@ -54,8 +54,7 @@ use ferrex_core::image_service::ImageService;
 use ferrex_core::orchestration::LibraryActorConfig;
 use ferrex_core::setup::SetupClaimService;
 use ferrex_core::types::LibraryReference;
-#[cfg(feature = "demo")]
-use ferrex_server::demo::{DemoCoordinator, prepare_demo_database};
+use ferrex_server::db::validate_primary_database_url;
 use ferrex_server::{
     application::auth::AuthApplicationFacade,
     infra::{
@@ -70,6 +69,10 @@ use ferrex_server::{
     routes,
     users::UserService,
 };
+#[cfg(feature = "demo")]
+use ferrex_server::{db::prepare_demo_database, demo::DemoCoordinator};
+use reqwest::header::CONTENT_TYPE;
+use reqwest::header::HeaderValue;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -208,6 +211,8 @@ async fn main() -> anyhow::Result<()> {
             }
         },
     };
+
+    validate_primary_database_url(&database_url)?;
 
     #[cfg(feature = "demo")]
     if demo_coordinator.is_some() {
@@ -374,6 +379,8 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(PostgresAuthSessionRepository::new(postgres_pool.clone()));
     let auth_event_repo: Arc<dyn AuthEventRepository> =
         Arc::new(PostgresAuthEventRepository::new(postgres_pool.clone()));
+    let device_challenges: Arc<dyn DeviceChallengeRepository> =
+        Arc::new(PostgresDeviceChallengeRepository::new(postgres_pool.clone()));
 
     let auth_service = Arc::new(
         AuthenticationService::new(
@@ -383,7 +390,8 @@ async fn main() -> anyhow::Result<()> {
             auth_sessions.clone(),
             auth_crypto.clone(),
         )
-        .with_event_repository(auth_event_repo.clone()),
+        .with_event_repository(auth_event_repo.clone())
+        .with_challenge_repository(device_challenges.clone()),
     );
 
     let device_trust_service = Arc::new(DeviceTrustService::new(
@@ -398,6 +406,7 @@ async fn main() -> anyhow::Result<()> {
         user_auth_repository.clone(),
         device_sessions.clone(),
         auth_event_repo.clone(),
+        auth_crypto.clone(),
     ));
 
     let auth_facade = Arc::new(AuthApplicationFacade::new(

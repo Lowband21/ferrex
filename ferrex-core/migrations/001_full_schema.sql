@@ -513,6 +513,13 @@ CREATE TYPE public.auth_event_type AS ENUM (
     'session_revoked',
     'auto_login'
 );
+-- Constrain device key algorithm to a known enum
+DO $$ BEGIN
+    CREATE TYPE public.auth_device_key_alg AS ENUM ('ed25519');
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
+
 CREATE TABLE public.auth_device_sessions (
     id uuid DEFAULT uuidv7() NOT NULL,
     user_id uuid NOT NULL,
@@ -521,9 +528,11 @@ CREATE TABLE public.auth_device_sessions (
     platform text,
     app_version text,
     hardware_id text,
+    -- Device-bound public key for possession checks (PEM or base64 per alg)
+    device_public_key text,
+    -- Public key algorithm identifier
+    device_key_alg public.auth_device_key_alg DEFAULT 'ed25519',
     status public.auth_device_status NOT NULL DEFAULT 'pending',
-    pin_hash text,
-    pin_set_at timestamp with time zone,
     pin_last_used_at timestamp with time zone,
     failed_attempts smallint DEFAULT 0 NOT NULL,
     locked_until timestamp with time zone,
@@ -565,13 +574,6 @@ COMMENT ON COLUMN public.auth_device_sessions.device_fingerprint IS 'SHA256 devi
 --
 
 COMMENT ON COLUMN public.auth_device_sessions.status IS 'Device trust lifecycle status (pending, trusted, revoked)';
-
-
---
--- Name: COLUMN auth_device_sessions.pin_hash; Type: COMMENT; Schema: public; Owner: postgres
---
-
-COMMENT ON COLUMN public.auth_device_sessions.pin_hash IS 'Argon2id hash of the device PIN stored when the device is trusted';
 
 
 --
@@ -1705,9 +1707,11 @@ CREATE TABLE public.auth_refresh_tokens (
     generation integer DEFAULT 1,
     used_at timestamp with time zone,
     used_count integer DEFAULT 0,
+    origin_scope text DEFAULT 'full'::text NOT NULL,
     CONSTRAINT auth_refresh_tokens_token_hash_length CHECK ((char_length(token_hash) = 64)),
     CONSTRAINT auth_refresh_tokens_valid_window CHECK ((expires_at > issued_at)),
-    CONSTRAINT auth_refresh_tokens_generation_positive CHECK ((generation >= 1))
+    CONSTRAINT auth_refresh_tokens_generation_positive CHECK ((generation >= 1)),
+    CONSTRAINT auth_refresh_tokens_origin_scope_valid CHECK ((origin_scope = 'full'::text) OR (origin_scope = 'playback'::text))
 );
 
 
@@ -1716,6 +1720,44 @@ CREATE TABLE public.auth_refresh_tokens (
 --
 
 COMMENT ON TABLE public.auth_refresh_tokens IS 'Refresh token store with rotation metadata and hashed tokens';
+
+-- Backfill moved below to ensure auth_sessions exists prior to update
+
+--
+-- Name: COLUMN auth_refresh_tokens.origin_scope; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.auth_refresh_tokens.origin_scope IS 'Sticky origin scope for the refresh token (full or playback)';
+
+
+--
+-- Name: auth_device_challenges; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.auth_device_challenges (
+    id uuid DEFAULT uuidv7() NOT NULL,
+    device_session_id uuid NOT NULL,
+    nonce bytea NOT NULL,
+    issued_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    used boolean DEFAULT false NOT NULL
+);
+
+--
+-- Name: TABLE auth_device_challenges; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.auth_device_challenges IS 'Ephemeral nonces for device possession challenges';
+
+--
+-- Name: COLUMN auth_device_challenges.nonce; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.auth_device_challenges.nonce IS 'Opaque random nonce bytes to be signed by the device key';
+
+-- Enforce minimum nonce length
+ALTER TABLE public.auth_device_challenges
+    ADD CONSTRAINT auth_device_challenges_nonce_min_len CHECK (octet_length(nonce) >= 32);
 
 
 --
@@ -2449,6 +2491,14 @@ COMMENT ON COLUMN public.auth_sessions.scope IS 'Session scope controlling acces
 
 COMMENT ON COLUMN public.auth_sessions.last_activity IS 'Last authenticated request timestamp for the session';
 
+-- Backfill origin_scope for existing refresh tokens once auth_sessions exists
+UPDATE public.auth_refresh_tokens art
+SET origin_scope = asess.scope
+FROM public.auth_sessions asess
+WHERE art.session_id IS NOT NULL
+  AND art.session_id = asess.id
+  AND art.origin_scope <> asess.scope;
+
 
 --
 -- Name: sync_participants; Type: TABLE; Schema: public; Owner: postgres
@@ -2534,6 +2584,8 @@ COMMENT ON TABLE public.user_completed_media IS 'Tracks completed media using UU
 CREATE TABLE public.user_credentials (
     user_id uuid NOT NULL,
     password_hash character varying(255) NOT NULL,
+    pin_hash text,
+    pin_updated_at timestamp with time zone,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -3609,6 +3661,12 @@ CREATE INDEX idx_auth_refresh_tokens_expires_at ON public.auth_refresh_tokens US
 --
 
 CREATE INDEX idx_auth_refresh_tokens_active ON public.auth_refresh_tokens USING btree (token_hash) WHERE (revoked = false);
+
+-- Name: idx_auth_device_challenges_device_session; Type: INDEX; Schema: public; Owner: postgres
+CREATE INDEX idx_auth_device_challenges_device_session ON public.auth_device_challenges USING btree (device_session_id);
+
+-- Name: idx_auth_device_challenges_active; Type: INDEX; Schema: public; Owner: postgres
+CREATE INDEX idx_auth_device_challenges_active ON public.auth_device_challenges USING btree (device_session_id, expires_at) WHERE (used = false);
 
 
 --
@@ -5040,6 +5098,13 @@ ALTER TABLE ONLY public.auth_refresh_tokens
 ALTER TABLE ONLY public.auth_refresh_tokens
     ADD CONSTRAINT auth_refresh_tokens_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.auth_sessions(id) ON DELETE SET NULL;
 
+--
+-- Name: auth_device_challenges auth_device_challenges_device_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.auth_device_challenges
+    ADD CONSTRAINT auth_device_challenges_device_session_id_fkey FOREIGN KEY (device_session_id) REFERENCES public.auth_device_sessions(id) ON DELETE CASCADE;
+
 
 --
 -- Name: jwt_blacklist jwt_blacklist_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
@@ -5823,3 +5888,14 @@ ALTER TABLE ONLY public.user_watch_progress
 --
 -- PostgreSQL database dump complete
 --
+--
+-- Name: COLUMN auth_device_sessions.device_public_key; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.auth_device_sessions.device_public_key IS 'Device-bound public key used to validate possession';
+
+--
+-- Name: COLUMN auth_device_sessions.device_key_alg; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.auth_device_sessions.device_key_alg IS 'Algorithm for device public key (e.g., ed25519)';

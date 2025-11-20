@@ -48,7 +48,6 @@ tower.workspace = true
 tower-http.workspace = true
 
 # Database
-surrealdb.workspace = true
 sqlx.workspace = true
 redis.workspace = true
 

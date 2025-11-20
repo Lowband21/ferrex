@@ -1,5 +1,6 @@
 use ferrex_core::error::MediaError;
 use ferrex_core::orchestration::QueueService;
+use ferrex_core::orchestration::config::RetryConfig;
 use ferrex_core::types::LibraryID;
 use sqlx::PgPool;
 use sqlx::Row;
@@ -19,6 +20,7 @@ use ferrex_core::orchestration::job::{
     EnqueueRequest, FolderScanJob, JobPayload, JobPriority, ScanReason,
 };
 use ferrex_core::orchestration::lease::DequeueRequest;
+use std::hash::{Hash, Hasher, SipHasher};
 use uuid::Uuid;
 
 async fn seed_library(pool: &PgPool) -> Uuid {
@@ -507,12 +509,17 @@ async fn job_failure_backoff_and_dead_letter(pool: PgPool) {
     let _ = svc
         .enqueue(EnqueueRequest::new(
             JobPriority::P1,
-            JobPayload::FolderScan(fs),
+            JobPayload::FolderScan(fs.clone()),
         ))
         .await
         .expect("enqueue");
 
     // Fail 5 times with retryable=true and check backoff ranges
+    let retry = RetryConfig::default();
+    let fast_reason = matches!(
+        fs.scan_reason,
+        ScanReason::UserRequested | ScanReason::HotChange
+    );
     for attempt in 1..=5 {
         let dq = DequeueRequest {
             kind: ferrex_core::orchestration::job::JobKind::FolderScan,
@@ -521,6 +528,7 @@ async fn job_failure_backoff_and_dead_letter(pool: PgPool) {
             selector: None,
         };
         let lease = svc.dequeue(dq).await.expect("dequeue ok").expect("lease");
+        let job_id = lease.job.id;
 
         // Fail with retryable true
         svc.fail(lease.lease_id, true, Some(format!("err-{}", attempt)))
@@ -528,39 +536,64 @@ async fn job_failure_backoff_and_dead_letter(pool: PgPool) {
             .expect("fail ok");
 
         // Verify state ready and available_at backoff within approx range
-        let row = sqlx::query(
-            "SELECT state, attempts, available_at FROM orchestrator_jobs WHERE id = $1",
+        let row = sqlx::query!(
+            r#"
+            SELECT state, attempts, available_at, updated_at
+            FROM orchestrator_jobs
+            WHERE id = $1
+            "#,
+            job_id.0
         )
-        .bind(lease.job.id.0)
         .fetch_one(&pool)
         .await
         .expect("fetch");
-        let state: String = row.get("state");
-        assert_eq!(state.as_str(), "ready");
-        let atts: i32 = row.get::<i32, _>("attempts");
+        assert_eq!(row.state.as_str(), "ready");
+        let atts: i32 = row.attempts;
         assert_eq!(atts, attempt as i32, "attempts should increment");
 
-        let base = (1i64 << atts.min(27)) as f64; // 2^attempts, large guard
-        let base_capped = base.min(120.0);
-        let now = Utc::now();
-        let available_at: chrono::DateTime<chrono::Utc> = row.get("available_at");
-        let diff = (available_at - now).num_milliseconds();
-        // diff can be slightly negative if test timing; clamp
-        let diff_ms = diff.max(0) as f64;
-        let lower = base_capped * 0.75 * 1000.0;
-        let upper = base_capped * 1.25 * 1000.0 + 300.0; // allow scheduling jitter/time to run
-        assert!(
-            diff_ms >= lower && diff_ms <= upper,
-            "backoff {}ms not in [{}, {}] for attempts {}",
-            diff_ms,
-            lower,
-            upper,
-            atts
+        let available_at = row.available_at;
+        let updated_at = row.updated_at;
+        let delay_ms = (available_at - updated_at).num_milliseconds();
+
+        let attempt_u16 = atts as u16;
+        let mut anchor =
+            (retry.backoff_base_ms as f64) * 2f64.powi((attempt_u16.saturating_sub(1)) as i32);
+        anchor = anchor.min(retry.backoff_max_ms as f64);
+
+        if fast_reason && attempt_u16 <= retry.fast_retry_attempts {
+            anchor = (anchor * retry.fast_retry_factor as f64).min(retry.backoff_max_ms as f64);
+        }
+
+        let mut library_under_pressure = false;
+        if retry.heavy_library_attempt_threshold > 0 {
+            let threshold = retry.heavy_library_attempt_threshold;
+            if attempt_u16 >= threshold {
+                library_under_pressure = true;
+            }
+        }
+        if library_under_pressure {
+            anchor = (anchor * retry.heavy_library_slowdown_factor as f64)
+                .min(retry.backoff_max_ms as f64);
+        }
+
+        let jitter_span = (anchor * f64::from(retry.jitter_ratio))
+            .max(retry.jitter_min_ms as f64)
+            .min(retry.backoff_max_ms as f64);
+        let lower = 0f64.max(anchor - jitter_span);
+        let upper = (anchor + jitter_span).min(retry.backoff_max_ms as f64);
+        let unit = deterministic_unit(job_id.0, attempt_u16);
+        let expected_delay = lower + (upper - lower) * unit;
+        let expected_delay_ms = expected_delay.round() as i64;
+
+        assert_eq!(
+            delay_ms, expected_delay_ms,
+            "attempt {} scheduled unexpected delay",
+            attempt_u16
         );
 
         // Force availability for next iteration to avoid sleeping
         sqlx::query("UPDATE orchestrator_jobs SET available_at = NOW() WHERE id = $1")
-            .bind(lease.job.id.0)
+            .bind(job_id.0)
             .execute(&pool)
             .await
             .expect("force availability");
@@ -598,6 +631,14 @@ async fn job_failure_backoff_and_dead_letter(pool: PgPool) {
     .expect("fetch final");
     let state: String = row.get("state");
     assert_eq!(state.as_str(), "dead_letter");
+}
+
+fn deterministic_unit(job_id: uuid::Uuid, attempt: u16) -> f64 {
+    let mut hasher = SipHasher::new_with_keys(0, 0);
+    job_id.hash(&mut hasher);
+    attempt.hash(&mut hasher);
+    let bits = hasher.finish();
+    (bits as f64) / (u64::MAX as f64)
 }
 
 #[sqlx::test]

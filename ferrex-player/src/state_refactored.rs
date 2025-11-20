@@ -20,7 +20,6 @@ use crate::domains::ui::types::DisplayMode;
 use crate::domains::ui::views::carousel::CarouselState;
 use crate::domains::ui::widgets::AnimationType;
 use crate::domains::user_management::UserManagementDomainState;
-use crate::infrastructure::ServiceBuilder;
 use crate::infrastructure::adapters::ApiClientAdapter;
 use crate::infrastructure::adapters::AuthManagerAdapter;
 use crate::infrastructure::api_client::ApiClient;
@@ -31,9 +30,11 @@ use crate::infrastructure::repository::{
     accessor::{Accessor, ReadOnly, ReadWrite},
     repository::MediaRepo,
 };
+use crate::infrastructure::services::api::ApiService;
 use crate::infrastructure::services::settings::SettingsApiAdapter;
 use crate::infrastructure::services::streaming::StreamingApiAdapter;
 use crate::infrastructure::services::user_management::UserAdminApiAdapter;
+use crate::infrastructure::ServiceBuilder;
 use ferrex_core::player_prelude::{LibraryID, SortBy, SortOrder, UiResolution, UiWatchStatus};
 use parking_lot::RwLock as StdRwLock;
 use std::sync::Arc;
@@ -51,7 +52,7 @@ pub struct State {
     pub server_url: String,
 
     /// Shared services and infrastructure
-    pub api_service: Arc<ApiClientAdapter>,
+    pub api_service: Arc<dyn ApiService>,
     pub image_service: UnifiedImageService,
     pub image_receiver: Arc<std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
 
@@ -86,9 +87,8 @@ impl State {
         let service_builder = ServiceBuilder::new();
 
         // RUS-136: Create single ApiClientAdapter instance to share across all domains
-        let api_adapter = std::sync::Arc::new(ApiClientAdapter::new(std::sync::Arc::new(
-            api_client.clone(),
-        )));
+        let api_adapter = Arc::new(ApiClientAdapter::new(Arc::new(api_client.clone())));
+        let api_service: Arc<dyn ApiService> = api_adapter.clone();
 
         // RUS-136: Create trait-based AuthService via adapter
         // Create AuthManager inline for the adapter (not stored in State)
@@ -98,15 +98,15 @@ impl State {
         let auth_service = std::sync::Arc::new(adapter);
 
         // Create domain states with required services
-        let auth_state = AuthDomainState::new(api_adapter.clone(), auth_service.clone());
+        let auth_state = AuthDomainState::new(api_service.clone(), auth_service.clone());
 
-        let library_state = LibraryDomainState::new(Some(api_adapter.clone()), lib_accessor);
+        let library_state = LibraryDomainState::new(Some(api_service.clone()), lib_accessor);
 
-        let media_state = MediaDomainState::new(media_accessor, Some(api_adapter.clone()));
+        let media_state = MediaDomainState::new(media_accessor, Some(api_service.clone()));
 
         let metadata_state = MetadataDomainState::new(
             server_url.clone(),
-            Some(api_adapter.clone()),
+            Some(api_service.clone()),
             image_service.clone(),
         );
 
@@ -171,7 +171,7 @@ impl State {
         let settings_service = Arc::new(settings_adapter);
 
         let settings_state =
-            SettingsDomainState::new(auth_service.clone(), api_adapter.clone(), settings_service);
+            SettingsDomainState::new(auth_service.clone(), api_service.clone(), settings_service);
 
         // Create streaming service adapter
         let api_arc_stream = Arc::new(api_client.clone());
@@ -179,10 +179,10 @@ impl State {
         let streaming_service = Arc::new(streaming_adapter);
 
         let streaming_state =
-            StreamingDomainState::new(api_adapter.clone(), streaming_service, ui_accessor.clone());
+            StreamingDomainState::new(api_service.clone(), streaming_service, ui_accessor.clone());
 
         let mut user_mgmt_state = UserManagementDomainState {
-            api_service: Some(api_adapter.clone()),
+            api_service: Some(api_service.clone()),
             user_admin_service: None,
             ..Default::default()
         };
@@ -193,9 +193,9 @@ impl State {
             user_mgmt_state.user_admin_service = Some(std::sync::Arc::new(adapter));
         }
 
-        let player_domain = PlayerDomain::new(Some(api_adapter.clone()));
+        let player_domain = PlayerDomain::new(Some(api_service.clone()));
 
-        let search_domain = SearchDomain::new_with_metrics(Some(api_adapter.clone()));
+        let search_domain = SearchDomain::new_with_metrics(Some(api_service.clone()));
 
         // Create domain registry
         let domains = DomainRegistry {
@@ -228,7 +228,7 @@ impl State {
             domains,
             tab_manager,
             server_url: server_url.clone(),
-            api_service: api_adapter,
+            api_service: api_service,
             image_service: image_service.clone(), // TODO: Fix this clone
             image_receiver: Arc::new(std::sync::Mutex::new(Some(_receiver))),
             loading: true,

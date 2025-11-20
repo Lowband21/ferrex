@@ -1,5 +1,5 @@
 use super::Message;
-use crate::infrastructure::{adapters::ApiClientAdapter, services::api::ApiService};
+use crate::infrastructure::services::api::ApiService;
 use ferrex_core::api_routes::{utils, v1};
 use ferrex_core::player_prelude::{ImageSize, ImageType};
 use futures::stream;
@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 /// Creates a subscription for loading images from the server
 pub fn image_loading(
-    api_service: Arc<ApiClientAdapter>,
+    api_service: Arc<dyn ApiService>,
     server_url: String,
     receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
     auth_token: Option<String>,
@@ -18,7 +18,7 @@ pub fn image_loading(
     #[derive(Debug, Clone)]
     struct ImageLoaderSubscription {
         id: u64,
-        api_service: Arc<ApiClientAdapter>,
+        api_service: Arc<dyn ApiService>,
         server_url: String,
         receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
         auth_token: Option<String>,
@@ -62,7 +62,7 @@ pub fn image_loading(
 
 // Image loader stream function
 fn image_loader_stream(
-    api_service: Arc<ApiClientAdapter>,
+    api_service: Arc<dyn ApiService>,
     server_url: String,
     wake_receiver_arc: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
     auth_token: Option<String>,

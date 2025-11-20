@@ -318,3 +318,119 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
 
     Ok(())
 }
+
+#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+async fn admin_endpoints_record_audit_logs(pool: PgPool) -> Result<()> {
+    use ferrex_core::api_routes::v1;
+
+    let app = build_test_app(pool).await?;
+    let (router, state, _tempdir) = app.into_parts();
+
+    let router: Router<()> = router.with_state(state.clone());
+    let make_service = router.into_make_service_with_connect_info::<SocketAddr>();
+    let server = TestServer::builder()
+        .http_transport()
+        .build(make_service)
+        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+
+    // Create admin and promote
+    let (admin_id_raw, admin_access, _admin_refresh) =
+        register_user(&server, "admin_crud", "Admin#Pass123").await?;
+    let admin_id = Uuid::parse_str(&admin_id_raw)?;
+    promote_to_admin(&state, admin_id).await?;
+
+    // Create a managed user through the admin API
+    let create_response = server
+        .post(v1::admin::USERS)
+        .add_header("Authorization", bearer(&admin_access))
+        .json(&json!({
+            "username": "managed_admin_user",
+            "display_name": "Managed Admin User",
+            "password": "Managed#Pass123",
+            "email": "managed_admin@example.com"
+        }))
+        .await;
+    create_response.assert_status_ok();
+    let created_body: Value = create_response.json();
+    let managed_id_raw = created_body["data"]["id"]
+        .as_str()
+        .expect("id present")
+        .to_string();
+    let managed_id = Uuid::parse_str(&managed_id_raw)?;
+
+    // Verify admin_actions and security_audit_log entries for creation
+    let admin_actions_created: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM admin_actions WHERE action_type = 'user.create' AND target_id = $1",
+        managed_id
+    )
+    .fetch_one(state.postgres.pool())
+    .await?
+    .unwrap_or(0);
+    assert_eq!(admin_actions_created, 1, "one admin action for create");
+
+    let security_created: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM security_audit_log WHERE event_type = 'user_created' AND user_id = $1",
+        managed_id
+    )
+    .fetch_one(state.postgres.pool())
+    .await?
+    .unwrap_or(0);
+    assert_eq!(security_created, 1, "one security audit for create");
+
+    // Update via admin API
+    let update_path = route_utils::replace_param(v1::admin::USER_ITEM, "{id}", &managed_id_raw);
+    let update_response = server
+        .put(&update_path)
+        .add_header("Authorization", bearer(&admin_access))
+        .json(&json!({
+            "display_name": "Managed Admin User Updated",
+            "email": "managed_admin_updated@example.com"
+        }))
+        .await;
+    update_response.assert_status_ok();
+
+    let admin_actions_updated: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM admin_actions WHERE action_type = 'user.update' AND target_id = $1",
+        managed_id
+    )
+    .fetch_one(state.postgres.pool())
+    .await?
+    .unwrap_or(0);
+    assert_eq!(admin_actions_updated, 1, "one admin action for update");
+
+    let security_updated: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM security_audit_log WHERE event_type = 'user_updated' AND user_id = $1",
+        managed_id
+    )
+    .fetch_one(state.postgres.pool())
+    .await?
+    .unwrap_or(0);
+    assert_eq!(security_updated, 1, "one security audit for update");
+
+    // Delete via admin API
+    let delete_response = server
+        .delete(&update_path)
+        .add_header("Authorization", bearer(&admin_access))
+        .await;
+    delete_response.assert_status(StatusCode::NO_CONTENT);
+
+    let admin_actions_deleted: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM admin_actions WHERE action_type = 'user.delete' AND target_id = $1",
+        managed_id
+    )
+    .fetch_one(state.postgres.pool())
+    .await?
+    .unwrap_or(0);
+    assert_eq!(admin_actions_deleted, 1, "one admin action for delete");
+
+    let security_deleted: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM security_audit_log WHERE event_type = 'user_deleted' AND user_id = $1",
+        managed_id
+    )
+    .fetch_one(state.postgres.pool())
+    .await?
+    .unwrap_or(0);
+    assert_eq!(security_deleted, 1, "one security audit for delete");
+
+    Ok(())
+}

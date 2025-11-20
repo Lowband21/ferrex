@@ -86,6 +86,17 @@ impl<'a> UserService<'a> {
             .map_err(map_admin_error)
     }
 
+    pub async fn get_user_by_username(&self, username: &str) -> AppResult<Option<User>> {
+        let lookup = username.to_lowercase();
+        self
+            .state
+            .unit_of_work
+            .users
+            .get_user_by_username(&lookup)
+            .await
+            .map_err(AppError::from)
+    }
+
     pub async fn create_user(&self, params: CreateUserParams) -> AppResult<User> {
         Self::validate_username(&params.username).map_err(AppError::bad_request)?;
 

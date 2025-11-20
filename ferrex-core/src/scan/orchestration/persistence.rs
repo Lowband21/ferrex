@@ -5,16 +5,17 @@
 use crate::error::Result;
 use async_trait::async_trait;
 use chrono::Utc;
-use rand::Rng;
+use serde_json::from_value;
 use sqlx::PgPool;
 use std::fmt;
+use std::hash::{Hash, Hasher, SipHasher};
 use tracing::{debug, info, warn};
 
 use crate::{
     error::MediaError,
     orchestration::{
         config::RetryConfig,
-        job::{EnqueueRequest, JobHandle, JobId, JobKind, JobPayload, JobPriority},
+        job::{EnqueueRequest, JobHandle, JobId, JobKind, JobPayload, JobPriority, ScanReason},
         lease::{DequeueRequest, JobLease, LeaseId, LeaseRenewal},
         queue::{
             ALL_JOB_KINDS, LeaseExpiryScanner, QueueInstrumentation, QueueService, QueueSnapshot,
@@ -97,7 +98,7 @@ impl PostgresQueueService {
     pub async fn scan_expired_leases(&self) -> Result<u64> {
         let expired = sqlx::query!(
             r#"
-            SELECT id, attempts
+            SELECT id, attempts, library_id, payload
             FROM orchestrator_jobs
             WHERE state = 'leased'
               AND lease_expires_at IS NOT NULL
@@ -114,10 +115,48 @@ impl PostgresQueueService {
         for row in expired {
             let attempts_before = row.attempts;
             if attempts_before < max_attempts {
-                let delay_ms = {
-                    let mut rng = rand::rng();
-                    self.jittered_delay_ms((attempts_before + 1) as u16, &mut rng)
-                };
+                let attempt_next = attempts_before.saturating_add(1) as u16;
+                let job_id = JobId(row.id);
+                let library_id = LibraryID(row.library_id);
+                let payload: JobPayload = from_value(row.payload).map_err(|e| {
+                    MediaError::Internal(format!(
+                        "lease resurrection payload decode failed for job {}: {e}",
+                        row.id
+                    ))
+                })?;
+
+                let mut library_under_pressure = false;
+                if self.retry_config.heavy_library_attempt_threshold > 0 {
+                    let threshold = i32::from(self.retry_config.heavy_library_attempt_threshold);
+                    if attempt_next as i32 >= threshold {
+                        library_under_pressure = true;
+                    } else {
+                        let pressure_count: Option<i64> = sqlx::query_scalar!(
+                            r#"
+                            SELECT COUNT(*)::bigint
+                            FROM orchestrator_jobs
+                            WHERE library_id = $1
+                              AND id <> $2
+                              AND attempts >= $3
+                              AND state IN ('ready','leased')
+                            "#,
+                            library_id.0,
+                            job_id.0,
+                            threshold
+                        )
+                        .fetch_one(&self.pool)
+                        .await
+                        .map_err(|e| {
+                            MediaError::Internal(format!(
+                                "lease resurrection pressure lookup failed: {e}"
+                            ))
+                        })?;
+                        library_under_pressure = pressure_count.unwrap_or(0) > 0;
+                    }
+                }
+
+                let delay_ms =
+                    self.compute_delay_ms(attempt_next, &payload, library_under_pressure, job_id);
                 sqlx::query!(
                     r#"
                     UPDATE orchestrator_jobs
@@ -178,19 +217,91 @@ impl PostgresQueueService {
         capped.max(0.0) as u64
     }
 
-    fn jittered_delay_ms(&self, attempt: u16, rng: &mut impl Rng) -> u64 {
+    fn compute_delay_ms(
+        &self,
+        attempt: u16,
+        payload: &JobPayload,
+        library_under_pressure: bool,
+        job_id: JobId,
+    ) -> u64 {
+        let anchor = self.anchor_delay_ms(attempt, payload, library_under_pressure);
+        self.jittered_delay_for_anchor(anchor, job_id, attempt)
+    }
+
+    fn anchor_delay_ms(
+        &self,
+        attempt: u16,
+        payload: &JobPayload,
+        library_under_pressure: bool,
+    ) -> u64 {
+        if attempt == 0 {
+            return 0;
+        }
+
         let base = self.base_delay_ms(attempt);
         if base == 0 {
             return 0;
         }
 
-        let upper_cap = self.retry_config.backoff_max_ms.max(1);
-        let capped = base.min(upper_cap);
-        let spread = (capped as f64 * 0.25).max(1.0);
-        let lower = (capped as f64 - spread).max(1.0);
-        let upper = (capped as f64 + spread).min(upper_cap as f64);
+        let fast_multiplier = self.fast_retry_multiplier(attempt, payload);
+        let mut scaled = (base as f32 * fast_multiplier).round() as u64;
+        if library_under_pressure {
+            scaled =
+                ((scaled as f32) * self.retry_config.heavy_library_slowdown_factor).round() as u64;
+        }
 
-        rng.random_range(lower..=upper).round() as u64
+        scaled.clamp(0, self.retry_config.backoff_max_ms)
+    }
+
+    fn fast_retry_multiplier(&self, attempt: u16, payload: &JobPayload) -> f32 {
+        if attempt == 0 || attempt > self.retry_config.fast_retry_attempts {
+            return 1.0;
+        }
+
+        let fast_reason = |reason: &ScanReason| {
+            matches!(reason, ScanReason::UserRequested | ScanReason::HotChange)
+        };
+
+        let is_fast_path = match payload {
+            JobPayload::FolderScan(job) => fast_reason(&job.scan_reason),
+            JobPayload::MediaAnalyze(job) => fast_reason(&job.scan_reason),
+            _ => false,
+        };
+
+        if is_fast_path {
+            self.retry_config.fast_retry_factor.max(0.05).min(1.0)
+        } else {
+            1.0
+        }
+    }
+
+    fn jittered_delay_for_anchor(&self, anchor_ms: u64, job_id: JobId, attempt: u16) -> u64 {
+        if anchor_ms == 0 {
+            return 0;
+        }
+
+        let jitter_ratio = f64::from(self.retry_config.jitter_ratio.max(0.0));
+        let jitter_span = ((anchor_ms as f64) * jitter_ratio)
+            .max(self.retry_config.jitter_min_ms as f64)
+            .min(self.retry_config.backoff_max_ms as f64);
+
+        let lower = 0f64.max(anchor_ms as f64 - jitter_span);
+        let upper = (anchor_ms as f64 + jitter_span).min(self.retry_config.backoff_max_ms as f64);
+        if upper <= lower {
+            return lower.round() as u64;
+        }
+
+        let unit = self.deterministic_unit(job_id, attempt);
+        let jittered = lower + (upper - lower) * unit;
+        jittered.round() as u64
+    }
+
+    fn deterministic_unit(&self, job_id: JobId, attempt: u16) -> f64 {
+        let mut hasher = SipHasher::new_with_keys(0, 0);
+        job_id.hash(&mut hasher);
+        attempt.hash(&mut hasher);
+        let bits = hasher.finish();
+        (bits as f64) / (u64::MAX as f64)
     }
 
     fn parse_kind(kind: &str) -> Option<JobKind> {
@@ -1031,7 +1142,7 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
         // Lock the row and get current attempts
         let row = sqlx::query!(
             r#"
-            SELECT id, attempts
+            SELECT id, attempts, library_id, payload
             FROM orchestrator_jobs
             WHERE lease_id = $1
             FOR UPDATE
@@ -1049,12 +1160,45 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
 
         let attempts_before: i32 = row.attempts;
         let max_attempts = i32::from(self.retry_config.max_attempts);
+        let attempt_next = attempts_before.saturating_add(1) as u16;
+        let job_id = JobId(row.id);
+        let library_id = LibraryID(row.library_id);
+        let payload: JobPayload = from_value(row.payload).map_err(|e| {
+            MediaError::Internal(format!(
+                "fail payload decode failed for job {}: {e}",
+                row.id
+            ))
+        })?;
+
+        let mut library_under_pressure = if self.retry_config.heavy_library_attempt_threshold == 0 {
+            false
+        } else {
+            attempt_next as i32 >= i32::from(self.retry_config.heavy_library_attempt_threshold)
+        };
+
+        if !library_under_pressure && self.retry_config.heavy_library_attempt_threshold > 0 {
+            let pressure_count: Option<i64> = sqlx::query_scalar!(
+                r#"
+                SELECT COUNT(*)::bigint
+                FROM orchestrator_jobs
+                WHERE library_id = $1
+                  AND id <> $2
+                  AND attempts >= $3
+                  AND state IN ('ready','leased')
+                "#,
+                library_id.0,
+                job_id.0,
+                i32::from(self.retry_config.heavy_library_attempt_threshold)
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| MediaError::Internal(format!("fail pressure lookup failed: {e}")))?;
+            library_under_pressure = pressure_count.unwrap_or(0) > 0;
+        }
 
         if retryable && attempts_before < max_attempts {
-            let delay_ms = {
-                let mut rng = rand::rng();
-                self.jittered_delay_ms((attempts_before + 1) as u16, &mut rng)
-            };
+            let delay_ms =
+                self.compute_delay_ms(attempt_next, &payload, library_under_pressure, job_id);
 
             sqlx::query!(
                 r#"
@@ -1082,9 +1226,11 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
                 .map_err(|e| MediaError::Internal(format!("fail tx commit failed: {e}")))?;
 
             warn!(
-                "job {} failed retryable; attempts now {}; scheduled retry",
+                "job {} failed retryable; attempts now {}; scheduled retry in {}ms (pressure={})",
                 row.id,
-                attempts_before + 1
+                attempts_before + 1,
+                delay_ms,
+                library_under_pressure
             );
             Ok(())
         } else {

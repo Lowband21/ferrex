@@ -12,6 +12,7 @@ use self::image_service::UnifiedImageService;
 use self::messages::Message as MetadataMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
+use crate::infrastructure::services::api::ApiService;
 use iced::Task;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -32,7 +33,7 @@ pub struct MetadataDomainState {
     // Shared references needed by metadata domain
     //pub media_store: Arc<StdRwLock<MediaStore>>,
     //pub repo_accessor: Arc<StdRwLock<MetadataRepoAccessor>>,
-    pub api_service: Option<Arc<ApiClientAdapter>>,
+    pub api_service: Option<Arc<dyn ApiService>>,
 }
 
 #[cfg_attr(
@@ -47,7 +48,7 @@ impl MetadataDomainState {
     pub fn new(
         server_url: String,
         //media_store: Arc<StdRwLock<MediaStore>>,
-        api_service: Option<Arc<ApiClientAdapter>>,
+        api_service: Option<Arc<dyn ApiService>>,
         image_service: UnifiedImageService,
     ) -> Self {
         Self {

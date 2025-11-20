@@ -100,3 +100,10 @@ impl From<ferrex_core::user::ValidationError> for AppError {
         Self::bad_request(err.to_string())
     }
 }
+
+impl From<sqlx::Error> for AppError {
+    fn from(err: sqlx::Error) -> Self {
+        tracing::error!(error = ?err, "database operation failed");
+        Self::internal("Database operation failed")
+    }
+}

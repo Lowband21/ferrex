@@ -180,6 +180,7 @@ pub async fn build_test_app(pool: PgPool) -> Result<TestApp> {
         user_auth_repo.clone(),
         device_repo.clone(),
         event_repo.clone(),
+        auth_crypto.clone(),
     ));
 
     let auth_facade = Arc::new(AuthApplicationFacade::new(

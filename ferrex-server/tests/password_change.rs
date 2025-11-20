@@ -49,22 +49,20 @@ async fn user_password_change_revokes_tokens(pool: PgPool) -> Result<()> {
     let body: serde_json::Value = response.json();
     let access_token = extract_token_field(&body, "access_token").to_string();
     let refresh_token = extract_token_field(&body, "refresh_token").to_string();
-    let user_id_raw = body["data"]["user_id"]
+    let _user_id = body["data"]["user_id"]
         .as_str()
         .expect("user_id present")
         .to_string();
-
-    let update_path = route_utils::replace_param(v1::users::ITEM, "{id}", &user_id_raw);
     let new_password = "NewPassword#456";
     let update = server
-        .put(&update_path)
+        .put(v1::users::CHANGE_PASSWORD)
         .add_header("Authorization", bearer(&access_token))
         .json(&json!({
             "current_password": initial_password,
             "new_password": new_password
         }))
         .await;
-    update.assert_status_ok();
+    update.assert_status(StatusCode::NO_CONTENT);
 
     let reuse_me = server
         .get(v1::users::CURRENT)

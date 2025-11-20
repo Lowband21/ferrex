@@ -1,13 +1,10 @@
 use std::fmt;
 
-use argon2::{
-    Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
-};
-use constant_time_eq::constant_time_eq;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zeroize::{Zeroize, ZeroizeOnDrop};
+
+use crate::auth::{AuthCrypto, AuthCryptoError};
 
 /// Errors that can occur when working with PIN codes
 #[derive(Debug, Error)]
@@ -29,6 +26,9 @@ pub enum PinCodeError {
 
     #[error("PIN verification failed")]
     VerificationFailed,
+
+    #[error("PIN crypto error: {0}")]
+    CryptoError(String),
 }
 
 /// PIN validation and security policy
@@ -86,15 +86,16 @@ impl fmt::Debug for PinValue {
 
 impl PinCode {
     /// Create a new PIN code with validation
-    pub fn new(pin: String, policy: &PinPolicy) -> Result<Self, PinCodeError> {
+    pub fn new(pin: String, _policy: &PinPolicy, crypto: &AuthCrypto) -> Result<Self, PinCodeError> {
         // Wrap in zeroizing container
         let mut pin_value = PinValue(pin);
 
-        // Validate the PIN
-        Self::validate(&pin_value.0, policy)?;
+        if pin_value.0.is_empty() {
+            return Err(PinCodeError::TooShort { min: 1 });
+        }
 
-        // Hash the PIN
-        let hash = Self::hash_pin(&pin_value.0)?;
+        // Hash the PIN proof material
+        let hash = Self::hash_with_crypto(&pin_value.0, crypto)?;
 
         // Clear the original PIN
         pin_value.zeroize();
@@ -108,86 +109,12 @@ impl PinCode {
     }
 
     /// Validate a PIN against the policy
-    fn validate(pin: &str, policy: &PinPolicy) -> Result<(), PinCodeError> {
-        // Check length
-        if pin.len() < policy.min_length {
-            return Err(PinCodeError::TooShort {
-                min: policy.min_length,
-            });
-        }
-
-        if pin.len() > policy.max_length {
-            return Err(PinCodeError::TooLong {
-                max: policy.max_length,
-            });
-        }
-
-        // Check for non-digit characters
-        if !pin.chars().all(|c| c.is_ascii_digit()) {
-            return Err(PinCodeError::InvalidCharacters);
-        }
-
-        // Check for patterns if enabled
-        if policy.check_patterns {
-            let digits: Vec<u8> = pin.chars().map(|c| c.to_digit(10).unwrap() as u8).collect();
-
-            // Check consecutive identical digits
-            if policy.max_consecutive > 0 {
-                let mut consecutive = 1;
-                for i in 1..digits.len() {
-                    if digits[i] == digits[i - 1] {
-                        consecutive += 1;
-                        if consecutive > policy.max_consecutive {
-                            return Err(PinCodeError::TooSimple);
-                        }
-                    } else {
-                        consecutive = 1;
-                    }
-                }
-            }
-
-            // Check sequential patterns
-            if policy.check_sequential {
-                let mut ascending = 1;
-                let mut descending = 1;
-
-                for i in 1..digits.len() {
-                    if digits[i] == digits[i - 1] + 1 {
-                        ascending += 1;
-                        if ascending >= pin.len() {
-                            return Err(PinCodeError::TooSimple);
-                        }
-                    } else {
-                        ascending = 1;
-                    }
-
-                    if digits[i] + 1 == digits[i - 1] {
-                        descending += 1;
-                        if descending >= pin.len() {
-                            return Err(PinCodeError::TooSimple);
-                        }
-                    } else {
-                        descending = 1;
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     /// Hash a PIN using Argon2id
-    fn hash_pin(pin: &str) -> Result<String, PinCodeError> {
-        let mut rng = OsRng;
-        let salt = SaltString::generate(&mut rng);
-
-        let argon2 = Argon2::default();
-        let hash = argon2
-            .hash_password(pin.as_bytes(), &salt)
-            .map_err(|_| PinCodeError::HashingFailed)?
-            .to_string();
-
-        Ok(hash)
+    fn hash_with_crypto(pin_material: &str, crypto: &AuthCrypto) -> Result<String, PinCodeError> {
+        crypto.hash_password(pin_material).map_err(|err| match err {
+            AuthCryptoError::PasswordHash(message) => PinCodeError::CryptoError(message),
+            _ => PinCodeError::HashingFailed,
+        })
     }
 
     /// Verify a PIN against this hash using constant-time comparison
@@ -195,24 +122,12 @@ impl PinCode {
     /// This method prevents timing attacks by ensuring that verification
     /// takes the same amount of time regardless of whether the PIN is correct
     /// or how many characters match.
-    pub fn verify(&self, pin: &str) -> Result<bool, PinCodeError> {
+    pub fn verify(&self, pin: &str, crypto: &AuthCrypto) -> Result<bool, PinCodeError> {
         let mut pin_value = PinValue(pin.to_string());
 
-        let parsed_hash =
-            PasswordHash::new(&self.hash).map_err(|_| PinCodeError::VerificationFailed)?;
-
-        let argon2 = Argon2::default();
-
-        // Perform Argon2 verification (already constant-time internally)
-        let argon2_result = argon2.verify_password(pin_value.0.as_bytes(), &parsed_hash);
-
-        // Convert result to bytes for constant-time comparison
-        // This ensures we don't leak timing information through early returns
-        let verification_passed = if argon2_result.is_ok() { 1u8 } else { 0u8 };
-        let expected_success = 1u8;
-
-        // Use constant-time comparison to prevent timing attacks
-        let is_equal = constant_time_eq(&[verification_passed], &[expected_success]);
+        let is_equal = crypto
+            .verify_password(&pin_value.0, &self.hash)
+            .map_err(|_| PinCodeError::VerificationFailed)?;
 
         pin_value.zeroize();
 
@@ -250,40 +165,43 @@ impl<'de> Deserialize<'de> for PinCode {
 mod tests {
     use super::*;
 
+    fn test_crypto() -> AuthCrypto {
+        AuthCrypto::new("test-pepper", "test-token").expect("crypto init")
+    }
+
     #[test]
     fn test_valid_pin() {
         let policy = PinPolicy::default();
-        let pin = PinCode::new("5823".to_string(), &policy).unwrap();
+        let crypto = test_crypto();
+        let pin = PinCode::new("5823".to_string(), &policy, &crypto).unwrap();
         assert!(!pin.hash.is_empty());
     }
 
     #[test]
-    fn test_pin_too_short() {
+    fn test_rejects_empty_proof() {
         let policy = PinPolicy::default();
-        let result = PinCode::new("123".to_string(), &policy);
+        let crypto = test_crypto();
+        let result = PinCode::new(String::new(), &policy, &crypto);
         assert!(matches!(result, Err(PinCodeError::TooShort { .. })));
     }
 
     #[test]
-    fn test_pin_too_simple() {
+    fn accepts_arbitrary_client_proof_material() {
         let policy = PinPolicy::default();
-
-        // Test consecutive digits
-        let result = PinCode::new("1111".to_string(), &policy);
-        assert!(matches!(result, Err(PinCodeError::TooSimple)));
-
-        // Test sequential
-        let result = PinCode::new("1234".to_string(), &policy);
-        assert!(matches!(result, Err(PinCodeError::TooSimple)));
+        let crypto = test_crypto();
+        let proof = "argon2id$v=19$m=65536,t=3,p=1$ZW1wdHlzbHQ$8J9CaJH2zv+2czZP2mEAPw";
+        let pin = PinCode::new(proof.to_string(), &policy, &crypto).unwrap();
+        assert!(pin.verify(proof, &crypto).unwrap());
     }
 
     #[test]
     fn test_pin_verification() {
         let policy = PinPolicy::default();
-        let pin = PinCode::new("5823".to_string(), &policy).unwrap();
+        let crypto = test_crypto();
+        let pin = PinCode::new("5823".to_string(), &policy, &crypto).unwrap();
 
-        assert!(pin.verify("5823").unwrap());
-        assert!(!pin.verify("5824").unwrap());
+        assert!(pin.verify("5823", &crypto).unwrap());
+        assert!(!pin.verify("5824", &crypto).unwrap());
     }
 
     #[test]
@@ -291,16 +209,17 @@ mod tests {
         use std::time::Instant;
 
         let policy = PinPolicy::default();
-        let pin = PinCode::new("1357".to_string(), &policy).unwrap();
+        let crypto = test_crypto();
+        let pin = PinCode::new("1357".to_string(), &policy, &crypto).unwrap();
 
         // Test correct PIN
         let start = Instant::now();
-        let result1 = pin.verify("1357").unwrap();
+        let result1 = pin.verify("1357", &crypto).unwrap();
         let time1 = start.elapsed();
 
         // Test incorrect PIN (completely different)
         let start = Instant::now();
-        let result2 = pin.verify("9999").unwrap();
+        let result2 = pin.verify("9999", &crypto).unwrap();
         let time2 = start.elapsed();
 
         assert!(result1); // Correct PIN should verify

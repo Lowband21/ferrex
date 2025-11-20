@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO auth_device_sessions (\n                id,\n                user_id,\n                device_fingerprint,\n                device_name,\n                device_public_key,\n                device_key_alg,\n                status,\n                failed_attempts,\n                first_authenticated_by,\n                first_authenticated_at,\n                last_seen_at,\n                last_activity,\n                created_at\n            ) VALUES (\n                $1,\n                $2,\n                $3,\n                $4,\n                $5,\n                ($6)::text::auth_device_key_alg,\n                ($7)::text::auth_device_status,\n                $8,\n                $2,\n                $9,\n                $10,\n                $11,\n                $12\n                )\n            ON CONFLICT (id) DO UPDATE SET\n                device_name = EXCLUDED.device_name,\n                device_public_key = COALESCE(EXCLUDED.device_public_key, auth_device_sessions.device_public_key),\n                device_key_alg = COALESCE(EXCLUDED.device_key_alg, auth_device_sessions.device_key_alg),\n                status = EXCLUDED.status,\n                failed_attempts = EXCLUDED.failed_attempts,\n                last_seen_at = EXCLUDED.last_seen_at,\n                last_activity = EXCLUDED.last_activity,\n                updated_at = NOW(),\n                revoked_at = CASE\n                    WHEN EXCLUDED.status = 'revoked'::auth_device_status THEN\n                        COALESCE(auth_device_sessions.revoked_at, NOW())\n                    ELSE NULL\n                END,\n                revoked_by = CASE\n                    WHEN EXCLUDED.status = 'revoked'::auth_device_status THEN auth_device_sessions.revoked_by\n                    ELSE NULL\n                END,\n                revoked_reason = CASE\n                    WHEN EXCLUDED.status = 'revoked'::auth_device_status THEN auth_device_sessions.revoked_reason\n                    ELSE NULL\n                END\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int2",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8a15ad805feb9caa66801ce17a22f0702e7d04d745c251ac04b6b9a5310d9994"
+}

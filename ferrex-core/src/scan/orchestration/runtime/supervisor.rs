@@ -1610,9 +1610,12 @@ mod tests {
             .build()
             .expect("runtime build");
 
+        let p0_pairs = 20usize;
+        let p1_per_library = 20usize;
+        let total_jobs = (p0_pairs + p1_per_library) * 2;
+
         let mut job_events = events.subscribe();
         let collected = Arc::new(TokioMutex::new(Vec::new()));
-        let total_jobs = 100usize;
         let collector = {
             let collected = Arc::clone(&collected);
             tokio::spawn(async move {
@@ -1637,22 +1640,34 @@ mod tests {
         runtime.start().await.expect("runtime start");
         time::sleep(Duration::from_millis(20)).await;
 
-        for idx in 0..50 {
+        for idx in 0..p0_pairs {
             enqueue_job(
                 queue.clone(),
                 events.clone(),
                 make_scan_request(lib_a, idx, JobPriority::P0),
             )
             .await;
+            enqueue_job(
+                queue.clone(),
+                events.clone(),
+                make_scan_request(lib_b, idx + 1_000, JobPriority::P0),
+            )
+            .await;
         }
 
         time::sleep(Duration::from_millis(50)).await;
 
-        for idx in 0..50 {
+        for idx in 0..p1_per_library {
             enqueue_job(
                 queue.clone(),
                 events.clone(),
-                make_scan_request(lib_b, idx + 100, JobPriority::P1),
+                make_scan_request(lib_a, idx + 2_000, JobPriority::P1),
+            )
+            .await;
+            enqueue_job(
+                queue.clone(),
+                events.clone(),
+                make_scan_request(lib_b, idx + 3_000, JobPriority::P1),
             )
             .await;
         }
@@ -1669,39 +1684,53 @@ mod tests {
         let dequeued = collected.lock().await.clone();
         assert_eq!(dequeued.len(), total_jobs);
 
-        let first_l2 = dequeued
+        let first_p1_index = dequeued
             .iter()
-            .position(|(lib, _)| *lib == lib_b)
-            .expect("library B dequeued");
+            .position(|(_, priority)| *priority == JobPriority::P1)
+            .unwrap_or(dequeued.len());
+
+        let p0_total = p0_pairs * 2;
+        let max_priority_bias = 2usize;
         assert!(
-            first_l2 < 10,
-            "library B should appear early, observed index {first_l2}"
+            p0_total >= first_p1_index && p0_total - first_p1_index <= max_priority_bias,
+            "lower priority work leaked ahead of P0: first_p1_index={first_p1_index}, expected boundary {p0_total}"
         );
 
-        let max_run_a = max_consecutive_library(&dequeued, lib_a);
-        let max_run_b = max_consecutive_library(&dequeued, lib_b);
-        // With multiple workers the scheduler can legitimately hand out short bursts when
-        // queues momentarily drain, but it should still cap to a small window before rotating.
-        let max_allowed_run = 8;
-        assert!(
-            max_run_a <= max_allowed_run,
-            "max consecutive for A: {max_run_a}"
-        );
-        assert!(
-            max_run_b <= max_allowed_run,
-            "max consecutive for B: {max_run_b}"
-        );
-
-        let p0_count = dequeued
+        let p0_entries: Vec<_> = dequeued
             .iter()
+            .cloned()
             .filter(|(_, priority)| *priority == JobPriority::P0)
-            .count();
-        let p1_count = dequeued
+            .collect();
+        let p1_entries: Vec<_> = dequeued
             .iter()
+            .cloned()
             .filter(|(_, priority)| *priority == JobPriority::P1)
-            .count();
-        assert_eq!(p0_count, 50);
-        assert_eq!(p1_count, 50);
+            .collect();
+
+        assert_eq!(p0_entries.len(), p0_pairs * 2);
+        assert_eq!(p1_entries.len(), p1_per_library * 2);
+
+        let p0_a = p0_entries.iter().filter(|(lib, _)| *lib == lib_a).count();
+        let p0_b = p0_entries.iter().filter(|(lib, _)| *lib == lib_b).count();
+        assert_eq!(p0_a, p0_pairs, "library A P0 distribution skewed: {p0_a}");
+        assert_eq!(p0_b, p0_pairs, "library B P0 distribution skewed: {p0_b}");
+
+        let p1_a = p1_entries.iter().filter(|(lib, _)| *lib == lib_a).count();
+        let p1_b = p1_entries.iter().filter(|(lib, _)| *lib == lib_b).count();
+        assert_eq!(p1_a, p1_per_library, "library A P1 count mismatch: {p1_a}");
+        assert_eq!(p1_b, p1_per_library, "library B P1 count mismatch: {p1_b}");
+
+        let p1_max_run_a = max_consecutive_library(p1_entries.as_slice(), lib_a);
+        let p1_max_run_b = max_consecutive_library(p1_entries.as_slice(), lib_b);
+        let max_allowed_run = 6;
+        assert!(
+            p1_max_run_a <= max_allowed_run,
+            "max consecutive P1 for A exceeded: {p1_max_run_a}"
+        );
+        assert!(
+            p1_max_run_b <= max_allowed_run,
+            "max consecutive P1 for B exceeded: {p1_max_run_b}"
+        );
 
         runtime.shutdown().await.expect("runtime shutdown");
     }

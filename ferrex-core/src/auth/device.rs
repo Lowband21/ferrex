@@ -233,20 +233,7 @@ pub fn generate_trust_token() -> String {
 // Note: Device salt derivation is implemented in the server module
 // to have access to proper cryptographic dependencies.
 
-/// Device-user credential for PIN authentication
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeviceUserCredential {
-    pub user_id: Uuid,
-    pub device_id: Uuid,
-    pub pin_hash: Option<String>,
-    pub pin_set_at: Option<DateTime<Utc>>,
-    pub pin_last_used_at: Option<DateTime<Utc>>,
-    pub failed_attempts: i32,
-    pub locked_until: Option<DateTime<Utc>>,
-    pub auto_login_enabled: bool,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
+// Legacy device-user credential removed; user-level PIN is canonical.
 
 /// Authenticated device record
 #[derive(Debug, Clone, Serialize, Deserialize)]

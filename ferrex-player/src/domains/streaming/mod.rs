@@ -9,6 +9,7 @@ pub mod update_handlers;
 use self::messages::Message as StreamingMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
+use crate::infrastructure::services::api::ApiService;
 use ferrex_core::player_prelude::{LibraryID, TranscodingStatus};
 use iced::Task;
 use std::sync::Arc;
@@ -18,7 +19,7 @@ use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
 /// Streaming domain state
 pub struct StreamingDomainState {
     // References needed by streaming domain
-    pub api_service: Arc<ApiClientAdapter>,
+    pub api_service: Arc<dyn ApiService>,
     pub current_library_id: Option<LibraryID>,
 
     pub repo_accessor: Accessor<ReadOnly>,
@@ -52,7 +53,7 @@ impl std::fmt::Debug for StreamingDomain {
 impl std::fmt::Debug for StreamingDomainState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StreamingDomainState")
-            .field("api_service", &"ApiClientAdapter(..)")
+            .field("api_service", &"ApiService(..)")
             .field("current_library_id", &self.current_library_id)
             .field("streaming_service", &"StreamingApiService(..)")
             .field("using_hls", &self.using_hls)
@@ -87,7 +88,7 @@ impl std::fmt::Debug for StreamingDomainState {
 )]
 impl StreamingDomainState {
     pub fn new(
-        api_service: Arc<ApiClientAdapter>,
+        api_service: Arc<dyn ApiService>,
         streaming_service: Arc<dyn crate::infrastructure::services::streaming::StreamingApiService>,
         repo_accessor: Accessor<ReadOnly>,
     ) -> Self {

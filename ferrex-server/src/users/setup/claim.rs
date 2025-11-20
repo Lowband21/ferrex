@@ -1,4 +1,4 @@
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::OnceLock;
 
 use axum::{
@@ -126,9 +126,16 @@ fn require_lan(ip: IpAddr) -> AppResult<()> {
 
 fn is_lan_ip(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(v4) => v4.is_private() || v4.is_loopback(),
+        IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || is_cgnat(v4),
         IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local(),
     }
+}
+
+fn is_cgnat(ip: Ipv4Addr) -> bool {
+    let addr = u32::from(ip);
+    let start = u32::from(Ipv4Addr::new(100, 64, 0, 0));
+    let end = u32::from(Ipv4Addr::new(100, 127, 255, 255));
+    addr >= start && addr <= end
 }
 
 fn map_claim_error(error: SetupClaimError) -> AppError {

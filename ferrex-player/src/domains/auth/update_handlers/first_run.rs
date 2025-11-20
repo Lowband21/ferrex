@@ -252,12 +252,12 @@ pub fn handle_setup_complete(
             api_service.set_token(Some(auth_token.clone())).await;
 
             let user: core::User = api_service
-                .get(v1::users::CURRENT)
+                .fetch_current_user()
                 .await
                 .map_err(|e| format!("Failed to get user: {}", e))?;
 
             let permissions: core::UserPermissions = api_service
-                .get(v1::roles::MY_PERMISSIONS)
+                .fetch_my_permissions()
                 .await
                 .unwrap_or_else(|e| {
                     info!(

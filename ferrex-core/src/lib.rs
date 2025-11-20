@@ -35,17 +35,32 @@
 //! ## Examples
 //!
 //! ```no_run
-//! use ferrex_core::{MediaDatabase, user::RegisterRequest};
+//! use ferrex_core::{
+//!     database::MediaDatabase,
+//!     player_prelude::{MediaID, MediaIDLike, MovieID, UpdateProgressRequest, UserWatchState},
+//!     user::RegisterRequest,
+//! };
 //!
-//! async fn register_user(db: &MediaDatabase) -> Result<(), Box<dyn std::error::Error>> {
+//! async fn register_and_track(
+//!     _db: &MediaDatabase,
+//! ) -> Result<(), Box<dyn std::error::Error>> {
 //!     let request = RegisterRequest {
 //!         username: "alice".to_string(),
 //!         password: "secure_password".to_string(),
-//!         display_name: Some("Alice".to_string()),
+//!         display_name: "Alice".to_string(),
 //!     };
 //!
-//!     let user = db.backend().create_user(request).await?;
-//!     println!("Created user: {}", user.username);
+//!     let mut watch_state = UserWatchState::new();
+//!     let movie = MediaID::Movie(MovieID::new());
+//!     let progress = UpdateProgressRequest {
+//!         media_id: movie.to_uuid(),
+//!         media_type: movie.media_type(),
+//!         position: 1800.0,
+//!         duration: 7200.0,
+//!     };
+//!
+//!     watch_state.update_progress(progress.media_id, progress.position, progress.duration);
+//!     println!("Prepared registration for {}", request.username);
 //!     Ok(())
 //! }
 //! ```

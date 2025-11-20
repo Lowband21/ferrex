@@ -18,6 +18,7 @@ pub mod v1 {
         pub mod device {
             pub const LOGIN: &str = v1_path!("/auth/device/login");
             pub const PIN_LOGIN: &str = v1_path!("/auth/device/pin");
+            pub const PIN_CHALLENGE: &str = v1_path!("/auth/device/pin/challenge");
             pub const STATUS: &str = v1_path!("/auth/device/status");
             pub const SET_PIN: &str = v1_path!("/auth/device/pin/set");
             pub const CHANGE_PIN: &str = v1_path!("/auth/device/pin/change");
@@ -36,8 +37,10 @@ pub mod v1 {
         pub const LIST_AUTH: &str = v1_path!("/users/list");
         pub const CURRENT: &str = v1_path!("/users/me");
         pub const CURRENT_PREFERENCES: &str = v1_path!("/users/me/preferences");
+        pub const CHANGE_PASSWORD: &str = v1_path!("/users/me/password");
         pub const ITEM: &str = v1_path!("/users/{id}");
 
+        #[deprecated(note = "User session routes are being migrated to the auth domain")]
         pub mod sessions {
             pub const COLLECTION: &str = v1_path!("/users/sessions");
             pub const ITEM: &str = v1_path!("/users/sessions/{id}");

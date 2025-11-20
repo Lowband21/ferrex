@@ -35,9 +35,7 @@ impl SearchDomain {
     )]
     pub fn new(
         //media_store: Arc<StdRwLock<crate::domains::media::store::MediaStore>>,
-        api_service: Option<
-            Arc<crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter>,
-        >,
+        api_service: Option<Arc<dyn crate::infrastructure::services::api::ApiService>>,
     ) -> Self {
         Self {
             state: SearchState::default(),
@@ -55,9 +53,7 @@ impl SearchDomain {
     )]
     pub fn new_with_metrics(
         //media_store: Arc<StdRwLock<crate::domains::media::store::MediaStore>>,
-        api_service: Option<
-            Arc<crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter>,
-        >,
+        api_service: Option<Arc<dyn crate::infrastructure::services::api::ApiService>>,
     ) -> Self {
         let mut state = SearchState::default();
         // Enable the enhanced decision engine with metrics

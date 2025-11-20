@@ -1,6 +1,7 @@
 //! Device-aware authentication handlers built on the new auth domain services.
 
 use axum::{Extension, Json, extract::State, http::HeaderMap};
+use base64::Engine as _;
 use chrono::Utc;
 use ferrex_core::{
     api_types::ApiResponse,
@@ -23,6 +24,8 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 use uuid::Uuid;
+use crate::infra::middleware::rate_limit_setup::InMemoryRateLimiter;
+use once_cell::sync::OnceCell;
 
 use crate::{
     application::auth::AuthFacadeError,
@@ -32,6 +35,7 @@ use crate::{
     },
 };
 use ferrex_core::auth::domain::value_objects::{DeviceFingerprint, PinPolicy};
+use ferrex_core::auth::domain::services::AuthenticationError as CoreAuthError;
 
 const MAX_PIN_ATTEMPTS: u8 = 3;
 
@@ -41,13 +45,23 @@ pub struct DeviceLoginRequest {
     pub password: String,
     pub device_info: Option<DeviceInfo>,
     pub remember_device: bool,
+    /// Optional device public key for possession validation (base64-encoded)
+    #[serde(default)]
+    pub device_public_key: Option<String>,
+    /// Optional algorithm for device public key (default: ed25519)
+    #[serde(default)]
+    pub device_key_alg: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct PinLoginRequest {
-    pub user_id: Uuid,
     pub device_id: Uuid,
-    pub pin: String,
+    /// Client-derived PIN proof (raw PIN must never be sent)
+    pub client_proof: String,
+    /// Challenge id obtained from PIN challenge endpoint
+    pub challenge_id: Uuid,
+    /// Base64-encoded device signature over ("Ferrex-PIN-v1" || challenge_id || nonce || user_uuid)
+    pub device_signature: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -60,7 +74,12 @@ pub struct DeviceAuthStatus {
 #[derive(Debug, Deserialize)]
 pub struct SetPinRequest {
     pub device_id: Uuid,
-    pub pin: String,
+    /// Client-derived PIN proof (raw PIN must never be sent)
+    pub client_proof: String,
+    /// Challenge id obtained from PIN challenge endpoint
+    pub challenge_id: Uuid,
+    /// Base64-encoded device signature over challenge
+    pub device_signature: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,8 +90,14 @@ pub struct RevokeDeviceRequest {
 #[derive(Debug, Deserialize)]
 pub struct ChangePinRequest {
     pub device_id: Uuid,
-    pub current_pin: String,
-    pub new_pin: String,
+    /// Current PIN client proof
+    pub current_proof: String,
+    /// New PIN client proof
+    pub new_proof: String,
+    /// Challenge id obtained from PIN challenge endpoint
+    pub challenge_id: Uuid,
+    /// Base64-encoded device signature over challenge
+    pub device_signature: String,
 }
 
 pub async fn device_login(
@@ -90,7 +115,7 @@ pub async fn device_login(
 
     let facade = state.auth_facade.clone();
 
-    let (bundle, session) = facade
+    let (bundle, mut session) = facade
         .device_password_login(
             &request.username,
             &request.password,
@@ -100,6 +125,39 @@ pub async fn device_login(
         )
         .await
         .map_err(map_facade_error)?;
+
+    // Persist device public key if provided (validate base64 and algorithm)
+    if let Some(pk_b64) = request.device_public_key.as_ref() {
+        let alg = request
+            .device_key_alg
+            .as_deref()
+            .unwrap_or("ed25519");
+        if alg != "ed25519" {
+            return Err(AppError::bad_request("unsupported device_key_alg".to_string()));
+        }
+        let pk_bytes = base64::engine::general_purpose::STANDARD
+            .decode(pk_b64.as_bytes())
+            .map_err(|_| AppError::bad_request("invalid device_public_key encoding".to_string()))?;
+        if pk_bytes.len() != 32 {
+            return Err(AppError::bad_request(
+                "invalid device_public_key length for ed25519".to_string(),
+            ));
+        }
+        // Update aggregate and persist via device trust service
+        session.set_device_public_key(alg.to_string(), pk_b64.clone());
+        facade
+            .device_trust_service()
+            .set_device_public_key(session.id(), alg.to_string(), pk_b64.clone())
+            .await
+            .map_err(map_device_trust_error)?;
+    }
+
+    // If the client requests to remember/trust the device, enforce presence of a device public key.
+    if request.remember_device && session.device_public_key().is_none() {
+        return Err(AppError::bad_request(
+            "remember_device requires a registered device_public_key".to_string(),
+        ));
+    }
 
     // Update user preferences when remember_device is requested
     if request.remember_device {
@@ -149,20 +207,52 @@ pub async fn device_login(
 
 pub async fn pin_login(
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
     Json(request): Json<PinLoginRequest>,
 ) -> AppResult<Json<ApiResponse<AuthResult>>> {
+    // Minimal in-memory rate limiting for PIN auth
+    fn auth_rate_limiter() -> &'static InMemoryRateLimiter {
+        static LIM: OnceCell<InMemoryRateLimiter> = OnceCell::new();
+        LIM.get_or_init(|| InMemoryRateLimiter::new())
+    }
+    let client_ip = headers
+        .get("x-forwarded-for")
+        .or_else(|| headers.get("x-real-ip"))
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or("unknown").to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    // 10/min per IP and per device
+    let allowed_ip = auth_rate_limiter()
+        .check_limit(
+            &format!("auth:pin:ip:{}", client_ip),
+            10,
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+    let allowed_dev = auth_rate_limiter()
+        .check_limit(
+            &format!("auth:pin:device:{}", request.device_id),
+            10,
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+    if !allowed_ip || !allowed_dev {
+        return Err(AppError::rate_limited("Too many failed authentication attempts".to_string()));
+    }
+    // Decode device signature
+    let sig = base64::engine::general_purpose::STANDARD
+        .decode(request.device_signature.as_bytes())
+        .map_err(|_| AppError::bad_request("invalid device_signature encoding".to_string()))?;
     let bundle = state
         .auth_service()
-        .authenticate_with_pin_session(request.device_id, &request.pin)
+        .authenticate_with_pin_session(
+            request.device_id,
+            &request.client_proof,
+            request.challenge_id,
+            &sig,
+        )
         .await
         .map_err(map_authentication_error)?;
-
-    if bundle.user_id != request.user_id {
-        return Err(AppError::forbidden(
-            "Device session does not belong to requested user".to_string(),
-        ));
-    }
 
     let result = AuthResult {
         user_id: bundle.user_id,
@@ -172,6 +262,66 @@ pub async fn pin_login(
     };
 
     Ok(Json(ApiResponse::success(result)))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PinChallengeRequest {
+    pub device_id: Uuid,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PinChallengeResponse {
+    pub challenge_id: Uuid,
+    pub nonce: String, // base64
+    pub expires_in_secs: i64,
+}
+
+/// Issue a device possession challenge for PIN login
+pub async fn pin_challenge(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<PinChallengeRequest>,
+) -> AppResult<Json<ApiResponse<PinChallengeResponse>>> {
+    // Minimal in-memory rate limiting for challenge issuance
+    fn auth_rate_limiter() -> &'static InMemoryRateLimiter {
+        static LIM: OnceCell<InMemoryRateLimiter> = OnceCell::new();
+        LIM.get_or_init(|| InMemoryRateLimiter::new())
+    }
+    let client_ip = headers
+        .get("x-forwarded-for")
+        .or_else(|| headers.get("x-real-ip"))
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or("unknown").to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let allowed_ip = auth_rate_limiter()
+        .check_limit(
+            &format!("auth:pin_challenge:ip:{}", client_ip),
+            20,
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+    let allowed_dev = auth_rate_limiter()
+        .check_limit(
+            &format!("auth:pin_challenge:device:{}", request.device_id),
+            20,
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+    if !allowed_ip || !allowed_dev {
+        return Err(AppError::rate_limited("Too many requests".to_string()));
+    }
+    // 2 minute TTL
+    let (id, nonce) = state
+        .auth_service()
+        .create_device_challenge(request.device_id, 120)
+        .await
+        .map_err(map_authentication_error)?;
+    let nonce_b64 = base64::engine::general_purpose::STANDARD.encode(nonce);
+    Ok(Json(ApiResponse::success(PinChallengeResponse {
+        challenge_id: id,
+        nonce: nonce_b64,
+        expires_in_secs: 120,
+    })))
 }
 
 pub async fn set_device_pin(
@@ -189,12 +339,29 @@ pub async fn set_device_pin(
         return Err(AppError::forbidden("Device not owned by user".to_string()));
     }
 
+    // Device must have a registered public key
+    if session.device_public_key().is_none() {
+        return Err(AppError::bad_request(
+            "device key not registered; cannot set PIN".to_string(),
+        ));
+    }
+
+    // Verify device possession via atomic challenge consumption
+    let sig = base64::engine::general_purpose::STANDARD
+        .decode(request.device_signature.as_bytes())
+        .map_err(|_| AppError::bad_request("invalid device_signature encoding".to_string()))?;
+    state
+        .auth_service()
+        .verify_device_possession(request.device_id, request.challenge_id, &sig)
+        .await
+        .map_err(map_core_auth_error)?;
+
     let policy = PinPolicy::default();
     facade
         .set_device_pin(
             user.id,
             session.device_fingerprint(),
-            request.pin,
+            request.client_proof,
             &policy,
             None,
         )
@@ -306,13 +473,30 @@ pub async fn change_device_pin(
         return Err(AppError::forbidden("Device not owned by user".to_string()));
     }
 
+    // Device must have a registered public key
+    if session.device_public_key().is_none() {
+        return Err(AppError::bad_request(
+            "device key not registered; cannot change PIN".to_string(),
+        ));
+    }
+
+    // Verify device possession via atomic challenge consumption
+    let sig = base64::engine::general_purpose::STANDARD
+        .decode(request.device_signature.as_bytes())
+        .map_err(|_| AppError::bad_request("invalid device_signature encoding".to_string()))?;
+    state
+        .auth_service()
+        .verify_device_possession(request.device_id, request.challenge_id, &sig)
+        .await
+        .map_err(map_core_auth_error)?;
+
     let policy = PinPolicy::default();
     facade
         .rotate_device_pin(
             user.id,
             session.device_fingerprint(),
-            &request.current_pin,
-            request.new_pin,
+            &request.current_proof,
+            request.new_proof,
             &policy,
             MAX_PIN_ATTEMPTS,
             None,
@@ -342,6 +526,21 @@ fn extract_device_info(headers: &HeaderMap, body_device_info: Option<DeviceInfo>
         app_version: "1.0.0".to_string(),
         hardware_id: None,
     })
+}
+
+fn map_core_auth_error(err: CoreAuthError) -> AppError {
+    match err {
+        CoreAuthError::InvalidCredentials | CoreAuthError::InvalidPin => {
+            AppError::unauthorized("Invalid authentication".to_string())
+        }
+        CoreAuthError::TooManyFailedAttempts =>
+            AppError::rate_limited("Too many failed attempts".to_string()),
+        CoreAuthError::DeviceNotFound => AppError::not_found("Device session not found".to_string()),
+        CoreAuthError::DeviceNotTrusted => AppError::forbidden("Device is not trusted".to_string()),
+        CoreAuthError::SessionExpired => AppError::unauthorized("Session expired".to_string()),
+        CoreAuthError::UserNotFound => AppError::not_found("User not found".to_string()),
+        CoreAuthError::DatabaseError(e) => AppError::internal(format!("Auth error: {e}")),
+    }
 }
 
 fn generate_device_fingerprint(
@@ -396,7 +595,8 @@ fn device_session_to_device_registration(
         platform: info.platform.clone(),
         app_version: info.app_version.clone(),
         trust_token: generate_trust_token(),
-        pin_hash: session.pin_hash().map(|s| s.to_string()),
+        // Device no longer stores a PIN hash; user-level PIN is shared across trusted devices.
+        pin_hash: None,
         registered_at: session.created_at(),
         last_used_at: session.last_activity(),
         expires_at: None,
@@ -416,7 +616,8 @@ fn device_session_to_authenticated_device(session: &DeviceSession) -> Authentica
         app_version: None,
         hardware_id: None,
         status: map_device_status(session.status()),
-        pin_hash: session.pin_hash().map(|s| s.to_string()),
+        // User-level PIN is canonical; device-level fields are deprecated.
+        pin_hash: None,
         pin_set_at: None,
         pin_last_used_at: None,
         failed_attempts: i32::from(session.failed_attempts()),
@@ -426,7 +627,8 @@ fn device_session_to_authenticated_device(session: &DeviceSession) -> Authentica
         trusted_until: None,
         last_seen_at: session.last_activity(),
         last_activity: session.last_activity(),
-        auto_login_enabled: session.has_pin(),
+        // Consider this "eligible for auto-login" if device is trusted.
+        auto_login_enabled: session.is_trusted(),
         revoked_by: None,
         revoked_at: None,
         revoked_reason: None,

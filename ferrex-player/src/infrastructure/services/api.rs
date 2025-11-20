@@ -5,25 +5,23 @@
 
 use crate::infrastructure::repository::RepositoryResult;
 use async_trait::async_trait;
+use std::fmt::Debug;
 use ferrex_core::{
     api_types::setup::{ConfirmClaimResponse, StartClaimResponse},
     player_prelude::{
         ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
-        LatestProgressResponse, Library, LibraryID, Media, MediaQuery, MediaWithStatus,
-        ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics, StartScanRequest,
-        UpdateLibraryRequest, UpdateProgressRequest, User, UserWatchState,
+        FilterIndicesRequest, LatestProgressResponse, Library, LibraryID, Media, MediaQuery,
+        MediaWithStatus, ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics,
+        StartScanRequest, UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions,
+        UserWatchState,
     },
 };
 use rkyv::util::AlignedVec;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Generic API service trait for server communication
 #[async_trait]
-pub trait ApiService: Send + Sync {
-    /// Make a GET request to the API
-    async fn get<T: for<'de> Deserialize<'de>>(&self, path: &str) -> RepositoryResult<T>;
-
+pub trait ApiService: Send + Sync + Debug {
     async fn get_rkyv(
         &self,
         path: &str,
@@ -33,23 +31,6 @@ pub trait ApiService: Send + Sync {
     /// Make a GET request that returns raw bytes (for images and binary content)
     async fn get_bytes(&self, path: &str, query: Option<(&str, &str)>)
         -> RepositoryResult<Vec<u8>>;
-
-    /// Make a POST request to the API
-    async fn post<T: for<'de> Deserialize<'de>, B: Serialize + Send + Sync>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> RepositoryResult<T>;
-
-    /// Make a PUT request to the API
-    async fn put<T: for<'de> Deserialize<'de>, B: Serialize + Send + Sync>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> RepositoryResult<T>;
-
-    /// Make a DELETE request to the API
-    async fn delete<T: for<'de> Deserialize<'de>>(&self, path: &str) -> RepositoryResult<T>;
 
     // === Common API operations ===
 
@@ -134,6 +115,13 @@ pub trait ApiService: Send + Sync {
     /// Query media with complex filters
     async fn query_media(&self, query: MediaQuery) -> RepositoryResult<Vec<MediaWithStatus>>;
 
+    /// Fetch filtered index positions for a library based on the provided filter spec
+    async fn fetch_filtered_indices(
+        &self,
+        library_id: Uuid,
+        spec: &FilterIndicesRequest,
+    ) -> RepositoryResult<Vec<u32>>;
+
     /// Check if setup is required
     async fn check_setup_status(
         &self,
@@ -149,6 +137,12 @@ pub trait ApiService: Send + Sync {
         claim_token: Option<String>,
     ) -> RepositoryResult<(User, AuthToken)>;
 
+    /// Fetch the currently authenticated user profile
+    async fn fetch_current_user(&self) -> RepositoryResult<User>;
+
+    /// Fetch the current user's permissions
+    async fn fetch_my_permissions(&self) -> RepositoryResult<UserPermissions>;
+
     /// Start the secure setup claim workflow and retrieve a claim code.
     async fn start_setup_claim(
         &self,
@@ -160,9 +154,6 @@ pub trait ApiService: Send + Sync {
         &self,
         claim_code: String,
     ) -> RepositoryResult<ConfirmClaimResponse>;
-
-    /// Make a GET request to a public endpoint (no auth)
-    async fn get_public<T: for<'de> Deserialize<'de>>(&self, path: &str) -> RepositoryResult<T>;
 
     /// Build a full URL from a path
     fn build_url(&self, path: &str) -> String;

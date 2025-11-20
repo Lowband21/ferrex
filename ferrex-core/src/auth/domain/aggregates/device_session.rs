@@ -4,7 +4,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::auth::domain::events::AuthEvent;
-use crate::auth::domain::value_objects::{DeviceFingerprint, PinCode, PinPolicy, SessionToken};
+use crate::auth::domain::value_objects::{DeviceFingerprint, SessionToken};
 
 /// Errors that can occur with device sessions
 #[derive(Debug, Error)]
@@ -62,11 +62,17 @@ pub struct DeviceSession {
     /// Human-readable device name
     device_name: String,
 
+    /// Device-bound public key for possession validation (PEM/base64 format)
+    device_public_key: Option<String>,
+
+    /// Public key algorithm identifier (e.g., 'ed25519')
+    device_key_alg: Option<String>,
+
     /// Current device status
     status: DeviceStatus,
 
-    /// Optional PIN for this device
-    pin: Option<PinCode>,
+    /// Whether the user currently has a PIN configured
+    pin_configured: bool,
 
     /// Current session token
     session_token: Option<SessionToken>,
@@ -92,7 +98,7 @@ impl DeviceSession {
         device_fingerprint: DeviceFingerprint,
         device_name: String,
         status: DeviceStatus,
-        pin: Option<PinCode>,
+        pin_configured: bool,
         session_token: Option<SessionToken>,
         failed_attempts: u8,
         created_at: DateTime<Utc>,
@@ -103,8 +109,10 @@ impl DeviceSession {
             user_id,
             device_fingerprint,
             device_name,
+            device_public_key: None,
+            device_key_alg: None,
             status,
-            pin,
+            pin_configured,
             session_token,
             failed_attempts,
             created_at,
@@ -123,8 +131,10 @@ impl DeviceSession {
             user_id,
             device_fingerprint,
             device_name: device_name.clone(),
+            device_public_key: None,
+            device_key_alg: None,
             status: DeviceStatus::Pending,
-            pin: None,
+            pin_configured: false,
             session_token: None,
             failed_attempts: 0,
             created_at: now,
@@ -142,19 +152,15 @@ impl DeviceSession {
         session
     }
 
-    /// Set or update the PIN for this device
-    pub fn set_pin(
-        &mut self,
-        pin_value: String,
-        policy: &PinPolicy,
-    ) -> Result<(), DeviceSessionError> {
-        // Create the PIN with validation
-        let pin = PinCode::new(pin_value, policy).map_err(|_| DeviceSessionError::InvalidPin)?;
+    /// Attach a device public key and algorithm once registered
+    pub fn set_device_public_key(&mut self, alg: impl Into<String>, key: impl Into<String>) {
+        self.device_key_alg = Some(alg.into());
+        self.device_public_key = Some(key.into());
+        self.last_activity = Utc::now();
+    }
 
-        self.pin = Some(pin);
-        self.failed_attempts = 0;
-
-        // If device was pending, it's now trusted
+    /// Mark the device as trusted after a PIN has been configured for the user.
+    pub fn mark_trusted_after_pin_setup(&mut self) {
         if self.status == DeviceStatus::Pending {
             self.status = DeviceStatus::Trusted;
             self.add_event(AuthEvent::DeviceTrusted {
@@ -164,39 +170,27 @@ impl DeviceSession {
             });
         }
 
+        self.pin_configured = true;
+        self.failed_attempts = 0;
+        self.last_activity = Utc::now();
+
         self.add_event(AuthEvent::PinSet {
             session_id: self.id,
             user_id: self.user_id,
             timestamp: Utc::now(),
         });
-
-        self.last_activity = Utc::now();
-
-        Ok(())
     }
 
-    /// Verify the stored PIN without issuing a session token.
-    pub fn verify_pin(
-        &mut self,
-        pin_value: &str,
-        max_attempts: u8,
-    ) -> Result<(), DeviceSessionError> {
-        self.ensure_pin_is_valid(pin_value, max_attempts)?;
-        Ok(())
-    }
-
-    /// Remove the configured PIN and return the device to a pending state.
-    pub fn clear_pin(&mut self) -> Result<(), DeviceSessionError> {
+    /// Remove the configured PIN association and return the device to a pending state.
+    pub fn clear_pin_association(&mut self) -> Result<(), DeviceSessionError> {
         if self.status == DeviceStatus::Revoked {
             return Err(DeviceSessionError::DeviceRevoked);
         }
 
-        if self.pin.is_none() {
-            return Ok(());
+        if self.status != DeviceStatus::Pending {
+            self.status = DeviceStatus::Pending;
         }
 
-        self.pin = None;
-        self.status = DeviceStatus::Pending;
         self.session_token = None;
         self.failed_attempts = 0;
         self.last_activity = Utc::now();
@@ -210,20 +204,58 @@ impl DeviceSession {
         Ok(())
     }
 
-    /// Verify PIN and create a new session token
-    pub fn authenticate_with_pin(
+    /// Ensure the device can attempt PIN authentication.
+    pub fn ensure_pin_available(&self, max_attempts: u8) -> Result<(), DeviceSessionError> {
+        match self.status {
+            DeviceStatus::Revoked => return Err(DeviceSessionError::DeviceRevoked),
+            DeviceStatus::Pending => return Err(DeviceSessionError::DeviceNotTrusted),
+            DeviceStatus::Trusted => {}
+        }
+
+        if !self.pin_configured {
+            return Err(DeviceSessionError::PinNotSet);
+        }
+
+        if self.failed_attempts >= max_attempts {
+            return Err(DeviceSessionError::TooManyFailedAttempts);
+        }
+
+        Ok(())
+    }
+
+    /// Record a failed PIN authentication attempt for this device.
+    pub fn register_pin_failure(&mut self, max_attempts: u8) -> DeviceSessionError {
+        self.failed_attempts = self.failed_attempts.saturating_add(1);
+        self.last_activity = Utc::now();
+
+        self.add_event(AuthEvent::AuthenticationFailed {
+            session_id: self.id,
+            user_id: self.user_id,
+            reason: "Invalid PIN".to_string(),
+            timestamp: Utc::now(),
+        });
+
+        if self.failed_attempts >= max_attempts {
+            DeviceSessionError::TooManyFailedAttempts
+        } else {
+            DeviceSessionError::InvalidPin
+        }
+    }
+
+    /// Issue a session token after a successful PIN verification.
+    pub fn issue_pin_session(
         &mut self,
-        pin_value: &str,
-        max_attempts: u8,
         session_lifetime: Duration,
     ) -> Result<SessionToken, DeviceSessionError> {
-        self.ensure_pin_is_valid(pin_value, max_attempts)?;
+        if self.status != DeviceStatus::Trusted {
+            return Err(DeviceSessionError::DeviceNotTrusted);
+        }
 
-        // Generate new session token
         let token = SessionToken::generate(session_lifetime)
             .map_err(|_| DeviceSessionError::InvalidStateTransition)?;
 
         self.session_token = Some(token.clone());
+        self.failed_attempts = 0;
         self.last_activity = Utc::now();
 
         self.add_event(AuthEvent::SessionCreated {
@@ -234,6 +266,12 @@ impl DeviceSession {
         });
 
         Ok(token)
+    }
+
+    /// Reset failure counters after a successful PIN verification.
+    pub fn record_pin_success(&mut self) {
+        self.failed_attempts = 0;
+        self.last_activity = Utc::now();
     }
 
     /// Refresh the session token if valid
@@ -261,7 +299,6 @@ impl DeviceSession {
             .map_err(|_| DeviceSessionError::InvalidStateTransition)?;
 
         self.session_token = Some(token.clone());
-        self.last_activity = Utc::now();
 
         self.add_event(AuthEvent::SessionRefreshed {
             session_id: self.id,
@@ -327,11 +364,13 @@ impl DeviceSession {
     pub fn device_name(&self) -> &str {
         &self.device_name
     }
+    pub fn device_public_key(&self) -> Option<&str> { self.device_public_key.as_deref() }
+    pub fn device_key_alg(&self) -> Option<&str> { self.device_key_alg.as_deref() }
     pub fn status(&self) -> DeviceStatus {
         self.status
     }
     pub fn has_pin(&self) -> bool {
-        self.pin.is_some()
+        self.pin_configured
     }
     pub fn failed_attempts(&self) -> u8 {
         self.failed_attempts
@@ -361,48 +400,6 @@ impl DeviceSession {
         self.session_token = token;
     }
 
-    /// Get the hashed PIN if one is stored
-    pub fn pin_hash(&self) -> Option<&str> {
-        self.pin.as_ref().map(|p| p.hash())
-    }
-
-    fn ensure_pin_is_valid(
-        &mut self,
-        pin_value: &str,
-        max_attempts: u8,
-    ) -> Result<(), DeviceSessionError> {
-        match self.status {
-            DeviceStatus::Revoked => return Err(DeviceSessionError::DeviceRevoked),
-            DeviceStatus::Pending => return Err(DeviceSessionError::DeviceNotTrusted),
-            DeviceStatus::Trusted => {}
-        }
-
-        let pin = self.pin.as_ref().ok_or(DeviceSessionError::PinNotSet)?;
-
-        if self.failed_attempts >= max_attempts {
-            return Err(DeviceSessionError::TooManyFailedAttempts);
-        }
-
-        let valid = pin
-            .verify(pin_value)
-            .map_err(|_| DeviceSessionError::InvalidPin)?;
-
-        if !valid {
-            self.failed_attempts += 1;
-            self.add_event(AuthEvent::AuthenticationFailed {
-                session_id: self.id,
-                user_id: self.user_id,
-                reason: "Invalid PIN".to_string(),
-                timestamp: Utc::now(),
-            });
-            return Err(DeviceSessionError::InvalidPin);
-        }
-
-        self.failed_attempts = 0;
-        self.last_activity = Utc::now();
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -427,23 +424,28 @@ mod tests {
         assert_eq!(session.status(), DeviceStatus::Pending);
         assert!(!session.has_pin());
 
-        // Set PIN
-        let policy = PinPolicy::default();
-        session.set_pin("5823".to_string(), &policy).unwrap();
+        // Mark trusted after PIN setup
+        session.mark_trusted_after_pin_setup();
 
         // Now trusted
         assert_eq!(session.status(), DeviceStatus::Trusted);
         assert!(session.has_pin());
 
-        // Authenticate
+        // Authenticate (server verification happens upstream)
+        session.ensure_pin_available(3).unwrap();
         let token = session
-            .authenticate_with_pin("5823", 3, Duration::hours(1))
+            .issue_pin_session(Duration::hours(1))
             .unwrap();
         assert!(token.is_valid());
 
-        session.verify_pin("5823", 3).unwrap();
+        // Simulate a failure and ensure lockout rules apply
+        session.ensure_pin_available(3).unwrap();
+        assert!(matches!(
+            session.register_pin_failure(3),
+            DeviceSessionError::InvalidPin
+        ));
 
-        session.clear_pin().unwrap();
+        session.clear_pin_association().unwrap();
         assert_eq!(session.status(), DeviceStatus::Pending);
         assert!(!session.has_pin());
 

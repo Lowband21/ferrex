@@ -7,10 +7,10 @@ use ferrex_core::player_prelude::{
 };
 use uuid::Uuid;
 
-use crate::infrastructure::{adapters::ApiClientAdapter, services::api::ApiService};
+use crate::infrastructure::services::api::ApiService;
 
 pub async fn start_library_scan(
-    client: Arc<ApiClientAdapter>,
+    client: Arc<dyn ApiService>,
     library_id: LibraryID,
     correlation_id: Option<Uuid>,
 ) -> Result<ScanCommandAcceptedResponse, anyhow::Error> {
@@ -21,7 +21,7 @@ pub async fn start_library_scan(
 }
 
 pub async fn pause_library_scan(
-    client: Arc<ApiClientAdapter>,
+    client: Arc<dyn ApiService>,
     library_id: LibraryID,
     scan_id: Uuid,
 ) -> Result<ScanCommandAcceptedResponse, anyhow::Error> {
@@ -32,7 +32,7 @@ pub async fn pause_library_scan(
 }
 
 pub async fn resume_library_scan(
-    client: Arc<ApiClientAdapter>,
+    client: Arc<dyn ApiService>,
     library_id: LibraryID,
     scan_id: Uuid,
 ) -> Result<ScanCommandAcceptedResponse, anyhow::Error> {
@@ -43,7 +43,7 @@ pub async fn resume_library_scan(
 }
 
 pub async fn cancel_library_scan(
-    client: Arc<ApiClientAdapter>,
+    client: Arc<dyn ApiService>,
     library_id: LibraryID,
     scan_id: Uuid,
 ) -> Result<ScanCommandAcceptedResponse, anyhow::Error> {
@@ -54,7 +54,7 @@ pub async fn cancel_library_scan(
 }
 
 pub async fn fetch_active_scans(
-    client: Arc<ApiClientAdapter>,
+    client: Arc<dyn ApiService>,
 ) -> Result<Vec<ScanSnapshotDto>, anyhow::Error> {
     let response: ActiveScansResponse = client
         .fetch_active_scans()
@@ -64,7 +64,7 @@ pub async fn fetch_active_scans(
 }
 
 pub async fn fetch_latest_scan_progress(
-    client: Arc<ApiClientAdapter>,
+    client: Arc<dyn ApiService>,
     scan_id: Uuid,
 ) -> Result<Option<LatestProgressResponse>, anyhow::Error> {
     let response = client

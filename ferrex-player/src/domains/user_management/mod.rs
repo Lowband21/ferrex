@@ -8,6 +8,7 @@ pub mod update;
 use self::messages::Message as UserManagementMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
+use crate::infrastructure::services::api::ApiService;
 use ferrex_core::player_prelude::UserPermissions;
 use iced::Task;
 
@@ -15,7 +16,7 @@ use iced::Task;
 #[derive(Default)]
 pub struct UserManagementDomainState {
     // References needed by user management domain
-    pub api_service: Option<std::sync::Arc<ApiClientAdapter>>,
+    pub api_service: Option<std::sync::Arc<dyn ApiService>>,
     pub user_permissions: Option<UserPermissions>,
     pub user_admin_service: Option<
         std::sync::Arc<dyn crate::infrastructure::services::user_management::UserAdminService>,

@@ -238,6 +238,12 @@ pub async fn scan_config_handler(
             max_attempts: cfg.retry.max_attempts,
             backoff_base_ms: cfg.retry.backoff_base_ms,
             backoff_max_ms: cfg.retry.backoff_max_ms,
+            fast_retry_attempts: cfg.retry.fast_retry_attempts,
+            fast_retry_factor: cfg.retry.fast_retry_factor,
+            heavy_library_attempt_threshold: cfg.retry.heavy_library_attempt_threshold,
+            heavy_library_slowdown_factor: cfg.retry.heavy_library_slowdown_factor,
+            jitter_ratio: cfg.retry.jitter_ratio,
+            jitter_min_ms: cfg.retry.jitter_min_ms,
         },
         metadata_limits: MetadataLimitsView {
             max_concurrency: cfg.metadata_limits.max_concurrency,

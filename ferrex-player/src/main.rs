@@ -1,23 +1,15 @@
-use ferrex_player::*;
+use ferrex_player::app::{self, AppConfig};
 
 use env_logger::{Builder, Target};
-use iced::{Font, Task, Theme};
-use iced_aw::ICED_AW_FONT_BYTES;
 use log::LevelFilter;
-use lucide_icons::lucide_font_bytes;
 
-use common::messages::DomainMessage;
-use domains::ui::theme;
-use state_refactored::State;
-
-fn app_theme(_: &State) -> Theme {
-    theme::MediaServerTheme::theme()
-}
+#[cfg(feature = "profile-with-tracy")]
+use tracy_client;
 
 fn init_logger() {
     Builder::new()
         .target(Target::Stdout)
-        .filter_level(LevelFilter::Warn) // Warn level for dependencies
+        .filter_level(LevelFilter::Warn)
         .filter_module("ferrex-player", LevelFilter::Debug)
         .init();
 }
@@ -31,13 +23,12 @@ fn main() -> iced::Result {
         env_logger::init();
     }
 
-    // Initialize profiling system if enabled
     #[cfg(any(
         feature = "profile-with-puffin",
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    infrastructure::profiling::init();
+    ferrex_player::infrastructure::profiling::init();
 
     #[cfg(any(
         feature = "profile-with-puffin",
@@ -54,177 +45,7 @@ fn main() -> iced::Result {
     #[cfg(feature = "profile-with-tracy")]
     tracy_client::Client::start();
 
-    let server_url =
-        std::env::var("FERREX_SERVER_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let config = AppConfig::from_environment();
 
-    #[cfg(feature = "demo")]
-    let demo_mode = {
-        let env_value = std::env::var("FERREX_PLAYER_DEMO_MODE")
-            .or_else(|_| std::env::var("FERREX_DEMO_MODE"))
-            .unwrap_or_default();
-        let is_truthy = matches!(
-            env_value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes"
-        );
-        let cli_flag = std::env::args().any(|arg| arg == "--demo");
-        is_truthy || cli_flag
-    };
-
-    #[cfg(feature = "demo")]
-    let demo_credentials = (
-        std::env::var("FERREX_DEMO_USERNAME").unwrap_or_else(|_| "demo".into()),
-        std::env::var("FERREX_DEMO_PASSWORD").unwrap_or_else(|_| "demo".into()),
-    );
-
-    let init = move || {
-        // Create state using the new constructor
-        let mut state = State::new(server_url.clone());
-
-        // Initialize the global service registry
-        infrastructure::service_registry::init_registry(state.image_service.clone());
-
-        // Extract auth_service for use in the auth task
-        let auth_service = state.domains.auth.state.auth_service.clone();
-
-        let lib_id = state
-            .domains
-            .library
-            .state
-            .current_library_id
-            .map(|library_id| library_id.as_uuid());
-
-        // Initialize depth lines for the default library view
-        state
-            .domains
-            .ui
-            .state
-            .background_shader_state
-            .update_depth_lines(
-                &state.domains.ui.state.view,
-                state.window_size.width,
-                state.window_size.height,
-                lib_id,
-            );
-
-        // Check for stored authentication
-        let auth_task = Task::perform(
-            async move {
-                log::info!("[Auth] Checking for stored authentication...");
-
-                match auth_service.load_from_keychain().await {
-                    Ok(Some(stored_auth)) => {
-                        log::info!(
-                            "[Auth] Found stored auth for user: {}",
-                            stored_auth.user.username
-                        );
-
-                        // Check if auto-login is enabled for this user
-                        let auto_login_enabled = auth_service
-                            .is_auto_login_enabled(&stored_auth.user.id)
-                            .await
-                            .unwrap_or(false)
-                            && stored_auth.user.preferences.auto_login_enabled;
-
-                        log::info!("[Auth] Auto-login enabled: {}", auto_login_enabled);
-
-                        if auto_login_enabled {
-                            // Apply the stored auth
-                            match auth_service.apply_stored_auth(stored_auth).await {
-                                Ok(()) => {
-                                    log::info!("[Auth] Auto-login successful");
-                                    Ok::<Option<bool>, String>(Some(true))
-                                }
-                                Err(e) => {
-                                    log::error!("[Auth] Failed to apply stored auth: {}", e);
-                                    Ok::<Option<bool>, String>(Some(false))
-                                }
-                            }
-                        } else {
-                            log::info!("[Auth] Auto-login disabled");
-                            Ok::<Option<bool>, String>(Some(false))
-                        }
-                    }
-                    Ok(None) => {
-                        log::info!("[Auth] No stored auth found");
-                        Ok::<Option<bool>, String>(None)
-                    }
-                    Err(e) => {
-                        log::error!("[Auth] Error loading stored auth: {}", e);
-                        Ok::<Option<bool>, String>(None)
-                    }
-                }
-            },
-            |result| match result {
-                Ok(Some(true)) => {
-                    log::info!("[Auth] Auto-login enabled, sending CheckAuthStatus");
-                    DomainMessage::Auth(domains::auth::messages::Message::CheckAuthStatus)
-                }
-                Ok(Some(false)) | Ok(None) => {
-                    log::info!("[Auth] Auto-login disabled or no stored auth, sending LoadUsers");
-                    DomainMessage::Auth(domains::auth::messages::Message::LoadUsers)
-                }
-                Err(e) => {
-                    log::error!("[Auth] Error during auth check: {}", e);
-                    DomainMessage::Auth(domains::auth::messages::Message::LoadUsers)
-                }
-            },
-        );
-
-        #[cfg(feature = "demo")]
-        let tasks = {
-            let mut tasks = vec![auth_task];
-
-            if demo_mode {
-                let auth_service = state.domains.auth.state.auth_service.clone();
-                let (username, password) = demo_credentials.clone();
-                log::info!("[Demo] Attempting automatic demo login as {}", username);
-                tasks.push(Task::perform(
-                    async move {
-                        auth_service
-                            .authenticate_device(username, password, true)
-                            .await
-                            .map_err(|err| err.to_string())
-                    },
-                    |result| {
-                        DomainMessage::Auth(domains::auth::messages::Message::AuthResult(result))
-                    },
-                ));
-            }
-
-            tasks
-        };
-
-        #[cfg(not(feature = "demo"))]
-        let tasks = vec![auth_task];
-
-        // Note: Library loading will happen after authentication
-        (state, Task::batch(tasks))
-    };
-
-    let mut settings = iced::Settings::default();
-    settings.id = Some("ferrex-player".to_string()); // pick the same name as your .desktop file
-    settings.antialiasing = true;
-    settings.default_font = Font::MONOSPACE;
-    // TODO: Load some custom fonts
-    //settings.fonts
-
-    iced::application::<State, DomainMessage, Theme, iced_wgpu::Renderer>(
-        init,
-        update::update,
-        view::view,
-    )
-    .settings(settings)
-    .title("Ferrex Player")
-    .subscription(subscriptions::subscription)
-    .font(ICED_AW_FONT_BYTES)
-    .font(lucide_font_bytes())
-    .theme(app_theme)
-    .window(iced::window::Settings {
-        size: iced::Size::new(1280.0, 720.0),
-        resizable: true,
-        decorations: true,
-        transparent: true, // Allow transparent background for Wayland subsurface video
-        ..Default::default()
-    })
-    .run()
+    app::application(config).run()
 }

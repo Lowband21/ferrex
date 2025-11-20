@@ -1,3 +1,4 @@
+pub mod app;
 /// Core module declaration as library to enable utilizing application modules for testing
 pub mod common;
 pub mod domains;

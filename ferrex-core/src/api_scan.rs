@@ -50,6 +50,12 @@ pub struct RetryConfigView {
     pub max_attempts: u16,
     pub backoff_base_ms: u64,
     pub backoff_max_ms: u64,
+    pub fast_retry_attempts: u16,
+    pub fast_retry_factor: f32,
+    pub heavy_library_attempt_threshold: u16,
+    pub heavy_library_slowdown_factor: f32,
+    pub jitter_ratio: f32,
+    pub jitter_min_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -84,10 +84,11 @@ zeroize.workspace = true
 base64.workspace = true
 hmac = "0.12"
 hex = "0.4"
-password-hash = "^0.5"
+password-hash = { version = "^0.5", features = ["getrandom"] }
 num_cpus = "1.17.0"
 constant_time_eq = "0.4.2"
 tokio-util.workspace = true
+ed25519-dalek = { version = "2", default-features = false, features = ["rand_core"] }
 
 [features]
 default = ["ffmpeg", "database", "compat", "scan-runtime"]

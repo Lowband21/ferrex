@@ -17,6 +17,7 @@
 //! use ferrex_core::rbac::{Role, Permission, UserPermissions};
 //!
 //! // Check if a user has a permission
+//! let user_permissions = UserPermissions::default();
 //! if user_permissions.has_permission("media:stream") {
 //!     // Allow streaming
 //! }
