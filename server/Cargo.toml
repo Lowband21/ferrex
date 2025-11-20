@@ -33,6 +33,8 @@ tower-http.workspace = true
 
 # Database
 surrealdb.workspace = true
+sqlx.workspace = true
+redis.workspace = true
 
 # UUID generation
 uuid.workspace = true
@@ -43,6 +45,10 @@ dotenv = "0.15"
 
 # HTTP Client
 reqwest.workspace = true
+
+# Media processing
+ffmpeg-next.workspace = true
+image = "0.24"
 
 # Internal dependencies
 rusty-media-core = { path = "../core" }

@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: rusty_media_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rusty_media}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-rusty_media}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backup:/backup
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rusty_media}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - rusty_media_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: rusty_media_redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - rusty_media_net
+
+  rusty_media_server:
+    image: ${DOCKER_REGISTRY:-docker.io}/${DOCKER_IMAGE:-rusty_media_server}:${VERSION:-latest}
+    container_name: rusty_media_server
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-rusty_media}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rusty_media}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/
+      MEDIA_PATHS: ${MEDIA_PATHS:-/media}
+      SERVER_PORT: ${SERVER_PORT:-3000}
+      RUST_LOG: ${RUST_LOG:-info}
+      TMDB_API_KEY: ${TMDB_API_KEY}
+      DATABASE_BACKEND: postgres
+      JWT_SECRET: ${JWT_SECRET}
+      ENABLE_HTTPS: ${ENABLE_HTTPS:-false}
+      SSL_CERT_PATH: ${SSL_CERT_PATH:-/certs/cert.pem}
+      SSL_KEY_PATH: ${SSL_KEY_PATH:-/certs/key.pem}
+    volumes:
+      - ${MEDIA_PATH}:/media:ro
+      - server_data:/app/data
+      - ./certs:/certs:ro
+    ports:
+      - "${SERVER_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - rusty_media_net
+
+  backup:
+    image: postgres:16-alpine
+    container_name: rusty_media_backup
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rusty_media}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-rusty_media}
+    volumes:
+      - ./backup:/backup
+      - ./scripts/backup.sh:/backup.sh:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["while true; do /backup.sh; sleep 86400; done"]
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - rusty_media_net
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  server_data:
+    driver: local
+
+networks:
+  rusty_media_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

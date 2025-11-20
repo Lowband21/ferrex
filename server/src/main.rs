@@ -1,5 +1,6 @@
 mod config;
 mod metadata_service;
+mod thumbnail_service;
 
 use axum::{
     extract::{Path, Query, State},
@@ -9,10 +10,11 @@ use axum::{
     Router,
 };
 use std::sync::Arc;
-use rusty_media_core::{MediaScanner, ScanResult, MetadataExtractor, MediaDatabase, MediaFilters};
+use rusty_media_core::{MediaScanner, ScanResult, MetadataExtractor, MediaDatabase, database::traits::MediaFilters, TvShowDetails, SeasonSummary, SeasonDetails, EpisodeSummary};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
+use std::collections::HashMap;
 use tokio_util::io::ReaderStream;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{info, warn};
@@ -24,6 +26,7 @@ struct AppState {
     db: Arc<MediaDatabase>,
     config: Arc<Config>,
     metadata_service: Arc<metadata_service::MetadataService>,
+    thumbnail_service: Arc<thumbnail_service::ThumbnailService>,
 }
 
 #[tokio::main]
@@ -51,17 +54,34 @@ async fn main() -> anyhow::Result<()> {
     config.ensure_directories()?;
     info!("Cache directories created");
 
-    // Create database instance
+    // Create database instance based on configuration
     let db = if let Some(db_url) = &config.database_url {
-        info!("Connecting to database: {}", db_url);
-        // TODO: Implement PostgreSQL connection
-        Arc::new(MediaDatabase::new_memory().await?)
+        // Check if the URL looks like PostgreSQL
+        if db_url.starts_with("postgres://") || db_url.starts_with("postgresql://") {
+            info!("Connecting to PostgreSQL database");
+            
+            // Use Redis cache if available
+            let with_cache = config.redis_url.is_some();
+            match MediaDatabase::new_postgres(db_url, with_cache).await {
+                Ok(database) => {
+                    info!("Successfully connected to PostgreSQL");
+                    Arc::new(database)
+                }
+                Err(e) => {
+                    warn!("Failed to connect to PostgreSQL: {}. Falling back to SurrealDB", e);
+                    Arc::new(MediaDatabase::new_surrealdb().await?)
+                }
+            }
+        } else {
+            info!("Using SurrealDB backend");
+            Arc::new(MediaDatabase::new_surrealdb().await?)
+        }
     } else {
-        info!("Using in-memory database");
-        Arc::new(MediaDatabase::new_memory().await?)
+        info!("Using in-memory SurrealDB");
+        Arc::new(MediaDatabase::new_surrealdb().await?)
     };
     
-    if let Err(e) = db.initialize_schema().await {
+    if let Err(e) = db.backend().initialize_schema().await {
         warn!("Failed to initialize database schema: {}", e);
     }
     info!("Database initialized successfully");
@@ -78,11 +98,19 @@ async fn main() -> anyhow::Result<()> {
             config.cache_dir.clone(),
         )
     );
+    
+    let thumbnail_service = Arc::new(
+        thumbnail_service::ThumbnailService::new(
+            config.cache_dir.clone(),
+            db.clone(),
+        ).expect("Failed to initialize thumbnail service")
+    );
 
     let state = AppState {
         db,
         config: config.clone(),
         metadata_service,
+        thumbnail_service,
     };
 
     let app = create_app(state);
@@ -99,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
 fn create_app(state: AppState) -> Router {
     Router::new()
         .route("/ping", get(ping_handler))
+        .route("/health", get(health_handler))
         .route("/scan", post(scan_handler))
         .route("/scan", get(scan_status_handler))
         .route("/metadata", post(metadata_handler))
@@ -108,6 +137,12 @@ fn create_app(state: AppState) -> Router {
         .route("/config", get(config_handler))
         .route("/metadata/fetch/:id", post(fetch_metadata_handler))
         .route("/poster/:id", get(poster_handler))
+        .route("/thumbnail/:id", get(thumbnail_handler))
+        .route("/season-poster/:show_name/:season_num", get(season_poster_handler))
+        // TV Show endpoints
+        .route("/shows", get(list_shows_handler))
+        .route("/shows/:show_name", get(show_details_handler))
+        .route("/shows/:show_name/seasons/:season_num", get(season_details_handler))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)
@@ -168,6 +203,57 @@ async fn ping_handler() -> Result<Json<Value>, StatusCode> {
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "version": env!("CARGO_PKG_VERSION")
     })))
+}
+
+async fn health_handler(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
+    let mut health_status = json!({
+        "status": "healthy",
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "version": env!("CARGO_PKG_VERSION"),
+        "checks": {}
+    });
+    
+    // Check database connectivity
+    let mut is_unhealthy = false;
+    
+    match state.db.backend().get_stats().await {
+        Ok(stats) => {
+            health_status["checks"]["database"] = json!({
+                "status": "healthy",
+                "total_files": stats.total_files,
+                "total_size": stats.total_size
+            });
+        }
+        Err(e) => {
+            health_status["checks"]["database"] = json!({
+                "status": "unhealthy",
+                "error": e.to_string()
+            });
+            is_unhealthy = true;
+        }
+    }
+    
+    // Check cache if available
+    if let Some(_cache) = state.db.cache() {
+        health_status["checks"]["cache"] = json!({
+            "status": "healthy",
+            "type": "redis"
+        });
+    }
+    
+    // Check disk space for cache directories
+    health_status["checks"]["cache_directories"] = json!({
+        "status": "healthy",
+        "thumbnail_cache": state.config.thumbnail_cache_dir.exists(),
+        "transcode_cache": state.config.transcode_cache_dir.exists()
+    });
+    
+    if is_unhealthy {
+        health_status["status"] = json!("unhealthy");
+        Err(StatusCode::SERVICE_UNAVAILABLE)
+    } else {
+        Ok(Json(health_status))
+    }
 }
 
 async fn scan_handler(Json(request): Json<ScanRequest>) -> Result<Json<ScanResponse>, StatusCode> {
@@ -275,7 +361,7 @@ async fn library_handler_impl(db: Arc<MediaDatabase>, filters: LibraryFilters) -
         limit: filters.limit,
     };
     
-    match db.list_media(media_filters).await {
+    match db.backend().list_media(media_filters).await {
         Ok(media_files) => {
             info!("Retrieved {} media files from library", media_files.len());
             Ok(Json(json!({
@@ -351,12 +437,25 @@ async fn scan_and_store_handler(
         None
     };
     
-    // Store each media file
+    // Store each media file and fetch external metadata
+    let mut metadata_fetch_count = 0;
+    let mut metadata_fetch_errors = Vec::new();
+    
     for mut media_file in scan_result.video_files {
-        // Extract metadata if requested
+        // Extract technical metadata if requested
         if let Some(ref mut metadata_extractor) = extractor {
             match metadata_extractor.extract_metadata(&media_file.path) {
                 Ok(metadata) => {
+                    // Log the extracted metadata for debugging
+                    if let Some(ref parsed_info) = metadata.parsed_info {
+                        info!("Extracted metadata for {}: media_type={}, show_name={:?}, season={:?}, episode={:?}", 
+                            media_file.filename, 
+                            parsed_info.media_type,
+                            parsed_info.show_name,
+                            parsed_info.season,
+                            parsed_info.episode
+                        );
+                    }
                     media_file.metadata = Some(metadata);
                 }
                 Err(e) => {
@@ -367,26 +466,100 @@ async fn scan_and_store_handler(
         }
         
         // Store in database
-        match state.db.store_media(media_file).await {
-            Ok(_) => {
+        let stored_id = match state.db.backend().store_media(media_file.clone()).await {
+            Ok(id) => {
                 stored_count += 1;
+                Some(id)
             }
             Err(e) => {
                 warn!("Failed to store media file: {}", e);
                 extraction_errors.push(format!("Storage failed: {}", e));
+                None
+            }
+        };
+        
+        // Fetch external metadata from TMDB if we stored the file successfully
+        if let Some(id) = stored_id {
+            // Only fetch if we don't already have external metadata
+            let needs_external_metadata = media_file.metadata.as_ref()
+                .map(|m| m.external_info.is_none())
+                .unwrap_or(true);
+                
+            if needs_external_metadata {
+                info!("Fetching TMDB metadata for: {}", media_file.filename);
+                match state.metadata_service.fetch_metadata(&media_file).await {
+                    Ok(detailed_info) => {
+                        // Update the media file with external info
+                        let mut updated_media = media_file.clone();
+                        if let Some(ref mut metadata) = updated_media.metadata {
+                            metadata.external_info = Some(detailed_info.external_info.clone());
+                        }
+                        
+                        // Store updated media file
+                        if let Err(e) = state.db.backend().store_media(updated_media).await {
+                            warn!("Failed to update media with TMDB metadata: {}", e);
+                        } else {
+                            metadata_fetch_count += 1;
+                            
+                            // Try to cache poster
+                            if let Some(poster_path) = &detailed_info.external_info.poster_url {
+                                let media_id = id.split(':').last().unwrap_or(&id);
+                                match state.metadata_service.cache_poster(poster_path, media_id).await {
+                                    Ok(path) => info!("Poster cached at: {:?}", path),
+                                    Err(e) => warn!("Failed to cache poster: {}", e),
+                                }
+                            }
+                            
+                            // Cache season poster if available for TV episodes
+                            if let Some(season_poster) = &detailed_info.external_info.season_poster_url {
+                                if let Some(metadata) = &media_file.metadata {
+                                    if let Some(parsed) = &metadata.parsed_info {
+                                        if let (Some(show_name), Some(season)) = (&parsed.show_name, parsed.season) {
+                                            match state.metadata_service.cache_season_poster(season_poster, show_name, season).await {
+                                                Ok(path) => info!("Season poster cached at: {:?}", path),
+                                                Err(e) => warn!("Failed to cache season poster: {}", e),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to fetch TMDB metadata for {}: {}", media_file.filename, e);
+                        metadata_fetch_errors.push(format!("{}: {}", media_file.filename, e));
+                    }
+                }
+            }
+            
+            // Extract thumbnail for TV episodes during scan
+            if let Some(metadata) = &media_file.metadata {
+                if let Some(parsed) = &metadata.parsed_info {
+                    if parsed.media_type == rusty_media_core::MediaType::TvEpisode {
+                        let media_id = id.split(':').last().unwrap_or(&id);
+                        match state.thumbnail_service.extract_thumbnail(media_id, &media_file.path.to_string_lossy()).await {
+                            Ok(path) => info!("Thumbnail extracted for {} at {:?}", media_file.filename, path),
+                            Err(e) => warn!("Failed to extract thumbnail for {}: {}", media_file.filename, e),
+                        }
+                    }
+                }
             }
         }
     }
     
     info!("Stored {} media files from scan of {}", stored_count, scan_path);
+    info!("Fetched TMDB metadata for {} files", metadata_fetch_count);
     
     Ok(Json(json!({
         "status": "success",
-        "message": format!("Scanned and stored {} media files", stored_count),
+        "message": format!("Scanned {} files, stored {}, fetched metadata for {}", 
+            scan_result.total_files, stored_count, metadata_fetch_count),
         "scanned": scan_result.total_files,
         "stored": stored_count,
+        "metadata_fetched": metadata_fetch_count,
         "skipped": scan_result.skipped_files,
         "extraction_errors": extraction_errors,
+        "metadata_errors": metadata_fetch_errors,
         "scan_errors": scan_result.errors
     })))
 }
@@ -398,15 +571,17 @@ async fn stream_handler(
 ) -> Result<Response, StatusCode> {
     info!("Stream request for media ID: {}", id);
     
-    // Format ID for database lookup (add "media:" prefix if not present)
+    // For PostgreSQL, we need just the UUID, not "media:uuid"
+    // For SurrealDB, we would need "media:uuid"
     let db_id = if id.starts_with("media:") {
-        id.clone()
+        // Strip the "media:" prefix for PostgreSQL
+        id.strip_prefix("media:").unwrap_or(&id).to_string()
     } else {
-        format!("media:{}", id)
+        id.clone()
     };
     
     // Get media file from database
-    let media_file = match state.db.get_media(&db_id).await {
+    let media_file = match state.db.backend().get_media(&db_id).await {
         Ok(Some(media)) => media,
         Ok(None) => {
             warn!("Media file not found: {}", id);
@@ -594,7 +769,7 @@ async fn fetch_metadata_handler(
     };
     
     // Get media file from database
-    let media_file = match state.db.get_media(&db_id).await {
+    let media_file = match state.db.backend().get_media(&db_id).await {
         Ok(Some(media)) => media,
         Ok(None) => {
             warn!("Media file not found: {}", id);
@@ -618,7 +793,7 @@ async fn fetch_metadata_handler(
             }
             
             // Store updated media file
-            if let Err(e) = state.db.store_media(updated_media).await {
+            if let Err(e) = state.db.backend().store_media(updated_media).await {
                 warn!("Failed to update media with metadata: {}", e);
             }
             
@@ -674,6 +849,316 @@ async fn poster_handler(
     }
 }
 
+async fn season_poster_handler(
+    State(state): State<AppState>,
+    Path((show_name, season_num)): Path<(String, u32)>
+) -> Result<Response, StatusCode> {
+    // Decode + signs back to spaces (form encoding artifact)
+    let show_name = show_name.replace("+", " ");
+    info!("Season poster request for show: {}, season: {}", show_name, season_num);
+    
+    // Check for cached season poster
+    if let Some(poster_path) = state.metadata_service.get_cached_season_poster(&show_name, season_num) {
+        // Serve the cached poster file
+        match tokio::fs::read(&poster_path).await {
+            Ok(bytes) => {
+                let mut response = Response::new(bytes.into());
+                response.headers_mut().insert(
+                    header::CONTENT_TYPE,
+                    header::HeaderValue::from_static("image/jpeg")
+                );
+                Ok(response)
+            }
+            Err(e) => {
+                warn!("Failed to read season poster file: {}", e);
+                Err(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        }
+    } else {
+        // No cached poster available
+        Err(StatusCode::NOT_FOUND)
+    }
+}
+
+async fn thumbnail_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>
+) -> Result<Response, StatusCode> {
+    info!("Thumbnail request for media ID: {}", id);
+    
+    // Try to get or extract thumbnail
+    match state.thumbnail_service.get_or_extract_thumbnail(&id).await {
+        Ok(thumbnail_path) => {
+            // Serve the thumbnail file
+            match tokio::fs::read(&thumbnail_path).await {
+                Ok(bytes) => {
+                    let mut response = Response::new(bytes.into());
+                    response.headers_mut().insert(
+                        header::CONTENT_TYPE,
+                        header::HeaderValue::from_static("image/jpeg")
+                    );
+                    Ok(response)
+                }
+                Err(e) => {
+                    warn!("Failed to read thumbnail file: {}", e);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
+        }
+        Err(e) => {
+            warn!("Failed to get thumbnail for {}: {}", id, e);
+            Err(StatusCode::NOT_FOUND)
+        }
+    }
+}
+
+// TV Show handlers
+async fn list_shows_handler(
+    State(state): State<AppState>
+) -> Result<Json<Value>, StatusCode> {
+    info!("Listing all TV shows");
+    
+    // Get all TV episodes
+    let filters = MediaFilters {
+        media_type: Some("tv_show".to_string()),
+        ..Default::default()
+    };
+    
+    match state.db.backend().list_media(filters).await {
+        Ok(episodes) => {
+            // Aggregate episodes into shows
+            let mut shows: HashMap<String, TvShowDetails> = HashMap::new();
+            
+            for episode in episodes {
+                if let Some(parsed_info) = &episode.metadata.as_ref().and_then(|m| m.parsed_info.as_ref()) {
+                    if let Some(show_name) = &parsed_info.show_name {
+                        let show = shows.entry(show_name.clone()).or_insert_with(|| {
+                            let external = episode.metadata.as_ref().and_then(|m| m.external_info.as_ref());
+                            TvShowDetails {
+                                name: show_name.clone(),
+                                tmdb_id: external.and_then(|e| e.tmdb_id),
+                                description: external.and_then(|e| e.show_description.clone().or(e.description.clone())),
+                                poster_url: external
+                                    .and_then(|e| e.show_poster_url.clone().or(e.poster_url.clone()))
+                                    .and_then(|path| state.metadata_service.get_tmdb_image_url(&path)),
+                                backdrop_url: external
+                                    .and_then(|e| e.backdrop_url.clone())
+                                    .and_then(|path| state.metadata_service.get_tmdb_image_url(&path)),
+                                genres: external.map(|e| e.genres.clone()).unwrap_or_default(),
+                                rating: external.and_then(|e| e.rating),
+                                seasons: Vec::new(),
+                                total_episodes: 0,
+                            }
+                        });
+                        
+                        show.total_episodes += 1;
+                        
+                        // Update season info
+                        if let Some(season_num) = parsed_info.season {
+                            if !show.seasons.iter().any(|s| s.number == season_num) {
+                                show.seasons.push(SeasonSummary {
+                                    number: season_num,
+                                    name: if season_num == 0 { Some("Specials".to_string()) } else { None },
+                                    episode_count: 1,
+                                    poster_url: if state.metadata_service.get_cached_season_poster(&show_name, season_num).is_some() {
+                                        Some(format!("/season-poster/{}/{}", 
+                                            show_name.replace(' ', "+"), season_num))
+                                    } else {
+                                        episode.metadata.as_ref()
+                                            .and_then(|m| m.external_info.as_ref())
+                                            .and_then(|e| e.season_poster_url.clone())
+                                            .and_then(|path| state.metadata_service.get_tmdb_image_url(&path))
+                                    },
+                                });
+                            } else if let Some(season) = show.seasons.iter_mut().find(|s| s.number == season_num) {
+                                season.episode_count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Sort seasons
+            for show in shows.values_mut() {
+                show.seasons.sort_by_key(|s| s.number);
+            }
+            
+            let show_list: Vec<_> = shows.into_values().collect();
+            info!("Found {} TV shows", show_list.len());
+            
+            Ok(Json(json!({
+                "status": "success",
+                "shows": show_list,
+                "count": show_list.len()
+            })))
+        }
+        Err(e) => {
+            warn!("Failed to retrieve TV shows: {}", e);
+            Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
+async fn show_details_handler(
+    State(state): State<AppState>,
+    Path(show_name): Path<String>
+) -> Result<Json<Value>, StatusCode> {
+    // Decode + signs back to spaces (form encoding artifact)
+    let show_name = show_name.replace("+", " ");
+    info!("Getting details for show: {}", show_name);
+    
+    // Get all episodes for this show
+    let filters = MediaFilters {
+        media_type: Some("tv_show".to_string()),
+        show_name: Some(show_name.clone()),
+        ..Default::default()
+    };
+    
+    match state.db.backend().list_media(filters).await {
+        Ok(episodes) => {
+            if episodes.is_empty() {
+                return Err(StatusCode::NOT_FOUND);
+            }
+            
+            // Build show details from episodes
+            let first_episode = &episodes[0];
+            let external = first_episode.metadata.as_ref().and_then(|m| m.external_info.as_ref());
+            
+            let mut show_details = TvShowDetails {
+                name: show_name.clone(),
+                tmdb_id: external.and_then(|e| e.tmdb_id),
+                description: external.and_then(|e| e.show_description.clone().or(e.description.clone())),
+                poster_url: external
+                    .and_then(|e| e.show_poster_url.clone().or(e.poster_url.clone()))
+                    .and_then(|path| state.metadata_service.get_tmdb_image_url(&path)),
+                backdrop_url: external
+                    .and_then(|e| e.backdrop_url.clone())
+                    .and_then(|path| state.metadata_service.get_tmdb_image_url(&path)),
+                genres: external.map(|e| e.genres.clone()).unwrap_or_default(),
+                rating: external.and_then(|e| e.rating),
+                seasons: Vec::new(),
+                total_episodes: episodes.len(),
+            };
+            
+            // Build season information
+            let mut season_map: HashMap<u32, Vec<_>> = HashMap::new();
+            for episode in episodes {
+                if let Some(parsed_info) = &episode.metadata.as_ref().and_then(|m| m.parsed_info.as_ref()) {
+                    if let Some(season_num) = parsed_info.season {
+                        season_map.entry(season_num).or_default().push(episode);
+                    }
+                }
+            }
+            
+            for (season_num, season_episodes) in season_map {
+                let season_poster = season_episodes.iter()
+                    .find_map(|e| e.metadata.as_ref()?.external_info.as_ref()?.season_poster_url.clone())
+                    .and_then(|path| state.metadata_service.get_tmdb_image_url(&path));
+                
+                show_details.seasons.push(SeasonSummary {
+                    number: season_num,
+                    name: if season_num == 0 { Some("Specials".to_string()) } else { None },
+                    episode_count: season_episodes.len(),
+                    poster_url: season_poster,
+                });
+            }
+            
+            show_details.seasons.sort_by_key(|s| s.number);
+            
+            Ok(Json(json!({
+                "status": "success",
+                "show": show_details
+            })))
+        }
+        Err(e) => {
+            warn!("Failed to retrieve show details: {}", e);
+            Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
+async fn season_details_handler(
+    State(state): State<AppState>,
+    Path((show_name, season_num)): Path<(String, u32)>
+) -> Result<Json<Value>, StatusCode> {
+    // Decode + signs back to spaces (form encoding artifact)
+    let show_name = show_name.replace("+", " ");
+    info!("Getting details for show: {}, season: {}", show_name, season_num);
+    
+    // Get all episodes for this show and season
+    let filters = MediaFilters {
+        media_type: Some("tv_show".to_string()),
+        show_name: Some(show_name.clone()),
+        season: Some(season_num),
+        ..Default::default()
+    };
+    
+    match state.db.backend().list_media(filters).await {
+        Ok(episodes) => {
+            if episodes.is_empty() {
+                return Err(StatusCode::NOT_FOUND);
+            }
+            
+            // Build season details
+            let season_poster = if state.metadata_service.get_cached_season_poster(&show_name, season_num).is_some() {
+                Some(format!("/season-poster/{}/{}", 
+                    show_name.replace(' ', "+"), season_num))
+            } else {
+                episodes.iter()
+                    .find_map(|e| e.metadata.as_ref()?.external_info.as_ref()?.season_poster_url.clone())
+                    .and_then(|path| state.metadata_service.get_tmdb_image_url(&path))
+            };
+            
+            let mut episode_summaries = Vec::new();
+            for episode in episodes {
+                if let Some(parsed_info) = &episode.metadata.as_ref().and_then(|m| m.parsed_info.as_ref()) {
+                    if let Some(episode_num) = parsed_info.episode {
+                        let external = episode.metadata.as_ref().and_then(|m| m.external_info.as_ref());
+                        
+                        episode_summaries.push(EpisodeSummary {
+                            id: episode.id,
+                            number: episode_num,
+                            title: parsed_info.episode_title.clone(),
+                            description: external.and_then(|e| e.description.clone()),
+                            still_url: external.and_then(|e| e.episode_still_url.clone()),
+                            duration: episode.metadata.as_ref().and_then(|m| m.duration),
+                            air_date: external.and_then(|e| e.release_date),
+                        });
+                    }
+                }
+            }
+            
+            episode_summaries.sort_by_key(|e| e.number);
+            
+            let season_details = SeasonDetails {
+                show_name: show_name.clone(),
+                number: season_num,
+                name: if season_num == 0 { Some("Specials".to_string()) } else { None },
+                poster_url: season_poster,
+                episodes: episode_summaries,
+            };
+            
+            Ok(Json(json!({
+                "status": "success",
+                "season": season_details
+            })))
+        }
+        Err(e) => {
+            warn!("Failed to retrieve season details: {}", e);
+            Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -688,7 +1173,13 @@ mod tests {
         let metadata_service = Arc::new(
             metadata_service::MetadataService::new(None, config.cache_dir.clone())
         );
-        let state = AppState { db, config, metadata_service };
+        let thumbnail_service = Arc::new(
+            thumbnail_service::ThumbnailService::new(
+                config.cache_dir.clone(),
+                db.clone(),
+            ).expect("Failed to initialize thumbnail service")
+        );
+        let state = AppState { db, config, metadata_service, thumbnail_service };
         let app = create_app(state);
 
         let response = app

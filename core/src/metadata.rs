@@ -173,42 +173,204 @@ impl MetadataExtractor {
         let file_path = file_path.as_ref();
         let filename = file_path.file_stem()?.to_str()?;
         
-        debug!("Parsing filename: {}", filename);
+        info!("=== METADATA PARSING ===");
+        info!("Full path: {:?}", file_path);
+        info!("Filename: {}", filename);
         
+        // First, check folder structure to determine media type
+        let path_str = file_path.to_string_lossy();
+        info!("Path string: {}", path_str);
+        
+        // Check for folder names case-insensitively
+        let path_lower = path_str.to_lowercase();
+        let is_in_movies_folder = path_lower.contains("/movies/") || path_lower.contains("\\movies\\");
+        let is_in_tvshows_folder = path_lower.contains("/tvshows/") || path_lower.contains("\\tvshows\\") ||
+                                    path_lower.contains("/tv shows/") || path_lower.contains("\\tv shows\\") ||
+                                    path_lower.contains("/tv-shows/") || path_lower.contains("\\tv-shows\\") ||
+                                    path_lower.contains("/series/") || path_lower.contains("\\series\\");
+        
+        info!("Is in movies folder: {}", is_in_movies_folder);
+        info!("Is in tvshows folder: {}", is_in_tvshows_folder);
+        
+        // If in movies folder, parse as movie
+        if is_in_movies_folder {
+            info!("File is in movies folder, parsing as movie");
+            return self.parse_as_movie(filename, file_path);
+        }
+        
+        // If in tvshows folder, parse as TV show
+        if is_in_tvshows_folder {
+            info!("File is in tvshows folder, parsing as TV show");
+            
+            // Try to extract show name from path first
+            let show_name_from_path = self.extract_show_name_from_path(file_path);
+            info!("Show name extracted from path: {:?}", show_name_from_path);
+            
+            if let Some(mut tv_info) = self.parse_tv_episode(filename) {
+                info!("Successfully parsed TV episode pattern from filename");
+                // If we got a show name from path, use it (it's more reliable than filename parsing)
+                if let Some(path_show_name) = show_name_from_path {
+                    tv_info.show_name = Some(path_show_name);
+                }
+                info!("Final TV info: {:?}", tv_info);
+                return Some(tv_info);
+            }
+            
+            // If TV parsing fails but we're in TV folder, create a basic TV episode entry
+            info!("TV pattern parsing failed, creating basic TV episode entry");
+            let show_name = show_name_from_path
+                .unwrap_or_else(|| self.clean_filename(filename));
+            
+            // Try to extract season from folder path
+            let season = self.extract_season_from_path(file_path);
+            info!("Extracted season from path: {:?}", season);
+            
+            let cleaned_title = self.clean_filename(filename);
+            let tv_info = ParsedMediaInfo {
+                media_type: MediaType::TvEpisode,
+                title: cleaned_title,
+                year: self.extract_year(filename),
+                show_name: Some(show_name),
+                season,
+                episode: self.extract_episode_number_from_filename(filename),
+                episode_title: None,
+                resolution: self.extract_resolution(filename),
+                source: self.extract_source(filename),
+                release_group: self.extract_release_group(filename),
+            };
+            info!("Created basic TV info: {:?}", tv_info);
+            return Some(tv_info);
+        }
+        
+        // If not in a specific folder, try to detect based on patterns
         // Try TV show pattern first (SxxExx format)
         if let Some(tv_info) = self.parse_tv_episode(filename) {
             return Some(tv_info);
         }
         
-        // Try movie pattern
-        if let Some(movie_info) = self.parse_movie(filename) {
-            return Some(movie_info);
+        // Default to movie
+        self.parse_as_movie(filename, file_path)
+    }
+    
+    /// Extract show name from folder path structure
+    fn extract_show_name_from_path(&self, file_path: &Path) -> Option<String> {
+        // Try to extract show name from path like /tvshows/Show Name/Season X/file.mkv
+        let path_str = file_path.to_string_lossy();
+        let path_lower = path_str.to_lowercase();
+        
+        info!("Extracting show name from path: {}", path_str);
+        
+        // Find the position of TV folder variations in the path (case-insensitive)
+        let tv_folder_patterns = vec![
+            ("/tvshows/", "\\tvshows\\"),
+            ("/tv shows/", "\\tv shows\\"),
+            ("/tv-shows/", "\\tv-shows\\"),
+            ("/series/", "\\series\\"),
+        ];
+        
+        for (unix_pattern, win_pattern) in tv_folder_patterns {
+            if let Some(pos) = path_lower.find(unix_pattern).or_else(|| path_lower.find(win_pattern)) {
+                // Get the actual case-sensitive path part after the TV folder
+                let pattern_len = unix_pattern.len();
+                let after_tv_folder = &path_str[pos + pattern_len..];
+                
+                // Get the first directory after tvshows - this should be the show name
+                let parts: Vec<&str> = after_tv_folder.split(&['/', '\\'][..]).collect();
+                if !parts.is_empty() && !parts[0].is_empty() {
+                    let show_name = parts[0].to_string();
+                    info!("Extracted show name: {}", show_name);
+                    return Some(show_name);
+                }
+            }
         }
         
-        // If no patterns match, try to determine if it's likely a movie based on cleaned title
-        let cleaned_title = self.clean_filename(filename);
+        info!("Could not extract show name from path");
+        None
+    }
+    
+    /// Extract season number from folder path
+    fn extract_season_from_path(&self, file_path: &Path) -> Option<u32> {
+        let path_str = file_path.to_string_lossy();
         
-        // If we can extract a year, it's likely a movie
-        if let Some(year) = self.extract_year(filename) {
-            return Some(ParsedMediaInfo {
-                media_type: MediaType::Movie,
-                title: cleaned_title,
-                year: Some(year),
-                show_name: None,
-                season: None,
-                episode: None,
-                episode_title: None,
-                resolution: self.extract_resolution(filename),
-                source: self.extract_source(filename),
-                release_group: self.extract_release_group(filename),
-            });
+        // Look for patterns like "Season 1", "Season 01", "S1", "S01" in the path
+        let season_patterns = vec![
+            Regex::new(r"[/\\][Ss]eason\s*(\d{1,2})[/\\]").unwrap(),
+            Regex::new(r"[/\\][Ss](\d{1,2})[/\\]").unwrap(),
+        ];
+        
+        for pattern in season_patterns {
+            if let Some(captures) = pattern.captures(&path_str) {
+                if let Some(season_str) = captures.get(1) {
+                    if let Ok(season) = season_str.as_str().parse::<u32>() {
+                        return Some(season);
+                    }
+                }
+            }
         }
         
-        // Default to movie for single files without clear TV patterns
+        None
+    }
+    
+    /// Try to extract episode number from filename even without standard patterns
+    fn extract_episode_number_from_filename(&self, filename: &str) -> Option<u32> {
+        // Look for standalone numbers that might be episode numbers
+        // E.g., "01.mkv", "episode_01.mkv", "01 - Title.mkv"
+        let patterns = vec![
+            Regex::new(r"^(\d{1,3})\.").unwrap(), // Starts with number
+            Regex::new(r"[Ee]pisode[\s_-]*(\d{1,3})").unwrap(), // "Episode 01"
+            Regex::new(r"[Ee]p[\s_-]*(\d{1,3})").unwrap(), // "Ep 01"
+            Regex::new(r"[\s_-](\d{1,3})[\s_-]").unwrap(), // " 01 " or "_01_"
+        ];
+        
+        for pattern in patterns {
+            if let Some(captures) = pattern.captures(filename) {
+                if let Some(ep_str) = captures.get(1) {
+                    if let Ok(episode) = ep_str.as_str().parse::<u32>() {
+                        if episode > 0 && episode < 1000 { // Reasonable episode range
+                            return Some(episode);
+                        }
+                    }
+                }
+            }
+        }
+        
+        None
+    }
+    
+    /// Force parse as movie (used when we know from folder structure)
+    fn parse_as_movie(&self, filename: &str, _file_path: &Path) -> Option<ParsedMediaInfo> {
+        let year = self.extract_year(filename);
+        let mut cleaned_title = filename.to_string();
+        
+        // Handle multi-language titles (e.g., "Il Gladiatore II - Gladiator II")
+        // If there's a dash with potential duplicate title, take the part after the dash
+        if let Some(dash_pos) = cleaned_title.find(" - ") {
+            let _before_dash = &cleaned_title[..dash_pos];
+            let after_dash = &cleaned_title[dash_pos + 3..];
+            
+            // Check if the part after dash looks like an English title
+            if after_dash.chars().any(|c| c.is_ascii_alphabetic()) && 
+               !after_dash.chars().all(|c| c.is_ascii_uppercase()) {
+                // Use the part after the dash if it looks like a proper title
+                cleaned_title = after_dash.to_string();
+            }
+        }
+        
+        // Remove year from the title if present
+        if let Some(y) = year {
+            cleaned_title = cleaned_title.replace(&format!(" {}", y), "");
+            cleaned_title = cleaned_title.replace(&format!("({})", y), "");
+            cleaned_title = cleaned_title.replace(&format!(".{}.", y), " ");
+            cleaned_title = cleaned_title.replace(&format!(" {} ", y), " ");
+        }
+        
+        // Now clean the title
+        cleaned_title = self.clean_movie_title(&cleaned_title);
+        
         Some(ParsedMediaInfo {
             media_type: MediaType::Movie,
             title: cleaned_title,
-            year: None,
+            year,
             show_name: None,
             season: None,
             episode: None,
@@ -217,6 +379,58 @@ impl MetadataExtractor {
             source: self.extract_source(filename),
             release_group: self.extract_release_group(filename),
         })
+    }
+    
+    /// Clean movie title more aggressively for TMDB search
+    fn clean_movie_title(&self, title: &str) -> String {
+        let mut cleaned = title.to_string();
+        
+        // Remove file extensions first
+        cleaned = Regex::new(r"\.(mkv|mp4|avi|mov|wmv|flv|webm|m4v|mpg|mpeg)$").unwrap()
+            .replace(&cleaned, "")
+            .to_string();
+        
+        // First pass: Remove everything in square brackets
+        cleaned = Regex::new(r"\[.*?\]").unwrap().replace_all(&cleaned, " ").to_string();
+        
+        // Remove everything after the first occurrence of common quality/format indicators
+        // This handles cases like "Movie Title (2014) (1080p..." by cutting at the second parenthesis
+        let quality_cutoff_regex = Regex::new(
+            r"(?i)\s*[\(\[]?\s*(BluRay|Bluray|BDRip|BRRip|WEBRip|WEB-DL|WebDl|HDTV|DVDRip|CAM|TS|HC|HDCAM|HDRip|dvd|dvdrip|xvid|divx|x264|x265|h264|h265|hevc|10bit|10\s*bit|HDR|HDR10|DV|AC3|AAC|DTS|FLAC|1080p|720p|480p|2160p|4K|UHD|[\(\[]?\d{3,4}p).*$"
+        ).unwrap();
+        cleaned = quality_cutoff_regex.replace(&cleaned, "").to_string();
+        
+        // Remove edition info
+        let edition_regex = Regex::new(
+            r"(?i)[\s\-]*(unrated|extended|director'?s?\s*cut|theatrical|special\s*edition|ultimate\s*edition|final\s*cut|remastered|uncut).*$"
+        ).unwrap();
+        cleaned = edition_regex.replace(&cleaned, "").to_string();
+        
+        // Now remove any remaining content in parentheses (but be careful about nested or unmatched)
+        // This regex handles nested parentheses better
+        while cleaned.contains('(') || cleaned.contains(')') {
+            let old_len = cleaned.len();
+            cleaned = Regex::new(r"\([^()]*\)").unwrap().replace_all(&cleaned, " ").to_string();
+            // Also remove any lone parentheses
+            cleaned = cleaned.replace('(', " ").replace(')', " ");
+            if cleaned.len() == old_len {
+                break; // Prevent infinite loop
+            }
+        }
+        
+        // Replace dots and underscores with spaces
+        cleaned = cleaned.replace('.', " ").replace('_', " ");
+        
+        // Remove release group patterns (dash followed by group name at end)
+        cleaned = Regex::new(r"\s*-\s*\w+$").unwrap().replace(&cleaned, "").to_string();
+        
+        // Clean up extra whitespace and punctuation
+        cleaned = cleaned.split_whitespace().collect::<Vec<&str>>().join(" ");
+        
+        // Final cleanup: remove any trailing punctuation
+        cleaned = cleaned.trim_matches(|c: char| c.is_whitespace() || c == '-' || c == '_' || c == '.').to_string();
+        
+        cleaned
     }
 
     /// Parse TV episode filename

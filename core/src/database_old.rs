@@ -97,7 +97,7 @@ impl MediaDatabase {
         };
         
         let result: Option<MediaRecord> = self.db
-            .create(("media", &id))
+            .update(("media", &id))
             .content(&record)
             .await
             .map_err(|e| MediaError::InvalidMedia(format!("Failed to store media: {}", e)))?;
@@ -152,7 +152,8 @@ impl MediaDatabase {
         }
         
         if let Some(show_name) = &filters.show_name {
-            conditions.push(format!("metadata.parsed_info.show_name = '{}'", show_name));
+            // Use double quotes for string literals in SurrealDB
+            conditions.push(format!("metadata.parsed_info.show_name = \"{}\"", show_name));
         }
         
         if let Some(season) = filters.season {

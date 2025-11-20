@@ -26,6 +26,8 @@ uuid.workspace = true
 
 # Database
 surrealdb.workspace = true
+sqlx.workspace = true
+redis.workspace = true
 
 # File system
 walkdir.workspace = true

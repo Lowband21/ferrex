@@ -44,6 +44,8 @@ async-trait = "0.1"
 
 # Database
 surrealdb = { version = "1.5", features = ["kv-mem"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "migrate", "bigdecimal"] }
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 
 # Media processing
 ffmpeg-next = "7.0"

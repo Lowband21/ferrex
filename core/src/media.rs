@@ -50,10 +50,21 @@ pub struct ParsedMediaInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
 pub enum MediaType {
     Movie,
     TvEpisode,
     Unknown,
+}
+
+impl std::fmt::Display for MediaType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MediaType::Movie => write!(f, "Movie"),
+            MediaType::TvEpisode => write!(f, "TvEpisode"),
+            MediaType::Unknown => write!(f, "Unknown"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +87,48 @@ pub struct ExternalMediaInfo {
     pub show_poster_url: Option<String>,
     pub season_poster_url: Option<String>,
     pub episode_still_url: Option<String>,
+}
+
+// TV Show aggregation structures for API responses
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TvShowDetails {
+    pub name: String,
+    pub tmdb_id: Option<u32>,
+    pub description: Option<String>,
+    pub poster_url: Option<String>,
+    pub backdrop_url: Option<String>,
+    pub genres: Vec<String>,
+    pub rating: Option<f32>,
+    pub seasons: Vec<SeasonSummary>,
+    pub total_episodes: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeasonSummary {
+    pub number: u32,
+    pub name: Option<String>,
+    pub episode_count: usize,
+    pub poster_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeasonDetails {
+    pub show_name: String,
+    pub number: u32,
+    pub name: Option<String>,
+    pub poster_url: Option<String>,
+    pub episodes: Vec<EpisodeSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EpisodeSummary {
+    pub id: Uuid,
+    pub number: u32,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub still_url: Option<String>,
+    pub duration: Option<f64>,
+    pub air_date: Option<chrono::NaiveDate>,
 }
 
 impl MediaFile {

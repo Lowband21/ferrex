@@ -77,8 +77,8 @@ impl MetadataService {
         let result = results.into_iter().next()
             .ok_or(ProviderError::NotFound)?;
         
-        // Fetch detailed metadata
-        provider.get_metadata(&result.id, query.media_type.clone()).await
+        // Fetch detailed metadata with season/episode info if available
+        provider.get_metadata_with_details(&result.id, query).await
     }
     
     /// Download and cache a poster image
@@ -122,6 +122,109 @@ impl MetadataService {
             Some(cache_path)
         } else {
             None
+        }
+    }
+    
+    /// Convert a TMDB poster path to a full URL
+    pub fn get_tmdb_image_url(&self, image_path: &str) -> Option<String> {
+        if image_path.starts_with("http://") || image_path.starts_with("https://") {
+            // Already a full URL
+            Some(image_path.to_string())
+        } else if let Some(tmdb) = &self.tmdb_provider {
+            // Build full TMDB URL
+            Some(format!("{}/w500{}", tmdb.image_base_url(), image_path))
+        } else {
+            None
+        }
+    }
+    
+    /// Cache an image from a URL with a specific cache key
+    pub async fn cache_image_from_url(&self, url: &str, cache_key: &str) -> Result<PathBuf> {
+        let cache_filename = format!("{}.jpg", cache_key);
+        let cache_path = self.cache_dir.join("posters").join(&cache_filename);
+        
+        // Check if already cached
+        if cache_path.exists() {
+            return Ok(cache_path);
+        }
+        
+        // Ensure directory exists
+        fs::create_dir_all(cache_path.parent().unwrap()).await?;
+        
+        // Download image
+        let response = reqwest::get(url).await?;
+        
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!("Failed to download image: {}", response.status()));
+        }
+        
+        let bytes = response.bytes().await?;
+        let mut file = fs::File::create(&cache_path).await?;
+        file.write_all(&bytes).await?;
+        
+        Ok(cache_path)
+    }
+    
+    
+    /// Get cached poster for show or season
+    pub fn get_cached_show_poster(&self, show_name: &str) -> Option<PathBuf> {
+        let cache_key = format!("show_{}", show_name.replace(' ', "_"));
+        let cache_path = self.cache_dir.join("posters").join(format!("{}.jpg", cache_key));
+        
+        if cache_path.exists() {
+            Some(cache_path)
+        } else {
+            None
+        }
+    }
+    
+    /// Get cached poster for season
+    pub fn get_cached_season_poster(&self, show_name: &str, season_num: u32) -> Option<PathBuf> {
+        let cache_key = format!("season_{}_{}", show_name.replace(' ', "_"), season_num);
+        let cache_path = self.cache_dir.join("posters").join(format!("{}.jpg", cache_key));
+        
+        if cache_path.exists() {
+            Some(cache_path)
+        } else {
+            None
+        }
+    }
+    
+    /// Cache a season poster
+    pub async fn cache_season_poster(&self, poster_path: &str, show_name: &str, season_num: u32) -> Result<PathBuf> {
+        let cache_key = format!("season_{}_{}", show_name.replace(' ', "_"), season_num);
+        let cache_filename = format!("{}.jpg", cache_key);
+        let cache_path = self.cache_dir.join("posters").join(&cache_filename);
+        
+        // Check if already cached
+        if cache_path.exists() {
+            return Ok(cache_path);
+        }
+        
+        // Ensure directory exists
+        fs::create_dir_all(cache_path.parent().unwrap()).await?;
+        
+        // Download from TMDB
+        if let Some(tmdb) = &self.tmdb_provider {
+            let url = if poster_path.starts_with("http") {
+                poster_path.to_string()
+            } else {
+                format!("{}/w500{}", tmdb.image_base_url(), poster_path)
+            };
+            
+            let response = reqwest::get(&url).await?;
+            
+            if !response.status().is_success() {
+                return Err(anyhow::anyhow!("Failed to download season poster: {}", response.status()));
+            }
+            
+            let bytes = response.bytes().await?;
+            let mut file = fs::File::create(&cache_path).await?;
+            file.write_all(&bytes).await?;
+            
+            Ok(cache_path)
+        } else {
+            Err(anyhow::anyhow!("No TMDB provider configured"))
         }
     }
 }
