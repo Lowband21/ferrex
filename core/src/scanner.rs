@@ -1,7 +1,7 @@
+use crate::{MediaError, MediaFile, Result};
 use std::path::Path;
-use walkdir::{DirEntry, WalkDir};
-use crate::{MediaFile, MediaError, Result};
 use tracing::{debug, info, warn};
+use walkdir::{DirEntry, WalkDir};
 
 #[derive(Debug, Clone)]
 pub struct MediaScanner {
@@ -84,9 +84,13 @@ impl MediaScanner {
     /// Scan a directory for media files
     pub fn scan_directory<P: AsRef<Path>>(&self, root_path: P) -> Result<ScanResult> {
         let root_path = root_path.as_ref();
-        
-        info!("Starting media scan of: {} (follow_links: {})", root_path.display(), self.follow_links);
-        
+
+        info!(
+            "Starting media scan of: {} (follow_links: {})",
+            root_path.display(),
+            self.follow_links
+        );
+
         if !root_path.exists() {
             return Err(MediaError::NotFound(format!(
                 "Directory does not exist: {}",
@@ -101,9 +105,8 @@ impl MediaScanner {
             )));
         }
 
-        let mut walker = WalkDir::new(root_path)
-            .follow_links(self.follow_links);
-        
+        let mut walker = WalkDir::new(root_path).follow_links(self.follow_links);
+
         if let Some(depth) = self.max_depth {
             walker = walker.max_depth(depth);
         }
@@ -122,14 +125,20 @@ impl MediaScanner {
                     let path = entry.path();
                     let is_symlink = entry.path_is_symlink();
                     let file_type = entry.file_type();
-                    
+
                     if is_symlink {
-                        debug!("Walker found symlink: {} (is_dir: {})", path.display(), file_type.is_dir());
+                        debug!(
+                            "Walker found symlink: {} (is_dir: {})",
+                            path.display(),
+                            file_type.is_dir()
+                        );
                     }
-                    
+
                     if let Err(e) = self.process_entry(&entry, &mut result) {
                         warn!("Error processing {}: {}", entry.path().display(), e);
-                        result.errors.push(format!("{}: {}", entry.path().display(), e));
+                        result
+                            .errors
+                            .push(format!("{}: {}", entry.path().display(), e));
                     }
                 }
                 Err(e) => {
@@ -155,10 +164,14 @@ impl MediaScanner {
         // Log symlinks for debugging
         if entry.path_is_symlink() {
             if let Ok(target) = std::fs::read_link(entry.path()) {
-                debug!("Found symlink: {} -> {}", entry.path().display(), target.display());
+                debug!(
+                    "Found symlink: {} -> {}",
+                    entry.path().display(),
+                    target.display()
+                );
             }
         }
-        
+
         // Skip directories
         if entry.file_type().is_dir() {
             return Ok(());
@@ -178,12 +191,17 @@ impl MediaScanner {
         // Create MediaFile from the path
         match MediaFile::new(path.to_path_buf()) {
             Ok(media_file) => {
-                debug!("Found video file: {} ({})", media_file.filename, media_file.size);
+                debug!(
+                    "Found video file: {} ({})",
+                    media_file.filename, media_file.size
+                );
                 result.video_files.push(media_file);
             }
             Err(e) => {
                 warn!("Failed to create MediaFile for {}: {}", path.display(), e);
-                result.errors.push(format!("MediaFile creation failed: {}", e));
+                result
+                    .errors
+                    .push(format!("MediaFile creation failed: {}", e));
             }
         }
 
@@ -193,7 +211,7 @@ impl MediaScanner {
     /// Scan a single file
     pub fn scan_file<P: AsRef<Path>>(&self, file_path: P) -> Result<Option<MediaFile>> {
         let file_path = file_path.as_ref();
-        
+
         if !file_path.exists() {
             return Err(MediaError::NotFound(format!(
                 "File does not exist: {}",
@@ -225,7 +243,7 @@ mod tests {
     #[test]
     fn test_is_video_file() {
         let scanner = MediaScanner::new();
-        
+
         assert!(scanner.is_video_file(Path::new("test.mp4")));
         assert!(scanner.is_video_file(Path::new("TEST.MKV")));
         assert!(scanner.is_video_file(Path::new("movie.avi")));
@@ -236,9 +254,9 @@ mod tests {
 
     #[test]
     fn test_custom_extensions() {
-        let scanner = MediaScanner::new()
-            .with_extensions(vec!["test".to_string(), "custom".to_string()]);
-        
+        let scanner =
+            MediaScanner::new().with_extensions(vec!["test".to_string(), "custom".to_string()]);
+
         assert!(scanner.is_video_file(Path::new("file.test")));
         assert!(scanner.is_video_file(Path::new("file.custom")));
         assert!(!scanner.is_video_file(Path::new("file.mp4")));
@@ -248,9 +266,9 @@ mod tests {
     fn test_scan_empty_directory() {
         let temp_dir = TempDir::new().unwrap();
         let scanner = MediaScanner::new();
-        
+
         let result = scanner.scan_directory(temp_dir.path()).unwrap();
-        
+
         assert_eq!(result.total_files, 0);
         assert_eq!(result.video_files.len(), 0);
         assert_eq!(result.skipped_files, 0);
@@ -260,7 +278,7 @@ mod tests {
     fn test_scan_nonexistent_directory() {
         let scanner = MediaScanner::new();
         let result = scanner.scan_directory("/nonexistent/path");
-        
+
         assert!(result.is_err());
         if let Err(MediaError::NotFound(_)) = result {
             // Expected
@@ -273,20 +291,22 @@ mod tests {
     fn test_scan_with_mock_files() {
         let temp_dir = TempDir::new().unwrap();
         let scanner = MediaScanner::new();
-        
+
         // Create test files
         fs::write(temp_dir.path().join("video.mp4"), b"fake video content").unwrap();
         fs::write(temp_dir.path().join("image.jpg"), b"fake image content").unwrap();
         fs::write(temp_dir.path().join("movie.mkv"), b"fake movie content").unwrap();
-        
+
         let result = scanner.scan_directory(temp_dir.path()).unwrap();
-        
+
         assert_eq!(result.total_files, 3);
         assert_eq!(result.video_files.len(), 2);
         assert_eq!(result.skipped_files, 1);
-        
+
         // Check that we found the right files
-        let filenames: Vec<_> = result.video_files.iter()
+        let filenames: Vec<_> = result
+            .video_files
+            .iter()
             .map(|f| f.filename.as_str())
             .collect();
         assert!(filenames.contains(&"video.mp4"));

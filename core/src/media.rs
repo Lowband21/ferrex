@@ -23,10 +23,10 @@ pub struct MediaMetadata {
     pub bitrate: Option<u64>,
     pub framerate: Option<f64>,
     pub file_size: u64,
-    
+
     // Parsed from filename
     pub parsed_info: Option<ParsedMediaInfo>,
-    
+
     // Future: External database info
     pub external_info: Option<ExternalMediaInfo>,
 }
@@ -36,13 +36,13 @@ pub struct ParsedMediaInfo {
     pub media_type: MediaType,
     pub title: String,
     pub year: Option<u32>,
-    
+
     // TV Show specific
     pub show_name: Option<String>,
     pub season: Option<u32>,
     pub episode: Option<u32>,
     pub episode_title: Option<String>,
-    
+
     // Quality/release info
     pub resolution: Option<String>,
     pub source: Option<String>,
@@ -73,7 +73,7 @@ pub struct ExternalMediaInfo {
     pub tmdb_id: Option<u32>,
     pub tvdb_id: Option<u32>,
     pub imdb_id: Option<String>,
-    
+
     // External metadata
     pub description: Option<String>,
     pub poster_url: Option<String>,
@@ -81,7 +81,7 @@ pub struct ExternalMediaInfo {
     pub genres: Vec<String>,
     pub rating: Option<f32>,
     pub release_date: Option<chrono::NaiveDate>,
-    
+
     // TV Show specific external info
     pub show_description: Option<String>,
     pub show_poster_url: Option<String>,
@@ -140,7 +140,7 @@ impl MediaFile {
             .to_string();
 
         let metadata = path.metadata()?;
-        
+
         Ok(Self {
             id: Uuid::new_v4(),
             path,
@@ -150,7 +150,7 @@ impl MediaFile {
             metadata: None,
         })
     }
-    
+
     /// Extract full metadata for this media file
     pub fn extract_metadata(&mut self) -> crate::Result<()> {
         let mut extractor = crate::MetadataExtractor::new();
@@ -158,16 +158,16 @@ impl MediaFile {
         self.metadata = Some(metadata);
         Ok(())
     }
-    
+
     pub fn is_video_file(&self) -> bool {
         let video_extensions = ["mp4", "mkv", "avi", "mov", "webm", "flv", "wmv"];
-        
+
         if let Some(extension) = self.path.extension() {
             if let Some(ext_str) = extension.to_str() {
                 return video_extensions.contains(&ext_str.to_lowercase().as_str());
             }
         }
-        
+
         false
     }
 }

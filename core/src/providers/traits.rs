@@ -1,24 +1,24 @@
+use crate::media::{ExternalMediaInfo, MediaType};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use crate::media::{MediaType, ExternalMediaInfo};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
     #[error("API error: {0}")]
     ApiError(String),
-    
+
     #[error("Not found")]
     NotFound,
-    
+
     #[error("Rate limited")]
     RateLimited,
-    
+
     #[error("Invalid API key")]
     InvalidApiKey,
-    
+
     #[error("Network error: {0}")]
     NetworkError(#[from] reqwest::Error),
-    
+
     #[error("Parse error: {0}")]
     ParseError(String),
 }
@@ -80,13 +80,17 @@ pub struct MediaImages {
 pub trait MetadataProvider: Send + Sync {
     /// Search for media matching the query
     async fn search(&self, query: &MediaQuery) -> Result<Vec<SearchResult>, ProviderError>;
-    
+
     /// Get detailed metadata for a specific media item
-    async fn get_metadata(&self, provider_id: &str, media_type: MediaType) -> Result<DetailedMediaInfo, ProviderError>;
-    
+    async fn get_metadata(
+        &self,
+        provider_id: &str,
+        media_type: MediaType,
+    ) -> Result<DetailedMediaInfo, ProviderError>;
+
     /// Get the provider name
     fn name(&self) -> &'static str;
-    
+
     /// Get the base URL for images
     fn image_base_url(&self) -> &str;
 }

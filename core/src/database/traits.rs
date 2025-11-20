@@ -62,11 +62,18 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn file_exists(&self, path: &str) -> Result<bool>;
     async fn delete_media(&self, id: &str) -> Result<()>;
     async fn get_all_media(&self) -> Result<Vec<MediaFile>>;
-    
-    async fn store_external_metadata(&self, media_id: &str, metadata: &MediaMetadata) -> Result<()>;
+
+    async fn store_external_metadata(&self, media_id: &str, metadata: &MediaMetadata)
+        -> Result<()>;
     async fn store_tv_show(&self, show_info: &TvShowInfo) -> Result<String>;
     async fn get_tv_show(&self, tmdb_id: &str) -> Result<Option<TvShowInfo>>;
-    async fn link_episode_to_file(&self, media_file_id: &str, show_tmdb_id: &str, season: i32, episode: i32) -> Result<()>;
+    async fn link_episode_to_file(
+        &self,
+        media_file_id: &str,
+        show_tmdb_id: &str,
+        season: i32,
+        episode: i32,
+    ) -> Result<()>;
 }
 
 pub enum DatabaseBackend {
