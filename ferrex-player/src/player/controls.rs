@@ -1,13 +1,17 @@
 use super::state::{AspectRatio, PlayerState};
 use super::theme;
 use super::track_selection::format_subtitle_track;
-use crate::Message;
+use crate::messages::media::Message;
 use iced::Font;
 use iced::{
-    widget::{button, column, container, mouse_area, pick_list, row, slider, stack, text, Space},
+    widget::{
+        button, checkbox, column, container, mouse_area, pick_list, row, slider, stack, text, Space,
+    },
     Alignment, Element, Length,
 };
-use iced_video_player::{AudioTrack, SubtitleTrack};
+use iced_video_player::{
+    AlgorithmParams, AudioTrack, SubtitleTrack, ToneMappingAlgorithm, ToneMappingPreset,
+};
 use lucide_icons::Icon;
 
 /// Get the lucide font
@@ -38,42 +42,6 @@ impl PlayerState {
     /// Build the full controls overlay
     pub fn build_controls(&self) -> Element<Message> {
         column![
-            // Transcoding status notification
-            if let Some(status) = &self.transcoding_status {
-                container(
-                    text(match status {
-                        super::state::TranscodingStatus::Pending => {
-                            "Preparing HDR tone mapping...".to_string()
-                        }
-                        super::state::TranscodingStatus::Queued => {
-                            "Waiting in queue...".to_string()
-                        }
-                        super::state::TranscodingStatus::Processing { progress } => {
-                            format!("Tone mapping HDR content: {:.0}%", progress * 100.0)
-                        }
-                        super::state::TranscodingStatus::Completed => {
-                            "HDR tone mapping ready".to_string()
-                        }
-                        super::state::TranscodingStatus::Failed { error } => {
-                            format!("Tone mapping failed: {}", error)
-                        }
-                        super::state::TranscodingStatus::Cancelled => {
-                            "Tone mapping cancelled".to_string()
-                        }
-                    })
-                    .size(14)
-                    .color(match status {
-                        super::state::TranscodingStatus::Failed { .. } => [1.0, 0.3, 0.3, 0.9],
-                        _ => [1.0, 0.8, 0.0, 0.9],
-                    }),
-                )
-                .padding(10)
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center)
-                .style(theme::container_notification)
-            } else {
-                container(Space::with_height(0))
-            },
             // Top bar with title and buttons
             container(
                 row![
@@ -194,7 +162,7 @@ impl PlayerState {
 
         // Use FillPortion for dynamic resizing based on percentages
         let played_portion = (played_percentage * 1000.0).max(1.0) as u16;
-        let buffered_portion = ((buffered_percentage - played_percentage) * 1000.0)
+        let _buffered_portion = ((buffered_percentage - played_percentage) * 1000.0)
             .max(0.0)
             .min(50.0) as u16;
         let unplayed_portion = (1000u16)
@@ -356,23 +324,15 @@ impl PlayerState {
                         .style(theme::button_player_disabled)
                         .padding(8)
                     },
-                    // Quality button (only show if using HLS)
-                    {
-                        let quality_button: Element<Message> = if self.using_hls {
-                            button(text(Icon::Gauge.unicode()).font(lucide_font()).size(20))
-                                .on_press(Message::ToggleQualityMenu)
-                                .style(if self.show_quality_menu {
-                                    theme::button_player_active
-                                } else {
-                                    theme::button_transparent
-                                })
-                                .padding(8)
-                                .into()
+                    // Video settings button (always show)
+                    button(text(Icon::Gauge.unicode()).font(lucide_font()).size(20))
+                        .on_press(Message::ToggleQualityMenu)
+                        .style(if self.show_quality_menu {
+                            theme::button_player_active
                         } else {
-                            Space::with_width(Length::Fixed(0.0)).into()
-                        };
-                        quality_button
-                    },
+                            theme::button_transparent
+                        })
+                        .padding(8),
                     // Settings button
                     button(text(Icon::Settings.unicode()).font(lucide_font()).size(20))
                         .on_press(Message::ToggleSettings)
@@ -465,30 +425,33 @@ impl PlayerState {
                             .style(theme::text_bright),
                             if let Some(media) = &self.current_media {
                                 if let Some(metadata) = &media.metadata {
-                                    column![
-                                        if let Some(bit_depth) = metadata.bit_depth {
+                                    let mut metadata_column = column![].spacing(2);
+
+                                    if let Some(bit_depth) = metadata.bit_depth {
+                                        metadata_column = metadata_column.push(
                                             text(format!("Bit depth: {}", bit_depth))
                                                 .size(11)
-                                                .style(theme::text_dim)
-                                        } else {
-                                            text("").size(0)
-                                        },
-                                        if let Some(color_transfer) = &metadata.color_transfer {
+                                                .style(theme::text_dim),
+                                        );
+                                    }
+
+                                    if let Some(color_transfer) = &metadata.color_transfer {
+                                        metadata_column = metadata_column.push(
                                             text(format!("Transfer: {}", color_transfer))
                                                 .size(11)
-                                                .style(theme::text_dim)
-                                        } else {
-                                            text("").size(0)
-                                        },
-                                        if let Some(color_primaries) = &metadata.color_primaries {
+                                                .style(theme::text_dim),
+                                        );
+                                    }
+
+                                    if let Some(color_primaries) = &metadata.color_primaries {
+                                        metadata_column = metadata_column.push(
                                             text(format!("Primaries: {}", color_primaries))
                                                 .size(11)
-                                                .style(theme::text_dim)
-                                        } else {
-                                            text("").size(0)
-                                        },
-                                    ]
-                                    .spacing(2)
+                                                .style(theme::text_dim),
+                                        );
+                                    }
+
+                                    metadata_column
                                 } else {
                                     column![]
                                 }
@@ -613,126 +576,458 @@ impl PlayerState {
         }
     }
 
-    /// Build the quality selection menu popup
+    /// Build the quality/tone mapping menu popup
     pub fn build_quality_menu(&self) -> Element<Message> {
-        let variants = if let Some(ref master_playlist) = self.master_playlist {
-            &master_playlist.variants
-        } else {
-            // No variants available
-            return container(
-                column![
-                    text("Quality").size(16).style(theme::text_bright),
-                    Space::with_height(15),
-                    text("No quality options available")
-                        .size(14)
-                        .style(theme::text_muted),
-                ]
-                .padding(20)
-                .spacing(5),
-            )
-            .style(theme::container_subtitle_menu)
-            .into();
+        let mut content = column![
+            // Header
+            row![
+                text("Video Settings").size(16).style(theme::text_bright),
+                Space::with_width(Length::Fill),
+                button(text(Icon::X.unicode()).font(lucide_font()).size(16))
+                    .on_press(Message::ToggleQualityMenu)
+                    .style(theme::button_ghost)
+                    .padding(2),
+            ]
+            .align_y(Alignment::Center),
+            Space::with_height(Length::Fixed(15.0)),
+        ]
+        .spacing(5);
+
+        // Tone mapping enabled checkbox
+        let tone_mapping_enabled_checkbox =
+            checkbox("Enable Tone Mapping", self.tone_mapping_config.enabled)
+                .on_toggle(Message::ToggleToneMapping)
+                .size(14)
+                .text_size(14);
+
+        content = content.push(tone_mapping_enabled_checkbox);
+        content = content.push(Space::with_height(Length::Fixed(10.0)));
+
+        // Preset selection
+        let preset_names = vec![
+            "Custom",
+            "Default",
+            "Film (ACES)",
+            "Game Classic",
+            "HDR Bright",
+            "Natural",
+            "Vivid",
+        ];
+
+        let current_preset_name = match self.tone_mapping_config.preset {
+            ToneMappingPreset::Custom => "Custom",
+            ToneMappingPreset::Default => "Default",
+            ToneMappingPreset::Film => "Film (ACES)",
+            ToneMappingPreset::GameClassic => "Game Classic",
+            ToneMappingPreset::HdrBright => "HDR Bright",
+            ToneMappingPreset::Natural => "Natural",
+            ToneMappingPreset::Vivid => "Vivid",
         };
 
-        container(
-            column![
-                // Header
+        content = content.push(
+            row![
+                text("Preset:").size(14),
+                Space::with_width(Length::Fill),
+                pick_list(preset_names, Some(current_preset_name), |selected| {
+                    use iced_video_player::ToneMappingPreset;
+                    let preset = match selected {
+                        "Custom" => ToneMappingPreset::Custom,
+                        "Default" => ToneMappingPreset::Default,
+                        "Film (ACES)" => ToneMappingPreset::Film,
+                        "Game Classic" => ToneMappingPreset::GameClassic,
+                        "HDR Bright" => ToneMappingPreset::HdrBright,
+                        "Natural" => ToneMappingPreset::Natural,
+                        "Vivid" => ToneMappingPreset::Vivid,
+                        _ => ToneMappingPreset::Default,
+                    };
+                    Message::SetToneMappingPreset(preset)
+                },)
+                .width(Length::Fixed(150.0))
+                .style(theme::pick_list_dark::<&str>)
+                .text_size(14),
+            ]
+            .align_y(Alignment::Center),
+        );
+
+        content = content.push(Space::with_height(Length::Fixed(10.0)));
+
+        // Algorithm selection
+        let algorithm_names = vec![
+            "None",
+            "Reinhard",
+            "Reinhard Extended",
+            "ACES Filmic",
+            "Hable (Uncharted 2)",
+        ];
+
+        let current_algorithm_name = match self.tone_mapping_config.algorithm {
+            ToneMappingAlgorithm::None => "None",
+            ToneMappingAlgorithm::Reinhard => "Reinhard",
+            ToneMappingAlgorithm::ReinhardExtended => "Reinhard Extended",
+            ToneMappingAlgorithm::AcesFilmic => "ACES Filmic",
+            ToneMappingAlgorithm::Hable => "Hable (Uncharted 2)",
+        };
+
+        content = content.push(
+            row![
+                text("Algorithm:").size(14),
+                Space::with_width(Length::Fill),
+                pick_list(algorithm_names, Some(current_algorithm_name), |selected| {
+                    let algorithm = match selected {
+                        "None" => ToneMappingAlgorithm::None,
+                        "Reinhard" => ToneMappingAlgorithm::Reinhard,
+                        "Reinhard Extended" => ToneMappingAlgorithm::ReinhardExtended,
+                        "ACES Filmic" => ToneMappingAlgorithm::AcesFilmic,
+                        "Hable (Uncharted 2)" => ToneMappingAlgorithm::Hable,
+                        _ => ToneMappingAlgorithm::None,
+                    };
+                    Message::SetToneMappingAlgorithm(algorithm)
+                },)
+                .width(Length::Fixed(150.0))
+                .style(theme::pick_list_dark::<&str>)
+                .text_size(14),
+            ]
+            .align_y(Alignment::Center),
+        );
+
+        // Algorithm-specific parameters
+        if self.tone_mapping_config.enabled {
+            content = content.push(Space::with_height(Length::Fixed(10.0)));
+            content = content.push(
+                text("─── Algorithm Settings ─────────")
+                    .size(12)
+                    .style(theme::text_muted),
+            );
+            content = content.push(Space::with_height(Length::Fixed(5.0)));
+
+            match self.tone_mapping_config.algorithm {
+                ToneMappingAlgorithm::ReinhardExtended => {
+                    let (white_point, exposure, saturation_boost) =
+                        match &self.tone_mapping_config.algorithm_params {
+                            AlgorithmParams::ReinhardExtended {
+                                white_point,
+                                exposure,
+                                saturation_boost,
+                            } => (*white_point, *exposure, *saturation_boost),
+                            _ => (4.0, 1.5, 1.2),
+                        };
+
+                    // White Point slider
+                    content = content.push(
+                        row![
+                            text("White Point:").size(12),
+                            Space::with_width(Length::Fixed(10.0)),
+                            slider(1.0..=10.0, white_point, Message::SetToneMappingWhitePoint)
+                                .step(0.1)
+                                .width(Length::Fixed(120.0))
+                                .style(theme::slider_volume),
+                            Space::with_width(Length::Fixed(5.0)),
+                            text(format!("{:.1}", white_point))
+                                .size(12)
+                                .style(theme::text_muted),
+                        ]
+                        .align_y(Alignment::Center),
+                    );
+
+                    // Exposure slider
+                    content = content.push(
+                        row![
+                            text("Exposure:").size(12),
+                            Space::with_width(Length::Fixed(10.0)),
+                            slider(0.5..=3.0, exposure, Message::SetToneMappingExposure)
+                                .step(0.1)
+                                .width(Length::Fixed(120.0))
+                                .style(theme::slider_volume),
+                            Space::with_width(Length::Fixed(5.0)),
+                            text(format!("{:.1}", exposure))
+                                .size(12)
+                                .style(theme::text_muted),
+                        ]
+                        .align_y(Alignment::Center),
+                    );
+
+                    // Saturation boost slider
+                    content = content.push(
+                        row![
+                            text("Saturation:").size(12),
+                            Space::with_width(Length::Fixed(10.0)),
+                            slider(
+                                0.8..=1.5,
+                                saturation_boost,
+                                Message::SetToneMappingSaturationBoost
+                            )
+                            .step(0.05)
+                            .width(Length::Fixed(120.0))
+                            .style(theme::slider_volume),
+                            Space::with_width(Length::Fixed(5.0)),
+                            text(format!("{:.2}", saturation_boost))
+                                .size(12)
+                                .style(theme::text_muted),
+                        ]
+                        .align_y(Alignment::Center),
+                    );
+                }
+                ToneMappingAlgorithm::Hable => {
+                    let (shoulder, linear_strength, linear_angle, toe_strength) =
+                        match &self.tone_mapping_config.algorithm_params {
+                            AlgorithmParams::Hable {
+                                shoulder_strength,
+                                linear_strength,
+                                linear_angle,
+                                toe_strength,
+                            } => (
+                                *shoulder_strength,
+                                *linear_strength,
+                                *linear_angle,
+                                *toe_strength,
+                            ),
+                            _ => (0.15, 0.5, 0.01, 0.2),
+                        };
+
+                    // Shoulder strength slider
+                    content = content.push(
+                        row![
+                            text("Shoulder:").size(12),
+                            Space::with_width(Length::Fixed(10.0)),
+                            slider(0.0..=1.0, shoulder, Message::SetHableShoulderStrength)
+                                .step(0.01)
+                                .width(Length::Fixed(120.0))
+                                .style(theme::slider_volume),
+                            Space::with_width(Length::Fixed(5.0)),
+                            text(format!("{:.2}", shoulder))
+                                .size(12)
+                                .style(theme::text_muted),
+                        ]
+                        .align_y(Alignment::Center),
+                    );
+
+                    // Linear strength slider
+                    content = content.push(
+                        row![
+                            text("Linear Str:").size(12),
+                            Space::with_width(Length::Fixed(10.0)),
+                            slider(0.0..=1.0, linear_strength, Message::SetHableLinearStrength)
+                                .step(0.01)
+                                .width(Length::Fixed(120.0))
+                                .style(theme::slider_volume),
+                            Space::with_width(Length::Fixed(5.0)),
+                            text(format!("{:.2}", linear_strength))
+                                .size(12)
+                                .style(theme::text_muted),
+                        ]
+                        .align_y(Alignment::Center),
+                    );
+
+                    // Linear angle slider
+                    content = content.push(
+                        row![
+                            text("Linear Angle:").size(12),
+                            Space::with_width(Length::Fixed(10.0)),
+                            slider(0.0..=0.1, linear_angle, Message::SetHableLinearAngle)
+                                .step(0.001)
+                                .width(Length::Fixed(120.0))
+                                .style(theme::slider_volume),
+                            Space::with_width(Length::Fixed(5.0)),
+                            text(format!("{:.3}", linear_angle))
+                                .size(12)
+                                .style(theme::text_muted),
+                        ]
+                        .align_y(Alignment::Center),
+                    );
+
+                    // Toe strength slider
+                    content = content.push(
+                        row![
+                            text("Toe Strength:").size(12),
+                            Space::with_width(Length::Fixed(10.0)),
+                            slider(0.0..=1.0, toe_strength, Message::SetHableToeStrength)
+                                .step(0.01)
+                                .width(Length::Fixed(120.0))
+                                .style(theme::slider_volume),
+                            Space::with_width(Length::Fixed(5.0)),
+                            text(format!("{:.2}", toe_strength))
+                                .size(12)
+                                .style(theme::text_muted),
+                        ]
+                        .align_y(Alignment::Center),
+                    );
+                }
+                ToneMappingAlgorithm::Reinhard => {
+                    content = content.push(
+                        text("Basic Reinhard (no parameters)")
+                            .size(12)
+                            .style(theme::text_muted),
+                    );
+                }
+                ToneMappingAlgorithm::None => {
+                    content = content.push(
+                        text("Passthrough (no tone mapping)")
+                            .size(12)
+                            .style(theme::text_muted),
+                    );
+                }
+                ToneMappingAlgorithm::AcesFilmic => {
+                    content = content.push(
+                        text("ACES Filmic (no parameters)")
+                            .size(12)
+                            .style(theme::text_muted),
+                    );
+                }
+            }
+
+            // Display settings
+            content = content.push(Space::with_height(Length::Fixed(10.0)));
+            content = content.push(
+                text("─── Display Settings ───────────")
+                    .size(12)
+                    .style(theme::text_muted),
+            );
+            content = content.push(Space::with_height(Length::Fixed(5.0)));
+
+            // Monitor brightness slider
+            content = content.push(
                 row![
-                    text("Quality").size(16).style(theme::text_bright),
-                    Space::with_width(Length::Fill),
-                    button(text(Icon::X.unicode()).font(lucide_font()).size(16))
-                        .on_press(Message::ToggleQualityMenu)
-                        .style(theme::button_ghost)
-                        .padding(2),
+                    text("Monitor (nits):").size(12),
+                    Space::with_width(Length::Fixed(10.0)),
+                    slider(
+                        100.0..=1000.0,
+                        self.tone_mapping_config.monitor_brightness,
+                        Message::SetMonitorBrightness
+                    )
+                    .step(50.0)
+                    .width(Length::Fixed(120.0))
+                    .style(theme::slider_volume),
+                    Space::with_width(Length::Fixed(5.0)),
+                    text(format!(
+                        "{:.0}",
+                        self.tone_mapping_config.monitor_brightness
+                    ))
+                    .size(12)
+                    .style(theme::text_muted),
                 ]
                 .align_y(Alignment::Center),
-                Space::with_height(Length::Fixed(15.0)),
-                // Auto option
-                button({
-                    let check_icon: Element<Message> = if self.current_quality_profile.is_none() {
-                        text(Icon::Check.unicode())
-                            .font(lucide_font())
-                            .size(14)
-                            .into()
-                    } else {
-                        Space::with_width(Length::Fixed(14.0)).into()
-                    };
+            );
 
+            // General adjustments
+            content = content.push(Space::with_height(Length::Fixed(10.0)));
+            content = content.push(
+                text("─── Adjustments ────────────────")
+                    .size(12)
+                    .style(theme::text_muted),
+            );
+            content = content.push(Space::with_height(Length::Fixed(5.0)));
+
+            // Brightness adjustment slider (not shown for Hable since it uses exposure only)
+            if !matches!(
+                self.tone_mapping_config.algorithm,
+                ToneMappingAlgorithm::Hable
+            ) {
+                content = content.push(
                     row![
-                        check_icon,
-                        Space::with_width(Length::Fixed(8.0)),
-                        text("Auto").size(14),
-                        Space::with_width(Length::Fill),
-                        if let Some(bw) = self.last_bandwidth_measurement {
-                            text(format!("({:.1} Mbps)", bw as f64 / 1_000_000.0))
-                                .size(12)
-                                .style(theme::text_muted)
-                        } else {
-                            text("").size(12)
-                        },
+                        text("Brightness:").size(12),
+                        Space::with_width(Length::Fixed(10.0)),
+                        slider(
+                            -1.0..=1.0,
+                            self.tone_mapping_config.brightness_adjustment,
+                            Message::SetToneMappingBrightness
+                        )
+                        .step(0.05)
+                        .width(Length::Fixed(120.0))
+                        .style(theme::slider_volume),
+                        Space::with_width(Length::Fixed(5.0)),
+                        text(format!(
+                            "{:.2}",
+                            self.tone_mapping_config.brightness_adjustment
+                        ))
+                        .size(12)
+                        .style(theme::text_muted),
                     ]
-                    .align_y(Alignment::Center)
-                })
-                .on_press(Message::QualityVariantSelected(String::new()))
-                .width(Length::Fill)
-                .style(theme::button_menu_item)
-                .padding([6, 10]),
-                Space::with_height(Length::Fixed(5.0)),
-                // Quality variants
-                column(
-                    variants
-                        .iter()
-                        .map(|variant| {
-                            let is_selected = self
-                                .current_quality_profile
-                                .as_ref()
-                                .map(|p| p == &variant.profile)
-                                .unwrap_or(false);
+                    .align_y(Alignment::Center),
+                );
+            }
 
-                            button({
-                                let check_icon: Element<Message> = if is_selected {
-                                    text(Icon::Check.unicode())
-                                        .font(lucide_font())
-                                        .size(14)
-                                        .into()
-                                } else {
-                                    Space::with_width(Length::Fixed(14.0)).into()
-                                };
+            // Contrast adjustment slider (not shown for Hable since curve parameters provide control)
+            if !matches!(
+                self.tone_mapping_config.algorithm,
+                ToneMappingAlgorithm::Hable
+            ) {
+                content = content.push(
+                    row![
+                        text("Contrast:").size(12),
+                        Space::with_width(Length::Fixed(10.0)),
+                        slider(
+                            0.5..=2.0,
+                            self.tone_mapping_config.contrast_adjustment,
+                            Message::SetToneMappingContrast
+                        )
+                        .step(0.05)
+                        .width(Length::Fixed(120.0))
+                        .style(theme::slider_volume),
+                        Space::with_width(Length::Fixed(5.0)),
+                        text(format!(
+                            "{:.2}",
+                            self.tone_mapping_config.contrast_adjustment
+                        ))
+                        .size(12)
+                        .style(theme::text_muted),
+                    ]
+                    .align_y(Alignment::Center),
+                );
+            }
 
-                                let quality_label = match variant.resolution {
-                                    Some((_, height)) => format!("{}p", height),
-                                    None => variant.profile.clone(),
-                                };
+            // Exposure adjustment slider
+            content = content.push(
+                row![
+                    text("Exposure:").size(12),
+                    Space::with_width(Length::Fixed(10.0)),
+                    slider(
+                        0.5..=3.0,
+                        self.tone_mapping_config.exposure_adjustment,
+                        Message::SetToneMappingExposure
+                    )
+                    .step(0.1)
+                    .width(Length::Fixed(120.0))
+                    .style(theme::slider_volume),
+                    Space::with_width(Length::Fixed(5.0)),
+                    text(format!(
+                        "{:.1}",
+                        self.tone_mapping_config.exposure_adjustment
+                    ))
+                    .size(12)
+                    .style(theme::text_muted),
+                ]
+                .align_y(Alignment::Center),
+            );
 
-                                row![
-                                    check_icon,
-                                    Space::with_width(Length::Fixed(8.0)),
-                                    text(quality_label).size(14),
-                                    Space::with_width(Length::Fill),
-                                    text(format!(
-                                        "{:.1} Mbps",
-                                        variant.bandwidth as f64 / 1_000_000.0
-                                    ))
-                                    .size(12)
-                                    .style(theme::text_muted),
-                                ]
-                                .align_y(Alignment::Center)
-                            })
-                            .on_press(Message::QualityVariantSelected(variant.profile.clone()))
-                            .width(Length::Fill)
-                            .style(theme::button_menu_item)
-                            .padding([6, 10])
-                            .into()
-                        })
-                        .collect::<Vec<_>>(),
-                )
-                .spacing(2),
-            ]
-            .padding(20)
-            .spacing(5),
-        )
-        .style(theme::container_subtitle_menu)
-        .into()
+            // Saturation adjustment slider
+            content = content.push(
+                row![
+                    text("Saturation:").size(12),
+                    Space::with_width(Length::Fixed(10.0)),
+                    slider(
+                        0.0..=2.0,
+                        self.tone_mapping_config.saturation_adjustment,
+                        Message::SetToneMappingSaturation
+                    )
+                    .step(0.05)
+                    .width(Length::Fixed(120.0))
+                    .style(theme::slider_volume),
+                    Space::with_width(Length::Fixed(5.0)),
+                    text(format!(
+                        "{:.2}",
+                        self.tone_mapping_config.saturation_adjustment
+                    ))
+                    .size(12)
+                    .style(theme::text_muted),
+                ]
+                .align_y(Alignment::Center),
+            );
+        }
+
+        container(content.padding(20))
+            .style(theme::container_subtitle_menu)
+            .width(Length::Fixed(350.0))
+            .into()
     }
 
     /// Build the subtitle menu popup

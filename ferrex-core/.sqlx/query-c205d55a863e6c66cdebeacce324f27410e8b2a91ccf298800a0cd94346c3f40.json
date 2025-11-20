@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, user_id, device_id, created_at, expires_at,\n                   last_activity, ip_address, user_agent, revoked, revoked_at\n            FROM sessions\n            WHERE device_id = $1\n            ORDER BY created_at DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "device_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_activity",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "ip_address",
+        "type_info": "Inet"
+      },
+      {
+        "ordinal": 7,
+        "name": "user_agent",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "revoked",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "c205d55a863e6c66cdebeacce324f27410e8b2a91ccf298800a0cd94346c3f40"
+}

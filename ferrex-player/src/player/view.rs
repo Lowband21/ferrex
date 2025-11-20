@@ -1,6 +1,6 @@
 use super::state::{AspectRatio, PlayerState, TrackNotification};
 use super::theme;
-use crate::Message;
+use crate::messages::media::Message;
 use iced::{
     widget::{button, column, container, mouse_area, row, stack, text, Space},
     ContentFit, Element, Length, Padding,
@@ -12,7 +12,7 @@ impl PlayerState {
     pub fn view(&self) -> Element<Message> {
         log::trace!("PlayerState::view() called - position: {:.2}s, duration: {:.2}s, source_duration: {:?}, controls: {}",
             self.position, self.duration, self.source_duration, self.controls);
-            
+
         if let Some(video) = &self.video_opt {
             // Create the clickable video
             let clickable_video = self.video_view(video);
@@ -61,11 +61,7 @@ impl PlayerState {
 
             // Add track notification overlay if present
             let player_with_notification = if let Some(notification) = &self.track_notification {
-                stack![
-                    player_with_menus,
-                    self.notification_overlay(notification)
-                ]
-                .into()
+                stack![player_with_menus, self.notification_overlay(notification)].into()
             } else {
                 player_with_menus
             };
@@ -83,7 +79,9 @@ impl PlayerState {
                 // Static loading icon for now - can be animated later
                 text("⟳").size(64), // Using a refresh/loading unicode symbol
                 Space::with_height(Length::Fixed(20.0)),
-                text("Loading video...").size(18).color(iced::Color::from_rgb(0.7, 0.7, 0.7)),
+                text("Loading video...")
+                    .size(18)
+                    .color(iced::Color::from_rgb(0.7, 0.7, 0.7)),
             ]
             .align_x(iced::Alignment::Center)
             .spacing(10);
@@ -190,7 +188,7 @@ impl PlayerState {
         }) // Position above controls
         .into()
     }
-    
+
     fn subtitle_menu_overlay(&self) -> Element<Message> {
         // Position the menu near the subtitle button (bottom right)
         container(row![

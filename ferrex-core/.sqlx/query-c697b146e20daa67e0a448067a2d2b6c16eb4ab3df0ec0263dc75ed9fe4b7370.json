@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM sync_participants \n            WHERE session_id = $1 AND user_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c697b146e20daa67e0a448067a2d2b6c16eb4ab3df0ec0263dc75ed9fe4b7370"
+}

@@ -1,70 +1,84 @@
 use crate::MediaDatabase;
 use axum::response::sse::{Event, KeepAlive, Sse};
-use futures::stream::{self, StreamExt};
+use ferrex_core::{
+    providers::TmdbApiProvider,
+    LibraryReference,
+    MediaEvent,
+    ScanOutput,
+    // Import types from api_types
+    ScanProgress,
+    ScanStatus,
+    StreamingScannerConfig,
+    StreamingScannerV2,
+};
+use futures::stream::{self};
 use futures_util::stream::Stream;
-use ferrex_core::{MediaFile, MediaScanner, MetadataExtractor, StreamingScanner, StreamingScannerConfig};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex, RwLock, Semaphore};
-use tracing::{debug, error, info, warn};
+use tokio::sync::{
+    mpsc::{self},
+    Mutex, RwLock,
+};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScanProgress {
-    pub scan_id: String,
-    pub status: ScanStatus,
-    pub path: String,
-    pub library_name: Option<String>, // Name of the library being scanned
-    pub library_id: Option<String>,   // ID of the library being scanned
-    pub total_files: usize,
-    pub scanned_files: usize,
-    pub stored_files: usize,
-    pub metadata_fetched: usize,
-    pub skipped_samples: usize,
-    pub errors: Vec<String>,
-    pub current_file: Option<String>,
-    pub started_at: chrono::DateTime<chrono::Utc>,
-    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub estimated_time_remaining: Option<Duration>,
-}
+// These types are now in ferrex_core::api_types
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct ScanProgress {
+//     pub scan_id: String,
+//     pub status: ScanStatus,
+//     pub path: String,
+//     pub library_name: Option<String>, // Name of the library being scanned
+//     pub library_id: Option<String>,   // ID of the library being scanned
+//     pub total_files: usize,
+//     pub scanned_files: usize,
+//     pub stored_files: usize,
+//     pub metadata_fetched: usize,
+//     pub skipped_samples: usize,
+//     pub errors: Vec<String>,
+//     pub current_file: Option<String>,
+//     pub started_at: chrono::DateTime<chrono::Utc>,
+//     pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
+//     pub estimated_time_remaining: Option<Duration>,
+// }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ScanStatus {
-    Pending,
-    Scanning,
-    Processing,
-    Completed,
-    Failed,
-    Cancelled,
-}
+// #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// #[serde(rename_all = "lowercase")]
+// pub enum ScanStatus {
+//     Pending,
+//     Scanning,
+//     Processing,
+//     Completed,
+//     Failed,
+//     Cancelled,
+// }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScanRequest {
-    pub path: Option<String>,
-    pub max_depth: Option<usize>,
-    pub follow_links: bool,
-    pub extract_metadata: bool,
-    pub force_rescan: bool,
-    pub paths: Option<Vec<String>>, // Multiple paths support
-    pub library_id: Option<Uuid>,
-    pub library_type: Option<ferrex_core::LibraryType>,
-    pub use_streaming: bool, // Use new streaming scanner
-}
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct ScanRequest {
+//     pub path: Option<String>,
+//     pub max_depth: Option<usize>,
+//     pub follow_links: bool,
+//     pub extract_metadata: bool,
+//     pub force_rescan: bool,
+//     pub paths: Option<Vec<String>>, // Multiple paths support
+//     pub library_id: Option<Uuid>,
+//     pub library_type: Option<ferrex_core::LibraryType>,
+// }
 
-// Media event types for SSE
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum MediaEvent {
-    MediaAdded { media: MediaFile },
-    MediaUpdated { media: MediaFile },
-    MediaDeleted { id: String },
-    MetadataUpdated { id: String },
-    ScanStarted { scan_id: String },
-    ScanCompleted { scan_id: String },
-}
+// // Media event types for SSE
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// #[serde(tag = "type", rename_all = "snake_case")]
+// pub enum MediaEvent {
+//     MediaAdded { media: MediaFile },
+//     MediaUpdated { media: MediaFile },
+//     MediaDeleted { id: String },
+//     MetadataUpdated { id: String },
+//     TvShowAdded { show: ferrex_core::TvShowDetails },
+//     TvShowUpdated { show: ferrex_core::TvShowDetails },
+//     ScanStarted { scan_id: String },
+//     ScanCompleted { scan_id: String },
+// }
 
 // Progress update channel
 type ProgressSender = mpsc::UnboundedSender<ScanProgress>;
@@ -82,6 +96,7 @@ pub struct ScanManager {
     db: Arc<MediaDatabase>,
     metadata_service: Arc<crate::metadata_service::MetadataService>,
     thumbnail_service: Arc<crate::thumbnail_service::ThumbnailService>,
+    tmdb_provider: Arc<TmdbApiProvider>,
 }
 
 impl ScanManager {
@@ -90,6 +105,9 @@ impl ScanManager {
         metadata_service: Arc<crate::metadata_service::MetadataService>,
         thumbnail_service: Arc<crate::thumbnail_service::ThumbnailService>,
     ) -> Self {
+        // Create TmdbApiProvider
+        let tmdb_provider = Arc::new(TmdbApiProvider::new());
+
         Self {
             active_scans: Arc::new(RwLock::new(HashMap::new())),
             scan_history: Arc::new(RwLock::new(Vec::new())),
@@ -98,98 +116,54 @@ impl ScanManager {
             db,
             metadata_service,
             thumbnail_service,
+            tmdb_provider,
         }
     }
 
-    /// Start a new scan in the background
-    pub async fn start_scan(&self, request: ScanRequest) -> Result<String, anyhow::Error> {
-        let scan_id = Uuid::new_v4().to_string();
-
-        // Determine paths to scan
-        let paths = if let Some(paths) = request.paths.clone() {
-            if paths.is_empty() {
-                // Empty paths array means no libraries configured
-                return Err(anyhow::anyhow!("No library paths configured. Please add a library first."));
-            }
-            paths
-        } else if let Some(path) = request.path.clone() {
-            vec![path]
-        } else {
-            // Use MEDIA_ROOT if no paths provided (legacy behavior)
-            match std::env::var("MEDIA_ROOT") {
-                Ok(path) => {
-                    warn!("No paths provided, falling back to MEDIA_ROOT: {}", path);
-                    vec![path]
-                },
-                Err(_) => return Err(anyhow::anyhow!("No paths provided and MEDIA_ROOT not set")),
-            }
-        };
-
-        // Create initial progress
-        let progress = ScanProgress {
-            scan_id: scan_id.clone(),
-            status: ScanStatus::Pending,
-            path: paths.join(", "),
-            library_name: None, // Will be set if this is a library scan
-            library_id: request.library_id.as_ref().map(|id| id.to_string()),
-            total_files: 0,
-            scanned_files: 0,
-            stored_files: 0,
-            metadata_fetched: 0,
-            skipped_samples: 0,
-            errors: vec![],
-            current_file: None,
-            started_at: chrono::Utc::now(),
-            completed_at: None,
-            estimated_time_remaining: None,
-        };
-
-        // Store in active scans
-        self.active_scans
-            .write()
-            .await
-            .insert(scan_id.clone(), progress.clone());
-
-        // Send media event for scan started
-        self.send_media_event(MediaEvent::ScanStarted {
-            scan_id: scan_id.clone(),
-        })
-        .await;
-
-        // Spawn background scan task
-        let scan_manager = Arc::new(self.clone());
-        let scan_id_clone = scan_id.clone();
-
-        tokio::spawn(async move {
-            if let Err(e) = scan_manager
-                .execute_scan(scan_id_clone.clone(), request, paths)
-                .await
-            {
-                error!("Scan failed: {}", e);
-                scan_manager
-                    .update_progress(&scan_id_clone, |p| {
-                        p.status = ScanStatus::Failed;
-                        p.errors.push(format!("Scan failed: {}", e));
-                        p.completed_at = Some(chrono::Utc::now());
-                    })
-                    .await;
-            }
-        });
-
-        Ok(scan_id)
-    }
-
     /// Start a streaming scan for a library
-    pub async fn start_library_scan(&self, library: Arc<ferrex_core::Library>, force_rescan: bool) -> Result<String, anyhow::Error> {
+    pub async fn start_library_scan(
+        &self,
+        library: Arc<ferrex_core::Library>,
+        _force_rescan: bool,
+    ) -> Result<String, anyhow::Error> {
         let scan_id = Uuid::new_v4().to_string();
-        
-        info!("Starting streaming scan {} for library: {} ({})", scan_id, library.name, library.id);
-        
+
+        info!(
+            "Starting streaming scan {} for library: {} ({})",
+            scan_id, library.name, library.id
+        );
+
+        // Verify the library exists in the database before starting scan
+        match self.db.backend().get_library(&library.id.to_string()).await {
+            Ok(Some(_)) => {
+                info!("Library {} verified in database", library.id);
+            }
+            Ok(None) => {
+                error!(
+                    "Library {} does not exist in database! Cannot start scan.",
+                    library.id
+                );
+                return Err(anyhow::anyhow!(
+                    "Library {} does not exist in database. Please create the library first.",
+                    library.id
+                ));
+            }
+            Err(e) => {
+                error!("Failed to verify library {}: {}", library.id, e);
+                return Err(anyhow::anyhow!("Failed to verify library existence: {}", e));
+            }
+        }
+
         // Create initial progress
         let progress = ScanProgress {
             scan_id: scan_id.clone(),
             status: ScanStatus::Pending,
-            path: library.paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "),
+            path: library
+                .paths
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
             library_name: Some(library.name.clone()),
             library_id: Some(library.id.to_string()),
             total_files: 0,
@@ -203,468 +177,222 @@ impl ScanManager {
             completed_at: None,
             estimated_time_remaining: None,
         };
-        
+
         // Store in active scans
         self.active_scans
             .write()
             .await
             .insert(scan_id.clone(), progress.clone());
-        
+
         // Send media event for scan started
         self.send_media_event(MediaEvent::ScanStarted {
             scan_id: scan_id.clone(),
         })
         .await;
-        
-        // Create streaming scanner
+
+        // Create streaming scanner v2
         let config = StreamingScannerConfig {
             folder_workers: 4,
-            file_workers: 8,
             batch_size: 100,
-            progress_buffer: 1000,
-            extract_metadata: true,
-            fetch_external_metadata: true,
-            generate_thumbnails: true,
+            tmdb_rate_limit_ms: 250,
+            fuzzy_match_threshold: 60,
+            cache_dir: Some(self.metadata_service.cache_dir().clone()),
         };
-        
-        let streaming_scanner = Arc::new(StreamingScanner::with_config(config, self.db.clone()));
-        let scan_handle = streaming_scanner.scan_library(library.clone(), force_rescan);
-        
-        // Convert streaming progress to our format and relay
+
+        // Convert Library to LibraryReference
+        info!(
+            "Converting Library to LibraryReference with ID: {}",
+            library.id
+        );
+        let library_ref = LibraryReference {
+            id: library.id,
+            name: library.name.clone(),
+            library_type: library.library_type,
+            paths: library.paths.clone(),
+        };
+        info!("LibraryReference created with ID: {}", library_ref.id);
+
+        let streaming_scanner = Arc::new(StreamingScannerV2::with_config(
+            config,
+            self.db.clone(),
+            self.tmdb_provider.clone(),
+        ));
+
+        // Create output channel for scan results
+        let (output_tx, mut output_rx) = mpsc::channel(1000);
+
+        // Start the scan
         let scan_manager = Arc::new(self.clone());
         let scan_id_clone = scan_id.clone();
-        let scan_handle_id = scan_handle.scan_id();
-        
+        let scanner_clone = streaming_scanner.clone();
+
         tokio::spawn(async move {
-            let mut progress_stream = scan_handle.progress_stream();
-            
-            while let Some(progress_event) = progress_stream.next().await {
-                match progress_event {
-                    ferrex_core::ScanProgress::ScanStarted { .. } => {
-                        scan_manager.update_progress(&scan_id_clone, |p| {
-                            p.status = ScanStatus::Scanning;
-                        }).await;
-                    }
-                    ferrex_core::ScanProgress::FileScanned { filename, current, total_estimate, .. } => {
-                        scan_manager.update_progress(&scan_id_clone, |p| {
-                            p.current_file = Some(filename);
-                            p.scanned_files = current;
-                            p.total_files = total_estimate;
-                            p.stored_files = current; // Assuming stored equals scanned
-                        }).await;
-                    }
-                    ferrex_core::ScanProgress::MetadataExtracted { .. } => {
-                        scan_manager.update_progress(&scan_id_clone, |p| {
-                            p.metadata_fetched += 1;
-                        }).await;
-                    }
-                    ferrex_core::ScanProgress::Error { error, .. } => {
-                        scan_manager.update_progress(&scan_id_clone, |p| {
-                            p.errors.push(error);
-                        }).await;
-                    }
-                    ferrex_core::ScanProgress::ScanCompleted { total_files, duration_secs: _, .. } => {
-                        scan_manager.update_progress(&scan_id_clone, |p| {
-                            p.status = ScanStatus::Completed;
-                            p.completed_at = Some(chrono::Utc::now());
-                            p.total_files = total_files;
-                            p.current_file = None;
-                            p.estimated_time_remaining = None;
-                        }).await;
-                        
-                        // Send scan completed event
-                        scan_manager.send_media_event(MediaEvent::ScanCompleted {
-                            scan_id: scan_id_clone.clone(),
-                        }).await;
-                        
-                        // Move to history
-                        if let Some(progress) = scan_manager.active_scans.write().await.remove(&scan_id_clone) {
-                            scan_manager.scan_history.write().await.push(progress);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            
-            info!("Streaming scan {} completed", scan_handle_id);
-        });
-        
-        Ok(scan_id)
-    }
+            // Update status to scanning
+            scan_manager
+                .update_progress(&scan_id_clone, |p| {
+                    p.status = ScanStatus::Scanning;
+                })
+                .await;
 
-    /// Execute the actual scan
-    async fn execute_scan(
-        &self,
-        scan_id: String,
-        request: ScanRequest,
-        paths: Vec<String>,
-    ) -> Result<(), anyhow::Error> {
-        info!("Starting scan {} for paths: {:?}", scan_id, paths);
-
-        self.update_progress(&scan_id, |p| {
-            p.status = ScanStatus::Scanning;
-        })
-        .await;
-
-        let start_time = std::time::Instant::now();
-        let mut all_files = Vec::new();
-
-        // Phase 1: Scan directories
-        for path in &paths {
-            let mut scanner = MediaScanner::new();
-            if let Some(depth) = request.max_depth {
-                scanner = scanner.with_max_depth(depth);
-            }
-            scanner = scanner.with_follow_links(request.follow_links);
-            
-            // Add library context if available
-            if let (Some(library_id), Some(library_type)) = (request.library_id, request.library_type.clone()) {
-                scanner = scanner.with_library(library_id, library_type);
-            }
-
-            match scanner.scan_directory(path) {
-                Ok(result) => {
-                    info!("Found {} video files in {}", result.video_files.len(), path);
-                    all_files.extend(result.video_files);
-
-                    if !result.errors.is_empty() {
-                        self.update_progress(&scan_id, |p| {
-                            p.errors.extend(result.errors);
-                        })
-                        .await;
-                    }
-                }
-                Err(e) => {
-                    warn!("Failed to scan {}: {}", path, e);
-                    self.update_progress(&scan_id, |p| {
-                        p.errors.push(format!("Failed to scan {}: {}", path, e));
+            // Run the scan
+            if let Err(e) = scanner_clone.scan_library(library_ref, output_tx).await {
+                error!("Scan failed: {}", e);
+                scan_manager
+                    .update_progress(&scan_id_clone, |p| {
+                        p.status = ScanStatus::Failed;
+                        p.errors.push(e.to_string());
+                        p.completed_at = Some(chrono::Utc::now());
                     })
                     .await;
-                }
             }
-        }
+        });
 
-        let total_files = all_files.len();
-        self.update_progress(&scan_id, |p| {
-            p.total_files = total_files;
-            p.status = ScanStatus::Processing;
-        })
-        .await;
+        // Process scan output events
+        let scan_manager_2 = Arc::new(self.clone());
+        let scan_id_clone_2 = scan_id.clone();
+        let db_2 = self.db.clone();
 
-        // Phase 2: Clean up deleted files if force rescan
-        if request.force_rescan {
-            info!("Force rescan enabled, cleaning up deleted files");
-            if let Err(e) = self.cleanup_all_deleted_files(&scan_id).await {
-                warn!("Failed to cleanup deleted files: {}", e);
-            }
-        }
+        tokio::spawn(async move {
+            let mut movies_found = 0;
+            let mut series_found = 0;
+            let mut episodes_found = 0;
 
-        // Phase 3: Process files concurrently
-        let extractor = if request.extract_metadata {
-            if let Some(library_type) = request.library_type.clone() {
-                Some(MetadataExtractor::with_library_type(library_type))
-            } else {
-                Some(MetadataExtractor::new())
-            }
-        } else {
-            None
-        };
-
-        // Concurrency configuration for metadata fetching
-        const MAX_CONCURRENT_METADATA: usize = 40; // TMDB allows 50 req/sec
-        const MAX_CONCURRENT_DB_OPS: usize = 20;
-        const MAX_CONCURRENT_THUMBNAILS: usize = 10;
-
-        let metadata_semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_METADATA));
-        let db_semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DB_OPS));
-        let thumbnail_semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_THUMBNAILS));
-
-        // Shared state for concurrent processing
-        let processed_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let self_arc = Arc::new(self.clone());
-        let scan_id_arc = Arc::new(scan_id.clone());
-        let force_rescan = request.force_rescan;
-        let extractor_arc = Arc::new(Mutex::new(extractor));
-
-        // Create futures for concurrent processing
-        let futures = all_files
-            .into_iter()
-            .enumerate()
-            .map(|(_index, mut media_file)| {
-                let scan_id = scan_id_arc.clone();
-                let scan_manager = self_arc.clone();
-                let metadata_sem = metadata_semaphore.clone();
-                let db_sem = db_semaphore.clone();
-                let thumb_sem = thumbnail_semaphore.clone();
-                let counter = processed_counter.clone();
-                let extractor_mutex = extractor_arc.clone();
-
-                async move {
-                    // Check if scan was cancelled
-                    if scan_manager.is_scan_cancelled(&scan_id).await {
-                        return;
+            while let Some(output) = output_rx.recv().await {
+                match output {
+                    ScanOutput::MovieFound(movie) => {
+                        movies_found += 1;
+                        scan_manager_2
+                            .update_progress(&scan_id_clone_2, |p| {
+                                p.scanned_files += 1;
+                                p.stored_files += 1;
+                            })
+                            .await;
+                        scan_manager_2
+                            .send_media_event(MediaEvent::MovieAdded { movie })
+                            .await;
                     }
-
-                    // Update progress
-                    let current_count =
-                        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-                    scan_manager
-                        .update_progress(&scan_id, |p| {
-                            p.current_file = Some(media_file.filename.clone());
-                            p.scanned_files = current_count;
-
-                            // Calculate ETA based on current processing rate
-                            let elapsed = start_time.elapsed();
-                            if elapsed.as_secs() > 0 {
-                                let rate = current_count as f64 / elapsed.as_secs_f64();
-                                let remaining = total_files - current_count;
-                                if rate > 0.0 {
-                                    p.estimated_time_remaining =
-                                        Some(Duration::from_secs_f64(remaining as f64 / rate));
+                    ScanOutput::SeriesFound(series) => {
+                        series_found += 1;
+                        scan_manager_2
+                            .send_media_event(MediaEvent::SeriesAdded { series })
+                            .await;
+                    }
+                    ScanOutput::SeasonFound(season) => {
+                        // Season is already stored in database by streaming_scanner_v2
+                        info!("Season found: {} S{} for series {}", 
+                              season.id.as_str(), 
+                              season.season_number.value(), 
+                              season.series_id.as_str());
+                        
+                        scan_manager_2
+                            .send_media_event(MediaEvent::SeasonAdded { season })
+                            .await;
+                    }
+                    ScanOutput::EpisodeFound(episode) => {
+                        episodes_found += 1;
+                        
+                        // Store episode in database
+                        if let Err(e) = db_2.backend().store_episode_reference(&episode).await {
+                            error!("Failed to store episode reference: {}. Episode: {} S{}E{} for series {}", 
+                                  e,
+                                  episode.id.as_str(),
+                                  episode.season_number.value(), 
+                                  episode.episode_number.value(),
+                                  episode.series_id.as_str());
+                        } else {
+                            info!("Stored episode {} S{}E{} for series {}", 
+                                  episode.id.as_str(),
+                                  episode.season_number.value(), 
+                                  episode.episode_number.value(),
+                                  episode.series_id.as_str());
+                        }
+                        
+                        scan_manager_2
+                            .update_progress(&scan_id_clone_2, |p| {
+                                p.scanned_files += 1;
+                                p.stored_files += 1;
+                            })
+                            .await;
+                        scan_manager_2
+                            .send_media_event(MediaEvent::EpisodeAdded { episode })
+                            .await;
+                    }
+                    ScanOutput::ScanProgress {
+                        folders_processed,
+                        total_folders,
+                        ..
+                    } => {
+                        scan_manager_2
+                            .update_progress(&scan_id_clone_2, |p| {
+                                if total_folders > 0 {
+                                    let percent =
+                                        (folders_processed as f64 / total_folders as f64) * 100.0;
+                                    p.current_file = Some(format!(
+                                        "Processing folders: {}/{} ({:.1}%)",
+                                        folders_processed, total_folders, percent
+                                    ));
                                 }
-                            }
-                        })
-                        .await;
+                            })
+                            .await;
+                    }
+                    ScanOutput::ScanComplete {
+                        movies_found: m,
+                        series_found: s,
+                        episodes_found: e,
+                        duration_secs,
+                        ..
+                    } => {
+                        info!(
+                            "Scan {} completed: {} movies, {} series, {} episodes in {}s",
+                            scan_id_clone_2, m, s, e, duration_secs
+                        );
 
-                    // Check if we should skip this file (for incremental scanning)
-                    if !force_rescan {
-                        if let Ok(Some(existing)) = scan_manager
-                            .db
-                            .backend()
-                            .get_media_by_path(&media_file.path.to_string_lossy())
+                        scan_manager_2
+                            .update_progress(&scan_id_clone_2, |p| {
+                                p.status = ScanStatus::Completed;
+                                p.completed_at = Some(chrono::Utc::now());
+                                p.total_files = m + e; // Movies + Episodes have files
+                                p.current_file = None;
+                                p.estimated_time_remaining = None;
+                            })
+                            .await;
+
+                        // Send scan completed event
+                        scan_manager_2
+                            .send_media_event(MediaEvent::ScanCompleted {
+                                scan_id: scan_id_clone_2.clone(),
+                            })
+                            .await;
+
+                        // Move to history
+                        if let Some(progress) = scan_manager_2
+                            .active_scans
+                            .write()
                             .await
+                            .remove(&scan_id_clone_2)
                         {
-                            // Skip if file hasn't been modified
-                            if let Ok(metadata) = tokio::fs::metadata(&media_file.path).await {
-                                if let Ok(modified) = metadata.modified() {
-                                    let modified_time =
-                                        chrono::DateTime::<chrono::Utc>::from(modified);
-                                    if modified_time <= existing.created_at {
-                                        return; // Skip unchanged file
-                                    }
-                                }
-                            }
+                            scan_manager_2.scan_history.write().await.push(progress);
                         }
                     }
-
-                    // Extract metadata (with mutex to avoid race conditions)
-                    {
-                        let mut extractor_guard = extractor_mutex.lock().await;
-                        if let Some(ref mut metadata_extractor) = *extractor_guard {
-                            match metadata_extractor.extract_metadata(&media_file.path) {
-                                Ok(metadata) => {
-                                    // Check if this is a sample file and skip it
-                                    if metadata_extractor.is_sample(&metadata) {
-                                        info!("Skipping sample file: {}", media_file.filename);
-                                        scan_manager
-                                            .update_progress(&scan_id, |p| {
-                                                p.skipped_samples += 1;
-                                            })
-                                            .await;
-                                        return; // Skip this file
-                                    }
-                                    media_file.metadata = Some(metadata);
-                                }
-                                Err(e) => {
-                                    let error_msg = format!(
-                                        "Metadata extraction failed for {}: {}",
-                                        media_file.filename, e
-                                    );
-                                    warn!("{}", error_msg);
-                                    scan_manager
-                                        .update_progress(&scan_id, |p| {
-                                            p.errors.push(error_msg);
-                                        })
-                                        .await;
-                                }
-                            }
-                        }
-                    }
-
-                    // Store in database with concurrency control
-                    let _db_permit = db_sem.acquire().await.unwrap();
-                    match scan_manager
-                        .db
-                        .backend()
-                        .store_media(media_file.clone())
-                        .await
-                    {
-                        Ok(id) => {
-                            scan_manager
-                                .update_progress(&scan_id, |p| {
-                                    p.stored_files += 1;
-                                })
-                                .await;
-                            drop(_db_permit); // Release early
-
-                            // Log media type before sending event
-                            let media_type = media_file
-                                .metadata
-                                .as_ref()
-                                .and_then(|m| m.parsed_info.as_ref())
-                                .map(|p| format!("{:?}", p.media_type))
-                                .unwrap_or_else(|| "Unknown".to_string());
-                            
-                            debug!(
-                                "Sending MediaAdded event for {} with type: {}",
-                                media_file.filename, media_type
-                            );
-                            
-                            // Send media event
-                            scan_manager
-                                .send_media_event(MediaEvent::MediaAdded {
-                                    media: media_file.clone(),
-                                })
-                                .await;
-
-                            // Fetch external metadata concurrently
-                            if media_file
-                                .metadata
-                                .as_ref()
-                                .map(|m| m.external_info.is_none())
-                                .unwrap_or(true)
-                            {
-                                let _metadata_permit = metadata_sem.acquire().await.unwrap();
-
-                                match scan_manager
-                                    .metadata_service
-                                    .fetch_metadata(&media_file)
-                                    .await
-                                {
-                                    Ok(detailed_info) => {
-                                        // Update media with external info
-                                        let mut updated_media = media_file.clone();
-                                        if let Some(ref mut metadata) = updated_media.metadata {
-                                            metadata.external_info =
-                                                Some(detailed_info.external_info.clone());
-                                        }
-
-                                        // Store updated media
-                                        if let Err(e) = scan_manager
-                                            .db
-                                            .backend()
-                                            .store_media(updated_media.clone())
-                                            .await
-                                        {
-                                            warn!(
-                                                "Failed to update media with TMDB metadata: {}",
-                                                e
-                                            );
-                                        } else {
-                                            scan_manager
-                                                .update_progress(&scan_id, |p| {
-                                                    p.metadata_fetched += 1;
-                                                })
-                                                .await;
-
-                                            // Cache poster if available
-                                            if let Some(poster_path) =
-                                                &detailed_info.external_info.poster_url
-                                            {
-                                                let media_id = id.split(':').last().unwrap_or(&id);
-                                                if let Err(e) = scan_manager
-                                                    .metadata_service
-                                                    .cache_poster(poster_path, media_id)
-                                                    .await
-                                                {
-                                                    warn!("Failed to cache poster: {}", e);
-                                                }
-                                            }
-
-                                            // Log media type before sending update event
-                                            let media_type = updated_media
-                                                .metadata
-                                                .as_ref()
-                                                .and_then(|m| m.parsed_info.as_ref())
-                                                .map(|p| format!("{:?}", p.media_type))
-                                                .unwrap_or_else(|| "Unknown".to_string());
-                                            
-                                            debug!(
-                                                "Sending MediaUpdated event for {} with type: {}",
-                                                updated_media.filename, media_type
-                                            );
-                                            
-                                            // Send media updated event
-                                            scan_manager
-                                                .send_media_event(MediaEvent::MediaUpdated {
-                                                    media: updated_media,
-                                                })
-                                                .await;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        warn!(
-                                            "Failed to fetch TMDB metadata for {}: {}",
-                                            media_file.filename, e
-                                        );
-                                    }
-                                }
-                            }
-
-                            // Extract thumbnail for TV episodes concurrently
-                            if let Some(metadata) = &media_file.metadata {
-                                if let Some(parsed) = &metadata.parsed_info {
-                                    if parsed.media_type == ferrex_core::MediaType::TvEpisode {
-                                        let _thumb_permit = thumb_sem.acquire().await.unwrap();
-                                        let media_id = id.split(':').last().unwrap_or(&id);
-                                        if let Err(e) = scan_manager
-                                            .thumbnail_service
-                                            .extract_thumbnail(
-                                                media_id,
-                                                &media_file.path.to_string_lossy(),
-                                            )
-                                            .await
-                                        {
-                                            warn!(
-                                                "Failed to extract thumbnail for {}: {}",
-                                                media_file.filename, e
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            let error_msg =
-                                format!("Failed to store {}: {}", media_file.filename, e);
-                            warn!("{}", error_msg);
-                            scan_manager
-                                .update_progress(&scan_id, |p| {
-                                    p.errors.push(error_msg);
-                                })
-                                .await;
-                        }
+                    ScanOutput::Error { path, error } => {
+                        let error_msg = if let Some(p) = path {
+                            format!("{}: {}", p, error)
+                        } else {
+                            error
+                        };
+                        scan_manager_2
+                            .update_progress(&scan_id_clone_2, |p| {
+                                p.errors.push(error_msg);
+                            })
+                            .await;
                     }
                 }
-            });
+            }
 
-        // Process all files concurrently
-        let mut stream = stream::iter(futures).buffer_unordered(MAX_CONCURRENT_DB_OPS);
-        while let Some(_) = stream.next().await {
-            // Progress is tracked in the futures above
-        }
+            info!("Scan {} output processing completed", scan_id_clone_2);
+        });
 
-        // Mark scan as completed
-        self.update_progress(&scan_id, |p| {
-            p.status = ScanStatus::Completed;
-            p.completed_at = Some(chrono::Utc::now());
-            p.current_file = None;
-            p.estimated_time_remaining = None;
-        })
-        .await;
-
-        // Send scan completed event
-        self.send_media_event(MediaEvent::ScanCompleted {
-            scan_id: scan_id.clone(),
-        })
-        .await;
-
-        // Move to history
-        if let Some(progress) = self.active_scans.write().await.remove(&scan_id) {
-            self.scan_history.write().await.push(progress);
-        }
-
-        Ok(())
+        Ok(scan_id)
     }
 
     /// Clean up all files that no longer exist on disk
@@ -808,6 +536,7 @@ impl Clone for ScanManager {
             db: self.db.clone(),
             metadata_service: self.metadata_service.clone(),
             thumbnail_service: self.thumbnail_service.clone(),
+            tmdb_provider: self.tmdb_provider.clone(),
         }
     }
 }

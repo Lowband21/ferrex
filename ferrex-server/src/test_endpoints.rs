@@ -96,9 +96,8 @@ pub async fn test_transcoding(
             .to_string(),
         size: std::fs::metadata(&path).ok().map(|m| m.len()).unwrap_or(0),
         created_at: chrono::Utc::now(),
-        metadata: metadata,
-        library_id: None,
-        parent_media_id: None,
+        media_file_metadata: metadata,
+        library_id: uuid::Uuid::nil(),
     };
 
     // Store in database
@@ -211,9 +210,8 @@ pub async fn test_hls_streaming(
             .to_string(),
         size: std::fs::metadata(&path).ok().map(|m| m.len()).unwrap_or(0),
         created_at: chrono::Utc::now(),
-        metadata: metadata,
-        library_id: None,
-        parent_media_id: None,
+        media_file_metadata: metadata,
+        library_id: uuid::Uuid::nil(),
     };
 
     // Store in database

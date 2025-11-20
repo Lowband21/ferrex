@@ -1,0 +1,325 @@
+use crate::api_types::MediaReference;
+use crate::messages::library::Message;
+use ferrex_core::MediaEvent;
+use futures::stream;
+use futures::StreamExt;
+use iced::Subscription;
+use tokio::sync::mpsc;
+
+/// Creates a subscription to server-sent events for library media changes
+pub fn media_events(server_url: String) -> Subscription<Message> {
+    #[derive(Debug, Clone, Hash)]
+    struct MediaEventsId(String);
+
+    Subscription::run_with(
+        MediaEventsId(server_url.clone()),
+        |MediaEventsId(server_url)| {
+            stream::unfold(
+                MediaEventState::new(server_url.to_owned()),
+                |mut state| async move {
+                    match state.next_event().await {
+                        Some(message) => Some((message, state)),
+                        None => {
+                            // Stream ended permanently
+                            None
+                        }
+                    }
+                },
+            )
+        },
+    )
+}
+
+/// Internal event type for channel communication
+#[derive(Debug)]
+enum MediaSseEvent {
+    Open,
+    Message(eventsource_stream::Event),
+    Error(String),
+    Closed,
+}
+
+/// State machine for media events SSE subscription
+struct MediaEventState {
+    server_url: String,
+    event_receiver: Option<mpsc::UnboundedReceiver<MediaSseEvent>>,
+    task_handle: Option<tokio::task::JoinHandle<()>>,
+    retry_count: u32,
+    max_retries: u32,
+}
+
+impl MediaEventState {
+    fn new(server_url: String) -> Self {
+        Self {
+            server_url,
+            event_receiver: None,
+            task_handle: None,
+            retry_count: 0,
+            max_retries: 10,
+        }
+    }
+
+    async fn next_event(&mut self) -> Option<Message> {
+        loop {
+            // Create event source if needed
+            if self.event_receiver.is_none() {
+                self.create_event_source().await;
+            }
+
+            // Try to get next event from channel
+            if let Some(receiver) = &mut self.event_receiver {
+                match receiver.recv().await {
+                    Some(MediaSseEvent::Open) => {
+                        log::info!("Library media events SSE connection opened");
+                        self.retry_count = 0;
+                        // Continue to next event
+                        continue;
+                    }
+
+                    Some(MediaSseEvent::Message(msg)) => {
+                        if let Some(message) = self.handle_sse_message(msg) {
+                            return Some(message);
+                        }
+                        // If no message, continue to next event
+                        continue;
+                    }
+
+                    Some(MediaSseEvent::Error(e)) => {
+                        log::error!("Library media events SSE error: {}", e);
+                        if self.handle_connection_error() {
+                            // Max retries exceeded, stop subscription
+                            return None;
+                        }
+                        // Otherwise, continue to retry
+                        continue;
+                    }
+
+                    Some(MediaSseEvent::Closed) | None => {
+                        log::warn!("Library media events SSE stream ended");
+                        // Clean up task handle
+                        if let Some(handle) = self.task_handle.take() {
+                            handle.abort();
+                        }
+                        if self.handle_connection_error() {
+                            // Max retries exceeded, stop subscription
+                            return None;
+                        }
+                        // Otherwise, continue to retry
+                        continue;
+                    }
+                }
+            } else {
+                // Failed to create event source after all retries
+                return None;
+            }
+        }
+    }
+
+    async fn create_event_source(&mut self) {
+        // Add exponential backoff delay for retries
+        if self.retry_count > 0 {
+            let delay_secs = std::cmp::min(30, 2u64.pow(self.retry_count - 1));
+            log::info!(
+                "Retrying media events connection after {} seconds (attempt #{})",
+                delay_secs,
+                self.retry_count + 1
+            );
+            tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+        }
+
+        let url = format!("{}/library/events/sse", self.server_url);
+        log::info!("Creating media events SSE connection to: {}", url);
+
+        // Create channel for communication
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.event_receiver = Some(rx);
+
+        // Spawn task to handle EventSource
+        let task_handle = tokio::spawn(async move {
+            let mut event_source = reqwest_eventsource::EventSource::get(&url);
+
+            while let Some(event) = event_source.next().await {
+                let sse_event = match event {
+                    Ok(reqwest_eventsource::Event::Open) => MediaSseEvent::Open,
+                    Ok(reqwest_eventsource::Event::Message(msg)) => MediaSseEvent::Message(msg),
+                    Err(e) => MediaSseEvent::Error(e.to_string()),
+                };
+
+                if tx.send(sse_event).is_err() {
+                    // Receiver dropped, exit task
+                    break;
+                }
+            }
+
+            // Send closed event
+            let _ = tx.send(MediaSseEvent::Closed);
+        });
+
+        self.task_handle = Some(task_handle);
+    }
+
+    fn handle_sse_message(&mut self, msg: eventsource_stream::Event) -> Option<Message> {
+        // Skip keepalive messages silently
+        if msg.data == "keepalive" || msg.data.is_empty() {
+            log::debug!("Received media event keepalive");
+            return None;
+        }
+
+        if msg.event == "media_event" {
+            log::debug!("Received media event: {}", msg.data);
+
+            match serde_json::from_str::<MediaEvent>(&msg.data) {
+                Ok(event) => self.convert_media_event(event),
+                Err(e) => {
+                    log::error!("Failed to parse media event: {} - Data: {}", e, msg.data);
+                    // Continue listening for valid messages
+                    None
+                }
+            }
+        } else {
+            // Unknown event type, log and continue
+            log::debug!(
+                "Unknown media event type: {} with data: {}",
+                msg.event,
+                msg.data
+            );
+            None
+        }
+    }
+
+    fn handle_connection_error(&mut self) -> bool {
+        self.event_receiver = None;
+        if let Some(handle) = self.task_handle.take() {
+            handle.abort();
+        }
+        self.retry_count += 1;
+
+        if self.retry_count > self.max_retries {
+            log::error!("Max retries exceeded for media events connection");
+            // Return true to indicate we should stop
+            return true;
+        }
+
+        // Return false to indicate we should continue retrying
+        false
+    }
+
+    fn convert_media_event(&self, event: MediaEvent) -> Option<Message> {
+        match event {
+            // These events indicate we should refresh our library data
+            MediaEvent::MovieAdded { movie } => {
+                log::info!("Movie added: {}", movie.title.as_str());
+                Some(Message::MediaDiscovered(vec![MediaReference::Movie(movie)]))
+            }
+            MediaEvent::SeriesAdded { series } => {
+                log::info!("Series added: {}", series.title.as_str());
+                Some(Message::MediaDiscovered(vec![MediaReference::Series(
+                    series,
+                )]))
+            }
+            MediaEvent::SeasonAdded { season } => {
+                log::info!(
+                    "Season added: S{} for series {}",
+                    season.season_number.value(),
+                    season.series_id.as_str()
+                );
+                Some(Message::MediaDiscovered(vec![MediaReference::Season(
+                    season,
+                )]))
+            }
+            MediaEvent::EpisodeAdded { episode } => {
+                log::info!(
+                    "Episode added: S{}E{}",
+                    episode.season_number.value(),
+                    episode.episode_number.value()
+                );
+                Some(Message::MediaDiscovered(vec![MediaReference::Episode(
+                    episode,
+                )]))
+            }
+
+            // Updates require refreshing existing data
+            MediaEvent::MovieUpdated { movie } => {
+                log::info!("Movie updated: {}", movie.title.as_str());
+                Some(Message::MediaUpdated(MediaReference::Movie(movie)))
+            }
+            MediaEvent::SeriesUpdated { series } => {
+                log::info!("Series updated: {}", series.title.as_str());
+                Some(Message::MediaUpdated(MediaReference::Series(series)))
+            }
+            MediaEvent::SeasonUpdated { season } => {
+                log::info!("Season updated: S{}", season.season_number.value());
+                Some(Message::MediaUpdated(MediaReference::Season(season)))
+            }
+            MediaEvent::EpisodeUpdated { episode } => {
+                log::info!(
+                    "Episode updated: S{}E{}",
+                    episode.season_number.value(),
+                    episode.episode_number.value()
+                );
+                Some(Message::MediaUpdated(MediaReference::Episode(episode)))
+            }
+
+            // Deletion events
+            MediaEvent::MediaDeleted { id } => {
+                log::info!("Media deleted: {:?}", id);
+                Some(Message::MediaDeleted(id))
+            }
+
+            // Scan events are already handled by scan subscription
+            MediaEvent::ScanStarted { scan_id } => {
+                log::debug!(
+                    "Ignoring ScanStarted event {} - handled by scan subscription",
+                    scan_id
+                );
+                None
+            }
+            MediaEvent::ScanCompleted { scan_id } => {
+                log::debug!(
+                    "Ignoring ScanCompleted event {} - handled by scan subscription",
+                    scan_id
+                );
+                None
+            }
+            MediaEvent::ScanProgress { scan_id, .. } => {
+                log::debug!(
+                    "Ignoring ScanProgress event {} - handled by scan subscription",
+                    scan_id
+                );
+                None
+            }
+            MediaEvent::ScanFailed { scan_id, error } => {
+                log::error!("Scan {} failed: {}", scan_id, error);
+                // Could emit a scan failed message if needed
+                None
+            }
+        }
+    }
+}
+
+impl Drop for MediaEventState {
+    fn drop(&mut self) {
+        // Clean up the spawned task when the state is dropped
+        if let Some(handle) = self.task_handle.take() {
+            handle.abort();
+        }
+    }
+}
+
+// Helper extension to convert MediaReference to legacy MediaFile if needed
+impl Message {
+    /// Create a MediaDiscovered message from media references
+    pub fn media_discovered(references: Vec<MediaReference>) -> Self {
+        Message::MediaDiscovered(references)
+    }
+
+    /// Create a MediaUpdated message from a media reference
+    pub fn media_updated(reference: MediaReference) -> Self {
+        Message::MediaUpdated(reference)
+    }
+
+    /// Create a MediaDeleted message from a media ID
+    pub fn media_deleted(id: String) -> Self {
+        Message::MediaDeleted(id)
+    }
+}

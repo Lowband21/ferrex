@@ -1,21 +1,22 @@
 use anyhow::Result;
-use ferrex_core::{
-    providers::traits::{DetailedMediaInfo, MediaQuery},
-    MediaFile, MetadataProvider, ProviderError, TmdbProvider,
-};
+use ferrex_core::{MediaFile, TmdbApiProvider};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
+// TODO: This service is part of the old architecture and should be refactored
+// to work with the new reference-based types when the client is updated
+
 pub struct MetadataService {
-    tmdb_provider: Option<Arc<TmdbProvider>>,
+    pub tmdb_provider: Option<Arc<TmdbApiProvider>>,
     cache_dir: PathBuf,
 }
 
 impl MetadataService {
-    pub fn new(tmdb_api_key: Option<String>, cache_dir: PathBuf) -> Self {
-        let tmdb_provider = tmdb_api_key.map(|key| Arc::new(TmdbProvider::new(key)));
+    pub fn new(_tmdb_api_key: Option<String>, cache_dir: PathBuf) -> Self {
+        // For now, always create TmdbApiProvider which gets key from env
+        let tmdb_provider = Some(Arc::new(TmdbApiProvider::new()));
 
         Self {
             tmdb_provider,
@@ -23,81 +24,68 @@ impl MetadataService {
         }
     }
 
-    /// Fetch metadata for a media file
-    pub async fn fetch_metadata(&self, media_file: &MediaFile) -> Result<DetailedMediaInfo> {
-        // Check if we have parsed info to search with
-        let parsed_info = media_file
-            .metadata
-            .as_ref()
-            .and_then(|m| m.parsed_info.as_ref())
-            .ok_or_else(|| anyhow::anyhow!("No parsed info available"))?;
-
-        tracing::info!(
-            "Fetching metadata for: {} (type: {:?})",
-            parsed_info.title,
-            parsed_info.media_type
-        );
-
-        // For TV shows, use show_name for search, not the full title
-        let search_title = match parsed_info.media_type {
-            ferrex_core::MediaType::TvEpisode => {
-                let show_name = parsed_info
-                    .show_name
-                    .clone()
-                    .unwrap_or_else(|| parsed_info.title.clone());
-
-                // Clean show name for TMDB search - remove year in parentheses
-                // e.g., "The Americans (2013)" -> "The Americans"
-                let cleaned = regex::Regex::new(r"\s*\(\d{4}\)\s*$")
-                    .unwrap()
-                    .replace(&show_name, "")
-                    .to_string();
-
-                tracing::info!(
-                    "Cleaned show name for search: '{}' -> '{}'",
-                    show_name,
-                    cleaned
-                );
-                cleaned
-            }
-            _ => parsed_info.title.clone(),
-        };
-
-        let query = MediaQuery {
-            title: search_title,
-            year: parsed_info.year,
-            media_type: parsed_info.media_type.clone(),
-            show_name: parsed_info.show_name.clone(),
-            season: parsed_info.season,
-            episode: parsed_info.episode,
-        };
-
-        // Try TMDB first
-        if let Some(tmdb) = &self.tmdb_provider {
-            match self.search_and_fetch_tmdb(&**tmdb, &query).await {
-                Ok(info) => return Ok(info),
-                Err(e) => {
-                    tracing::warn!("TMDB fetch failed: {}", e);
-                }
-            }
-        }
-
-        Err(anyhow::anyhow!("No metadata providers available"))
+    /// Get the cache directory path
+    pub fn cache_dir(&self) -> &PathBuf {
+        &self.cache_dir
     }
 
-    async fn search_and_fetch_tmdb(
-        &self,
-        provider: &TmdbProvider,
-        query: &MediaQuery,
-    ) -> Result<DetailedMediaInfo, ProviderError> {
-        // Search for the media
-        let results = provider.search(query).await?;
+    /// Fetch metadata for a media file - DEPRECATED
+    pub async fn fetch_metadata(&self, _media_file: &MediaFile) -> Result<()> {
+        // Return empty metadata for now - this is deprecated functionality
+        Err(anyhow::anyhow!(
+            "Metadata fetching not supported in transition period"
+        ))
+    }
 
-        // Get the first result (TODO: implement better matching)
-        let result = results.into_iter().next().ok_or(ProviderError::NotFound)?;
+    /// Fetch TV show metadata directly by TMDB ID - DEPRECATED
+    pub async fn fetch_tv_show_metadata(&self, _tmdb_id: u32) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "TV metadata fetching not supported in transition period"
+        ))
+    }
 
-        // Fetch detailed metadata with season/episode info if available
-        provider.get_metadata_with_details(&result.id, query).await
+    /// Search for a TV show by name and fetch its metadata - DEPRECATED
+    pub async fn search_and_fetch_show_metadata(&self, _show_name: &str) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "TV metadata fetching not supported in transition period"
+        ))
+    }
+
+    /// Download and cache a TV show poster
+    pub async fn download_show_poster(&self, show_name: &str, poster_url: &str) -> Result<PathBuf> {
+        let cache_key = format!("show_{}", show_name.replace(' ', "_"));
+        let cache_filename = format!("{}.png", cache_key);
+        let cache_path = self.cache_dir.join("posters").join(&cache_filename);
+
+        // Check if already cached
+        if cache_path.exists() {
+            return Ok(cache_path);
+        }
+
+        // Ensure directory exists
+        fs::create_dir_all(cache_path.parent().unwrap()).await?;
+
+        // Download image
+        let response = reqwest::get(poster_url).await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "Failed to download show poster: {}",
+                response.status()
+            ));
+        }
+
+        let bytes = response.bytes().await?;
+        let mut file = fs::File::create(&cache_path).await?;
+        file.write_all(&bytes).await?;
+
+        tracing::info!(
+            "Downloaded show poster for '{}' to {:?}",
+            show_name,
+            cache_path
+        );
+
+        Ok(cache_path)
     }
 
     /// Download and cache a poster image
@@ -114,8 +102,13 @@ impl MetadataService {
         fs::create_dir_all(cache_path.parent().unwrap()).await?;
 
         // Download from TMDB
-        if let Some(tmdb) = &self.tmdb_provider {
-            let url = format!("{}/w500{}", tmdb.image_base_url(), poster_path);
+        if let Some(_tmdb) = &self.tmdb_provider {
+            let url = if poster_path.starts_with("http") {
+                poster_path.to_string()
+            } else {
+                format!("https://image.tmdb.org/t/p/w500{}", poster_path)
+            };
+
             let response = reqwest::get(&url).await?;
 
             if !response.status().is_success() {
@@ -137,7 +130,7 @@ impl MetadataService {
 
     /// Get a cached poster path if it exists
     pub fn get_cached_poster(&self, media_id: &str) -> Option<PathBuf> {
-        // Try PNG first 
+        // Try PNG first
         let png_filename = format!("{}_poster.png", media_id);
         let png_path = self.cache_dir.join("posters").join(&png_filename);
 
@@ -161,17 +154,15 @@ impl MetadataService {
         if image_path.starts_with("http://") || image_path.starts_with("https://") {
             // Already a full URL
             Some(image_path.to_string())
-        } else if let Some(tmdb) = &self.tmdb_provider {
-            // Build full TMDB URL
-            Some(format!("{}/w500{}", tmdb.image_base_url(), image_path))
         } else {
-            None
+            // Build full TMDB URL
+            Some(format!("https://image.tmdb.org/t/p/w500{}", image_path))
         }
     }
 
     /// Cache an image from a URL with a specific cache key
     pub async fn cache_image_from_url(&self, url: &str, cache_key: &str) -> Result<PathBuf> {
-        let cache_filename = format!("{}.png", cache_key); // Changed to PNG
+        let cache_filename = format!("{}.png", cache_key);
         let cache_path = self.cache_dir.join("posters").join(&cache_filename);
 
         // Check if already cached
@@ -257,7 +248,7 @@ impl MetadataService {
     pub fn get_poster_path(&self, media_id: &str) -> PathBuf {
         self.cache_dir
             .join("posters")
-            .join(format!("{}.png", media_id)) // Changed to PNG
+            .join(format!("{}.png", media_id))
     }
 
     /// Cache a season poster
@@ -268,7 +259,7 @@ impl MetadataService {
         season_num: u32,
     ) -> Result<PathBuf> {
         let cache_key = format!("season_{}_{}", show_name.replace(' ', "_"), season_num);
-        let cache_filename = format!("{}.png", cache_key); // Changed to PNG
+        let cache_filename = format!("{}.png", cache_key);
         let cache_path = self.cache_dir.join("posters").join(&cache_filename);
 
         // Check if already cached
@@ -280,29 +271,36 @@ impl MetadataService {
         fs::create_dir_all(cache_path.parent().unwrap()).await?;
 
         // Download from TMDB
-        if let Some(tmdb) = &self.tmdb_provider {
-            let url = if poster_path.starts_with("http") {
-                poster_path.to_string()
-            } else {
-                format!("{}/w500{}", tmdb.image_base_url(), poster_path)
-            };
-
-            let response = reqwest::get(&url).await?;
-
-            if !response.status().is_success() {
-                return Err(anyhow::anyhow!(
-                    "Failed to download season poster: {}",
-                    response.status()
-                ));
-            }
-
-            let bytes = response.bytes().await?;
-            let mut file = fs::File::create(&cache_path).await?;
-            file.write_all(&bytes).await?;
-
-            Ok(cache_path)
+        let url = if poster_path.starts_with("http") {
+            poster_path.to_string()
         } else {
-            Err(anyhow::anyhow!("No TMDB provider configured"))
+            format!("https://image.tmdb.org/t/p/w500{}", poster_path)
+        };
+
+        let response = reqwest::get(&url).await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "Failed to download season poster: {}",
+                response.status()
+            ));
         }
+
+        let bytes = response.bytes().await?;
+        let mut file = fs::File::create(&cache_path).await?;
+        file.write_all(&bytes).await?;
+
+        Ok(cache_path)
     }
+}
+
+// Temporary stub for DetailedMediaInfo - part of old architecture
+#[derive(Debug, Clone)]
+pub struct DetailedMediaInfo {
+    pub external_info: ExternalMediaInfo,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExternalMediaInfo {
+    pub poster_url: Option<String>,
 }

@@ -1,31 +1,156 @@
+//! # Ferrex Core
+//! 
+//! Core library for the Ferrex Media Server, providing fundamental types, database abstractions,
+//! and business logic for media management, user authentication, and playback synchronization.
+//!
+//! ## Overview
+//!
+//! `ferrex-core` is the foundation of the Ferrex Media Server ecosystem, offering:
+//!
+//! - **Media Management**: Comprehensive types for movies, TV shows, episodes, and media files
+//! - **User System**: JWT-based authentication with session management
+//! - **Watch Status Tracking**: Track viewing progress and completion status
+//! - **Synchronized Playback**: Real-time synchronized viewing sessions
+//! - **Database Abstraction**: Trait-based database interface supporting multiple backends
+//! - **Metadata Processing**: Integration with TMDB for media metadata
+//! - **Query System**: Flexible media querying with filters and sorting
+//!
+//! ## Feature Flags
+//!
+//! - `database`: Enables database functionality (PostgreSQL/SQLx support)
+//! - `ffmpeg`: Enables FFmpeg-based metadata extraction
+//! - `test-utils`: Provides utilities for testing
+//!
+//! ## Architecture
+//!
+//! The crate is organized into several key modules:
+//!
+//! - [`api_types`]: Common types used across API boundaries
+//! - [`user`]: User authentication and session management
+//! - [`watch_status`]: Media playback progress tracking
+//! - [`sync_session`]: Synchronized playback session management
+//! - [`query`]: Advanced media querying capabilities
+//! - [`database`]: Database traits and implementations
+//!
+//! ## Examples
+//!
+//! ```no_run
+//! use ferrex_core::{MediaDatabase, user::RegisterRequest};
+//! 
+//! async fn register_user(db: &MediaDatabase) -> Result<(), Box<dyn std::error::Error>> {
+//!     let request = RegisterRequest {
+//!         username: "alice".to_string(),
+//!         password: "secure_password".to_string(),
+//!         display_name: Some("Alice".to_string()),
+//!     };
+//!     
+//!     let user = db.backend().create_user(request).await?;
+//!     println!("Created user: {}", user.username);
+//!     Ok(())
+//! }
+//! ```
+
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![warn(missing_docs)]
+
+/// Common API types used across the Ferrex ecosystem
+pub mod api_types;
+
+/// Database abstraction layer and implementations
 #[cfg(feature = "database")]
+#[cfg_attr(docsrs, doc(cfg(feature = "database")))]
 pub mod database;
+
+/// Error types and error handling utilities
 pub mod error;
+
+/// Parser for identifying and organizing media extras (trailers, featurettes, etc.)
 pub mod extras_parser;
+
+/// Image caching and serving service
+#[cfg(feature = "database")]
+#[cfg_attr(docsrs, doc(cfg(feature = "database")))]
+pub mod image_service;
+
+/// Media library management and organization
 pub mod library;
+
+/// Core media types (Movie, Series, Episode) and references
 pub mod media;
+
+/// Media reference sorting and filtering extensions
+pub mod media_reference_ext;
+
+/// FFmpeg-based metadata extraction
 #[cfg(feature = "ffmpeg")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ffmpeg")))]
 pub mod metadata;
+
+/// External metadata providers (TMDB integration)
 pub mod providers;
+
+/// Advanced media query system with filtering and sorting
+pub mod query;
+
+/// Role-Based Access Control (RBAC) system
+pub mod rbac;
+
+/// Media library scanner using streaming approach
 #[cfg(feature = "database")]
+#[cfg_attr(docsrs, doc(cfg(feature = "database")))]
+pub mod streaming_scanner_v2;
+
+/// Public scanner interface (wraps streaming_scanner_v2)
+#[cfg(feature = "database")]
+#[cfg_attr(docsrs, doc(cfg(feature = "database")))]
 pub mod scanner;
-#[cfg(feature = "database")]
-pub mod streaming_scanner;
+
+/// Synchronized playback session management
+pub mod sync_session;
+
+/// TV show filename parser for extracting episode information
 pub mod tv_parser;
+
+/// Common types used throughout the crate
 pub mod types;
+
+/// User authentication and session management
+pub mod user;
+
+/// Enhanced authentication with device trust and PIN support
+pub mod auth;
+
+/// User management domain module with CRUD operations
+pub mod user_management;
+
+/// Media watch status and progress tracking
+pub mod watch_status;
 
 #[cfg(feature = "database")]
 pub use database::*;
 pub use error::*;
+#[cfg(feature = "database")]
+pub use image_service::{ImageService, TmdbImageSize};
 pub use extras_parser::ExtrasParser;
 pub use library::*;
 pub use media::*;
+pub use media_reference_ext::{MediaReferenceExt, MediaSortBy, MediaFilters};
 #[cfg(feature = "ffmpeg")]
 pub use metadata::*;
-pub use providers::{MetadataProvider, ProviderError, TmdbProvider};
+pub use providers::{ProviderError, TmdbApiProvider};
+// #[cfg(feature = "database")]
+// pub use scanner::*;  // Archived - using streaming_scanner_v2
+// #[cfg(feature = "database")]
+// pub use streaming_scanner::*;  // Archived - using streaming_scanner_v2
 #[cfg(feature = "database")]
-pub use scanner::*;
-#[cfg(feature = "database")]
-pub use streaming_scanner::*;
+pub use streaming_scanner_v2::*;
 pub use tv_parser::{TvParser, EpisodeInfo};
 pub use types::{TranscodingJobResponse, TranscodingStatus, TranscodingProgressDetails};
+pub use api_types::*;
+pub use user::*;
+pub use watch_status::*;
+pub use sync_session::*;
+pub use query::*;
+pub use rbac::*;
+pub use auth::*;
+// user_management is available as a module but not re-exported to avoid conflicts

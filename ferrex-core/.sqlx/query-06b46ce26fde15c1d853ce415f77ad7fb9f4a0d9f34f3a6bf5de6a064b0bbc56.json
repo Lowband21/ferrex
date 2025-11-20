@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                id, \n                user_id, \n                ip_address::text as ip_address, \n                user_agent, \n                EXTRACT(EPOCH FROM last_active)::BIGINT * 1000 as last_active,\n                EXTRACT(EPOCH FROM created_at)::BIGINT * 1000 as created_at\n            FROM user_sessions\n            WHERE user_id = $1\n            ORDER BY last_active DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "ip_address",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "user_agent",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_active",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "06b46ce26fde15c1d853ce415f77ad7fb9f4a0d9f34f3a6bf5de6a064b0bbc56"
+}

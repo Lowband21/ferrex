@@ -1,5 +1,5 @@
 [database]
-url = "postgresql://postgres:password@localhost/rusty_media_server"
+url = "postgresql://postgres:password@localhost/ferrex"
 
 [migrations]
 table_name = "_sqlx_migrations"

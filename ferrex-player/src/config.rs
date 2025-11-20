@@ -28,7 +28,7 @@ impl Config {
         } else {
             Self::default()
         };
-        
+
         // Then load from config file (which can override env var)
         if let Some(config_dir) = dirs::config_dir() {
             let config_path = config_dir.join("ferrex-player").join("config.json");
@@ -40,12 +40,12 @@ impl Config {
                 }
             }
         }
-        
+
         // Allow env var to override config file for server URL
         if let Ok(server_url) = std::env::var("FERREX_SERVER_URL") {
             config.server_url = server_url;
         }
-        
+
         config
     }
 

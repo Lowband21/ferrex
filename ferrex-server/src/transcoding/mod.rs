@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod config;
+pub mod handlers;
 pub mod hardware;
 pub mod job;
 pub mod profiles;
@@ -22,14 +23,18 @@ use uuid::Uuid;
 use self::cache::{CacheCleaner, CacheManager};
 use self::config::{ToneMappingConfig, TranscodingConfig};
 use self::hardware::{HardwareDetector, HardwareSelector};
-use self::job::{JobMessage, JobPriority, JobProgress, JobResponse, JobType, SourceVideoMetadata, TranscodingJob, TranscodingStatus};
-use self::profiles::{AdaptiveBitrateProfile, TranscodingProfile, ProfileVariant};
+use self::job::{
+    JobMessage, JobPriority, JobProgress, JobResponse, JobType, SourceVideoMetadata,
+    TranscodingJob, TranscodingStatus,
+};
+use self::profiles::{AdaptiveBitrateProfile, ProfileVariant, TranscodingProfile};
 use self::queue::{JobQueue, JobQueueHandle};
 use self::segments::SegmentGenerator;
 use self::worker::{WorkerConfig, WorkerPool};
 
 /// Cached hardware encoders to avoid re-detection
-static HARDWARE_ENCODERS_CACHE: std::sync::OnceLock<Vec<hardware::HardwareEncoder>> = std::sync::OnceLock::new();
+static HARDWARE_ENCODERS_CACHE: std::sync::OnceLock<Vec<hardware::HardwareEncoder>> =
+    std::sync::OnceLock::new();
 
 /// Main transcoding service
 pub struct TranscodingService {
@@ -62,7 +67,7 @@ impl TranscodingService {
             let detector = HardwareDetector::new(config.ffmpeg_path.clone());
             let encoders = detector.detect_hardware_encoders().await?;
             info!("Hardware detection completed in {:?}", start.elapsed());
-            
+
             // Try to cache the result
             let _ = HARDWARE_ENCODERS_CACHE.set(encoders.clone());
             encoders
@@ -71,7 +76,7 @@ impl TranscodingService {
 
         // Create job queue
         let (queue, queue_handle) = JobQueue::new(config.max_concurrent_jobs * 10);
-        
+
         // Create progress channel
         let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<JobProgress>(100);
 
@@ -124,7 +129,7 @@ impl TranscodingService {
             progress_store: Arc::new(RwLock::new(HashMap::new())),
             media_cache: Arc::new(RwLock::new(HashMap::new())),
         };
-        
+
         // Spawn progress update handler
         let progress_store_clone = service.progress_store.clone();
         tokio::spawn(async move {
@@ -133,13 +138,13 @@ impl TranscodingService {
                 store.insert(progress.job_id.clone(), progress);
             }
         });
-        
+
         Ok(service)
     }
 
     /// Check if a media file contains HDR content
     pub async fn is_hdr_content(media: &MediaFile) -> bool {
-        if let Some(metadata) = &media.metadata {
+        if let Some(metadata) = &media.media_file_metadata {
             // Check for HDR indicators
             if let Some(bit_depth) = metadata.bit_depth {
                 if bit_depth > 8 {
@@ -169,7 +174,7 @@ impl TranscodingService {
     /// Get media with request-level caching
     async fn get_media_cached(&self, media_id: &str) -> Result<MediaFile> {
         const CACHE_TTL: Duration = Duration::from_secs(30);
-        
+
         // Check cache first
         {
             let cache = self.media_cache.read().await;
@@ -179,7 +184,7 @@ impl TranscodingService {
                 }
             }
         }
-        
+
         // Not in cache or expired, fetch from database
         let media = self
             .db
@@ -188,19 +193,22 @@ impl TranscodingService {
             .await
             .context("Failed to get media from database")?
             .ok_or_else(|| anyhow::anyhow!("Media not found"))?;
-        
+
         // Update cache
         {
             let mut cache = self.media_cache.write().await;
-            cache.insert(media_id.to_string(), (std::time::Instant::now(), media.clone()));
-            
+            cache.insert(
+                media_id.to_string(),
+                (std::time::Instant::now(), media.clone()),
+            );
+
             // Clean up old entries if cache gets too large
             if cache.len() > 100 {
                 let now = std::time::Instant::now();
                 cache.retain(|_, (cached_at, _)| now.duration_since(*cached_at) < CACHE_TTL);
             }
         }
-        
+
         Ok(media)
     }
 
@@ -213,7 +221,7 @@ impl TranscodingService {
         priority: Option<JobPriority>,
     ) -> Result<String> {
         let start = std::time::Instant::now();
-        
+
         // Get media file from database (with caching)
         let media = self.get_media_cached(media_id).await?;
 
@@ -253,15 +261,15 @@ impl TranscodingService {
             output_dir,
             priority.unwrap_or_default(),
         );
-        
+
         // Set tone mapping config if provided
         job.tone_mapping_config = _tone_mapping_config;
-        
+
         // Extract source metadata for accurate progress tracking
-        if let Some(metadata) = &media.metadata {
+        if let Some(metadata) = &media.media_file_metadata {
             let duration = metadata.duration.unwrap_or(0.0);
             let framerate = metadata.framerate.unwrap_or(25.0); // Default to 25fps if unknown
-            
+
             job.source_metadata = Some(SourceVideoMetadata {
                 duration,
                 framerate,
@@ -275,7 +283,11 @@ impl TranscodingService {
         // Submit job to queue
         self.queue_handle.submit(job).await?;
 
-        info!("Transcoding job {} created in: {:?}", job_id, start.elapsed());
+        info!(
+            "Transcoding job {} created in: {:?}",
+            job_id,
+            start.elapsed()
+        );
         Ok(job_id)
     }
 
@@ -287,7 +299,7 @@ impl TranscodingService {
     ) -> Result<String> {
         let overall_start = std::time::Instant::now();
         info!("Starting adaptive transcoding for media: {}", media_id);
-        
+
         if !self.config.enable_adaptive_bitrate {
             return Err(anyhow::anyhow!("Adaptive bitrate streaming is disabled"));
         }
@@ -298,7 +310,7 @@ impl TranscodingService {
         info!("Database lookup took: {:?}", db_start.elapsed());
 
         // Get video dimensions
-        let (width, height) = if let Some(metadata) = &media.metadata {
+        let (width, height) = if let Some(metadata) = &media.media_file_metadata {
             (
                 metadata.width.unwrap_or(1920),
                 metadata.height.unwrap_or(1080),
@@ -312,27 +324,44 @@ impl TranscodingService {
 
         // Check if all variants are already cached (in parallel)
         let has_any_variant = !adaptive_profile.variants.is_empty();
-        
+
         // Check all variants in parallel for better performance
         let cache_check_start = std::time::Instant::now();
-        let cache_checks: Vec<_> = adaptive_profile.variants.iter().map(|variant| {
-            let profile_name = format!("adaptive_{}", variant.name);
-            let cache_manager = self.cache_manager.clone();
-            let media_id = media_id.to_string();
-            async move {
-                cache_manager.has_cached_version(&media_id, &profile_name).await
-            }
-        }).collect();
-        
+        let cache_checks: Vec<_> = adaptive_profile
+            .variants
+            .iter()
+            .map(|variant| {
+                let profile_name = format!("adaptive_{}", variant.name);
+                let cache_manager = self.cache_manager.clone();
+                let media_id = media_id.to_string();
+                async move {
+                    cache_manager
+                        .has_cached_version(&media_id, &profile_name)
+                        .await
+                }
+            })
+            .collect();
+
         let cache_results = future::join_all(cache_checks).await;
         let all_cached = has_any_variant && cache_results.iter().all(|&cached| cached);
-        info!("Cache checking {} variants took: {:?}", adaptive_profile.variants.len(), cache_check_start.elapsed());
-        
+        info!(
+            "Cache checking {} variants took: {:?}",
+            adaptive_profile.variants.len(),
+            cache_check_start.elapsed()
+        );
+
         // If all variants are cached and master playlist exists, return success immediately
         if all_cached && has_any_variant {
-            let master_path = self.config.transcode_cache_dir.join(media_id).join("master.m3u8");
+            let master_path = self
+                .config
+                .transcode_cache_dir
+                .join(media_id)
+                .join("master.m3u8");
             if tokio::fs::try_exists(&master_path).await.unwrap_or(false) {
-                info!("All variants already cached for media {}, using existing transcoding", media_id);
+                info!(
+                    "All variants already cached for media {}, using existing transcoding",
+                    media_id
+                );
                 return Ok(format!("cached_{}", media_id));
             }
         }
@@ -346,37 +375,49 @@ impl TranscodingService {
         // 2. Original quality for best experience
         let mut initial_variants = Vec::new();
         let mut remaining_variants = Vec::new();
-        
+
         // Debug: log all available variants
-        info!("Available variants: {:?}", adaptive_profile.variants.iter().map(|v| &v.name).collect::<Vec<_>>());
-        
+        info!(
+            "Available variants: {:?}",
+            adaptive_profile
+                .variants
+                .iter()
+                .map(|v| &v.name)
+                .collect::<Vec<_>>()
+        );
+
         // Find the fast variant and original quality
         for variant in &adaptive_profile.variants {
             match variant.name.as_str() {
                 "720p" | "480p" => {
-                    if initial_variants.iter().all(|v: &&ProfileVariant| v.name != "720p" && v.name != "480p") {
+                    if initial_variants
+                        .iter()
+                        .all(|v: &&ProfileVariant| v.name != "720p" && v.name != "480p")
+                    {
                         info!("Adding fast variant: {}", variant.name);
                         initial_variants.push(variant);
                     } else {
                         remaining_variants.push(variant);
                     }
-                },
+                }
                 "original" => {
                     info!("Adding original quality variant");
                     initial_variants.push(variant);
-                },
+                }
                 _ => remaining_variants.push(variant),
             }
         }
-        
+
         // Ensure we have at least 2 variants to start
         while initial_variants.len() < 2 && !remaining_variants.is_empty() {
             initial_variants.push(remaining_variants.remove(0));
         }
-        
-        info!("Starting {} initial variants for immediate playback: {:?}", 
+
+        info!(
+            "Starting {} initial variants for immediate playback: {:?}",
             initial_variants.len(),
-            initial_variants.iter().map(|v| &v.name).collect::<Vec<_>>());
+            initial_variants.iter().map(|v| &v.name).collect::<Vec<_>>()
+        );
 
         // Start initial variants with high priority
         for variant in &initial_variants {
@@ -394,47 +435,53 @@ impl TranscodingService {
             let job_id = self
                 .start_transcoding(media_id, profile, None, priority)
                 .await?;
-            
+
             // Skip cached versions - they don't need status tracking
             if !job_id.starts_with("cached_") {
                 variant_job_ids.push(job_id);
             }
         }
-        
+
         // Store remaining variants info for on-demand transcoding later
-        info!("Remaining variants available for on-demand transcoding: {:?}",
-            remaining_variants.iter().map(|v| &v.name).collect::<Vec<_>>());
-        
+        info!(
+            "Remaining variants available for on-demand transcoding: {:?}",
+            remaining_variants
+                .iter()
+                .map(|v| &v.name)
+                .collect::<Vec<_>>()
+        );
+
         // Don't start remaining variants - they will be transcoded on-demand when requested
-        
+
         // If no new jobs were created (all cached), just return success
         if variant_job_ids.is_empty() {
             info!("All variants already cached for media {}", media_id);
             // Ensure master playlist exists
-            self.ensure_master_playlist_exists(media_id, &adaptive_profile).await?;
+            self.ensure_master_playlist_exists(media_id, &adaptive_profile)
+                .await?;
             return Ok(format!("cached_{}", media_id));
         }
 
         // Create master job that tracks all variant jobs
-        let master_output_dir = self
-            .config
-            .transcode_cache_dir
-            .join(media_id);
+        let master_output_dir = self.config.transcode_cache_dir.join(media_id);
 
-        info!("Creating master job {} with variant jobs: {:?}", master_job_id, variant_job_ids);
-        
+        info!(
+            "Creating master job {} with variant jobs: {:?}",
+            master_job_id, variant_job_ids
+        );
+
         // Create master playlist immediately
         fs::create_dir_all(&master_output_dir).await?;
         let master_playlist_path = master_output_dir.join("master.m3u8");
-        
+
         // Generate initial master playlist content - only include initial variants
         let mut master_content = "#EXTM3U\n#EXT-X-VERSION:3\n\n".to_string();
-        
+
         // Only add initial variants to master playlist
         let all_variants_for_playlist = initial_variants.clone();
         for variant in &all_variants_for_playlist {
             let profile_name = format!("adaptive_{}", variant.name);
-            
+
             let (width, height) = {
                 let parts: Vec<&str> = variant.resolution.split('x').collect();
                 if parts.len() == 2 {
@@ -443,28 +490,37 @@ impl TranscodingService {
                     (0, 0)
                 }
             };
-            
+
             let bandwidth = if variant.video_bitrate.ends_with('M') {
-                variant.video_bitrate.trim_end_matches('M')
+                variant
+                    .video_bitrate
+                    .trim_end_matches('M')
                     .parse::<u32>()
-                    .unwrap_or(0) * 1000000 // Convert Mbps to bps
+                    .unwrap_or(0)
+                    * 1000000 // Convert Mbps to bps
             } else if variant.video_bitrate.ends_with('k') {
-                variant.video_bitrate.trim_end_matches('k')
+                variant
+                    .video_bitrate
+                    .trim_end_matches('k')
                     .parse::<u32>()
-                    .unwrap_or(0) * 1000 // Convert kbps to bps
+                    .unwrap_or(0)
+                    * 1000 // Convert kbps to bps
             } else {
                 variant.video_bitrate.parse::<u32>().unwrap_or(0)
             };
-            
+
             master_content.push_str(&format!(
                 "#EXT-X-STREAM-INF:BANDWIDTH={},RESOLUTION={}x{}\nvariant/{}/playlist.m3u8\n\n",
                 bandwidth, width, height, profile_name
             ));
         }
-        
+
         // Write master playlist
         fs::write(&master_playlist_path, &master_content).await?;
-        info!("Created initial master playlist at: {:?}", master_playlist_path);
+        info!(
+            "Created initial master playlist at: {:?}",
+            master_playlist_path
+        );
 
         // Wait a moment to ensure variant jobs are in the queue
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -478,10 +534,10 @@ impl TranscodingService {
         );
 
         // Extract and store source metadata in master job too
-        if let Some(metadata) = &media.metadata {
+        if let Some(metadata) = &media.media_file_metadata {
             let duration = metadata.duration.unwrap_or(0.0);
             let framerate = metadata.framerate.unwrap_or(25.0); // Default to 25fps if unknown
-            
+
             master_job.source_metadata = Some(SourceVideoMetadata {
                 duration,
                 framerate,
@@ -490,25 +546,27 @@ impl TranscodingService {
                 height: metadata.height.unwrap_or(0),
                 codec: metadata.video_codec.clone().unwrap_or_default(),
             });
-            
-            info!("Master job {} has source duration: {} seconds", master_job_id, duration);
+
+            info!(
+                "Master job {} has source duration: {} seconds",
+                master_job_id, duration
+            );
         }
 
         // Submit master job to queue with lower priority so variants process first
         master_job.priority = JobPriority::Low;
-        
+
         self.queue_handle.submit(master_job).await?;
 
-        info!("Adaptive transcoding setup completed in: {:?}", overall_start.elapsed());
+        info!(
+            "Adaptive transcoding setup completed in: {:?}",
+            overall_start.elapsed()
+        );
         Ok(master_job_id)
     }
 
     /// Get a specific segment on demand
-    pub async fn get_segment(
-        &self,
-        job_id: &str,
-        segment_number: u32,
-    ) -> Result<PathBuf> {
+    pub async fn get_segment(&self, job_id: &str, segment_number: u32) -> Result<PathBuf> {
         // Get job details
         let response = self
             .queue_handle
@@ -519,7 +577,7 @@ impl TranscodingService {
             JobResponse::Status(Some(job)) => {
                 // Parse media path from job
                 let media_path = PathBuf::from(&job.media_id);
-                
+
                 self.segment_generator
                     .get_segment(
                         job_id,
@@ -545,7 +603,10 @@ impl TranscodingService {
         match response {
             JobResponse::Status(Some(mut job)) => {
                 // If this is a master job, aggregate variant statuses
-                if let JobType::Master { ref variant_job_ids } = job.job_type {
+                if let JobType::Master {
+                    ref variant_job_ids,
+                } = job.job_type
+                {
                     job.status = self.aggregate_variant_statuses(variant_job_ids).await;
                 }
                 Some(job)
@@ -557,20 +618,29 @@ impl TranscodingService {
 
     /// Aggregate statuses from variant jobs for a master job
     async fn aggregate_variant_statuses(&self, variant_job_ids: &[String]) -> TranscodingStatus {
-        info!("Aggregating status for {} variant jobs", variant_job_ids.len());
-        
+        info!(
+            "Aggregating status for {} variant jobs",
+            variant_job_ids.len()
+        );
+
         let mut all_completed = true;
         let mut any_failed = false;
         let mut any_processing = false;
         let mut total_progress = 0.0;
-        let mut active_jobs = 0;  // Only count jobs that have started (not Pending)
+        let mut active_jobs = 0; // Only count jobs that have started (not Pending)
 
-        info!("Aggregating status for master job with {} variant IDs: {:?}", 
-            variant_job_ids.len(), variant_job_ids);
-        
+        info!(
+            "Aggregating status for master job with {} variant IDs: {:?}",
+            variant_job_ids.len(),
+            variant_job_ids
+        );
+
         for variant_id in variant_job_ids {
             if let Some(variant_job) = self.get_variant_job_status(variant_id).await {
-                info!("Found variant job {}: status = {:?}", variant_id, variant_job.status);
+                info!(
+                    "Found variant job {}: status = {:?}",
+                    variant_id, variant_job.status
+                );
                 match &variant_job.status {
                     TranscodingStatus::Completed => {
                         active_jobs += 1;
@@ -602,19 +672,23 @@ impl TranscodingService {
         }
 
         if any_failed {
-            TranscodingStatus::Failed { error: "One or more variants failed".to_string() }
+            TranscodingStatus::Failed {
+                error: "One or more variants failed".to_string(),
+            }
         } else if all_completed && active_jobs > 0 {
             TranscodingStatus::Completed
         } else if any_processing || active_jobs > 0 {
             // Only average across jobs that have actually started
             let avg_progress = if active_jobs > 0 {
-                (total_progress / active_jobs as f32).min(1.0).max(0.0)  // Clamp to 0.0-1.0
+                (total_progress / active_jobs as f32).min(1.0).max(0.0) // Clamp to 0.0-1.0
             } else {
                 0.0
             };
             info!("Master job aggregation: {} active variant jobs (out of {}), total_progress={}, avg={}", 
                 active_jobs, variant_job_ids.len(), total_progress, avg_progress);
-            TranscodingStatus::Processing { progress: avg_progress }
+            TranscodingStatus::Processing {
+                progress: avg_progress,
+            }
         } else {
             TranscodingStatus::Pending
         }
@@ -633,32 +707,35 @@ impl TranscodingService {
             _ => None,
         }
     }
-    
+
     /// Get detailed progress information for a job
     pub async fn get_job_progress(&self, job_id: &str) -> Option<JobProgress> {
         let progress_map = self.progress_store.read().await;
         progress_map.get(job_id).cloned()
     }
-    
+
     /// Get aggregated progress details for a master job from its variant jobs
     pub async fn get_master_job_progress(&self, job_id: &str) -> Option<JobProgress> {
         // First check if this is a master job
         if let Some(job) = self.get_variant_job_status(job_id).await {
-            if let JobType::Master { ref variant_job_ids } = job.job_type {
+            if let JobType::Master {
+                ref variant_job_ids,
+            } = job.job_type
+            {
                 // Aggregate progress from all variant jobs
                 let progress_map = self.progress_store.read().await;
-                
+
                 let mut total_frames_processed = 0u64;
                 let mut total_frames = 0u64;
                 let mut avg_fps = 0.0f32;
                 let mut avg_speed = 0.0f32;
                 let mut valid_progress_count = 0;
                 let mut total_progress = 0.0f32;
-                
+
                 for variant_id in variant_job_ids {
                     if let Some(variant_progress) = progress_map.get(variant_id) {
                         valid_progress_count += 1;
-                        
+
                         // Add up frames
                         if let Some(frames) = variant_progress.current_frame {
                             total_frames_processed += frames;
@@ -666,7 +743,7 @@ impl TranscodingService {
                         if let Some(total) = variant_progress.total_frames {
                             total_frames += total;
                         }
-                        
+
                         // Average FPS and speed
                         if let Some(fps) = variant_progress.fps {
                             avg_fps += fps;
@@ -674,7 +751,7 @@ impl TranscodingService {
                         if let Some(speed) = variant_progress.speed {
                             avg_speed += speed;
                         }
-                        
+
                         // Calculate progress from status
                         match &variant_progress.status {
                             TranscodingStatus::Processing { progress } => {
@@ -689,42 +766,66 @@ impl TranscodingService {
                         }
                     }
                 }
-                
+
                 if valid_progress_count > 0 {
                     let avg_progress = total_progress / valid_progress_count as f32;
-                    
+
                     return Some(JobProgress {
                         job_id: job_id.to_string(),
-                        status: TranscodingStatus::Processing { progress: avg_progress },
-                        current_frame: if total_frames_processed > 0 { Some(total_frames_processed / valid_progress_count as u64) } else { None },
-                        total_frames: if total_frames > 0 { Some(total_frames / valid_progress_count as u64) } else { None },
-                        fps: if avg_fps > 0.0 { Some(avg_fps / valid_progress_count as f32) } else { None },
+                        status: TranscodingStatus::Processing {
+                            progress: avg_progress,
+                        },
+                        current_frame: if total_frames_processed > 0 {
+                            Some(total_frames_processed / valid_progress_count as u64)
+                        } else {
+                            None
+                        },
+                        total_frames: if total_frames > 0 {
+                            Some(total_frames / valid_progress_count as u64)
+                        } else {
+                            None
+                        },
+                        fps: if avg_fps > 0.0 {
+                            Some(avg_fps / valid_progress_count as f32)
+                        } else {
+                            None
+                        },
                         bitrate: None, // Difficult to aggregate meaningfully
-                        speed: if avg_speed > 0.0 { Some(avg_speed / valid_progress_count as f32) } else { None },
+                        speed: if avg_speed > 0.0 {
+                            Some(avg_speed / valid_progress_count as f32)
+                        } else {
+                            None
+                        },
                         eta: None, // Would need to calculate based on slowest variant
                     });
                 }
             }
         }
-        
+
         // Fall back to regular progress lookup
         self.get_job_progress(job_id).await
     }
-    
+
     /// Update job progress (called by workers)
     pub async fn update_job_progress(&self, progress: JobProgress) {
-        info!("Updating progress for job {}: {:?}", progress.job_id, progress.status);
-        
+        info!(
+            "Updating progress for job {}: {:?}",
+            progress.job_id, progress.status
+        );
+
         // Store in progress map
         let mut progress_map = self.progress_store.write().await;
         progress_map.insert(progress.job_id.clone(), progress.clone());
         drop(progress_map); // Release lock early
-        
+
         // Also update the job status in the queue
-        let _ = self.queue_handle.send_command(JobMessage::UpdateStatus {
-            job_id: progress.job_id,
-            status: progress.status,
-        }).await;
+        let _ = self
+            .queue_handle
+            .send_command(JobMessage::UpdateStatus {
+                job_id: progress.job_id,
+                status: progress.status,
+            })
+            .await;
     }
 
     /// Cancel a job
@@ -801,23 +902,27 @@ impl TranscodingService {
     ) -> Result<()> {
         let master_dir = self.config.transcode_cache_dir.join(media_id);
         let master_path = master_dir.join("master.m3u8");
-        
+
         // If master playlist already exists, we're done
         if tokio::fs::try_exists(&master_path).await.unwrap_or(false) {
             return Ok(());
         }
-        
+
         // Create directory if needed
         fs::create_dir_all(&master_dir).await?;
-        
+
         // Generate master playlist content
         let mut master_content = "#EXTM3U\n#EXT-X-VERSION:3\n\n".to_string();
-        
+
         for variant in &profile.variants {
             let profile_name = format!("adaptive_{}", variant.name);
-            
+
             // Only include variants that are actually cached
-            if self.cache_manager.has_cached_version(media_id, &profile_name).await {
+            if self
+                .cache_manager
+                .has_cached_version(media_id, &profile_name)
+                .await
+            {
                 let (width, height) = {
                     let parts: Vec<&str> = variant.resolution.split('x').collect();
                     if parts.len() == 2 {
@@ -826,44 +931,53 @@ impl TranscodingService {
                         (0, 0)
                     }
                 };
-                
+
                 let bandwidth = if variant.video_bitrate.ends_with('M') {
-                    variant.video_bitrate.trim_end_matches('M')
+                    variant
+                        .video_bitrate
+                        .trim_end_matches('M')
                         .parse::<u32>()
-                        .unwrap_or(0) * 1000000 // Convert Mbps to bps
+                        .unwrap_or(0)
+                        * 1000000 // Convert Mbps to bps
                 } else if variant.video_bitrate.ends_with('k') {
-                    variant.video_bitrate.trim_end_matches('k')
+                    variant
+                        .video_bitrate
+                        .trim_end_matches('k')
                         .parse::<u32>()
-                        .unwrap_or(0) * 1000 // Convert kbps to bps
+                        .unwrap_or(0)
+                        * 1000 // Convert kbps to bps
                 } else {
                     variant.video_bitrate.parse::<u32>().unwrap_or(0)
                 };
-                
+
                 master_content.push_str(&format!(
                     "#EXT-X-STREAM-INF:BANDWIDTH={},RESOLUTION={}x{}\nvariant/adaptive_{}/playlist.m3u8\n\n",
                     bandwidth, width, height, variant.name
                 ));
             }
         }
-        
+
         // Write master playlist
         fs::write(&master_path, &master_content).await?;
-        info!("Created master playlist for cached media: {:?}", master_path);
-        
+        info!(
+            "Created master playlist for cached media: {:?}",
+            master_path
+        );
+
         Ok(())
     }
 
     /// Shutdown the service
     pub async fn shutdown(self) {
         info!("Shutting down transcoding service");
-        
+
         // TODO: Cancel all pending jobs
-        
+
         // Shutdown worker pool
         if let Ok(pool) = Arc::try_unwrap(self.worker_pool) {
             pool.shutdown().await;
         }
-        
+
         info!("Transcoding service shutdown complete");
     }
 }

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE sync_sessions \n            SET is_active = false\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4a09745ec2eff9279e01ad54e51f42d2991d6c2fb7e7b8ec57be970c6eb9ba0e"
+}

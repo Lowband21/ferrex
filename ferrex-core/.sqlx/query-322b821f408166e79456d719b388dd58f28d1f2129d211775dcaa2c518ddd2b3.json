@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, fingerprint, name, platform, app_version, first_authenticated_by,\n                   first_authenticated_at, trusted_until, last_seen_at, revoked,\n                   revoked_by, revoked_at, metadata\n            FROM authenticated_devices\n            WHERE fingerprint = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "fingerprint",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "platform",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "app_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "first_authenticated_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "first_authenticated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "trusted_until",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "revoked",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "revoked_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 11,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "322b821f408166e79456d719b388dd58f28d1f2129d211775dcaa2c518ddd2b3"
+}

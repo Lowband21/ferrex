@@ -1,6 +1,6 @@
 use super::messages::PlayerMessage;
 use super::state::PlayerState;
-use crate::Message;
+use crate::messages::media::Message;
 use iced::Task;
 use std::time::Duration;
 
@@ -107,15 +107,17 @@ impl PlayerState {
             }
 
             PlayerMessage::SeekBarMoved(_point) => {
-                // SeekBarMoved is handled in main.rs where we have access to window width
+                // SeekBarMoved should not reach here as it's handled in update_media.rs
+                // where we have access to window dimensions
+                log::warn!("SeekBarMoved reached player update - this should be handled in update_media.rs");
                 Task::none()
             }
-            
+
             PlayerMessage::SeekDone => {
                 // Seek operation completed, clear seeking flag
-                if let Some(video) = &self.video_opt {
+                if let Some(video) = &mut self.video_opt {
                     let video_pos = video.position().as_secs_f64();
-                    log::debug!("SeekDone: Clearing seeking flag. Video position: {:.2}s, UI position: {:.2}s", 
+                    log::debug!("SeekDone: Clearing seeking flag. Video position: {:.2}s, UI position: {:.2}s",
                         video_pos, self.position);
                 } else {
                     log::debug!("SeekDone: Clearing seeking flag (no video)");
@@ -199,7 +201,7 @@ impl PlayerState {
             }
 
             PlayerMessage::NewFrame => {
-                if let Some(video) = &self.video_opt {
+                if let Some(video) = &mut self.video_opt {
                     // Check for seek timeout (500ms)
                     if self.seeking {
                         if let Some(start_time) = self.seek_started_time {
@@ -210,7 +212,7 @@ impl PlayerState {
                             }
                         }
                     }
-                    
+
                     // Update duration if it wasn't available during load
                     if self.duration <= 0.0 {
                         let new_duration = video.duration().as_secs_f64();
@@ -227,28 +229,37 @@ impl PlayerState {
                         // Normal position update
                         let new_position = video.position().as_secs_f64();
                         let old_position = self.position;
-                        
+
                         // Only update if we got a valid position
                         if new_position > 0.0 || self.position == 0.0 {
                             self.position = new_position;
-                            
+
                             // Log significant position changes
                             if (new_position - old_position).abs() > 0.5 {
                                 log::debug!("NewFrame: Position updated from {:.2}s to {:.2}s (duration: {:.2}s, source_duration: {:?})",
                                     old_position, new_position, self.duration, self.source_duration);
                             }
                         } else {
-                            log::trace!("NewFrame: No valid position update (current: {:.2}s, new: {:.2}s)", 
-                                self.position, new_position);
+                            log::trace!(
+                                "NewFrame: No valid position update (current: {:.2}s, new: {:.2}s)",
+                                self.position,
+                                new_position
+                            );
                         }
                     } else {
                         if self.seeking {
                             let video_pos = video.position().as_secs_f64();
-                            log::debug!("NewFrame during seek: video reports {:.2}s, UI shows {:.2}s", 
-                                video_pos, self.position);
+                            log::debug!(
+                                "NewFrame during seek: video reports {:.2}s, UI shows {:.2}s",
+                                video_pos,
+                                self.position
+                            );
                         }
-                        log::trace!("NewFrame: Skipping position update (dragging: {}, seeking: {})", 
-                            self.dragging, self.seeking);
+                        log::trace!(
+                            "NewFrame: Skipping position update (dragging: {}, seeking: {})",
+                            self.dragging,
+                            self.seeking
+                        );
                     }
                 }
                 Task::none()
@@ -384,6 +395,189 @@ impl PlayerState {
             PlayerMessage::TracksLoaded => {
                 // Tracks have been loaded, update notification
                 self.update_track_notification();
+                Task::none()
+            }
+
+            // Tone mapping controls
+            PlayerMessage::ToggleToneMapping(enabled) => {
+                self.tone_mapping_config.enabled = enabled;
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
+                Task::none()
+            }
+
+            PlayerMessage::SetToneMappingPreset(preset) => {
+                self.tone_mapping_config.apply_preset(preset);
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
+                Task::none()
+            }
+
+            PlayerMessage::SetToneMappingAlgorithm(algorithm) => {
+                self.tone_mapping_config.algorithm = algorithm;
+                self.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+                // Update algorithm params based on the selected algorithm
+                use iced_video_player::{AlgorithmParams, ToneMappingAlgorithm};
+                self.tone_mapping_config.algorithm_params = match algorithm {
+                    ToneMappingAlgorithm::ReinhardExtended => AlgorithmParams::ReinhardExtended {
+                        white_point: 4.0,
+                        exposure: 1.5,
+                        saturation_boost: 1.2,
+                    },
+                    ToneMappingAlgorithm::Hable => AlgorithmParams::Hable {
+                        shoulder_strength: 0.15,
+                        linear_strength: 0.5,
+                        linear_angle: 0.01,
+                        toe_strength: 0.2,
+                    },
+                    _ => AlgorithmParams::None,
+                };
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
+                Task::none()
+            }
+
+            PlayerMessage::SetToneMappingWhitePoint(value) => {
+                if let iced_video_player::AlgorithmParams::ReinhardExtended {
+                    ref mut white_point,
+                    ..
+                } = &mut self.tone_mapping_config.algorithm_params
+                {
+                    *white_point = value;
+                }
+                self.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
+                Task::none()
+            }
+
+            PlayerMessage::SetToneMappingExposure(value) => {
+                if let iced_video_player::AlgorithmParams::ReinhardExtended {
+                    ref mut exposure,
+                    ..
+                } = &mut self.tone_mapping_config.algorithm_params
+                {
+                    *exposure = value;
+                }
+                self.tone_mapping_config.exposure_adjustment = value;
+                self.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
+                Task::none()
+            }
+
+            PlayerMessage::SetToneMappingSaturation(value) => {
+                self.tone_mapping_config.saturation_adjustment = value;
+                self.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
+                Task::none()
+            }
+
+            PlayerMessage::SetToneMappingSaturationBoost(value) => {
+                if let iced_video_player::AlgorithmParams::ReinhardExtended {
+                    ref mut saturation_boost,
+                    ..
+                } = &mut self.tone_mapping_config.algorithm_params
+                {
+                    *saturation_boost = value;
+                }
+                self.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
+                Task::none()
+            }
+
+            PlayerMessage::SetHableShoulderStrength(value) => {
+                if let iced_video_player::AlgorithmParams::Hable {
+                    ref mut shoulder_strength,
+                    ..
+                } = &mut self.tone_mapping_config.algorithm_params
+                {
+                    *shoulder_strength = value;
+                }
+                self.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
+                Task::none()
+            }
+
+            PlayerMessage::SetHableLinearStrength(value) => {
+                if let iced_video_player::AlgorithmParams::Hable {
+                    ref mut linear_strength,
+                    ..
+                } = &mut self.tone_mapping_config.algorithm_params
+                {
+                    *linear_strength = value;
+                }
+                self.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
+                Task::none()
+            }
+
+            PlayerMessage::SetHableLinearAngle(value) => {
+                if let iced_video_player::AlgorithmParams::Hable {
+                    ref mut linear_angle,
+                    ..
+                } = &mut self.tone_mapping_config.algorithm_params
+                {
+                    *linear_angle = value;
+                }
+                self.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
+                Task::none()
+            }
+
+            PlayerMessage::SetHableToeStrength(value) => {
+                if let iced_video_player::AlgorithmParams::Hable {
+                    ref mut toe_strength,
+                    ..
+                } = &mut self.tone_mapping_config.algorithm_params
+                {
+                    *toe_strength = value;
+                }
+                self.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
+                Task::none()
+            }
+
+            PlayerMessage::SetMonitorBrightness(value) => {
+                self.tone_mapping_config.monitor_brightness = value;
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
+                Task::none()
+            }
+
+            PlayerMessage::SetToneMappingBrightness(value) => {
+                self.tone_mapping_config.brightness_adjustment = value;
+                self.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
+                Task::none()
+            }
+
+            PlayerMessage::SetToneMappingContrast(value) => {
+                self.tone_mapping_config.contrast_adjustment = value;
+                self.tone_mapping_config.preset = iced_video_player::ToneMappingPreset::Custom;
+                if let Some(video) = &mut self.video_opt {
+                    video.set_tone_mapping_config(self.tone_mapping_config.clone());
+                }
                 Task::none()
             }
         }

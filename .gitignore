@@ -103,6 +103,9 @@ TEST_*.md
 UI_*.md
 VIDEO_*.md
 VOLUME_*.md
+WINDOWS*.md
+*windows*.sh
+*gstreamer*.sh
 
 # Test scripts (keep some, ignore others)
 test_*.sh
@@ -110,7 +113,9 @@ test_*.sh
 
 # Fork directories (managed separately)
 iced_video_player/
-lucide_icons_iced_0.14
+lucide_icons_iced_0.14/
+iced_fork/
 
-# Reference repositories
-reference_repos/
+ferrex-player-windows/
+ferrex-player-windows.backup/
+*.zip

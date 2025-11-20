@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO season_metadata (season_id, tmdb_details, images)\n                VALUES ($1, $2, $3)\n                ON CONFLICT (season_id) DO UPDATE\n                SET tmdb_details = EXCLUDED.tmdb_details,\n                    images = EXCLUDED.images,\n                    updated_at = NOW()\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "19a8626677d245a1b28ca7fe7c7bb01ef449029b0a6abeb39db4bde229796431"
+}

@@ -11,6 +11,7 @@ pub struct MediaServerTheme;
 impl MediaServerTheme {
     // Core colors
     pub const BLACK: Color = Color::from_rgb(0.0, 0.0, 0.0); // #000000
+    pub const BACKGROUND_DARK: Color = Color::from_rgb(0.1, 0.1, 0.10);
     pub const ACCENT_BLUE: Color = Color::from_rgb(0.0, 0.5, 1.0); // #0080FF
     pub const ACCENT_BLUE_HOVER: Color = Color::from_rgb(0.0, 0.6, 1.0); // #0099FF
     pub const ACCENT_BLUE_GLOW: Color = Color::from_rgba(0.0, 0.5, 1.0, 0.3); // Blue glow
@@ -20,10 +21,16 @@ impl MediaServerTheme {
     pub const CARD_HOVER: Color = Color::from_rgb(0.15, 0.15, 0.15); // #262626
     pub const BORDER_COLOR: Color = Color::from_rgb(0.2, 0.2, 0.2); // #333333
 
+    // Soft grays for backgrounds - with subtle blue tint
+    pub const SOFT_GREY_DARK: Color = Color::from_rgb(0.05, 0.05, 0.08); // Much darker for contrast
+    pub const SOFT_GREY_LIGHT: Color = Color::from_rgb(0.20, 0.20, 0.25); // Much lighter for visible gradient
+    pub const SOFT_GREY_MEDIUM: Color = Color::from_rgb(0.10, 0.10, 0.12); // Medium with blue tint
+
     // Text colors
     pub const TEXT_PRIMARY: Color = Color::from_rgb(1.0, 1.0, 1.0); // #FFFFFF
     pub const TEXT_SECONDARY: Color = Color::from_rgb(0.7, 0.7, 0.7); // #B3B3B3
     pub const TEXT_DIMMED: Color = Color::from_rgb(0.5, 0.5, 0.5); // #808080
+    pub const TEXT_SUBDUED: Color = Color::from_rgb(0.6, 0.6, 0.6); // #999999
 
     // Status colors
     pub const SUCCESS: Color = Color::from_rgb(0.0, 0.8, 0.4); // #00CC66
@@ -31,6 +38,11 @@ impl MediaServerTheme {
     pub const ERROR: Color = Color::from_rgb(1.0, 0.2, 0.2); // #FF3333
     pub const ERROR_COLOR: Color = Color::from_rgb(1.0, 0.2, 0.2); // #FF3333 - alias for forms
     pub const DESTRUCTIVE: Color = Color::from_rgb(1.0, 0.2, 0.2); // #FF3333 - for destructive actions
+    pub const INFO: Color = Color::from_rgb(0.2, 0.6, 1.0); // #3399FF - informational
+
+    // Background colors
+    pub const BACKGROUND: Color = Color::from_rgb(0.0, 0.0, 0.0); // #000000 - same as BLACK
+    pub const SURFACE_DIM: Color = Color::from_rgb(0.08, 0.08, 0.08); // #141414 - slightly lighter than black
 
     pub fn theme() -> Theme {
         let mut palette = theme::Palette::DARK;
@@ -49,17 +61,13 @@ pub enum Container {
     Default,
     Card,
     CardHovered,
-    Selected,
-    MediaGrid,
-    VideoPlayer,
     ProgressBar,
     ProgressBarBackground,
-    Badge,
     Header,
-    RoundedImage,
     ErrorBox,
     Modal,
     ModalOverlay,
+    TechDetail,
 }
 
 impl Container {
@@ -67,7 +75,7 @@ impl Container {
         match self {
             Container::Default => |_| container::Style {
                 text_color: Some(MediaServerTheme::TEXT_PRIMARY),
-                background: Some(Background::Color(MediaServerTheme::BLACK)),
+                background: None, // Transparent to show background shader
                 border: Border::default(),
                 shadow: Shadow::default(),
                 snap: false,
@@ -98,35 +106,6 @@ impl Container {
                 },
                 snap: false,
             },
-            Container::Selected => |_| container::Style {
-                text_color: Some(MediaServerTheme::TEXT_PRIMARY),
-                background: Some(Background::Color(MediaServerTheme::CARD_BG)),
-                border: Border {
-                    color: MediaServerTheme::ACCENT_BLUE,
-                    width: 2.0,
-                    radius: 8.0.into(),
-                },
-                shadow: Shadow {
-                    color: MediaServerTheme::ACCENT_BLUE_GLOW,
-                    offset: iced::Vector::new(0.0, 0.0),
-                    blur_radius: 20.0,
-                },
-                snap: false,
-            },
-            Container::MediaGrid => |_| container::Style {
-                text_color: Some(MediaServerTheme::TEXT_PRIMARY),
-                background: Some(Background::Color(MediaServerTheme::BLACK)),
-                border: Border::default(),
-                shadow: Shadow::default(),
-                snap: false,
-            },
-            Container::VideoPlayer => |_| container::Style {
-                text_color: Some(MediaServerTheme::TEXT_PRIMARY),
-                background: Some(Background::Color(Color::BLACK)),
-                border: Border::default(),
-                shadow: Shadow::default(),
-                snap: false,
-            },
             Container::ProgressBar => |_| container::Style {
                 text_color: None,
                 background: Some(Background::Color(MediaServerTheme::ACCENT_BLUE)),
@@ -153,39 +132,13 @@ impl Container {
                 shadow: Shadow::default(),
                 snap: false,
             },
-            Container::Badge => |_| container::Style {
-                text_color: Some(Color::WHITE),
-                background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.8))),
-                border: Border {
-                    color: Color::TRANSPARENT,
-                    width: 0.0,
-                    radius: 4.0.into(),
-                },
-                shadow: Shadow::default(),
-                snap: false,
-            },
             Container::Header => |_| container::Style {
                 text_color: Some(MediaServerTheme::TEXT_PRIMARY),
-                background: Some(Background::Color(MediaServerTheme::BLACK)),
+                background: Some(Background::Color(MediaServerTheme::BACKGROUND_DARK)),
                 border: Border {
-                    color: MediaServerTheme::BLACK,
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
                     width: 0.0,
                     radius: 0.0.into(),
-                },
-                shadow: Shadow {
-                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.8),
-                    offset: iced::Vector::new(0.0, 2.0),
-                    blur_radius: 4.0,
-                },
-                snap: false,
-            },
-            Container::RoundedImage => |_| container::Style {
-                text_color: None,
-                background: None,
-                border: Border {
-                    color: Color::TRANSPARENT,
-                    width: 0.0,
-                    radius: 8.0.into(),
                 },
                 shadow: Shadow::default(),
                 snap: false,
@@ -223,6 +176,17 @@ impl Container {
                 shadow: Shadow::default(),
                 snap: false,
             },
+            Container::TechDetail => |_| container::Style {
+                text_color: Some(MediaServerTheme::TEXT_PRIMARY),
+                background: Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.02))),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 0.0.into(), // Sharp corners to match header buttons
+                },
+                shadow: Shadow::default(),
+                snap: false,
+            },
         }
     }
 }
@@ -233,11 +197,51 @@ pub enum Button {
     Secondary,
     Destructive,
     MediaCard,
-    MediaCardHovered,
     Text,
     Icon,
     PlayOverlay,
-    Card,
+    HeaderIcon,
+    DetailAction,
+    BackdropControl,
+    Disabled,
+    Danger,
+}
+
+// Helper functions for views
+pub fn button_style() -> fn(&Theme, button::Status) -> button::Style {
+    Button::Primary.style()
+}
+
+pub fn container_style() -> fn(&Theme) -> container::Style {
+    Container::Default.style()
+}
+
+// FerrexTheme enum for text styles
+#[derive(Debug, Clone, Copy)]
+pub enum FerrexTheme {
+    Text,
+    HeaderText,
+    SubduedText,
+    ErrorText,
+}
+
+impl FerrexTheme {
+    pub fn text_color(&self) -> Color {
+        match self {
+            FerrexTheme::Text => MediaServerTheme::TEXT_PRIMARY,
+            FerrexTheme::HeaderText => MediaServerTheme::TEXT_PRIMARY,
+            FerrexTheme::SubduedText => MediaServerTheme::TEXT_SECONDARY,
+            FerrexTheme::ErrorText => MediaServerTheme::ERROR,
+        }
+    }
+
+    pub fn card_background() -> Color {
+        MediaServerTheme::CARD_BG
+    }
+
+    pub fn border_color() -> Color {
+        MediaServerTheme::BORDER_COLOR
+    }
 }
 
 impl Button {
@@ -348,13 +352,9 @@ impl Button {
                     snap: false,
                 }
             },
-            Button::MediaCard => |_, status| {
-                let background = match status {
-                    button::Status::Hovered => {
-                        Some(Background::Color(Color::from_rgba(0.0, 0.5, 1.0, 0.1)))
-                    }
-                    _ => Some(Background::Color(Color::TRANSPARENT)),
-                };
+            Button::MediaCard => |_, _status| {
+                // Always use transparent background - hover effects are handled by the shader
+                let background = Some(Background::Color(Color::TRANSPARENT));
 
                 button::Style {
                     text_color: MediaServerTheme::TEXT_PRIMARY,
@@ -367,13 +367,6 @@ impl Button {
                     shadow: Shadow::default(),
                     snap: false,
                 }
-            },
-            Button::MediaCardHovered => |_, _| button::Style {
-                text_color: MediaServerTheme::TEXT_PRIMARY,
-                background: Some(Background::Color(Color::from_rgba(0.0, 0.5, 1.0, 0.1))),
-                border: Border::default(),
-                shadow: Shadow::default(),
-                snap: false,
             },
             Button::Text => |_, status| {
                 let text_color = match status {
@@ -445,23 +438,145 @@ impl Button {
                     snap: false,
                 }
             },
-            Button::Card => |_, status| {
-                let background = match status {
-                    button::Status::Hovered => {
-                        Some(Background::Color(MediaServerTheme::CARD_HOVER))
-                    }
-                    _ => Some(Background::Color(Color::TRANSPARENT)),
+            Button::HeaderIcon => |_, status| {
+                let (background, text_color) = match status {
+                    button::Status::Active => (
+                        Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.02))),
+                        MediaServerTheme::TEXT_PRIMARY,
+                    ),
+                    button::Status::Hovered => (
+                        Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
+                        MediaServerTheme::TEXT_PRIMARY,
+                    ),
+                    button::Status::Pressed => (
+                        Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.08))),
+                        MediaServerTheme::ACCENT_BLUE,
+                    ),
+                    _ => (None, MediaServerTheme::TEXT_SECONDARY),
                 };
 
                 button::Style {
-                    text_color: MediaServerTheme::TEXT_PRIMARY,
+                    text_color,
                     background,
                     border: Border {
                         color: Color::TRANSPARENT,
                         width: 0.0,
+                        radius: 0.0.into(), // Sharp corners
+                    },
+                    shadow: Shadow::default(), // No glow
+                    snap: false,
+                }
+            },
+            Button::DetailAction => |_, status| {
+                let (background, text_color) = match status {
+                    button::Status::Active => (
+                        Some(Background::Color(Color::from_rgba(0.0, 0.5, 1.0, 0.1))), // Brighter blue glow
+                        MediaServerTheme::TEXT_PRIMARY,
+                    ),
+                    button::Status::Hovered => (
+                        Some(Background::Color(MediaServerTheme::ACCENT_BLUE)), // Solid blue on hover
+                        MediaServerTheme::TEXT_PRIMARY,
+                    ),
+                    button::Status::Pressed => (
+                        Some(Background::Color(Color::from_rgb(0.0, 0.4, 0.8))),
+                        MediaServerTheme::TEXT_PRIMARY,
+                    ),
+                    _ => (
+                        Some(Background::Color(Color::from_rgba(0.0, 0.5, 1.0, 0.08))),
+                        MediaServerTheme::TEXT_PRIMARY,
+                    ),
+                };
+
+                button::Style {
+                    text_color,
+                    background,
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 0.0.into(), // Sharp corners
+                    },
+                    shadow: Shadow::default(), // No glow
+                    snap: false,
+                }
+            },
+            Button::BackdropControl => |_, status| {
+                let (background, text_color) = match status {
+                    button::Status::Active => (
+                        Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.02))),
+                        MediaServerTheme::TEXT_PRIMARY,
+                    ),
+                    button::Status::Hovered => (
+                        Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
+                        MediaServerTheme::TEXT_PRIMARY,
+                    ),
+                    button::Status::Pressed => (
+                        Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.08))),
+                        MediaServerTheme::ACCENT_BLUE,
+                    ),
+                    _ => (None, MediaServerTheme::TEXT_SECONDARY),
+                };
+
+                button::Style {
+                    text_color,
+                    background,
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 0.0.into(), // Sharp corners
+                    },
+                    shadow: Shadow::default(), // No glow
+                    snap: false,
+                }
+            },
+            Button::Disabled => |_, _| button::Style {
+                text_color: MediaServerTheme::TEXT_DIMMED,
+                background: Some(Background::Color(MediaServerTheme::CARD_BG)),
+                border: Border {
+                    color: MediaServerTheme::BORDER_COLOR,
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                shadow: Shadow::default(),
+                snap: false,
+            },
+            Button::Danger => |_, status| {
+                let (background, shadow) = match status {
+                    button::Status::Active => (
+                        MediaServerTheme::DESTRUCTIVE,
+                        Shadow {
+                            color: Color::from_rgba(1.0, 0.2, 0.2, 0.3),
+                            offset: iced::Vector::new(0.0, 2.0),
+                            blur_radius: 8.0,
+                        },
+                    ),
+                    button::Status::Hovered => (
+                        Color::from_rgb(1.0, 0.3, 0.3),
+                        Shadow {
+                            color: Color::from_rgba(1.0, 0.2, 0.2, 0.3),
+                            offset: iced::Vector::new(0.0, 2.0),
+                            blur_radius: 16.0,
+                        },
+                    ),
+                    button::Status::Pressed => (
+                        Color::from_rgb(0.8, 0.1, 0.1),
+                        Shadow {
+                            color: Color::from_rgba(1.0, 0.2, 0.2, 0.3),
+                            offset: iced::Vector::new(0.0, 2.0),
+                            blur_radius: 8.0,
+                        },
+                    ),
+                    _ => (MediaServerTheme::DESTRUCTIVE, Shadow::default()),
+                };
+
+                button::Style {
+                    text_color: MediaServerTheme::TEXT_PRIMARY,
+                    background: Some(Background::Color(background)),
+                    border: Border {
+                        color: background,
+                        width: 1.0,
                         radius: 8.0.into(),
                     },
-                    shadow: Shadow::default(),
+                    shadow,
                     snap: false,
                 }
             },
@@ -559,6 +674,12 @@ impl Slider {
 // Text input style
 pub struct TextInput;
 
+impl Default for TextInput {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl TextInput {
     pub fn style() -> fn(&Theme, text_input::Status) -> text_input::Style {
         |_, status| {
@@ -586,6 +707,39 @@ impl TextInput {
                 icon: MediaServerTheme::TEXT_SECONDARY,
                 placeholder: MediaServerTheme::TEXT_DIMMED,
                 value: MediaServerTheme::TEXT_PRIMARY,
+                selection: MediaServerTheme::ACCENT_BLUE,
+            }
+        }
+    }
+
+    pub fn header_search() -> fn(&Theme, text_input::Status) -> text_input::Style {
+        |_, status| {
+            let (background, text_color) = match status {
+                text_input::Status::Active => (
+                    Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.02))),
+                    MediaServerTheme::TEXT_SECONDARY,
+                ),
+                text_input::Status::Hovered => (
+                    Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
+                    MediaServerTheme::TEXT_PRIMARY,
+                ),
+                text_input::Status::Focused { .. } => (
+                    Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.08))),
+                    MediaServerTheme::TEXT_PRIMARY,
+                ),
+                text_input::Status::Disabled => (None, MediaServerTheme::TEXT_DIMMED),
+            };
+
+            text_input::Style {
+                background: background.unwrap_or(Background::Color(Color::TRANSPARENT)),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 0.0.into(), // Sharp corners
+                },
+                icon: MediaServerTheme::TEXT_SECONDARY,
+                placeholder: MediaServerTheme::TEXT_DIMMED,
+                value: text_color,
                 selection: MediaServerTheme::ACCENT_BLUE,
             }
         }

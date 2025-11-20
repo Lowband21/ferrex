@@ -4,15 +4,20 @@ members = [
     "ferrex-core",
     "ferrex-player",
 ]
-exclude = ["lucide_icons_iced_0.14"]
+exclude = ["lucide_icons_iced_0.14", "iced_fork"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Ferrex Contributors"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/yourusername/ferrex_media_server"
+repository = "https://github.com/Lowband21/rusty-media-server"
+documentation = "https://docs.rs/ferrex"
+homepage = "https://github.com/Lowband21/ferrex_media_server"
+readme = "README.md"
+keywords = ["media-server", "streaming", "rust", "video", "transcoding"]
+categories = ["multimedia", "web-programming::http-server"]
 
 [workspace.dependencies]
 # Async runtime
@@ -37,7 +42,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # HTTP/Web
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
+axum-extra = { version = "0.9", features = ["typed-header"] }
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
 reqwest = { version = "0.11", features = ["json"] }
@@ -47,7 +53,7 @@ async-trait = "0.1"
 
 # Database
 surrealdb = { version = "1.5", features = ["kv-mem"] }
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "migrate", "bigdecimal"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "migrate", "bigdecimal", "ipnetwork"] }
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 
 # Media processing
@@ -56,18 +62,40 @@ ffmpeg-next = "7.0"
 # File system
 walkdir = "2.5"
 
+# Image processing
+image = "0.25"
+
+# Cryptography
+sha2 = "0.10"
+
 # Regex
 regex = "1.10"
 
 # UUID generation
-uuid = { version = "1.10", features = ["v4", "serde"] }
+uuid = { version = "1.10", features = ["v4", "v5", "v7", "serde", "std"] }
 
 # Configuration
 config = "0.14"
 
+# URL
+url = "2.5.4"
+
+# tmdb
+tmdb-api = "0.9.1"
+
 # Testing
 mockall = "0.13"
 tempfile = "3.12"
+
+# Concurrency
+rayon = "1.10.0"
+
+# Fuzzy matching
+fuzzy-matcher = "0.3"
+
+# Authentication
+jsonwebtoken = "9.3"
+argon2 = "0.5.3"
 
 [profile.release]
 lto = "thin"
@@ -79,4 +107,23 @@ opt-level = 2
 
 [profile.release.package.ferrex-player]
 opt-level = 3
+
+# Documentation settings
+[workspace.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+# Define documentation lints
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "warn"
+private_intra_doc_links = "warn"
+missing_crate_level_docs = "warn"
+private_doc_tests = "warn"
+invalid_codeblock_attributes = "warn"
+invalid_rust_codeblocks = "warn"
+bare_urls = "warn"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
 

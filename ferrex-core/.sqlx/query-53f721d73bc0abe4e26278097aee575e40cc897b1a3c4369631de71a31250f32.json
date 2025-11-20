@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS(\n                SELECT 1 \n                FROM user_roles ur\n                INNER JOIN roles r ON ur.role_id = r.id\n                WHERE ur.user_id = $1 AND r.name = $2\n            ) as \"exists!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "53f721d73bc0abe4e26278097aee575e40cc897b1a3c4369631de71a31250f32"
+}

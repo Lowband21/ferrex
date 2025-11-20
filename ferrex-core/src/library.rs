@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
+use crate::MediaReference;
+
 /// Represents a media library with a specific type
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Library {
@@ -12,8 +14,13 @@ pub struct Library {
     pub scan_interval_minutes: u32,
     pub last_scan: Option<chrono::DateTime<chrono::Utc>>,
     pub enabled: bool,
+    pub auto_scan: bool,
+    pub watch_for_changes: bool,
+    pub analyze_on_scan: bool,
+    pub max_retry_attempts: u32,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub media: Option<Vec<MediaReference>>,
 }
 
 /// The type of content a library contains
@@ -45,8 +52,13 @@ impl Library {
             scan_interval_minutes: 60,
             last_scan: None,
             enabled: true,
+            auto_scan: true,
+            watch_for_changes: true,
+            analyze_on_scan: false,
+            max_retry_attempts: 3,
             created_at: now,
             updated_at: now,
+            media:  None,
         }
     }
 
@@ -72,24 +84,7 @@ impl Library {
     }
 }
 
-/// Request to create a new library
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateLibraryRequest {
-    pub name: String,
-    pub library_type: LibraryType,
-    pub paths: Vec<String>,
-    pub scan_interval_minutes: Option<u32>,
-    pub enabled: Option<bool>,
-}
-
-/// Request to update an existing library
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateLibraryRequest {
-    pub name: Option<String>,
-    pub paths: Option<Vec<String>>,
-    pub scan_interval_minutes: Option<u32>,
-    pub enabled: Option<bool>,
-}
+// Request types moved to api_types.rs to avoid conflicts
 
 /// Library scan result
 #[derive(Debug, Clone, Serialize, Deserialize)]

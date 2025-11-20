@@ -12,6 +12,10 @@ pub enum MediaError {
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
+    #[cfg(feature = "database")]
+    #[error("Database error: {0}")]
+    Database(#[from] sqlx::Error),
+
     #[error("Invalid media file: {0}")]
     InvalidMedia(String),
 
@@ -20,6 +24,9 @@ pub enum MediaError {
 
     #[error("Operation cancelled: {0}")]
     Cancelled(String),
+
+    #[error("Conflict: {0}")]
+    Conflict(String),
 
     #[error("Internal error: {0}")]
     Internal(String),

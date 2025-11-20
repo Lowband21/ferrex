@@ -1,0 +1,106 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                er.id, er.episode_number, er.season_number, er.season_id, er.series_id,\n                er.tmdb_series_id, er.file_id,\n                em.tmdb_details,\n                mf.id as media_file_id, mf.file_path, mf.filename, mf.file_size,\n                mf.created_at as file_created_at, mf.technical_metadata, mf.library_id\n            FROM episode_references er\n            JOIN media_files mf ON er.file_id = mf.id\n            LEFT JOIN episode_metadata em ON er.id = em.episode_id\n            WHERE er.id = ANY($1)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "episode_number",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "season_number",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "season_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "series_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "tmdb_series_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "file_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "tmdb_details",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "media_file_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "file_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "filename",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "file_size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "file_created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "technical_metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 14,
+        "name": "library_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "37c6d1c07f3bf9360e94a4292ea6ec50655b383cfe79ccaf8b20e01c7d97e5fc"
+}

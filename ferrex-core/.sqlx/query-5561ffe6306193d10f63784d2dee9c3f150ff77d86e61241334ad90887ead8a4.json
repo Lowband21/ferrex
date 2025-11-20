@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT r.id, r.name, r.description, r.is_system as \"is_system!\", \n                   EXTRACT(EPOCH FROM r.created_at)::BIGINT as \"created_at!\"\n            FROM roles r\n            INNER JOIN user_roles ur ON r.id = ur.role_id\n            WHERE ur.user_id = $1\n            ORDER BY r.name\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "is_system!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "5561ffe6306193d10f63784d2dee9c3f150ff77d86e61241334ad90887ead8a4"
+}

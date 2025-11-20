@@ -1,5 +1,6 @@
 use super::state::AspectRatio;
 use crate::media_library::MediaFile;
+use crate::messages::media::Message;
 use iced::Point;
 
 #[derive(Debug, Clone)]
@@ -55,96 +56,162 @@ pub enum PlayerMessage {
     CycleSubtitleTrack,
     CycleSubtitleSimple, // Simple subtitle cycling for left-click
     TracksLoaded,
-    // Subtitle text from video
+
+    // Tone mapping controls
+    ToggleToneMapping(bool),
+    SetToneMappingPreset(iced_video_player::ToneMappingPreset),
+    SetToneMappingAlgorithm(iced_video_player::ToneMappingAlgorithm),
+    SetToneMappingWhitePoint(f32),
+    SetToneMappingExposure(f32),
+    SetToneMappingSaturation(f32),
+    SetHableShoulderStrength(f32),
+    SetHableLinearStrength(f32),
+    SetHableLinearAngle(f32),
+    SetHableToeStrength(f32),
+    SetMonitorBrightness(f32),
+    SetToneMappingBrightness(f32),
+    SetToneMappingContrast(f32),
+    SetToneMappingSaturationBoost(f32),
 }
 
 impl PlayerMessage {
     /// Check if this is a player message that should be handled by the player module
-    pub fn is_player_message(msg: &crate::Message) -> bool {
+    pub fn is_player_message(msg: &Message) -> bool {
         matches!(
             msg,
-            crate::Message::PlayMedia(_) |
-            crate::Message::BackToLibrary |
-            crate::Message::Play |
-            crate::Message::Pause |
-            crate::Message::PlayPause |
-            crate::Message::Stop |
-            crate::Message::Seek(_) |
-            crate::Message::SeekRelative(_) |
-            crate::Message::SeekRelease |
-            crate::Message::SeekBarPressed |
-            //crate::Message::SeekBarMoved(_) |
-            crate::Message::SeekDone |
-            crate::Message::SeekForward |
-            crate::Message::SeekBackward |
-            crate::Message::SetVolume(_) |
-            crate::Message::ToggleMute |
-            crate::Message::VideoLoaded(_) |
-            crate::Message::EndOfStream |
-            crate::Message::NewFrame |
-            crate::Message::Reload |
-            crate::Message::ShowControls |
-            crate::Message::ToggleFullscreen |
-            crate::Message::ToggleSettings |
-            crate::Message::MouseMoved |
-            crate::Message::VideoClicked |
-            crate::Message::VideoDoubleClicked |
-            crate::Message::SetPlaybackSpeed(_) |
-            crate::Message::SetAspectRatio(_) |
-            crate::Message::AudioTrackSelected(_) |
-            crate::Message::SubtitleTrackSelected(_) |
-            crate::Message::ToggleSubtitles |
-            crate::Message::ToggleSubtitleMenu |
-            crate::Message::CycleAudioTrack |
-            crate::Message::CycleSubtitleTrack |
-            crate::Message::CycleSubtitleSimple |
-            crate::Message::TracksLoaded
+            Message::PlayMedia(_) |
+            Message::BackToLibrary |
+            Message::Play |
+            Message::Pause |
+            Message::PlayPause |
+            Message::Stop |
+            Message::Seek(_) |
+            Message::SeekRelative(_) |
+            Message::SeekRelease |
+            Message::SeekBarPressed |
+            // Message::SeekBarMoved(_) | // Handled in update_media.rs where we have window dimensions
+            Message::SeekDone |
+            Message::SeekForward |
+            Message::SeekBackward |
+            Message::SetVolume(_) |
+            Message::ToggleMute |
+            Message::VideoLoaded(_) |
+            Message::EndOfStream |
+            Message::NewFrame |
+            Message::Reload |
+            Message::ShowControls |
+            Message::ToggleFullscreen |
+            Message::ToggleSettings |
+            Message::MouseMoved |
+            Message::VideoClicked |
+            Message::VideoDoubleClicked |
+            Message::SetPlaybackSpeed(_) |
+            Message::SetAspectRatio(_) |
+            Message::AudioTrackSelected(_) |
+            Message::SubtitleTrackSelected(_) |
+            Message::ToggleSubtitles |
+            Message::ToggleSubtitleMenu |
+            Message::CycleAudioTrack |
+            Message::CycleSubtitleTrack |
+            Message::CycleSubtitleSimple |
+            Message::TracksLoaded |
+            Message::ToggleToneMapping(_) |
+            Message::SetToneMappingPreset(_) |
+            Message::SetToneMappingAlgorithm(_) |
+            Message::SetToneMappingWhitePoint(_) |
+            Message::SetToneMappingExposure(_) |
+            Message::SetToneMappingSaturation(_) |
+            Message::SetHableShoulderStrength(_) |
+            Message::SetHableLinearStrength(_) |
+            Message::SetHableLinearAngle(_) |
+            Message::SetHableToeStrength(_) |
+            Message::SetMonitorBrightness(_) |
+            Message::SetToneMappingBrightness(_) |
+            Message::SetToneMappingContrast(_) |
+            Message::SetToneMappingSaturationBoost(_)
         )
     }
 
     /// Convert from main Message to PlayerMessage
-    pub fn from_main_message(msg: crate::Message) -> Option<Self> {
+    pub fn from_main_message(msg: Message) -> Option<Self> {
         match msg {
-            crate::Message::PlayMedia(media) => Some(PlayerMessage::PlayMedia(media)),
-            crate::Message::BackToLibrary => Some(PlayerMessage::BackToLibrary),
-            crate::Message::Play => Some(PlayerMessage::Play),
-            crate::Message::Pause => Some(PlayerMessage::Pause),
-            crate::Message::PlayPause => Some(PlayerMessage::PlayPause),
-            crate::Message::Stop => Some(PlayerMessage::Stop),
-            crate::Message::Seek(pos) => Some(PlayerMessage::Seek(pos)),
-            crate::Message::SeekRelative(delta) => Some(PlayerMessage::SeekRelative(delta)),
-            crate::Message::SeekRelease => Some(PlayerMessage::SeekRelease),
-            crate::Message::SeekBarPressed => Some(PlayerMessage::SeekBarPressed),
-            //crate::Message::SeekBarMoved(point) => Some(PlayerMessage::SeekBarMoved(point)),
-            crate::Message::SeekDone => Some(PlayerMessage::SeekDone),
-            crate::Message::SeekForward => Some(PlayerMessage::SeekForward),
-            crate::Message::SeekBackward => Some(PlayerMessage::SeekBackward),
-            crate::Message::SetVolume(vol) => Some(PlayerMessage::SetVolume(vol)),
-            crate::Message::ToggleMute => Some(PlayerMessage::ToggleMute),
-            crate::Message::VideoLoaded(success) => Some(PlayerMessage::VideoLoaded(success)),
-            crate::Message::EndOfStream => Some(PlayerMessage::EndOfStream),
-            crate::Message::NewFrame => Some(PlayerMessage::NewFrame),
-            crate::Message::Reload => Some(PlayerMessage::Reload),
-            crate::Message::ShowControls => Some(PlayerMessage::ShowControls),
-            crate::Message::ToggleFullscreen => Some(PlayerMessage::ToggleFullscreen),
-            crate::Message::ToggleSettings => Some(PlayerMessage::ToggleSettings),
-            crate::Message::MouseMoved => Some(PlayerMessage::MouseMoved),
-            crate::Message::VideoClicked => Some(PlayerMessage::VideoClicked),
-            crate::Message::VideoDoubleClicked => Some(PlayerMessage::VideoDoubleClicked),
-            crate::Message::SetPlaybackSpeed(speed) => Some(PlayerMessage::SetPlaybackSpeed(speed)),
-            crate::Message::SetAspectRatio(ratio) => Some(PlayerMessage::SetAspectRatio(ratio)),
-            crate::Message::AudioTrackSelected(index) => {
-                Some(PlayerMessage::AudioTrackSelected(index))
-            }
-            crate::Message::SubtitleTrackSelected(index) => {
+            Message::PlayMedia(media) => Some(PlayerMessage::PlayMedia(media)),
+            Message::BackToLibrary => Some(PlayerMessage::BackToLibrary),
+            Message::Play => Some(PlayerMessage::Play),
+            Message::Pause => Some(PlayerMessage::Pause),
+            Message::PlayPause => Some(PlayerMessage::PlayPause),
+            Message::Stop => Some(PlayerMessage::Stop),
+            Message::Seek(pos) => Some(PlayerMessage::Seek(pos)),
+            Message::SeekRelative(delta) => Some(PlayerMessage::SeekRelative(delta)),
+            Message::SeekRelease => Some(PlayerMessage::SeekRelease),
+            Message::SeekBarPressed => Some(PlayerMessage::SeekBarPressed),
+            // Message::SeekBarMoved(point) => Some(PlayerMessage::SeekBarMoved(point)), // Handled in update_media.rs
+            Message::SeekDone => Some(PlayerMessage::SeekDone),
+            Message::SeekForward => Some(PlayerMessage::SeekForward),
+            Message::SeekBackward => Some(PlayerMessage::SeekBackward),
+            Message::SetVolume(vol) => Some(PlayerMessage::SetVolume(vol)),
+            Message::ToggleMute => Some(PlayerMessage::ToggleMute),
+            Message::VideoLoaded(success) => Some(PlayerMessage::VideoLoaded(success)),
+            Message::EndOfStream => Some(PlayerMessage::EndOfStream),
+            Message::NewFrame => Some(PlayerMessage::NewFrame),
+            Message::Reload => Some(PlayerMessage::Reload),
+            Message::ShowControls => Some(PlayerMessage::ShowControls),
+            Message::ToggleFullscreen => Some(PlayerMessage::ToggleFullscreen),
+            Message::ToggleSettings => Some(PlayerMessage::ToggleSettings),
+            Message::MouseMoved => Some(PlayerMessage::MouseMoved),
+            Message::VideoClicked => Some(PlayerMessage::VideoClicked),
+            Message::VideoDoubleClicked => Some(PlayerMessage::VideoDoubleClicked),
+            Message::SetPlaybackSpeed(speed) => Some(PlayerMessage::SetPlaybackSpeed(speed)),
+            Message::SetAspectRatio(ratio) => Some(PlayerMessage::SetAspectRatio(ratio)),
+            Message::AudioTrackSelected(index) => Some(PlayerMessage::AudioTrackSelected(index)),
+            Message::SubtitleTrackSelected(index) => {
                 Some(PlayerMessage::SubtitleTrackSelected(index))
             }
-            crate::Message::ToggleSubtitles => Some(PlayerMessage::ToggleSubtitles),
-            crate::Message::ToggleSubtitleMenu => Some(PlayerMessage::ToggleSubtitleMenu),
-            crate::Message::CycleAudioTrack => Some(PlayerMessage::CycleAudioTrack),
-            crate::Message::CycleSubtitleTrack => Some(PlayerMessage::CycleSubtitleTrack),
-            crate::Message::CycleSubtitleSimple => Some(PlayerMessage::CycleSubtitleSimple),
-            crate::Message::TracksLoaded => Some(PlayerMessage::TracksLoaded),
+            Message::ToggleSubtitles => Some(PlayerMessage::ToggleSubtitles),
+            Message::ToggleSubtitleMenu => Some(PlayerMessage::ToggleSubtitleMenu),
+            Message::CycleAudioTrack => Some(PlayerMessage::CycleAudioTrack),
+            Message::CycleSubtitleTrack => Some(PlayerMessage::CycleSubtitleTrack),
+            Message::CycleSubtitleSimple => Some(PlayerMessage::CycleSubtitleSimple),
+            Message::TracksLoaded => Some(PlayerMessage::TracksLoaded),
+
+            // Tone mapping messages
+            Message::ToggleToneMapping(enabled) => Some(PlayerMessage::ToggleToneMapping(enabled)),
+            Message::SetToneMappingPreset(preset) => {
+                Some(PlayerMessage::SetToneMappingPreset(preset))
+            }
+            Message::SetToneMappingAlgorithm(algo) => {
+                Some(PlayerMessage::SetToneMappingAlgorithm(algo))
+            }
+            Message::SetToneMappingWhitePoint(value) => {
+                Some(PlayerMessage::SetToneMappingWhitePoint(value))
+            }
+            Message::SetToneMappingExposure(value) => {
+                Some(PlayerMessage::SetToneMappingExposure(value))
+            }
+            Message::SetToneMappingSaturation(value) => {
+                Some(PlayerMessage::SetToneMappingSaturation(value))
+            }
+            Message::SetHableShoulderStrength(value) => {
+                Some(PlayerMessage::SetHableShoulderStrength(value))
+            }
+            Message::SetHableLinearStrength(value) => {
+                Some(PlayerMessage::SetHableLinearStrength(value))
+            }
+            Message::SetHableLinearAngle(value) => Some(PlayerMessage::SetHableLinearAngle(value)),
+            Message::SetHableToeStrength(value) => Some(PlayerMessage::SetHableToeStrength(value)),
+            Message::SetMonitorBrightness(value) => {
+                Some(PlayerMessage::SetMonitorBrightness(value))
+            }
+            Message::SetToneMappingBrightness(value) => {
+                Some(PlayerMessage::SetToneMappingBrightness(value))
+            }
+            Message::SetToneMappingContrast(value) => {
+                Some(PlayerMessage::SetToneMappingContrast(value))
+            }
+            Message::SetToneMappingSaturationBoost(value) => {
+                Some(PlayerMessage::SetToneMappingSaturationBoost(value))
+            }
+
             _ => None,
         }
     }

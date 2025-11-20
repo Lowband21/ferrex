@@ -3,7 +3,7 @@
 //! This implementation uses GPU shaders for true rounded rectangle clipping
 //! with anti-aliasing, providing better performance than Canvas-based approaches.
 
-use crate::Message;
+use crate::messages::ui::Message;
 use bytemuck::{Pod, Zeroable};
 use iced::advanced::graphics::core::image;
 use iced::advanced::graphics::Viewport;
@@ -11,10 +11,64 @@ use iced::wgpu;
 use iced::widget::image::Handle;
 use iced::widget::shader::Program;
 use iced::widget::shader::{Primitive, Storage};
-use iced::{mouse, Element, Length, Rectangle};
+use iced::{event, mouse, Color, Element, Event, Length, Point, Rectangle, Size};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// Dynamic bounds for animated posters
+#[derive(Debug, Clone, Copy)]
+pub struct AnimatedPosterBounds {
+    /// Base size of the poster
+    pub base_width: f32,
+    pub base_height: f32,
+    /// Extra horizontal padding for animation overflow (e.g., scale and shadows)
+    pub horizontal_padding: f32,
+    /// Extra vertical padding for animation overflow
+    pub vertical_padding: f32,
+    /// Global UI scale factor for DPI independence
+    pub ui_scale_factor: f32,
+}
+
+impl AnimatedPosterBounds {
+    /// Create new bounds with default padding
+    pub fn new(width: f32, height: f32) -> Self {
+        use crate::constants::animation;
+
+        // Calculate padding using centralized constants
+        //let horizontal_padding = animation::calculate_horizontal_padding(width);
+        let horizontal_padding = animation::calculate_horizontal_padding(width);
+        let vertical_padding = animation::calculate_vertical_padding(height);
+
+        Self {
+            base_width: width,
+            base_height: height,
+            horizontal_padding,
+            vertical_padding,
+            ui_scale_factor: 1.0,
+        }
+    }
+
+    /// Get the layout bounds - includes padding for effects
+    pub fn layout_bounds(&self) -> (f32, f32) {
+        // Return size with padding included - this is what the layout system sees
+        (
+            (self.base_width + self.horizontal_padding * 2.0) * self.ui_scale_factor,
+            (self.base_height + self.vertical_padding * 2.0) * self.ui_scale_factor,
+        )
+    }
+
+    /// Get the render bounds including animation overflow space
+    pub fn render_bounds(&self) -> Rectangle {
+        // Center the base bounds within the padded area
+        Rectangle {
+            x: -self.horizontal_padding,
+            y: -self.vertical_padding,
+            width: self.base_width + (self.horizontal_padding * 2.0),
+            height: self.base_height + (self.vertical_padding * 2.0),
+        }
+    }
+}
 
 // Image loading functions are in the image crate root
 
@@ -22,8 +76,21 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Copy)]
 pub enum AnimationType {
     None,
-    Fade { duration: Duration },
-    Flip { duration: Duration },
+    Fade {
+        duration: Duration,
+    },
+    Flip {
+        duration: Duration,
+    },
+    EnhancedFlip {
+        total_duration: Duration,
+        rise_end: f32,   // Phase end: 0.0-0.25
+        emerge_end: f32, // Phase end: 0.25-0.5
+        flip_end: f32,   // Phase end: 0.5-0.75
+                         // Settle: 0.75-1.0
+    },
+    /// Special state for placeholders - shows backface in sunken state
+    PlaceholderSunken,
 }
 
 impl AnimationType {
@@ -32,6 +99,20 @@ impl AnimationType {
             AnimationType::None => 0,
             AnimationType::Fade { .. } => 1,
             AnimationType::Flip { .. } => 2,
+            AnimationType::EnhancedFlip { .. } => 3,
+            AnimationType::PlaceholderSunken => 4,
+        }
+    }
+
+    /// Create default enhanced flip animation with standard timings
+    pub fn enhanced_flip() -> Self {
+        use crate::constants::animation;
+
+        AnimationType::EnhancedFlip {
+            total_duration: Duration::from_millis(animation::DEFAULT_DURATION_MS),
+            rise_end: 0.15,
+            emerge_end: 0.35,
+            flip_end: 0.8,
         }
     }
 }
@@ -44,18 +125,46 @@ pub struct RoundedImageProgram {
     pub animation: AnimationType,
     pub load_time: Option<Instant>,
     pub opacity: f32,
+    pub theme_color: Color,
+    pub bounds: Option<AnimatedPosterBounds>,
+    pub is_hovered: bool,
+    pub progress: Option<f32>,
+    pub progress_color: Color,
+    pub on_play: Option<Message>,
+    pub on_edit: Option<Message>,
+    pub on_options: Option<Message>,
+    pub on_click: Option<Message>,
 }
 
-impl<Message> Program<Message> for RoundedImageProgram {
-    type State = ();
+/// State for tracking mouse position within the shader widget
+#[derive(Debug, Clone, Default)]
+pub struct RoundedImageState {
+    /// Current mouse position relative to widget bounds
+    pub mouse_position: Option<Point>,
+    /// Whether mouse is over the widget
+    pub is_hovered: bool,
+}
+
+impl Program<Message> for RoundedImageProgram {
+    type State = RoundedImageState;
     type Primitive = RoundedImagePrimitive;
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         _cursor: mouse::Cursor,
         bounds: Rectangle,
     ) -> Self::Primitive {
+        // Use mouse position from state instead of cursor
+        let mouse_position = state.mouse_position;
+
+        /*
+        log::info!(
+            "RoundedImageProgram::draw called - state hover: {}, mouse_pos: {:?}",
+            state.is_hovered,
+            mouse_position
+        ); */
+
         RoundedImagePrimitive {
             image_handle: self.handle.clone(),
             bounds,
@@ -63,7 +172,172 @@ impl<Message> Program<Message> for RoundedImageProgram {
             animation: self.animation,
             load_time: self.load_time,
             opacity: self.opacity,
+            theme_color: self.theme_color,
+            animated_bounds: self.bounds.clone(),
+            is_hovered: self.is_hovered,
+            mouse_position,
+            progress: self.progress,
+            progress_color: self.progress_color,
         }
+    }
+
+    fn update(
+        &self,
+        state: &mut Self::State,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<iced::widget::Action<Message>> {
+        match event {
+            Event::Mouse(mouse_event) => {
+                //log::info!("Shader widget received mouse event: {:?}", mouse_event);
+
+                match mouse_event {
+                    mouse::Event::CursorMoved { .. } => {
+                        // Check if cursor position is available
+                        if let Some(position) = cursor.position() {
+                            if bounds.contains(position) {
+                                // Convert to relative position within widget
+                                let relative_pos =
+                                    Point::new(position.x - bounds.x, position.y - bounds.y);
+
+                                let was_hovered = state.is_hovered;
+                                state.mouse_position = Some(relative_pos);
+                                state.is_hovered = true;
+
+                                // Always request redraw when mouse state changes
+                                return Some(iced::widget::Action::request_redraw());
+                            } else {
+                                // Mouse outside widget bounds
+                                let was_hovered = state.is_hovered;
+                                state.mouse_position = None;
+                                state.is_hovered = false;
+
+                                // Request redraw if state changed
+                                if was_hovered {
+                                    return Some(iced::widget::Action::request_redraw());
+                                }
+                            }
+                        } else {
+                            // No cursor position available (cursor left window)
+                            // Clear any stale mouse state
+                            if state.is_hovered || state.mouse_position.is_some() {
+                                state.mouse_position = None;
+                                state.is_hovered = false;
+                                return Some(iced::widget::Action::request_redraw());
+                            }
+                        }
+                    }
+                    mouse::Event::ButtonPressed(mouse::Button::Left) => {
+                        // First verify cursor is actually within widget bounds
+                        if let Some(cursor_pos) = cursor.position() {
+                            if !bounds.contains(cursor_pos) {
+                                // Click is outside widget bounds, ignore it
+                                return None;
+                            }
+                        } else {
+                            // No cursor position available, ignore click
+                            return None;
+                        }
+
+                        // Verify state mouse position matches current cursor position
+                        // This handles cases where the app lost/regained focus
+                        if let Some(cursor_pos) = cursor.position() {
+                            let current_relative =
+                                Point::new(cursor_pos.x - bounds.x, cursor_pos.y - bounds.y);
+
+                            // Update state if mouse position is stale
+                            if let Some(old_pos) = state.mouse_position {
+                                let delta = old_pos - current_relative;
+                                let distance = (delta.x * delta.x + delta.y * delta.y).sqrt();
+                                if distance > 1.0 {
+                                    state.mouse_position = Some(current_relative);
+                                }
+                            } else {
+                                state.mouse_position = Some(current_relative);
+                            }
+                        }
+
+                        // Handle click events based on mouse position
+                        if let Some(mouse_pos) = state.mouse_position {
+                            //log::debug!("Click in widget - cursor_pos: {:?}, widget bounds: {:?}, relative mouse_pos: {:?}",
+                            //    cursor.position(), bounds, mouse_pos);
+
+                            // Normalize mouse position to 0-1 range
+                            let norm_x = mouse_pos.x / bounds.width;
+                            let norm_y = mouse_pos.y / bounds.height;
+
+                            // Check which button was clicked
+                            // Center play button (circle with 8% radius at center)
+                            // Note: Unlike shader, we don't need aspect ratio adjustment in click detection
+                            // because norm_x and norm_y are already normalized to widget bounds
+                            let center_x = 0.5;
+                            let center_y = 0.5;
+                            let radius = 0.08;
+                            let dist_from_center =
+                                ((norm_x - center_x).powi(2) + (norm_y - center_y).powi(2)).sqrt();
+                            if dist_from_center <= radius {
+                                if let Some(on_play) = &self.on_play {
+                                    log::debug!("Play button clicked!");
+                                    return Some(iced::widget::Action::publish(on_play.clone()));
+                                }
+                            }
+                            // Top-right edit button (radius 0.06 at 0.85, 0.15)
+                            else if norm_x >= 0.79
+                                && norm_x <= 0.91
+                                && norm_y >= 0.09
+                                && norm_y <= 0.21
+                            {
+                                if let Some(on_edit) = &self.on_edit {
+                                    log::debug!("Edit button clicked!");
+                                    return Some(iced::widget::Action::publish(on_edit.clone()));
+                                }
+                            }
+                            // Bottom-right options button (radius 0.06 at 0.85, 0.85)
+                            else if norm_x >= 0.79
+                                && norm_x <= 0.91
+                                && norm_y >= 0.79
+                                && norm_y <= 0.91
+                            {
+                                if let Some(on_options) = &self.on_options {
+                                    log::debug!("Options button clicked!");
+                                    return Some(iced::widget::Action::publish(on_options.clone()));
+                                }
+                            }
+                            // Empty space - trigger on_click
+                            else if let Some(on_click) = &self.on_click {
+                                log::debug!("Empty space clicked!");
+                                return Some(iced::widget::Action::publish(on_click.clone()));
+                            }
+                        }
+                    }
+                    mouse::Event::CursorEntered => {
+                        // Handle cursor entering the widget
+                        if let Some(position) = cursor.position() {
+                            if bounds.contains(position) {
+                                let relative_pos =
+                                    Point::new(position.x - bounds.x, position.y - bounds.y);
+                                state.mouse_position = Some(relative_pos);
+                                state.is_hovered = true;
+                                log::debug!("Cursor entered widget at: {:?}", relative_pos);
+                                return Some(iced::widget::Action::request_redraw());
+                            }
+                        }
+                    }
+                    mouse::Event::CursorLeft => {
+                        // Clear mouse position when cursor leaves
+                        state.mouse_position = None;
+                        state.is_hovered = false;
+                        log::debug!("Cursor left widget");
+                        return Some(iced::widget::Action::request_redraw());
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+
+        None
     }
 }
 
@@ -76,6 +350,12 @@ pub struct RoundedImagePrimitive {
     pub animation: AnimationType,
     pub load_time: Option<Instant>,
     pub opacity: f32,
+    pub theme_color: Color,
+    pub animated_bounds: Option<AnimatedPosterBounds>,
+    pub is_hovered: bool,
+    pub mouse_position: Option<Point>, // Mouse position relative to widget
+    pub progress: Option<f32>,
+    pub progress_color: Color,
 }
 
 /// Global uniform data (viewport transform)
@@ -88,15 +368,24 @@ struct Globals {
 }
 
 /// Instance data for each rounded image
+/// Packed into vec4s to reduce vertex attribute count
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct Instance {
-    position: [f32; 2],    // Top-left position
-    size: [f32; 2],        // Width and height
-    radius: f32,           // Corner radius
-    opacity: f32,          // Opacity for fade animations (0.0 to 1.0)
-    rotation_y: f32,       // Y-axis rotation for flip animation (in radians)
-    animation_progress: f32, // Animation progress (0.0 to 1.0)
+    // vec4: position.xy, size.xy
+    position_and_size: [f32; 4],
+    // vec4: radius, opacity, rotation_y, animation_progress
+    radius_opacity_rotation_anim: [f32; 4],
+    // vec4: theme_color.rgb, z_depth
+    theme_color_zdepth: [f32; 4],
+    // vec4: scale, shadow_intensity, border_glow, animation_type
+    scale_shadow_glow_type: [f32; 4],
+    // vec4: is_hovered, show_overlay, show_border, progress
+    hover_overlay_border_progress: [f32; 4],
+    // vec4: mouse_position.xy, unused, unused
+    mouse_pos_and_padding: [f32; 4],
+    // vec4: progress_color.rgb, unused
+    progress_color_and_padding: [f32; 4],
 }
 
 /// Pipeline state (immutable after creation)
@@ -213,41 +502,47 @@ impl Pipeline {
             array_stride: std::mem::size_of::<Instance>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &[
-                // position
+                // position_and_size: vec4
                 wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x2,
+                    format: wgpu::VertexFormat::Float32x4,
                 },
-                // size
-                wgpu::VertexAttribute {
-                    offset: 8,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                // radius
+                // radius_opacity_rotation_anim: vec4
                 wgpu::VertexAttribute {
                     offset: 16,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                // theme_color_zdepth: vec4
+                wgpu::VertexAttribute {
+                    offset: 32,
                     shader_location: 2,
-                    format: wgpu::VertexFormat::Float32,
+                    format: wgpu::VertexFormat::Float32x4,
                 },
-                // opacity
+                // scale_shadow_glow_type: vec4
                 wgpu::VertexAttribute {
-                    offset: 20,
+                    offset: 48,
                     shader_location: 3,
-                    format: wgpu::VertexFormat::Float32,
+                    format: wgpu::VertexFormat::Float32x4,
                 },
-                // rotation_y
+                // hover_overlay_border_progress: vec4
                 wgpu::VertexAttribute {
-                    offset: 24,
+                    offset: 64,
                     shader_location: 4,
-                    format: wgpu::VertexFormat::Float32,
+                    format: wgpu::VertexFormat::Float32x4,
                 },
-                // animation_progress
+                // mouse_pos_and_padding: vec4
                 wgpu::VertexAttribute {
-                    offset: 28,
+                    offset: 80,
                     shader_location: 5,
-                    format: wgpu::VertexFormat::Float32,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                // progress_color_and_padding: vec4
+                wgpu::VertexAttribute {
+                    offset: 96,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Float32x4,
                 },
             ],
         };
@@ -318,7 +613,7 @@ fn load_texture(
     queue: &wgpu::Queue,
     handle: &Handle,
 ) -> Option<Arc<wgpu::Texture>> {
-    log::trace!("Loading texture for handle {:?}", handle.id());
+    //log::trace!("Loading texture for handle {:?}", handle.id());
 
     // Load the actual image data from the handle
     let (image_data, width, height) = match handle {
@@ -337,7 +632,7 @@ fn load_texture(
             }
         }
         Handle::Bytes(_, bytes) => {
-            log::info!("Loading image from {} bytes", bytes.len());
+            //log::info!("Loading image from {} bytes", bytes.len());
             match ::image::load_from_memory(bytes) {
                 Ok(img) => {
                     let rgba = img.to_rgba8();
@@ -356,7 +651,7 @@ fn load_texture(
             height,
             ..
         } => {
-            log::info!("Loading RGBA image {}x{}", width, height);
+            //log::info!("Loading RGBA image {}x{}", width, height);
             // RGBA format is always 4 bytes per pixel
             (pixels.to_vec(), *width, *height)
         }
@@ -412,7 +707,7 @@ impl Primitive for RoundedImagePrimitive {
     ) {
         // Initialize pipeline if needed
         if !storage.has::<Pipeline>() {
-            log::info!("Creating rounded image shader pipeline");
+            //log::info!("Creating rounded image shader pipeline");
             storage.store(Pipeline::new(device, format));
         }
 
@@ -506,42 +801,382 @@ impl Primitive for RoundedImagePrimitive {
         // Create instance data for this primitive
         // IMPORTANT: The bounds parameter might already be in screen space
         // Check if we need to adjust for viewport offset
-        
+
+        // Debug log the incoming state
+        //log::debug!("RoundedImagePrimitive prepare:");
+        //log::debug!("  - animation type: {:?}", self.animation);
+        //log::debug!("  - load_time: {:?}", self.load_time);
+        //log::debug!("  - opacity: {}", self.opacity);
+
         // Calculate animation values based on animation type
-        let (actual_opacity, rotation_y, animation_progress) = match self.animation {
-            AnimationType::None => (self.opacity, 0.0, 1.0),
+        let (
+            actual_opacity,
+            rotation_y,
+            animation_progress,
+            z_depth,
+            scale,
+            shadow_intensity,
+            border_glow,
+        ) = match self.animation {
+            AnimationType::None => (self.opacity, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0),
+            AnimationType::PlaceholderSunken => {
+                // Placeholder state: backface showing, sunken
+                //log::debug!("PlaceholderSunken state - showing backface with theme color");
+                // Dimmed opacity, rotation PI (backface), no progress, sunken z-depth
+                (0.7, std::f32::consts::PI, 0.0, -10.0, 1.0, 0.0, 0.0)
+            }
             AnimationType::Fade { duration } => {
                 if let Some(load_time) = self.load_time {
                     let elapsed = load_time.elapsed().as_secs_f32();
                     let progress = (elapsed / duration.as_secs_f32()).min(1.0);
-                    (self.opacity, 0.0, progress)
+                    log::debug!(
+                        "Fade animation - elapsed: {:.3}s, progress: {:.3}",
+                        elapsed,
+                        progress
+                    );
+                    (self.opacity * progress, 0.0, progress, 0.0, 1.0, 0.0, 0.0)
                 } else {
-                    (self.opacity, 0.0, 1.0)
+                    (self.opacity, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0)
                 }
             }
             AnimationType::Flip { duration } => {
                 if let Some(load_time) = self.load_time {
                     let elapsed = load_time.elapsed().as_secs_f32();
                     let progress = (elapsed / duration.as_secs_f32()).min(1.0);
-                    let rotation = progress * std::f32::consts::PI; // 0 to PI (180 degrees)
-                    // Opacity is handled by AnimatePoster, just pass through
-                    (self.opacity, rotation, progress)
+
+                    // Flip animation: Start at PI (backface) and rotate to 0 (front face)
+                    let rotation = std::f32::consts::PI * (1.0 - progress); // PI to 0
+
+                    log::debug!("Flip animation - load_time: {:?}, elapsed: {:.3}s, progress: {:.3}, rotation: {:.3} rad",
+                        load_time, elapsed, progress, rotation);
+
+                    (self.opacity, rotation, progress, 0.0, 1.0, 0.0, 0.0)
                 } else {
-                    (self.opacity, 0.0, 0.0)
+                    log::debug!("Flip animation - no load_time, animation completed");
+                    // Return completed state (visible, no rotation, full progress)
+                    (self.opacity, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0)
+                }
+            }
+            AnimationType::EnhancedFlip {
+                total_duration,
+                rise_end,
+                emerge_end,
+                flip_end,
+            } => {
+                if let Some(load_time) = self.load_time {
+                    let elapsed = load_time.elapsed().as_secs_f32();
+                    let overall_progress = (elapsed / total_duration.as_secs_f32()).min(1.0);
+
+                    // Smooth easing function
+                    let ease_out_cubic = |t: f32| -> f32 {
+                        let t = t - 1.0;
+                        t * t * t + 1.0
+                    };
+
+                    let ease_in_out_cubic = |t: f32| -> f32 {
+                        if t < 0.5 {
+                            4.0 * t * t * t
+                        } else {
+                            let t = 2.0 * t - 2.0;
+                            1.0 + t * t * t / 2.0
+                        }
+                    };
+
+                    // Calculate phase-specific values
+                    let (z_depth, scale, shadow_intensity, border_glow, rotation_y, final_opacity) =
+                        if overall_progress < rise_end {
+                            // Phase 1: Rising (0.0 - 0.25)
+                            let phase_progress = overall_progress / rise_end;
+                            let eased = ease_out_cubic(phase_progress);
+
+                            // Z-depth from -10 to 0
+                            let z = -10.0 * (1.0 - eased);
+                            // Shadow fades in more dramatically
+                            let shadow = 0.5 * eased;
+                            // Brightness increases (through opacity)
+                            let opacity = self.opacity * (0.7 + 0.2 * eased);
+
+                            (z, 1.0, shadow, 0.0, std::f32::consts::PI, opacity)
+                        } else if overall_progress < emerge_end {
+                            // Phase 2: Emerging (0.25 - 0.5)
+                            let phase_progress =
+                                (overall_progress - rise_end) / (emerge_end - rise_end);
+                            let eased = ease_in_out_cubic(phase_progress);
+
+                            // Z-depth from 0 to +10 (reduced for less dramatic effect)
+                            let z = 10.0 * eased;
+                            // Scale from 1.0 to 1.05 (reduced to stay within bounds)
+                            let scale = 1.0 + 0.05 * eased;
+                            // Shadow intensifies dramatically
+                            let shadow = 0.5 + 0.5 * eased;
+                            // Border glow appears
+                            let glow = 0.5 * eased;
+
+                            (
+                                z,
+                                scale,
+                                shadow,
+                                glow,
+                                std::f32::consts::PI,
+                                self.opacity * 0.9,
+                            )
+                        } else if overall_progress < flip_end {
+                            // Phase 3: Flip (0.5 - 0.75)
+                            let phase_progress =
+                                (overall_progress - emerge_end) / (flip_end - emerge_end);
+                            let eased = ease_in_out_cubic(phase_progress);
+
+                            // Maintain elevated state
+                            let z = 10.0;
+                            let scale = 1.05;
+                            let shadow = 1.0; // Full shadow
+                            let glow = 0.5 * (1.0 - phase_progress); // Fade out glow
+
+                            // Rotation from PI to 0
+                            let rotation = std::f32::consts::PI * (1.0 - eased);
+
+                            (z, scale, shadow, glow, rotation, self.opacity)
+                        } else {
+                            // Phase 4: Settling (0.75 - 1.0)
+                            let phase_progress = (overall_progress - flip_end) / (1.0 - flip_end);
+                            let eased = ease_out_cubic(phase_progress);
+
+                            // Add subtle overshoot and bounce
+                            let bounce_factor = if phase_progress < 0.6 {
+                                1.0 - (phase_progress / 0.6) * 0.02 // Slight overshoot
+                            } else {
+                                0.98 + ((phase_progress - 0.6) / 0.4) * 0.02 // Bounce back
+                            };
+
+                            // Z-depth from +10 to 0 with bounce
+                            let z = 10.0 * (1.0 - eased);
+                            // Scale from 1.05 to 1.0 with bounce
+                            let scale = 1.0 + 0.05 * (1.0 - eased) * bounce_factor;
+                            // Shadow fades to final state
+                            let shadow = 1.0 * (1.0 - eased) + 0.3; // Final shadow = 0.3
+
+                            (z, scale, shadow, 0.0, 0.0, self.opacity)
+                        };
+
+                    /*
+                    log::debug!("Enhanced flip - phase: {}, progress: {:.3}, z: {:.1}, scale: {:.3}, shadow: {:.3}",
+                        if overall_progress < rise_end { "Rising" }
+                        else if overall_progress < emerge_end { "Emerging" }
+                        else if overall_progress < flip_end { "Flipping" }
+                        else { "Settling" },
+                        overall_progress, z_depth, scale, shadow_intensity); */
+
+                    (
+                        final_opacity,
+                        rotation_y,
+                        overall_progress,
+                        z_depth,
+                        scale,
+                        shadow_intensity,
+                        border_glow,
+                    )
+                } else {
+                    // Animation completed
+                    (self.opacity, 0.0, 1.0, 0.0, 1.0, 0.1, 0.0)
                 }
             }
         };
-        
-        // The bounds parameter is provided by the renderer and should be correct for the current viewport
-        // However, if there's a mismatch, it might be because we're not accounting for something
-        
+
+        //log::debug!(
+        //    "  - Calculated values: opacity={}, rotation_y={}, progress={}, z_depth={}, scale={}",
+        //    actual_opacity,
+        //    rotation_y,
+        //    animation_progress,
+        //    z_depth,
+        //    scale
+        //);
+
+        // The bounds parameter is provided by the renderer for layout positioning
+        // For animations, we render within these bounds but allow overflow via clipping
+
+        // Convert theme color to linear RGB
+        let theme_color_array = [self.theme_color.r, self.theme_color.g, self.theme_color.b];
+
+        //log::debug!("Instance data - theme_color: [{:.3}, {:.3}, {:.3}], opacity: {:.3}, rotation_y: {:.3}, scale: {:.3}, z_depth: {:.3}",
+        //    theme_color_array[0], theme_color_array[1], theme_color_array[2], actual_opacity, rotation_y, scale, z_depth);
+
+        // If we have animated bounds, render the poster centered within the larger container
+        let (poster_position, poster_size) =
+            if let Some(animated_bounds) = self.animated_bounds.as_ref() {
+                // The widget bounds are the full container (e.g., 260x360)
+                // The poster should be centered within this at its base size (e.g., 200x300)
+                // This gives us 30px padding on each side for scaling
+
+                // Calculate centering offset
+                let offset_x = (bounds.width - animated_bounds.base_width) / 2.0;
+                let offset_y = (bounds.height - animated_bounds.base_height) / 2.0;
+
+                // Position the poster centered within the container
+                let poster_x = bounds.x + offset_x;
+                let poster_y = bounds.y + offset_y;
+
+                //log::info!(
+                //        "Shader render - Container bounds: {:?}, poster base size: {}x{}, centered at: ({}, {})",
+                //        bounds,
+                //        animated_bounds.base_width,
+                //        animated_bounds.base_height,
+                //        poster_x,
+                //        poster_y
+                //    );
+                //log::info!(
+                //    "  Padding: {}, Scale: {}, Scaled size: {}x{}",
+                //    animated_bounds.animation_padding,
+                //    scale,
+                //    animated_bounds.base_width * scale,
+                //    animated_bounds.base_height * scale
+                //);
+
+                (
+                    [poster_x, poster_y],
+                    [animated_bounds.base_width, animated_bounds.base_height],
+                )
+            } else {
+                // No animated bounds - add small padding for border expansion
+                // Border can expand up to 0.004 units (normalized), which is ~1% of poster size
+                // For a 200px wide poster, that's 2px, so we need at least 2-3px padding
+                let border_padding = 3.0; // 3px padding for border expansion
+
+                // Shrink the poster slightly within bounds to allow border to expand outward
+                let poster_x = bounds.x + border_padding;
+                let poster_y = bounds.y + border_padding;
+                let poster_width = bounds.width - (border_padding * 2.0);
+                let poster_height = bounds.height - (border_padding * 2.0);
+
+                ([poster_x, poster_y], [poster_width, poster_height])
+            };
+
+        // Calculate overlay state based on hover and animation
+        // For PlaceholderSunken and no animation, consider animation complete
+        let animation_complete = match self.animation {
+            AnimationType::None => true,
+            AnimationType::PlaceholderSunken => true,
+            // Use epsilon comparison for floating point - animation is complete if within 0.001 of 1.0
+            _ => animation_progress >= 0.999,
+        };
+
+        // For now, use the external hover state
+        // TODO: Implement proper internal hover detection
+        let show_overlay = if self.is_hovered && animation_complete {
+            1.0
+        } else {
+            0.0
+        };
+
+        // Debug hover state when it might fail
+        if self.is_hovered && !animation_complete {
+            log::debug!(
+                "Hover blocked by animation: progress={:.3}",
+                animation_progress
+            );
+        }
+
+        // Always show border regardless of animation state
+        let show_border = 1.0;
+
+        // Calculate normalized mouse position (0-1) relative to poster
+        let mouse_pos_normalized = if let Some(mouse_pos) = self.mouse_position {
+            //log::info!("Prepare: Mouse position available: {:?}", mouse_pos);
+            // Account for the current scale of the poster
+            let scaled_poster_width = poster_size[0] * scale;
+            let scaled_poster_height = poster_size[1] * scale;
+
+            // Calculate the offset from widget bounds to scaled poster position
+            // The poster is centered, so we need to account for the scaled size
+            let widget_to_poster_offset_x = if let Some(animated_bounds) = &self.animated_bounds {
+                (bounds.width - scaled_poster_width) / 2.0
+            } else {
+                0.0
+            };
+            let widget_to_poster_offset_y = if let Some(animated_bounds) = &self.animated_bounds {
+                (bounds.height - scaled_poster_height) / 2.0
+            } else {
+                0.0
+            };
+
+            // Adjust mouse position to be relative to scaled poster, not widget
+            let mouse_x_relative_to_poster = mouse_pos.x - widget_to_poster_offset_x;
+            let mouse_y_relative_to_poster = mouse_pos.y - widget_to_poster_offset_y;
+
+            // Now normalize to 0-1 within scaled poster bounds
+            let norm_x = mouse_x_relative_to_poster / scaled_poster_width;
+            let norm_y = mouse_y_relative_to_poster / scaled_poster_height;
+
+            // Only return valid position if mouse is within poster bounds
+            // Add small tolerance for floating-point edge cases
+            if norm_x >= -0.01 && norm_x <= 1.01 && norm_y >= -0.01 && norm_y <= 1.01 {
+                // Clamp to valid range
+                let result = [norm_x.clamp(0.0, 1.0), norm_y.clamp(0.0, 1.0)];
+                // Debug individual button areas
+                /*
+                if self.is_hovered {
+                    // Check if mouse is in button areas
+                    let center_button =
+                        norm_x >= 0.4 && norm_x <= 0.6 && norm_y >= 0.4 && norm_y <= 0.6;
+                    let edit_button =
+                        norm_x >= 0.79 && norm_x <= 0.91 && norm_y >= 0.09 && norm_y <= 0.21;
+                    let dots_button =
+                        norm_x >= 0.79 && norm_x <= 0.91 && norm_y >= 0.79 && norm_y <= 0.91;
+
+                    if center_button || edit_button || dots_button {
+                        log::info!(
+                            "Mouse over button area - normalized: [{:.3}, {:.3}], scale: {:.3}",
+                            result[0],
+                            result[1],
+                            scale
+                        );
+                    }
+                } */
+                result
+            } else {
+                [-1.0, -1.0] // Mouse outside poster
+            }
+        } else {
+            [-1.0, -1.0] // Mouse not over widget
+        };
+
         let instance = Instance {
-            position: [bounds.x, bounds.y],
-            size: [bounds.width, bounds.height],
-            radius: self.radius, // Note: radius is in logical pixels, scaling handled by transform
-            opacity: actual_opacity,
-            rotation_y,
-            animation_progress,
+            position_and_size: [
+                poster_position[0],
+                poster_position[1],
+                poster_size[0],
+                poster_size[1],
+            ],
+            radius_opacity_rotation_anim: [
+                self.radius,
+                actual_opacity,
+                rotation_y,
+                animation_progress,
+            ],
+            theme_color_zdepth: [
+                theme_color_array[0],
+                theme_color_array[1],
+                theme_color_array[2],
+                z_depth,
+            ],
+            scale_shadow_glow_type: [
+                scale,
+                shadow_intensity,
+                border_glow,
+                self.animation.as_u32() as f32,
+            ],
+            hover_overlay_border_progress: [
+                if self.is_hovered { 1.0 } else { 0.0 },
+                show_overlay,
+                show_border,
+                self.progress.unwrap_or(-1.0), // -1.0 means no progress bar
+            ],
+            mouse_pos_and_padding: [mouse_pos_normalized[0], mouse_pos_normalized[1], 0.0, 0.0],
+            progress_color_and_padding: [
+                self.progress_color.r,
+                self.progress_color.g,
+                self.progress_color.b,
+                0.0,
+            ],
         };
 
         // Create or update instance buffer for this primitive
@@ -624,12 +1259,49 @@ impl Primitive for RoundedImagePrimitive {
         render_pass.set_bind_group(0, globals_bind_group, &[]);
         render_pass.set_bind_group(1, &primitive_data.texture_bind_group, &[]);
         render_pass.set_vertex_buffer(0, primitive_data.instance_buffer.slice(..));
-        render_pass.set_scissor_rect(
-            clip_bounds.x,
-            clip_bounds.y,
-            clip_bounds.width,
-            clip_bounds.height,
-        );
+
+        // Calculate proper scissor rect based on animated bounds
+        let (scissor_x, scissor_y, scissor_width, scissor_height) =
+            if let Some(animated_bounds) = &self.animated_bounds {
+                // Use expanded bounds for animations
+                // Use the maximum padding to ensure scissor rect is large enough
+                let padding = animated_bounds
+                    .horizontal_padding
+                    .max(animated_bounds.vertical_padding);
+
+                // For animated posters, we simply use the full clip bounds
+                // The animation overflow is handled by the larger container size
+                // established in the layout phase (260x360 for a 200x300 poster)
+                // This ensures the scissor rect is large enough for scaling without
+                // trying to expand beyond the valid render target bounds
+
+                // Use the full clip bounds - the container is already sized to accommodate scaling
+                (
+                    clip_bounds.x,
+                    clip_bounds.y,
+                    clip_bounds.width.max(1),
+                    clip_bounds.height.max(1),
+                )
+            } else {
+                // Use original clip bounds for non-animated posters
+                (
+                    clip_bounds.x,
+                    clip_bounds.y,
+                    clip_bounds.width.max(1),
+                    clip_bounds.height.max(1),
+                )
+            };
+
+        //log::info!(
+        //    "Setting scissor rect: ({}, {}, {}, {}) for bounds {:?}",
+        //    scissor_x,
+        //    scissor_y,
+        //    scissor_width,
+        //    scissor_height,
+        //    clip_bounds
+        //);
+
+        render_pass.set_scissor_rect(scissor_x, scissor_y, scissor_width, scissor_height);
 
         // Draw quad (4 vertices) with 1 instance
         render_pass.draw(0..4, 0..1);
@@ -645,11 +1317,22 @@ pub struct RoundedImage {
     animation: AnimationType,
     load_time: Option<Instant>,
     opacity: f32,
+    theme_color: Color,
+    bounds: Option<AnimatedPosterBounds>,
+    is_hovered: bool,
+    on_play: Option<Message>,
+    on_edit: Option<Message>,
+    on_options: Option<Message>,
+    on_click: Option<Message>, // For clicking empty space (details page)
+    progress: Option<f32>,     // Progress percentage (0.0 to 1.0)
+    progress_color: Color,     // Color for the progress bar
 }
 
 impl RoundedImage {
     /// Creates a new rounded image
     pub fn new(handle: Handle) -> Self {
+        use crate::theme::MediaServerTheme;
+
         Self {
             handle,
             radius: 8.0,
@@ -658,6 +1341,15 @@ impl RoundedImage {
             animation: AnimationType::None,
             load_time: None,
             opacity: 1.0,
+            theme_color: Color::from_rgb(0.1, 0.1, 0.1), // Default dark gray
+            bounds: None,
+            is_hovered: false,
+            on_play: None,
+            on_edit: None,
+            on_options: None,
+            on_click: None,
+            progress: None,
+            progress_color: MediaServerTheme::ACCENT_BLUE, // Default to theme blue
         }
     }
 
@@ -678,7 +1370,7 @@ impl RoundedImage {
         self.height = height.into();
         self
     }
-    
+
     /// Sets the animation type
     pub fn with_animation(mut self, animation: AnimationType) -> Self {
         self.animation = animation;
@@ -687,16 +1379,74 @@ impl RoundedImage {
         }
         self
     }
-    
+
     /// Sets the load time for animation
     pub fn with_load_time(mut self, load_time: Instant) -> Self {
         self.load_time = Some(load_time);
         self
     }
-    
+
     /// Sets the opacity
     pub fn opacity(mut self, opacity: f32) -> Self {
         self.opacity = opacity;
+        self
+    }
+
+    /// Sets the theme color for backface
+    pub fn theme_color(mut self, color: Color) -> Self {
+        self.theme_color = color;
+        self
+    }
+
+    /// Sets animated bounds with padding
+    pub fn with_animated_bounds(mut self, bounds: AnimatedPosterBounds) -> Self {
+        self.bounds = Some(bounds);
+        // Use layout bounds for stable grid positioning
+        let (width, height) = bounds.layout_bounds();
+        self.width = Length::Fixed(width);
+        self.height = Length::Fixed(height);
+        self
+    }
+
+    /// Sets the hover state
+    pub fn is_hovered(mut self, hovered: bool) -> Self {
+        self.is_hovered = hovered;
+        self
+    }
+
+    /// Sets the play button callback
+    pub fn on_play(mut self, message: Message) -> Self {
+        self.on_play = Some(message);
+        self
+    }
+
+    /// Sets the edit button callback
+    pub fn on_edit(mut self, message: Message) -> Self {
+        self.on_edit = Some(message);
+        self
+    }
+
+    /// Sets the options button callback
+    pub fn on_options(mut self, message: Message) -> Self {
+        self.on_options = Some(message);
+        self
+    }
+
+    /// Sets the click callback (for clicking empty space)
+    pub fn on_click(mut self, message: Message) -> Self {
+        self.on_click = Some(message);
+        self
+    }
+
+    /// Sets the progress percentage (0.0 to 1.0)
+    pub fn progress(mut self, progress: f32) -> Self {
+        self.progress = Some(progress.clamp(0.0, 1.0));
+        self
+    }
+
+    /// Sets the progress bar color
+    pub fn progress_color(mut self, color: Color) -> Self {
+        self.progress_color = color;
         self
     }
 }
@@ -708,15 +1458,34 @@ pub fn rounded_image_shader(handle: Handle) -> RoundedImage {
 
 impl<'a> From<RoundedImage> for Element<'a, Message> {
     fn from(image: RoundedImage) -> Self {
-        iced::widget::shader(RoundedImageProgram {
+        // Debug log the widget dimensions
+        //if let Some(bounds) = &image.bounds {
+        //    let (layout_width, layout_height) = bounds.layout_bounds();
+        //log::info!(
+        //    "Creating shader widget with dimensions - width: {:?}, height: {:?}, layout_bounds: {}x{}",
+        //    image.width, image.height, layout_width, layout_height
+        //);
+        //}
+
+        let shader = iced::widget::shader(RoundedImageProgram {
             handle: image.handle,
             radius: image.radius,
             animation: image.animation,
             load_time: image.load_time,
             opacity: image.opacity,
+            theme_color: image.theme_color,
+            bounds: image.bounds,
+            is_hovered: image.is_hovered,
+            progress: image.progress,
+            progress_color: image.progress_color,
+            on_play: image.on_play,
+            on_edit: image.on_edit,
+            on_options: image.on_options,
+            on_click: image.on_click,
         })
         .width(image.width)
-        .height(image.height)
-        .into()
+        .height(image.height);
+
+        shader.into()
     }
 }

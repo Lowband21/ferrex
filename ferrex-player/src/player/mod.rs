@@ -6,6 +6,7 @@ pub mod state;
 pub mod theme;
 pub mod track_selection;
 pub mod update;
+pub mod video;
 pub mod view;
 
 pub use messages::PlayerMessage;

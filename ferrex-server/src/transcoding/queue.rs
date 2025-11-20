@@ -3,7 +3,7 @@ use anyhow::Result;
 use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, RwLock};
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 /// Priority queue item wrapper
 #[derive(Debug, Clone)]

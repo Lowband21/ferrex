@@ -1,4 +1,3 @@
-use crate::MediaType;
 use regex::Regex;
 use std::path::Path;
 use tracing::debug;
@@ -22,24 +21,35 @@ pub struct EpisodeInfo {
 
 impl TvParser {
     /// Episode naming patterns in order of preference
-    /// Based on Jellyfin's episode parsing logic
+    /// Based on Jellyfin's episode parsing logic with enhanced robustness
     pub fn episode_patterns() -> Vec<(&'static str, Regex)> {
         vec![
             // Multi-episode patterns (must check before single episode)
-            ("multi_episode_dash", Regex::new(r"[Ss](\d+)[Ee](\d+)(?:-[Ee]?(\d+))").unwrap()),
-            ("multi_episode_concat", Regex::new(r"[Ss](\d+)[Ee](\d+)[Ee](\d+)").unwrap()),
-            ("multi_episode_x", Regex::new(r"(\d+)[xX](\d+)(?:-[xX]?(\d+))").unwrap()),
+            ("multi_episode_dash", Regex::new(r"[Ss](\d{1,3})[Ee](\d{1,3})(?:-[Ee]?(\d{1,3}))").unwrap()),
+            ("multi_episode_concat", Regex::new(r"[Ss](\d{1,3})[Ee](\d{1,3})[Ee](\d{1,3})").unwrap()),
+            ("multi_episode_x", Regex::new(r"(\d{1,2})[xX](\d{1,3})(?:-[xX]?(\d{1,3}))").unwrap()),
             
-            // Standard patterns
-            ("s00e00", Regex::new(r"[Ss](\d+)[Ee](\d+)").unwrap()),
-            ("0x00", Regex::new(r"(\d+)[xX](\d+)").unwrap()),
-            ("season_episode", Regex::new(r"(?i)season\s*(\d+)\s*episode\s*(\d+)").unwrap()),
-            ("s00_e00", Regex::new(r"[Ss](\d+)\s+[Ee](\d+)").unwrap()),
-            ("ep000", Regex::new(r"(?i)(?:ep|episode)\s*(\d)(\d{2})").unwrap()),
-            ("000", Regex::new(r"^(\d)(\d{2})(?:\D|$)").unwrap()),
+            // Standard patterns with boundary checks
+            ("s00e00", Regex::new(r"(?i)(?:^|[^a-z])s(\d{1,3})e(\d{1,3})(?:[^0-9]|$)").unwrap()),
+            ("s00e00_dots", Regex::new(r"(?i)s(\d{1,3})\.e(\d{1,3})").unwrap()),
+            ("season_episode", Regex::new(r"(?i)season\s*(\d{1,3})\s*episode\s*(\d{1,3})").unwrap()),
+            ("s00_e00", Regex::new(r"(?i)s(\d{1,3})\s+e(\d{1,3})").unwrap()),
+            ("0x00", Regex::new(r"(?:^|[^0-9])(\d{1,2})x(\d{1,3})(?:[^0-9]|$)").unwrap()),
+            
+            // Episode patterns with word boundaries
+            ("ep000", Regex::new(r"(?i)(?:^|[^a-z])(?:ep|episode)(?:\s|\.)*(\d{1,3})(?:[^0-9]|$)").unwrap()),
+            ("e00", Regex::new(r"(?i)(?:^|[^a-z])e(\d{1,3})(?:[^0-9]|$)").unwrap()),
+            
+            // Season folder with episode number only
+            ("folder_episode", Regex::new(r"(?:^|[^0-9])(\d{1,3})(?:\s*-|\.|\s|_|$)").unwrap()),
+            
+            // Part/Chapter patterns
+            ("part", Regex::new(r"(?i)(?:part|pt)\.?\s*(\d{1,3})").unwrap()),
+            ("chapter", Regex::new(r"(?i)(?:chapter|ch)\.?\s*(\d{1,3})").unwrap()),
             
             // Absolute episode number (common in anime)
-            ("absolute", Regex::new(r"(?:^|\D)(\d{2,4})(?:\D|$)").unwrap()),
+            ("absolute_3digit", Regex::new(r"(?:^|[^0-9])(\d{3})(?:[^0-9]|$)").unwrap()),
+            ("absolute_2digit", Regex::new(r"(?:^|[^0-9])(\d{2})(?:[^0-9]|$)").unwrap()),
         ]
     }
     
@@ -149,7 +159,7 @@ impl TvParser {
                             });
                         }
                     }
-                    "absolute" => {
+                    "absolute_3digit" | "absolute_2digit" => {
                         // Only use absolute numbering if no other pattern matched
                         // and we're in an anime-like structure
                         if Self::is_likely_anime(path) {
@@ -167,6 +177,70 @@ impl TvParser {
                                         is_special: false,
                                     });
                                 }
+                            }
+                        }
+                    }
+                    "ep000" | "e00" => {
+                        if captures.len() >= 2 {
+                            if let Ok(episode) = captures[1].parse::<u32>() {
+                                // If we're in a season folder, use that season
+                                let season = if let Some(parent) = path.parent() {
+                                    if let Some(parent_name) = parent.file_name() {
+                                        if let Some(parent_str) = parent_name.to_str() {
+                                            Self::parse_season_folder(parent_str).unwrap_or(1)
+                                        } else {
+                                            1
+                                        }
+                                    } else {
+                                        1
+                                    }
+                                } else {
+                                    1
+                                };
+                                
+                                debug!("Parsed episode: S{:02}E{:02} from {}", season, episode, filename);
+                                return Some(EpisodeInfo {
+                                    season,
+                                    episode,
+                                    end_episode: None,
+                                    year: None,
+                                    month: None,
+                                    day: None,
+                                    absolute_episode: None,
+                                    is_special: season == 0,
+                                });
+                            }
+                        }
+                    }
+                    "part" | "chapter" => {
+                        if captures.len() >= 2 {
+                            if let Ok(episode) = captures[1].parse::<u32>() {
+                                // For parts/chapters, assume season 1 unless in season folder
+                                let season = if let Some(parent) = path.parent() {
+                                    if let Some(parent_name) = parent.file_name() {
+                                        if let Some(parent_str) = parent_name.to_str() {
+                                            Self::parse_season_folder(parent_str).unwrap_or(1)
+                                        } else {
+                                            1
+                                        }
+                                    } else {
+                                        1
+                                    }
+                                } else {
+                                    1
+                                };
+                                
+                                debug!("Parsed part/chapter as episode: S{:02}E{:02} from {}", season, episode, filename);
+                                return Some(EpisodeInfo {
+                                    season,
+                                    episode,
+                                    end_episode: None,
+                                    year: None,
+                                    month: None,
+                                    day: None,
+                                    absolute_episode: None,
+                                    is_special: season == 0,
+                                });
                             }
                         }
                     }
@@ -202,7 +276,6 @@ impl TvParser {
     
     /// Parse episode info from folder structure
     fn parse_from_folder_structure(path: &Path) -> Option<EpisodeInfo> {
-
         let filename = path.file_stem()?.to_str()?;
         
         if let Some(parent) = path.parent() {
@@ -210,10 +283,13 @@ impl TvParser {
                 if let Some(season) = Self::parse_season_folder(parent_name.to_str()?) {
                     // Look for just episode number in filename
                     let ep_patterns = vec![
-                        Regex::new(r"(?i)(?:e|ep|episode)\s*(\d+)").unwrap(),
-                        Regex::new(r"^\s*(\d+)\s*[-_.]").unwrap(),
+                        // Episode patterns with various formats
+                        Regex::new(r"(?i)(?:e|ep|episode)(?:\s|\.)*(\d{1,3})").unwrap(),
+                        Regex::new(r"^\s*(\d{1,3})\s*[-_.]").unwrap(),
                         Regex::new(r"^(\d{1,3})\s").unwrap(), // "01 Title"
                         Regex::new(r"^(\d{1,3})$").unwrap(), // Just "01" or "05"
+                        // Extract from common naming patterns
+                        Regex::new(r"^(?:[^0-9]*?)(\d{1,3})(?:[^0-9]|$)").unwrap(),
                     ];
                     
                     for pattern in ep_patterns {
@@ -283,29 +359,6 @@ impl TvParser {
         None
     }
 
-    /// Determine media type based on path structure
-    pub fn determine_media_type(path: &Path, library_type: Option<&crate::LibraryType>) -> MediaType {
-        // If library type is specified, use it as a strong hint
-        match library_type {
-            Some(crate::LibraryType::TvShows) => {
-                // In a TV library, default to TV episode
-                // Even if we can't parse episode info, it's still TV content
-                return MediaType::TvEpisode;
-            }
-            Some(crate::LibraryType::Movies) => {
-                // In a movie library, ALWAYS return Movie type
-                // Library type should be authoritative
-                return MediaType::Movie;
-            }
-            None => {
-                // No library context, use heuristics
-                if Self::parse_episode(path).is_some() {
-                    return MediaType::TvEpisode;
-                }
-                return MediaType::Movie;
-            }
-        }
-    }
 
     /// Check if a path is within a TV show folder structure
     pub fn is_in_tv_structure(path: &Path) -> bool {
@@ -321,7 +374,7 @@ impl TvParser {
 
             // Check grandparent path
             if let Some(grandparent) = parent.parent() {
-                if let Some(grandparent_name) = grandparent.file_name() {
+                if let Some(_grandparent_name) = grandparent.file_name() {
                     // If grandparent exists and parent is a season folder
                     if let Some(parent_name) = parent.file_name() {
                         if let Some(parent_str) = parent_name.to_str() {

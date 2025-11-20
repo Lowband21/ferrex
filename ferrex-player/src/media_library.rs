@@ -1,23 +1,20 @@
-use iced::{
-    widget::{button, column, container, image, text, Column, Row},
-    Element, Length,
+use crate::api_types::{
+    ApiResponse, CreateLibraryRequest, LibraryReference, LibraryType, UpdateLibraryRequest,
 };
+use crate::messages::metadata::Message as MetadataMessage;
 use serde::{Deserialize, Serialize};
-
-use crate::{
-    poster_cache::{PosterCache, PosterState},
-    Message,
-};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Library {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
-    pub library_type: String, // "Movies" or "TvShows"
+    pub library_type: LibraryType, // Using core's LibraryType enum
     pub paths: Vec<String>,
     pub scan_interval_minutes: u32,
     pub last_scan: Option<String>,
     pub enabled: bool,
+    #[serde(default)]
+    pub media: Vec<crate::api_types::MediaReference>, // Central store of media (MovieReference or SeriesReference)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,13 +30,13 @@ pub struct MediaFile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaMetadata {
-    pub duration: f64,
+    pub duration: Option<f64>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub video_codec: Option<String>,
     pub audio_codec: Option<String>,
     pub bitrate: Option<u64>,
-    pub framerate: Option<f32>,
+    pub framerate: Option<f64>,
     pub file_size: u64,
     // HDR metadata
     pub color_primaries: Option<String>,
@@ -54,7 +51,7 @@ pub struct MediaMetadata {
 pub struct ParsedInfo {
     pub media_type: String,
     pub title: String,
-    pub year: Option<u32>,
+    pub year: Option<u16>,
     pub show_name: Option<String>,
     pub season: Option<u32>,
     pub episode: Option<u32>,
@@ -254,13 +251,15 @@ impl MediaFile {
 
         if let Some(metadata) = &self.metadata {
             // Duration
-            let duration = metadata.duration as i64;
-            let hours = duration / 3600;
-            let minutes = (duration % 3600) / 60;
-            if hours > 0 {
-                info.push(format!("{}h {}m", hours, minutes));
-            } else {
-                info.push(format!("{}m", minutes));
+            if let Some(duration_f64) = metadata.duration {
+                let duration = duration_f64 as i64;
+                let hours = duration / 3600;
+                let minutes = (duration % 3600) / 60;
+                if hours > 0 {
+                    info.push(format!("{}h {}m", hours, minutes));
+                } else {
+                    info.push(format!("{}m", minutes));
+                }
             }
 
             // Video codec
@@ -312,6 +311,12 @@ impl MediaFile {
             .is_some()
     }
 
+    /// DEPRECATED: This uses the old /poster/{id} endpoint
+    /// New code should use MediaReference types with /images/ endpoints
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use MediaReference types with new /images/ endpoints"
+    )]
     pub fn poster_url(&self, server_url: &str) -> String {
         format!("{}/poster/{}", server_url, self.id)
     }
@@ -337,104 +342,6 @@ impl MediaLibrary {
 
     pub fn set_server_url(&mut self, server_url: String) {
         self.server_url = server_url;
-    }
-
-    pub fn view_grid(&self, poster_cache: &PosterCache) -> Element<Message> {
-        if self.files.is_empty() {
-            // Return a non-Fill height element for empty state
-            return container(text("No media files found").size(18))
-                .padding(50)
-                .width(Length::Fill)
-                .into();
-        }
-
-        // Create a grid layout with 4-6 items per row depending on width
-        let items_per_row = 5;
-        let mut rows: Vec<Element<Message>> = Vec::new();
-        let mut current_row: Vec<Element<Message>> = Vec::new();
-
-        for (i, file) in self.files.iter().enumerate() {
-            let item = self.create_media_item(file, poster_cache);
-            current_row.push(item);
-
-            if current_row.len() >= items_per_row || i == self.files.len() - 1 {
-                rows.push(Row::with_children(current_row).spacing(15).into());
-                current_row = Vec::new();
-            }
-        }
-
-        container(Column::with_children(rows).spacing(15).padding(20))
-            .width(Length::Fill)
-            .into()
-    }
-
-    pub fn create_media_item(
-        &self,
-        file: &MediaFile,
-        poster_cache: &PosterCache,
-    ) -> Element<Message> {
-        let title = file.display_title();
-        let info = file.display_info();
-
-        // Create poster element - always check cache
-        let poster_element: Element<Message> = match poster_cache.get(&file.id) {
-            Some(PosterState::Loaded { thumbnail, .. }) => {
-                // Display the loaded poster with fade-in effect
-                container(
-                    image(thumbnail)
-                        .content_fit(iced::ContentFit::Cover)
-                        .width(Length::Fill)
-                        .height(Length::Fill),
-                )
-                .width(Length::Fixed(200.0))
-                .height(Length::Fixed(300.0))
-                .style(container::bordered_box)
-                .into()
-            }
-            Some(PosterState::Loading) => {
-                // Show loading state
-                container(
-                    column![text("⏳").size(32), text("Loading...").size(12)]
-                        .align_x(iced::Alignment::Center)
-                        .spacing(5),
-                )
-                .width(Length::Fixed(200.0))
-                .height(Length::Fixed(300.0))
-                .align_x(iced::alignment::Horizontal::Center)
-                .align_y(iced::alignment::Vertical::Center)
-                .style(container::bordered_box)
-                .into()
-            }
-            _ => {
-                // Failed, not started, or no poster - show placeholder
-                container(text("🎬").size(48))
-                    .width(Length::Fixed(200.0))
-                    .height(Length::Fixed(300.0))
-                    .align_x(iced::alignment::Horizontal::Center)
-                    .align_y(iced::alignment::Vertical::Center)
-                    .style(container::bordered_box)
-                    .into()
-            }
-        };
-
-        // Media item card
-        let content = column![
-            poster_element,
-            // Title
-            text(title).size(14).width(Length::Fixed(200.0)),
-            // Info
-            text(info)
-                .size(12)
-                .color(iced::Color::from_rgb(0.7, 0.7, 0.7))
-                .width(Length::Fixed(200.0)),
-        ]
-        .spacing(5);
-
-        button(content)
-            .on_press(Message::ViewDetails(file.clone()))
-            .padding(10)
-            .style(button::secondary)
-            .into()
     }
 }
 
@@ -490,6 +397,73 @@ pub async fn fetch_library(server_url: String) -> Result<Vec<MediaFile>, anyhow:
 
     log::info!("Total fetch time: {:?}", start.elapsed());
     parse_result
+}
+
+// Movie API functions
+pub async fn fetch_movies(server_url: String) -> anyhow::Result<Vec<crate::models::MovieDetails>> {
+    log::info!("Fetching movies from: {}/movies", server_url);
+    let start = std::time::Instant::now();
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+
+    let response = client.get(format!("{}/movies", server_url)).send().await?;
+
+    log::info!("Server responded in {:?}", start.elapsed());
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Server returned error: {}",
+            response.status()
+        ));
+    }
+
+    let json: serde_json::Value = response.json().await?;
+
+    if let Some(movies) = json.get("movies") {
+        let movie_list: Vec<crate::models::MovieDetails> = serde_json::from_value(movies.clone())?;
+        log::info!(
+            "Fetched {} movies in {:?}",
+            movie_list.len(),
+            start.elapsed()
+        );
+        Ok(movie_list)
+    } else if let Some(error) = json.get("error") {
+        Err(anyhow::anyhow!("Server error: {}", error))
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+pub async fn fetch_movie_details(
+    server_url: String,
+    movie_id: String,
+) -> anyhow::Result<crate::models::MovieDetails> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{}/movies/{}", server_url, movie_id))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Server returned error: {}",
+            response.status()
+        ));
+    }
+
+    let json: serde_json::Value = response.json().await?;
+
+    if let Some(movie) = json.get("movie") {
+        let movie_details: crate::models::MovieDetails = serde_json::from_value(movie.clone())?;
+        log::info!("Fetched details for movie ID: {}", movie_id);
+        Ok(movie_details)
+    } else if let Some(error) = json.get("error") {
+        Err(anyhow::anyhow!("Server error: {}", error))
+    } else {
+        Err(anyhow::anyhow!("Movie not found"))
+    }
 }
 
 // TV Show API functions
@@ -553,68 +527,6 @@ pub async fn fetch_tv_show_details(
     }
 }
 
-pub async fn check_posters_batch(
-    server_url: &str,
-    media_ids: Vec<String>,
-) -> Result<Vec<(String, Option<String>)>, String> {
-    let url = format!("{}/posters/batch", server_url);
-    let client = reqwest::Client::new();
-
-    let response = client
-        .post(&url)
-        .json(&serde_json::json!({
-            "media_ids": media_ids
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Failed to check posters: {}", e))?;
-
-    if response.status().is_success() {
-        let json: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        if let Some(posters) = json["posters"].as_array() {
-            Ok(posters
-                .iter()
-                .filter_map(|p| {
-                    let media_id = p["media_id"].as_str()?.to_string();
-                    let poster_url = p["poster_url"].as_str().map(|s| s.to_string());
-                    Some((media_id, poster_url))
-                })
-                .collect())
-        } else {
-            Ok(Vec::new())
-        }
-    } else {
-        Err(format!("Server returned error: {}", response.status()))
-    }
-}
-
-pub async fn queue_missing_metadata(
-    server_url: &str,
-    media_ids: Vec<String>,
-) -> Result<(), String> {
-    let url = format!("{}/metadata/queue-missing", server_url);
-    let client = reqwest::Client::new();
-
-    let response = client
-        .post(&url)
-        .json(&serde_json::json!({
-            "media_ids": media_ids
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Failed to queue metadata: {}", e))?;
-
-    if response.status().is_success() {
-        Ok(())
-    } else {
-        Err(format!("Server returned error: {}", response.status()))
-    }
-}
-
 pub async fn fetch_season_details(
     server_url: String,
     show_name: String,
@@ -673,16 +585,42 @@ pub async fn fetch_libraries(server_url: String) -> anyhow::Result<Vec<Library>>
         ));
     }
 
-    let json: serde_json::Value = response.json().await?;
+    // Parse the response as ApiResponse<Vec<LibraryReference>>
+    let api_response: ApiResponse<Vec<LibraryReference>> = response.json().await?;
 
-    if let Some(libraries) = json.get("libraries") {
-        let library_list: Vec<Library> = serde_json::from_value(libraries.clone())?;
-        log::info!("Fetched {} libraries", library_list.len());
-        Ok(library_list)
-    } else if let Some(error) = json.get("error") {
-        Err(anyhow::anyhow!("Server error: {}", error))
+    if api_response.status == "success" {
+        if let Some(library_refs) = api_response.data {
+            // Convert LibraryReference to Library with empty media_references
+            let library_list: Vec<Library> = library_refs
+                .into_iter()
+                .map(|lib_ref| Library {
+                    id: lib_ref.id,
+                    name: lib_ref.name,
+                    library_type: lib_ref.library_type,
+                    paths: lib_ref
+                        .paths
+                        .iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect(),
+                    scan_interval_minutes: 60, // Default value, actual value should be fetched separately
+                    last_scan: None,           // Not included in LibraryReference
+                    enabled: true, // Default to enabled, actual value should be fetched separately
+                    media: Vec::new(), // Empty initially
+                })
+                .collect();
+            log::info!("Fetched {} libraries", library_list.len());
+            Ok(library_list)
+        } else {
+            log::warn!("No library data in response");
+            Ok(vec![])
+        }
     } else {
-        Ok(Vec::new())
+        Err(anyhow::anyhow!(
+            "API error: {}",
+            api_response
+                .error
+                .unwrap_or_else(|| "Unknown error".to_string())
+        ))
     }
 }
 
@@ -690,131 +628,154 @@ pub async fn fetch_libraries(server_url: String) -> anyhow::Result<Vec<Library>>
 pub async fn create_library(server_url: String, library: Library) -> anyhow::Result<Library> {
     log::info!("Creating library: {}", library.name);
 
+    // Convert Library to CreateLibraryRequest
+    let create_request = CreateLibraryRequest {
+        name: library.name.clone(),
+        library_type: library.library_type,
+        paths: library.paths.clone(),
+        scan_interval_minutes: library.scan_interval_minutes,
+        enabled: library.enabled,
+    };
+
     // Log the JSON being sent
-    match serde_json::to_string_pretty(&library) {
-        Ok(json_str) => log::debug!("Sending library JSON: {}", json_str),
-        Err(e) => log::error!("Failed to serialize library for logging: {}", e),
+    match serde_json::to_string_pretty(&create_request) {
+        Ok(json_str) => log::debug!("Sending CreateLibraryRequest JSON: {}", json_str),
+        Err(e) => log::error!("Failed to serialize request for logging: {}", e),
     }
 
     let client = reqwest::Client::new();
     let response = client
         .post(format!("{}/libraries", server_url))
-        .json(&library)
+        .json(&create_request)
         .send()
         .await?;
 
     if !response.status().is_success() {
-        return Err(anyhow::anyhow!(
-            "Server returned error: {}",
-            response.status()
-        ));
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(anyhow::anyhow!("Server returned error: {}", error_text));
     }
 
-    let json: serde_json::Value = response.json().await?;
+    // Parse the response as ApiResponse<uuid::Uuid>
+    let api_response: ApiResponse<uuid::Uuid> = response.json().await?;
 
     // Debug log the entire response
-    log::debug!(
-        "Server response JSON: {}",
-        serde_json::to_string_pretty(&json).unwrap_or_else(|_| "Failed to serialize".to_string())
-    );
+    log::debug!("Server response: {:?}", api_response);
 
-    // Check if this is the newer API format that returns just the ID
-    if let Some(id) = json.get("id").and_then(|v| v.as_str()) {
-        if json.get("status").and_then(|v| v.as_str()) == Some("success") {
-            // Server returned just the ID, we need to fetch the full library
-            log::info!("Library created with ID: {}, fetching full details", id);
+    // Check if the response was successful and has data
+    if api_response.status == "success" {
+        if let Some(library_id) = api_response.data {
+            // Server returned the library ID, we need to fetch the full library
+            log::info!(
+                "Library created with ID: {}, fetching full details",
+                library_id
+            );
 
             // Fetch the created library by ID
             let fetch_response = client
-                .get(format!("{}/libraries/{}", server_url, id))
+                .get(format!("{}/libraries/{}", server_url, library_id))
                 .send()
                 .await?;
 
             if !fetch_response.status().is_success() {
+                let error_text = fetch_response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
                 return Err(anyhow::anyhow!(
                     "Failed to fetch created library: {}",
-                    fetch_response.status()
+                    error_text
                 ));
             }
 
-            let fetch_json: serde_json::Value = fetch_response.json().await?;
+            // Parse as ApiResponse<LibraryReference>
+            let library_response: ApiResponse<LibraryReference> = fetch_response.json().await?;
 
-            if let Some(library_data) = fetch_json.get("library") {
-                let library: Library = serde_json::from_value(library_data.clone())?;
-                log::info!("Successfully fetched created library: {}", library.name);
-                return Ok(library);
-            } else {
-                // Try to reconstruct the library from what we have
+            if let Some(library_ref) = library_response.data {
+                // Convert LibraryReference to legacy Library
                 let created_library = Library {
-                    id: id.to_string(),
-                    name: library.name,
-                    library_type: library.library_type,
-                    paths: library.paths,
-                    scan_interval_minutes: library.scan_interval_minutes,
-                    last_scan: None,
-                    enabled: library.enabled,
+                    id: library_ref.id,
+                    name: library_ref.name,
+                    library_type: library_ref.library_type,
+                    paths: library_ref
+                        .paths
+                        .iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect(),
+                    scan_interval_minutes: library.scan_interval_minutes, // Use the value we sent
+                    last_scan: None,          // New library has no last scan
+                    enabled: library.enabled, // Use the value we sent
+                    media: Vec::new(), // Empty initially, will be populated when media is loaded
                 };
-                log::info!("Reconstructed library from request data");
+                log::info!(
+                    "Successfully fetched created library: {}",
+                    created_library.name
+                );
                 return Ok(created_library);
+            } else {
+                return Err(anyhow::anyhow!("Server returned empty library data"));
             }
+        } else {
+            return Err(anyhow::anyhow!("Server response missing library ID"));
         }
-    }
-
-    // Try the old format where the server returns the full library
-    if let Some(created_library) = json.get("library") {
-        let library: Library = serde_json::from_value(created_library.clone())?;
-        log::info!("Created library: {}", library.name);
-        Ok(library)
-    } else if let Some(error) = json.get("error") {
-        Err(anyhow::anyhow!("Server error: {}", error))
     } else {
-        // Log what fields are present in the response
-        let fields: Vec<String> = json
-            .as_object()
-            .map(|obj| obj.keys().cloned().collect())
-            .unwrap_or_default();
-        log::error!(
-            "Unexpected response structure. Fields present: {:?}",
-            fields
-        );
-        Err(anyhow::anyhow!(
-            "Invalid response from server - expected 'library' or 'id' field"
-        ))
+        return Err(anyhow::anyhow!(
+            "API error: {}",
+            api_response
+                .error
+                .unwrap_or_else(|| "Unknown error".to_string())
+        ));
     }
 }
 
 /// Update an existing library
 pub async fn update_library(server_url: String, library: Library) -> anyhow::Result<Library> {
     log::info!("Updating library: {}", library.name);
+
+    // Create UpdateLibraryRequest with only the fields that can be updated
+    let update_request = UpdateLibraryRequest {
+        name: Some(library.name.clone()),
+        paths: Some(library.paths.clone()),
+        scan_interval_minutes: Some(library.scan_interval_minutes),
+        enabled: Some(library.enabled),
+    };
+
     let client = reqwest::Client::new();
     let response = client
         .put(format!("{}/libraries/{}", server_url, library.id))
-        .json(&library)
+        .json(&update_request)
         .send()
         .await?;
 
     if !response.status().is_success() {
-        return Err(anyhow::anyhow!(
-            "Server returned error: {}",
-            response.status()
-        ));
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(anyhow::anyhow!("Server returned error: {}", error_text));
     }
 
-    let json: serde_json::Value = response.json().await?;
+    // Parse the response as ApiResponse<String>
+    let api_response: ApiResponse<String> = response.json().await?;
 
-    if let Some(updated_library) = json.get("library") {
-        let library: Library = serde_json::from_value(updated_library.clone())?;
+    if api_response.status == "success" {
+        // Return the library with preserved media_references
         log::info!("Updated library: {}", library.name);
         Ok(library)
-    } else if let Some(error) = json.get("error") {
-        Err(anyhow::anyhow!("Server error: {}", error))
     } else {
-        Err(anyhow::anyhow!("Invalid response from server"))
+        Err(anyhow::anyhow!(
+            "API error: {}",
+            api_response
+                .error
+                .unwrap_or_else(|| "Unknown error".to_string())
+        ))
     }
 }
 
 /// Delete a library
-pub async fn delete_library(server_url: String, library_id: String) -> anyhow::Result<()> {
+pub async fn delete_library(server_url: String, library_id: Uuid) -> anyhow::Result<()> {
     log::info!("Deleting library: {}", library_id);
     let client = reqwest::Client::new();
     let response = client
@@ -836,7 +797,7 @@ pub async fn delete_library(server_url: String, library_id: String) -> anyhow::R
 /// Scan a specific library
 pub async fn scan_library(
     server_url: String,
-    library_id: String,
+    library_id: Uuid,
     streaming: bool,
 ) -> anyhow::Result<String> {
     log::info!(
@@ -873,6 +834,25 @@ pub async fn scan_library(
 }
 
 /// Fetch media files from a specific library
+pub async fn fetch_media_by_id(
+    server_url: String,
+    media_id: String,
+) -> Result<MediaFile, anyhow::Error> {
+    let url = format!("{}/media/{}", server_url, media_id);
+    log::debug!("Fetching media from: {}", url);
+
+    let response = reqwest::get(&url).await?;
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Failed to fetch media: {}",
+            response.status()
+        ));
+    }
+
+    let media = response.json::<MediaFile>().await?;
+    Ok(media)
+}
+
 pub async fn fetch_library_media(
     server_url: String,
     library_id: String,
@@ -930,4 +910,365 @@ pub async fn fetch_library_media(
 
     log::info!("Total fetch time: {:?}", start.elapsed());
     parse_result
+}
+
+// ===== NEW API FUNCTIONS FOR REFERENCE-BASED SYSTEM =====
+
+use crate::api_types::{
+    FetchMediaRequest, LibraryMediaResponse, MediaId, MediaReference, SeasonReference,
+};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use uuid::Uuid;
+
+/// Fetch lightweight media references for a library
+pub async fn fetch_library_media_references(
+    server_url: String,
+    library_id: Uuid,
+) -> anyhow::Result<LibraryMediaResponse> {
+    log::info!("Fetching media references for library: {}", library_id);
+    let start = std::time::Instant::now();
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+
+    let response = client
+        .get(format!("{}/libraries/{}/media", server_url, library_id))
+        .send()
+        .await?;
+
+    log::info!("Server responded in {:?}", start.elapsed());
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(anyhow::anyhow!(
+            "Server returned error {}: {}",
+            status,
+            error_text
+        ));
+    }
+
+    let bytes = response.bytes().await?;
+    log::info!("Downloaded {} bytes in {:?}", bytes.len(), start.elapsed());
+
+    // Parse on background thread
+    let parse_result = tokio::task::spawn_blocking(move || {
+        let parse_start = std::time::Instant::now();
+        let api_response: ApiResponse<LibraryMediaResponse> = serde_json::from_slice(&bytes)?;
+        log::info!("JSON parsed in {:?}", parse_start.elapsed());
+
+        match api_response.data {
+            Some(data) => {
+                log::info!("Fetched {} media references", data.media.len());
+                Ok(data)
+            }
+            None => {
+                let error = api_response
+                    .error
+                    .unwrap_or_else(|| "Unknown error".to_string());
+                Err(anyhow::anyhow!("Server error: {}", error))
+            }
+        }
+    })
+    .await??;
+
+    log::info!("Total fetch time: {:?}", start.elapsed());
+    Ok(parse_result)
+}
+
+/// Fetch full details for a specific media item
+pub async fn fetch_media_details(
+    server_url: String,
+    library_id: Uuid,
+    media_id: MediaId,
+) -> anyhow::Result<MediaReference> {
+    log::debug!("Fetching details for media: {:?}", media_id);
+
+    let client = reqwest::Client::new();
+
+    // The /api/media/:id endpoint expects the media ID in the URL path
+    let media_id_str = match &media_id {
+        MediaId::Movie(id) => id.as_str(),
+        MediaId::Series(id) => id.as_str(),
+        MediaId::Season(id) => id.as_str(),
+        MediaId::Episode(id) => id.as_str(),
+        MediaId::Person(id) => id.as_str(),
+    };
+
+    let response = client
+        .get(format!("{}/api/media/{}", server_url, media_id_str))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(anyhow::anyhow!(
+            "Server returned error {}: {}",
+            status,
+            error_text
+        ));
+    }
+
+    // The /api/media/:id endpoint returns ApiResponse<MediaReference>
+    let api_response: ApiResponse<MediaReference> = response.json().await?;
+
+    match api_response.data {
+        Some(media_reference) => Ok(media_reference),
+        None => {
+            let error = api_response
+                .error
+                .unwrap_or_else(|| "No data in response".to_string());
+            Err(anyhow::anyhow!("API error: {}", error))
+        }
+    }
+}
+
+/// Fetch full details for multiple media items in a single request
+pub async fn fetch_media_details_batch(
+    api_client: &crate::api_client::ApiClient,
+    library_id: Uuid,
+    media_ids: Vec<MediaId>,
+) -> anyhow::Result<crate::api_types::BatchMediaResponse> {
+    if media_ids.is_empty() {
+        return Ok(crate::api_types::BatchMediaResponse {
+            items: vec![],
+            errors: vec![],
+        });
+    }
+
+    log::info!("Fetching batch details for {} media items", media_ids.len());
+
+    let request = crate::api_types::BatchMediaRequest {
+        library_id,
+        media_ids,
+    };
+
+    // Use the authenticated API client
+    let response: Result<crate::api_types::BatchMediaResponse, anyhow::Error> =
+        api_client.post("/api/media/batch", &request).await;
+
+    match response {
+        Ok(batch_response) => {
+            log::info!(
+                "Successfully fetched batch of {} items",
+                batch_response.items.len()
+            );
+            if !batch_response.errors.is_empty() {
+                log::warn!("Batch fetch had {} errors", batch_response.errors.len());
+            }
+            Ok(batch_response)
+        }
+        Err(e) => {
+            log::error!("Batch request failed: {}", e);
+            // Check specifically for authentication errors
+            if e.to_string().contains("401") || e.to_string().contains("Unauthorized") {
+                log::error!("Authentication error in batch fetch - API client may not have valid auth token");
+            }
+            // For now, return an error instead of falling back
+            // This will help identify auth issues
+            Err(anyhow::anyhow!("Batch fetch failed: {}", e))
+        }
+    }
+}
+
+/// Fallback to individual requests if batch endpoint is not available
+async fn fetch_media_details_fallback(
+    server_url: String,
+    library_id: Uuid,
+    media_ids: Vec<MediaId>,
+) -> anyhow::Result<crate::api_types::BatchMediaResponse> {
+    use futures::future::join_all;
+
+    let mut items = Vec::new();
+    let mut errors = Vec::new();
+
+    // Create futures for all requests
+    let futures: Vec<_> = media_ids
+        .into_iter()
+        .map(|media_id| {
+            let server_url = server_url.clone();
+            async move {
+                let result = fetch_media_details(server_url, library_id, media_id.clone()).await;
+                (media_id, result)
+            }
+        })
+        .collect();
+
+    // Execute all requests concurrently (limited by reqwest's connection pool)
+    let results = join_all(futures).await;
+
+    for (media_id, result) in results {
+        match result {
+            Ok(media_ref) => items.push(media_ref),
+            Err(e) => errors.push((media_id, e.to_string())),
+        }
+    }
+
+    Ok(crate::api_types::BatchMediaResponse { items, errors })
+}
+
+/// Background details fetcher that can be used to fetch details for visible items
+#[derive(Debug)]
+pub struct BackgroundDetailsFetcher {
+    server_url: String,
+    pub library_id: Uuid,
+    fetch_queue: Arc<RwLock<Vec<MediaId>>>,
+    completed_items: Arc<RwLock<Vec<MediaReference>>>,
+    message_sender: Option<tokio::sync::mpsc::UnboundedSender<MetadataMessage>>,
+    pub metadata_cache: Arc<RwLock<HashMap<MediaId, MediaReference>>>,
+}
+
+impl BackgroundDetailsFetcher {
+    pub fn new(server_url: String, library_id: Uuid) -> Self {
+        Self {
+            server_url,
+            library_id,
+            fetch_queue: Arc::new(RwLock::new(Vec::new())),
+            completed_items: Arc::new(RwLock::new(Vec::new())),
+            message_sender: None,
+            metadata_cache: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub fn with_message_sender(
+        mut self,
+        sender: tokio::sync::mpsc::UnboundedSender<MetadataMessage>,
+    ) -> Self {
+        self.message_sender = Some(sender);
+        self
+    }
+
+    pub fn with_cache(mut self, cache: Arc<RwLock<HashMap<MediaId, MediaReference>>>) -> Self {
+        self.metadata_cache = cache;
+        self
+    }
+
+    /// Queue media items for background detail fetching
+    pub async fn queue_items(&self, items: Vec<MediaId>) {
+        let mut queue = self.fetch_queue.write().await;
+        for item in items {
+            if !queue.contains(&item) {
+                queue.push(item);
+            }
+        }
+    }
+
+    /// Poll for completed items (used by the UI subscription)
+    pub async fn poll_completed(&self) -> Vec<MediaReference> {
+        let mut completed = self.completed_items.write().await;
+        let items = completed.drain(..).collect();
+        items
+    }
+
+    /// Start background fetching (returns a handle to the task)
+    pub fn start_fetching(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            loop {
+                // Get next item from queue
+                let next_item = {
+                    let mut queue = self.fetch_queue.write().await;
+                    queue.pop()
+                };
+
+                match next_item {
+                    Some(media_id) => {
+                        // Check cache first
+                        let cached = self.metadata_cache.read().await.get(&media_id).cloned();
+
+                        if let Some(media) = cached {
+                            log::debug!("Found cached details for {:?}", media_id);
+                            // Store in completed items for polling
+                            self.completed_items.write().await.push(media.clone());
+                            // Also send update message to UI if sender is available
+                            if let Some(sender) = &self.message_sender {
+                                let _ = sender.send(MetadataMessage::MediaDetailsUpdated(media));
+                            }
+                        } else {
+                            // Fetch details in background
+                            match fetch_media_details(
+                                self.server_url.clone(),
+                                self.library_id,
+                                media_id.clone(),
+                            )
+                            .await
+                            {
+                                Ok(media) => {
+                                    log::debug!("Fetched details for {:?}", media_id);
+                                    // Store in cache
+                                    self.metadata_cache
+                                        .write()
+                                        .await
+                                        .insert(media_id.clone(), media.clone());
+                                    // Store in completed items for polling
+                                    self.completed_items.write().await.push(media.clone());
+                                    // Also send update message to UI if sender is available
+                                    if let Some(sender) = &self.message_sender {
+                                        let _ = sender
+                                            .send(MetadataMessage::MediaDetailsUpdated(media));
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to fetch details for {:?}: {}", media_id, e);
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        // Queue is empty, wait a bit
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    }
+                }
+            }
+        })
+    }
+}
+
+/// Fetch details for all seasons of a series in the background
+pub async fn fetch_series_season_details(
+    server_url: String,
+    library_id: Uuid,
+    _series_id: crate::api_types::SeriesID,
+    season_refs: Vec<SeasonReference>,
+) -> Vec<SeasonReference> {
+    let tasks: Vec<_> = season_refs
+        .into_iter()
+        .map(|season| {
+            let server_url = server_url.clone();
+            let library_id = library_id;
+            let season_id = season.id.clone();
+
+            tokio::spawn(async move {
+                match fetch_media_details(server_url, library_id, MediaId::Season(season_id)).await
+                {
+                    Ok(MediaReference::Season(updated_season)) => Some(updated_season),
+                    Ok(_) => {
+                        log::warn!("Unexpected media type returned for season");
+                        None
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to fetch season details: {}", e);
+                        None
+                    }
+                }
+            })
+        })
+        .collect();
+
+    // Wait for all tasks to complete
+    let results = futures::future::join_all(tasks).await;
+
+    results
+        .into_iter()
+        .filter_map(|result| result.ok().flatten())
+        .collect()
 }

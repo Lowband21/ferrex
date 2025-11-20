@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, library_id, tmdb_id as \"tmdb_id?\", title, theme_color\n            FROM series_references\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "tmdb_id?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "theme_color",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "f9daf701b1882fd5cf8e32ef63f0f2f9cb1325d1d41ef61141efd4069ec94d76"
+}

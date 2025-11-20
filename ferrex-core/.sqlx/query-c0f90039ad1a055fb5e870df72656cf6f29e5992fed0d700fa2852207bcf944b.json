@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                CASE \n                    WHEN parsed_info->>'media_type' IS NOT NULL THEN parsed_info->>'media_type'\n                    ELSE 'unknown'\n                END as media_type,\n                COUNT(*) as count\n            FROM media_files \n            GROUP BY parsed_info->>'media_type'\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "c0f90039ad1a055fb5e870df72656cf6f29e5992fed0d700fa2852207bcf944b"
+}

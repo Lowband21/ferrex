@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO series_metadata (\n                    series_id, tmdb_details, images, cast_crew, videos, keywords, external_ids,\n                    created_at, updated_at\n                )\n                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())\n                ON CONFLICT (series_id) DO UPDATE SET\n                    tmdb_details = EXCLUDED.tmdb_details,\n                    images = EXCLUDED.images,\n                    cast_crew = EXCLUDED.cast_crew,\n                    videos = EXCLUDED.videos,\n                    keywords = EXCLUDED.keywords,\n                    external_ids = EXCLUDED.external_ids,\n                    updated_at = NOW()\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "TextArray",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "51280dfe9c233a46e49902acd2d7d044d1d1ccc0fffaa31f9eb3a1cbed84a52f"
+}

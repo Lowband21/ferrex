@@ -1,51 +1,331 @@
-pub mod config;
-pub mod metadata_service;
-pub mod scan_manager;
-pub mod thumbnail_service;
-pub mod transcoding;
-pub mod test_endpoints;
+//! # Ferrex Server
+//!
+//! High-performance media server with real-time transcoding, streaming, and synchronized playback support.
+//!
+//! ## Overview
+//!
+//! Ferrex Server is a comprehensive media streaming solution that provides:
+//!
+//! - **Media Streaming**: HLS adaptive bitrate streaming with on-the-fly transcoding
+//! - **User Management**: JWT-based authentication with session tracking
+//! - **Watch Progress**: Automatic progress tracking and "continue watching" features
+//! - **Synchronized Playback**: Real-time synchronized viewing sessions via WebSocket
+//! - **Library Management**: Automatic media scanning and metadata enrichment
+//! - **API Access**: RESTful API for all features
+//!
+//! ## Architecture
+//!
+//! The server is built on Axum and uses:
+//! - PostgreSQL for persistent storage
+//! - Redis for caching and session management
+//! - FFmpeg for transcoding
+//! - TMDB for metadata
+//!
+//! ## API Endpoints
+//!
+//! ### Authentication
+//! - `POST /api/auth/register` - Create new user account
+//! - `POST /api/auth/login` - Authenticate and receive tokens
+//! - `POST /api/auth/refresh` - Refresh access token
+//! - `POST /api/auth/logout` - Invalidate session
+//!
+//! ### Media
+//! - `GET /api/media/:id` - Get media details
+//! - `POST /api/media/batch` - Batch fetch multiple media items
+//! - `POST /api/media/query` - Query media with filters
+//! - `GET /api/stream/:id` - Stream media file
+//!
+//! ### Watch Status
+//! - `POST /api/watch/progress` - Update viewing progress
+//! - `GET /api/watch/state` - Get user's watch state
+//! - `GET /api/watch/continue` - Get continue watching list
+//!
+//! ### Synchronized Playback
+//! - `POST /api/sync/sessions` - Create sync session
+//! - `GET /api/sync/sessions/:code` - Join sync session
+//! - `GET /api/sync/ws` - WebSocket for real-time sync
+//!
+//! ## Configuration
+//!
+//! Server configuration is loaded from environment variables and config files.
 
-use scan_manager::MediaEvent;
+#[cfg(test)]
+mod tests;
+// See [`config`] module for details.
+//
+// ## Example Usage
+//
+// ```bash
+// # Start the server
+// cargo run --bin ferrex-server
+//
+// # Register a user
+// curl -X POST http://localhost:3000/api/auth/register \
+//   -H "Content-Type: application/json" \
+//   -d '{"username":"alice","password":"password123","display_name":"Alice"}'
+//
+// # Login
+// curl -X POST http://localhost:3000/api/auth/login \
+//   -H "Content-Type: application/json" \
+//   -d '{"username":"alice","password":"password123"}'
+// ```
+
+//#![warn(missing_docs)]
+
+/// Admin-only management handlers
+pub mod admin_handlers;
+/// API endpoint handlers organized by functionality
+pub mod api;
+/// Authentication and JWT token management
+pub mod auth;
+/// Server configuration and settings
+pub mod config;
+/// Development utilities (only available in debug builds)
+pub mod dev_handlers;
+/// Error types and handling
+pub mod errors;
+/// First-run setup and other handlers
+pub mod handlers;
+/// Image serving and caching handlers
+pub mod image_handlers;
+/// Library management API handlers
+pub mod library_handlers_v2;
+/// Unified media reference API handlers
+pub mod media_reference_handlers;
+/// External metadata provider integration (TMDB)
+pub mod metadata_service;
+/// Middleware implementations
+pub mod middleware;
+/// Movie specific API handlers
+pub mod movie_handlers;
+/// Media query API handlers
+pub mod query_handlers;
+/// Role and permission management handlers
+pub mod role_handlers;
+/// Versioned route organization
+pub mod routes;
+/// Media scanning API handlers
+pub mod scan_handlers;
+/// Media library scanning and indexing
+pub mod scan_manager;
+/// Centralized services for common operations
+pub mod services;
+/// Session management handlers
+pub mod session_handlers;
+/// Media streaming handlers
+pub mod stream_handlers;
+/// Synchronized playback session handlers
+pub mod sync_handlers;
+/// Development and testing endpoints
+pub mod test_endpoints;
+/// Integration and unit tests
+#[cfg(test)]
+pub mod tests;
+/// Thumbnail generation and caching
+pub mod thumbnail_service;
+/// TLS configuration and certificate management
+pub mod tls;
+/// Video transcoding and HLS streaming
+pub mod transcoding;
+/// TV show specific API handlers
+pub mod tv_handlers;
+/// User profile management handlers
+pub mod user_handlers;
+/// API versioning infrastructure
+pub mod versioning;
+/// Watch progress tracking handlers
+pub mod watch_status_handlers;
+/// WebSocket connection management
+pub mod websocket;
 
 use axum::{
     body::Body,
-    extract::{Path, Query, State},
+    extract::{Path, Request, State},
     http::{header, HeaderMap, StatusCode},
-    response::{sse::Sse, Json, Response},
-    routing::{get, post},
+    middleware as axum_middleware,
+    response::{Json, Response},
+    routing::{get, post, put},
     Router,
 };
+use chrono;
+use clap::Parser;
 use config::Config;
 use ferrex_core::{
-    database::traits::MediaFilters, EpisodeSummary, Library, LibraryType, MediaDatabase, MediaScanner, MetadataExtractor,
-    ScanResult, SeasonDetails, SeasonSummary, TvShowDetails,
+    auth::domain::services::{create_authentication_service, AuthenticationService},
+    database::traits::MediaFilters,
+    database::PostgresDatabase,
+    Library, MediaDatabase, MediaEvent, MediaFileMetadata, ParsedMediaInfo, ScanRequest,
 };
+use futures;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::process::Stdio;
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, Semaphore};
 use tokio_util::io::ReaderStream;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use transcoding::handlers::*;
+use uuid::Uuid;
+
+use library_handlers_v2::*;
+use scan_handlers::*;
+
+/// Command line arguments for the Ferrex media server
+#[derive(Parser, Debug)]
+#[command(name = "ferrex-server")]
+#[command(about = "High-performance media server with real-time transcoding and streaming")]
+struct Args {
+    /// Path to TLS certificate file (PEM format)
+    #[arg(long, env = "TLS_CERT_PATH")]
+    cert: Option<PathBuf>,
+
+    /// Path to TLS private key file (PEM format)
+    #[arg(long, env = "TLS_KEY_PATH")]
+    key: Option<PathBuf>,
+
+    /// Server port (overrides config)
+    #[arg(short, long, env = "SERVER_PORT")]
+    port: Option<u16>,
+
+    /// Server host (overrides config)
+    #[arg(long, env = "SERVER_HOST")]
+    host: Option<String>,
+}
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<MediaDatabase>,
+    pub database: Arc<MediaDatabase>, // Alias for compatibility
     pub config: Arc<Config>,
     pub metadata_service: Arc<metadata_service::MetadataService>,
     pub thumbnail_service: Arc<thumbnail_service::ThumbnailService>,
     pub scan_manager: Arc<scan_manager::ScanManager>,
     pub transcoding_service: Arc<transcoding::TranscodingService>,
+    pub image_service: Arc<ferrex_core::ImageService>,
+    pub websocket_manager: Arc<websocket::ConnectionManager>,
+    pub auth_service: Arc<AuthenticationService>,
+    /// Track admin sessions per device for PIN authentication eligibility
+    pub admin_sessions: Arc<Mutex<HashMap<Uuid, AdminSessionInfo>>>,
+}
+
+/// Admin session information for PIN authentication tracking
+#[derive(Debug, Clone)]
+pub struct AdminSessionInfo {
+    pub user_id: Uuid,
+    pub device_id: Uuid,
+    pub authenticated_at: chrono::DateTime<chrono::Utc>,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub session_token: String,
+}
+
+impl AdminSessionInfo {
+    pub fn new(user_id: Uuid, device_id: Uuid, session_token: String) -> Self {
+        let now = chrono::Utc::now();
+        Self {
+            user_id,
+            device_id,
+            authenticated_at: now,
+            expires_at: now + chrono::Duration::hours(24), // Admin sessions expire after 24 hours
+            session_token,
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.expires_at > chrono::Utc::now()
+    }
+}
+
+impl AppState {
+    /// Check if an admin is authenticated on the given device
+    pub async fn is_admin_authenticated_on_device(&self, device_id: Uuid) -> bool {
+        let admin_sessions = self.admin_sessions.lock().await;
+        admin_sessions
+            .get(&device_id)
+            .map(|session| session.is_valid())
+            .unwrap_or(false)
+    }
+
+    /// Register an admin session for a device
+    pub async fn register_admin_session(
+        &self,
+        user_id: Uuid,
+        device_id: Uuid,
+        session_token: String,
+    ) -> Result<(), anyhow::Error> {
+        // Verify the user is actually an admin
+        let user = self
+            .db
+            .backend()
+            .get_user_by_id(user_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("User not found"))?;
+
+        // TODO: Add proper admin role checking once role system is implemented
+        // For now, assume the caller has already verified admin status
+
+        let mut admin_sessions = self.admin_sessions.lock().await;
+        let session_info = AdminSessionInfo::new(user_id, device_id, session_token);
+        admin_sessions.insert(device_id, session_info);
+
+        tracing::info!(
+            "Admin session registered for device {} by user {}",
+            device_id,
+            user_id
+        );
+        Ok(())
+    }
+
+    /// Remove admin session for a device
+    pub async fn remove_admin_session(&self, device_id: Uuid) {
+        let mut admin_sessions = self.admin_sessions.lock().await;
+        if admin_sessions.remove(&device_id).is_some() {
+            tracing::info!("Admin session removed for device {}", device_id);
+        }
+    }
+
+    /// Clean up expired admin sessions
+    pub async fn cleanup_expired_admin_sessions(&self) {
+        let mut admin_sessions = self.admin_sessions.lock().await;
+        let initial_count = admin_sessions.len();
+        admin_sessions.retain(|_, session| session.is_valid());
+        let removed_count = initial_count - admin_sessions.len();
+
+        if removed_count > 0 {
+            tracing::info!("Cleaned up {} expired admin sessions", removed_count);
+        }
+    }
+
+    /// Get admin session info for a device
+    pub async fn get_admin_session(&self, device_id: Uuid) -> Option<AdminSessionInfo> {
+        let admin_sessions = self.admin_sessions.lock().await;
+        admin_sessions
+            .get(&device_id)
+            .filter(|session| session.is_valid())
+            .cloned()
+    }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Parse command line arguments
+    let args = Args::parse();
+
     // Load configuration from environment
-    let config = Arc::new(Config::from_env()?);
+    let mut config = Config::from_env()?;
+
+    // Override config with CLI arguments if provided
+    if let Some(port) = args.port {
+        config.server_port = port;
+    }
+    if let Some(host) = args.host {
+        config.server_host = host;
+    }
+
+    let config = Arc::new(config);
 
     tracing_subscriber::registry()
         .with(
@@ -81,20 +361,19 @@ async fn main() -> anyhow::Result<()> {
                     Arc::new(database)
                 }
                 Err(e) => {
-                    warn!(
-                        "Failed to connect to PostgreSQL: {}. Falling back to SurrealDB",
-                        e
-                    );
-                    Arc::new(MediaDatabase::new_surrealdb().await?)
+                    error!("Failed to connect to PostgreSQL: {}", e);
+                    return Err(anyhow::anyhow!("Database connection failed: {}", e));
                 }
             }
         } else {
-            info!("Using SurrealDB backend");
-            Arc::new(MediaDatabase::new_surrealdb().await?)
+            error!("Only PostgreSQL database URLs are supported");
+            return Err(anyhow::anyhow!(
+                "Invalid database URL: must start with postgres:// or postgresql://"
+            ));
         }
     } else {
-        info!("Using in-memory SurrealDB");
-        Arc::new(MediaDatabase::new_surrealdb().await?)
+        error!("DATABASE_URL environment variable is required");
+        return Err(anyhow::anyhow!("DATABASE_URL not set"));
     };
 
     if let Err(e) = db.backend().initialize_schema().await {
@@ -131,49 +410,373 @@ async fn main() -> anyhow::Result<()> {
         transcode_cache_dir: config.transcode_cache_dir.clone(),
         ..Default::default()
     };
-    
+
     let transcoding_service = Arc::new(
         transcoding::TranscodingService::new(transcoding_config, db.clone())
             .await
             .expect("Failed to initialize transcoding service"),
     );
 
+    // Initialize image service
+    let image_service = Arc::new(ferrex_core::ImageService::new(
+        db.clone(),
+        config.cache_dir.clone(),
+    ));
+
+    let websocket_manager = Arc::new(websocket::ConnectionManager::new());
+
+    // Initialize authentication service
+    let auth_service = {
+        // Get the PostgreSQL pool from the MediaDatabase
+        let postgres_backend = db
+            .as_any()
+            .downcast_ref::<PostgresDatabase>()
+            .expect("Expected PostgreSQL backend for authentication service");
+
+        Arc::new(create_authentication_service(Arc::new(
+            postgres_backend.pool().clone(),
+        )))
+    };
+
     let state = AppState {
-        db,
+        db: db.clone(),
+        database: db,
         config: config.clone(),
         metadata_service,
         thumbnail_service,
         scan_manager,
         transcoding_service,
+        image_service,
+        websocket_manager,
+        auth_service,
+        admin_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
+
+    // Start periodic cleanup of expired admin sessions
+    let cleanup_state = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300)); // Clean up every 5 minutes
+        loop {
+            interval.tick().await;
+            cleanup_state.cleanup_expired_admin_sessions().await;
+        }
+    });
 
     let app = create_app(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
-    info!(
-        "Starting Rusty Media Server on {}:{}",
-        config.server_host, config.server_port
-    );
+    // Check if TLS is enabled via CLI args or environment variables
+    let tls_cert_path = args
+        .cert
+        .or_else(|| std::env::var("TLS_CERT_PATH").ok().map(PathBuf::from));
+    let tls_key_path = args
+        .key
+        .or_else(|| std::env::var("TLS_KEY_PATH").ok().map(PathBuf::from));
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    match (tls_cert_path, tls_key_path) {
+        (Some(cert_path), Some(key_path)) => {
+            // HTTPS mode with TLS
+            info!("TLS enabled - starting HTTPS server");
+            info!("Certificate path: {:?}", cert_path);
+            info!("Private key path: {:?}", key_path);
+
+            let tls_config = crate::tls::TlsCertConfig {
+                cert_path,
+                key_path,
+                ..Default::default()
+            };
+
+            // Create TLS acceptor
+            let rustls_config = crate::tls::create_tls_acceptor(tls_config).await?;
+
+            let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
+            info!(
+                "Starting Ferrex Media Server (HTTPS) on {}:{}",
+                config.server_host, config.server_port
+            );
+
+            axum_server::bind_rustls(addr, rustls_config)
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+                .await?;
+        }
+        _ => {
+            // HTTP mode (development/behind reverse proxy)
+            let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
+            info!(
+                "Starting Ferrex Media Server (HTTP) on {}:{}",
+                config.server_host, config.server_port
+            );
+            warn!("TLS is not configured. For production use, set TLS_CERT_PATH and TLS_KEY_PATH environment variables.");
+
+            let listener = tokio::net::TcpListener::bind(addr).await?;
+
+            // Create the service with ConnectInfo for client IP tracking
+            let make_service = app.into_make_service_with_connect_info::<SocketAddr>();
+
+            axum::serve(listener, make_service).await?;
+        }
+    }
 
     Ok(())
 }
 
 pub fn create_app(state: AppState) -> Router {
+    // Create versioned API routes
+    let versioned_api = routes::create_api_router(state.clone());
+
+    // Create backward compatibility layer for old API paths
+    // This will redirect old paths to v1 endpoints during migration period
+    let compatibility_routes = create_compatibility_routes(state.clone());
+
+    // Routes that require authentication (legacy - to be removed)
+    let protected_routes = Router::new()
+        .route("/api/auth/logout", post(auth::handlers::logout))
+        .route("/api/users/me", get(auth::handlers::get_current_user))
+        // User management
+        .route(
+            "/api/user/password",
+            axum::routing::put(user_handlers::change_password_handler),
+        )
+        // Device authentication management (requires auth)
+        .route(
+            "/api/auth/device/pin/set",
+            post(auth::device_handlers::set_device_pin),
+        )
+        .route(
+            "/api/auth/device/pin/change",
+            post(auth::device_handlers::change_device_pin),
+        )
+        .route(
+            "/api/auth/device/list",
+            get(auth::device_handlers::list_user_devices),
+        )
+        .route(
+            "/api/auth/device/revoke",
+            post(auth::device_handlers::revoke_device),
+        )
+        // Watch status endpoints
+        .route(
+            "/api/watch/progress",
+            post(watch_status_handlers::update_progress_handler),
+        )
+        .route(
+            "/api/watch/state",
+            get(watch_status_handlers::get_watch_state_handler),
+        )
+        .route(
+            "/api/watch/continue",
+            get(watch_status_handlers::get_continue_watching_handler),
+        )
+        .route(
+            "/api/watch/progress/:media_id",
+            axum::routing::delete(watch_status_handlers::clear_progress_handler),
+        )
+        .route(
+            "/api/media/:id/progress",
+            get(watch_status_handlers::get_media_progress_handler),
+        )
+        .route(
+            "/api/media/:id/complete",
+            post(watch_status_handlers::mark_completed_handler),
+        )
+        .route(
+            "/api/media/:id/is-completed",
+            get(watch_status_handlers::is_completed_handler),
+        )
+        // Protected streaming endpoints with progress tracking
+        .route(
+            "/api/stream/:id",
+            get(stream_handlers::stream_with_progress_handler),
+        )
+        .route(
+            "/api/stream/:id/progress",
+            post(stream_handlers::report_progress_handler),
+        )
+        // Sync session endpoints
+        .route(
+            "/api/sync/sessions",
+            post(sync_handlers::create_sync_session_handler),
+        )
+        .route(
+            "/api/sync/sessions/join/:code",
+            get(sync_handlers::join_sync_session_handler),
+        )
+        .route(
+            "/api/sync/sessions/:id",
+            axum::routing::delete(sync_handlers::leave_sync_session_handler),
+        )
+        .route(
+            "/api/sync/sessions/:id/state",
+            get(sync_handlers::get_sync_session_state_handler),
+        )
+        // WebSocket endpoint for sync sessions
+        .route("/api/sync/ws", get(websocket::handler::websocket_handler))
+        // User profile management
+        .route("/api/users/:id", get(user_handlers::get_user_handler))
+        .route(
+            "/api/users/:id",
+            axum::routing::put(user_handlers::update_user_handler),
+        )
+        .route(
+            "/api/users/:id",
+            axum::routing::delete(user_handlers::delete_user_handler),
+        )
+        // Session management
+        .route(
+            "/api/users/sessions",
+            get(session_handlers::get_user_sessions_handler),
+        )
+        .route(
+            "/api/users/sessions/:id",
+            axum::routing::delete(session_handlers::delete_session_handler),
+        )
+        .route(
+            "/api/users/sessions",
+            axum::routing::delete(session_handlers::delete_all_sessions_handler),
+        )
+        // Query system
+        .route(
+            "/api/media/query",
+            post(query_handlers::query_media_handler),
+        )
+        // PIN authentication routes (require admin session on device)
+        .route(
+            "/api/auth/pin/authenticate",
+            post(auth::pin_handlers::authenticate_with_pin),
+        )
+        .route("/api/auth/pin/set", post(auth::pin_handlers::set_pin))
+        .route(
+            "/api/auth/pin/remove/:device_id",
+            axum::routing::delete(auth::pin_handlers::remove_pin),
+        )
+        .route(
+            "/api/auth/pin/available/:device_id",
+            get(auth::pin_handlers::check_pin_availability),
+        )
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ));
+
+    // Admin routes - require both auth and admin middleware
+    // Note: Middleware runs in reverse order - auth_middleware runs first, then admin_middleware
+    // TODO: Migrate to permission-based middleware with specific permissions per endpoint:
+    // - /admin/users: users:read
+    // - /admin/users/:id/roles: users:manage_roles
+    // - /admin/users/:id (DELETE): users:delete
+    // - /admin/users/:id/sessions: users:read
+    // - /admin/users/:user_id/sessions/:session_id: users:update
+    // - /admin/stats: server:read_settings
+    let admin_routes = Router::new()
+        .route("/admin/users", get(admin_handlers::list_all_users))
+        .route(
+            "/admin/users/:id/roles",
+            put(admin_handlers::assign_user_roles),
+        )
+        .route(
+            "/admin/users/:id",
+            axum::routing::delete(admin_handlers::delete_user_admin),
+        )
+        .route(
+            "/admin/users/:id/sessions",
+            get(admin_handlers::get_user_sessions_admin),
+        )
+        .route(
+            "/admin/users/:user_id/sessions/:session_id",
+            axum::routing::delete(admin_handlers::revoke_user_session_admin),
+        )
+        .route("/admin/stats", get(admin_handlers::get_admin_stats))
+        // Development/reset endpoints (admin only)
+        .route(
+            "/admin/dev/reset/check",
+            get(dev_handlers::check_reset_status),
+        )
+        .route(
+            "/admin/dev/reset/database",
+            post(dev_handlers::reset_database),
+        )
+        .route("/admin/dev/seed", post(dev_handlers::seed_database))
+        // Admin session management for PIN authentication
+        .route(
+            "/admin/sessions/register",
+            post(auth::pin_handlers::register_admin_session),
+        )
+        .route(
+            "/admin/sessions/:device_id",
+            axum::routing::delete(auth::pin_handlers::remove_admin_session),
+        )
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ))
+        .layer(axum_middleware::from_fn(auth::middleware::admin_middleware));
+
+    // Role management routes
+    let role_routes = Router::new()
+        .route("/roles", get(role_handlers::list_roles_handler))
+        .route("/permissions", get(role_handlers::list_permissions_handler))
+        .route(
+            "/users/:id/permissions",
+            get(role_handlers::get_user_permissions_handler),
+        )
+        .route(
+            "/users/:id/roles",
+            put(role_handlers::assign_user_roles_handler),
+        )
+        .route(
+            "/users/:id/permissions/override",
+            post(role_handlers::override_user_permission_handler),
+        )
+        .route(
+            "/users/me/permissions",
+            get(role_handlers::get_my_permissions_handler),
+        )
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ));
+
+    // Public routes
     Router::new()
         .route("/ping", get(ping_handler))
         .route("/health", get(health_handler))
+        // Public setup endpoints (for first-run)
+        .route("/api/setup/status", get(handlers::check_setup_status))
+        .route("/api/setup/admin", post(handlers::create_initial_admin))
+        // Public authentication endpoints
+        .route("/api/auth/register", post(auth::handlers::register))
+        .route("/api/auth/login", post(auth::handlers::login))
+        .route("/api/auth/refresh", post(auth::handlers::refresh))
+        // Device authentication endpoints
+        .route(
+            "/api/auth/device/login",
+            post(auth::device_handlers::device_login),
+        )
+        .route(
+            "/api/auth/device/pin",
+            post(auth::device_handlers::pin_login),
+        )
+        .route(
+            "/api/auth/device/status",
+            get(auth::device_handlers::check_device_status),
+        )
+        // Public user endpoints (for user selection screen)
+        .route("/api/users", get(user_handlers::list_users_handler))
+        // Add protected routes
+        .merge(protected_routes)
+        // Add admin routes with /api prefix
+        .nest("/api", admin_routes)
+        // Add role management routes with /api prefix
+        .nest("/api", role_routes)
         .route("/scan", post(scan_handler))
         .route("/scan", get(scan_status_handler))
-        .route("/metadata", post(metadata_handler))
-        .route(
-            "/library",
-            get(library_get_handler).post(library_post_handler),
-        )
-        .route("/library/scan-and-store", post(scan_and_store_handler))
+        // .route("/metadata", post(metadata_handler)) // Old endpoint - deprecated
+        // Old library endpoint (returns MediaFiles)
+        // .route(
+        //     "/library",
+        //     get(library_get_handler).post(library_post_handler),
+        // )
         .route("/scan/start", post(start_scan_handler))
+        .route("/scan/all", post(scan_all_libraries_handler))
         .route("/scan/progress/:id", get(scan_progress_handler))
         .route("/scan/progress/:id/sse", get(scan_progress_sse_handler))
         .route("/scan/active", get(active_scans_handler))
@@ -188,38 +791,91 @@ pub fn create_app(state: AppState) -> Router {
         .route("/transcode/:id", post(start_transcode_handler))
         .route("/transcode/status/:job_id", get(transcode_status_handler))
         // New production transcoding endpoints
-        .route("/transcode/:id/adaptive", post(start_adaptive_transcode_handler))
-        .route("/transcode/:id/segment/:segment_number", get(get_segment_handler))
-        .route("/transcode/:id/master.m3u8", get(get_master_playlist_handler))
-        .route("/transcode/:id/variant/:profile/playlist.m3u8", get(get_variant_playlist_handler))
-        .route("/transcode/:id/variant/:profile/:segment", get(get_variant_segment_handler))
+        .route(
+            "/transcode/:id/adaptive",
+            post(start_adaptive_transcode_handler),
+        )
+        .route(
+            "/transcode/:id/segment/:segment_number",
+            get(get_segment_handler),
+        )
+        .route(
+            "/transcode/:id/master.m3u8",
+            get(get_master_playlist_handler),
+        )
+        .route(
+            "/transcode/:id/variant/:profile/playlist.m3u8",
+            get(get_variant_playlist_handler),
+        )
+        .route(
+            "/transcode/:id/variant/:profile/:segment",
+            get(get_variant_segment_handler),
+        )
         .route("/transcode/cancel/:job_id", post(cancel_transcode_handler))
         .route("/transcode/profiles", get(list_transcode_profiles_handler))
         .route("/transcode/cache/stats", get(transcode_cache_stats_handler))
-        .route("/transcode/:id/clear-cache", post(clear_transcode_cache_handler))
+        .route(
+            "/transcode/:id/clear-cache",
+            post(clear_transcode_cache_handler),
+        )
         .route("/library/status", get(library_status_handler))
         .route("/media/:id/availability", get(media_availability_handler))
         .route("/config", get(config_handler))
-        .route("/metadata/fetch/:id", post(fetch_metadata_handler))
+        // .route("/metadata/fetch/:id", post(fetch_metadata_handler)) // Old endpoint - deprecated
+        // .route("/metadata/fetch-show/:show_name", post(fetch_show_metadata_handler)) // Old endpoint - deprecated
         .route("/poster/:id", get(poster_handler))
         .route("/thumbnail/:id", get(thumbnail_handler))
+        // New unified media reference endpoint
+        .route(
+            "/api/media/:id",
+            get(media_reference_handlers::get_media_reference_handler),
+        )
+        // Batch media fetch endpoint
+        .route(
+            "/api/media/batch",
+            post(media_reference_handlers::get_media_batch_handler),
+        )
+        // Image serving endpoint (public but client sends auth headers)
+        .route(
+            "/images/:type/:id/:category/:index",
+            get(image_handlers::serve_image_handler),
+        )
         .route(
             "/season-poster/:show_name/:season_num",
             get(season_poster_handler),
         )
-        // TV Show endpoints
-        .route("/shows", get(list_shows_handler))
-        .route("/shows/:show_name", get(show_details_handler))
+        // TV Show endpoints (old - using MediaFile)
+        // .route("/shows", get(list_shows_handler))
+        // .route("/shows/:show_name", get(show_details_handler))
+        // .route("/shows/:show_name/episodes", get(show_episodes_handler))
+        // .route(
+        //     "/shows/:show_name/seasons/:season_num",
+        //     get(season_details_handler),
+        // )
+        // Movie endpoints (old - using MediaFile)
+        // .route("/movies", get(list_movies_handler))
+        // .route("/movies/:id", get(movie_details_handler))
+        // Library management endpoints (old - commented out)
+        // .route("/libraries", get(list_libraries_handler).post(create_library_handler))
+        // .route("/libraries/:id", get(get_library_handler))
+        // .route("/libraries/:id", axum::routing::put(update_library_handler))
+        // .route("/libraries/:id", axum::routing::delete(delete_library_handler))
+        // .route("/libraries/:id/scan", post(scan_library_handler))
+        // New library-centric endpoints
         .route(
-            "/shows/:show_name/seasons/:season_num",
-            get(season_details_handler),
+            "/libraries",
+            get(list_libraries_handler).post(create_library_handler),
         )
-        // Library management endpoints
-        .route("/libraries", get(list_libraries_handler).post(create_library_handler))
         .route("/libraries/:id", get(get_library_handler))
         .route("/libraries/:id", axum::routing::put(update_library_handler))
-        .route("/libraries/:id", axum::routing::delete(delete_library_handler))
+        .route(
+            "/libraries/:id",
+            axum::routing::delete(delete_library_handler),
+        )
         .route("/libraries/:id/scan", post(scan_library_handler))
+        .route("/libraries/:id/media", get(get_library_media_handler))
+        .route("/media", post(fetch_media_handler))
+        .route("/media/match", post(manual_match_media_handler))
         // Temporary maintenance endpoint
         .route(
             "/maintenance/delete-by-title/:title",
@@ -227,96 +883,186 @@ pub fn create_app(state: AppState) -> Router {
         )
         .route("/metadata/fetch-batch", post(fetch_metadata_batch_handler))
         .route("/posters/batch", post(fetch_posters_batch_handler))
-        .route(
-            "/metadata/queue-missing",
-            post(queue_missing_metadata_handler),
-        )
+        // .route(
+        //     "/metadata/queue-missing",
+        //     post(queue_missing_metadata_handler),
+        // ) // Old endpoint - deprecated
         // Database maintenance endpoints (for testing/debugging)
         .route("/maintenance/clear-database", post(clear_database_handler))
         // Test endpoints for metadata extraction and transcoding
-        .route("/test/metadata/:path", get(test_endpoints::test_metadata_extraction))
-        .route("/test/transcode/:path", post(test_endpoints::test_transcoding))
-        .route("/test/transcode/status/:job_id", get(test_endpoints::test_transcode_status))
+        .route(
+            "/test/metadata/:path",
+            get(test_endpoints::test_metadata_extraction),
+        )
+        .route(
+            "/test/transcode/:path",
+            post(test_endpoints::test_transcoding),
+        )
+        .route(
+            "/test/transcode/status/:job_id",
+            get(test_endpoints::test_transcode_status),
+        )
         .route("/test/hls/:path", post(test_endpoints::test_hls_streaming))
-        .layer(TraceLayer::new_for_http())
+        // Add versioned API routes
+        .merge(versioned_api)
+        // Add compatibility routes (temporary)
+        .merge(compatibility_routes)
+        // Add middleware layers in correct order (outer to inner):
+        // 1. CORS (outermost)
         .layer(CorsLayer::permissive())
+        // 2. Tracing
+        .layer(TraceLayer::new_for_http())
+        // 3. HTTPS enforcement (redirects before processing) - DISABLED IN DEV
+        // NOTE: Completely disabled for now to debug connection issues
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            |State(app_state): State<AppState>,
+             req: Request<Body>,
+             next: axum::middleware::Next| async move {
+                use axum::http::header;
+                use std::convert::Infallible;
+
+                // Skip HTTPS enforcement in development mode
+                if app_state.config.dev_mode || cfg!(debug_assertions) {
+                    return Ok::<_, Infallible>(next.run(req).await);
+                }
+
+                // Check if request is HTTPS
+                let is_https = req
+                    .headers()
+                    .get("x-forwarded-proto")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|v| v == "https")
+                    .unwrap_or_else(|| {
+                        req.uri()
+                            .scheme()
+                            .map(|s| s.as_str() == "https")
+                            .unwrap_or(false)
+                    });
+
+                if !is_https {
+                    // Build HTTPS URL
+                    let uri = req.uri();
+                    let host = req
+                        .headers()
+                        .get(header::HOST)
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("localhost");
+
+                    let https_url = format!(
+                        "https://{}{}{}",
+                        host,
+                        uri.path(),
+                        uri.query().map(|q| format!("?{}", q)).unwrap_or_default()
+                    );
+
+                    return Ok::<_, Infallible>(
+                        Response::builder()
+                            .status(StatusCode::MOVED_PERMANENTLY)
+                            .header(header::LOCATION, https_url)
+                            .body(Body::empty())
+                            .unwrap(),
+                    );
+                }
+
+                // Pass through HTTPS requests
+                Ok::<_, Infallible>(next.run(req).await)
+            },
+        ))
+        // 4. Rate limiting (before auth to protect auth endpoints)
+        .layer(axum::middleware::from_fn(
+            |request: Request<Body>, next: axum::middleware::Next| async move {
+                // Simple pass-through for now - rate limiting can be enhanced later
+                // In production, this would check Redis/memory cache for rate limits
+                next.run(request).await
+            },
+        ))
+        // 5. Version negotiation (after security, before business logic)
+        .layer(axum_middleware::from_fn(versioning::version_middleware))
         .with_state(state)
 }
 
+/// Create backward compatibility routes that redirect to v1 endpoints
+fn create_compatibility_routes(state: AppState) -> Router<AppState> {
+    Router::new()
+        // These routes will forward to the v1 equivalents
+        // We'll implement actual redirects or proxies later
+        // For now, this serves as documentation of what needs compatibility
+        .with_state(state)
+}
+
+// These types are now in ferrex_core::api_types
+// #[derive(Deserialize)]
 #[derive(Deserialize)]
 struct MetadataRequest {
     path: String,
 }
 
-#[derive(Deserialize)]
-struct CreateLibraryRequest {
-    name: String,
-    library_type: String,
-    paths: Vec<String>,
-    #[serde(default = "default_scan_interval")]
-    scan_interval_minutes: u32,
-    #[serde(default = "default_enabled")]
-    enabled: bool,
-}
+// #[derive(Deserialize)]
+// struct CreateLibraryRequest {
+//     name: String,
+//     library_type: String,
+//     paths: Vec<String>,
+//     #[serde(default = "default_scan_interval")]
+//     scan_interval_minutes: u32,
+//     #[serde(default = "default_enabled")]
+//     enabled: bool,
+// }
 
-#[derive(Deserialize)]
-struct UpdateLibraryRequest {
-    name: Option<String>,
-    paths: Option<Vec<String>>,
-    scan_interval_minutes: Option<u32>,
-    enabled: Option<bool>,
-}
+// #[derive(Deserialize)]
+// struct UpdateLibraryRequest {
+//     name: Option<String>,
+//     paths: Option<Vec<String>>,
+//     scan_interval_minutes: Option<u32>,
+//     enabled: Option<bool>,
+// }
 
-fn default_scan_interval() -> u32 {
-    60
-}
+// fn default_scan_interval() -> u32 {
+//     60
+// }
 
-fn default_enabled() -> bool {
-    true
-}
+// fn default_enabled() -> bool {
+//     true
+// }
 
-#[derive(Debug, Deserialize)]
-struct LibraryFilters {
-    media_type: Option<String>,
-    show_name: Option<String>,
-    season: Option<u32>,
-    order_by: Option<String>,
-    limit: Option<u64>,
-    library_id: Option<String>,
-}
+// #[derive(Debug, Deserialize)]
+// struct LibraryFilters {
+//     media_type: Option<String>,
+//     show_name: Option<String>,
+//     season: Option<u32>,
+//     order_by: Option<String>,
+//     limit: Option<u64>,
+//     library_id: Option<String>,
+// }
 
-#[derive(Deserialize)]
-struct ScanAndStoreRequest {
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    max_depth: Option<usize>,
-    #[serde(default)]
-    follow_links: bool,
-    #[serde(default = "default_extract_metadata")]
-    extract_metadata: bool,
-}
+// ScanAndStoreRequest - old type, not needed with new scanner
+// #[derive(Deserialize)]
+// struct ScanAndStoreRequest {
+//     #[serde(default)]
+//     path: Option<String>,
+//     #[serde(default)]
+//     max_depth: Option<usize>,
+//     #[serde(default)]
+//     follow_links: bool,
+//     #[serde(default = "default_extract_metadata")]
+//     extract_metadata: bool,
+// }
 
-fn default_extract_metadata() -> bool {
-    true
-}
+// fn default_extract_metadata() -> bool {
+//     true
+// }
 
-#[derive(Deserialize)]
-struct ScanRequest {
-    path: String,
-    #[serde(default)]
-    max_depth: Option<usize>,
-    #[serde(default)]
-    follow_links: bool,
-}
+// ScanRequest is now in ferrex_core::api_types
+// #[derive(Deserialize)]
+// struct ScanRequest {
+//     path: String,
+//     #[serde(default)]
+//     max_depth: Option<usize>,
+//     #[serde(default)]
+//     follow_links: bool,
+// }
 
-#[derive(Serialize)]
-struct ScanResponse {
-    status: String,
-    message: String,
-    result: Option<ScanResult>,
-    error: Option<String>,
-}
+// ScanResponse struct removed - using new scan management API
 
 async fn ping_handler() -> Result<Json<Value>, StatusCode> {
     info!("Ping endpoint called");
@@ -379,47 +1125,14 @@ async fn health_handler(State(state): State<AppState>) -> Result<Json<Value>, St
     }
 }
 
-async fn scan_handler(Json(request): Json<ScanRequest>) -> Result<Json<ScanResponse>, StatusCode> {
-    info!("Scan request for path: {}", request.path);
-
-    let mut scanner = MediaScanner::new();
-
-    if let Some(depth) = request.max_depth {
-        scanner = scanner.with_max_depth(depth);
-    }
-
-    scanner = scanner.with_follow_links(request.follow_links);
-
-    match scanner.scan_directory(&request.path) {
-        Ok(result) => {
-            info!(
-                "Scan completed: {} video files found in {}",
-                result.video_files.len(),
-                request.path
-            );
-
-            Ok(Json(ScanResponse {
-                status: "success".to_string(),
-                message: format!(
-                    "Found {} video files out of {} total files",
-                    result.video_files.len(),
-                    result.total_files
-                ),
-                result: Some(result),
-                error: None,
-            }))
-        }
-        Err(e) => {
-            warn!("Scan failed for {}: {}", request.path, e);
-
-            Ok(Json(ScanResponse {
-                status: "error".to_string(),
-                message: "Scan failed".to_string(),
-                result: None,
-                error: Some(e.to_string()),
-            }))
-        }
-    }
+// Deprecated scan handler - use start_scan_handler instead
+async fn scan_handler(_request: Json<ScanRequest>) -> Result<Json<Value>, StatusCode> {
+    warn!("Deprecated /scan endpoint called. Use /scan/start instead");
+    Ok(Json(json!({
+        "status": "error",
+        "message": "This endpoint is deprecated. Use POST /scan/start instead",
+        "error": "deprecated_endpoint"
+    })))
 }
 
 async fn scan_status_handler() -> Result<Json<Value>, StatusCode> {
@@ -434,301 +1147,10 @@ async fn scan_status_handler() -> Result<Json<Value>, StatusCode> {
     })))
 }
 
+// Deprecated - will be removed
 async fn metadata_handler(Json(request): Json<MetadataRequest>) -> Result<Json<Value>, StatusCode> {
-    info!("Metadata extraction request for: {}", request.path);
-
-    let mut extractor = MetadataExtractor::new();
-
-    match extractor.extract_metadata(&request.path) {
-        Ok(metadata) => {
-            info!("Metadata extraction successful for: {}", request.path);
-            Ok(Json(json!({
-                "status": "success",
-                "metadata": metadata
-            })))
-        }
-        Err(e) => {
-            warn!("Metadata extraction failed for {}: {}", request.path, e);
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-async fn library_get_handler(
-    State(state): State<AppState>,
-    Query(filters): Query<LibraryFilters>,
-) -> Result<Json<Value>, StatusCode> {
-    info!("Library GET request with filters: {:?}", filters);
-    library_handler_impl(state.db, filters).await
-}
-
-async fn library_post_handler(
-    State(state): State<AppState>,
-    Json(filters): Json<LibraryFilters>,
-) -> Result<Json<Value>, StatusCode> {
-    info!("Library POST request with filters: {:?}", filters);
-    library_handler_impl(state.db, filters).await
-}
-
-async fn library_handler_impl(
-    db: Arc<MediaDatabase>,
-    filters: LibraryFilters,
-) -> Result<Json<Value>, StatusCode> {
-    info!("Library request with filters: {:?}", filters);
-
-    let media_filters = MediaFilters {
-        media_type: filters.media_type,
-        show_name: filters.show_name,
-        season: filters.season,
-        order_by: filters.order_by,
-        limit: filters.limit,
-        library_id: filters.library_id.and_then(|id| uuid::Uuid::parse_str(&id).ok()),
-    };
-
-    match db.backend().list_media(media_filters).await {
-        Ok(media_files) => {
-            info!("Retrieved {} media files from library", media_files.len());
-            Ok(Json(json!({
-                "status": "success",
-                "media_files": media_files,
-                "count": media_files.len()
-            })))
-        }
-        Err(e) => {
-            warn!("Failed to retrieve library: {}", e);
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-async fn scan_and_store_handler(
-    State(state): State<AppState>,
-    Json(request): Json<ScanAndStoreRequest>,
-) -> Result<Json<Value>, StatusCode> {
-    // Use provided path or fall back to MEDIA_ROOT
-    let scan_path = match request.path {
-        Some(path) => {
-            info!("Using provided path: {}", path);
-            path
-        }
-        None => {
-            info!("No path provided, checking MEDIA_ROOT environment variable");
-            match std::env::var("MEDIA_ROOT") {
-                Ok(path) => {
-                    info!("Using MEDIA_ROOT: {}", path);
-                    path
-                }
-                Err(_) => {
-                    warn!("No path provided and MEDIA_ROOT environment variable not set");
-                    return Ok(Json(json!({
-                        "status": "error",
-                        "error": "No path provided and MEDIA_ROOT not configured on server"
-                    })));
-                }
-            }
-        }
-    };
-
-    info!("Scan and store request for path: {}", scan_path);
-
-    // Scan for media files
-    let mut scanner = MediaScanner::new();
-    if let Some(depth) = request.max_depth {
-        scanner = scanner.with_max_depth(depth);
-    }
-    scanner = scanner.with_follow_links(request.follow_links);
-
-    let scan_result = match scanner.scan_directory(&scan_path) {
-        Ok(result) => result,
-        Err(e) => {
-            warn!("Scan failed for {}: {}", scan_path, e);
-            return Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })));
-        }
-    };
-
-    let mut stored_count = 0;
-    let mut extraction_errors = Vec::new();
-    let mut extractor = if request.extract_metadata {
-        Some(MetadataExtractor::new())
-    } else {
-        None
-    };
-
-    // Store each media file and fetch external metadata
-    let mut metadata_fetch_count = 0;
-    let mut metadata_fetch_errors = Vec::new();
-
-    for mut media_file in scan_result.video_files {
-        // Extract technical metadata if requested
-        if let Some(ref mut metadata_extractor) = extractor {
-            match metadata_extractor.extract_metadata(&media_file.path) {
-                Ok(metadata) => {
-                    // Log the extracted metadata for debugging
-                    if let Some(ref parsed_info) = metadata.parsed_info {
-                        info!("Extracted metadata for {}: media_type={}, show_name={:?}, season={:?}, episode={:?}", 
-                            media_file.filename, 
-                            parsed_info.media_type,
-                            parsed_info.show_name,
-                            parsed_info.season,
-                            parsed_info.episode
-                        );
-                    }
-                    media_file.metadata = Some(metadata);
-                }
-                Err(e) => {
-                    warn!(
-                        "Metadata extraction failed for {}: {}",
-                        media_file.filename, e
-                    );
-                    extraction_errors.push(format!("{}: {}", media_file.filename, e));
-                }
-            }
-        }
-
-        // Store in database
-        let stored_id = match state.db.backend().store_media(media_file.clone()).await {
-            Ok(id) => {
-                stored_count += 1;
-                Some(id)
-            }
-            Err(e) => {
-                warn!("Failed to store media file: {}", e);
-                extraction_errors.push(format!("Storage failed: {}", e));
-                None
-            }
-        };
-
-        // Fetch external metadata from TMDB if we stored the file successfully
-        if let Some(id) = stored_id {
-            // Only fetch if we don't already have external metadata
-            let needs_external_metadata = media_file
-                .metadata
-                .as_ref()
-                .map(|m| m.external_info.is_none())
-                .unwrap_or(true);
-
-            if needs_external_metadata {
-                info!("Fetching TMDB metadata for: {}", media_file.filename);
-                match state.metadata_service.fetch_metadata(&media_file).await {
-                    Ok(detailed_info) => {
-                        // Update the media file with external info
-                        let mut updated_media = media_file.clone();
-                        if let Some(ref mut metadata) = updated_media.metadata {
-                            metadata.external_info = Some(detailed_info.external_info.clone());
-                        }
-
-                        // Store updated media file
-                        if let Err(e) = state.db.backend().store_media(updated_media).await {
-                            warn!("Failed to update media with TMDB metadata: {}", e);
-                        } else {
-                            metadata_fetch_count += 1;
-
-                            // Try to cache poster
-                            if let Some(poster_path) = &detailed_info.external_info.poster_url {
-                                let media_id = id.split(':').last().unwrap_or(&id);
-                                match state
-                                    .metadata_service
-                                    .cache_poster(poster_path, media_id)
-                                    .await
-                                {
-                                    Ok(path) => info!("Poster cached at: {:?}", path),
-                                    Err(e) => warn!("Failed to cache poster: {}", e),
-                                }
-                            }
-
-                            // Cache season poster if available for TV episodes
-                            if let Some(season_poster) =
-                                &detailed_info.external_info.season_poster_url
-                            {
-                                if let Some(metadata) = &media_file.metadata {
-                                    if let Some(parsed) = &metadata.parsed_info {
-                                        if let (Some(show_name), Some(season)) =
-                                            (&parsed.show_name, parsed.season)
-                                        {
-                                            match state
-                                                .metadata_service
-                                                .cache_season_poster(
-                                                    season_poster,
-                                                    show_name,
-                                                    season,
-                                                )
-                                                .await
-                                            {
-                                                Ok(path) => {
-                                                    info!("Season poster cached at: {:?}", path)
-                                                }
-                                                Err(e) => {
-                                                    warn!("Failed to cache season poster: {}", e)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to fetch TMDB metadata for {}: {}",
-                            media_file.filename, e
-                        );
-                        metadata_fetch_errors.push(format!("{}: {}", media_file.filename, e));
-                    }
-                }
-            }
-
-            // Extract thumbnail for TV episodes during scan
-            if let Some(metadata) = &media_file.metadata {
-                if let Some(parsed) = &metadata.parsed_info {
-                    if parsed.media_type == ferrex_core::MediaType::TvEpisode {
-                        let media_id = id.split(':').last().unwrap_or(&id);
-                        match state
-                            .thumbnail_service
-                            .extract_thumbnail(media_id, &media_file.path.to_string_lossy())
-                            .await
-                        {
-                            Ok(path) => info!(
-                                "Thumbnail extracted for {} at {:?}",
-                                media_file.filename, path
-                            ),
-                            Err(e) => warn!(
-                                "Failed to extract thumbnail for {}: {}",
-                                media_file.filename, e
-                            ),
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    info!(
-        "Stored {} media files from scan of {}",
-        stored_count, scan_path
-    );
-    info!("Fetched TMDB metadata for {} files", metadata_fetch_count);
-
-    Ok(Json(json!({
-        "status": "success",
-        "message": format!("Scanned {} files, stored {}, fetched metadata for {}",
-            scan_result.total_files, stored_count, metadata_fetch_count),
-        "scanned": scan_result.total_files,
-        "stored": stored_count,
-        "metadata_fetched": metadata_fetch_count,
-        "skipped": scan_result.skipped_files,
-        "extraction_errors": extraction_errors,
-        "metadata_errors": metadata_fetch_errors,
-        "scan_errors": scan_result.errors
-    })))
+    warn!("Deprecated metadata handler called for: {}", request.path);
+    Err(StatusCode::NOT_IMPLEMENTED)
 }
 
 async fn stream_handler(
@@ -745,7 +1167,7 @@ async fn stream_handler(
         error!("Failed to decode media ID: {}", e);
         StatusCode::BAD_REQUEST
     })?;
-    
+
     // Use the decoded ID for database lookup
     let db_id = decoded_id.into_owned();
 
@@ -998,11 +1420,14 @@ async fn fetch_metadata_handler(
     // First, re-extract technical metadata from the video file
     let mut updated_media = media_file.clone();
     let mut technical_metadata_extracted = false;
-    
+
     if media_file.path.exists() {
-        info!("Re-extracting technical metadata from: {:?}", media_file.path);
+        info!(
+            "Re-extracting technical metadata from: {:?}",
+            media_file.path
+        );
         let mut extractor = ferrex_core::MetadataExtractor::new();
-        
+
         match extractor.extract_metadata(&media_file.path) {
             Ok(new_metadata) => {
                 info!("Technical metadata extracted successfully:");
@@ -1010,17 +1435,15 @@ async fn fetch_metadata_handler(
                 info!("  Color space: {:?}", new_metadata.color_space);
                 info!("  Color primaries: {:?}", new_metadata.color_primaries);
                 info!("  Bit depth: {:?}", new_metadata.bit_depth);
-                
+
                 // Update media with new technical metadata
-                if let Some(ref mut existing_metadata) = updated_media.metadata {
-                    // Preserve external info but update technical fields
-                    let external_info = existing_metadata.external_info.clone();
+                if let Some(ref mut existing_metadata) = updated_media.media_file_metadata {
+                    // Update technical fields while preserving parsed info
                     let parsed_info = existing_metadata.parsed_info.clone();
                     *existing_metadata = new_metadata;
-                    existing_metadata.external_info = external_info;
                     existing_metadata.parsed_info = parsed_info;
                 } else {
-                    updated_media.metadata = Some(new_metadata);
+                    updated_media.media_file_metadata = Some(new_metadata);
                 }
                 technical_metadata_extracted = true;
             }
@@ -1032,75 +1455,44 @@ async fn fetch_metadata_handler(
         warn!("Media file not found on disk: {:?}", media_file.path);
     }
 
-    // Then fetch external metadata from TMDB
-    match state.metadata_service.fetch_metadata(&media_file).await {
-        Ok(detailed_info) => {
-            info!("External metadata fetched successfully for: {}", id);
-
-            // Update the media file with external info
-            if let Some(ref mut metadata) = updated_media.metadata {
-                metadata.external_info = Some(detailed_info.external_info.clone());
+    // Store updated media if technical metadata was extracted
+    if technical_metadata_extracted {
+        match state.db.backend().store_media(updated_media.clone()).await {
+            Ok(_) => {
+                info!("Technical metadata saved for media: {}", id);
             }
-
-            // Store updated media file
-            match state.db.backend().store_media(updated_media.clone()).await {
-                Ok(_) => {
-                    info!("Media updated in database with new metadata");
-                    
-                    // Send MediaUpdated event if technical metadata was extracted
-                    if technical_metadata_extracted {
-                        let event = MediaEvent::MediaUpdated { media: updated_media };
-                        state.scan_manager.send_media_event(event).await;
-                        info!("MediaUpdated event sent for media: {}", id);
-                    }
-                }
-                Err(e) => {
-                    warn!("Failed to update media with metadata: {}", e);
-                }
+            Err(e) => {
+                warn!("Failed to save technical metadata: {}", e);
             }
-
-            // Download poster if available
-            if let Some(poster_path) = &detailed_info.external_info.poster_url {
-                match state.metadata_service.cache_poster(poster_path, &id).await {
-                    Ok(path) => info!("Poster cached at: {:?}", path),
-                    Err(e) => warn!("Failed to cache poster: {}", e),
-                }
-            }
-
-            Ok(Json(json!({
-                "status": "success",
-                "metadata": detailed_info,
-                "technical_metadata_extracted": technical_metadata_extracted
-            })))
-        }
-        Err(e) => {
-            warn!("External metadata fetch failed for {}: {}", id, e);
-            
-            // Even if external metadata fails, save technical metadata if we extracted it
-            if technical_metadata_extracted {
-                match state.db.backend().store_media(updated_media.clone()).await {
-                    Ok(_) => {
-                        info!("Technical metadata saved despite external metadata failure");
-                        
-                        // Send MediaUpdated event
-                        let event = MediaEvent::MediaUpdated { media: updated_media };
-                        state.scan_manager.send_media_event(event).await;
-                        info!("MediaUpdated event sent for media: {}", id);
-                    }
-                    Err(db_err) => {
-                        warn!("Failed to save technical metadata: {}", db_err);
-                    }
-                }
-            }
-            
-            Ok(Json(json!({
-                "status": "partial",
-                "error": e.to_string(),
-                "technical_metadata_extracted": technical_metadata_extracted
-            })))
         }
     }
+
+    // Return simple response since metadata fetching is deprecated
+    Ok(Json(json!({
+        "status": "deprecated",
+        "message": "This endpoint is deprecated. Use the new reference-based API.",
+        "technical_metadata_extracted": technical_metadata_extracted
+    })))
 }
+
+async fn fetch_show_metadata_handler(
+    State(_state): State<AppState>,
+    Path(show_name): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    info!(
+        "TV show metadata fetch request for show: {} - DEPRECATED",
+        show_name
+    );
+
+    // This endpoint is deprecated - return appropriate response
+    Ok(Json(json!({
+        "status": "deprecated",
+        "message": "This endpoint is deprecated. Use the new reference-based API for TV show metadata.",
+        "show_name": show_name
+    })))
+}
+
+// The rest of the original function has been removed as it relied on deprecated external_info fields
 
 async fn poster_handler(
     State(state): State<AppState>,
@@ -1108,41 +1500,254 @@ async fn poster_handler(
 ) -> Result<Response, StatusCode> {
     info!("Poster request for media ID: {}", id);
 
-    // Extract just the UUID part (consistent with caching logic)
-    let media_id = id.split(':').last().unwrap_or(&id);
+    // Check if this is a TV show request
+    if id.starts_with("tvshow:") {
+        let show_name = id.strip_prefix("tvshow:").unwrap_or(&id);
+        info!("TV show poster request for: {}", show_name);
 
-    // Check for cached poster
-    if let Some(poster_path) = state.metadata_service.get_cached_poster(media_id) {
-        // Serve the cached poster file
-        match tokio::fs::read(&poster_path).await {
-            Ok(bytes) => {
-                let mut response = Response::new(bytes.into());
-                
-                // Determine content type based on file extension
-                let content_type = if poster_path.extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| ext.eq_ignore_ascii_case("png"))
-                    .unwrap_or(false) 
-                {
-                    "image/png"
+        // Get the first episode of the show to find poster URL
+        let filters = MediaFilters {
+            media_type: Some("tv_show".to_string()),
+            show_name: Some(show_name.to_string()),
+            limit: Some(5), // Get more episodes to debug
+            ..Default::default()
+        };
+
+        info!(
+            "Querying for TV show '{}' with filters: media_type='tv_show', show_name='{}'",
+            show_name, show_name
+        );
+
+        match state.db.backend().list_media(filters).await {
+            Ok(episodes) => {
+                info!("Found {} episodes for show '{}'", episodes.len(), show_name);
+
+                // Debug: Log what show names we have in the database
+                if episodes.is_empty() {
+                    // Try to find what shows we DO have
+                    let all_tv_filters = MediaFilters {
+                        media_type: Some("tv_show".to_string()),
+                        limit: Some(100),
+                        ..Default::default()
+                    };
+
+                    if let Ok(all_episodes) = state.db.backend().list_media(all_tv_filters).await {
+                        let mut unique_shows = std::collections::HashSet::new();
+                        for ep in &all_episodes {
+                            if let Some(parsed) = ep
+                                .media_file_metadata
+                                .as_ref()
+                                .and_then(|m| m.parsed_info.as_ref())
+                            {
+                                if let ParsedMediaInfo::Episode(episode_info) = parsed {
+                                    unique_shows.insert(episode_info.show_name.clone());
+                                }
+                            }
+                        }
+                        info!("Available TV shows in database: {:?}", unique_shows);
+                        info!(
+                            "Requested show '{}' not found. Possible mismatch?",
+                            show_name
+                        );
+                    }
+                }
+
+                if let Some(_episode) = episodes.first() {
+                    // Since we no longer have external_info in MediaFileMetadata,
+                    // poster URLs should come from reference types in the database
+                    // Poster handling has been moved to reference types
                 } else {
-                    "image/jpeg"
-                };
-                
-                response.headers_mut().insert(
-                    header::CONTENT_TYPE,
-                    header::HeaderValue::from_static(content_type),
-                );
-                Ok(response)
+                    warn!("No poster URL found for any episode of TV show '{}'. Episodes found but no metadata.", show_name);
+
+                    // If we have episodes but no poster metadata, trigger a metadata fetch
+                    if !episodes.is_empty() {
+                        if let Some(first_episode) = episodes.first() {
+                            let media_id = first_episode.id.clone();
+                            info!(
+                                "Triggering metadata fetch for episode {} to get show poster",
+                                media_id
+                            );
+
+                            // Fire and forget metadata fetch
+                            let media_id_str = media_id.to_string();
+                            tokio::spawn(async move {
+                                let clean_id = if media_id_str.starts_with("media:") {
+                                    media_id_str.strip_prefix("media:").unwrap_or(&media_id_str)
+                                } else {
+                                    &media_id_str
+                                };
+                                if let Ok(response) = reqwest::Client::new()
+                                    .post(&format!(
+                                        "http://localhost:3000/metadata/fetch/{}",
+                                        clean_id
+                                    ))
+                                    .send()
+                                    .await
+                                {
+                                    info!(
+                                        "Metadata fetch triggered for {}: {:?}",
+                                        clean_id,
+                                        response.status()
+                                    );
+                                }
+                            });
+                        }
+                    }
+                }
+                warn!("No poster available for TV show '{}' yet", show_name);
+                Err(StatusCode::NOT_FOUND)
             }
             Err(e) => {
-                warn!("Failed to read poster file: {}", e);
+                warn!("Failed to fetch TV show episodes: {}", e);
                 Err(StatusCode::INTERNAL_SERVER_ERROR)
             }
         }
     } else {
-        // No cached poster available
-        Err(StatusCode::NOT_FOUND)
+        // Regular media ID handling
+        // Extract just the UUID part (consistent with caching logic)
+        let media_id = id.split(':').last().unwrap_or(&id);
+
+        // Check for cached poster
+        if let Some(poster_path) = state.metadata_service.get_cached_poster(media_id) {
+            // Serve the cached poster file
+            match tokio::fs::read(&poster_path).await {
+                Ok(bytes) => {
+                    let mut response = Response::new(bytes.into());
+
+                    // Determine content type based on file extension
+                    let content_type = if poster_path
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .map(|ext| ext.eq_ignore_ascii_case("png"))
+                        .unwrap_or(false)
+                    {
+                        "image/png"
+                    } else {
+                        "image/jpeg"
+                    };
+
+                    response.headers_mut().insert(
+                        header::CONTENT_TYPE,
+                        header::HeaderValue::from_static(content_type),
+                    );
+                    Ok(response)
+                }
+                Err(e) => {
+                    warn!("Failed to read poster file: {}", e);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
+        } else {
+            // No cached poster available - try to fetch and cache it
+            info!(
+                "Poster not cached for {}, attempting to fetch from TMDB",
+                media_id
+            );
+
+            // Try to get movie reference to find poster path
+            use ferrex_core::media::MovieID;
+
+            if let Ok(movie_id) = MovieID::new(media_id.to_string()) {
+                match state.db.backend().get_movie_reference(&movie_id).await {
+                    Ok(movie_ref) => {
+                        // Extract poster path from metadata
+                        if let ferrex_core::media::MediaDetailsOption::Details(
+                            ferrex_core::media::TmdbDetails::Movie(details),
+                        ) = &movie_ref.details
+                        {
+                            if let Some(poster_path) = &details.poster_path {
+                                // Cache the poster
+                                match state
+                                    .metadata_service
+                                    .cache_poster(poster_path, media_id)
+                                    .await
+                                {
+                                    Ok(cached_path) => {
+                                        // Read and serve the newly cached poster
+                                        match tokio::fs::read(&cached_path).await {
+                                            Ok(bytes) => {
+                                                let mut response = Response::new(bytes.into());
+                                                response.headers_mut().insert(
+                                                    header::CONTENT_TYPE,
+                                                    header::HeaderValue::from_static("image/png"),
+                                                );
+                                                return Ok(response);
+                                            }
+                                            Err(e) => {
+                                                warn!("Failed to read newly cached poster: {}", e);
+                                                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!("Failed to cache poster for {}: {}", media_id, e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        info!("Not a movie reference, trying series: {}", e);
+                        // Try as series
+                        use ferrex_core::media::SeriesID;
+                        if let Ok(series_id) = SeriesID::new(media_id.to_string()) {
+                            match state.db.backend().get_series_reference(&series_id).await {
+                                Ok(series_ref) => {
+                                    if let ferrex_core::media::MediaDetailsOption::Details(
+                                        ferrex_core::media::TmdbDetails::Series(details),
+                                    ) = &series_ref.details
+                                    {
+                                        if let Some(poster_path) = &details.poster_path {
+                                            // Cache the poster
+                                            match state
+                                                .metadata_service
+                                                .cache_poster(poster_path, media_id)
+                                                .await
+                                            {
+                                                Ok(cached_path) => {
+                                                    // Read and serve the newly cached poster
+                                                    match tokio::fs::read(&cached_path).await {
+                                                        Ok(bytes) => {
+                                                            let mut response =
+                                                                Response::new(bytes.into());
+                                                            response.headers_mut().insert(
+                                                                header::CONTENT_TYPE,
+                                                                header::HeaderValue::from_static(
+                                                                    "image/png",
+                                                                ),
+                                                            );
+                                                            return Ok(response);
+                                                        }
+                                                        Err(e) => {
+                                                            warn!("Failed to read newly cached poster: {}", e);
+                                                            return Err(
+                                                                StatusCode::INTERNAL_SERVER_ERROR,
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    warn!(
+                                                        "Failed to cache poster for {}: {}",
+                                                        media_id, e
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("Failed to get series reference for {}: {}", media_id, e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If we get here, we couldn't fetch/cache the poster
+            Err(StatusCode::NOT_FOUND)
+        }
     }
 }
 
@@ -1212,828 +1817,6 @@ async fn thumbnail_handler(
             warn!("Failed to get thumbnail for {}: {}", id, e);
             Err(StatusCode::NOT_FOUND)
         }
-    }
-}
-
-// TV Show handlers
-async fn list_shows_handler(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
-    info!("Listing all TV shows");
-
-    // Get all TV episodes
-    let filters = MediaFilters {
-        media_type: Some("tv_show".to_string()),
-        ..Default::default()
-    };
-
-    match state.db.backend().list_media(filters).await {
-        Ok(episodes) => {
-            // Aggregate episodes into shows
-            let mut shows: HashMap<String, TvShowDetails> = HashMap::new();
-
-            for episode in episodes {
-                if let Some(parsed_info) = &episode
-                    .metadata
-                    .as_ref()
-                    .and_then(|m| m.parsed_info.as_ref())
-                {
-                    if let Some(show_name) = &parsed_info.show_name {
-                        let show = shows.entry(show_name.clone()).or_insert_with(|| {
-                            let external = episode
-                                .metadata
-                                .as_ref()
-                                .and_then(|m| m.external_info.as_ref());
-                            TvShowDetails {
-                                name: show_name.clone(),
-                                tmdb_id: external.and_then(|e| e.tmdb_id),
-                                description: external.and_then(|e| {
-                                    e.show_description.clone().or(e.description.clone())
-                                }),
-                                poster_url: external
-                                    .and_then(|e| {
-                                        e.show_poster_url.clone().or(e.poster_url.clone())
-                                    })
-                                    .and_then(|path| {
-                                        state.metadata_service.get_tmdb_image_url(&path)
-                                    }),
-                                backdrop_url: external
-                                    .and_then(|e| e.backdrop_url.clone())
-                                    .and_then(|path| {
-                                        state.metadata_service.get_tmdb_image_url(&path)
-                                    }),
-                                genres: external.map(|e| e.genres.clone()).unwrap_or_default(),
-                                rating: external.and_then(|e| e.rating),
-                                seasons: Vec::new(),
-                                total_episodes: 0,
-                            }
-                        });
-
-                        show.total_episodes += 1;
-
-                        // Update season info
-                        if let Some(season_num) = parsed_info.season {
-                            if !show.seasons.iter().any(|s| s.number == season_num) {
-                                show.seasons.push(SeasonSummary {
-                                    number: season_num,
-                                    name: if season_num == 0 {
-                                        Some("Specials".to_string())
-                                    } else {
-                                        None
-                                    },
-                                    episode_count: 1,
-                                    poster_url: if state
-                                        .metadata_service
-                                        .get_cached_season_poster(&show_name, season_num)
-                                        .is_some()
-                                    {
-                                        Some(format!(
-                                            "/season-poster/{}/{}",
-                                            show_name.replace(' ', "+"),
-                                            season_num
-                                        ))
-                                    } else {
-                                        episode
-                                            .metadata
-                                            .as_ref()
-                                            .and_then(|m| m.external_info.as_ref())
-                                            .and_then(|e| e.season_poster_url.clone())
-                                            .and_then(|path| {
-                                                state.metadata_service.get_tmdb_image_url(&path)
-                                            })
-                                    },
-                                });
-                            } else if let Some(season) =
-                                show.seasons.iter_mut().find(|s| s.number == season_num)
-                            {
-                                season.episode_count += 1;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Sort seasons
-            for show in shows.values_mut() {
-                show.seasons.sort_by_key(|s| s.number);
-            }
-
-            let show_list: Vec<_> = shows.into_values().collect();
-            info!("Found {} TV shows", show_list.len());
-
-            Ok(Json(json!({
-                "status": "success",
-                "shows": show_list,
-                "count": show_list.len()
-            })))
-        }
-        Err(e) => {
-            warn!("Failed to retrieve TV shows: {}", e);
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-async fn show_details_handler(
-    State(state): State<AppState>,
-    Path(show_name): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
-    // Decode + signs back to spaces (form encoding artifact)
-    let show_name = show_name.replace("+", " ");
-    info!("Getting details for show: {}", show_name);
-
-    // Get all episodes for this show
-    let filters = MediaFilters {
-        media_type: Some("tv_show".to_string()),
-        show_name: Some(show_name.clone()),
-        ..Default::default()
-    };
-
-    match state.db.backend().list_media(filters).await {
-        Ok(episodes) => {
-            if episodes.is_empty() {
-                return Err(StatusCode::NOT_FOUND);
-            }
-
-            // Build show details from episodes
-            let first_episode = &episodes[0];
-            let external = first_episode
-                .metadata
-                .as_ref()
-                .and_then(|m| m.external_info.as_ref());
-
-            let mut show_details = TvShowDetails {
-                name: show_name.clone(),
-                tmdb_id: external.and_then(|e| e.tmdb_id),
-                description: external
-                    .and_then(|e| e.show_description.clone().or(e.description.clone())),
-                poster_url: external
-                    .and_then(|e| e.show_poster_url.clone().or(e.poster_url.clone()))
-                    .and_then(|path| state.metadata_service.get_tmdb_image_url(&path)),
-                backdrop_url: external
-                    .and_then(|e| e.backdrop_url.clone())
-                    .and_then(|path| state.metadata_service.get_tmdb_image_url(&path)),
-                genres: external.map(|e| e.genres.clone()).unwrap_or_default(),
-                rating: external.and_then(|e| e.rating),
-                seasons: Vec::new(),
-                total_episodes: episodes.len(),
-            };
-
-            // Build season information
-            let mut season_map: HashMap<u32, Vec<_>> = HashMap::new();
-            for episode in episodes {
-                if let Some(parsed_info) = &episode
-                    .metadata
-                    .as_ref()
-                    .and_then(|m| m.parsed_info.as_ref())
-                {
-                    if let Some(season_num) = parsed_info.season {
-                        season_map.entry(season_num).or_default().push(episode);
-                    }
-                }
-            }
-
-            for (season_num, season_episodes) in season_map {
-                let season_poster = season_episodes
-                    .iter()
-                    .find_map(|e| {
-                        e.metadata
-                            .as_ref()?
-                            .external_info
-                            .as_ref()?
-                            .season_poster_url
-                            .clone()
-                    })
-                    .and_then(|path| state.metadata_service.get_tmdb_image_url(&path));
-
-                show_details.seasons.push(SeasonSummary {
-                    number: season_num,
-                    name: if season_num == 0 {
-                        Some("Specials".to_string())
-                    } else {
-                        None
-                    },
-                    episode_count: season_episodes.len(),
-                    poster_url: season_poster,
-                });
-            }
-
-            show_details.seasons.sort_by_key(|s| s.number);
-
-            Ok(Json(json!({
-                "status": "success",
-                "show": show_details
-            })))
-        }
-        Err(e) => {
-            warn!("Failed to retrieve show details: {}", e);
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-async fn season_details_handler(
-    State(state): State<AppState>,
-    Path((show_name, season_num)): Path<(String, u32)>,
-) -> Result<Json<Value>, StatusCode> {
-    // Decode + signs back to spaces (form encoding artifact)
-    let show_name = show_name.replace("+", " ");
-    info!(
-        "Getting details for show: {}, season: {}",
-        show_name, season_num
-    );
-
-    // Get all episodes for this show and season
-    let filters = MediaFilters {
-        media_type: Some("tv_show".to_string()),
-        show_name: Some(show_name.clone()),
-        season: Some(season_num),
-        ..Default::default()
-    };
-
-    match state.db.backend().list_media(filters).await {
-        Ok(episodes) => {
-            if episodes.is_empty() {
-                return Err(StatusCode::NOT_FOUND);
-            }
-
-            // Build season details
-            let season_poster = if state
-                .metadata_service
-                .get_cached_season_poster(&show_name, season_num)
-                .is_some()
-            {
-                Some(format!(
-                    "/season-poster/{}/{}",
-                    show_name.replace(' ', "+"),
-                    season_num
-                ))
-            } else {
-                episodes
-                    .iter()
-                    .find_map(|e| {
-                        e.metadata
-                            .as_ref()?
-                            .external_info
-                            .as_ref()?
-                            .season_poster_url
-                            .clone()
-                    })
-                    .and_then(|path| state.metadata_service.get_tmdb_image_url(&path))
-            };
-
-            let mut episode_summaries = Vec::new();
-            for episode in episodes {
-                if let Some(parsed_info) = &episode
-                    .metadata
-                    .as_ref()
-                    .and_then(|m| m.parsed_info.as_ref())
-                {
-                    if let Some(episode_num) = parsed_info.episode {
-                        let external = episode
-                            .metadata
-                            .as_ref()
-                            .and_then(|m| m.external_info.as_ref());
-
-                        episode_summaries.push(EpisodeSummary {
-                            id: episode.id,
-                            number: episode_num,
-                            title: parsed_info.episode_title.clone(),
-                            description: external.and_then(|e| e.description.clone()),
-                            still_url: external.and_then(|e| e.episode_still_url.clone()),
-                            duration: episode.metadata.as_ref().and_then(|m| m.duration),
-                            air_date: external.and_then(|e| e.release_date),
-                        });
-                    }
-                }
-            }
-
-            episode_summaries.sort_by_key(|e| e.number);
-
-            let season_details = SeasonDetails {
-                show_name: show_name.clone(),
-                number: season_num,
-                name: if season_num == 0 {
-                    Some("Specials".to_string())
-                } else {
-                    None
-                },
-                poster_url: season_poster,
-                episodes: episode_summaries,
-            };
-
-            Ok(Json(json!({
-                "status": "success",
-                "season": season_details
-            })))
-        }
-        Err(e) => {
-            warn!("Failed to retrieve season details: {}", e);
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-// Library management handlers
-async fn list_libraries_handler(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
-    info!("Listing all libraries");
-    
-    match state.db.backend().list_libraries().await {
-        Ok(libraries) => {
-            info!("Found {} libraries", libraries.len());
-            Ok(Json(json!({
-                "status": "success",
-                "libraries": libraries
-            })))
-        }
-        Err(e) => {
-            warn!("Failed to list libraries: {}", e);
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-async fn get_library_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
-    info!("Getting library: {}", id);
-    
-    match state.db.backend().get_library(&id).await {
-        Ok(Some(library)) => {
-            Ok(Json(json!({
-                "status": "success",
-                "library": library
-            })))
-        }
-        Ok(None) => {
-            warn!("Library not found: {}", id);
-            Err(StatusCode::NOT_FOUND)
-        }
-        Err(e) => {
-            warn!("Failed to get library: {}", e);
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-async fn create_library_handler(
-    State(state): State<AppState>,
-    Json(request): Json<CreateLibraryRequest>,
-) -> Result<Json<Value>, StatusCode> {
-    info!("Creating library: {}", request.name);
-    
-    // Parse library type
-    let library_type = match request.library_type.to_lowercase().as_str() {
-        "movies" => LibraryType::Movies,
-        "tvshows" | "tv_shows" | "tv" => LibraryType::TvShows,
-        _ => {
-            return Ok(Json(json!({
-                "status": "error",
-                "error": "Invalid library type. Use 'movies' or 'tvshows'"
-            })));
-        }
-    };
-    
-    // Convert string paths to PathBuf
-    let paths: Vec<std::path::PathBuf> = request.paths.into_iter()
-        .map(std::path::PathBuf::from)
-        .collect();
-    
-    // Validate paths exist
-    for path in &paths {
-        if !path.exists() {
-            return Ok(Json(json!({
-                "status": "error",
-                "error": format!("Path does not exist: {}", path.display())
-            })));
-        }
-    }
-    
-    let library = Library {
-        id: uuid::Uuid::new_v4(),
-        name: request.name,
-        library_type,
-        paths,
-        scan_interval_minutes: request.scan_interval_minutes,
-        last_scan: None,
-        enabled: request.enabled,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    };
-    
-    match state.db.backend().create_library(library).await {
-        Ok(id) => {
-            info!("Library created with ID: {}", id);
-            Ok(Json(json!({
-                "status": "success",
-                "id": id,
-                "message": "Library created successfully"
-            })))
-        }
-        Err(e) => {
-            warn!("Failed to create library: {}", e);
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-async fn update_library_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(request): Json<UpdateLibraryRequest>,
-) -> Result<Json<Value>, StatusCode> {
-    info!("Updating library: {}", id);
-    
-    // Get existing library
-    let mut library = match state.db.backend().get_library(&id).await {
-        Ok(Some(lib)) => lib,
-        Ok(None) => {
-            warn!("Library not found: {}", id);
-            return Err(StatusCode::NOT_FOUND);
-        }
-        Err(e) => {
-            warn!("Failed to get library: {}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-    
-    // Update fields
-    if let Some(name) = request.name {
-        library.name = name;
-    }
-    
-    if let Some(paths) = request.paths {
-        let new_paths: Vec<std::path::PathBuf> = paths.into_iter()
-            .map(std::path::PathBuf::from)
-            .collect();
-        
-        // Validate paths exist
-        for path in &new_paths {
-            if !path.exists() {
-                return Ok(Json(json!({
-                    "status": "error",
-                    "error": format!("Path does not exist: {}", path.display())
-                })));
-            }
-        }
-        
-        library.paths = new_paths;
-    }
-    
-    if let Some(interval) = request.scan_interval_minutes {
-        library.scan_interval_minutes = interval;
-    }
-    
-    if let Some(enabled) = request.enabled {
-        library.enabled = enabled;
-    }
-    
-    library.updated_at = chrono::Utc::now();
-    
-    match state.db.backend().update_library(&id, library).await {
-        Ok(()) => {
-            info!("Library updated: {}", id);
-            Ok(Json(json!({
-                "status": "success",
-                "message": "Library updated successfully"
-            })))
-        }
-        Err(e) => {
-            warn!("Failed to update library: {}", e);
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-async fn delete_library_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
-    info!("Deleting library: {}", id);
-    
-    match state.db.backend().delete_library(&id).await {
-        Ok(()) => {
-            info!("Library deleted: {}", id);
-            Ok(Json(json!({
-                "status": "success",
-                "message": "Library deleted successfully"
-            })))
-        }
-        Err(e) => {
-            warn!("Failed to delete library: {}", e);
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-// Library scan handler
-async fn scan_library_handler(
-    State(state): State<AppState>,
-    Path(library_id): Path<String>,
-    Query(params): Query<HashMap<String, String>>,
-) -> Result<Json<Value>, StatusCode> {
-    info!("Scan request for library: {}", library_id);
-    
-    // Get the library details
-    let library = match state.db.backend().get_library(&library_id).await {
-        Ok(Some(lib)) => lib,
-        Ok(None) => {
-            warn!("Library not found: {}", library_id);
-            return Ok(Json(json!({
-                "status": "error",
-                "error": "Library not found"
-            })));
-        }
-        Err(e) => {
-            warn!("Failed to get library: {}", e);
-            return Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })));
-        }
-    };
-    
-    // Check if library is enabled
-    if !library.enabled {
-        return Ok(Json(json!({
-            "status": "error",
-            "error": "Library is disabled"
-        })));
-    }
-    
-    // Check for force rescan parameter
-    let force_rescan = params.get("force")
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false);
-    
-    // Check if we should use streaming scanner (default to true for libraries)
-    let use_streaming = params.get("streaming")
-        .map(|v| v != "false" && v != "0")
-        .unwrap_or(true);
-    
-    let library_name = library.name.clone();
-    
-    // Start the scan
-    let scan_result = if use_streaming {
-        // Use new streaming scanner for better performance
-        state.scan_manager.start_library_scan(Arc::new(library), force_rescan).await
-    } else {
-        // Fall back to traditional scanner if requested
-        let scan_request = scan_manager::ScanRequest {
-            paths: Some(library.paths.iter().map(|p| p.to_string_lossy().to_string()).collect()),
-            path: None,
-            library_id: Some(library.id),
-            library_type: Some(library.library_type),
-            extract_metadata: true,
-            follow_links: false,
-            force_rescan,
-            max_depth: None,
-            use_streaming: false,
-        };
-        state.scan_manager.start_scan(scan_request).await
-    };
-    
-    match scan_result {
-        Ok(scan_id) => {
-            // Update library last scan time
-            let _ = state.db.backend().update_library_last_scan(&library_id).await;
-            
-            info!("Library scan started with ID: {}", scan_id);
-            Ok(Json(json!({
-                "status": "success",
-                "scan_id": scan_id,
-                "message": format!("Scan started for library: {}", library_name)
-            })))
-        }
-        Err(e) => {
-            warn!("Failed to start library scan: {}", e);
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-// New scan management handlers
-async fn start_scan_handler(
-    State(state): State<AppState>,
-    Json(request): Json<scan_manager::ScanRequest>,
-) -> Result<Json<Value>, StatusCode> {
-    match state.scan_manager.start_scan(request).await {
-        Ok(scan_id) => Ok(Json(json!({
-            "status": "success",
-            "scan_id": scan_id,
-            "message": "Scan started successfully"
-        }))),
-        Err(e) => {
-            warn!("Failed to start scan: {}", e);
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-async fn scan_progress_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
-    match state.scan_manager.get_scan_progress(&id).await {
-        Some(progress) => Ok(Json(json!({
-            "status": "success",
-            "progress": progress
-        }))),
-        None => Ok(Json(json!({
-            "status": "error",
-            "error": "Scan not found"
-        }))),
-    }
-}
-
-async fn scan_progress_sse_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<
-    Sse<impl futures_util::Stream<Item = Result<axum::response::sse::Event, anyhow::Error>>>,
-    StatusCode,
-> {
-    info!("SSE connection requested for scan {}", id);
-    let receiver = state.scan_manager.subscribe_to_progress(id.clone()).await;
-    Ok(scan_manager::scan_progress_sse(id, receiver))
-}
-
-async fn media_events_sse_handler(
-    State(state): State<AppState>,
-) -> Result<
-    Sse<impl futures_util::Stream<Item = Result<axum::response::sse::Event, anyhow::Error>>>,
-    StatusCode,
-> {
-    info!("SSE connection requested for media events");
-    let receiver = state.scan_manager.subscribe_to_media_events().await;
-    Ok(scan_manager::media_events_sse(receiver))
-}
-
-async fn active_scans_handler(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
-    let active_scans = state.scan_manager.get_active_scans().await;
-    Ok(Json(json!({
-        "status": "success",
-        "scans": active_scans,
-        "count": active_scans.len()
-    })))
-}
-
-async fn scan_history_handler(
-    State(state): State<AppState>,
-    Query(params): Query<HashMap<String, String>>,
-) -> Result<Json<Value>, StatusCode> {
-    let limit = params
-        .get("limit")
-        .and_then(|l| l.parse::<usize>().ok())
-        .unwrap_or(10);
-
-    let history = state.scan_manager.get_scan_history(limit).await;
-    Ok(Json(json!({
-        "status": "success",
-        "history": history,
-        "count": history.len()
-    })))
-}
-
-async fn cancel_scan_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
-    match state.scan_manager.cancel_scan(&id).await {
-        Ok(_) => Ok(Json(json!({
-            "status": "success",
-            "message": "Scan cancelled"
-        }))),
-        Err(e) => Ok(Json(json!({
-            "status": "error",
-            "error": e.to_string()
-        }))),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::body::Body;
-    use axum::http::{Request, StatusCode};
-    use ferrex_core::MediaFile;
-    use std::path::PathBuf;
-    use tower::ServiceExt;
-
-    #[tokio::test]
-    async fn test_ping_endpoint() {
-        let config = Arc::new(Config::from_env().unwrap());
-        let db = Arc::new(MediaDatabase::new_surrealdb().await.unwrap());
-        let metadata_service = Arc::new(metadata_service::MetadataService::new(
-            None,
-            config.cache_dir.clone(),
-        ));
-        let thumbnail_service = Arc::new(
-            thumbnail_service::ThumbnailService::new(config.cache_dir.clone(), db.clone())
-                .expect("Failed to initialize thumbnail service"),
-        );
-        let scan_manager = Arc::new(scan_manager::ScanManager::new(
-            db.clone(),
-            metadata_service.clone(),
-            thumbnail_service.clone(),
-        ));
-        let state = AppState {
-            db,
-            config,
-            metadata_service,
-            thumbnail_service,
-            scan_manager,
-        };
-        let app = create_app(state);
-
-        let response = app
-            .oneshot(Request::builder().uri("/ping").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_clear_database_endpoint() {
-        let config = Arc::new(Config::from_env().unwrap());
-        let db = Arc::new(MediaDatabase::new_surrealdb().await.unwrap());
-        
-        // Initialize database schema
-        db.backend().initialize_schema().await.unwrap();
-        
-        let metadata_service = Arc::new(metadata_service::MetadataService::new(
-            None,
-            config.cache_dir.clone(),
-        ));
-        let thumbnail_service = Arc::new(
-            thumbnail_service::ThumbnailService::new(config.cache_dir.clone(), db.clone())
-                .expect("Failed to initialize thumbnail service"),
-        );
-        let scan_manager = Arc::new(scan_manager::ScanManager::new(
-            db.clone(),
-            metadata_service.clone(),
-            thumbnail_service.clone(),
-        ));
-        let state = AppState {
-            db: db.clone(),
-            config,
-            metadata_service,
-            thumbnail_service,
-            scan_manager,
-        };
-        let app = create_app(state);
-
-        // Call clear database endpoint
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/maintenance/clear-database")
-                    .header("content-type", "application/json")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        
-        // Check that we get a valid JSON response
-        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
-        assert!(body_str.contains("\"status\":\"success\""));
     }
 }
 
@@ -2145,14 +1928,22 @@ async fn clear_database_handler(State(state): State<AppState>) -> Result<Json<Va
             }
 
             // Clean up poster (try both PNG and JPG)
-            let png_poster_path = state.config.cache_dir.join("posters").join(format!("{}_poster.png", media_id));
+            let png_poster_path = state
+                .config
+                .cache_dir
+                .join("posters")
+                .join(format!("{}_poster.png", media_id));
             if png_poster_path.exists() {
                 if let Err(e) = tokio::fs::remove_file(&png_poster_path).await {
                     warn!("Failed to delete PNG poster: {}", e);
                 }
             }
-            
-            let jpg_poster_path = state.config.cache_dir.join("posters").join(format!("{}_poster.jpg", media_id));
+
+            let jpg_poster_path = state
+                .config
+                .cache_dir
+                .join("posters")
+                .join(format!("{}_poster.jpg", media_id));
             if jpg_poster_path.exists() {
                 if let Err(e) = tokio::fs::remove_file(&jpg_poster_path).await {
                     warn!("Failed to delete JPG poster: {}", e);
@@ -2168,7 +1959,11 @@ async fn clear_database_handler(State(state): State<AppState>) -> Result<Json<Va
             Ok(mut entries) => {
                 while let Ok(Some(entry)) = entries.next_entry().await {
                     if let Err(e) = tokio::fs::remove_file(entry.path()).await {
-                        warn!("Failed to delete poster cache file {:?}: {}", entry.path(), e);
+                        warn!(
+                            "Failed to delete poster cache file {:?}: {}",
+                            entry.path(),
+                            e
+                        );
                     }
                 }
             }
@@ -2209,8 +2004,8 @@ async fn fetch_metadata_batch_handler(
     );
 
     let priority = request.priority.as_deref().unwrap_or("posters_only");
-    let mut updated = Vec::new();
-    let mut errors = Vec::new();
+    let mut updated: Vec<String> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
 
     // Limit batch size to prevent overload
     let batch_size = std::cmp::min(request.media_ids.len(), 50);
@@ -2238,43 +2033,12 @@ async fn fetch_metadata_batch_handler(
             // Get media from database
             match state.db.backend().get_media(&db_id).await {
                 Ok(Some(media)) => {
-                    // Check if we already have the data we need
-                    let has_poster = media
-                        .metadata
-                        .as_ref()
-                        .and_then(|m| m.external_info.as_ref())
-                        .and_then(|e| e.poster_url.as_ref())
-                        .is_some();
-
-                    if priority == "posters_only" && has_poster {
-                        return Ok(id); // Already has poster, skip
-                    }
-
-                    // Fetch metadata
-                    match state.metadata_service.fetch_metadata(&media).await {
-                        Ok(detailed_info) => {
-                            let mut updated_media = media;
-                            if let Some(ref mut metadata) = updated_media.metadata {
-                                metadata.external_info = Some(detailed_info.external_info.clone());
-                            }
-
-                            // Store updated media
-                            if let Err(e) = state.db.backend().store_media(updated_media).await {
-                                Err(format!("Failed to update {}: {}", id, e))
-                            } else {
-                                // Cache poster if available
-                                if let Some(poster_url) = &detailed_info.external_info.poster_url {
-                                    let media_id = db_id.split(':').last().unwrap_or(&db_id);
-                                    let _ = state
-                                        .metadata_service
-                                        .cache_poster(poster_url, media_id)
-                                        .await;
-                                }
-                                Ok(id)
-                            }
-                        }
-                        Err(e) => Err(format!("Failed to fetch metadata for {}: {}", id, e)),
-                    }
+                    // Batch metadata fetching is deprecated
+                    // TMDB metadata should come from reference types in the database
+                    Err(format!(
+                        "Batch metadata fetching is deprecated for media ID: {}",
+                        id
+                    ))
                 }
                 Ok(None) => Err(format!("Media not found: {}", id)),
                 Err(e) => Err(format!("Database error for {}: {}", id, e)),
@@ -2376,52 +2140,8 @@ async fn queue_missing_metadata_handler(
 
                 // Get media from database
                 if let Ok(Some(media)) = db.backend().get_media(&db_id).await {
-                    // Check if metadata is actually missing
-                    let needs_metadata = media
-                        .metadata
-                        .as_ref()
-                        .and_then(|m| m.external_info.as_ref())
-                        .and_then(|e| e.poster_url.as_ref())
-                        .is_none();
-
-                    if needs_metadata {
-                        // Fetch metadata
-                        match metadata_service.fetch_metadata(&media).await {
-                            Ok(detailed_info) => {
-                                let mut updated_media = media;
-                                if let Some(ref mut metadata) = updated_media.metadata {
-                                    metadata.external_info =
-                                        Some(detailed_info.external_info.clone());
-                                }
-
-                                // Store updated media
-                                if let Ok(_) = db.backend().store_media(updated_media.clone()).await
-                                {
-                                    info!("Updated metadata for {}", id);
-
-                                    // Send media updated event
-                                    scan_manager
-                                        .send_media_event(scan_manager::MediaEvent::MediaUpdated {
-                                            media: updated_media,
-                                        })
-                                        .await;
-
-                                    // Cache poster if available
-                                    if let Some(poster_url) =
-                                        &detailed_info.external_info.poster_url
-                                    {
-                                        let media_id = db_id.split(':').last().unwrap_or(&db_id);
-                                        let _ = metadata_service
-                                            .cache_poster(poster_url, media_id)
-                                            .await;
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                warn!("Failed to fetch metadata for {}: {}", id, e);
-                            }
-                        }
-                    }
+                    // DEPRECATED: External metadata fetching disabled during transition
+                    // The new reference-based API handles metadata differently
                 }
 
                 // Small delay between items
@@ -2506,996 +2226,4 @@ async fn media_availability_handler(
         "path": media_file.path.display().to_string(),
         "size": media_file.size
     })))
-}
-
-// HLS Streaming handlers
-async fn hls_playlist_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Query(params): Query<HashMap<String, String>>,
-) -> Result<Response, StatusCode> {
-    info!("HLS playlist request for media ID: {}", id);
-    
-    // Check if we have a transcoded version
-    let profile_name = params.get("profile").cloned().unwrap_or_else(|| "hdr_to_sdr_1080p".to_string());
-    
-    // First check if we have a cached version
-    if let Some(playlist_path) = state.transcoding_service.get_playlist_url(&id, &profile_name).await {
-        // Serve the cached playlist
-        match tokio::fs::read_to_string(&playlist_path).await {
-            Ok(content) => {
-                let mut response = Response::new(content.into());
-                response.headers_mut().insert(
-                    header::CONTENT_TYPE,
-                    header::HeaderValue::from_static("application/vnd.apple.mpegurl"),
-                );
-                Ok(response)
-            }
-            Err(e) => {
-                warn!("Failed to read playlist file: {}", e);
-                Err(StatusCode::INTERNAL_SERVER_ERROR)
-            }
-        }
-    } else {
-        // Check if media is HDR and needs transcoding
-        match state.db.backend().get_media(&id).await {
-            Ok(Some(media)) => {
-                if transcoding::TranscodingService::is_hdr_content(&media).await {
-                    // Start transcoding job if not already running
-                    let profile = transcoding::profiles::TranscodingProfile::hdr_to_sdr_1080p();
-                    match state.transcoding_service.start_transcoding(&id, profile.clone(), None, None).await {
-                        Ok(job_id) => {
-                            info!("Started on-the-fly transcoding job {} for media {}", job_id, id);
-                            
-                            // Wait for first segment to be available (up to 10 seconds)
-                            let mut retries = 0;
-                            const MAX_RETRIES: u32 = 20;
-                            const RETRY_DELAY_MS: u64 = 500;
-                            
-                            loop {
-                                // Check if we have a playlist with segments
-                                if let Some(playlist_path) = state.transcoding_service.get_playlist_url(&id, &profile_name).await {
-                                    if let Ok(content) = tokio::fs::read_to_string(&playlist_path).await {
-                                        // Check if playlist has at least one segment
-                                        if content.contains("#EXTINF:") {
-                                            let mut response = Response::new(content.into());
-                                            response.headers_mut().insert(
-                                                header::CONTENT_TYPE,
-                                                header::HeaderValue::from_static("application/vnd.apple.mpegurl"),
-                                            );
-                                            response.headers_mut().insert(
-                                                header::CACHE_CONTROL,
-                                                header::HeaderValue::from_static("no-cache"),
-                                            );
-                                            return Ok(response);
-                                        }
-                                    }
-                                }
-                                
-                                retries += 1;
-                                if retries >= MAX_RETRIES {
-                                    warn!("Timeout waiting for first segment after {} retries", retries);
-                                    break;
-                                }
-                                
-                                tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS)).await;
-                            }
-                            
-                            // If we're here, no segments were generated in time
-                            // Return error to trigger fallback
-                            Err(StatusCode::SERVICE_UNAVAILABLE)
-                        }
-                        Err(e) => {
-                            warn!("Failed to start transcoding: {}", e);
-                            Err(StatusCode::INTERNAL_SERVER_ERROR)
-                        }
-                    }
-                } else {
-                    // Not HDR content, redirect to direct stream
-                    Ok(Response::builder()
-                        .status(StatusCode::TEMPORARY_REDIRECT)
-                        .header("Location", format!("/stream/{}", id))
-                        .body(axum::body::Body::empty())
-                        .unwrap())
-                }
-            }
-            Ok(None) => Err(StatusCode::NOT_FOUND),
-            Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
-        }
-    }
-}
-
-// Hardware encoder detection
-#[derive(Debug, Clone)]
-enum HardwareEncoder {
-    AMF,
-    VAAPI,
-    None,
-}
-
-async fn detect_hardware_encoder(ffmpeg_path: &str) -> HardwareEncoder {
-    // Check for available encoders
-    let output = tokio::process::Command::new(ffmpeg_path)
-        .arg("-hide_banner")
-        .arg("-encoders")
-        .output()
-        .await
-        .ok();
-    
-    if let Some(output) = output {
-        let encoders = String::from_utf8_lossy(&output.stdout);
-        
-        // Check for AMF first (preferred for AMD)
-        if encoders.contains("h264_amf") {
-            // Verify AMF runtime is available by testing encoding
-            let test_output = tokio::process::Command::new(ffmpeg_path)
-                .arg("-f").arg("lavfi")
-                .arg("-i").arg("testsrc2=duration=0.1:size=320x240:rate=30")
-                .arg("-c:v").arg("h264_amf")
-                .arg("-f").arg("null")
-                .arg("-")
-                .output()
-                .await
-                .ok();
-            
-            if let Some(test) = test_output {
-                if test.status.success() {
-                    info!("AMF hardware encoder detected and verified");
-                    return HardwareEncoder::AMF;
-                } else {
-                    let stderr = String::from_utf8_lossy(&test.stderr);
-                    if stderr.contains("libamfrt64.so.1") {
-                        warn!("AMF encoder found but runtime libraries missing");
-                    }
-                }
-            }
-        }
-        
-        // Check for VAAPI
-        if encoders.contains("h264_vaapi") && std::path::Path::new("/dev/dri/renderD128").exists() {
-            info!("VAAPI hardware encoder detected");
-            return HardwareEncoder::VAAPI;
-        }
-    }
-    
-    info!("No hardware encoder detected, using software encoding");
-    HardwareEncoder::None
-}
-
-// Direct transcoding stream handler - pipes FFmpeg output directly to client
-async fn stream_transcode_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Query(params): Query<HashMap<String, String>>,
-) -> Result<Response<Body>, StatusCode> {
-    info!("Direct transcode stream request for media ID: {}", id);
-    
-    // Decode the percent-encoded ID
-    let decoded_id = urlencoding::decode(&id).map_err(|e| {
-        error!("Failed to decode media ID: {}", e);
-        StatusCode::BAD_REQUEST
-    })?;
-    
-    let profile_name = params.get("profile").cloned().unwrap_or_else(|| "hdr_to_sdr_1080p".to_string());
-    
-    // Determine target resolution and bitrate based on profile
-    let (target_width, video_bitrate, max_bitrate, buffer_size) = match profile_name.as_str() {
-        "hdr_to_sdr_4k" => (3840, "25M", "30M", "10M"),      // 4K needs higher bitrate for quality
-        "hdr_to_sdr_1440p" => (2560, "15M", "18M", "6M"),    // 1440p medium bitrate
-        _ => (1920, "10M", "12M", "4M"),                     // 1080p default
-    };
-    
-    // Get media file
-    let media = match state.db.backend().get_media(&decoded_id).await {
-        Ok(Some(media)) => media,
-        Ok(None) => return Err(StatusCode::NOT_FOUND),
-        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
-    };
-    
-    // Build FFmpeg command for direct streaming
-    let mut cmd = tokio::process::Command::new(&state.config.ffmpeg_path);
-    
-    // Check if this is HDR content (including Dolby Vision)
-    let is_hdr = if let Some(metadata) = &media.metadata {
-        metadata.bit_depth.map(|b| b > 8).unwrap_or(false) ||
-        metadata.color_transfer.as_ref().map(|t| 
-            t.contains("smpte2084") || t.contains("arib-std-b67") || t.contains("smpte2086")
-        ).unwrap_or(false) ||
-        metadata.color_primaries.as_ref().map(|p| p.contains("bt2020")).unwrap_or(false)
-    } else {
-        false
-    };
-    
-    // Detect available hardware acceleration options
-    let hardware_encoder = detect_hardware_encoder(&state.config.ffmpeg_path).await;
-    
-    // Fast startup options - balance speed and reliability
-    cmd.arg("-probesize").arg("1048576"); // 1MB probe size for fast but reliable startup
-    cmd.arg("-analyzeduration").arg("500000"); // 0.5 second analysis
-    cmd.arg("-fpsprobesize").arg("0"); // Skip FPS probing
-    cmd.arg("-flags").arg("low_delay"); // Low latency mode
-    cmd.arg("-movflags").arg("+faststart"); // Low latency mode
-    cmd.arg("-tune").arg("zerolatency"); // Low latency mode
-    cmd.arg("-strict").arg("experimental"); // Allow experimental features
-    
-    // Apply hardware decoding options BEFORE input file
-    if matches!(hardware_encoder, HardwareEncoder::VAAPI) {
-        cmd.arg("-hwaccel").arg("vaapi");
-        cmd.arg("-hwaccel_device").arg("/dev/dri/renderD128");
-        cmd.arg("-hwaccel_output_format").arg("vaapi");
-    }
-    
-    // Input file
-    cmd.arg("-i").arg(&media.path);
-    
-    // Build filter chain and encoder selection based on detected hardware
-    match (is_hdr, &hardware_encoder) {
-        (true, HardwareEncoder::AMF) => {
-            // HDR with AMF: Optimized for performance
-            // Simplified filter chain for faster processing
-            cmd.arg("-vf").arg(format!("setpts=PTS-STARTPTS,scale={}:-2:flags=fast_bilinear,format=p010le,tonemap=hable:desat=0,format=nv12", target_width));
-            
-            // Use AMF H.264 encoder
-            cmd.arg("-c:v").arg("h264_amf");
-            cmd.arg("-usage").arg("lowlatency");
-            cmd.arg("-quality").arg("speed");
-            cmd.arg("-b:v").arg(video_bitrate);
-            cmd.arg("-maxrate").arg(max_bitrate);
-            cmd.arg("-bufsize").arg(buffer_size);
-            cmd.arg("-rc").arg("cbr");
-        },
-        (true, HardwareEncoder::VAAPI) => {
-            // HDR with VAAPI: Simplified for performance
-            cmd.arg("-vf").arg(format!("hwdownload,format=p010le,setpts=PTS-STARTPTS,scale={}:-2:flags=fast_bilinear,tonemap=hable:desat=0,format=nv12,hwupload", target_width));
-            
-            // Use VAAPI H.264 encoder
-            cmd.arg("-c:v").arg("h264_vaapi");
-            cmd.arg("-b:v").arg(video_bitrate);
-            cmd.arg("-maxrate").arg(max_bitrate);
-            cmd.arg("-bufsize").arg(buffer_size);
-        },
-        (true, HardwareEncoder::None) => {
-            // HDR software only - simplified for real-time performance
-            cmd.arg("-vf").arg(format!("setpts=PTS-STARTPTS,scale={}:-2:flags=fast_bilinear,format=p010le,tonemap=hable:desat=0,format=yuv420p", target_width));
-            
-            cmd.arg("-c:v").arg("libx264");
-            cmd.arg("-preset").arg("ultrafast");
-            cmd.arg("-tune").arg("zerolatency");
-            cmd.arg("-b:v").arg(video_bitrate);
-            cmd.arg("-maxrate").arg(max_bitrate);
-            cmd.arg("-bufsize").arg(buffer_size);
-            cmd.arg("-x264opts").arg("bframes=0:threads=16:rc-lookahead=0:weightp=0:aq-mode=0:ref=1:me=dia:subme=0:trellis=0:no-deblock:no-cabac:scenecut=0:sync-lookahead=0:aud=1");
-        },
-        (false, HardwareEncoder::AMF) => {
-            // SDR with AMF - keep original resolution for SDR
-            cmd.arg("-vf").arg(format!("scale={}:-2,format=nv12", target_width));
-            cmd.arg("-c:v").arg("h264_amf");
-            cmd.arg("-usage").arg("lowlatency");
-            cmd.arg("-quality").arg("balanced");
-            cmd.arg("-b:v").arg("6M");
-            cmd.arg("-rc").arg("vbr");
-        },
-        (false, HardwareEncoder::VAAPI) => {
-            // SDR with VAAPI - filters only, hwaccel already set
-            cmd.arg("-vf").arg(format!("scale_vaapi=w={}:h=-2:format=nv12", target_width));
-            cmd.arg("-c:v").arg("h264_vaapi");
-            cmd.arg("-quality").arg("0");
-            cmd.arg("-b:v").arg("6M");
-        },
-        (false, HardwareEncoder::None) => {
-            // SDR software
-            cmd.arg("-vf").arg(format!("scale={}:-2,format=yuv420p", target_width));
-            cmd.arg("-c:v").arg("libx264");
-            cmd.arg("-preset").arg("veryfast");
-            cmd.arg("-crf").arg("22");
-            cmd.arg("-x264opts").arg("threads=16");
-        }
-    }
-    
-    // Stream mapping - select first video and best audio stream
-    cmd.arg("-map").arg("0:v:0"); // First video stream
-    cmd.arg("-map").arg("0:a:0"); // First audio stream (FFmpeg will handle TrueHD)
-    
-    /*
-    // Audio transcoding settings with better buffering
-    cmd.arg("-c:a").arg("aac");
-    cmd.arg("-profile:a").arg("aac_low");
-    cmd.arg("-b:a").arg("192k");
-    cmd.arg("-ac").arg("2"); // Stereo
-    cmd.arg("-ar").arg("48000"); // Standard sample rate
-    // Simpler audio filter for better stability
-    cmd.arg("-af").arg("aresample=async=1:first_pts=0");
-    */
-    
-    // Threading optimization for AMD 7950X (16 cores, 32 threads)
-    cmd.arg("-threads").arg("16"); // Use half the threads for good balance
-    
-    // Use MPEGTS format optimized for streaming
-    //cmd.arg("-f").arg("mpegts");
-    //cmd.arg("-mpegts_copyts").arg("0"); // Don't copy timestamps to ensure they start at 0
-    //cmd.arg("-pes_payload_size").arg("0"); // Let FFmpeg decide PES payload size
-    
-    // Better timestamp handling (fflags already set above with nobuffer)
-    cmd.arg("-fflags").arg("+genpts+discardcorrupt+nobuffer");
-    cmd.arg("-avoid_negative_ts").arg("make_zero");
-    cmd.arg("-fps_mode").arg("cfr"); // Constant frame rate for consistent timing
-    cmd.arg("-start_at_zero").arg("1"); // Force timestamps to start at 0
-    
-    // GOP settings for better seeking
-    cmd.arg("-g").arg("48"); // Keyframe every 2 seconds
-    cmd.arg("-keyint_min").arg("24");
-    cmd.arg("-sc_threshold").arg("0");
-    
-    // Remove H.264 SEI data that can cause timing issues
-    // Use dump_extra to remove SEI NAL units
-    cmd.arg("-bsf:v").arg("dump_extra");
-    
-    // Buffer settings for preventing audio cutouts
-    cmd.arg("-max_delay").arg("500000");
-    cmd.arg("-muxdelay").arg("0.1");
-    cmd.arg("-muxpreload").arg("0.5");
-    cmd.arg("-max_muxing_queue_size").arg("1024");
-    
-    // Output to stdout
-    cmd.arg("pipe:1");
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped()); // Capture stderr for debugging
-    
-    // Log the FFmpeg command for debugging
-    info!("FFmpeg command: {:?}", cmd);
-    info!("HDR content detected: {}", is_hdr);
-    info!("Hardware encoder: {:?}", hardware_encoder);
-    
-    // Spawn FFmpeg
-    let mut child = cmd.spawn().map_err(|e| {
-        error!("Failed to spawn FFmpeg: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    
-    // Spawn a task to log FFmpeg stderr
-    if let Some(stderr) = child.stderr.take() {
-        tokio::spawn(async move {
-            let reader = tokio::io::BufReader::new(stderr);
-            let mut lines = tokio::io::AsyncBufReadExt::lines(reader);
-            while let Ok(Some(line)) = lines.next_line().await {
-                if line.contains("error") || line.contains("Error") {
-                    error!("FFmpeg: {}", line);
-                } else {
-                    debug!("FFmpeg: {}", line);
-                }
-            }
-        });
-    }
-    
-    // Get stdout
-    let stdout = child.stdout.take().ok_or_else(|| {
-        error!("Failed to get FFmpeg stdout");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    
-    // Create async stream from stdout
-    let stream = tokio_util::io::ReaderStream::new(stdout);
-    let body = Body::from_stream(stream);
-    
-    // Build response
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "video/mp2t")
-        .header(header::CACHE_CONTROL, "no-cache")
-        .body(body)
-        .unwrap())
-}
-
-async fn hls_segment_handler(
-    State(state): State<AppState>,
-    Path((id, segment)): Path<(String, String)>,
-    Query(params): Query<HashMap<String, String>>,
-) -> Result<Response, StatusCode> {
-    info!("HLS segment request for media ID: {}, segment: {}", id, segment);
-    
-    let profile_name = params.get("profile").cloned().unwrap_or_else(|| "hdr_to_sdr_1080p".to_string());
-    
-    // Build segment path
-    let segment_path = state.config.transcode_cache_dir
-        .join(&id)
-        .join(&profile_name)
-        .join(&segment);
-    
-    // Serve the segment file
-    match tokio::fs::read(&segment_path).await {
-        Ok(bytes) => {
-            let mut response = Response::new(bytes.into());
-            response.headers_mut().insert(
-                header::CONTENT_TYPE,
-                header::HeaderValue::from_static("video/mp2t"),
-            );
-            Ok(response)
-        }
-        Err(e) => {
-            warn!("Failed to read segment file: {}", e);
-            Err(StatusCode::NOT_FOUND)
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct TranscodeRequest {
-    profile: Option<String>,
-    tone_mapping: Option<transcoding::config::ToneMappingConfig>,
-}
-
-async fn start_transcode_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(request): Json<TranscodeRequest>,
-) -> Result<Json<Value>, StatusCode> {
-    info!("Transcode request for media ID: {}", id);
-    
-    // Get media to check if it exists and is HDR
-    let media = match state.db.backend().get_media(&id).await {
-        Ok(Some(m)) => m,
-        Ok(None) => {
-            return Ok(Json(json!({
-                "status": "error",
-                "error": "Media not found"
-            })));
-        }
-        Err(e) => {
-            return Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })));
-        }
-    };
-    
-    // Determine profile
-    let profile = if let Some(profile_name) = request.profile {
-        match profile_name.as_str() {
-            "hdr_to_sdr_1080p" => transcoding::profiles::TranscodingProfile::hdr_to_sdr_1080p(),
-            "hdr_to_sdr_4k" => transcoding::profiles::TranscodingProfile::hdr_to_sdr_4k(),
-            _ => {
-                return Ok(Json(json!({
-                    "status": "error",
-                    "error": "Unknown profile"
-                })));
-            }
-        }
-    } else if transcoding::TranscodingService::is_hdr_content(&media).await {
-        transcoding::profiles::TranscodingProfile::hdr_to_sdr_1080p()
-    } else {
-        return Ok(Json(json!({
-            "status": "error",
-            "error": "Media is not HDR content"
-        })));
-    };
-    
-    // Start transcoding
-    match state.transcoding_service.start_transcoding(&id, profile, request.tone_mapping, None).await {
-        Ok(job_id) => {
-            Ok(Json(json!({
-                "status": "success",
-                "job_id": job_id,
-                "message": "Transcoding started"
-            })))
-        }
-        Err(e) => {
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-async fn transcode_status_handler(
-    State(state): State<AppState>,
-    Path(job_id): Path<String>,
-) -> Result<Json<ferrex_core::TranscodingJobResponse>, StatusCode> {
-    if let Some(job) = state.transcoding_service.get_job_status(&job_id).await {
-        // Use stored source metadata duration instead of re-extracting
-        let duration = job.source_metadata.as_ref().map(|m| m.duration);
-        
-        if let Some(dur) = duration {
-            debug!("Job {} has stored duration: {} seconds", job_id, dur);
-        } else {
-            debug!("Job {} has no stored duration metadata", job_id);
-        }
-        
-        // Get latest progress information if available
-        // For master jobs, we need to aggregate progress from variant jobs
-        let progress_details = if matches!(&job.job_type, transcoding::job::JobType::Master { .. }) {
-            state.transcoding_service.get_master_job_progress(&job_id).await
-        } else {
-            state.transcoding_service.get_job_progress(&job_id).await
-        };
-        
-        // Log job type and status for debugging
-        info!("Job {} - Type: {:?}, Status: {:?}", job_id, job.job_type, job.status);
-        
-        // Convert server TranscodingStatus to shared TranscodingStatus
-        let status = match &job.status {
-            transcoding::job::TranscodingStatus::Pending => ferrex_core::TranscodingStatus::Pending,
-            transcoding::job::TranscodingStatus::Queued => ferrex_core::TranscodingStatus::Queued,
-            transcoding::job::TranscodingStatus::Processing { progress } => {
-                ferrex_core::TranscodingStatus::Processing { progress: *progress }
-            },
-            transcoding::job::TranscodingStatus::Completed => ferrex_core::TranscodingStatus::Completed,
-            transcoding::job::TranscodingStatus::Failed { error } => {
-                ferrex_core::TranscodingStatus::Failed { error: error.clone() }
-            },
-            transcoding::job::TranscodingStatus::Cancelled => ferrex_core::TranscodingStatus::Cancelled,
-        };
-        
-        // Log progress details for debugging
-        if let Some(ref p) = progress_details {
-            info!("Progress details for job {}: status={:?}, frames={:?}/{:?}, fps={:?}", 
-                job_id, p.status, p.current_frame, p.total_frames, p.fps);
-        } else {
-            info!("No progress details available for job {}", job_id);
-        }
-        
-        // Convert progress details if available
-        let shared_progress_details = progress_details.map(|p| {
-            ferrex_core::TranscodingProgressDetails {
-                percentage: match &status { // Use the aggregated status, not p.status
-                    ferrex_core::TranscodingStatus::Processing { progress } => *progress * 100.0,
-                    _ => 0.0
-                },
-                time_elapsed: None, // Could calculate from job.started_at if available
-                estimated_time_remaining: p.eta.map(|d| d.as_secs_f64()),
-                frames_processed: p.current_frame,
-                current_fps: p.fps.map(|f| f as f64),
-                current_bitrate: p.bitrate.as_ref()
-                    .and_then(|b| b.parse::<u64>().ok()),
-            }
-        });
-        
-        Ok(Json(ferrex_core::TranscodingJobResponse {
-            id: job.id.clone(),
-            media_id: job.media_id.clone(),
-            media_path: job.media_id.clone(), // The actual file path
-            profile: job.profile.name.clone(),
-            status,
-            created_at: job.created_at.elapsed().as_secs(),
-            output_path: Some(job.output_dir.to_string_lossy().to_string()),
-            playlist_path: Some(job.playlist_path.to_string_lossy().to_string()),
-            error: job.error.clone(),
-            progress_details: shared_progress_details,
-            duration,
-        }))
-    } else {
-        Err(StatusCode::NOT_FOUND)
-    }
-}
-
-/// Start adaptive bitrate transcoding for a media file
-/// This creates multiple quality variants for adaptive streaming
-async fn start_adaptive_transcode_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
-    info!("Adaptive transcode request for media ID: {}", id);
-    
-    // Decode the percent-encoded ID
-    let decoded_id = urlencoding::decode(&id).map_err(|e| {
-        error!("Failed to decode media ID: {}", e);
-        StatusCode::BAD_REQUEST
-    })?;
-    
-    match state.transcoding_service.start_adaptive_transcoding(&decoded_id, None).await {
-        Ok(job_id) => {
-            Ok(Json(json!({
-                "status": "success",
-                "master_job_id": job_id,
-                "message": "Adaptive bitrate transcoding started",
-                "info": "Use /transcode/{id}/master.m3u8 to get the master playlist once ready"
-            })))
-        }
-        Err(e) => {
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-/// Get a specific segment on-the-fly
-/// This endpoint generates segments on demand for true streaming
-async fn get_segment_handler(
-    State(state): State<AppState>,
-    Path((job_id, segment_number)): Path<(String, u32)>,
-) -> Result<Response<Body>, StatusCode> {
-    match state.transcoding_service.get_segment(&job_id, segment_number).await {
-        Ok(segment_path) => {
-            // Stream the segment file
-            match tokio::fs::File::open(&segment_path).await {
-                Ok(file) => {
-                    let stream = ReaderStream::new(file);
-                    let body = Body::from_stream(stream);
-                    
-                    Ok(Response::builder()
-                        .header(header::CONTENT_TYPE, "video/MP2T")
-                        .header(header::CACHE_CONTROL, "public, max-age=3600")
-                        .body(body)
-                        .unwrap())
-                }
-                Err(_) => Err(StatusCode::NOT_FOUND),
-            }
-        }
-        Err(e) => {
-            error!("Failed to get segment: {}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
-        }
-    }
-}
-
-/// Get master playlist for adaptive bitrate streaming
-async fn get_master_playlist_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Response<Body>, StatusCode> {
-    info!("Master playlist request for media ID: {}", id);
-    
-    // Decode the percent-encoded ID
-    let decoded_id = urlencoding::decode(&id).map_err(|e| {
-        error!("Failed to decode media ID: {}", e);
-        StatusCode::BAD_REQUEST
-    })?;
-    
-    match state.transcoding_service.get_master_playlist(&decoded_id).await {
-        Some(playlist_path) => {
-            info!("Found master playlist at: {:?}", playlist_path);
-            match tokio::fs::read_to_string(&playlist_path).await {
-                Ok(content) => {
-                    info!("Successfully read master playlist, size: {} bytes", content.len());
-                    Ok(Response::builder()
-                        .header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")
-                        .header(header::CACHE_CONTROL, "no-cache")
-                        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-                        .body(Body::from(content))
-                        .unwrap())
-                }
-                Err(e) => {
-                    warn!("Failed to read master playlist: {}", e);
-                    Err(StatusCode::NOT_FOUND)
-                }
-            }
-        }
-        None => {
-            warn!("Master playlist not found for media ID: {}", id);
-            // Check if variant directories exist and generate master playlist on the fly
-            let cache_dir = state.config.transcode_cache_dir.join(&id);
-            match tokio::fs::read_dir(&cache_dir).await {
-                Ok(mut entries) => {
-                    let mut variants = Vec::new();
-                    
-                    // Scan for variant directories
-                    while let Ok(Some(entry)) = entries.next_entry().await {
-                        if let Ok(file_type) = entry.file_type().await {
-                            if file_type.is_dir() {
-                                let name = entry.file_name();
-                                if let Some(name_str) = name.to_str() {
-                                    if name_str.starts_with("adaptive_") {
-                                        variants.push(name_str.to_string());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    if !variants.is_empty() {
-                        info!("Found {} variants, generating master playlist on the fly", variants.len());
-                        
-                        // Generate master playlist content
-                        let mut master_content = "#EXTM3U\n#EXT-X-VERSION:3\n\n".to_string();
-                        
-                        // Sort variants by quality
-                        variants.sort();
-                        
-                        for variant_name in variants {
-                            // Extract resolution from variant name (e.g., "adaptive_720p" -> "720p")
-                            let quality = variant_name.trim_start_matches("adaptive_");
-                            
-                            let (width, height, bandwidth) = match quality {
-                                "360p" => (640, 360, 1000000),
-                                "480p" => (854, 480, 2000000),
-                                "720p" => (1280, 720, 3000000),
-                                "1080p" => (1920, 1080, 5000000),
-                                "4k" => (3840, 2160, 20000000),
-                                "original" => {
-                                    // For original quality, we should use actual source dimensions
-                                    // For now, use high values that will be sorted last
-                                    (7680, 4320, 50000000) // 8K placeholder with very high bitrate
-                                },
-                                _ => continue,
-                            };
-                            
-                            // Check if playlist exists in this variant
-                            let playlist_path = cache_dir.join(&variant_name).join("playlist.m3u8");
-                            if tokio::fs::metadata(&playlist_path).await.is_ok() {
-                                master_content.push_str(&format!(
-                                    "#EXT-X-STREAM-INF:BANDWIDTH={},RESOLUTION={}x{}\nvariant/{}/playlist.m3u8\n\n",
-                                    bandwidth, width, height, variant_name
-                                ));
-                            }
-                        }
-                        
-                        // Save the generated master playlist for future use
-                        let master_path = cache_dir.join("master.m3u8");
-                        if let Err(e) = tokio::fs::write(&master_path, &master_content).await {
-                            warn!("Failed to save generated master playlist: {}", e);
-                        }
-                        
-                        Ok(Response::builder()
-                            .header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")
-                            .header(header::CACHE_CONTROL, "no-cache")
-                            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-                            .body(Body::from(master_content))
-                            .unwrap())
-                    } else {
-                        warn!("No variant directories found for media ID: {}", id);
-                        Err(StatusCode::NOT_FOUND)
-                    }
-                }
-                Err(e) => {
-                    warn!("Failed to read cache directory: {}", e);
-                    Err(StatusCode::NOT_FOUND)
-                }
-            }
-        }
-    }
-}
-
-/// Get variant playlist for a specific quality profile
-async fn get_variant_playlist_handler(
-    State(state): State<AppState>,
-    Path((id, profile)): Path<(String, String)>,
-) -> Result<Response<Body>, StatusCode> {
-    match state.transcoding_service.get_playlist_url(&id, &profile).await {
-        Some(playlist_path) => {
-            match tokio::fs::read_to_string(&playlist_path).await {
-                Ok(mut content) => {
-                    // FFmpeg generates segment files with relative paths like "segment_000.ts"
-                    // We need to update these to include the full path for our server
-                    // Replace segment references to use our segment endpoint
-                    content = content.replace("segment_", &format!("/transcode/{}/variant/{}/segment_", id, profile));
-                    
-                    Ok(Response::builder()
-                        .header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")
-                        .header(header::CACHE_CONTROL, "no-cache")
-                        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-                        .body(Body::from(content))
-                        .unwrap())
-                }
-                Err(_) => Err(StatusCode::NOT_FOUND),
-            }
-        }
-        None => {
-            // Variant doesn't exist - check if we should start on-demand transcoding
-            info!("Variant {} not found for media {}, checking for on-demand transcoding", profile, id);
-            
-            // Extract quality from profile (e.g., "adaptive_720p" -> "720p")
-            if profile.starts_with("adaptive_") {
-                let quality = profile.trim_start_matches("adaptive_");
-                
-                // Check if this is a valid quality we support
-                let valid_qualities = ["360p", "480p", "720p", "1080p", "4k", "original"];
-                if valid_qualities.contains(&quality) {
-                    // Get media info to create proper transcoding profile
-                    match state.db.backend().get_media(&id).await {
-                        Ok(Some(media)) => {
-                            // Create transcoding profile for this specific variant
-                            let transcode_profile = match quality {
-                                "360p" => transcoding::profiles::TranscodingProfile {
-                                    name: profile.clone(),
-                                    video_codec: "libx264".to_string(),
-                                    audio_codec: "copy".to_string(), // Pass through original audio
-                                    video_bitrate: "800k".to_string(),
-                                    audio_bitrate: "0".to_string(), // Not used with copy codec
-                                    resolution: Some("640x360".to_string()),
-                                    preset: "fast".to_string(),
-                                    apply_tone_mapping: false,
-                                },
-                                "480p" => transcoding::profiles::TranscodingProfile {
-                                    name: profile.clone(),
-                                    video_codec: "libx264".to_string(),
-                                    audio_codec: "copy".to_string(), // Pass through original audio
-                                    video_bitrate: "2M".to_string(),
-                                    audio_bitrate: "0".to_string(), // Not used with copy codec
-                                    resolution: Some("854x480".to_string()),
-                                    preset: "fast".to_string(),
-                                    apply_tone_mapping: false,
-                                },
-                                "1080p" => transcoding::profiles::TranscodingProfile {
-                                    name: profile.clone(),
-                                    video_codec: "libx264".to_string(),
-                                    audio_codec: "copy".to_string(), // Pass through original audio
-                                    video_bitrate: "8M".to_string(),
-                                    audio_bitrate: "0".to_string(), // Not used with copy codec
-                                    resolution: Some("1920x1080".to_string()),
-                                    preset: "fast".to_string(),
-                                    apply_tone_mapping: false,
-                                },
-                                _ => {
-                                    warn!("Unsupported on-demand quality: {}", quality);
-                                    return Err(StatusCode::NOT_FOUND);
-                                }
-                            };
-                            
-                            // Start on-demand transcoding
-                            info!("Starting on-demand transcoding for {} variant of media {}", quality, id);
-                            match state.transcoding_service
-                                .start_transcoding(&id, transcode_profile, None, Some(transcoding::job::JobPriority::High))
-                                .await
-                            {
-                                Ok(job_id) => {
-                                    info!("Started on-demand transcoding job {} for variant {}", job_id, profile);
-                                    // Return 202 Accepted to indicate transcoding has started
-                                    Ok(Response::builder()
-                                        .status(StatusCode::ACCEPTED)
-                                        .header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")
-                                        .header(header::CACHE_CONTROL, "no-cache")
-                                        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-                                        .header("X-Transcode-Status", "started")
-                                        .header("X-Transcode-Job-Id", job_id)
-                                        .body(Body::from("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-PLAYLIST-TYPE:EVENT\n# Transcoding in progress..."))
-                                        .unwrap())
-                                }
-                                Err(e) => {
-                                    warn!("Failed to start on-demand transcoding: {}", e);
-                                    Err(StatusCode::SERVICE_UNAVAILABLE)
-                                }
-                            }
-                        }
-                        _ => {
-                            warn!("Media {} not found for on-demand transcoding", id);
-                            Err(StatusCode::NOT_FOUND)
-                        }
-                    }
-                } else {
-                    Err(StatusCode::NOT_FOUND)
-                }
-            } else {
-                Err(StatusCode::NOT_FOUND)
-            }
-        },
-    }
-}
-
-/// Serve variant segment files
-async fn get_variant_segment_handler(
-    State(state): State<AppState>,
-    Path((id, profile, segment)): Path<(String, String, String)>,
-) -> Result<Response<Body>, StatusCode> {
-    let segment_path = state.config.transcode_cache_dir
-        .join(&id)
-        .join(&profile)
-        .join(&segment);
-    
-    match tokio::fs::File::open(&segment_path).await {
-        Ok(file) => {
-            let stream = ReaderStream::new(file);
-            let body = Body::from_stream(stream);
-            
-            Ok(Response::builder()
-                .header(header::CONTENT_TYPE, "video/MP2T")
-                .header(header::CACHE_CONTROL, "public, max-age=3600")
-                .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-                .body(body)
-                .unwrap())
-        }
-        Err(_) => Err(StatusCode::NOT_FOUND),
-    }
-}
-
-/// Cancel a transcoding job
-async fn cancel_transcode_handler(
-    State(state): State<AppState>,
-    Path(job_id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
-    match state.transcoding_service.cancel_job(&job_id).await {
-        Ok(()) => {
-            Ok(Json(json!({
-                "status": "success",
-                "message": "Job cancelled"
-            })))
-        }
-        Err(e) => {
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-/// List available transcoding profiles
-async fn list_transcode_profiles_handler(
-    State(_state): State<AppState>,
-) -> Result<Json<Value>, StatusCode> {
-    // Return available profiles
-    Ok(Json(json!({
-        "status": "success",
-        "profiles": [
-            {
-                "name": "hdr_to_sdr_1080p",
-                "description": "HDR to SDR conversion at 1080p",
-                "video_codec": "libx264",
-                "audio_codec": "aac",
-                "resolution": "1920x1080"
-            },
-            {
-                "name": "hdr_to_sdr_4k",
-                "description": "HDR to SDR conversion at 4K",
-                "video_codec": "libx265",
-                "audio_codec": "aac",
-                "resolution": "3840x2160"
-            },
-            {
-                "name": "adaptive",
-                "description": "Adaptive bitrate with multiple quality variants",
-                "variants": ["360p", "480p", "720p", "1080p", "4k"]
-            }
-        ]
-    })))
-}
-
-/// Get transcoding cache statistics
-async fn transcode_cache_stats_handler(
-    State(state): State<AppState>,
-) -> Result<Json<Value>, StatusCode> {
-    match state.transcoding_service.get_cache_stats().await {
-        Ok(stats) => {
-            Ok(Json(json!({
-                "status": "success",
-                "cache_stats": {
-                    "total_size_mb": stats.total_size_mb,
-                    "file_count": stats.file_count,
-                    "media_count": stats.media_count,
-                    "oldest_file_age_days": stats.oldest_file_age_days
-                }
-            })))
-        }
-        Err(e) => {
-            Ok(Json(json!({
-                "status": "error",
-                "error": e.to_string()
-            })))
-        }
-    }
-}
-
-/// Clear transcoding cache for a specific media file
-async fn clear_transcode_cache_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
-    info!("Clear cache request for media ID: {}", id);
-    
-    // Clear all cached variants for this media
-    let cache_dir = state.config.transcode_cache_dir.join(&id);
-    if cache_dir.exists() {
-        match tokio::fs::remove_dir_all(&cache_dir).await {
-            Ok(()) => {
-                info!("Cleared transcode cache for media: {}", id);
-                Ok(Json(json!({
-                    "status": "success",
-                    "message": "Cache cleared successfully"
-                })))
-            }
-            Err(e) => {
-                error!("Failed to clear cache: {}", e);
-                Ok(Json(json!({
-                    "status": "error",
-                    "error": e.to_string()
-                })))
-            }
-        }
-    } else {
-        Ok(Json(json!({
-            "status": "success",
-            "message": "No cache to clear"
-        })))
-    }
 }

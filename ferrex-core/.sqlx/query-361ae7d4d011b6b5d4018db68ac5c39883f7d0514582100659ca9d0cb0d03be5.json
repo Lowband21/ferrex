@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO season_references (id, season_number, series_id, tmdb_series_id)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (series_id, season_number) DO UPDATE\n            SET tmdb_series_id = EXCLUDED.tmdb_series_id,\n                updated_at = NOW()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "361ae7d4d011b6b5d4018db68ac5c39883f7d0514582100659ca9d0cb0d03be5"
+}

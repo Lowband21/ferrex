@@ -1,6 +1,6 @@
 use crate::media_library::MediaFile;
-use crate::hls::{HlsClient, MasterPlaylist, VariantPlaylist};
-use iced_video_player::{AudioTrack, SubtitleTrack, Video};
+use crate::server::hls::{HlsClient, MasterPlaylist, VariantPlaylist};
+use iced_video_player::{AudioTrack, SubtitleTrack, ToneMappingConfig, Video};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -15,10 +15,15 @@ pub enum AspectRatio {
 pub struct PlayerState {
     // Current media
     pub current_media: Option<MediaFile>,
+    pub current_media_id: Option<ferrex_core::api_types::MediaId>,
     pub current_url: Option<url::Url>,
 
     // Video instance
     pub video_opt: Option<Video>,
+
+    // Watch progress tracking
+    pub last_progress_update: Option<Instant>,
+    pub last_progress_sent: f64,
 
     // Playback state
     pub position: f64,
@@ -59,7 +64,7 @@ pub struct PlayerState {
 
     // Subtitle menu state
     pub show_subtitle_menu: bool,
-    
+
     // Quality selection menu state
     pub show_quality_menu: bool,
     pub current_quality_profile: Option<String>,
@@ -69,27 +74,30 @@ pub struct PlayerState {
     // Seek throttling
     pub last_seek_time: Option<Instant>,
     pub pending_seek_position: Option<f64>,
-    
+
     // HDR and transcoding state
     pub is_hdr_content: bool,
     pub using_hls: bool,
     pub transcoding_status: Option<TranscodingStatus>,
     pub transcoding_job_id: Option<String>,
-    
+
     // HLS adaptive streaming
     pub hls_client: Option<HlsClient>,
     pub master_playlist: Option<MasterPlaylist>,
     pub current_variant_playlist: Option<VariantPlaylist>,
     pub current_segment_index: usize,
     pub segment_buffer: Vec<Vec<u8>>, // Prefetched segments
-    
+
     // Performance metrics
     pub last_bandwidth_measurement: Option<u64>, // bits per second
     pub quality_switch_count: u32,
     pub transcoding_duration: Option<f64>, // Duration from transcoding job
-    pub transcoding_check_count: u32, // Number of status checks performed
-    pub is_loading_video: bool, // Flag to prevent duplicate video loading
-    pub source_duration: Option<f64>, // Original source video duration (never changes)
+    pub transcoding_check_count: u32,      // Number of status checks performed
+    pub is_loading_video: bool,            // Flag to prevent duplicate video loading
+    pub source_duration: Option<f64>,      // Original source video duration (never changes)
+
+    // Tone mapping configuration
+    pub tone_mapping_config: ToneMappingConfig,
 }
 
 // Use the shared TranscodingStatus from ferrex-core
@@ -105,8 +113,11 @@ impl Default for PlayerState {
     fn default() -> Self {
         Self {
             current_media: None,
+            current_media_id: None,
             current_url: None,
             video_opt: None,
+            last_progress_update: None,
+            last_progress_sent: 0.0,
             position: 0.0,
             duration: 0.0,
             buffered_percentage: 0.0, // Start with no buffer
@@ -150,6 +161,7 @@ impl Default for PlayerState {
             transcoding_check_count: 0,
             is_loading_video: false,
             source_duration: None,
+            tone_mapping_config: ToneMappingConfig::default(),
         }
     }
 }
@@ -157,8 +169,11 @@ impl Default for PlayerState {
 impl PlayerState {
     pub fn reset(&mut self) {
         self.current_media = None;
+        self.current_media_id = None;
         self.current_url = None;
         self.video_opt = None;
+        self.last_progress_update = None;
+        self.last_progress_sent = 0.0;
         self.position = 0.0;
         self.duration = 0.0;
         self.buffered_percentage = 0.0; // Start with no buffer

@@ -1,6 +1,7 @@
-use crate::{theme, Message, State, player::state::TranscodingStatus};
+use crate::{messages::ui::Message, theme, State};
+use ferrex_core::TranscodingStatus;
 use iced::{
-    widget::{button, column, container, row, text, Space, progress_bar},
+    widget::{button, column, container, progress_bar, row, text, Space},
     Element, Length,
 };
 use lucide_icons::Icon;
@@ -36,28 +37,28 @@ pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Mes
 
     // Loading indicator with status
     let mut loading_content = column![].spacing(20).align_x(iced::Alignment::Center);
-    
+
     // Spinner icon (using refresh icon that will be animated via CSS)
     loading_content = loading_content.push(
         text(Icon::RefreshCw.unicode())
             .font(lucide_font())
             .size(48)
-            .color(theme::MediaServerTheme::TEXT_PRIMARY)
+            .color(theme::MediaServerTheme::TEXT_PRIMARY),
     );
-    
+
     // Main loading text
     let loading_text = if state.player.using_hls {
         "Starting Adaptive Streaming"
     } else {
         "Loading Video"
     };
-    
+
     loading_content = loading_content.push(
         text(loading_text)
             .size(24)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
     );
-    
+
     // Status message based on transcoding state
     let status_message = match &state.player.transcoding_status {
         Some(TranscodingStatus::Pending) => "Initializing transcoding...".to_string(),
@@ -76,25 +77,23 @@ pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Mes
             }
         }
     };
-    
+
     loading_content = loading_content.push(
         text(status_message)
             .size(16)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
     );
-    
+
     // Show progress bar if transcoding
     if let Some(TranscodingStatus::Processing { progress }) = &state.player.transcoding_status {
         loading_content = loading_content.push(Space::with_height(10));
         loading_content = loading_content.push(
-            container(
-                progress_bar(0.0..=1.0, *progress)
-            )
-            .width(Length::Fixed(300.0))
-            .height(Length::Fixed(8.0))
+            container(progress_bar(0.0..=1.0, *progress))
+                .width(Length::Fixed(300.0))
+                .height(Length::Fixed(8.0)),
         );
     }
-    
+
     // Additional info
     if state.player.using_hls {
         loading_content = loading_content.push(Space::with_height(20));
@@ -108,10 +107,10 @@ pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Mes
                     .color(theme::MediaServerTheme::SUCCESS),
             ]
             .spacing(5)
-            .align_x(iced::Alignment::Center)
+            .align_x(iced::Alignment::Center),
         );
     }
-    
+
     loading_content = loading_content.push(Space::with_height(20));
     loading_content = loading_content.push(
         text(url)

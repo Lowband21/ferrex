@@ -1,4 +1,4 @@
-use crate::{theme, Message};
+use crate::{messages::ui::Message, theme};
 use iced::{
     widget::{button, column, container, row, text, Space},
     Element, Length,

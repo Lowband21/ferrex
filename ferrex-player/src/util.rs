@@ -71,59 +71,17 @@ pub fn sort_media(
     // since HashMap doesn't maintain order
 }
 
-pub async fn trigger_metadata_fetch(
-    server_url: String,
-    media_ids: Vec<String>,
-) -> Result<(), String> {
-    log::info!("Triggering metadata fetch for {} items", media_ids.len());
+// Helper function to format duration
+pub fn format_duration(seconds: f64) -> String {
+    let hours = (seconds / 3600.0) as u32;
+    let minutes = ((seconds % 3600.0) / 60.0) as u32;
+    let secs = (seconds % 60.0) as u32;
 
-    // Use a connection pool with limited connections
-    let client = reqwest::Client::builder()
-        .pool_max_idle_per_host(2)
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-
-    // Process in smaller batches to avoid overwhelming the server
-    for (i, media_id) in media_ids.iter().enumerate() {
-        // Extract just the ID part if it's in "media:id" format
-        let clean_id = if media_id.starts_with("media:") {
-            media_id.strip_prefix("media:").unwrap_or(media_id)
-        } else {
-            media_id
-        };
-
-        let url = format!("{}/metadata/fetch/{}", server_url, clean_id);
-        log::debug!("Fetching metadata from: {}", url);
-
-        match client.post(&url).send().await {
-            Ok(response) => {
-                if response.status().is_success() {
-                    log::info!(
-                        "Metadata fetch triggered successfully for {} ({}/{})",
-                        clean_id,
-                        i + 1,
-                        media_ids.len()
-                    );
-                } else {
-                    log::warn!(
-                        "Metadata fetch failed for {}: {}",
-                        clean_id,
-                        response.status()
-                    );
-                }
-            }
-            Err(e) => {
-                log::error!("Failed to trigger metadata fetch for {}: {}", clean_id, e);
-            }
-        }
-
-        // Small delay between requests to avoid overwhelming the server
-        if i < media_ids.len() - 1 {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        }
+    if hours > 0 {
+        format!("{}h {}m {}s", hours, minutes, secs)
+    } else if minutes > 0 {
+        format!("{}m {}s", minutes, secs)
+    } else {
+        format!("{}s", secs)
     }
-
-    log::info!("Completed metadata fetch batch");
-    Ok(())
 }

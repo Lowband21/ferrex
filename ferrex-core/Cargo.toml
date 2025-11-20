@@ -5,6 +5,15 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+readme = "../README.md"
+keywords.workspace = true
+categories.workspace = true
+description = "Core library for Ferrex Media Server - handles media metadata, database operations, and business logic"
+
+[lints]
+workspace = true
 
 [dependencies]
 # Serialization
@@ -49,10 +58,39 @@ tokio.workspace = true
 tokio-stream.workspace = true
 futures.workspace = true
 
+# URL
+url.workspace = true
+
+# TMDB
+tmdb-api.workspace = true
+
+# Concurrency
+rayon.workspace = true
+
+# Fuzzy matching
+fuzzy-matcher = "0.3"
+
+# Random number generation
+rand = "0.8"
+
+# File watching
+notify = { version = "6.1", optional = true }
+
+# Image processing
+image = { workspace = true, optional = true }
+
+# Cryptography
+sha2 = { workspace = true }
+argon2 = { workspace = true }
+password-hash = "0.5"
+ring = "0.17.14"
+zeroize = { version = "1.8", features = ["derive"] }
+base64 = "0.22.1"
+
 [features]
 default = ["ffmpeg", "database"]
 ffmpeg = ["dep:ffmpeg-next"]
-database = ["dep:sqlx", "dep:surrealdb", "dep:redis"]
+database = ["dep:sqlx", "dep:surrealdb", "dep:redis", "dep:image", "dep:notify"]
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::fs;
 use tokio::process::Command;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 /// On-the-fly segment generator

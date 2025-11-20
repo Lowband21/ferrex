@@ -55,7 +55,13 @@ impl ThumbnailService {
         let thumbnail_path_clone = thumbnail_path.clone();
 
         tokio::task::spawn_blocking(move || {
-            extract_frame_at_percentage(&video_path, &thumbnail_path_clone, 0.1)
+            // Catch panics that might occur from FFmpeg operations
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                extract_frame_at_percentage(&video_path, &thumbnail_path_clone, 0.1)
+            })) {
+                Ok(result) => result,
+                Err(_) => Err(anyhow::anyhow!("Thumbnail extraction panicked, likely due to corrupt video file"))
+            }
         })
         .await
         .context("Failed to spawn blocking task")?
@@ -101,15 +107,25 @@ fn extract_frame_at_percentage(
         output_path
     );
 
-    // Open input
-    let mut input_ctx = ffmpeg::format::input(&input_path).context("Failed to open input file")?;
+    // Open input with error handling for corrupt files
+    let mut input_ctx = match ffmpeg::format::input(&input_path) {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            tracing::error!("Failed to open input file '{}': {}", input_path, e);
+            return Err(anyhow::anyhow!("Cannot open video file, it may be corrupt or unsupported: {}", e));
+        }
+    };
 
     // Find video stream
-    let video_stream_index = input_ctx
-        .streams()
-        .best(ffmpeg::media::Type::Video)
-        .ok_or_else(|| anyhow::anyhow!("No video stream found"))?
-        .index();
+    let video_stream = match input_ctx.streams().best(ffmpeg::media::Type::Video) {
+        Some(stream) => stream,
+        None => {
+            tracing::error!("No video stream found in '{}'", input_path);
+            return Err(anyhow::anyhow!("No video stream found in file"));
+        }
+    };
+    
+    let video_stream_index = video_stream.index();
 
     // Get video stream info and create decoder
     let (time_base, stream_duration, codec_params) = {
@@ -171,24 +187,47 @@ fn extract_frame_at_percentage(
         tracing::warn!("No valid duration found, extracting from beginning");
     }
 
-    // Create decoder
-    let codec = ffmpeg::codec::context::Context::from_parameters(codec_params)
-        .context("Failed to create codec context")?;
-    let mut decoder = codec
-        .decoder()
-        .video()
-        .context("Failed to create video decoder")?;
+    // Create decoder with error handling
+    let codec = match ffmpeg::codec::context::Context::from_parameters(codec_params) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to create codec context: {}", e);
+            return Err(anyhow::anyhow!("Invalid or corrupt video codec parameters: {}", e));
+        }
+    };
+    
+    let mut decoder = match codec.decoder().video() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!("Failed to create video decoder: {}", e);
+            return Err(anyhow::anyhow!("Cannot decode video stream, file may be corrupt: {}", e));
+        }
+    };
 
-    // Get original dimensions and calculate scaled dimensions maintaining aspect ratio
+    // Validate decoder dimensions
     let original_width = decoder.width();
     let original_height = decoder.height();
+    
+    if original_width == 0 || original_height == 0 {
+        tracing::error!("Invalid video dimensions: {}x{}", original_width, original_height);
+        return Err(anyhow::anyhow!("Video has invalid dimensions: {}x{}", original_width, original_height));
+    }
+    
+    // Validate pixel format
+    let pixel_format = decoder.format();
+    if pixel_format == ffmpeg::format::Pixel::None {
+        tracing::error!("Video has unspecified pixel format");
+        return Err(anyhow::anyhow!("Video has unspecified pixel format, cannot process"));
+    }
+    
     let aspect_ratio = original_width as f32 / original_height as f32;
 
     tracing::info!(
-        "Video info: {}x{} (aspect ratio: {:.2})",
+        "Video info: {}x{} (aspect ratio: {:.2}), format: {:?})",
         original_width,
         original_height,
-        aspect_ratio
+        aspect_ratio,
+        pixel_format
     );
 
     // Calculate target dimensions preserving aspect ratio
@@ -207,8 +246,8 @@ fn extract_frame_at_percentage(
 
     tracing::info!("Thumbnail dimensions: {}x{}", target_width, target_height);
 
-    // Create scaler with calculated dimensions
-    let mut scaler = ffmpeg::software::scaling::context::Context::get(
+    // Create scaler with calculated dimensions and error handling
+    let mut scaler = match ffmpeg::software::scaling::context::Context::get(
         decoder.format(),
         decoder.width(),
         decoder.height(),
@@ -216,8 +255,13 @@ fn extract_frame_at_percentage(
         target_width,
         target_height,
         ffmpeg::software::scaling::flag::Flags::BILINEAR,
-    )
-    .context("Failed to create scaler")?;
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("Failed to create scaler: {}", e);
+            return Err(anyhow::anyhow!("Cannot create video scaler, format may be unsupported: {}", e));
+        }
+    };
 
     // Decode frames until we get one
     let mut decoded_frame = ffmpeg::util::frame::video::Video::empty();
@@ -248,6 +292,26 @@ fn extract_frame_at_percentage(
                 match decoder.receive_frame(&mut decoded_frame) {
                     Ok(_) => {
                         frame_count += 1;
+                        
+                        // Validate decoded frame before processing
+                        if decoded_frame.width() == 0 || decoded_frame.height() == 0 {
+                            tracing::warn!("Decoded frame {} has invalid dimensions: {}x{}", 
+                                frame_count, decoded_frame.width(), decoded_frame.height());
+                            continue;
+                        }
+                        
+                        if decoded_frame.format() == ffmpeg::format::Pixel::None {
+                            tracing::warn!("Decoded frame {} has invalid pixel format", frame_count);
+                            continue;
+                        }
+                        
+                        // Validate frame dimensions match decoder expectations
+                        if decoded_frame.width() != original_width || decoded_frame.height() != original_height {
+                            tracing::warn!("Frame dimensions {}x{} don't match expected {}x{}", 
+                                decoded_frame.width(), decoded_frame.height(), original_width, original_height);
+                            // Try to continue, but this might indicate corruption
+                        }
+                        
                         // Try to estimate the frame position
                         let pts = decoded_frame.pts().unwrap_or(0);
                         let time_seconds = if pts > 0 && time_base.denominator() > 0 {
@@ -269,10 +333,21 @@ fn extract_frame_at_percentage(
                             continue;
                         }
 
-                        // Scale the frame
-                        if let Err(e) = scaler.run(&decoded_frame, &mut scaled_frame) {
-                            tracing::error!("Failed to scale frame: {}", e);
-                            return Err(anyhow::anyhow!("Failed to scale frame: {}", e));
+                        // Scale the frame with error handling
+                        match scaler.run(&decoded_frame, &mut scaled_frame) {
+                            Ok(_) => {
+                                // Frame scaled successfully
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to scale frame {}: {}", frame_count, e);
+                                // Try next frame instead of failing immediately
+                                if frame_count < 50 {
+                                    tracing::warn!("Trying next frame after scale error");
+                                    continue;
+                                } else {
+                                    return Err(anyhow::anyhow!("Failed to scale frame after {} attempts: {}", frame_count, e));
+                                }
+                            }
                         }
 
                         tracing::info!(

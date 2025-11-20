@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, name, library_type, paths, scan_interval_minutes, last_scan, enabled, auto_scan, watch_for_changes, analyze_on_scan, max_retry_attempts, created_at, updated_at FROM libraries WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "library_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "paths",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 4,
+        "name": "scan_interval_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_scan",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "auto_scan",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "watch_for_changes",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "analyze_on_scan",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "max_retry_attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fa6d8e7823344b7b126b5b8a336733634238d304e90c56ef339dfd5dc7ba7c63"
+}

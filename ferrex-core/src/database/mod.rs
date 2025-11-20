@@ -1,12 +1,11 @@
 pub mod cache;
 pub mod postgres;
-pub mod surrealdb;
+pub mod postgres_ext;
 pub mod traits;
 
 pub use cache::RedisCache;
-pub use postgres::PostgresDatabase;
-pub use surrealdb::SurrealDatabase;
-pub use traits::{DatabaseBackend, MediaDatabaseTrait};
+pub use postgres::{PostgresDatabase, PoolStats};
+pub use traits::MediaDatabaseTrait;
 
 use crate::Result;
 use std::sync::Arc;
@@ -30,13 +29,6 @@ impl MediaDatabase {
         Ok(Self { backend, cache })
     }
 
-    pub async fn new_surrealdb() -> Result<Self> {
-        let backend = Arc::new(SurrealDatabase::new().await?);
-        Ok(Self {
-            backend,
-            cache: None,
-        })
-    }
 
     pub fn backend(&self) -> &dyn MediaDatabaseTrait {
         self.backend.as_ref()
@@ -44,5 +36,10 @@ impl MediaDatabase {
 
     pub fn cache(&self) -> Option<&RedisCache> {
         self.cache.as_ref().map(|c| c.as_ref())
+    }
+    
+    /// Get the backend as Any for downcasting
+    pub fn as_any(&self) -> &dyn std::any::Any {
+        self.backend.as_any()
     }
 }

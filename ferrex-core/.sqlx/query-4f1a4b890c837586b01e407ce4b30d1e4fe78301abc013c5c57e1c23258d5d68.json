@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM user_completed_media \n            WHERE user_id = $1 AND media_id_json = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4f1a4b890c837586b01e407ce4b30d1e4fe78301abc013c5c57e1c23258d5d68"
+}
