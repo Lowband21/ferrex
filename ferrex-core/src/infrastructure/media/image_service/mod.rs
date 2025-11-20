@@ -23,9 +23,15 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::{Mutex, Notify, Semaphore};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+#[derive(Debug, Clone)]
+pub struct EnsureReport {
+    pub image_id: Option<Uuid>,
+    pub ready_path: Option<PathBuf>,
+}
 
 #[cfg(feature = "ffmpeg")]
 use ffmpeg_next as ffmpeg;
@@ -40,6 +46,9 @@ pub struct ImageService {
     http_client: reqwest::Client,
     // Non-blocking variant generation coordination
     in_flight: Arc<Mutex<HashSet<String>>>,
+    // Per-variant singleflight to avoid duplicate downloads of the same size
+    in_flight_variants:
+        Arc<Mutex<std::collections::HashMap<String, Arc<Notify>>>>,
     permits: Arc<Semaphore>,
 }
 
@@ -71,6 +80,15 @@ impl ImageService {
         images: Arc<dyn ImageRepository>,
         cache_dir: PathBuf,
     ) -> Self {
+        Self::new_with_concurrency(media_files, images, cache_dir, 12)
+    }
+
+    pub fn new_with_concurrency(
+        media_files: Arc<dyn MediaFilesReadPort>,
+        images: Arc<dyn ImageRepository>,
+        cache_dir: PathBuf,
+        download_concurrency: usize,
+    ) -> Self {
         let http_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
@@ -91,7 +109,11 @@ impl ImageService {
             cache_dir,
             http_client,
             in_flight: Arc::new(Mutex::new(HashSet::new())),
-            permits: Arc::new(Semaphore::new(4)), // cap concurrent variant work
+            in_flight_variants: Arc::new(Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            // Cap concurrent variant work; configurable via server wiring.
+            permits: Arc::new(Semaphore::new(download_concurrency.max(1))),
         }
     }
 
@@ -194,8 +216,14 @@ impl ImageService {
         );
         //debug!("Downloading image variant: {}", url);
 
-        let response =
-            self.http_client.get(&url).send().await.map_err(|e| {
+        let response = self
+            .http_client
+            // Avoid compressed, range-susceptible responses for binary assets
+            .get(&url)
+            .header(reqwest::header::ACCEPT_ENCODING, "identity")
+            .send()
+            .await
+            .map_err(|e| {
                 MediaError::Internal(format!("Failed to download image: {}", e))
             })?;
 
@@ -206,9 +234,20 @@ impl ImageService {
             )));
         }
 
+        let expected_len = response.content_length();
         let bytes = response.bytes().await.map_err(|e| {
             MediaError::Internal(format!("Failed to read image data: {}", e))
         })?;
+
+        if let Some(content_len) = expected_len {
+            if bytes.len() as u64 != content_len {
+                return Err(MediaError::Internal(format!(
+                    "Image size mismatch: got {} bytes, expected {}",
+                    bytes.len(),
+                    content_len
+                )));
+            }
+        }
 
         let variant_dir = self
             .cache_dir
@@ -227,7 +266,25 @@ impl ImageService {
         );
         let file_path = variant_dir.join(&filename);
 
-        tokio::fs::write(&file_path, &bytes)
+        // Write atomically: write to a temporary file, fsync, then rename.
+        // This prevents readers from observing partial files during concurrent access.
+        let tmp_path = file_path.with_extension("tmp");
+        {
+            use tokio::io::AsyncWriteExt;
+            let mut f = tokio::fs::File::create(&tmp_path)
+                .await
+                .map_err(MediaError::Io)?;
+            f.write_all(&bytes).await.map_err(MediaError::Io)?;
+            // Ensure file contents are durable before rename
+            f.sync_all().await.map_err(MediaError::Io)?;
+        }
+        // Best-effort: fsync the parent directory to persist the rename operation
+        if let Some(parent) = file_path.parent() {
+            if let Ok(dir) = tokio::fs::File::open(parent).await {
+                let _ = dir.sync_all().await; // ignore errors; rename below is still atomic
+            }
+        }
+        tokio::fs::rename(&tmp_path, &file_path)
             .await
             .map_err(MediaError::Io)?;
 
@@ -439,11 +496,7 @@ impl ImageService {
 
         let video_path = media.path.clone();
 
-        let variant_dir = self
-            .cache_dir
-            .join("images")
-            .join(image_folder)
-            .join(&variant_name);
+        let variant_dir = self.cache_dir.join(image_folder).join(&variant_name);
         tokio::fs::create_dir_all(&variant_dir)
             .await
             .map_err(MediaError::Io)?;
@@ -585,11 +638,12 @@ impl ImageService {
     }
 
     /// Ensure an image variant exists by spawning background work on cache miss.
-    /// Returns Some(path) if available immediately, or None if queued.
+    /// - ready_path: present if a variant is already cached and ready.
+    /// - image_id: present if the image record exists in the database.
     pub async fn ensure_variant_async(
         &self,
         params: &ImageLookupParams,
-    ) -> Result<Option<PathBuf>> {
+    ) -> Result<EnsureReport> {
         debug!(
             "ensure_variant_async: type={}, id={}, image_type={}, index={}, variant={:?}",
             params.media_type,
@@ -603,32 +657,47 @@ impl ImageService {
         if let Some((image_record, existing_variant)) =
             self.images.lookup_image_variant(params).await?
         {
+            // Choose a canonical first variant to fetch for this image type so
+            // different requested sizes coalesce on the same download.
             let requested_variant = params.variant.as_deref();
+            let canonical_size =
+                select_canonical_size(&params.image_type, requested_variant);
+            let canonical_variant_str = canonical_size.as_str();
             let variant_key_struct =
-                requested_variant.and_then(|v| build_variant_key(params, v));
+                build_variant_key(params, canonical_variant_str);
 
             if let Some(variant) = existing_variant {
-                if let Some(ref key) = variant_key_struct {
-                    let record = MediaImageVariantRecord {
-                        requested_at: Utc::now(),
-                        cached_at: Some(Utc::now()),
-                        cached: true,
-                        width: variant.width,
-                        height: variant.height,
-                        content_hash: None,
-                        theme_color: None,
-                        key: key.clone(),
-                    };
-                    self.images.upsert_media_image_variant(&record).await?;
-                }
-                return Ok(Some(PathBuf::from(variant.file_path)));
+                // Variant already cached: avoid hot-path DB writes.
+                // We deliberately skip upserting media_image_variants here to keep
+                // GET fast; cache bookkeeping occurs when downloads complete.
+                return Ok(EnsureReport {
+                    image_id: Some(image_record.id),
+                    ready_path: Some(PathBuf::from(variant.file_path)),
+                });
             }
 
             // Missing: spawn background download for requested size if it maps to TMDB size
             if let Some(size_str) = requested_variant
                 && let Some(size) = TmdbImageSize::from_str(size_str)
             {
-                let key = self.variant_key(params);
+                // Per-variant singleflight key (same image, same TMDB size)
+                let vkey = format!(
+                    "{}:{}",
+                    image_record.id.as_hyphenated(),
+                    canonical_variant_str
+                );
+                let (is_leader, _notify) = self.subscribe_variant(&vkey).await;
+                if !is_leader {
+                    debug!(
+                        "Variant {} already in-flight for image {}, skipping background ensure",
+                        canonical_variant_str, image_record.id
+                    );
+                    return Ok(EnsureReport {
+                        image_id: Some(image_record.id),
+                        ready_path: None,
+                    });
+                }
+                let key = self.image_key(params);
                 let mut guard = self.in_flight.lock().await;
                 if !guard.contains(&key) {
                     guard.insert(key.clone());
@@ -652,24 +721,26 @@ impl ImageService {
                     let tmdb_path = image_record.tmdb_path.clone();
                     let permits = self.permits.clone();
                     let key_struct = variant_key_struct.clone();
+                    let vkey2 = vkey.clone();
                     tokio::spawn(async move {
                         let _permit =
                             permits.acquire().await.expect("semaphore");
-                        if let Err(e) = this
+                        let download_result = this
                             .download_variant(
                                 &tmdb_path,
-                                size,
+                                canonical_size,
                                 key_struct.clone(),
                             )
-                            .await
-                        {
+                            .await;
+                        if let Err(e) = download_result {
                             warn!(
                                 "Background variant download failed for {} {}: {}",
                                 tmdb_path,
-                                size.as_str(),
+                                canonical_size.as_str(),
                                 e
                             );
                         }
+                        this.complete_variant(&vkey2).await;
                         let mut g = this.in_flight.lock().await;
                         g.remove(&key);
                     });
@@ -683,10 +754,16 @@ impl ImageService {
             }
 
             // Not immediately available
-            return Ok(None);
+            return Ok(EnsureReport {
+                image_id: Some(image_record.id),
+                ready_path: None,
+            });
         }
 
-        Ok(None)
+        Ok(EnsureReport {
+            image_id: None,
+            ready_path: None,
+        })
     }
 
     /// Pick the best available fallback variant for the same image.
@@ -756,15 +833,84 @@ impl ImageService {
         Ok(None)
     }
 
-    fn variant_key(&self, params: &ImageLookupParams) -> String {
+    /// Pick best available variant given a known image_id, avoiding an extra lookup.
+    pub async fn pick_best_available_for_image(
+        &self,
+        image_id: Uuid,
+        target_width: Option<u32>,
+        requested_variant: Option<&str>,
+    ) -> Result<Option<(PathBuf, String)>> {
+        let mut variants = self.images.get_image_variants(image_id).await?;
+        if variants.is_empty() {
+            return Ok(None);
+        }
+
+        let target_w = target_width
+            .or_else(|| requested_variant.and_then(tmdb_variant_to_width_hint))
+            .unwrap_or(500);
+
+        variants.sort_by_key(|v| {
+            tmdb_variant_to_width_hint(&v.variant).unwrap_or(u32::MAX)
+        });
+
+        let mut best: Option<&ImageVariant> = None;
+        for v in variants.iter().rev() {
+            if let Some(w) = tmdb_variant_to_width_hint(&v.variant) {
+                if w <= target_w {
+                    best = Some(v);
+                    break;
+                }
+            }
+        }
+        if best.is_none() {
+            for v in variants.iter() {
+                if let Some(w) = tmdb_variant_to_width_hint(&v.variant) {
+                    if w >= target_w {
+                        best = Some(v);
+                        break;
+                    }
+                } else {
+                    best = Some(v);
+                    break;
+                }
+            }
+        }
+
+        if let Some(v) = best {
+            return Ok(Some((PathBuf::from(&v.file_path), v.variant.clone())));
+        }
+        Ok(None)
+    }
+
+    fn image_key(&self, params: &ImageLookupParams) -> String {
+        // Dedupe in-flight work by image identity only (ignore variant)
         format!(
-            "{}:{}:{}:{}:{}",
+            "{}:{}:{}:{}",
             params.media_type,
             params.media_id,
             params.image_type.as_str(),
             params.index,
-            params.variant.as_deref().unwrap_or("")
         )
+    }
+
+    async fn subscribe_variant(&self, vkey: &str) -> (bool, Arc<Notify>) {
+        let mut map = self.in_flight_variants.lock().await;
+        if let Some(n) = map.get(vkey) {
+            return (false, Arc::clone(n));
+        }
+        let notify = Arc::new(Notify::new());
+        map.insert(vkey.to_string(), Arc::clone(&notify));
+        (true, notify)
+    }
+
+    async fn complete_variant(&self, vkey: &str) {
+        let notify = {
+            let mut map = self.in_flight_variants.lock().await;
+            map.remove(vkey)
+        };
+        if let Some(n) = notify {
+            n.notify_waiters();
+        }
     }
 
     /// Get or download an image variant (blocking until ready)
@@ -788,10 +934,38 @@ impl ImageService {
             if let Some(size_str) = &params.variant
                 && let Some(size) = TmdbImageSize::from_str(size_str)
             {
+                // If already present, return immediately
+                if let Some(existing) = self
+                    .images
+                    .get_image_variant(image_record.id, size_str)
+                    .await?
+                {
+                    return Ok(Some(PathBuf::from(existing.file_path)));
+                }
+
+                // Per-variant singleflight: serialize concurrent downloads of the same variant
+                let vkey =
+                    format!("{}:{}", image_record.id.as_hyphenated(), size_str);
+                let (is_leader, notify) = self.subscribe_variant(&vkey).await;
+                if !is_leader {
+                    notify.notified().await;
+                    if let Some(v) = self
+                        .images
+                        .get_image_variant(image_record.id, size_str)
+                        .await?
+                    {
+                        return Ok(Some(PathBuf::from(v.file_path)));
+                    } else {
+                        return Ok(None);
+                    }
+                }
+
                 let key_struct = build_variant_key(params, size_str);
-                let path = self
+                let result = self
                     .download_variant(&image_record.tmdb_path, size, key_struct)
-                    .await?;
+                    .await;
+                self.complete_variant(&vkey).await;
+                let path = result?;
                 return Ok(Some(path));
             }
 
@@ -964,6 +1138,26 @@ impl ImageService {
         &self,
     ) -> Result<std::collections::HashMap<String, u64>> {
         self.images.get_image_cache_stats().await
+    }
+}
+
+fn select_canonical_size(
+    kind: &MediaImageKind,
+    requested_variant: Option<&str>,
+) -> TmdbImageSize {
+    match kind {
+        MediaImageKind::Poster => TmdbImageSize::PosterW342,
+        // Backdrops are displayed large; prefer original to avoid detail loss.
+        MediaImageKind::Backdrop => TmdbImageSize::Original,
+        MediaImageKind::Thumbnail => TmdbImageSize::StillW300,
+        MediaImageKind::Logo => TmdbImageSize::Original,
+        MediaImageKind::Cast => TmdbImageSize::ProfileW185,
+        MediaImageKind::Other(_) => {
+            // Fall back to requested if parsable; else original
+            requested_variant
+                .and_then(TmdbImageSize::from_str)
+                .unwrap_or(TmdbImageSize::Original)
+        }
     }
 }
 

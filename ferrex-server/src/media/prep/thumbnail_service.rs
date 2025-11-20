@@ -557,8 +557,35 @@ fn save_frame_as_jpeg(
             )
         })?;
 
-    // Save as JPEG with quality 85
-    img.save(output_path).context("Failed to save thumbnail")?;
+    // Save as JPEG with quality 85 using an atomic write pattern
+    use image::ColorType;
+    use image::codecs::jpeg::JpegEncoder;
+    use std::fs::{self, File};
+
+    let tmp_path = output_path.with_extension("tmp");
+
+    // Write to a temporary file first
+    {
+        let mut file = File::create(&tmp_path).with_context(|| {
+            format!("Failed to create temp file for {:?}", tmp_path)
+        })?;
+        let mut encoder = JpegEncoder::new_with_quality(&mut file, 85);
+        encoder
+            .encode(img.as_raw(), width, height, ColorType::Rgb8.into())
+            .context("Failed to encode JPEG")?;
+        file.sync_all()
+            .context("Failed to fsync temp thumbnail file")?;
+    }
+
+    // fsync parent directory best-effort after rename
+    fs::rename(&tmp_path, &output_path).with_context(|| {
+        format!("Failed to rename temp file to {:?}", output_path)
+    })?;
+    if let Some(parent) = output_path.parent() {
+        if let Ok(dir) = File::open(parent) {
+            let _ = dir.sync_all();
+        }
+    }
 
     tracing::debug!("Thumbnail saved to {:?}", output_path);
     Ok(())

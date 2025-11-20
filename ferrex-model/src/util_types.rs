@@ -102,7 +102,11 @@ impl ImageSize {
     pub fn dimensions(&self) -> (f32, f32) {
         match self {
             ImageSize::Thumbnail => (150.0, 225.0),
-            ImageSize::Poster => (200.0, 300.0),
+            // NOTE: Poster size is set to 185x278 to avoid collision with scanner's w300→w342 requests.
+            // Player requests w=185→w185, scanner requests w300→w342 (server normalizes).
+            // TODO: Refactor image endpoint to accept ImageSize enum instead of pixel width to
+            // eliminate error-prone width-to-variant mapping and prevent future collisions.
+            ImageSize::Poster => (185.0, 278.0),
             ImageSize::Backdrop => (1920.0, 1080.0), // Full HD backdrop
             ImageSize::Full => (0.0, 0.0),           // Dynamic
             ImageSize::Profile => (120.0, 180.0), // 2:3 aspect ratio for cast
