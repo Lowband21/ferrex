@@ -183,8 +183,8 @@ impl TmdbFolderGenerator {
                 .await
                 .map_err(|e| {
                     MediaError::Internal(format!(
-                        "TMDB popular movies error: {}",
-                        e
+                        "TMDB popular movies error (page={}, lang={:?}, region={:?}): {}",
+                        page, language, region, e
                     ))
                 })?;
             for m in page_res.results {
@@ -201,7 +201,6 @@ impl TmdbFolderGenerator {
             page += 1;
         }
 
-        // Use up to requested count; if less available, generate as many as possible
         for (title, year) in collected.into_iter().take(count) {
             let folder_name = self.naming.movie_folder_name(&title, year);
             let folder_path = root.join(folder_name);
@@ -224,15 +223,19 @@ impl TmdbFolderGenerator {
         root: &Path,
         count: usize,
         language: Option<&str>,
+        region: Option<&str>,
         seasons_range: std::ops::RangeInclusive<u8>,
         episodes_per_season_range: std::ops::RangeInclusive<u16>,
     ) -> Result<StructurePlan> {
         let mut plan = StructurePlan::default();
         plan.push_dir(root.to_path_buf());
 
-        let mut collected: Vec<String> = Vec::new();
+        let region_upper = region.map(|r| r.trim().to_ascii_uppercase());
+        let mut prioritized: Vec<String> = Vec::new();
+        let mut others: Vec<String> = Vec::new();
+
         let mut page: u32 = 1;
-        while collected.len() < count {
+        while prioritized.len() + others.len() < count {
             let page_res = self
                 .tmdb
                 .list_popular_tvshows(
@@ -242,21 +245,50 @@ impl TmdbFolderGenerator {
                 .await
                 .map_err(|e| {
                     MediaError::Internal(format!(
-                        "TMDB popular TV error: {}",
-                        e
+                        "TMDB popular TV error (page={}, lang={:?}): {}",
+                        page, language, e
                     ))
                 })?;
+
             for s in page_res.results {
                 let title = s.inner.name;
-                collected.push(title);
-                if collected.len() >= count {
+                let mut origin_countries = s
+                    .inner
+                    .origin_country
+                    .iter()
+                    .map(|c| c.trim().to_ascii_uppercase())
+                    .filter(|c| !c.is_empty())
+                    .collect::<Vec<_>>();
+                origin_countries.sort();
+                origin_countries.dedup();
+
+                let matches_region = region_upper
+                    .as_ref()
+                    .map(|target| origin_countries.iter().any(|c| c == target))
+                    .unwrap_or(false);
+
+                if matches_region {
+                    prioritized.push(title);
+                } else {
+                    others.push(title);
+                }
+                if prioritized.len() + others.len() >= count {
                     break;
                 }
             }
+
             if page as u64 >= page_res.total_pages {
                 break;
             }
             page += 1;
+        }
+
+        let mut collected: Vec<String> = Vec::new();
+        for t in prioritized.into_iter().chain(others.into_iter()) {
+            collected.push(t);
+            if collected.len() >= count {
+                break;
+            }
         }
 
         let mut rng = rand::rng();
@@ -268,7 +300,7 @@ impl TmdbFolderGenerator {
             let seasons = if seasons_range.start() == seasons_range.end() {
                 *seasons_range.start()
             } else {
-                rng.random_range(seasons_range.clone())
+                rand::rng().random_range(seasons_range.clone())
             };
 
             for season_idx in 1..=seasons {
@@ -281,7 +313,7 @@ impl TmdbFolderGenerator {
                 {
                     *episodes_per_season_range.start()
                 } else {
-                    rng.random_range(episodes_per_season_range.clone())
+                    rand::rng().random_range(episodes_per_season_range.clone())
                 };
 
                 for ep_idx in 1..=episodes {
@@ -291,8 +323,9 @@ impl TmdbFolderGenerator {
                         ep_idx,
                         &self.video_ext,
                     );
-                    let size =
-                        rng.random_range(300_u64..=1600_u64) * 1024 * 1024; // 300MB - 1.6GB
+                    let size = rand::rng().random_range(300_u64..=1600_u64)
+                        * 1024
+                        * 1024; // 300MB - 1.6GB
                     plan.push_file(season_path.join(fname), size);
                 }
             }

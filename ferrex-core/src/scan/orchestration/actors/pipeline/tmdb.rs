@@ -29,7 +29,10 @@ use crate::{
     },
     scan::orchestration::{
         actors::messages::ParentDescriptors,
-        job::{ImageFetchJob, ImageFetchPriority, ImageFetchSource},
+        job::{
+            ImageFetchJob, ImageFetchPriority, ImageFetchSource,
+            MetadataIntent, ScanReason,
+        },
         series::{
             SeriesFolderClues, SeriesLocator, clean_series_title,
             collapse_whitespace,
@@ -148,6 +151,66 @@ impl TmdbMetadataActor {
                 _ => MetadataMediaKind::Unknown,
             })
             .unwrap_or(MetadataMediaKind::Unknown)
+    }
+
+    async fn seed_series_from_folder(
+        &self,
+        library_id: LibraryID,
+        folder_name: &str,
+    ) -> Result<SeriesReference> {
+        // Prefer existing match by cleaned name
+        let clean = clean_series_title(folder_name);
+        let locator = SeriesLocator::new(self.media_refs.clone());
+        if let Some(series) = locator
+            .find_existing_series(library_id, None, &clean)
+            .await?
+        {
+            return Ok(series);
+        }
+
+        let clues = SeriesFolderClues::from_folder_name(folder_name);
+        let search_results = self
+            .tmdb
+            .search_series(
+                &clues.normalized_title,
+                clues.year,
+                clues.region.as_deref(),
+            )
+            .await
+            .map_err(|e| {
+                MediaError::Internal(format!("TMDB series search failed: {e}"))
+            })?;
+
+        if let Some(primary) = Self::pick_series_candidate(
+            &clues.normalized_title,
+            clues.region.as_deref(),
+            &search_results,
+        ) {
+            let tmdb_id = primary.tmdb_id;
+            let mut series_ref =
+                self.build_series_reference(library_id, tmdb_id).await?;
+            self.media_refs.store_series_reference(&series_ref).await?;
+            if let Some(stored) = self
+                .media_refs
+                .get_series_by_tmdb_id(library_id, tmdb_id)
+                .await?
+            {
+                if stored.id != series_ref.id {
+                    series_ref.id = stored.id;
+                }
+                series_ref.endpoint = stored.endpoint;
+                series_ref.created_at = stored.created_at;
+                if series_ref.theme_color.is_none() {
+                    series_ref.theme_color = stored.theme_color;
+                }
+            }
+            return Ok(series_ref);
+        }
+
+        Err(MediaError::InvalidMedia(format!(
+            "series_not_found: {}",
+            clues.normalized_title
+        )))
     }
 
     fn extract_technical_metadata(
@@ -428,6 +491,30 @@ impl TmdbMetadataActor {
             }
         }
         slug.trim_matches('-').to_string()
+    }
+
+    fn is_invalid_series_title(title: &str) -> bool {
+        let trimmed = clean_series_title(title);
+        if trimmed.is_empty() {
+            return true;
+        }
+        let lowered = trimmed.to_ascii_lowercase();
+        if lowered == "unknown series"
+            || lowered == "extras"
+            || lowered == "special"
+            || lowered == "specials"
+        {
+            return true;
+        }
+        // Treat season-like tokens as invalid standalone series titles
+        if crate::domain::media::tv_parser::TvParser::parse_season_folder(
+            &trimmed,
+        )
+        .is_some()
+        {
+            return true;
+        }
+        false
     }
 
     fn handle_movie_release_dates(
@@ -1471,6 +1558,35 @@ impl TmdbMetadataActor {
 
         let parent = Self::parse_parent_descriptors(&command.analyzed.context);
 
+        // During initial bulk seed, do not create new series from episodes.
+        // If a matching series does not already exist with a real TMDB binding
+        // (tmdb_id > 0), defer with a transient error so retries can resolve
+        // after the series seed completes.
+        let bulk_seed = matches!(
+            command.job.intent,
+            MetadataIntent::MatchMedia(ref intent)
+                if matches!(intent.scan_reason, ScanReason::BulkSeed)
+        );
+        if bulk_seed {
+            let locator = SeriesLocator::new(self.media_refs.clone());
+            match locator
+                .find_existing_series(
+                    command.job.library_id,
+                    parent.as_ref(),
+                    &info.series.normalized_title,
+                )
+                .await?
+            {
+                Some(existing) if existing.tmdb_id > 0 => {}
+                _ => {
+                    return Err(MediaError::Internal(
+                        "temporarily unavailable: series mapping not ready"
+                            .into(),
+                    ));
+                }
+            }
+        }
+
         let mut excluded_series = HashSet::new();
         let (series_ref, season_ref) = loop {
             let candidate_series = self
@@ -1663,41 +1779,53 @@ impl TmdbMetadataActor {
         {
             return Ok(existing);
         }
-
-        let search_results = self
-            .tmdb
-            .search_series(
-                &info.series.normalized_title,
-                info.series.year,
-                info.series.region.as_deref(),
+        let allow_search =
+            !Self::is_invalid_series_title(&info.series.normalized_title);
+        let search_results = if allow_search {
+            Some(
+                self.tmdb
+                    .search_series(
+                        &info.series.normalized_title,
+                        info.series.year,
+                        info.series.region.as_deref(),
+                    )
+                    .await
+                    .map_err(|e| {
+                        MediaError::Internal(format!(
+                            "TMDB series search failed: {e}"
+                        ))
+                    })?,
             )
-            .await
-            .map_err(|e| {
-                MediaError::Internal(format!("TMDB series search failed: {e}"))
-            })?;
+        } else {
+            None
+        };
 
         let mut ordered_tmdb_ids = Vec::new();
         let mut seen_ids = HashSet::new();
 
         let clean_title = info.series.normalized_title.clone();
 
-        if let Some(primary) = Self::pick_series_candidate(
-            &clean_title,
-            info.series.region.as_deref(),
-            &search_results,
-        ) && primary.tmdb_id != 0
-            && seen_ids.insert(primary.tmdb_id)
-        {
-            ordered_tmdb_ids.push(primary.tmdb_id);
+        if let Some(results) = &search_results {
+            if let Some(primary) = Self::pick_series_candidate(
+                &clean_title,
+                info.series.region.as_deref(),
+                results,
+            ) && primary.tmdb_id != 0
+                && seen_ids.insert(primary.tmdb_id)
+            {
+                ordered_tmdb_ids.push(primary.tmdb_id);
+            }
         }
 
-        for candidate in &search_results {
-            let tmdb_id = candidate.tmdb_id;
-            if tmdb_id == 0 {
-                continue;
-            }
-            if seen_ids.insert(tmdb_id) {
-                ordered_tmdb_ids.push(tmdb_id);
+        if let Some(results) = &search_results {
+            for candidate in results {
+                let tmdb_id = candidate.tmdb_id;
+                if tmdb_id == 0 {
+                    continue;
+                }
+                if seen_ids.insert(tmdb_id) {
+                    ordered_tmdb_ids.push(tmdb_id);
+                }
             }
         }
 
@@ -1743,13 +1871,10 @@ impl TmdbMetadataActor {
             }
         }
 
-        debug!(
-            "Falling back to stub series metadata for '{}'",
-            info.series.raw_title
-        );
-        let stub = self.build_series_stub(library_id, info, parent)?;
-        self.media_refs.store_series_reference(&stub).await?;
-        Ok(stub)
+        Err(MediaError::InvalidMedia(format!(
+            "series_not_found: {}",
+            info.series.normalized_title
+        )))
     }
 
     async fn build_series_reference(
@@ -2397,6 +2522,69 @@ impl MetadataActor for TmdbMetadataActor {
         &self,
         command: MetadataCommand,
     ) -> Result<MediaReadyForIndex> {
+        // Handle series seed path before inferring kind from context
+        if let MetadataIntent::SeriesSeed(series) = &command.job.intent {
+            let folder_name = if !series.folder_name.is_empty() {
+                series.folder_name.clone()
+            } else if !series.folder_path.is_empty() {
+                Path::new(&series.folder_path)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+                    .to_string()
+            } else {
+                String::new()
+            };
+
+            if !folder_name.is_empty() {
+                let series_ref = self
+                    .seed_series_from_folder(
+                        command.job.library_id,
+                        &folder_name,
+                    )
+                    .await?;
+                // Best-effort image jobs for series card
+                let mut image_jobs = Vec::new();
+                if let MediaDetailsOption::Details(details) =
+                    &series_ref.details
+                    && let TmdbDetails::Series(details) = details.as_ref()
+                {
+                    self.queue_image_job(
+                        command.job.library_id,
+                        "series",
+                        series_ref.id.0,
+                        MediaImageKind::Poster,
+                        0,
+                        details.poster_path.as_deref(),
+                        true,
+                        ImageFetchPriority::Poster,
+                        &mut image_jobs,
+                    )
+                    .await?;
+                    self.queue_image_job(
+                        command.job.library_id,
+                        "series",
+                        series_ref.id.0,
+                        MediaImageKind::Backdrop,
+                        0,
+                        details.backdrop_path.as_deref(),
+                        true,
+                        ImageFetchPriority::Backdrop,
+                        &mut image_jobs,
+                    )
+                    .await?;
+                }
+                return Ok(MediaReadyForIndex {
+                    library_id: command.job.library_id,
+                    logical_id: Some(series_ref.id.to_string()),
+                    normalized_title: Some(series_ref.title.to_string()),
+                    analyzed: command.analyzed,
+                    prepared_at: Utc::now(),
+                    image_jobs,
+                });
+            }
+        }
+
         match Self::infer_media_kind(&command.analyzed.context) {
             MetadataMediaKind::Movie => self.enrich_movie(command).await,
             MetadataMediaKind::Episode => self.enrich_episode(command).await,

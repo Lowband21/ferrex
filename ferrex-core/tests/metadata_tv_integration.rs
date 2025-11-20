@@ -7,7 +7,8 @@ fn test_metadata_extraction_with_tv_library_context() {
     let parser = FilenameParser::with_library_type(LibraryType::Series);
 
     // Standard TV episode
-    let tv_file = PathBuf::from("TV Shows/Breaking Bad/Season 1/S01E01 - Pilot.mkv");
+    let tv_file =
+        PathBuf::from("TV Shows/Breaking Bad/Season 1/S01E01 - Pilot.mkv");
     let parsed_info = parser
         .parse_filename_with_type(&tv_file)
         .expect("should parse");
@@ -24,8 +25,9 @@ fn test_metadata_extraction_with_tv_library_context() {
 #[test]
 fn test_metadata_extraction_multi_episode() {
     let mut parser = FilenameParser::with_library_type(LibraryType::Series);
-    let multi_file =
-        PathBuf::from("TV Shows/The Office/S01E01-E02 - Pilot & Diversity Day.mkv");
+    let multi_file = PathBuf::from(
+        "TV Shows/The Office/S01E01-E02 - Pilot & Diversity Day.mkv",
+    );
     let parsed_info = parser
         .parse_filename_with_type(&multi_file)
         .expect("should parse");
@@ -73,7 +75,8 @@ fn test_metadata_extraction_specials() {
 #[test]
 fn test_metadata_extraction_folder_based() {
     let mut parser = FilenameParser::with_library_type(LibraryType::Series);
-    let folder_file = PathBuf::from("TV Shows/The Wire/Season 1/03 - The Buys.mkv");
+    let folder_file =
+        PathBuf::from("TV Shows/The Wire/Season 1/03 - The Buys.mkv");
     let parsed_info = parser
         .parse_filename_with_type(&folder_file)
         .expect("should parse");
@@ -91,7 +94,8 @@ fn test_metadata_extraction_folder_based() {
 fn test_metadata_extraction_movie_in_tv_library() {
     let parser = FilenameParser::with_library_type(LibraryType::Series);
     // Movie file without TV patterns in TV library
-    let movie_file = PathBuf::from("TV Shows/Documentaries/Planet Earth (2006).mkv");
+    let movie_file =
+        PathBuf::from("TV Shows/Documentaries/Planet Earth (2006).mkv");
     let parsed_info = parser
         .parse_filename_with_type(&movie_file)
         .expect("should parse");

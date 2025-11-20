@@ -789,19 +789,19 @@ impl QueryRepository for PostgresQueryRepository {
         sql_builder.push(" ORDER BY ");
 
         let (field, null_position) = match sort.primary {
-            SortBy::Title => ("LOWER(series_title)", "LAST"),
+            SortBy::Title => ("LOWER(sd.title)", "LAST"),
             SortBy::DateAdded => (
-                "COALESCE(file_discovered_at, season_discovered_at, series_discovered_at)",
+                "COALESCE(mf.discovered_at, sn.discovered_at, sd.discovered_at)",
                 "LAST",
             ),
             SortBy::CreatedAt => (
-                "COALESCE(file_created_at, season_created_at, series_created_at)",
+                "COALESCE(mf.created_at, sn.created_at, sd.created_at)",
                 "LAST",
             ),
-            SortBy::ReleaseDate => ("series_first_air_date", "LAST"),
-            SortBy::Rating => ("series_vote_average", "LAST"),
+            SortBy::ReleaseDate => ("sd.first_air_date", "LAST"),
+            SortBy::Rating => ("sd.vote_average", "LAST"),
             _ => (
-                "COALESCE(file_discovered_at, season_discovered_at, series_discovered_at)",
+                "COALESCE(mf.discovered_at, sn.discovered_at, sd.discovered_at)",
                 "LAST",
             ),
         };
@@ -814,8 +814,7 @@ impl QueryRepository for PostgresQueryRepository {
         };
         sql_builder.push(null_position);
 
-        // Secondary sort for hierarchy
-        sql_builder.push(", sd.id, season_number, episode_number");
+        sql_builder.push(", sd.id, sn.season_number, ep.episode_number");
     }
 
     fn add_series_search_clause(

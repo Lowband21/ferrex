@@ -1,6 +1,6 @@
 use sqlx::types::chrono::Utc;
 use std::collections::HashMap;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use async_trait::async_trait;
 use sqlx::PgPool;
@@ -399,7 +399,7 @@ impl ImageRepository for PostgresImageRepository {
         &self,
         params: &ImageLookupParams,
     ) -> Result<Option<(ImageRecord, Option<ImageVariant>)>> {
-        info!(
+        debug!(
             "lookup_image_variant: type={}, id='{}', image_type={}, index={}",
             params.media_type, params.media_id, params.image_type, params.index
         );
@@ -420,7 +420,7 @@ impl ImageRepository for PostgresImageRepository {
         };
 
         // First find the media image link
-        info!(
+        debug!(
             "Querying media_images table: type={}, media_id={}, image_type={}, index={}",
             &params.media_type, media_id, &params.image_type, params.index
         );

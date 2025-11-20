@@ -157,10 +157,14 @@ impl DefaultFolderScanActor {
     ) -> bool {
         match library_type {
             LibraryType::Series => {
-                // Season folders, specials, extras
-                name.to_lowercase().starts_with("season")
-                    || name.eq_ignore_ascii_case("specials")
-                    || name.eq_ignore_ascii_case("extras")
+                // Recognize season folders using TvParser and common extras names.
+                if let Some(_) = crate::domain::media::tv_parser::TvParser::parse_season_folder(name) {
+                    return true;
+                }
+                let lowered = name.to_ascii_lowercase();
+                lowered == "specials"
+                    || lowered == "special"
+                    || lowered == "extras"
             }
             LibraryType::Movies => {
                 // Extras, featurettes, behind the scenes
@@ -177,6 +181,9 @@ impl DefaultFolderScanActor {
             || parent.season_id.is_some()
             || parent.episode_id.is_some()
             || parent.extra_tag.is_some()
+            // Once a series slug or inferred season number is known, narrow traversal to relevant children
+            || parent.series_slug.is_some()
+            || parent.season_number.is_some()
     }
 
     async fn list_directory(&self, path: &Path) -> Result<Vec<ListingEntry>> {
@@ -344,6 +351,34 @@ impl FolderScanActor for DefaultFolderScanActor {
         // Always derive children; persistence-level dedupe prevents redundant
         // enqueue even during bulk seed, and this keeps recursion uniform.
         let mut children = Vec::new();
+
+        // Improve series propagation: when traversing a Series library and the
+        // current folder looks like a series root, attach a series slug/title
+        // hint to descendants even if the parent carried only the library type.
+        let mut base_descriptors = parent.parent.clone();
+        if matches!(base_descriptors.resolved_type, Some(LibraryType::Series))
+            && base_descriptors.series_id.is_none()
+            && base_descriptors.series_slug.is_none()
+        {
+            if let Some(parent_name) =
+                std::path::Path::new(&parent.folder_path_norm)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+            {
+                let clues = crate::scan::orchestration::series::SeriesFolderClues::from_folder_name(parent_name);
+                if clues.raw_title != "Unknown Series" {
+                    if let Some(slug) =
+                        crate::scan::orchestration::series::slugify_series_title(
+                            &clues.normalized_title,
+                        )
+                    {
+                        base_descriptors.series_slug = Some(slug);
+                        base_descriptors.series_title_hint =
+                            Some(clues.normalized_title);
+                    }
+                }
+            }
+        }
         for dir in &plan.directories {
             let folder_path_norm = dir.to_string_lossy().to_string();
             let folder_name = dir
@@ -353,7 +388,7 @@ impl FolderScanActor for DefaultFolderScanActor {
                 .unwrap_or_else(|| folder_path_norm.clone());
 
             let parent_descriptors = FolderClassifier::derive_child_descriptors(
-                &parent.parent,
+                &base_descriptors,
                 parent.parent.resolved_type,
                 &folder_name,
             );

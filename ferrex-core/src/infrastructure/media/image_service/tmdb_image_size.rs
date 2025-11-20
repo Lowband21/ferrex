@@ -80,11 +80,8 @@ impl TmdbImageSize {
                 TmdbImageSize::PosterW500,
                 TmdbImageSize::PosterW185,
             ],
-            MediaImageKind::Backdrop => vec![
-                TmdbImageSize::Original,
-                TmdbImageSize::BackdropW780,
-                TmdbImageSize::BackdropW1280,
-            ],
+            // Backdrops: prefer only original for now to avoid artifacts
+            MediaImageKind::Backdrop => vec![TmdbImageSize::Original],
             MediaImageKind::Logo => vec![TmdbImageSize::Original], // SVG logos should use original
             MediaImageKind::Thumbnail => {
                 vec![TmdbImageSize::StillW300, TmdbImageSize::StillW500]

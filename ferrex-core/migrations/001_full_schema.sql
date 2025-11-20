@@ -4086,6 +4086,13 @@ CREATE INDEX idx_media_images_primary ON public.media_images USING btree (media_
 
 
 --
+-- Name: idx_media_images_lookup_full; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_media_images_lookup_full ON public.media_images USING btree (media_type, media_id, image_type, order_index);
+
+
+--
 -- Name: idx_media_processing_status_analyzed; Type: INDEX; Schema: public; Owner: postgres
 --
 

@@ -889,26 +889,64 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
         library_id: LibraryID,
         name: &str,
     ) -> Result<Option<SeriesReference>> {
-        // Use ILIKE for case-insensitive search with fuzzy matching
+        // Normalize an input "slug" in Rust to avoid repeating logic in many callers.
+        // Keep this conservative: only lowercase and collapse non-alphanumerics to dashes.
+        let mut slug = String::new();
+        for ch in name.trim().chars() {
+            if ch.is_ascii_alphanumeric() {
+                slug.push(ch.to_ascii_lowercase());
+            } else if !slug.ends_with('-') {
+                slug.push('-');
+            }
+        }
+        while slug.ends_with('-') {
+            slug.pop();
+        }
+
+        // Use a three-tiered match strategy to reduce false positives:
+        // 1) Exact case-insensitive title match
+        // 2) Exact slug match (title normalized to slug on the DB side)
+        // 3) Prefix match, then finally a fuzzy ILIKE catch‑all
         let search_pattern = format!("%{}%", name);
 
         let row = sqlx::query!(
             r#"
+            WITH candidates AS (
+                SELECT
+                    id,
+                    library_id,
+                    tmdb_id,
+                    title,
+                    theme_color,
+                    discovered_at,
+                    created_at,
+                    -- Compute a conservative slug server-side for exact matching
+                    TRIM(BOTH '-' FROM REGEXP_REPLACE(LOWER(title), '[^a-z0-9]+', '-', 'g')) AS title_slug
+                FROM series_references
+                WHERE library_id = $1
+                  AND (
+                        LOWER(title) = LOWER($2)
+                     OR TRIM(BOTH '-' FROM REGEXP_REPLACE(LOWER(title), '[^a-z0-9]+', '-', 'g')) = $3
+                     OR LOWER(title) LIKE LOWER($2 || '%')
+                     OR title ILIKE $4
+                  )
+            )
             SELECT id, library_id, tmdb_id as "tmdb_id?", title, theme_color, discovered_at, created_at
-            FROM series_references
-            WHERE library_id = $1 AND title ILIKE $2
+            FROM candidates
             ORDER BY
                 CASE
-                    WHEN LOWER(title) = LOWER($3) THEN 0
-                    WHEN LOWER(title) LIKE LOWER($3 || '%') THEN 1
-                    ELSE 2
+                    WHEN LOWER(title) = LOWER($2) THEN 0
+                    WHEN title_slug = $3 THEN 1
+                    WHEN LOWER(title) LIKE LOWER($2 || '%') THEN 2
+                    ELSE 3
                 END,
                 LENGTH(title)
             LIMIT 1
             "#,
             library_id.as_uuid(),
-            search_pattern,
-            name
+            name,
+            slug,
+            search_pattern
         )
         .fetch_optional(&self.pool)
         .await

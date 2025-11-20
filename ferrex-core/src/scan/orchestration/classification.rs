@@ -56,8 +56,13 @@ fn classify_series_folder(
     parent: &ParentDescriptors,
     name: &str,
 ) {
-    match (parent.series_slug.as_deref(), parent.season_number) {
-        (None, _) => {
+    // Consider ourselves "inside a series" if we already have a concrete linkage
+    // (id) or a slug hint carried from an ancestor. In that case, never promote
+    // children to new series candidates; only derive season/extras.
+    let in_series = parent.series_id.is_some() || parent.series_slug.is_some();
+
+    match (in_series, parent.season_number) {
+        (false, _) => {
             if let Some(candidate) = infer_series_candidate(name) {
                 descriptors.series_slug = Some(candidate.slug);
                 descriptors.series_title_hint = Some(candidate.title);
@@ -67,8 +72,11 @@ fn classify_series_folder(
                 }
             }
         }
-        (Some(series_slug), None) => {
-            descriptors.series_slug = Some(series_slug.to_string());
+        (true, None) => {
+            // Already in a series: keep any existing slug; derive season/extras
+            if let Some(series_slug) = parent.series_slug.as_deref() {
+                descriptors.series_slug = Some(series_slug.to_string());
+            }
             if let Some(season) =
                 infer_season_number(name, parent.series_title_hint.as_deref())
             {
@@ -82,8 +90,10 @@ fn classify_series_folder(
                 descriptors.season_number = None;
             }
         }
-        (Some(series_slug), Some(current_season)) => {
-            descriptors.series_slug = Some(series_slug.to_string());
+        (true, Some(current_season)) => {
+            if let Some(series_slug) = parent.series_slug.as_deref() {
+                descriptors.series_slug = Some(series_slug.to_string());
+            }
             if let Some(tag) = infer_extras_tag(name) {
                 descriptors.extra_tag = Some(tag);
             }
@@ -112,11 +122,13 @@ fn infer_series_candidate(name: &str) -> Option<SeriesCandidate> {
     }
 
     let clues = SeriesFolderClues::from_folder_name(name);
-    let title_source: Cow<'_, str> = if clues.raw_title == "Unknown Series" {
-        Cow::Owned(clean_series_title(name))
-    } else {
-        Cow::Owned(clues.normalized_title)
-    };
+    // If the folder name looks like a season/extras folder (no reliable series title),
+    // do not promote it to a series candidate. Let deeper context (episodes, parent) drive it.
+    if clues.raw_title == "Unknown Series" {
+        return None;
+    }
+
+    let title_source: Cow<'_, str> = Cow::Owned(clues.normalized_title);
 
     if let Some(slug) = slugify_series_title(&title_source) {
         return Some(SeriesCandidate {

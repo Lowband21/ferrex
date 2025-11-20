@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use ferrex_core::scan::orchestration::persistence::PostgresQueueService;
 use ferrex_core::scan::orchestration::job::{
-    EnqueueRequest, JobPayload, JobPriority, FolderScanJob, MediaAnalyzeJob, MetadataEnrichJob,
-    IndexUpsertJob, MediaFingerprint, JobKind,
+    EnqueueRequest, FolderScanJob, IndexUpsertJob, JobKind, JobPayload,
+    JobPriority, MatchMediaIntent, MediaAnalyzeJob, MediaFingerprint,
+    MetadataEnrichJob, MetadataIntent,
 };
 use ferrex_core::scan::orchestration::lease::{DequeueRequest, LeaseRenewal, QueueSelector};
 use ferrex_core::QueueService;
@@ -350,7 +351,12 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
         let md = MetadataEnrichJob {
             library_id: lib_id,
             logical_candidate_id: format!("cand-{i}"),
-            parse_fields: serde_json::json!({"t": i}),
+            intent: MetadataIntent::MatchMedia(MatchMediaIntent {
+                path: format!("/meta/cand-{i}"),
+                fingerprint: MediaFingerprint::default(),
+                context: serde_json::json!({"t": i}),
+                scan_reason: ferrex_core::scan::orchestration::job::ScanReason::BulkSeed,
+            }),
             external_ids: None,
         };
         enqueues.push(EnqueueRequest::new(
@@ -362,7 +368,12 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
     let md_dupe = MetadataEnrichJob {
         library_id: lib_id,
         logical_candidate_id: "cand-4".into(),
-        parse_fields: serde_json::json!({"t": "4b"}),
+        intent: MetadataIntent::MatchMedia(MatchMediaIntent {
+            path: "/meta/cand-4".into(),
+            fingerprint: MediaFingerprint::default(),
+            context: serde_json::json!({"t": "4b"}),
+            scan_reason: ferrex_core::scan::orchestration::job::ScanReason::BulkSeed,
+        }),
         external_ids: None,
     };
     enqueues.push(EnqueueRequest::new(

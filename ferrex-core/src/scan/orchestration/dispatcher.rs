@@ -24,8 +24,9 @@ use crate::{
         },
         job::{
             EnqueueRequest, FolderScanJob, ImageFetchJob, IndexUpsertJob,
-            JobHandle, JobPayload, JobPriority, MediaAnalyzeJob,
-            MediaFingerprint, MetadataEnrichJob, ScanReason,
+            JobHandle, JobPayload, JobPriority, MatchMediaIntent,
+            MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob,
+            MetadataIntent, ScanReason,
         },
         lease::JobLease,
         queue::QueueService,
@@ -556,10 +557,11 @@ where
         let meta_job = MetadataEnrichJob {
             library_id: job.library_id,
             logical_candidate_id: job.path_norm.clone(),
-            parse_fields: serde_json::json!({
-                "path": job.path_norm,
-                "context": analyzed.context,
-                "fingerprint": analyzed.fingerprint,
+            intent: MetadataIntent::MatchMedia(MatchMediaIntent {
+                path: job.path_norm.clone(),
+                fingerprint: analyzed.fingerprint.clone(),
+                context: analyzed.context.clone(),
+                scan_reason: job.scan_reason,
             }),
             external_ids: None,
         };
@@ -574,53 +576,25 @@ where
         self.enqueue_follow_up(req).await
     }
 
-    fn extract_fingerprint(value: &Value) -> MediaFingerprint {
-        serde_json::from_value(value.clone()).unwrap_or(MediaFingerprint {
-            device_id: None,
-            inode: None,
-            size: 0,
-            mtime: 0,
-            weak_hash: None,
-        })
-    }
-
     async fn handle_metadata_enrich(
         &self,
         job: &MetadataEnrichJob,
     ) -> DispatchStatus {
-        let (path_norm, fingerprint, context) =
-            match job.parse_fields.get("path") {
-                Some(Value::String(path)) => {
-                    let fp = job
-                        .parse_fields
-                        .get("fingerprint")
-                        .map(Self::extract_fingerprint)
-                        .unwrap_or(MediaFingerprint {
-                            device_id: None,
-                            inode: None,
-                            size: 0,
-                            mtime: 0,
-                            weak_hash: None,
-                        });
-                    let ctx = job
-                        .parse_fields
-                        .get("context")
-                        .cloned()
-                        .unwrap_or(Value::Null);
-                    (path.clone(), fp, ctx)
-                }
-                _ => (
-                    job.logical_candidate_id.clone(),
-                    MediaFingerprint {
-                        device_id: None,
-                        inode: None,
-                        size: 0,
-                        mtime: 0,
-                        weak_hash: None,
-                    },
-                    Value::Null,
-                ),
-            };
+        let (path_norm, fingerprint, context) = match &job.intent {
+            MetadataIntent::MatchMedia(intent) => {
+                let path = if intent.path.is_empty() {
+                    job.logical_candidate_id.clone()
+                } else {
+                    intent.path.clone()
+                };
+                (path, intent.fingerprint.clone(), intent.context.clone())
+            }
+            MetadataIntent::SeriesSeed(_) => (
+                job.logical_candidate_id.clone(),
+                MediaFingerprint::default(),
+                Value::Null,
+            ),
+        };
 
         let analyzed = MediaAnalyzed {
             library_id: job.library_id,
@@ -1263,7 +1237,12 @@ mod tests {
         let job = MetadataEnrichJob {
             library_id: FIXTURE_LIB_A,
             logical_candidate_id: "cand".into(),
-            parse_fields: serde_json::json!({"path": "/library/movie.mkv"}),
+            intent: MetadataIntent::MatchMedia(MatchMediaIntent {
+                path: "/library/movie.mkv".into(),
+                fingerprint: MediaFingerprint::default(),
+                context: Value::Null,
+                scan_reason: ScanReason::BulkSeed,
+            }),
             external_ids: None,
         };
         let lease = lease_for_payload(JobPayload::MetadataEnrich(job));
@@ -1346,7 +1325,12 @@ mod tests {
         let job = MetadataEnrichJob {
             library_id: FIXTURE_LIB_B,
             logical_candidate_id: "cand".into(),
-            parse_fields: serde_json::json!({"path": "/library/movie.mkv"}),
+            intent: MetadataIntent::MatchMedia(MatchMediaIntent {
+                path: "/library/movie.mkv".into(),
+                fingerprint: MediaFingerprint::default(),
+                context: Value::Null,
+                scan_reason: ScanReason::BulkSeed,
+            }),
             external_ids: None,
         };
         let lease = lease_for_payload(JobPayload::MetadataEnrich(job));

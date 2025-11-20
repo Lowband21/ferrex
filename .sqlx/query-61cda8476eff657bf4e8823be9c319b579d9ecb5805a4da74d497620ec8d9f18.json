@@ -1,0 +1,61 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH candidates AS (\n                SELECT\n                    id,\n                    library_id,\n                    tmdb_id,\n                    title,\n                    theme_color,\n                    discovered_at,\n                    created_at,\n                    -- Compute a conservative slug server-side for exact matching\n                    TRIM(BOTH '-' FROM REGEXP_REPLACE(LOWER(title), '[^a-z0-9]+', '-', 'g')) AS title_slug\n                FROM series_references\n                WHERE library_id = $1\n                  AND (\n                        LOWER(title) = LOWER($2)\n                     OR TRIM(BOTH '-' FROM REGEXP_REPLACE(LOWER(title), '[^a-z0-9]+', '-', 'g')) = $3\n                     OR LOWER(title) LIKE LOWER($2 || '%')\n                     OR title ILIKE $4\n                  )\n            )\n            SELECT id, library_id, tmdb_id as \"tmdb_id?\", title, theme_color, discovered_at, created_at\n            FROM candidates\n            ORDER BY\n                CASE\n                    WHEN LOWER(title) = LOWER($2) THEN 0\n                    WHEN title_slug = $3 THEN 1\n                    WHEN LOWER(title) LIKE LOWER($2 || '%') THEN 2\n                    ELSE 3\n                END,\n                LENGTH(title)\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "tmdb_id?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "theme_color",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "discovered_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "61cda8476eff657bf4e8823be9c319b579d9ecb5805a4da74d497620ec8d9f18"
+}

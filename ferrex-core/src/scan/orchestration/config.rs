@@ -56,12 +56,12 @@ pub struct QueueConfig {
 impl Default for QueueConfig {
     fn default() -> Self {
         Self {
-            max_parallel_scans: 12,
-            max_parallel_analyses: 8,
-            max_parallel_metadata: 8,
+            max_parallel_scans: 6,
+            max_parallel_analyses: 4,
+            max_parallel_metadata: 4,
             max_parallel_index: 1,
             max_parallel_image_fetch: 8,
-            max_parallel_scans_per_device: 32,
+            max_parallel_scans_per_device: 16,
             high_watermark: 10_000,
             critical_watermark: 20_000,
             coalesce_window_ms: 100,

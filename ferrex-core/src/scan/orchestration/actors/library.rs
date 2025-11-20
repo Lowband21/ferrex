@@ -20,7 +20,10 @@ use super::messages::{ActorObserver, IssuedJobRecord, ParentDescriptors};
 use crate::scan::orchestration::{
     correlation::CorrelationCache,
     events::JobEventPublisher,
-    job::{DedupeKey, JobHandle, JobId, JobPriority, ScanReason},
+    job::{
+        DedupeKey, JobHandle, JobId, JobPriority, MetadataEnrichJob,
+        MetadataIntent, ScanReason, SeriesSeedIntent,
+    },
     queue::QueueService,
     scan_cursor::normalize_path,
 };
@@ -115,6 +118,12 @@ pub enum LibraryActorEvent {
         priority: JobPriority,
         reason: ScanReason,
         parent: ParentDescriptors,
+        correlation_id: Option<Uuid>,
+    },
+    /// Request orchestrator to enqueue a metadata enrich job (e.g., series pre-seed).
+    EnqueueMetadataEnrich {
+        job: MetadataEnrichJob,
+        priority: JobPriority,
         correlation_id: Option<Uuid>,
     },
     JobEnqueued(JobHandle),
@@ -372,6 +381,37 @@ where
         );
 
         for path in folders {
+            // Pre-seed series entries based on folder names for TV libraries
+            if self.config.library.library_type
+                == crate::types::library::LibraryType::Series
+            {
+                use std::path::Path as StdPath;
+                let series_name = StdPath::new(&path)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| path.clone());
+
+                let logical_id =
+                    format!("series-seed:{}:{}", self.config.library.id, path);
+
+                let meta_job = MetadataEnrichJob {
+                    library_id: self.config.library.id,
+                    logical_candidate_id: logical_id,
+                    intent: MetadataIntent::SeriesSeed(SeriesSeedIntent {
+                        folder_name: series_name,
+                        folder_path: path.clone(),
+                    }),
+                    external_ids: None,
+                };
+
+                events.push(LibraryActorEvent::EnqueueMetadataEnrich {
+                    job: meta_job,
+                    priority: JobPriority::P0,
+                    correlation_id,
+                });
+            }
+
             // For bulk seeding we bypass outstanding throttles; persistence dedupe ensures safety.
             let mut issued = self
                 .enqueue_folder_scan(
@@ -960,7 +1000,11 @@ mod tests {
         let enqueued = events
             .iter()
             .find_map(|event| {
-                if let LibraryActorEvent::EnqueueFolderScan { correlation_id, .. } = event {
+                if let LibraryActorEvent::EnqueueFolderScan {
+                    correlation_id,
+                    ..
+                } = event
+                {
                     Some(*correlation_id)
                 } else {
                     None
@@ -1016,9 +1060,10 @@ mod tests {
         // redundant and could reintroduce the incomplete-state bug these guards
         // were meant to avoid.
         assert!(
-            responses
-                .iter()
-                .all(|event| !matches!(event, LibraryActorEvent::EnqueueFolderScan { .. })),
+            responses.iter().all(|event| !matches!(
+                event,
+                LibraryActorEvent::EnqueueFolderScan { .. }
+            )),
             "fs events during bulk should not enqueue additional scans"
         );
 
@@ -1031,8 +1076,11 @@ mod tests {
         let root = temp.path().to_path_buf();
         let queue = Arc::new(RecordingQueue::default());
         let publisher = Arc::new(RecordingPublisher::default());
-        let mut actor =
-            make_actor_with_publisher(Arc::clone(&queue), root.clone(), Arc::clone(&publisher));
+        let mut actor = make_actor_with_publisher(
+            Arc::clone(&queue),
+            root.clone(),
+            Arc::clone(&publisher),
+        );
         let library_id = actor.config.library.id;
         let correlation = Uuid::now_v7();
 
@@ -1118,7 +1166,11 @@ mod tests {
         let enqueued = responses
             .iter()
             .find_map(|event| {
-                if let LibraryActorEvent::EnqueueFolderScan { correlation_id, .. } = event {
+                if let LibraryActorEvent::EnqueueFolderScan {
+                    correlation_id,
+                    ..
+                } = event
+                {
                     Some(*correlation_id)
                 } else {
                     None

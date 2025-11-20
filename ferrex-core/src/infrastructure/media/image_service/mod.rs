@@ -934,13 +934,34 @@ impl ImageService {
             if let Some(size_str) = &params.variant
                 && let Some(size) = TmdbImageSize::from_str(size_str)
             {
-                // If already present, return immediately
+                // If present in DB, verify on-disk path exists and is in the expected structure.
                 if let Some(existing) = self
                     .images
                     .get_image_variant(image_record.id, size_str)
                     .await?
                 {
-                    return Ok(Some(PathBuf::from(existing.file_path)));
+                    let existing_path = PathBuf::from(&existing.file_path);
+                    let image_folder = image_type_folder(&params.image_type);
+                    let variant_dir_ok = existing_path
+                        .parent()
+                        .map(|dir| dir.ends_with(size_str))
+                        .unwrap_or(false);
+                    let type_dir_ok = existing_path
+                        .parent()
+                        .and_then(|dir| dir.parent())
+                        .map(|dir| dir.ends_with(image_folder))
+                        .unwrap_or(false);
+
+                    if existing_path.exists() && variant_dir_ok && type_dir_ok {
+                        // Happy path: cached file is present and in the right place.
+                        return Ok(Some(existing_path));
+                    } else {
+                        // Stale or legacy path: heal by re-downloading into the canonical location.
+                        warn!(
+                            "Variant record exists but file missing or legacy path, re-downloading: {}",
+                            existing.file_path
+                        );
+                    }
                 }
 
                 // Per-variant singleflight: serialize concurrent downloads of the same variant

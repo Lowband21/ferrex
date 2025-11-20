@@ -376,26 +376,35 @@ where
                                         EnqueueRequest,
                                     )> = Vec::new();
                                     for evt in events {
-                                        if let crate::scan::orchestration::actors::LibraryActorEvent::EnqueueFolderScan { folder_path, priority, reason, parent, correlation_id } = evt {
-                                            let encoded_parent = match serde_json::to_string(&parent) {
-                                                Ok(s) => s,
-                                                Err(err) => {
-                                                    tracing::warn!(target: "scan::mailbox", error = %err, folder = %folder_path, "skipping enqueue due to parent encode error");
-                                                    continue;
-                                                }
-                                            };
-                                            let job = FolderScanJob {
-                                                library_id,
-                                                folder_path_norm: folder_path.clone(),
-                                                parent_context: Some(encoded_parent),
-                                                scan_reason: reason.clone(),
-                                                enqueue_time: chrono::Utc::now(),
-                                                device_id: None,
-                                            };
-                                            let payload = JobPayload::FolderScan(job);
-                                            let mut request = EnqueueRequest::new(priority, payload.clone());
-                                            request.correlation_id = correlation_id;
-                                            batch.push((payload, request));
+                                        match evt {
+                                            crate::scan::orchestration::actors::LibraryActorEvent::EnqueueFolderScan { folder_path, priority, reason, parent, correlation_id } => {
+                                                let encoded_parent = match serde_json::to_string(&parent) {
+                                                    Ok(s) => s,
+                                                    Err(err) => {
+                                                        tracing::warn!(target: "scan::mailbox", error = %err, folder = %folder_path, "skipping enqueue due to parent encode error");
+                                                        continue;
+                                                    }
+                                                };
+                                                let job = FolderScanJob {
+                                                    library_id,
+                                                    folder_path_norm: folder_path.clone(),
+                                                    parent_context: Some(encoded_parent),
+                                                    scan_reason: reason.clone(),
+                                                    enqueue_time: chrono::Utc::now(),
+                                                    device_id: None,
+                                                };
+                                                let payload = JobPayload::FolderScan(job);
+                                                let mut request = EnqueueRequest::new(priority, payload.clone());
+                                                request.correlation_id = correlation_id;
+                                                batch.push((payload, request));
+                                            }
+                                            crate::scan::orchestration::actors::LibraryActorEvent::EnqueueMetadataEnrich { job, priority, correlation_id } => {
+                                                let payload = JobPayload::MetadataEnrich(job);
+                                                let mut request = EnqueueRequest::new(priority, payload.clone());
+                                                request.correlation_id = correlation_id;
+                                                batch.push((payload, request));
+                                            }
+                                            _ => {}
                                         }
                                     }
 

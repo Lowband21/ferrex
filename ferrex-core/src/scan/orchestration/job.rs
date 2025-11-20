@@ -6,7 +6,7 @@ use crate::types::LibraryID;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::fmt;
+use std::{fmt, result::Result as StdResult, str::FromStr};
 use uuid::Uuid;
 
 use super::config::PriorityWeights;
@@ -297,13 +297,28 @@ pub struct FolderScanJob {
     pub device_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ScanReason {
     HotChange,
     UserRequested,
     BulkSeed,
     MaintenanceSweep,
     WatcherOverflow,
+}
+
+impl FromStr for ScanReason {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> StdResult<Self, Self::Err> {
+        match s {
+            "HotChange" => Ok(ScanReason::HotChange),
+            "UserRequested" => Ok(ScanReason::UserRequested),
+            "BulkSeed" => Ok(ScanReason::BulkSeed),
+            "MaintenanceSweep" => Ok(ScanReason::MaintenanceSweep),
+            "WatcherOverflow" => Ok(ScanReason::WatcherOverflow),
+            _ => Err("unrecognized scan reason"),
+        }
+    }
 }
 
 /// Analyze job payload (typically ffprobe + thumbnails).
@@ -328,8 +343,42 @@ fn default_scan_reason() -> ScanReason {
 pub struct MetadataEnrichJob {
     pub library_id: LibraryID,
     pub logical_candidate_id: String,
-    pub parse_fields: serde_json::Value,
+    pub intent: MetadataIntent,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_ids: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MatchMediaIntent {
+    pub path: String,
+    #[serde(default)]
+    pub fingerprint: MediaFingerprint,
+    #[serde(
+        default = "default_json_null",
+        skip_serializing_if = "Value::is_null"
+    )]
+    pub context: Value,
+    #[serde(default = "default_scan_reason")]
+    pub scan_reason: ScanReason,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SeriesSeedIntent {
+    #[serde(default)]
+    pub folder_name: String,
+    #[serde(default)]
+    pub folder_path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "intent", rename_all = "snake_case")]
+pub enum MetadataIntent {
+    MatchMedia(MatchMediaIntent),
+    SeriesSeed(SeriesSeedIntent),
+}
+
+fn default_json_null() -> Value {
+    Value::Null
 }
 
 /// Index upsert payload (DB + search index writes).
@@ -363,6 +412,18 @@ impl MediaFingerprint {
             self.mtime,
             self.weak_hash.as_deref().unwrap_or("")
         )
+    }
+}
+
+impl Default for MediaFingerprint {
+    fn default() -> Self {
+        Self {
+            device_id: None,
+            inode: None,
+            size: 0,
+            mtime: 0,
+            weak_hash: None,
+        }
     }
 }
 
