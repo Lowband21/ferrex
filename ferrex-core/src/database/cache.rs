@@ -1,8 +1,11 @@
-use crate::{MediaError, Result};
+use crate::{MediaError, Result, query::MediaQuery};
 use redis::{aio::ConnectionManager, AsyncCommands};
 use serde::{de::DeserializeOwned, Serialize};
 use std::time::Duration;
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct RedisCache {
@@ -150,5 +153,67 @@ impl CacheKeys {
 
     pub fn tmdb_tv(id: &str) -> String {
         format!("tmdb:tv:{id}")
+    }
+
+    /// Generate a cache key for a media query
+    /// The key includes all fields that affect query results
+    pub fn media_query(query: &MediaQuery, user_id: Option<Uuid>) -> String {
+        let mut hasher = DefaultHasher::new();
+        
+        // Hash all filter fields
+        query.filters.library_ids.hash(&mut hasher);
+        if let Some(ref media_type) = query.filters.media_type {
+            format!("{:?}", media_type).hash(&mut hasher);
+        }
+        query.filters.genres.hash(&mut hasher);
+        query.filters.year_range.hash(&mut hasher);
+        
+        // Hash rating range with normalized precision to avoid floating point issues
+        if let Some((min, max)) = query.filters.rating_range {
+            ((min * 10.0) as i32).hash(&mut hasher);
+            ((max * 10.0) as i32).hash(&mut hasher);
+        }
+        
+        if let Some(ref watch_status) = query.filters.watch_status {
+            format!("{:?}", watch_status).hash(&mut hasher);
+        }
+        
+        // Hash sort criteria
+        format!("{:?}", query.sort.primary).hash(&mut hasher);
+        format!("{:?}", query.sort.order).hash(&mut hasher);
+        if let Some(ref secondary) = query.sort.secondary {
+            format!("{:?}", secondary).hash(&mut hasher);
+        }
+        
+        // Hash search if present
+        if let Some(ref search) = query.search {
+            search.text.to_lowercase().hash(&mut hasher);
+            search.fields.iter().map(|f| format!("{:?}", f)).collect::<Vec<_>>().hash(&mut hasher);
+            search.fuzzy.hash(&mut hasher);
+        }
+        
+        // Hash pagination
+        query.pagination.offset.hash(&mut hasher);
+        query.pagination.limit.hash(&mut hasher);
+        
+        // Include user context if present (for watch status queries)
+        if let Some(user_id) = user_id.or(query.user_context) {
+            user_id.hash(&mut hasher);
+        }
+        
+        let hash = hasher.finish();
+        format!("query:media:v1:{:x}", hash)
+    }
+
+    /// Generate a pattern to match all query cache keys
+    pub fn media_query_pattern() -> String {
+        "query:media:v1:*".to_string()
+    }
+
+    /// Generate cache keys for invalidation based on library
+    pub fn media_query_by_library_pattern(library_id: Uuid) -> String {
+        // Since we can't reverse engineer which queries include a library,
+        // we need to invalidate all queries when a library is updated
+        Self::media_query_pattern()
     }
 }

@@ -197,6 +197,9 @@ impl ScanManager {
             tmdb_rate_limit_ms: 250,
             fuzzy_match_threshold: 60,
             cache_dir: Some(self.metadata_service.cache_dir().clone()),
+            max_error_retries: 3,
+            folder_batch_limit: 50,  // Folders are processed in batches of 50 to avoid memory issues
+                                      // The scanner will loop to process all batches until complete
         };
 
         // Convert Library to LibraryReference

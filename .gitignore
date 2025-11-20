@@ -53,12 +53,10 @@ test-media/
 data/
 
 # MCP
-.mcp/memory/
-.mcp/cache/
+.mcp/*
 
 # Documentation build
-docs/_build/
-docs/_site/
+docs/*
 
 # Temporary files
 tmp/
@@ -76,40 +74,8 @@ reference_repos/
 # Cache
 cache/
 
-# Development notes and troubleshooting files
-*_NOTES.md
-*_FIX.md
-*_PLAN.md
-*_DEBUG*.md
-*_TROUBLESHOOTING.md
-*_IMPLEMENTATION.md
-*_ANALYSIS.md
-*_COMPLETE.md
-*_SUMMARY.md
-*_ISSUE*.md
-ALTERNATIVE_*.md
-COSMIC_*.md
-DESKTOP_*.md
-FLOATING_*.md
-HTTP_*.md
-ICED_*.md
-MACOS_*.md
-METADATA_*.md
-PITCH_*.md
-PLAYER_*.md
-SCROLLABLE_*.md
-SEEKING_*.md
-TEST_*.md
-UI_*.md
-VIDEO_*.md
-VOLUME_*.md
-WINDOWS*.md
-*windows*.sh
-*gstreamer*.sh
-
 # Test scripts (keep some, ignore others)
-test_*.sh
-!test_metadata_flow.sh
+scripts/
 
 # Fork directories (managed separately)
 iced_video_player/
@@ -119,3 +85,5 @@ iced_fork/
 ferrex-player-windows/
 ferrex-player-windows.backup/
 *.zip
+
+node_modules/

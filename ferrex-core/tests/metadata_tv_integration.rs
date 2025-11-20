@@ -1,4 +1,4 @@
-use ferrex_core::{MetadataExtractor, LibraryType, MediaType};
+use ferrex_core::{MetadataExtractor, LibraryType, ParsedMediaInfo};
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -22,12 +22,15 @@ fn test_metadata_extraction_with_tv_library_context() {
     let metadata = extractor.extract_metadata(&tv_file).unwrap();
     
     assert!(metadata.parsed_info.is_some());
-    let parsed = metadata.parsed_info.unwrap();
-    assert_eq!(parsed.media_type, MediaType::TvEpisode);
-    assert_eq!(parsed.show_name.as_deref(), Some("Breaking Bad"));
-    assert_eq!(parsed.season, Some(1));
-    assert_eq!(parsed.episode, Some(1));
-    assert_eq!(parsed.episode_title.as_deref(), Some("Pilot"));
+    let parsed_info = metadata.parsed_info.unwrap();
+    if let ParsedMediaInfo::Episode(episode) = parsed_info {
+        assert_eq!(episode.show_name, "Breaking Bad");
+        assert_eq!(episode.season, 1);
+        assert_eq!(episode.episode, 1);
+        assert_eq!(episode.episode_title.as_deref(), Some("Pilot"));
+    } else {
+        panic!("Expected Episode variant");
+    }
 }
 
 #[test]
@@ -39,10 +42,13 @@ fn test_metadata_extraction_multi_episode() {
     let metadata = extractor.extract_metadata(&multi_file).unwrap();
     
     assert!(metadata.parsed_info.is_some());
-    let parsed = metadata.parsed_info.unwrap();
-    assert_eq!(parsed.media_type, MediaType::TvEpisode);
-    assert_eq!(parsed.season, Some(1));
-    assert_eq!(parsed.episode, Some(1));
+    let parsed_info = metadata.parsed_info.unwrap();
+    if let ParsedMediaInfo::Episode(episode) = parsed_info {
+        assert_eq!(episode.season, 1);
+        assert_eq!(episode.episode, 1);
+    } else {
+        panic!("Expected Episode variant");
+    }
     // Note: end_episode info is in EpisodeInfo but not in ParsedMediaInfo yet
 }
 
@@ -55,10 +61,13 @@ fn test_metadata_extraction_date_based() {
     let metadata = extractor.extract_metadata(&date_file).unwrap();
     
     assert!(metadata.parsed_info.is_some());
-    let parsed = metadata.parsed_info.unwrap();
-    assert_eq!(parsed.media_type, MediaType::TvEpisode);
-    assert_eq!(parsed.season, Some(2024));
-    assert_eq!(parsed.episode, Some(115)); // Encoded as MMDD
+    let parsed_info = metadata.parsed_info.unwrap();
+    if let ParsedMediaInfo::Episode(episode) = parsed_info {
+        assert_eq!(episode.season, 2024);
+        assert_eq!(episode.episode, 115); // Encoded as MMDD
+    } else {
+        panic!("Expected Episode variant");
+    }
 }
 
 #[test]
@@ -70,10 +79,13 @@ fn test_metadata_extraction_specials() {
     let metadata = extractor.extract_metadata(&special_file).unwrap();
     
     assert!(metadata.parsed_info.is_some());
-    let parsed = metadata.parsed_info.unwrap();
-    assert_eq!(parsed.media_type, MediaType::TvEpisode);
-    assert_eq!(parsed.season, Some(0));
-    assert_eq!(parsed.episode, Some(1));
+    let parsed_info = metadata.parsed_info.unwrap();
+    if let ParsedMediaInfo::Episode(episode) = parsed_info {
+        assert_eq!(episode.season, 0);
+        assert_eq!(episode.episode, 1);
+    } else {
+        panic!("Expected Episode variant");
+    }
 }
 
 #[test]
@@ -85,12 +97,15 @@ fn test_metadata_extraction_folder_based() {
     let metadata = extractor.extract_metadata(&folder_file).unwrap();
     
     assert!(metadata.parsed_info.is_some());
-    let parsed = metadata.parsed_info.unwrap();
-    assert_eq!(parsed.media_type, MediaType::TvEpisode);
-    assert_eq!(parsed.show_name.as_deref(), Some("The Wire"));
-    assert_eq!(parsed.season, Some(1));
-    assert_eq!(parsed.episode, Some(3));
-    assert_eq!(parsed.episode_title.as_deref(), Some("The Buys"));
+    let parsed_info = metadata.parsed_info.unwrap();
+    if let ParsedMediaInfo::Episode(episode) = parsed_info {
+        assert_eq!(episode.show_name, "The Wire");
+        assert_eq!(episode.season, 1);
+        assert_eq!(episode.episode, 3);
+        assert_eq!(episode.episode_title.as_deref(), Some("The Buys"));
+    } else {
+        panic!("Expected Episode variant");
+    }
 }
 
 #[test]
@@ -103,9 +118,13 @@ fn test_metadata_extraction_movie_in_tv_library() {
     let metadata = extractor.extract_metadata(&movie_file).unwrap();
     
     assert!(metadata.parsed_info.is_some());
-    let parsed = metadata.parsed_info.unwrap();
+    let parsed_info = metadata.parsed_info.unwrap();
     // Should be detected as movie since no TV patterns
-    assert_eq!(parsed.media_type, MediaType::Movie);
+    if let ParsedMediaInfo::Movie(_) = parsed_info {
+        // Expected Movie variant
+    } else {
+        panic!("Expected Movie variant");
+    }
 }
 
 #[test]
@@ -118,11 +137,14 @@ fn test_metadata_extraction_tv_in_movie_library() {
     let metadata = extractor.extract_metadata(&tv_file).unwrap();
     
     assert!(metadata.parsed_info.is_some());
-    let parsed = metadata.parsed_info.unwrap();
+    let parsed_info = metadata.parsed_info.unwrap();
     // Should still be detected as TV due to strong pattern
-    assert_eq!(parsed.media_type, MediaType::TvEpisode);
-    assert_eq!(parsed.season, Some(1));
-    assert_eq!(parsed.episode, Some(1));
+    if let ParsedMediaInfo::Episode(episode) = parsed_info {
+        assert_eq!(episode.season, 1);
+        assert_eq!(episode.episode, 1);
+    } else {
+        panic!("Expected Episode variant");
+    }
 }
 
 #[test]
@@ -134,10 +156,13 @@ fn test_metadata_extraction_anime() {
     let metadata = extractor.extract_metadata(&anime_file).unwrap();
     
     assert!(metadata.parsed_info.is_some());
-    let parsed = metadata.parsed_info.unwrap();
-    assert_eq!(parsed.media_type, MediaType::TvEpisode);
-    // Should parse the episode number
-    assert!(parsed.episode.is_some());
+    let parsed_info = metadata.parsed_info.unwrap();
+    if let ParsedMediaInfo::Episode(episode) = parsed_info {
+        // Should parse the episode number
+        assert!(episode.episode > 0);
+    } else {
+        panic!("Expected Episode variant");
+    }
 }
 
 #[test]
@@ -150,18 +175,18 @@ fn test_metadata_library_context_switching() {
     // Without library context
     let metadata1 = extractor.extract_metadata(&tv_file).unwrap();
     assert!(metadata1.parsed_info.is_some());
-    assert_eq!(metadata1.parsed_info.as_ref().unwrap().media_type, MediaType::TvEpisode);
+    assert!(matches!(metadata1.parsed_info.as_ref().unwrap(), ParsedMediaInfo::Episode(_)));
     
     // Set to movie library
     extractor.set_library_type(Some(LibraryType::Movies));
     let metadata2 = extractor.extract_metadata(&tv_file).unwrap();
     assert!(metadata2.parsed_info.is_some());
     // Still TV due to strong pattern
-    assert_eq!(metadata2.parsed_info.as_ref().unwrap().media_type, MediaType::TvEpisode);
+    assert!(matches!(metadata2.parsed_info.as_ref().unwrap(), ParsedMediaInfo::Episode(_)));
     
     // Set to TV library
     extractor.set_library_type(Some(LibraryType::TvShows));
     let metadata3 = extractor.extract_metadata(&tv_file).unwrap();
     assert!(metadata3.parsed_info.is_some());
-    assert_eq!(metadata3.parsed_info.as_ref().unwrap().media_type, MediaType::TvEpisode);
+    assert!(matches!(metadata3.parsed_info.as_ref().unwrap(), ParsedMediaInfo::Episode(_)));
 }

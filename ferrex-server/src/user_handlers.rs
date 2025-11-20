@@ -1,40 +1,194 @@
 use axum::{
+    http::HeaderMap,
     extract::{Path, State},
     http::StatusCode,
     Extension, Json,
 };
 use ferrex_core::{
+    UserRole,
     api_types::ApiResponse,
     user::{User, UserUpdateRequest},
+    database::postgres::PostgresDatabase,
 };
 use serde::Deserialize;
 use tracing::info;
 use uuid::Uuid;
 
 use crate::{
+    errors::AppError,
     errors::AppResult,
     services::{UserService, user_service::UpdateUserParams},
     AppState,
 };
 
-/// List all users (public endpoint for user selection screen)
+/// Helper function to get the database pool
+fn get_pool(state: &AppState) -> Result<&sqlx::PgPool, AppError> {
+    state.database.as_any()
+        .downcast_ref::<PostgresDatabase>()
+        .ok_or_else(|| AppError::internal("Database not available".to_string()))
+        .map(|db| db.pool())
+}
+
+/// List users for selection screen (rate-limited public endpoint)
+/// 
+/// This endpoint is intentionally limited to prevent user enumeration attacks:
+/// - Returns only minimal user information
+/// - Requires device fingerprint for tracking
+/// - Rate limited to prevent scraping
+/// - May require CAPTCHA in future versions
 pub async fn list_users_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> AppResult<Json<ApiResponse<Vec<UserListItemDto>>>> {
-    // Get all users from database
-    let users = state.database.backend().get_all_users().await?;
+    // Extract device fingerprint from headers (required for user selection)
+    let device_fingerprint = headers
+        .get("X-Device-Fingerprint")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| {
+            AppError::bad_request("Device fingerprint required for user list".to_string())
+        })?;
     
-    // Convert to UserListItemDto for the client
+    // Validate device fingerprint format (basic validation)
+    if device_fingerprint.len() < 32 || device_fingerprint.len() > 256 {
+        return Err(AppError::bad_request("Invalid device fingerprint".to_string()));
+    }
+    
+    // Check if this is a known/trusted device (optional enhancement)
+    let is_known_device = sqlx::query_scalar!(
+        "SELECT EXISTS(SELECT 1 FROM auth_device_sessions WHERE device_fingerprint = $1)",
+        device_fingerprint
+    )
+    .fetch_one(get_pool(&state)?)
+    .await
+    .ok()
+    .and_then(|opt| opt)
+    .unwrap_or(false);
+    
+    // For unknown devices, return limited information
+    if !is_known_device {
+        // Return only usernames without UUIDs or other sensitive info
+        let users = sqlx::query!(
+            r#"
+            SELECT username, display_name, avatar_url
+            FROM users
+            -- No soft delete check needed
+            ORDER BY username
+            LIMIT 50
+            "#
+        )
+        .fetch_all(get_pool(&state)?)
+        .await
+        .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
+        
+        // Create anonymized user list (no UUIDs, no activity info)
+        let user_list: Vec<UserListItemDto> = users.into_iter()
+            .map(|user| UserListItemDto {
+                // Use a deterministic but non-reversible hash of username as ID
+                // This allows consistent selection without exposing real UUIDs
+                id: Uuid::new_v5(&Uuid::NAMESPACE_DNS, user.username.as_bytes()),
+                username: user.username,
+                display_name: user.display_name,
+                avatar_url: user.avatar_url,
+                has_pin: false, // Never reveal PIN status to unknown devices
+                last_login: None, // Never reveal activity patterns
+            })
+            .collect();
+        
+        return Ok(Json(ApiResponse::success(user_list)));
+    }
+    
+    // For known devices, return slightly more information (but still limited)
+    let users = sqlx::query!(
+        r#"
+        SELECT 
+            u.id,
+            u.username,
+            u.display_name,
+            u.avatar_url,
+            EXISTS(
+                SELECT 1 FROM auth_device_sessions ads
+                WHERE ads.user_id = u.id 
+                AND ads.device_fingerprint = $1
+                AND ads.pin_hash IS NOT NULL
+            ) as has_pin_on_device
+        FROM users u
+        -- No soft delete check needed
+        ORDER BY u.username
+        "#,
+        device_fingerprint
+    )
+    .fetch_all(get_pool(&state)?)
+    .await
+    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
+    
     let user_list: Vec<UserListItemDto> = users.into_iter()
         .map(|user| UserListItemDto {
             id: user.id,
             username: user.username,
             display_name: user.display_name,
             avatar_url: user.avatar_url,
-            has_pin: false, // TODO: Check if user has PIN on any device
-            last_login: user.last_login,
+            has_pin: user.has_pin_on_device.unwrap_or(false),
+            last_login: None, // Still don't reveal activity patterns
         })
         .collect();
+    
+    Ok(Json(ApiResponse::success(user_list)))
+}
+
+/// List all users with full information (authenticated endpoint)
+/// 
+/// This endpoint requires authentication and returns complete user information
+/// for administrative purposes or authenticated device management.
+pub async fn list_users_authenticated_handler(
+    State(state): State<AppState>,
+    Extension(user): Extension<ferrex_core::user::User>,
+    Extension(device_id): Extension<Option<Uuid>>,
+) -> AppResult<Json<ApiResponse<Vec<UserListItemDto>>>> {
+    // Check if user has permission to list all users
+    // TODO: Implement role checking when User has role field
+    // For now, only allow users to see themselves (no admin check)
+    let is_admin = false; // Will be: user.role == UserRole::Admin;
+    
+    let users = if is_admin {
+        // Admin gets full user list
+        state.database.backend().get_all_users().await?
+    } else {
+        // Regular users only see themselves
+        vec![state.database.backend()
+            .get_user_by_id(user.id)
+            .await?
+            .ok_or_else(|| AppError::not_found("User not found".to_string()))?]
+    };
+    
+    // Get device information for PIN status - already extracted as Extension
+    
+    let mut user_list = Vec::new();
+    for user in users {
+        // Check if user has PIN on current device
+        let has_pin = if let Some(device_id) = device_id {
+            sqlx::query_scalar!(
+                "SELECT EXISTS(SELECT 1 FROM auth_device_sessions WHERE user_id = $1 AND id = $2 AND pin_hash IS NOT NULL)",
+                user.id,
+                device_id
+            )
+            .fetch_one(get_pool(&state)?)
+            .await
+            .ok()
+            .and_then(|opt| opt)
+            .unwrap_or(false)
+        } else {
+            false
+        };
+        
+        user_list.push(UserListItemDto {
+            id: user.id,
+            username: user.username,
+            display_name: user.display_name,
+            avatar_url: user.avatar_url,
+            has_pin,
+            last_login: if is_admin { user.last_login } else { None },
+        });
+    }
     
     Ok(Json(ApiResponse::success(user_list)))
 }

@@ -334,6 +334,8 @@ impl BackgroundScanner {
             tmdb_rate_limit_ms: 250,
             fuzzy_match_threshold: 60,
             cache_dir: None,
+            max_error_retries: 3,
+            folder_batch_limit: 50,
         };
         
         let scanner = crate::StreamingScannerV2::with_config(

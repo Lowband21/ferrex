@@ -98,6 +98,17 @@ pub struct UserPermissions {
     pub permission_details: Option<Vec<Permission>>,
 }
 
+impl Default for UserPermissions {
+    fn default() -> Self {
+        Self {
+            user_id: Uuid::nil(),
+            roles: Vec::new(),
+            permissions: HashMap::new(),
+            permission_details: None,
+        }
+    }
+}
+
 impl UserPermissions {
     /// Check if the user has a specific permission
     pub fn has_permission(&self, permission: &str) -> bool {

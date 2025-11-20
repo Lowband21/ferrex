@@ -28,6 +28,10 @@ pub struct StreamingScannerConfig {
     pub fuzzy_match_threshold: i64,
     /// Path to cache directory for images
     pub cache_dir: Option<std::path::PathBuf>,
+    /// Maximum number of error retries for failed folders
+    pub max_error_retries: i32,
+    /// Maximum number of folders to process in a single batch
+    pub folder_batch_limit: usize,
 }
 
 impl Default for StreamingScannerConfig {
@@ -38,6 +42,8 @@ impl Default for StreamingScannerConfig {
             tmdb_rate_limit_ms: 250,   // 4 requests per second
             fuzzy_match_threshold: 60, // 60% match minimum
             cache_dir: None,
+            max_error_retries: 3,      // 3 retry attempts
+            folder_batch_limit: 50,     // Process up to 50 folders per batch
         }
     }
 }
@@ -151,24 +157,60 @@ impl StreamingScannerV2 {
         Ok(())
     }
 
-    /// Scan a movie library with folder structure: /Movies/Movie Name (Year)/movie.mkv
+    /// Scan a movie library using folder inventory
     async fn scan_movie_library(
         self: Arc<Self>,
         library: LibraryReference,
         output_tx: mpsc::Sender<ScanOutput>,
         scan_id: Uuid,
     ) -> Result<()> {
-        info!("Scanning movie library: {}", library.name);
+        info!("Scanning movie library: {} using folder inventory", library.name);
 
-        for root_path in &library.paths {
-            let movie_folders = self.discover_movie_folders(root_path).await?;
-            let total_folders = movie_folders.len();
+        let mut total_folders_processed = 0;
+        let mut batch_number = 0;
+        
+        // Loop to process all folders in batches
+        loop {
+            batch_number += 1;
+            
+            // Query folder inventory for folders needing scan
+            // Prioritize unscanned folders first
+            let filters = crate::database::traits::FolderScanFilters {
+                library_id: Some(library.id),
+                processing_status: Some(crate::database::traits::FolderProcessingStatus::Pending),
+                folder_type: Some(crate::database::traits::FolderType::Movie),
+                max_attempts: Some(3),
+                stale_after_hours: None,
+                limit: None,
+                priority: None,
+                max_batch_size: Some(self.config.folder_batch_limit as i32),
+                error_retry_threshold: Some(self.config.max_error_retries),
+            };
 
-            info!(
-                "Found {} movie folders in {}",
-                total_folders,
-                root_path.display()
-            );
+            // Get pending folders first
+            let mut folders_to_scan = self.db.backend().get_folders_needing_scan(&filters).await?;
+            
+            // Also get failed folders that haven't exceeded max attempts
+            let mut failed_filters = filters.clone();
+            failed_filters.processing_status = Some(crate::database::traits::FolderProcessingStatus::Failed);
+            let failed_folders = self.db.backend().get_folders_needing_scan(&failed_filters).await?;
+            folders_to_scan.extend(failed_folders);
+
+            let batch_size = folders_to_scan.len();
+            
+            // If no more folders to scan, we're done
+            if batch_size == 0 {
+                if total_folders_processed == 0 {
+                    info!("No movie folders need scanning for library: {}", library.name);
+                } else {
+                    info!("Completed scanning all {} movie folders for library: {}", 
+                          total_folders_processed, library.name);
+                }
+                break;
+            }
+
+            info!("Processing batch {} with {} movie folders for library: {} (total processed so far: {})", 
+                  batch_number, batch_size, library.name, total_folders_processed);
 
             // Create work channel
             let (folder_tx, folder_rx) = mpsc::channel(100);
@@ -176,9 +218,21 @@ impl StreamingScannerV2 {
 
             // Send folders to channel
             let folder_tx_clone = folder_tx.clone();
+            let db = self.db.clone();
             tokio::spawn(async move {
-                for folder in movie_folders {
-                    if folder_tx_clone.send(folder).await.is_err() {
+                for folder in folders_to_scan {
+                    // Update folder status to 'scanning' before processing
+                    if let Err(e) = db.backend().update_folder_status(
+                        folder.id,
+                        crate::database::traits::FolderProcessingStatus::Processing,
+                        None
+                    ).await {
+                        error!("Failed to update folder {} status to scanning: {}", folder.folder_path, e);
+                        continue;
+                    }
+                    
+                    // Send folder info to worker
+                    if folder_tx_clone.send((folder.id, PathBuf::from(folder.folder_path))).await.is_err() {
                         break;
                     }
                 }
@@ -188,7 +242,7 @@ impl StreamingScannerV2 {
             // Spawn workers
             let mut workers = Vec::new();
             for worker_id in 0..self.config.folder_workers {
-                let worker = self.clone().spawn_movie_worker(
+                let worker = self.clone().spawn_movie_worker_with_inventory(
                     worker_id,
                     folder_rx.clone(),
                     output_tx.clone(),
@@ -204,55 +258,144 @@ impl StreamingScannerV2 {
                     error!("Movie worker failed: {}", e);
                 }
             }
+            
+            total_folders_processed += batch_size;
+            info!("Completed batch {} ({} folders). Total processed: {}", 
+                  batch_number, batch_size, total_folders_processed);
+        }
+
+        // Update library's last_scan timestamp after successful scan
+        if let Err(e) = self.db.backend().update_library_last_scan(&library.id.to_string()).await {
+            error!("Failed to update library last_scan timestamp: {}", e);
+        } else {
+            info!("Updated last_scan timestamp for library: {}", library.name);
         }
 
         Ok(())
     }
 
-    /// Scan a TV library with folder structure: /TV Shows/Series Name/Season X/episode.mkv
+    /// Scan a TV library using folder inventory
     async fn scan_tv_library(
         self: Arc<Self>,
         library: LibraryReference,
         output_tx: mpsc::Sender<ScanOutput>,
         scan_id: Uuid,
     ) -> Result<()> {
-        info!("Scanning TV library: {}", library.name);
+        info!("Scanning TV library: {} using folder inventory", library.name);
 
-        for root_path in &library.paths {
-            let series_folders = self.discover_series_folders(root_path).await?;
-            let total_folders = series_folders.len();
+        let mut total_folders_processed = 0;
+        let mut batch_number = 0;
+        
+        // Loop to process all folders in batches
+        loop {
+            batch_number += 1;
+            
+            // Query folder inventory for series folders needing scan
+            let filters = crate::database::traits::FolderScanFilters {
+                library_id: Some(library.id),
+                processing_status: Some(crate::database::traits::FolderProcessingStatus::Pending),
+                folder_type: Some(crate::database::traits::FolderType::TvShow),
+                max_attempts: Some(3),
+                stale_after_hours: None,
+                limit: None,
+                priority: None,
+                max_batch_size: Some(self.config.folder_batch_limit as i32),
+                error_retry_threshold: Some(self.config.max_error_retries),
+            };
 
-            info!(
-                "Found {} series folders in {}",
-                total_folders,
-                root_path.display()
-            );
+            // Get pending folders first
+            let mut folders_to_scan = self.db.backend().get_folders_needing_scan(&filters).await?;
+            
+            // Also get failed folders that haven't exceeded max attempts
+            let mut failed_filters = filters.clone();
+            failed_filters.processing_status = Some(crate::database::traits::FolderProcessingStatus::Failed);
+            let failed_folders = self.db.backend().get_folders_needing_scan(&failed_filters).await?;
+            folders_to_scan.extend(failed_folders);
 
-            // Process each series folder
-            for (idx, series_folder) in series_folders.into_iter().enumerate() {
-                // Send progress update
+            let batch_size = folders_to_scan.len();
+            
+            // If no more folders to scan, we're done
+            if batch_size == 0 {
+                if total_folders_processed == 0 {
+                    info!("No TV series folders need scanning for library: {}", library.name);
+                } else {
+                    info!("Completed scanning all {} TV series folders for library: {}", 
+                          total_folders_processed, library.name);
+                }
+                break;
+            }
+
+            info!("Processing batch {} with {} TV series folders for library: {} (total processed so far: {})", 
+                  batch_number, batch_size, library.name, total_folders_processed);
+
+            // Process each series folder in this batch
+            for (idx, folder_info) in folders_to_scan.into_iter().enumerate() {
+                // Send progress update with cumulative count
                 let _ = output_tx
                     .send(ScanOutput::ScanProgress {
                         scan_id,
-                        folders_processed: idx,
-                        total_folders,
+                        folders_processed: total_folders_processed + idx,
+                        total_folders: total_folders_processed + batch_size, // Estimate based on current knowledge
                     })
                     .await;
 
+                // Update folder status to 'scanning' before processing
+                if let Err(e) = self.db.backend().update_folder_status(
+                    folder_info.id,
+                    crate::database::traits::FolderProcessingStatus::Processing,
+                    None
+                ).await {
+                    error!("Failed to update folder {} status to scanning: {}", folder_info.folder_path, e);
+                    continue;
+                }
+
                 let scanner = self.clone();
-                if let Err(e) = scanner
-                    .process_series_folder(series_folder, library.id, &output_tx)
-                    .await
-                {
-                    error!("Failed to process series folder: {}", e);
-                    let _ = output_tx
-                        .send(ScanOutput::Error {
-                            path: None,
-                            error: e.to_string(),
-                        })
-                        .await;
+                let folder_path = PathBuf::from(&folder_info.folder_path);
+                let folder_id = folder_info.id;
+                
+                match scanner.process_series_folder(folder_path.clone(), library.id, &output_tx).await {
+                    Ok(_) => {
+                        // Update folder status to 'completed' after successful processing
+                        if let Err(e) = self.db.backend().update_folder_status(
+                            folder_id,
+                            crate::database::traits::FolderProcessingStatus::Completed,
+                            None
+                        ).await {
+                            error!("Failed to update folder {} status to completed: {}", folder_info.folder_path, e);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to process series folder {}: {}", folder_info.folder_path, e);
+                        
+                        // Update folder status to 'failed' with error message
+                        if let Err(update_err) = self.db.backend().update_folder_status(
+                            folder_id,
+                            crate::database::traits::FolderProcessingStatus::Failed,
+                            Some(e.to_string())
+                        ).await {
+                            error!("Failed to update folder {} status to failed: {}", folder_info.folder_path, update_err);
+                        }
+                        
+                        let _ = output_tx
+                            .send(ScanOutput::Error {
+                                path: Some(folder_info.folder_path),
+                                error: e.to_string(),
+                            })
+                            .await;
+                    }
                 }
             }
+            
+            total_folders_processed += batch_size;
+            info!("Completed batch {} ({} folders). Total processed: {}", 
+                  batch_number, batch_size, total_folders_processed);
+        }
+
+        // Update library's last_scan timestamp after successful scan
+        if let Err(e) = self.db.backend().update_library_last_scan(&library.id.to_string()).await {
+            error!("Failed to update library last_scan timestamp: {}", e);
+        } else {
+            info!("Updated last_scan timestamp for library: {}", library.name);
         }
 
         Ok(())
@@ -385,55 +528,8 @@ impl StreamingScannerV2 {
         Some((endpoint, theme_color))
     }
 
-    /// Discover movie folders (folders containing video files)
-    async fn discover_movie_folders(&self, root_path: &Path) -> Result<Vec<PathBuf>> {
-        let mut movie_folders = Vec::new();
 
-        let mut entries = tokio::fs::read_dir(root_path).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if path.is_dir() {
-                // Check if this folder contains video files
-                if self.contains_video_files(&path).await? {
-                    movie_folders.push(path);
-                }
-            } else if path.is_file() && self.is_video_file(&path) {
-                // Handle loose video files in the root directory
-                // Treat each file as its own "folder" for processing
-                movie_folders.push(path);
-            }
-        }
 
-        Ok(movie_folders)
-    }
-
-    /// Discover series folders
-    async fn discover_series_folders(&self, root_path: &Path) -> Result<Vec<PathBuf>> {
-        let mut series_folders = Vec::new();
-
-        let mut entries = tokio::fs::read_dir(root_path).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if path.is_dir() {
-                // Assume any folder in TV Shows root is a series folder
-                series_folders.push(path);
-            }
-        }
-
-        Ok(series_folders)
-    }
-
-    /// Check if a directory contains video files
-    async fn contains_video_files(&self, path: &Path) -> Result<bool> {
-        let mut entries = tokio::fs::read_dir(path).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if path.is_file() && self.is_video_file(&path) {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
 
     /// Check if a file is a video file
     fn is_video_file(&self, path: &Path) -> bool {
@@ -486,6 +582,77 @@ impl StreamingScannerV2 {
                             "Movie worker {} failed to process {:?}: {}",
                             worker_id, folder, e
                         );
+                        let _ = output_tx
+                            .send(ScanOutput::Error {
+                                path: Some(folder.display().to_string()),
+                                error: e.to_string(),
+                            })
+                            .await;
+                    }
+                }
+            }
+
+            Ok(())
+        })
+    }
+
+    /// Spawn a worker to process movie folders with inventory tracking
+    fn spawn_movie_worker_with_inventory(
+        self: Arc<Self>,
+        worker_id: usize,
+        folder_rx: Arc<Mutex<mpsc::Receiver<(Uuid, PathBuf)>>>,
+        output_tx: mpsc::Sender<ScanOutput>,
+        library_id: Uuid,
+        _scan_id: Uuid,
+    ) -> JoinHandle<Result<()>> {
+        tokio::spawn(async move {
+            info!("Movie worker {} started (with inventory tracking)", worker_id);
+
+            loop {
+                let folder_data = {
+                    let mut rx = folder_rx.lock().await;
+                    rx.recv().await
+                };
+
+                let Some((folder_id, folder)) = folder_data else {
+                    info!("Movie worker {} completed", worker_id);
+                    break;
+                };
+
+                match self.process_movie_folder(folder.clone(), library_id).await {
+                    Ok(movie_ref) => {
+                        info!(
+                            "Movie worker {} processed: {}",
+                            worker_id,
+                            movie_ref.title.as_str()
+                        );
+                        
+                        // Update folder status to 'completed' after successful processing
+                        if let Err(e) = self.db.backend().update_folder_status(
+                            folder_id,
+                            crate::database::traits::FolderProcessingStatus::Completed,
+                            None
+                        ).await {
+                            error!("Failed to update folder {} status to completed: {}", folder.display(), e);
+                        }
+                        
+                        let _ = output_tx.send(ScanOutput::MovieFound(movie_ref)).await;
+                    }
+                    Err(e) => {
+                        error!(
+                            "Movie worker {} failed to process {:?}: {}",
+                            worker_id, folder, e
+                        );
+                        
+                        // Update folder status to 'failed' with error message
+                        if let Err(update_err) = self.db.backend().update_folder_status(
+                            folder_id,
+                            crate::database::traits::FolderProcessingStatus::Failed,
+                            Some(e.to_string())
+                        ).await {
+                            error!("Failed to update folder {} status to failed: {}", folder.display(), update_err);
+                        }
+                        
                         let _ = output_tx
                             .send(ScanOutput::Error {
                                 path: Some(folder.display().to_string()),
@@ -1001,6 +1168,7 @@ impl StreamingScannerV2 {
         Ok(movie_ref)
     }
 
+
     /// Process a series folder
     pub async fn process_series_folder(
         &self,
@@ -1020,7 +1188,7 @@ impl StreamingScannerV2 {
         let clean_name = self.clean_series_name(&series_name);
 
         // Search TMDB with fuzzy matching
-        let series_ref = self.find_or_create_series(&clean_name, library_id).await?;
+        let series_ref = self.find_or_create_series(&clean_name, library_id, &series_folder).await?;
 
         // Send series found event immediately
         output_tx
@@ -1028,15 +1196,66 @@ impl StreamingScannerV2 {
             .await
             .map_err(|_| MediaError::Cancelled("Output channel closed".to_string()))?;
 
-        // Process seasons
-        let season_folders = self.discover_season_folders(&series_folder).await?;
+        // Get the series folder from inventory to find its ID
+        let series_folder_str = series_folder.to_string_lossy().to_string();
+        let series_folder_info = match self.db.backend().get_folder_by_path(library_id, &series_folder_str).await? {
+            Some(folder) => folder,
+            None => {
+                warn!("Series folder not found in inventory: {}", series_folder_str);
+                return Ok(());
+            }
+        };
 
-        for season_folder in season_folders {
-            if let Err(e) = self
-                .process_season_folder(&season_folder, &series_ref, library_id, output_tx)
-                .await
-            {
-                error!("Failed to process season folder {:?}: {}", season_folder, e);
+        // Query for season folders under this series
+        info!("Querying for season folders under series: {} (folder_id: {})", series_name, series_folder_info.id);
+        let season_folders = self.db.backend().get_season_folders(series_folder_info.id).await?;
+        
+        if season_folders.is_empty() {
+            info!("No season folders found for series: {}", series_name);
+        } else {
+            info!("Found {} season folders for series: {}", season_folders.len(), series_name);
+            
+            // Process each season folder
+            for season_folder in season_folders {
+                let season_path = PathBuf::from(&season_folder.folder_path);
+                
+                // Update season folder status to 'scanning'
+                if let Err(e) = self.db.backend().update_folder_status(
+                    season_folder.id,
+                    crate::database::traits::FolderProcessingStatus::Processing,
+                    None
+                ).await {
+                    error!("Failed to update season folder {} status to scanning: {}", season_folder.folder_path, e);
+                    continue;
+                }
+                
+                // Process the season folder
+                match self.process_season_folder(&season_path, &series_ref, library_id, output_tx).await {
+                    Ok(season_ref) => {
+                        info!("Successfully processed season {} of {}", season_ref.season_number, series_name);
+                        
+                        // Update season folder status to 'completed'
+                        if let Err(e) = self.db.backend().update_folder_status(
+                            season_folder.id,
+                            crate::database::traits::FolderProcessingStatus::Completed,
+                            None
+                        ).await {
+                            error!("Failed to update season folder {} status to completed: {}", season_folder.folder_path, e);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to process season folder {}: {}", season_folder.folder_path, e);
+                        
+                        // Update season folder status to 'failed'
+                        if let Err(e) = self.db.backend().update_folder_status(
+                            season_folder.id,
+                            crate::database::traits::FolderProcessingStatus::Failed,
+                            Some(e.to_string())
+                        ).await {
+                            error!("Failed to update season folder {} status to failed: {}", season_folder.folder_path, e);
+                        }
+                    }
+                }
             }
         }
 
@@ -1044,16 +1263,30 @@ impl StreamingScannerV2 {
     }
 
     /// Find or create a series reference with TMDB data
-    pub async fn find_or_create_series(&self, series_name: &str, library_id: Uuid) -> Result<SeriesReference> {
+    pub async fn find_or_create_series(&self, series_name: &str, library_id: Uuid, series_folder: &Path) -> Result<SeriesReference> {
+        info!(
+            "SCAN: find_or_create_series called for '{}' in library {}",
+            series_name, library_id
+        );
+        
         // First, check if series already exists by name in this library
-        if let Ok(Some(existing_series)) = self.db.backend().find_series_by_name(library_id, series_name).await {
-            info!(
-                "Found existing series '{}' in library {} with TMDB ID: {}",
-                existing_series.title.as_str(),
-                library_id,
-                existing_series.tmdb_id
-            );
-            return Ok(existing_series);
+        match self.db.backend().find_series_by_name(library_id, series_name).await {
+            Ok(Some(existing_series)) => {
+                info!(
+                    "SCAN: Found existing series '{}' (ID: {}) in library {} with TMDB ID: {}, returning it",
+                    existing_series.title.as_str(),
+                    existing_series.id.as_str(),
+                    library_id,
+                    existing_series.tmdb_id
+                );
+                return Ok(existing_series);
+            }
+            Ok(None) => {
+                info!("SCAN: No existing series found by name '{}' in library {}", series_name, library_id);
+            }
+            Err(e) => {
+                warn!("SCAN: Error checking for existing series by name: {}", e);
+            }
         }
 
         // Rate limit TMDB requests
@@ -1108,19 +1341,36 @@ impl StreamingScannerV2 {
 
         // If we found a TMDB match, check if it already exists in the database
         if let Some(matched) = tmdb_match {
-            if let Ok(Some(existing_series)) = self.db.backend().get_series_by_tmdb_id(library_id, matched.tmdb_id).await {
-                info!(
-                    "Found existing series by TMDB ID {} in library {}: '{}'",
-                    matched.tmdb_id,
-                    library_id,
-                    existing_series.title.as_str()
-                );
-                return Ok(existing_series);
+            info!("SCAN: Found TMDB match for '{}': TMDB ID {}", series_name, matched.tmdb_id);
+            match self.db.backend().get_series_by_tmdb_id(library_id, matched.tmdb_id).await {
+                Ok(Some(existing_series)) => {
+                    info!(
+                        "SCAN: Found existing series by TMDB ID {} (ID: {}) in library {}: '{}', returning it",
+                        matched.tmdb_id,
+                        existing_series.id.as_str(),
+                        library_id,
+                        existing_series.title.as_str()
+                    );
+                    return Ok(existing_series);
+                }
+                Ok(None) => {
+                    info!("SCAN: No existing series found with TMDB ID {} in library {}", matched.tmdb_id, library_id);
+                }
+                Err(e) => {
+                    warn!("SCAN: Error checking for existing series by TMDB ID: {}", e);
+                }
             }
+        } else {
+            info!("SCAN: No TMDB match found for '{}'", series_name);
         }
 
-        // Generate series ID early for both cases
+        // Only generate a new series ID if we're actually creating a new series
+        // This is critical - we should NEVER regenerate IDs for existing series
         let series_id = SeriesID::new(Uuid::new_v4().to_string())?;
+        info!(
+            "SCAN: Creating NEW series for '{}' with generated ID: {} (confirmed: no existing series found)",
+            series_name, series_id.as_str()
+        );
 
         // Use match or create placeholder
         let (tmdb_id, enhanced_details, theme_color) = if let Some(matched) = tmdb_match {
@@ -1446,6 +1696,34 @@ impl StreamingScannerV2 {
             (0, None, None)
         };
 
+        // Get folder creation time
+        let created_at = series_folder.metadata()
+            .ok()
+            .and_then(|metadata| {
+                metadata.created()
+                    .ok()
+                    .and_then(|time| {
+                        let duration = time.duration_since(std::time::UNIX_EPOCH).ok()?;
+                        chrono::DateTime::<chrono::Utc>::from_timestamp(
+                            duration.as_secs() as i64,
+                            duration.subsec_nanos()
+                        )
+                    })
+                    .or_else(|| {
+                        // Fallback to modified time if creation time not available
+                        metadata.modified()
+                            .ok()
+                            .and_then(|time| {
+                                let duration = time.duration_since(std::time::UNIX_EPOCH).ok()?;
+                                chrono::DateTime::<chrono::Utc>::from_timestamp(
+                                    duration.as_secs() as i64,
+                                    duration.subsec_nanos()
+                                )
+                            })
+                    })
+            })
+            .unwrap_or_else(chrono::Utc::now);
+
         let series_ref = SeriesReference {
             id: series_id,
             library_id,
@@ -1472,6 +1750,7 @@ impl StreamingScannerV2 {
                     Uuid::new_v4().to_string()
                 }
             )),
+            created_at,
             theme_color, // Extracted from poster
         };
 
@@ -1517,10 +1796,43 @@ impl StreamingScannerV2 {
         let season_num = self.extract_season_number(season_folder)?;
 
         info!(
-            "Processing season {} of {}",
+            "Processing season {} of {} (series_id: {})",
             season_num,
-            series_ref.title.as_str()
+            series_ref.title.as_str(),
+            series_ref.id.as_str()
         );
+
+        // Get season folder creation time
+        let folder_created_at = match season_folder.metadata() {
+            Ok(metadata) => {
+                metadata.created()
+                    .ok()
+                    .and_then(|time| {
+                        let duration = time.duration_since(std::time::UNIX_EPOCH).ok()?;
+                        chrono::DateTime::<chrono::Utc>::from_timestamp(
+                            duration.as_secs() as i64,
+                            duration.subsec_nanos()
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        // Fallback to modified time if creation time is not available
+                        metadata.modified()
+                            .ok()
+                            .and_then(|time| {
+                                let duration = time.duration_since(std::time::UNIX_EPOCH).ok()?;
+                                chrono::DateTime::<chrono::Utc>::from_timestamp(
+                                    duration.as_secs() as i64,
+                                    duration.subsec_nanos()
+                                )
+                            })
+                            .unwrap_or_else(chrono::Utc::now)
+                    })
+            }
+            Err(e) => {
+                warn!("Failed to get season folder metadata for {}: {}, using current time", season_folder.display(), e);
+                chrono::Utc::now()
+            }
+        };
 
         // Get season details from TMDB if available
         let season_details = if series_ref.tmdb_id > 0 {
@@ -1578,6 +1890,7 @@ impl StreamingScannerV2 {
             id: season_id,
             season_number: SeasonNumber::new(season_num),
             series_id: series_ref.id.clone(), // Link to parent series
+            library_id, // Direct library reference (no runtime derivation needed)
             tmdb_series_id: series_ref.tmdb_id,
             details: if let Some(details) = enhanced_season {
                 MediaDetailsOption::Details(TmdbDetails::Season(details))
@@ -1588,18 +1901,20 @@ impl StreamingScannerV2 {
                 ))
             },
             endpoint: SeasonURL::from_string(format!("/api/season/{}", season_id_str)),
+            created_at: folder_created_at,
             theme_color: None, // Seasons don't have theme colors
         };
 
         // Store season in database BEFORE processing episodes to avoid foreign key constraint violation
         info!(
-            "Storing season reference before processing episodes: {} S{} for series {}",
+            "SCAN: Storing season reference: ID={} S{} for series '{}' (series_id={})",
             season_ref.id.as_str(),
             season_num,
-            series_ref.title.as_str()
+            series_ref.title.as_str(),
+            season_ref.series_id.as_str()
         );
         
-        self.db
+        let actual_season_uuid = self.db
             .backend()
             .store_season_reference(&season_ref)
             .await
@@ -1610,6 +1925,10 @@ impl StreamingScannerV2 {
                 );
                 MediaError::Internal(format!("Failed to store season reference: {}", e))
             })?;
+        
+        // Update season_ref with the actual ID from the database (in case it already existed)
+        let mut season_ref = season_ref;
+        season_ref.id = SeasonID::new(actual_season_uuid.to_string())?;
 
         // Send season found event AFTER storing it
         output_tx
@@ -1747,37 +2066,25 @@ impl StreamingScannerV2 {
             file: media_file,
         };
 
-        // Store in database
-        self.db
+        // Store in database and get actual file ID
+        let actual_file_id = self.db
             .backend()
             .store_media(episode_ref.file.clone())
+            .await?;
+        
+        // Update episode_ref with the actual file ID (in case it already existed)
+        let mut episode_ref = episode_ref;
+        episode_ref.file.id = Uuid::parse_str(&actual_file_id)
+            .map_err(|e| MediaError::Internal(format!("Invalid file UUID: {}", e)))?;
+        
+        self.db
+            .backend()
+            .store_episode_reference(&episode_ref)
             .await?;
 
         Ok(episode_ref)
     }
 
-    /// Discover season folders within a series directory
-    async fn discover_season_folders(&self, series_path: &Path) -> Result<Vec<PathBuf>> {
-        let mut season_folders = Vec::new();
-
-        let mut entries = tokio::fs::read_dir(series_path).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if path.is_dir() {
-                // Check if this looks like a season folder
-                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-                if self.is_season_folder(name) {
-                    season_folders.push(path);
-                }
-            }
-        }
-
-        // Sort season folders by season number
-        season_folders.sort_by_key(|p| self.extract_season_number(p).unwrap_or(111));
-
-        Ok(season_folders)
-    }
 
     /// Check if a folder name looks like a season folder
     fn is_season_folder(&self, name: &str) -> bool {

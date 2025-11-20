@@ -183,6 +183,93 @@ pub struct ImageLookupParams {
     pub variant: Option<String>,
 }
 
+// Folder inventory types
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum FolderType {
+    Root,
+    Movie,
+    TvShow,
+    Season,
+    Extra,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum FolderProcessingStatus {
+    Pending,
+    Processing,
+    Completed,
+    Failed,
+    Skipped,
+    Queued,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum FolderDiscoverySource {
+    Scan,
+    Watch,
+    Manual,
+    Import,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanPriority {
+    Unscanned,  // Never been scanned
+    Changed,    // Files have changed  
+    Routine,    // Regular rescan
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FolderInventory {
+    pub id: Uuid,
+    pub library_id: Uuid,
+    pub folder_path: String,
+    pub folder_type: FolderType,
+    pub parent_folder_id: Option<Uuid>,
+    
+    // Discovery tracking
+    pub discovered_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
+    pub discovery_source: FolderDiscoverySource,
+    
+    // Processing status
+    pub processing_status: FolderProcessingStatus,
+    pub last_processed_at: Option<DateTime<Utc>>,
+    pub processing_error: Option<String>,
+    pub processing_attempts: i32,
+    pub next_retry_at: Option<DateTime<Utc>>,
+    
+    // Content tracking
+    pub total_files: i32,
+    pub processed_files: i32,
+    pub total_size_bytes: i64,
+    pub file_types: Vec<String>,
+    pub last_modified: Option<DateTime<Utc>>,
+    
+    // Metadata
+    pub metadata: serde_json::Value,
+    
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FolderScanFilters {
+    pub library_id: Option<Uuid>,
+    pub processing_status: Option<FolderProcessingStatus>,
+    pub folder_type: Option<FolderType>,
+    pub max_attempts: Option<i32>,
+    pub stale_after_hours: Option<i32>,
+    pub limit: Option<i32>,
+    pub priority: Option<ScanPriority>,
+    pub max_batch_size: Option<i32>,
+    pub error_retry_threshold: Option<i32>,
+}
+
 #[async_trait]
 pub trait MediaDatabaseTrait: Send + Sync {
     /// Get self as Any for downcasting
@@ -222,7 +309,7 @@ pub trait MediaDatabaseTrait: Send + Sync {
     // New reference type methods
     async fn store_movie_reference(&self, movie: &MovieReference) -> Result<()>;
     async fn store_series_reference(&self, series: &SeriesReference) -> Result<()>;
-    async fn store_season_reference(&self, season: &SeasonReference) -> Result<()>;
+    async fn store_season_reference(&self, season: &SeasonReference) -> Result<Uuid>;
     
     // Series lookup methods
     async fn get_series_by_tmdb_id(&self, library_id: Uuid, tmdb_id: u64) -> Result<Option<SeriesReference>>;
@@ -408,5 +495,41 @@ pub trait MediaDatabaseTrait: Send + Sync {
     
     /// Get authentication events for device
     async fn get_device_auth_events(&self, device_id: Uuid, limit: usize) -> Result<Vec<crate::auth::AuthEvent>>;
+    
+    // Folder inventory management methods
+    /// Get folders that need scanning based on filters
+    async fn get_folders_needing_scan(&self, filters: &FolderScanFilters) -> Result<Vec<FolderInventory>>;
+    
+    /// Update folder processing status
+    async fn update_folder_status(&self, folder_id: Uuid, status: FolderProcessingStatus, error: Option<String>) -> Result<()>;
+    
+    /// Record a folder scan error and update retry information
+    async fn record_folder_scan_error(&self, folder_id: Uuid, error: &str, next_retry: Option<DateTime<Utc>>) -> Result<()>;
+    
+    /// Get complete folder inventory for a library
+    async fn get_folder_inventory(&self, library_id: Uuid) -> Result<Vec<FolderInventory>>;
+    
+    /// Upsert a folder (insert or update if exists)
+    async fn upsert_folder(&self, folder: &FolderInventory) -> Result<Uuid>;
+    
+    /// Cleanup stale folders that haven't been seen in the specified time
+    async fn cleanup_stale_folders(&self, library_id: Uuid, stale_after_hours: i32) -> Result<u32>;
+    
+    /// Get folder by path
+    async fn get_folder_by_path(&self, library_id: Uuid, path: &str) -> Result<Option<FolderInventory>>;
+    
+    /// Update folder content statistics
+    async fn update_folder_stats(&self, folder_id: Uuid, total_files: i32, processed_files: i32, total_size_bytes: i64, file_types: Vec<String>) -> Result<()>;
+    
+    /// Mark folder as processed
+    async fn mark_folder_processed(&self, folder_id: Uuid) -> Result<()>;
+    
+    /// Get child folders of a parent folder
+    async fn get_child_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>>;
+    
+    /// Get season folders under a series folder
+    /// This queries folder_inventory table for all folders where parent_folder_id matches 
+    /// the series folder and folder_type is 'season'
+    async fn get_season_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>>;
 }
 

@@ -73,6 +73,9 @@ fuzzy-matcher = "0.3"
 # Random number generation
 rand = "0.8"
 
+# Ordered floating point for sorting
+ordered-float = "4.2"
+
 # File watching
 notify = { version = "6.1", optional = true }
 

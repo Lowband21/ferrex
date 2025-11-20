@@ -1,5 +1,6 @@
 pub mod device_simple;
 pub mod device_handlers;
+pub mod device_validation;
 pub mod handlers;
 pub mod jwt;
 pub mod middleware;

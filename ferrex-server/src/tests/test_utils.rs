@@ -241,6 +241,7 @@ pub fn create_test_season_reference(series_id: SeriesID) -> SeasonReference {
         id: season_id,
         season_number: SeasonNumber::new(1),
         series_id,
+        library_id: Uuid::new_v4(), // Test library ID
         tmdb_series_id: 54321,
         details: MediaDetailsOption::Details(TmdbDetails::Season(SeasonDetails {
             id: 11111,
@@ -252,6 +253,7 @@ pub fn create_test_season_reference(series_id: SeriesID) -> SeasonReference {
             poster_path: Some("/test_season_poster.jpg".to_string()),
         })),
         endpoint: SeasonURL::from_string("/api/season/test-season-1".to_string()),
+        created_at: chrono::Utc::now(),
         theme_color: None,
     }
 }

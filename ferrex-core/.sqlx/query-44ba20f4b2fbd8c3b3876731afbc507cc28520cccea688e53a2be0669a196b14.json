@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT 1 as exists\n            FROM user_completed_media \n            WHERE user_id = $1 \n                AND media_id_json->>'type' = 'Episode'\n                AND media_id_json->>'id' = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "44ba20f4b2fbd8c3b3876731afbc507cc28520cccea688e53a2be0669a196b14"
+}

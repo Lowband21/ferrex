@@ -153,6 +153,7 @@ impl TmdbApiProvider {
                 title: SeriesTitle::new(r.inner.name).unwrap(),
                 details: MediaDetailsOption::Endpoint(format!("/api/series/{}", r.inner.id)),
                 endpoint: SeriesURL::from_string(format!("/api/series/{}", r.inner.id)),
+                created_at: chrono::Utc::now(), // New results use current time
                 theme_color: None,
             })
             .collect())

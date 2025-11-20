@@ -1,6 +1,7 @@
 use axum::{Extension, Json, extract::State};
 use serde::{Deserialize, Serialize};
 use ferrex_core::{user::User, ApiResponse};
+use uuid::Uuid;
 use crate::{
     errors::{AppError, AppResult},
     AppState,
@@ -24,6 +25,7 @@ pub struct PreferencesResponse {
 pub async fn update_preferences(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
+    Extension(device_id): Extension<Option<Uuid>>,
     Json(request): Json<UpdatePreferencesRequest>,
 ) -> AppResult<Json<ApiResponse<PreferencesResponse>>> {
     let mut updated_user = user.clone();
@@ -34,6 +36,21 @@ pub async fn update_preferences(
         if updated_user.preferences.auto_login_enabled != auto_login {
             updated_user.preferences.auto_login_enabled = auto_login;
             changed = true;
+            
+            // Also update the device credential if we have a device_id
+            if let Some(device_id) = device_id {
+                if let Ok(Some(mut credential)) = state.db.backend()
+                    .get_device_credential(user.id, device_id)
+                    .await
+                {
+                    credential.auto_login_enabled = auto_login;
+                    credential.updated_at = chrono::Utc::now();
+                    let _ = state.db.backend().upsert_device_credential(&credential).await;
+                    
+                    tracing::info!("Updated device credential auto-login for user {} on device {}", 
+                        user.id, device_id);
+                }
+            }
         }
     }
     

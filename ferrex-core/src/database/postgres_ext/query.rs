@@ -7,8 +7,15 @@ use crate::{
 };
 
 impl PostgresDatabase {
-    /// Execute a media query - queries from actual database tables
+    /// Execute a media query - delegates to optimized implementation
     pub async fn query_media(&self, query: &MediaQuery) -> Result<Vec<MediaReferenceWithStatus>> {
+        // Use the optimized query implementation that leverages indexes
+        self.query_media_optimized(query).await
+    }
+    
+    /// Legacy implementation - kept for reference
+    #[allow(dead_code)]
+    async fn query_media_legacy(&self, query: &MediaQuery) -> Result<Vec<MediaReferenceWithStatus>> {
         let mut results = Vec::new();
         
         // Get watch state if user context provided

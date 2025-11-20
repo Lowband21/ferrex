@@ -154,6 +154,7 @@ use ferrex_core::{
     auth::domain::services::{create_authentication_service, AuthenticationService},
     database::traits::MediaFilters,
     database::PostgresDatabase,
+    scanner::FolderMonitor,
     Library, MediaDatabase, MediaEvent, MediaFileMetadata, ParsedMediaInfo, ScanRequest,
 };
 use futures;
@@ -208,6 +209,7 @@ pub struct AppState {
     pub image_service: Arc<ferrex_core::ImageService>,
     pub websocket_manager: Arc<websocket::ConnectionManager>,
     pub auth_service: Arc<AuthenticationService>,
+    pub folder_monitor: Arc<FolderMonitor>,
     /// Track admin sessions per device for PIN authentication eligibility
     pub admin_sessions: Arc<Mutex<HashMap<Uuid, AdminSessionInfo>>>,
 }
@@ -438,6 +440,48 @@ async fn main() -> anyhow::Result<()> {
         )))
     };
 
+    // Initialize FolderMonitor
+    let folder_monitor = {
+        // Load libraries from database
+        let libraries = match db.backend().list_libraries().await {
+            Ok(libs) => libs,
+            Err(e) => {
+                warn!("Failed to load libraries for FolderMonitor: {}", e);
+                Vec::new()
+            }
+        };
+        
+        // Get the backend as a trait object for FolderMonitor
+        let postgres_backend = db
+            .as_any()
+            .downcast_ref::<PostgresDatabase>()
+            .expect("Expected PostgreSQL backend for FolderMonitor");
+        
+        // Create FolderMonitorConfig with 60-second scan interval
+        let folder_monitor_config = ferrex_core::scanner::FolderMonitorConfig {
+            scan_interval_secs: 60,
+            max_retry_attempts: 3,
+            stale_folder_hours: 24,
+            batch_size: 100,
+            error_retry_threshold: 3,
+        };
+        
+        let monitor = Arc::new(FolderMonitor::new(
+            Arc::new(postgres_backend.clone()) as Arc<dyn ferrex_core::database::traits::MediaDatabaseTrait>,
+            Arc::new(tokio::sync::RwLock::new(libraries)),
+            folder_monitor_config,
+        ));
+        
+        // Start the folder monitor background task
+        if let Err(e) = monitor.clone().start().await {
+            warn!("Failed to start FolderMonitor background task: {}", e);
+        } else {
+            info!("FolderMonitor background task started with 60-second scan interval");
+        }
+        
+        monitor
+    };
+
     let state = AppState {
         db: db.clone(),
         database: db,
@@ -449,6 +493,7 @@ async fn main() -> anyhow::Result<()> {
         image_service,
         websocket_manager,
         auth_service,
+        folder_monitor,
         admin_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
@@ -521,7 +566,13 @@ async fn main() -> anyhow::Result<()> {
 
 pub fn create_app(state: AppState) -> Router {
     // Create versioned API routes
-    let versioned_api = routes::create_api_router(state.clone());
+    let mut versioned_api = routes::create_api_router(state.clone());
+    
+    // Apply rate limiting to API routes
+    let rate_limit_config = middleware::rate_limit_setup::RateLimitConfig::default();
+    versioned_api = middleware::rate_limit_setup::apply_auth_rate_limits(versioned_api, &rate_limit_config);
+    versioned_api = middleware::rate_limit_setup::apply_public_rate_limits(versioned_api, &rate_limit_config);
+    versioned_api = middleware::rate_limit_setup::apply_api_rate_limits(versioned_api, &rate_limit_config);
 
     // Create backward compatibility layer for old API paths
     // This will redirect old paths to v1 endpoints during migration period
@@ -632,6 +683,19 @@ pub fn create_app(state: AppState) -> Router {
         .route(
             "/api/users/sessions",
             axum::routing::delete(session_handlers::delete_all_sessions_handler),
+        )
+        // Folder inventory monitoring
+        .route(
+            "/api/folders/inventory/:library_id",
+            get(handlers::get_folder_inventory),
+        )
+        .route(
+            "/api/folders/progress/:library_id",
+            get(handlers::get_scan_progress),
+        )
+        .route(
+            "/api/folders/rescan/:folder_id",
+            post(handlers::trigger_folder_rescan),
         )
         // Query system
         .route(

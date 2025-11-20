@@ -1,5 +1,5 @@
 use ferrex_core::{
-    PostgresUserAuthRepository,
+    infrastructure::repositories::PostgresUserAuthRepository,
     AuthenticationService,
     UserAuthentication,
 };

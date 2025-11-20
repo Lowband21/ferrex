@@ -10,6 +10,7 @@
 pub mod https;
 pub mod hsts;
 pub mod rate_limit;
+pub mod rate_limit_setup;
 pub mod csrf;
 
 pub use https::{HttpsRedirectLayer, HttpsRedirectMiddleware, HttpsEnforcementLayer, HttpsEnforcementMiddleware};

@@ -48,6 +48,11 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         .route("/auth/device/pin/set", post(auth::device_handlers::set_device_pin))
         .route("/auth/device/list", get(auth::device_handlers::list_user_devices))
         .route("/auth/device/revoke", post(auth::device_handlers::revoke_device))
+        // Device trust validation endpoints
+        .route("/auth/device/validate", get(auth::device_validation::validate_device_trust))
+        .route("/auth/device/revoke-trust", post(auth::device_validation::revoke_device_trust))
+        .route("/auth/device/trusted", get(auth::device_validation::list_trusted_devices))
+        .route("/auth/device/extend-trust", post(auth::device_validation::extend_device_trust))
         // Watch status endpoints
         .route("/watch/progress", post(watch_status_handlers::update_progress_handler))
         .route("/watch/state", get(watch_status_handlers::get_watch_state_handler))
@@ -77,6 +82,8 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         // User preferences endpoint (for current user)
         .route("/users/me/preferences", put(auth::user_preferences::update_preferences))
         .route("/users/me/preferences", get(auth::user_preferences::get_preferences))
+        // User list endpoint (authenticated)
+        .route("/users/list", get(user_handlers::list_users_authenticated_handler))
         // User management endpoints (admin)
         .route("/users", get(user_management::list_users))
         .route("/users", post(user_management::create_user))

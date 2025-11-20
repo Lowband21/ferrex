@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                sr.id, sr.series_id, sr.season_number, sr.library_id, sr.tmdb_series_id, sr.created_at,\n                sm.tmdb_details\n            FROM season_references sr\n            LEFT JOIN season_metadata sm ON sr.id = sm.season_id\n            WHERE sr.series_id = $1\n            ORDER BY sr.season_number\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "series_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "season_number",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "tmdb_series_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "tmdb_details",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d0e56b64fd628f4ece350562bf8b2e91b8b615268f1c3e44de08b4319ce3aed1"
+}

@@ -1,112 +1,48 @@
 use crate::media::{
-    MediaReference,
+    MediaReference, MediaRef, Playable,
     MediaDetailsOption, TmdbDetails,
 };
 
 // ===== MediaReference Sorting and Filtering Methods =====
+//
+// These methods are kept for backward compatibility but now use
+// the trait system internally for cleaner implementation.
 
 impl MediaReference {
     /// Get title regardless of media type
     pub fn title(&self) -> &str {
-        match self {
-            Self::Movie(m) => m.title.as_str(),
-            Self::Series(s) => s.title.as_str(),
-            Self::Season(s) => {
-                // For seasons, we might want to construct a title like "Season 1"
-                // But for now, let's use the series title which is available via details
-                match &s.details {
-                    MediaDetailsOption::Details(TmdbDetails::Season(details)) => &details.name,
-                    _ => "Unknown Season",
-                }
-            }
-            Self::Episode(e) => {
-                match &e.details {
-                    MediaDetailsOption::Details(TmdbDetails::Episode(details)) => &details.name,
-                    _ => "Unknown Episode",
-                }
-            }
-        }
+        // Now uses the trait method internally
+        self.as_ref().title()
     }
     
     /// Get release year if available
     pub fn year(&self) -> Option<u16> {
-        match self {
-            Self::Movie(m) => m.details.get_release_year(),
-            Self::Series(s) => match &s.details {
-                MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
-                    details.first_air_date
-                        .as_ref()
-                        .and_then(|date| date.split('-').next())
-                        .and_then(|year| year.parse().ok())
-                }
-                _ => None,
-            },
-            Self::Season(s) => match &s.details {
-                MediaDetailsOption::Details(TmdbDetails::Season(details)) => {
-                    details.air_date
-                        .as_ref()
-                        .and_then(|date| date.split('-').next())
-                        .and_then(|year| year.parse().ok())
-                }
-                _ => None,
-            },
-            Self::Episode(e) => match &e.details {
-                MediaDetailsOption::Details(TmdbDetails::Episode(details)) => {
-                    details.air_date
-                        .as_ref()
-                        .and_then(|date| date.split('-').next())
-                        .and_then(|year| year.parse().ok())
-                }
-                _ => None,
-            },
-        }
+        // Now uses the trait method internally
+        self.as_ref().year()
     }
     
     /// Get rating (vote average) if available
     pub fn rating(&self) -> Option<f32> {
-        match self {
-            Self::Movie(m) => match &m.details {
-                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => details.vote_average,
-                _ => None,
-            },
-            Self::Series(s) => match &s.details {
-                MediaDetailsOption::Details(TmdbDetails::Series(details)) => details.vote_average,
-                _ => None,
-            },
-            Self::Episode(e) => match &e.details {
-                MediaDetailsOption::Details(TmdbDetails::Episode(details)) => details.vote_average,
-                _ => None,
-            },
-            Self::Season(_) => None, // Seasons don't have ratings
-        }
+        // Now uses the trait method internally
+        self.as_ref().rating()
     }
     
     /// Get genres if available
     pub fn genres(&self) -> Option<Vec<&str>> {
-        match self {
-            Self::Movie(m) => match &m.details {
-                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
-                    Some(details.genres.iter().map(|s| s.as_str()).collect())
-                }
-                _ => None,
-            },
-            Self::Series(s) => match &s.details {
-                MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
-                    Some(details.genres.iter().map(|s| s.as_str()).collect())
-                }
-                _ => None,
-            },
-            _ => None, // Episodes and seasons don't have their own genres
+        // Uses trait method, but returns Option for backward compatibility
+        let genres = self.as_ref().genres();
+        if genres.is_empty() {
+            None
+        } else {
+            Some(genres)
         }
     }
     
     /// Get file creation date for date_added sorting
     pub fn date_added(&self) -> Option<chrono::DateTime<chrono::Utc>> {
-        match self {
-            Self::Movie(m) => Some(m.file.created_at),
-            Self::Episode(e) => Some(e.file.created_at),
-            _ => None, // Series and seasons don't have files
-        }
+        // Use the Playable trait to access file information
+        self.as_playable()
+            .map(|playable| playable.file().created_at)
     }
     
     /// Sort a collection of media references by title

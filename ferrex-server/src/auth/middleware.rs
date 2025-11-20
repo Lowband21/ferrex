@@ -8,6 +8,7 @@ use axum::{
 use ferrex_core::user::User;
 use ferrex_core::rbac::UserPermissions;
 use ferrex_core::api_types::ApiResponse;
+use uuid::Uuid;
 
 use super::jwt::validate_token;
 use ferrex_core::database::postgres::PostgresDatabase;
@@ -19,7 +20,7 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     let token = extract_bearer_token(&request)?;
-    let user = validate_and_get_user(&state, &token).await?;
+    let (user, device_id) = validate_and_get_user(&state, &token).await?;
     
     // Load user permissions
     let permissions = state.database.backend()
@@ -29,6 +30,7 @@ pub async fn auth_middleware(
     
     request.extensions_mut().insert(user);
     request.extensions_mut().insert(permissions);
+    request.extensions_mut().insert(device_id); // Add device_id as Option<Uuid>
     Ok(next.run(request).await)
 }
 
@@ -38,7 +40,7 @@ pub async fn optional_auth_middleware(
     next: Next,
 ) -> Response {
     if let Ok(token) = extract_bearer_token(&request) {
-        if let Ok(user) = validate_and_get_user(&state, &token).await {
+        if let Ok((user, device_id)) = validate_and_get_user(&state, &token).await {
             // Also load permissions when user is authenticated
             if let Ok(permissions) = state.database.backend()
                 .get_user_permissions(user.id)
@@ -46,6 +48,7 @@ pub async fn optional_auth_middleware(
                 request.extensions_mut().insert(permissions);
             }
             request.extensions_mut().insert(user);
+            request.extensions_mut().insert(device_id); // Add device_id as Option<Uuid>
         }
     }
     
@@ -116,13 +119,13 @@ fn extract_bearer_token(request: &Request) -> Result<String, StatusCode> {
 async fn validate_and_get_user(
     state: &AppState,
     token: &str,
-) -> Result<User, StatusCode> {
+) -> Result<(User, Option<Uuid>), StatusCode> {
     // First try to validate as a session token
-    if let Ok(user) = validate_session_token(state, token).await {
-        return Ok(user);
+    if let Ok((user, device_id)) = validate_session_token(state, token).await {
+        return Ok((user, device_id));
     }
     
-    // Fall back to JWT validation with revocation check
+    // Fall back to JWT validation with revocation check (no device_id for JWT)
     let pool = if let Some(pg_db) = state.db.as_any().downcast_ref::<PostgresDatabase>() {
         pg_db.pool()
     } else {
@@ -133,19 +136,21 @@ async fn validate_and_get_user(
         .await
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
     
-    state
+    let user = state
         .db
         .backend()
         .get_user_by_id(claims.sub)
         .await
         .map_err(|_| StatusCode::UNAUTHORIZED)?
-        .ok_or(StatusCode::UNAUTHORIZED)
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    
+    Ok((user, None)) // JWT tokens don't have device_id
 }
 
 async fn validate_session_token(
     state: &AppState,
     token: &str,
-) -> Result<User, StatusCode> {
+) -> Result<(User, Option<Uuid>), StatusCode> {
     use sha2::{Sha256, Digest};
     use chrono::Utc;
     
@@ -162,10 +167,10 @@ async fn validate_session_token(
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     };
     
-    // Query the sessions table
+    // Query the sessions table including device_id
     let session_row = sqlx::query!(
         r#"
-        SELECT user_id, expires_at, revoked
+        SELECT user_id, device_id, expires_at, revoked
         FROM sessions
         WHERE token_hash = $1
         "#,
@@ -173,29 +178,42 @@ async fn validate_session_token(
     )
     .fetch_optional(pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        tracing::error!("Database error validating session token: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::UNAUTHORIZED)?;
     
-    // Check if session exists
-    let session_row = match session_row {
-        Some(row) => row,
-        None => return Err(StatusCode::UNAUTHORIZED),
-    };
-    
-    // Check if session is valid
+    // Check if session is revoked
     if session_row.revoked {
         return Err(StatusCode::UNAUTHORIZED);
     }
     
+    // Check if session is expired
     if session_row.expires_at < Utc::now() {
         return Err(StatusCode::UNAUTHORIZED);
     }
     
     // Get the user
-    state
+    let user = state
         .db
         .backend()
         .get_user_by_id(session_row.user_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::UNAUTHORIZED)
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    
+    // Update last activity (fire-and-forget)
+    let pool_clone = pool.clone();
+    let token_hash_clone = token_hash.clone();
+    tokio::spawn(async move {
+        let _ = sqlx::query!(
+            "UPDATE sessions SET last_activity = NOW() WHERE token_hash = $1",
+            token_hash_clone
+        )
+        .execute(&pool_clone)
+        .await;
+    });
+    
+    Ok((user, Some(session_row.device_id)))
 }

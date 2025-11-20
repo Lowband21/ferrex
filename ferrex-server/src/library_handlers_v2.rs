@@ -11,6 +11,7 @@ use ferrex_core::{
     ParsedMediaInfo, TmdbDetails, UpdateLibraryRequest,
 };
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -55,10 +56,33 @@ pub async fn get_library_media_handler(
                 // Get seasons for this series
                 match state.db.backend().get_series_seasons(&series_id).await {
                     Ok(seasons) => {
-                        info!("Found {} seasons for series {}", seasons.len(), series_id.as_str());
+                        info!("Found {} seasons for series {} ({})", 
+                              seasons.len(), 
+                              series.title.as_str(),
+                              series_id.as_str());
                         for season in seasons {
                             let season_id = season.id.clone();
-                            info!("Adding season {} to media references", season_id.as_str());
+                            info!("Adding season {} (S{}) for series {} to media references", 
+                                  season_id.as_str(),
+                                  season.season_number.value(),
+                                  series.title.as_str());
+                            
+                            // DEBUG: Verify series_id matches
+                            if season.series_id != series.id {
+                                error!(
+                                    "SERIES_ID MISMATCH! Season {} has series_id {} but belongs to series {}",
+                                    season_id.as_str(),
+                                    season.series_id.as_str(),
+                                    series.id.as_str()
+                                );
+                            } else {
+                                info!(
+                                    "Season {} correctly has series_id {} matching series",
+                                    season_id.as_str(),
+                                    season.series_id.as_str()
+                                );
+                            }
+                            
                             media.push(MediaReference::Season(season.clone()));
 
                             // Get episodes for this season
@@ -478,9 +502,36 @@ pub async fn create_library_handler(
         library.id, library.library_type
     );
 
-    match state.db.backend().create_library(library).await {
+    match state.db.backend().create_library(library.clone()).await {
         Ok(id) => {
             info!("Library successfully created in database with ID: {}", id);
+            
+            // Update the FolderMonitor's library list to include the new library
+            {
+                let mut libraries = state.folder_monitor.libraries.write().await;
+                libraries.push(library.clone());
+            }
+            
+            // Trigger immediate folder discovery for the new library
+            if let Err(e) = state.folder_monitor.discover_library_folders_immediate(&library.id).await {
+                warn!("Failed to trigger immediate folder discovery for library {}: {}", id, e);
+                // Continue anyway - folder discovery will happen in the next scheduled cycle
+            } else {
+                info!("Immediate folder discovery triggered for library {}", id);
+                
+                // Trigger an immediate scan for the newly created library after folder discovery
+                info!("Triggering immediate scan for newly created library {}", id);
+                match state.scan_manager.start_library_scan(Arc::new(library.clone()), false).await {
+                    Ok(scan_id) => {
+                        info!("Immediate scan started for library {} with scan ID: {}", id, scan_id);
+                    }
+                    Err(e) => {
+                        warn!("Failed to trigger immediate scan for library {}: {}", id, e);
+                        // Continue anyway - scan can be triggered manually or will happen on schedule
+                    }
+                }
+            }
+            
             Ok(Json(ApiResponse::success(id)))
         }
         Err(e) => {

@@ -7,6 +7,7 @@ use crate::media::{
 };
 use crate::{Library, MediaError, MediaFile, MediaFileMetadata, Result};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde_json::{self, json};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::str::FromStr;
@@ -68,6 +69,19 @@ impl PostgresDatabase {
         })
     }
 
+    /// Create a PostgresDatabase from an existing pool (mainly for testing)
+    pub fn from_pool(pool: PgPool) -> Self {
+        // Use default values for test pools
+        let max_connections = 20;
+        let min_connections = 5;
+        
+        PostgresDatabase {
+            pool,
+            max_connections,
+            min_connections,
+        }
+    }
+    
     /// Get a reference to the connection pool for use in extension modules
     pub fn pool(&self) -> &PgPool {
         &self.pool
@@ -622,8 +636,16 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn store_media(&self, media_file: MediaFile) -> Result<String> {
-        self.store_media_file_complete(&media_file).await?;
-        Ok(media_file.id.to_string())
+        // Use a transaction to get the actual ID
+        let mut tx = self.pool.begin().await
+            .map_err(|e| MediaError::Internal(format!("Transaction failed: {}", e)))?;
+        
+        let actual_id = self.store_media_file_in_transaction(&mut tx, &media_file).await?;
+        
+        tx.commit().await
+            .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
+        
+        Ok(actual_id.to_string())
     }
 
     async fn store_media_batch(&self, media_files: Vec<MediaFile>) -> Result<Vec<String>> {
@@ -1141,7 +1163,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         self.store_series_reference_complete(series, metadata).await
     }
 
-    async fn store_season_reference(&self, season: &SeasonReference) -> Result<()> {
+    async fn store_season_reference(&self, season: &SeasonReference) -> Result<Uuid> {
         // Extract metadata if available
         let metadata = match &season.details {
             MediaDetailsOption::Details(TmdbDetails::Season(details)) => {
@@ -1158,20 +1180,25 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let series_uuid = Uuid::parse_str(season.series_id.as_str())
             .map_err(|e| MediaError::Internal(format!("Invalid series UUID: {}", e)))?;
         
-        sqlx::query!(
+        // Use RETURNING to get the actual ID (either new or existing)
+        let actual_season_id = sqlx::query_scalar!(
             r#"
-            INSERT INTO season_references (id, season_number, series_id, tmdb_series_id)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO season_references (id, season_number, series_id, library_id, tmdb_series_id, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (series_id, season_number) DO UPDATE
             SET tmdb_series_id = EXCLUDED.tmdb_series_id,
+                library_id = EXCLUDED.library_id,
                 updated_at = NOW()
+            RETURNING id
             "#,
             season_uuid,
             season.season_number.value() as i32,
             series_uuid,
-            season.tmdb_series_id as i64
+            season.library_id,
+            season.tmdb_series_id as i64,
+            season.created_at
         )
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to store season reference: {}", e)))?;
 
@@ -1189,7 +1216,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                     images = EXCLUDED.images,
                     updated_at = NOW()
                 "#,
-                season_uuid,
+                actual_season_id,
                 meta,
                 images
             )
@@ -1198,7 +1225,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             .map_err(|e| MediaError::Internal(format!("Failed to store season metadata: {}", e)))?;
         }
 
-        Ok(())
+        Ok(actual_season_id)
     }
 
     async fn store_episode_reference(&self, episode: &EpisodeReference) -> Result<()> {
@@ -1219,31 +1246,74 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let mut tx = self.pool.begin().await
             .map_err(|e| MediaError::Internal(format!("Failed to start transaction: {}", e)))?;
 
-        // Insert episode reference
-        sqlx::query!(
+        // First, check if episode already exists for this series/season/episode number
+        let existing_episode_id: Option<Uuid> = sqlx::query_scalar!(
             r#"
-            INSERT INTO episode_references (
-                id, series_id, season_id, file_id, 
-                season_number, episode_number, tmdb_series_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (series_id, season_number, episode_number) 
-            DO UPDATE SET
-                season_id = EXCLUDED.season_id,
-                file_id = EXCLUDED.file_id,
-                tmdb_series_id = EXCLUDED.tmdb_series_id,
-                updated_at = NOW()
+            SELECT id 
+            FROM episode_references 
+            WHERE series_id = $1 
+              AND season_number = $2 
+              AND episode_number = $3
             "#,
-            episode_uuid,
             series_uuid,
-            season_uuid,
-            file_uuid,
             episode.season_number.value() as i16,
-            episode.episode_number.value() as i16,
-            episode.tmdb_series_id as i64
+            episode.episode_number.value() as i16
         )
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to insert episode reference: {}", e)))?;
+        .map_err(|e| MediaError::Internal(format!("Failed to check existing episode: {}", e)))?;
+
+        let actual_episode_id = if let Some(existing_id) = existing_episode_id {
+            // Episode exists, update it
+            info!("Episode already exists with ID {}, updating instead of creating new", existing_id);
+            
+            sqlx::query!(
+                r#"
+                UPDATE episode_references 
+                SET season_id = $1,
+                    file_id = $2,
+                    tmdb_series_id = $3,
+                    updated_at = NOW()
+                WHERE id = $4
+                "#,
+                season_uuid,
+                file_uuid,
+                episode.tmdb_series_id as i64,
+                existing_id
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| MediaError::Internal(format!("Failed to update episode reference: {}", e)))?;
+            
+            existing_id
+        } else {
+            // Episode doesn't exist, insert it
+            sqlx::query!(
+                r#"
+                INSERT INTO episode_references (
+                    id, series_id, season_id, file_id, 
+                    season_number, episode_number, tmdb_series_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                "#,
+                episode_uuid,
+                series_uuid,
+                season_uuid,
+                file_uuid,
+                episode.season_number.value() as i16,
+                episode.episode_number.value() as i16,
+                episode.tmdb_series_id as i64
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| MediaError::Internal(format!("Failed to insert episode reference: {}", e)))?;
+            
+            episode_uuid
+        };
+        
+        // Log if we're using a different ID than expected (conflict occurred)
+        if actual_episode_id != episode_uuid {
+            info!("Episode already exists with ID {}, updating instead of creating new", actual_episode_id);
+        }
 
         // Store metadata if available
         if let MediaDetailsOption::Details(TmdbDetails::Episode(details)) = &episode.details {
@@ -1259,7 +1329,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                     tmdb_details = EXCLUDED.tmdb_details,
                     updated_at = NOW()
                 "#,
-                episode_uuid,
+                actual_episode_id,  // Use the actual ID from the database
                 tmdb_details_json,
                 serde_json::json!([])
             )
@@ -1272,8 +1342,8 @@ impl MediaDatabaseTrait for PostgresDatabase {
         tx.commit().await
             .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
 
-        info!("Successfully stored episode reference: {} S{}E{}", 
-              episode.id.as_str(), episode.season_number.value(), episode.episode_number.value());
+        info!("Successfully stored episode reference: {} S{}E{} (actual ID: {})", 
+              episode.id.as_str(), episode.season_number.value(), episode.episode_number.value(), actual_episode_id);
 
         Ok(())
     }
@@ -1346,7 +1416,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let rows = sqlx::query!(
             r#"
             SELECT 
-                sr.id, sr.series_id, sr.season_number, sr.tmdb_series_id,
+                sr.id, sr.series_id, sr.season_number, sr.library_id, sr.tmdb_series_id, sr.created_at,
                 sm.tmdb_details
             FROM season_references sr
             LEFT JOIN season_metadata sm ON sr.id = sm.season_id
@@ -1380,9 +1450,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 id: SeasonID::new(row.id.to_string())?,
                 season_number: SeasonNumber::new(row.season_number as u8),
                 series_id: SeriesID::new(row.series_id.to_string())?,
+                library_id: row.library_id,
                 tmdb_series_id: row.tmdb_series_id as u64,
                 details,
                 endpoint: SeasonURL::from_string(format!("/api/media/{}", row.id)),
+                created_at: row.created_at,
                 theme_color: None, // Seasons typically inherit theme color from the series
             });
         }
@@ -1518,7 +1590,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let rows = sqlx::query!(
             r#"
             SELECT
-                sr.id, sr.library_id, sr.tmdb_id as "tmdb_id?", sr.title, sr.theme_color
+                sr.id, sr.library_id, sr.tmdb_id as "tmdb_id?", sr.title, sr.theme_color, sr.created_at
             FROM series_references sr
             WHERE sr.library_id = $1
             ORDER BY sr.title
@@ -1542,6 +1614,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 title: SeriesTitle::new(row.title)?,
                 details: MediaDetailsOption::Endpoint(format!("/api/series/{}", row.id)),
                 endpoint: SeriesURL::from_string(format!("/api/series/{}", row.id)),
+                created_at: row.created_at,
                 theme_color: row.theme_color,
             };
 
@@ -1567,7 +1640,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         // First get the series reference
         let series_row = sqlx::query!(
             r#"
-            SELECT id, library_id, tmdb_id as "tmdb_id?", title, theme_color
+            SELECT id, library_id, tmdb_id as "tmdb_id?", title, theme_color, created_at
             FROM series_references
             WHERE id = $1
             "#,
@@ -1616,6 +1689,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             title: SeriesTitle::new(series_row.title)?,
             details,
             endpoint: SeriesURL::from_string(format!("/api/series/{}", series_uuid)),
+            created_at: series_row.created_at,
             theme_color: series_row.theme_color,
         })
     }
@@ -1627,7 +1701,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let row = sqlx::query!(
             r#"
             SELECT 
-                sr.id, sr.series_id, sr.season_number, sr.tmdb_series_id,
+                sr.id, sr.series_id, sr.season_number, sr.library_id, sr.tmdb_series_id, sr.created_at,
                 sm.tmdb_details
             FROM season_references sr
             LEFT JOIN season_metadata sm ON sr.id = sm.season_id
@@ -1657,9 +1731,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
             id: SeasonID::new(row.id.to_string())?,
             season_number: SeasonNumber::new(row.season_number as u8),
             series_id: SeriesID::new(row.series_id.to_string())?,
+            library_id: row.library_id,
             tmdb_series_id: row.tmdb_series_id as u64,
             details,
             endpoint: SeasonURL::from_string(format!("/api/media/{}", row.id)),
+            created_at: row.created_at,
             theme_color: None, // Seasons typically inherit theme color from the series
         })
     }
@@ -1769,7 +1845,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     ) -> Result<Option<SeriesReference>> {
         let row = sqlx::query!(
             r#"
-            SELECT id, library_id, tmdb_id as "tmdb_id?", title, theme_color
+            SELECT id, library_id, tmdb_id as "tmdb_id?", title, theme_color, created_at
             FROM series_references
             WHERE library_id = $1 AND tmdb_id = $2
             "#,
@@ -1793,6 +1869,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 title: SeriesTitle::new(row.title)?,
                 details: MediaDetailsOption::Endpoint(format!("/api/series/{}", row.id)),
                 endpoint: SeriesURL::from_string(format!("/api/series/{}", row.id)),
+                created_at: row.created_at,
                 theme_color: row.theme_color,
             }))
         } else {
@@ -1810,7 +1887,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let row = sqlx::query!(
             r#"
-            SELECT id, library_id, tmdb_id as "tmdb_id?", title, theme_color
+            SELECT id, library_id, tmdb_id as "tmdb_id?", title, theme_color, created_at
             FROM series_references
             WHERE library_id = $1 AND title ILIKE $2
             ORDER BY 
@@ -1841,6 +1918,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 title: SeriesTitle::new(row.title)?,
                 details: MediaDetailsOption::Endpoint(format!("/api/series/{}", row.id)),
                 endpoint: SeriesURL::from_string(format!("/api/series/{}", row.id)),
+                created_at: row.created_at,
                 theme_color: row.theme_color,
             }))
         } else {
@@ -3710,8 +3788,8 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let rows = sqlx::query!(
             r#"
             SELECT 
-                sr.id, sr.library_id, sr.tmdb_id as "tmdb_id?", sr.title, sr.theme_color,
-                sm.tmdb_details
+                sr.id, sr.library_id, sr.tmdb_id as "tmdb_id?", sr.title, sr.theme_color, sr.created_at,
+                sm.tmdb_details as "tmdb_details?"
             FROM series_references sr
             LEFT JOIN series_metadata sm ON sr.id = sm.series_id
             WHERE sr.id = ANY($1)
@@ -3724,28 +3802,36 @@ impl MediaDatabaseTrait for PostgresDatabase {
         
         let mut series_list = Vec::new();
         for row in rows {
+            // Extract required fields - these are non-nullable in the query
+            let row_id = row.id;
+            let library_id = row.library_id;
+            let title = row.title;
+            let created_at = row.created_at;
+            
             // Build the details field
-            let details = if let Some(metadata) = row.tmdb_details {
-                match serde_json::from_value::<EnhancedSeriesDetails>(metadata) {
-                    Ok(series_details) => MediaDetailsOption::Details(TmdbDetails::Series(series_details)),
-                    Err(e) => {
-                        warn!("Failed to deserialize series metadata: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/api/series/{}", row.id))
+            let details = match row.tmdb_details {
+                Some(metadata) if !metadata.is_null() => {
+                    match serde_json::from_value::<EnhancedSeriesDetails>(metadata) {
+                        Ok(series_details) => MediaDetailsOption::Details(TmdbDetails::Series(series_details)),
+                        Err(e) => {
+                            warn!("Failed to deserialize series metadata: {}", e);
+                            MediaDetailsOption::Endpoint(format!("/api/series/{}", row_id))
+                        }
                     }
                 }
-            } else {
-                MediaDetailsOption::Endpoint(format!("/api/series/{}", row.id))
+                _ => MediaDetailsOption::Endpoint(format!("/api/series/{}", row_id))
             };
             
             let tmdb_id = row.tmdb_id.unwrap_or(0) as u64;
             
             series_list.push(SeriesReference {
-                id: SeriesID::new(row.id.to_string())?,
-                library_id: row.library_id,
+                id: SeriesID::new(row_id.to_string())?,
+                library_id,
                 tmdb_id,
-                title: SeriesTitle::new(row.title)?,
+                title: SeriesTitle::new(title)?,
                 details,
-                endpoint: SeriesURL::from_string(format!("/api/series/{}", row.id)),
+                endpoint: SeriesURL::from_string(format!("/api/series/{}", row_id)),
+                created_at,
                 theme_color: row.theme_color,
             });
         }
@@ -3768,7 +3854,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let rows = sqlx::query!(
             r#"
             SELECT 
-                sr.id, sr.series_id, sr.season_number, sr.tmdb_series_id,
+                sr.id, sr.series_id, sr.season_number, sr.library_id, sr.tmdb_series_id, sr.created_at,
                 sm.tmdb_details
             FROM season_references sr
             LEFT JOIN season_metadata sm ON sr.id = sm.season_id
@@ -3800,9 +3886,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 id: SeasonID::new(row.id.to_string())?,
                 season_number: SeasonNumber::new(row.season_number as u8),
                 series_id: SeriesID::new(row.series_id.to_string())?,
+                library_id: row.library_id,
                 tmdb_series_id: row.tmdb_series_id as u64,
                 details,
                 endpoint: SeasonURL::from_string(format!("/api/media/{}", row.id)),
+                created_at: row.created_at,
                 theme_color: None,
             });
         }
@@ -3887,6 +3975,51 @@ impl MediaDatabaseTrait for PostgresDatabase {
         }
         
         Ok(episodes)
+    }
+
+    // Folder inventory management methods
+    async fn get_folders_needing_scan(&self, filters: &FolderScanFilters) -> Result<Vec<FolderInventory>> {
+        self.get_folders_needing_scan_impl(filters).await
+    }
+    
+    async fn update_folder_status(&self, folder_id: Uuid, status: FolderProcessingStatus, error: Option<String>) -> Result<()> {
+        self.update_folder_status_impl(folder_id, status, error).await
+    }
+    
+    async fn record_folder_scan_error(&self, folder_id: Uuid, error: &str, next_retry: Option<DateTime<Utc>>) -> Result<()> {
+        self.record_folder_scan_error_impl(folder_id, error, next_retry).await
+    }
+    
+    async fn get_folder_inventory(&self, library_id: Uuid) -> Result<Vec<FolderInventory>> {
+        self.get_folder_inventory_impl(library_id).await
+    }
+    
+    async fn upsert_folder(&self, folder: &FolderInventory) -> Result<Uuid> {
+        self.upsert_folder_impl(folder).await
+    }
+    
+    async fn cleanup_stale_folders(&self, library_id: Uuid, stale_after_hours: i32) -> Result<u32> {
+        self.cleanup_stale_folders_impl(library_id, stale_after_hours).await
+    }
+    
+    async fn get_folder_by_path(&self, library_id: Uuid, path: &str) -> Result<Option<FolderInventory>> {
+        self.get_folder_by_path_impl(library_id, path).await
+    }
+    
+    async fn update_folder_stats(&self, folder_id: Uuid, total_files: i32, processed_files: i32, total_size_bytes: i64, file_types: Vec<String>) -> Result<()> {
+        self.update_folder_stats_impl(folder_id, total_files, processed_files, total_size_bytes, file_types).await
+    }
+    
+    async fn mark_folder_processed(&self, folder_id: Uuid) -> Result<()> {
+        self.mark_folder_processed_impl(folder_id).await
+    }
+    
+    async fn get_child_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>> {
+        self.get_child_folders_impl(parent_folder_id).await
+    }
+    
+    async fn get_season_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>> {
+        self.get_season_folders_impl(parent_folder_id).await
     }
 }
 
@@ -4106,5 +4239,4 @@ impl PostgresDatabase {
 
         Ok(())
     }
-
 }
