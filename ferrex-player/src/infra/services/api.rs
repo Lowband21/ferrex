@@ -13,8 +13,9 @@ use ferrex_core::{
         ActiveScansResponse, AuthToken, AuthenticatedDevice,
         CreateLibraryRequest, FilterIndicesRequest, LatestProgressResponse,
         Library, LibraryID, Media, MediaQuery, MediaRootBrowseResponse,
-        MediaWithStatus, ScanCommandAcceptedResponse, ScanCommandRequest,
-        ScanConfig, ScanMetrics, StartScanRequest, UpdateLibraryRequest,
+        MediaWithStatus, NextEpisode, ScanCommandAcceptedResponse,
+        ScanCommandRequest, ScanConfig, ScanMetrics, SeasonWatchStatus,
+        SeriesWatchStatus, StartScanRequest, UpdateLibraryRequest,
         UpdateProgressRequest, User, UserPermissions, UserWatchState,
     },
 };
@@ -136,6 +137,25 @@ pub trait ApiService: Send + Sync + Debug {
         &self,
         request: &UpdateProgressRequest,
     ) -> RepositoryResult<()>;
+
+    /// Get series watch state
+    async fn get_series_watch_state(
+        &self,
+        tmdb_series_id: u64,
+    ) -> RepositoryResult<SeriesWatchStatus>;
+
+    /// Get season watch state
+    async fn get_season_watch_state(
+        &self,
+        tmdb_series_id: u64,
+        season_number: u16,
+    ) -> RepositoryResult<SeasonWatchStatus>;
+
+    /// Get next episode for a series
+    async fn get_series_next_episode(
+        &self,
+        tmdb_series_id: u64,
+    ) -> RepositoryResult<Option<NextEpisode>>;
 
     /// List authenticated devices for current user
     async fn list_user_devices(

@@ -36,6 +36,10 @@ pub enum PlayerMessage {
     ToggleShuffle,
     ToggleRepeat,
 
+    // Episode navigation
+    NextEpisode,
+    PreviousEpisode,
+
     // Video events
     VideoLoaded(bool), // Success flag
     VideoReadyToPlay, // Video is ready to be loaded and played (from streaming domain)
@@ -125,6 +129,10 @@ impl fmt::Debug for PlayerMessage {
             // Playlist control
             PlayerMessage::ToggleShuffle => write!(f, "ToggleShuffle"),
             PlayerMessage::ToggleRepeat => write!(f, "ToggleRepeat"),
+
+            // Episode navigation
+            PlayerMessage::NextEpisode => write!(f, "NextEpisode"),
+            PlayerMessage::PreviousEpisode => write!(f, "PreviousEpisode"),
 
             // Video events
             PlayerMessage::VideoLoaded(success) => {

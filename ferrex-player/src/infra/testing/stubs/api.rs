@@ -336,6 +336,32 @@ impl ApiService for TestApiService {
         Ok(())
     }
 
+    async fn get_series_watch_state(
+        &self,
+        _tmdb_series_id: u64,
+    ) -> RepositoryResult<ferrex_core::player_prelude::SeriesWatchStatus> {
+        Err(RepositoryError::QueryFailed(
+            "get_series_watch_state not implemented in test stub".into(),
+        ))
+    }
+
+    async fn get_season_watch_state(
+        &self,
+        _tmdb_series_id: u64,
+        _season_number: u16,
+    ) -> RepositoryResult<ferrex_core::player_prelude::SeasonWatchStatus> {
+        Err(RepositoryError::QueryFailed(
+            "get_season_watch_state not implemented in test stub".into(),
+        ))
+    }
+
+    async fn get_series_next_episode(
+        &self,
+        _tmdb_series_id: u64,
+    ) -> RepositoryResult<Option<ferrex_core::player_prelude::NextEpisode>> {
+        Ok(None)
+    }
+
     async fn list_user_devices(
         &self,
     ) -> RepositoryResult<Vec<AuthenticatedDevice>> {

@@ -231,6 +231,30 @@ pub fn update_media(
                 if position > 0.0 && duration > 0.0 {
                     let api_service = api_service.clone();
 
+                    // Derive episode identity when updating an episode
+                    let episode_key_opt: Option<EpisodeKey> = match media_id {
+                        MediaID::Episode(ep_id) => {
+                            // Try to fetch the episode reference to extract identity
+                            match state
+                                .domains
+                                .media
+                                .state
+                                .repo_accessor
+                                .get(&MediaID::Episode(ep_id))
+                            {
+                                Ok(crate::infra::api_types::Media::Episode(ep)) => {
+                                    Some(EpisodeKey {
+                                        tmdb_series_id: ep.tmdb_series_id,
+                                        season_number: ep.season_number.value() as u16,
+                                        episode_number: ep.episode_number.value() as u16,
+                                    })
+                                }
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    };
+
                     DomainUpdateResult::task(Task::perform(
                         async move {
                             let request = UpdateProgressRequest {
@@ -238,6 +262,8 @@ pub fn update_media(
                                 media_type: media_id.media_type(),
                                 position: position as f32,
                                 duration: duration as f32,
+                                episode: episode_key_opt,
+                                last_media_uuid: Some(media_id.to_uuid()),
                             };
                             api_service
                                 .update_progress(&request)

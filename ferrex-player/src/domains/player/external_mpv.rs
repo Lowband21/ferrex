@@ -414,6 +414,17 @@ See mpv log for details: {}",
         Ok(())
     }
 
+    /// Seek to an absolute position (in seconds)
+    pub fn seek_absolute(
+        &mut self,
+        seconds: f64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Build arguments dynamically; JSON IPC copies the values, so local strings are fine
+        let secs = format!("{:.3}", seconds.max(0.0));
+        let args = vec!["seek", secs.as_str(), "absolute"];
+        self.send_command(&args)
+    }
+
     /// Poll for current playback position and window state
     pub fn poll_position(&mut self) -> (f64, f64) {
         // Read any pending IPC messages

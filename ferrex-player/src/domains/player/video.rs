@@ -174,12 +174,17 @@ pub fn load_video(
     );
 
     // Log URL bytes for debugging UTF-8 issues
-    log::debug!("URL bytes: {:?}", url_string.as_bytes());
-
-    // Store tone mapping config for the async task
-    //let tone_mapping_config_final = state.domains.player.state.tone_mapping_config.clone();
+    // log::debug!("URL bytes: {:?}", url_string.as_bytes());
 
     state.domains.ui.state.view = ViewState::Player;
+
+    let res_pos: f64 = state
+        .domains
+        .player
+        .state
+        .pending_resume_position
+        .unwrap_or(0.0)
+        .into();
 
     // Create video synchronously on the UI thread and update state immediately
     match SubwaveVideo::open_at_seconds(&url, res_pos) {
@@ -187,45 +192,9 @@ pub fn load_video(
             let duration = video.duration().as_secs_f64();
             if duration > 0.0 {
                 state.domains.player.state.last_valid_duration = duration;
-                state.domains.player.state.last_valid_duration = duration;
             }
 
-            // Resume position if any
-            if let Some(resume_pos) =
-                state.domains.player.state.pending_resume_position
-            {
-                match video
-                    .seek(std::time::Duration::from_secs_f32(resume_pos), false)
-                {
-                    Ok(_) => {
-                        state.domains.player.state.last_valid_position =
-                            resume_pos as f64;
-                        state.domains.player.state.pending_resume_position =
-                            None;
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to seek to resume position {:.3}s: {}. Will retry when player heartbeat runs.",
-                            resume_pos,
-                            e
-                        );
-                        // Keep the pending resume so a later heartbeat can retry once the pipeline is ready
-                        state.domains.player.state.last_valid_position =
-                            resume_pos as f64;
-                        state.domains.player.state.pending_resume_position =
-                            Some(resume_pos);
-                    }
-                }
-            } else {
-                state.domains.player.state.last_valid_position = 0.0;
-            }
-
-            // Store and start playback
             state.domains.player.state.video_opt = Some(video);
-            if let Some(video) = &mut state.domains.player.state.video_opt {
-                // Start playback
-                video.set_paused(false);
-            }
 
             state.domains.player.state.is_loading_video = false;
             state.domains.ui.state.view = ViewState::Player;
@@ -238,9 +207,11 @@ pub fn load_video(
                 message: format!("{}", e),
             };
             state.domains.player.state.is_loading_video = false;
-            Task::done(crate::domains::player::messages::PlayerMessage::VideoLoaded(
-                false,
-            ))
+            Task::done(
+                crate::domains::player::messages::PlayerMessage::VideoLoaded(
+                    false,
+                ),
+            )
         }
     }
 }

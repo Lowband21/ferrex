@@ -2,7 +2,18 @@ use super::{messages::PlayerMessage, state::PlayerDomainState};
 
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
-    domains::{media, player::video::load_video, ui},
+    domains::{
+        media::{
+            self,
+            messages::MediaMessage,
+            selectors::{
+                next_episode_by_order_with_repo,
+                previous_episode_by_order_with_repo,
+            },
+        },
+        player::video::load_video,
+        ui::{self, messages::UiMessage},
+    },
     infra::constants::player_controls,
 };
 
@@ -41,6 +52,7 @@ pub fn update_player(
 
     match message {
         PlayerMessage::PlayMedia(media) => {
+            // TODO: Refactor ID passthrough
             // Fallback handler without MediaID - proceed without tracking
             info!("[Player] PlayMedia without ID - starting playback");
             // Delegate to PlayMediaWithId with no ID tracking
@@ -878,6 +890,180 @@ pub fn update_player(
             DomainUpdateResult::task(Task::none())
         }
 
+        // Episode navigation: Next by ordering, Prev = restart or previous by ordering (<5%)
+        PlayerMessage::NextEpisode => {
+            let (current_episode_id, external_active, mid_opt, pos, dur) = {
+                if let Some(ferrex_core::player_prelude::MediaID::Episode(ep)) =
+                    state.current_media_id
+                {
+                    let (p, d) = if let Some(video) = &mut state.video_opt {
+                        (
+                            video.position().as_secs_f64(),
+                            video.duration().as_secs_f64(),
+                        )
+                    } else {
+                        (state.last_valid_position, state.last_valid_duration)
+                    };
+                    (
+                        ep,
+                        state.external_mpv_active,
+                        state.current_media_id,
+                        p,
+                        d,
+                    )
+                } else {
+                    return DomainUpdateResult::task(Task::none());
+                }
+            };
+
+            // Resolve next strictly by ordering using repo accessor
+            let next_opt = next_episode_by_order_with_repo(
+                &app_state.domains.ui.state.repo_accessor,
+                current_episode_id,
+            );
+
+            if let Some(next_ep_id) = next_opt {
+                let progress_task = if let Some(mid) = mid_opt {
+                    Task::done(DomainMessage::Media(
+                        media::messages::MediaMessage::SendProgressUpdateWithData(
+                            mid, pos, dur,
+                        ),
+                    ))
+                } else {
+                    Task::none()
+                };
+
+                let play_msg = if external_active {
+                    ui::messages::UiMessage::PlayMediaWithIdInMpv(
+                        ferrex_core::player_prelude::MediaID::Episode(
+                            next_ep_id,
+                        ),
+                    )
+                } else {
+                    ui::messages::UiMessage::PlayMediaWithId(
+                        ferrex_core::player_prelude::MediaID::Episode(
+                            next_ep_id,
+                        ),
+                    )
+                };
+
+                let tasks = Task::batch(vec![
+                    progress_task,
+                    Task::done(DomainMessage::Ui(play_msg)),
+                ]);
+                DomainUpdateResult::task(tasks)
+            } else {
+                DomainUpdateResult::task(Task::none())
+            }
+        }
+
+        PlayerMessage::PreviousEpisode => {
+            // Only valid for episodes
+            let current_episode_id = match state.current_media_id {
+                Some(ferrex_core::player_prelude::MediaID::Episode(ep)) => ep,
+                _ => return DomainUpdateResult::task(Task::none()),
+            };
+
+            // Determine progress ratio using the most reliable numbers
+            let (position, mut duration) =
+                if let Some(video) = &mut state.video_opt {
+                    (
+                        video.position().as_secs_f64(),
+                        video.duration().as_secs_f64(),
+                    )
+                } else {
+                    (state.last_valid_position, state.last_valid_duration)
+                };
+            if let Some(src) = state.source_duration {
+                if src > 0.0 {
+                    duration = src;
+                }
+            }
+            let ratio = if duration > 0.0 {
+                position / duration
+            } else {
+                1.0
+            };
+
+            if ratio >= 0.05 {
+                // Restart current episode from beginning
+                if let Some(base) = prepare_restart_current_episode(
+                    state,
+                    state.external_mpv_active,
+                    position,
+                ) {
+                    // Use immediate relative seek to 0 for internal player
+                    update_player(app_state, PlayerMessage::SeekRelative(-base))
+                } else {
+                    DomainUpdateResult::task(Task::none())
+                }
+            } else {
+                // Less than 5% watched: go to previous episode by ordering
+                let (external_active, mid_opt, p, d) = {
+                    let (p, d) = if let Some(video) = &mut state.video_opt {
+                        (
+                            video.position().as_secs_f64(),
+                            video.duration().as_secs_f64(),
+                        )
+                    } else {
+                        (state.last_valid_position, state.last_valid_duration)
+                    };
+                    (state.external_mpv_active, state.current_media_id, p, d)
+                };
+
+                let prev_opt = previous_episode_by_order_with_repo(
+                    &app_state.domains.ui.state.repo_accessor,
+                    current_episode_id,
+                );
+
+                if let Some(prev_ep_id) = prev_opt {
+                    let progress_task = if let Some(mid) = mid_opt {
+                        Task::done(DomainMessage::Media(
+                            media::messages::MediaMessage::SendProgressUpdateWithData(
+                                mid, p, d,
+                            ),
+                        ))
+                    } else {
+                        Task::none()
+                    };
+
+                    let play_msg = if external_active {
+                        ui::messages::UiMessage::PlayMediaWithIdInMpv(
+                            ferrex_core::player_prelude::MediaID::Episode(
+                                prev_ep_id,
+                            ),
+                        )
+                    } else {
+                        ui::messages::UiMessage::PlayMediaWithId(
+                            ferrex_core::player_prelude::MediaID::Episode(
+                                prev_ep_id,
+                            ),
+                        )
+                    };
+
+                    let tasks = Task::batch(vec![
+                        progress_task,
+                        Task::done(DomainMessage::Ui(play_msg)),
+                    ]);
+                    DomainUpdateResult::task(tasks)
+                } else {
+                    // No previous episode -> restart current instead
+                    if let Some(base) = prepare_restart_current_episode(
+                        state,
+                        external_active,
+                        p,
+                    ) {
+                        update_player(
+                            app_state,
+                            PlayerMessage::SeekRelative(-base),
+                        )
+                    } else {
+                        DomainUpdateResult::task(Task::none())
+                    }
+                }
+            }
+        }
+
         PlayerMessage::PlayMediaWithId(media, media_id) => {
             // Store current media and id
             state.current_media = Some(media.clone());
@@ -901,7 +1087,7 @@ pub fn update_player(
                 state.last_valid_duration = duration;
             }
 
-            // HDR detection heuristics (copied from previous media handler)
+            // HDR detection heuristics
             let is_hdr_content = if let Some(metadata) =
                 &media.media_file_metadata
             {
@@ -926,7 +1112,7 @@ pub fn update_player(
             };
             state.is_hdr_content = is_hdr_content;
 
-            // Build secure streaming URL with access_token query (minimal secure handoff)
+            // Build secure streaming URL with access_token query
             let server_url = app_state.server_url.clone();
             let media_id_string = media.id.to_string();
             let api = app_state.api_service.clone();
@@ -1006,10 +1192,44 @@ pub fn update_player(
                 let final_position = handle.get_final_position();
                 let final_fullscreen = handle.get_final_fullscreen();
                 state.last_valid_position = final_position;
+                state.is_fullscreen = final_fullscreen;
 
-                // Send final progress update
-                let progress_task = Task::done(crate::common::messages::DomainMessage::Media(
-                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                // Decide: next episode (external) or exit
+                if let MediaID::Episode(current_ep) = media_id {
+                    let next_opt = next_episode_by_order_with_repo(
+                        &app_state.domains.ui.state.repo_accessor,
+                        current_ep,
+                    );
+
+                    // Clear external MPV state before proceeding
+                    state.external_mpv_handle = None;
+                    state.external_mpv_active = false;
+
+                    if let Some(next_ep) = next_opt {
+                        // Persist final progress, then start next in external MPV
+                        let tasks = Task::batch(vec![
+                            Task::done(DomainMessage::Media(
+                                MediaMessage::SendProgressUpdateWithData(
+                                    MediaID::Episode(current_ep),
+                                    final_position,
+                                    state.last_valid_duration,
+                                ),
+                            )),
+                            Task::done(DomainMessage::Ui(
+                                UiMessage::PlayMediaWithIdInMpv(
+                                    MediaID::Episode(next_ep),
+                                ),
+                            )),
+                        ]);
+                        return DomainUpdateResult::task(tasks);
+                    }
+
+                    // No next episode -> fall through to exit path below
+                }
+
+                // Fallback: no next episode or not an episode -> send progress and exit
+                let progress_task = Task::done(DomainMessage::Media(
+                    MediaMessage::SendProgressUpdateWithData(
                         media_id,
                         final_position,
                         state.last_valid_duration,
@@ -1032,9 +1252,7 @@ pub fn update_player(
 
                 DomainUpdateResult::with_events(
                     all_tasks,
-                    vec![crate::common::messages::CrossDomainEvent::RestoreWindow(
-                        final_fullscreen,
-                    )],
+                    vec![CrossDomainEvent::RestoreWindow(final_fullscreen)],
                 )
             } else {
                 let tasks = Task::batch(vec![
@@ -1062,12 +1280,12 @@ pub fn update_player(
                     state.last_valid_duration = duration;
 
                     return DomainUpdateResult::task(Task::done(
-                            DomainMessage::Media(
-                                media::messages::MediaMessage::SendProgressUpdateWithData(
-                                    media_id, position, duration,
-                                ),
+                        DomainMessage::Media(
+                            MediaMessage::SendProgressUpdateWithData(
+                                media_id, position, duration,
                             ),
-                        ));
+                        ),
+                    ));
                 }
             }
             DomainUpdateResult::task(Task::none())
@@ -1096,16 +1314,15 @@ pub fn update_player(
                         state.external_mpv_active = false;
 
                         // Send final progress update
-                        let end_playback_task = Task::done(
-                            crate::common::messages::DomainMessage::Player(
+                        let end_playback_task =
+                            Task::done(DomainMessage::Player(
                                 PlayerMessage::ExternalPlaybackEnded,
+                            ));
+                        let progress_task = Task::done(DomainMessage::Media(
+                            MediaMessage::SendProgressUpdateWithData(
+                                media_id, position, duration,
                             ),
-                        );
-                        let progress_task = Task::done(crate::common::messages::DomainMessage::Media(
-                        crate::domains::media::messages::MediaMessage::SendProgressUpdateWithData(
-                            media_id, position, duration,
-                        ),
-                    ));
+                        ));
 
                         // Navigate back to previous view
                         let nav_task = Task::done(DomainMessage::Ui(
@@ -1163,10 +1380,36 @@ pub fn update_player(
 
             match url::Url::parse(&video_url) {
                 Ok(url) => {
+                    // Set the new URL for the player
                     state.current_url = Some(url);
-                    app_state.domains.ui.state.view =
-                        ui::types::ViewState::LoadingVideo { url: video_url };
+
+                    // If we're already in the Player view (e.g., next/prev episode while playing),
+                    // keep the Player view and swap streams seamlessly without showing the loading page.
+                    // Otherwise (e.g., initial play from library), show the loading view.
+                    let in_player_already =
+                        matches!(
+                            app_state.domains.ui.state.view,
+                            ui::types::ViewState::Player
+                        ) || app_state.domains.player.state.video_opt.is_some();
+
+                    // Clear any previous error
                     app_state.domains.ui.state.error_message = None;
+
+                    if in_player_already {
+                        // Ensure we stay on the Player view for near-instant transitions
+                        app_state.domains.ui.state.view =
+                            ui::types::ViewState::Player;
+                        // Explicitly close the existing pipeline so load_video doesn't early-return
+                        crate::domains::player::video::close_video(app_state);
+                    } else {
+                        // First-time play or not currently in player: show loading view briefly
+                        app_state.domains.ui.state.view =
+                            ui::types::ViewState::LoadingVideo {
+                                url: video_url,
+                            };
+                    }
+
+                    // Load the new video URL
                     DomainUpdateResult::task(
                         crate::domains::player::video::load_video(app_state)
                             .map(DomainMessage::Player),
@@ -1183,6 +1426,32 @@ pub fn update_player(
                 }
             }
         }
+    }
+}
+
+/// Prepare a restart of the current episode.
+/// If `external_active` is true, seeks external MPV to the start and updates state,
+/// returning None (no further action needed). If using the internal player and a
+/// video is loaded, returns the normalized seek base so the caller can issue a
+/// relative seek via `update_player`.
+fn prepare_restart_current_episode(
+    state: &mut PlayerDomainState,
+    external_active: bool,
+    position: f64,
+) -> Option<f64> {
+    if external_active {
+        if let Some(handle) = state.external_mpv_handle.as_mut() {
+            if let Err(e) = handle.seek_absolute(0.0) {
+                error!("Failed to seek external MPV to start: {}", e);
+            } else {
+                state.last_valid_position = 0.0;
+            }
+        }
+        None
+    } else if state.video_opt.is_some() {
+        Some(position.max(0.0))
+    } else {
+        None
     }
 }
 
@@ -1257,15 +1526,14 @@ fn start_external_mpv_with_current_url(
             )))
         }
         Err(e) => {
-            // Robust fallback: log and start internal pipeline
+            // Fallback to internal pipeline
             error!(
                 "Failed to start external MPV (falling back to internal): {}",
                 e
             );
             state.external_mpv_active = false;
             DomainUpdateResult::task(
-                crate::domains::player::video::load_video(app_state)
-                    .map(DomainMessage::Player),
+                load_video(app_state).map(DomainMessage::Player),
             )
         }
     }

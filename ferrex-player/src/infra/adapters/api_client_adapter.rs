@@ -307,6 +307,54 @@ impl ApiService for ApiClientAdapter {
             .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
     }
 
+    async fn get_series_watch_state(
+        &self,
+        tmdb_series_id: u64,
+    ) -> RepositoryResult<SeriesWatchStatus> {
+        let path = replace_param(
+            v1::watch::SERIES_STATE,
+            "{tmdb_series_id}",
+            tmdb_series_id.to_string(),
+        );
+        self.client
+            .get::<SeriesWatchStatus>(&path)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn get_season_watch_state(
+        &self,
+        tmdb_series_id: u64,
+        season_number: u16,
+    ) -> RepositoryResult<SeasonWatchStatus> {
+        let path = ferrex_core::api::routes::utils::replace_params(
+            v1::watch::SEASON_STATE,
+            &[
+                ("{tmdb_series_id}", tmdb_series_id.to_string()),
+                ("{season_number}", season_number.to_string()),
+            ],
+        );
+        self.client
+            .get::<SeasonWatchStatus>(&path)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn get_series_next_episode(
+        &self,
+        tmdb_series_id: u64,
+    ) -> RepositoryResult<Option<NextEpisode>> {
+        let path = replace_param(
+            v1::watch::SERIES_NEXT,
+            "{tmdb_series_id}",
+            tmdb_series_id.to_string(),
+        );
+        self.client
+            .get::<Option<NextEpisode>>(&path)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
     async fn list_user_devices(
         &self,
     ) -> RepositoryResult<Vec<AuthenticatedDevice>> {

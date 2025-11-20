@@ -137,3 +137,128 @@ pub fn select_next_episode_for_season(
     // 3) Fallback if all completed
     Some(episodes[0].id)
 }
+
+/// Resolve an episode by id using the provided repository accessor.
+fn resolve_episode_using_accessor(
+    accessor: &Accessor<ReadOnly>,
+    episode_id: &EpisodeID,
+) -> Option<ferrex_core::player_prelude::EpisodeReference> {
+    accessor.get(episode_id).ok().and_then(|m| match m {
+        ferrex_core::player_prelude::Media::Episode(ep) => Some(ep),
+        _ => None,
+    })
+}
+
+/// Gather all episodes in a series in canonical order (season, episode)
+/// using the provided repository accessor.
+fn ordered_series_episodes(
+    accessor: &Accessor<ReadOnly>,
+    series_id: &SeriesID,
+) -> Vec<ferrex_core::player_prelude::EpisodeReference> {
+    let seasons = accessor.get_series_seasons(series_id).unwrap_or_default();
+
+    let mut episodes: Vec<ferrex_core::player_prelude::EpisodeReference> =
+        Vec::new();
+    for season in &seasons {
+        let mut eps =
+            accessor.get_season_episodes(&season.id).unwrap_or_default();
+        // Ensure ascending episode order within a season
+        eps.sort_by_key(|e| e.episode_number.value());
+        episodes.extend(eps);
+    }
+
+    // Defensive sort by (season, episode)
+    episodes
+        .sort_by_key(|e| (e.season_number.value(), e.episode_number.value()));
+    episodes
+}
+
+/// Find the next episode strictly by ordering from the current episode (season, episode).
+/// Returns None if the current episode is the last in the series or cannot be resolved.
+pub fn next_episode_by_order(
+    state: &State,
+    current_episode_id: EpisodeID,
+) -> Option<EpisodeID> {
+    // Resolve the current episode reference to find its series and position
+    let current = resolve_episode_using_accessor(
+        &state.domains.ui.state.repo_accessor,
+        &current_episode_id,
+    )?;
+
+    // Gather all episodes of the series sorted by (season, episode)
+    let episodes = ordered_series_episodes(
+        &state.domains.ui.state.repo_accessor,
+        &current.series_id,
+    );
+
+    // Find current index and return the next
+    if let Some(idx) = episodes.iter().position(|e| e.id == current.id) {
+        if idx + 1 < episodes.len() {
+            return Some(episodes[idx + 1].id);
+        }
+    }
+    None
+}
+
+/// Find the previous episode strictly by ordering from the current episode (season, episode).
+/// Returns None if the current episode is the first in the series or cannot be resolved.
+pub fn previous_episode_by_order(
+    state: &State,
+    current_episode_id: EpisodeID,
+) -> Option<EpisodeID> {
+    // Resolve the current episode to get series and position
+    let current = resolve_episode_using_accessor(
+        &state.domains.ui.state.repo_accessor,
+        &current_episode_id,
+    )?;
+
+    let episodes = ordered_series_episodes(
+        &state.domains.ui.state.repo_accessor,
+        &current.series_id,
+    );
+
+    if let Some(idx) = episodes.iter().position(|e| e.id == current.id) {
+        if idx > 0 {
+            return Some(episodes[idx - 1].id);
+        }
+    }
+    None
+}
+
+/// Next episode by ordering using a repository accessor.
+pub fn next_episode_by_order_with_repo(
+    accessor: &Accessor<ReadOnly>,
+    current_episode_id: EpisodeID,
+) -> Option<EpisodeID> {
+    // Resolve current episode
+    let current =
+        resolve_episode_using_accessor(accessor, &current_episode_id)?;
+
+    let episodes = ordered_series_episodes(accessor, &current.series_id);
+
+    if let Some(idx) = episodes.iter().position(|e| e.id == current.id) {
+        if idx + 1 < episodes.len() {
+            return Some(episodes[idx + 1].id);
+        }
+    }
+    None
+}
+
+/// Previous episode by ordering using a repository accessor.
+pub fn previous_episode_by_order_with_repo(
+    accessor: &Accessor<ReadOnly>,
+    current_episode_id: EpisodeID,
+) -> Option<EpisodeID> {
+    // Resolve current episode
+    let current =
+        resolve_episode_using_accessor(accessor, &current_episode_id)?;
+
+    let episodes = ordered_series_episodes(accessor, &current.series_id);
+
+    if let Some(idx) = episodes.iter().position(|e| e.id == current.id) {
+        if idx > 0 {
+            return Some(episodes[idx - 1].id);
+        }
+    }
+    None
+}
