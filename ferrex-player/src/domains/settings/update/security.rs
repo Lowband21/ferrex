@@ -186,7 +186,7 @@ pub fn handle_check_user_has_pin(state: &mut State) -> DomainUpdateResult {
                 false
             }
         },
-        settings::Message::UserHasPinResult,
+        settings::SettingsMessage::UserHasPinResult,
     );
     DomainUpdateResult::task(task.map(DomainMessage::Settings))
 }

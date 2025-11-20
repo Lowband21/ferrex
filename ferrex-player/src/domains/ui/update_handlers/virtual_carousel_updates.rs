@@ -40,7 +40,7 @@ use std::time::Duration;
 pub fn handle_virtual_carousel_message(
     state: &mut State,
     msg: VCM,
-) -> Task<ui::Message> {
+) -> Task<ui::UiMessage> {
     match msg {
         VCM::ViewportChanged(key, viewport) => {
             #[cfg(any(
@@ -736,7 +736,7 @@ pub fn handle_virtual_carousel_message(
                     {
                         vc.set_scroll_x(next_x);
                     }
-                    return scroll_to::<ui::Message>(
+                    return scroll_to::<ui::UiMessage>(
                         scroll_id,
                         AbsoluteOffset { x: next_x, y: 0.0 },
                     );
@@ -789,7 +789,7 @@ pub fn handle_virtual_carousel_message(
                 }
 
                 maybe_send_snapshot_for_key(state, &key, finished_snap);
-                return scroll_to::<ui::Message>(
+                return scroll_to::<ui::UiMessage>(
                     scroll_id,
                     AbsoluteOffset {
                         x: next_scroll,
@@ -881,7 +881,7 @@ fn start_snap_to_page(
     state: &mut State,
     key: CarouselKey,
     to_right: bool,
-) -> Task<ui::Message> {
+) -> Task<ui::UiMessage> {
     // Set keyboard focus to this carousel when user presses page chevrons
     state
         .domains
@@ -958,7 +958,7 @@ fn start_snap_to_step(
     state: &mut State,
     key: CarouselKey,
     to_right: bool,
-) -> Task<ui::Message> {
+) -> Task<ui::UiMessage> {
     // Set keyboard focus to this carousel when user presses chevron buttons
     state
         .domains
@@ -1107,7 +1107,7 @@ fn handle_release_snap_align(
     state: &mut State,
     key: CarouselKey,
     dir: i32,
-) -> Task<ui::Message> {
+) -> Task<ui::UiMessage> {
     let held_ms = state
         .domains
         .ui

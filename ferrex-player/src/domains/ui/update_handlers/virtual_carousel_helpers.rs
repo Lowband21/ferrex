@@ -8,7 +8,7 @@ use crate::domains::ui::views::virtual_carousel::{
     types::{CarouselConfig, CarouselKey},
 };
 use crate::domains::ui::{
-    messages::Message as UiMessage,
+    messages::UiMessage as UiMessage,
     tabs::{TabId, TabState},
 };
 use crate::infra::api_types::LibraryType;

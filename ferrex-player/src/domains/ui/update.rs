@@ -3,9 +3,9 @@ use crate::{
     domains::{
         library,
         metadata::demand_planner::DemandSnapshot,
-        settings::messages::Message as SettingsMessage,
+        settings::messages::SettingsMessage,
         ui::{
-            messages::Message as UiMessage,
+            messages::UiMessage,
             tabs::{TabId, TabState},
             types::{BackdropAspectMode, DisplayMode, ViewState},
             update_handlers::{
@@ -22,8 +22,8 @@ use crate::{
 
 use ferrex_core::{
     player_prelude::{
-        EpisodeLike, Media, MediaTypeFilter, MovieLike, PosterKind, SortOrder,
-        UiResolution, UiWatchStatus,
+        EpisodeID, EpisodeLike, Media, MediaID, MediaTypeFilter, MovieLike,
+        PosterKind, SeriesID, SortOrder, UiResolution, UiWatchStatus,
     },
     query::filtering::{
         FilterRequestParams, build_filter_indices_request, hash_filter_spec,
@@ -687,7 +687,7 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
 
             // Trigger load of users from the user management domain
             let task = Task::done(DomainMessage::UserManagement(
-                crate::domains::user_management::messages::Message::LoadUsers,
+                crate::domains::user_management::messages::UserManagementMessage::LoadUsers,
             ));
             DomainUpdateResult::task(task)
         }
@@ -699,7 +699,7 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
         UiMessage::UserAdminDelete(user_id) => {
             // Proxy to user_management domain delete confirm action
             let task = Task::done(DomainMessage::UserManagement(
-                crate::domains::user_management::messages::Message::DeleteUserConfirm(user_id),
+                crate::domains::user_management::messages::UserManagementMessage::DeleteUserConfirm(user_id),
             ));
             DomainUpdateResult::task(task)
         }
@@ -717,7 +717,7 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
             state.domains.library.state.show_library_management = true;
 
             let fetch_scans_task = Task::done(DomainMessage::Library(
-                library::messages::Message::FetchActiveScans,
+                library::messages::LibraryMessage::FetchActiveScans,
             ));
 
             let mut tasks = vec![fetch_scans_task];
@@ -1101,7 +1101,7 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
         UiMessage::ExecuteSearch => {
             // Forward directly to search domain
             DomainUpdateResult::task(Task::done(DomainMessage::Search(
-                crate::domains::search::messages::Message::ExecuteSearch,
+                crate::domains::search::messages::SearchMessage::ExecuteSearch,
             )))
         }
         UiMessage::ShowLibraryMenu => {
@@ -1166,7 +1166,7 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
                 crate::domains::settings::state::SettingsView::DeviceManagement;
             // Load devices when the view is shown - send direct message to Settings domain
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::LoadDevices,
+                crate::domains::settings::messages::SettingsMessage::LoadDevices,
             )))
         }
 
@@ -1182,37 +1182,37 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
         // Security settings handlers - emit cross-domain events to Settings domain
         UiMessage::ShowChangePassword => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::ShowChangePassword,
+                crate::domains::settings::messages::SettingsMessage::ShowChangePassword,
             )))
         }
 
         UiMessage::UpdatePasswordCurrent(value) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::UpdatePasswordCurrent(value),
+                crate::domains::settings::messages::SettingsMessage::UpdatePasswordCurrent(value),
             )))
         }
 
         UiMessage::UpdatePasswordNew(value) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::UpdatePasswordNew(value),
+                crate::domains::settings::messages::SettingsMessage::UpdatePasswordNew(value),
             )))
         }
 
         UiMessage::UpdatePasswordConfirm(value) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::UpdatePasswordConfirm(value),
+                crate::domains::settings::messages::SettingsMessage::UpdatePasswordConfirm(value),
             )))
         }
 
         UiMessage::TogglePasswordVisibility => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::TogglePasswordVisibility,
+                crate::domains::settings::messages::SettingsMessage::TogglePasswordVisibility,
             )))
         }
 
         UiMessage::SubmitPasswordChange => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::SubmitPasswordChange,
+                crate::domains::settings::messages::SettingsMessage::SubmitPasswordChange,
             )))
         }
 
@@ -1224,38 +1224,38 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
 
         UiMessage::CancelPasswordChange => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::CancelPasswordChange,
+                crate::domains::settings::messages::SettingsMessage::CancelPasswordChange,
             )))
         }
 
         UiMessage::ShowSetPin => DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-            crate::domains::settings::messages::Message::ShowSetPin,
+            crate::domains::settings::messages::SettingsMessage::ShowSetPin,
         ))),
 
         UiMessage::ShowChangePin => DomainUpdateResult::task(Task::done(
-            DomainMessage::Settings(crate::domains::settings::messages::Message::ShowChangePin),
+            DomainMessage::Settings(crate::domains::settings::messages::SettingsMessage::ShowChangePin),
         )),
 
         UiMessage::UpdatePinCurrent(value) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::UpdatePinCurrent(value),
+                crate::domains::settings::messages::SettingsMessage::UpdatePinCurrent(value),
             )))
         }
 
         UiMessage::UpdatePinNew(value) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::UpdatePinNew(value),
+                crate::domains::settings::messages::SettingsMessage::UpdatePinNew(value),
             )))
         }
 
         UiMessage::UpdatePinConfirm(value) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::UpdatePinConfirm(value),
+                crate::domains::settings::messages::SettingsMessage::UpdatePinConfirm(value),
             )))
         }
 
         UiMessage::SubmitPinChange => DomainUpdateResult::task(Task::done(
-            DomainMessage::Settings(crate::domains::settings::messages::Message::SubmitPinChange),
+            DomainMessage::Settings(crate::domains::settings::messages::SettingsMessage::SubmitPinChange),
         )),
 
         // TODO: PIN CHANGE UNIMPLEMENTED
@@ -1269,13 +1269,13 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
 
         UiMessage::EnableAdminPinUnlock => {
             DomainUpdateResult::task(Task::done(DomainMessage::Auth(
-                crate::domains::auth::messages::Message::EnableAdminPinUnlock,
+                crate::domains::auth::messages::AuthMessage::EnableAdminPinUnlock,
             )))
         }
 
         UiMessage::DisableAdminPinUnlock => {
             DomainUpdateResult::task(Task::done(DomainMessage::Auth(
-                crate::domains::auth::messages::Message::DisableAdminPinUnlock,
+                crate::domains::auth::messages::AuthMessage::DisableAdminPinUnlock,
             )))
         }
 
@@ -1307,13 +1307,13 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
 
         UiMessage::RefreshDevices => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::RefreshDevices,
+                crate::domains::settings::messages::SettingsMessage::RefreshDevices,
             )))
         }
 
         UiMessage::RevokeDevice(device_id) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                crate::domains::settings::messages::Message::RevokeDevice(device_id),
+                crate::domains::settings::messages::SettingsMessage::RevokeDevice(device_id),
             )))
         }
 
@@ -1329,7 +1329,7 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
         UiMessage::Logout => {
             use crate::domains::auth::messages as auth;
             DomainUpdateResult::task(Task::done(DomainMessage::Auth(
-                auth::Message::Logout,
+                auth::AuthMessage::Logout,
             )))
         }
 
@@ -1604,13 +1604,13 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
                     // First seed the player with PlayMediaWithId, then switch to external player
                     let tasks = Task::batch(vec![
                         Task::done(DomainMessage::Player(
-                            crate::domains::player::messages::Message::PlayMediaWithId(
+                            crate::domains::player::messages::PlayerMessage::PlayMediaWithId(
                                 media_file,
                                 media_id,
                             ),
                         )),
                         Task::done(DomainMessage::Player(
-                            crate::domains::player::messages::Message::PlayExternal,
+                            crate::domains::player::messages::PlayerMessage::PlayExternal,
                         )),
                     ]);
 
@@ -1622,128 +1622,151 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
                 }
             }
         }
-        UiMessage::PlaySeriesNextEpisode(_series_id) => {
-            /*
-            // Use series progress service to find next episode
-            use crate::domains::media::services::SeriesProgressService;
-
-            let media_store = state.domains.media.state.media_store.clone();
-            let service = SeriesProgressService::new(media_store);
-
-            // Get watch state and find next episode
-            let watch_state = state.domains.media.state.user_watch_state.as_ref();
-
-            if let Some((episode, resume_position)) =
-                service.get_next_episode_for_series(&series_id, watch_state)
-            {
-                // Convert episode to MediaFile
-                let media_file =
-                    crate::domains::media::library::MediaFile::from(episode.file.clone());
-                let media_id = MediaID::Episode(episode.id.clone());
-
-                // Store resume position if available
-                if let Some(resume_pos) = resume_position {
-                    state.domains.media.state.pending_resume_position = Some(resume_pos);
-                    log::info!("Series will resume episode at position: {:.1}s", resume_pos);
-                }
-
-                // Play the episode
-                DomainUpdateResult::with_events(
-                    Task::none(),
-                    vec![CrossDomainEvent::MediaPlayWithId(media_file, media_id)],
-                )
-            } else {
-                log::info!(
-                    "No unwatched episodes found for series {}",
-                    series_id.as_str()
+        UiMessage::PlaySeriesNextEpisode(series_id) => {
+            // Prefer identity-based next-episode from server, fall back to local selection
+            let fallback_next =
+                crate::domains::media::selectors::select_next_episode_for_series(
+                    state, series_id,
                 );
-                // Could show a message or navigate to series details
-                DomainUpdateResult::task(Task::none())
-            }*/
-            DomainUpdateResult::task(Task::none())
+
+            // Resolve TMDB series id from repository (SeriesReference)
+            let tmdb_series_id = match state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get(&MediaID::Series(series_id))
+            {
+                Ok(Media::Series(series)) => Some(series.tmdb_id),
+                _ => None,
+            };
+
+            // If we have an API service and tmdb id, defer to server
+            if let (Some(api), Some(tmdb_id)) = (
+                state.domains.media.state.api_service.clone(),
+                tmdb_series_id,
+            ) {
+                let task = Task::perform(
+                    async move { api.get_series_next_episode(tmdb_id).await },
+                    move |result| match result {
+                        Ok(Some(next)) => {
+                            if let Some(playable) = next.playable_media_id {
+                                DomainMessage::Ui(UiMessage::PlayMediaWithId(
+                                    MediaID::Episode(EpisodeID(playable)),
+                                ))
+                            } else if let Some(fid) = fallback_next {
+                                DomainMessage::Ui(UiMessage::PlayMediaWithId(
+                                    MediaID::Episode(fid),
+                                ))
+                            } else {
+                                DomainMessage::Ui(UiMessage::NoOp)
+                            }
+                        }
+                        _ => {
+                            if let Some(fid) = fallback_next {
+                                DomainMessage::Ui(UiMessage::PlayMediaWithId(
+                                    MediaID::Episode(fid),
+                                ))
+                            } else {
+                                DomainMessage::Ui(UiMessage::NoOp)
+                            }
+                        }
+                    },
+                );
+                DomainUpdateResult::task(task)
+            } else {
+                // No API or TMDB id -> use local selection immediately
+                if let Some(fid) = fallback_next {
+                    DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                        UiMessage::PlayMediaWithId(MediaID::Episode(fid)),
+                    )))
+                } else {
+                    DomainUpdateResult::task(Task::none())
+                }
+            }
         }
 
         // Library management proxies
         UiMessage::ShowLibraryForm(library) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::ShowLibraryForm(library),
+                library::messages::LibraryMessage::ShowLibraryForm(library),
             )))
         }
         UiMessage::HideLibraryForm => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::HideLibraryForm,
+                library::messages::LibraryMessage::HideLibraryForm,
             )))
         }
         UiMessage::ScanLibrary(library_id) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::ScanLibrary(library_id),
+                library::messages::LibraryMessage::ScanLibrary(library_id),
             )))
         }
         UiMessage::DeleteLibrary(library_id) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::DeleteLibrary(library_id),
+                library::messages::LibraryMessage::DeleteLibrary(library_id),
             )))
         }
         UiMessage::UpdateLibraryFormName(name) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::UpdateLibraryFormName(name),
+                library::messages::LibraryMessage::UpdateLibraryFormName(name),
             )))
         }
         UiMessage::UpdateLibraryFormType(library_type) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::UpdateLibraryFormType(library_type),
+                library::messages::LibraryMessage::UpdateLibraryFormType(library_type),
             )))
         }
         UiMessage::UpdateLibraryFormPaths(paths) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::UpdateLibraryFormPaths(paths),
+                library::messages::LibraryMessage::UpdateLibraryFormPaths(paths),
             )))
         }
         UiMessage::UpdateLibraryFormScanInterval(interval) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::UpdateLibraryFormScanInterval(interval),
+                library::messages::LibraryMessage::UpdateLibraryFormScanInterval(interval),
             )))
         }
         UiMessage::ToggleLibraryFormEnabled => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::ToggleLibraryFormEnabled,
+                library::messages::LibraryMessage::ToggleLibraryFormEnabled,
             )))
         }
         UiMessage::ToggleLibraryFormStartScan => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::ToggleLibraryFormStartScan,
+                library::messages::LibraryMessage::ToggleLibraryFormStartScan,
             )))
         }
         UiMessage::SubmitLibraryForm => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::SubmitLibraryForm,
+                library::messages::LibraryMessage::SubmitLibraryForm,
             )))
         }
         UiMessage::LibraryMediaRoot(message) => DomainUpdateResult::task(
             Task::done(DomainMessage::Library(
-                library::messages::Message::MediaRootBrowser(message),
+                library::messages::LibraryMessage::MediaRootBrowser(message),
             )),
         ),
         UiMessage::PauseLibraryScan(library_id, scan_id) => DomainUpdateResult::task(Task::done(
-            DomainMessage::Library(library::messages::Message::PauseScan {
+            DomainMessage::Library(library::messages::LibraryMessage::PauseScan {
                 library_id,
                 scan_id,
             }),
         )),
         UiMessage::ResumeLibraryScan(library_id, scan_id) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::ResumeScan {
+                library::messages::LibraryMessage::ResumeScan {
                     library_id,
                     scan_id,
                 },
@@ -1751,17 +1774,17 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
         }
         UiMessage::CancelLibraryScan(library_id, scan_id) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::CancelScan {
+                library::messages::LibraryMessage::CancelScan {
                     library_id,
                     scan_id,
                 },
             )))
         }
         UiMessage::FetchScanMetrics => DomainUpdateResult::task(Task::done(
-            DomainMessage::Library(library::messages::Message::FetchScanMetrics),
+            DomainMessage::Library(library::messages::LibraryMessage::FetchScanMetrics),
         )),
         UiMessage::ResetLibrary(library_id) => DomainUpdateResult::task(Task::done(
-            DomainMessage::Library(library::messages::Message::ResetLibrary(library_id)),
+            DomainMessage::Library(library::messages::LibraryMessage::ResetLibrary(library_id)),
         )),
 
         // Aggregate all libraries

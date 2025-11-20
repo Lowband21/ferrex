@@ -1,7 +1,7 @@
 use iced::Task;
 use iced::widget::{operation::scroll_to, scrollable::AbsoluteOffset};
 
-use crate::domains::ui::messages::Message;
+use crate::domains::ui::messages::UiMessage;
 use crate::domains::ui::tabs::{TabId, TabState};
 use crate::infra::constants::virtual_carousel::layout as vcl;
 use crate::infra::constants::virtual_carousel::snap as snap_consts;
@@ -18,7 +18,7 @@ use crate::state::State;
 pub fn handle_all_view_scrolled(
     state: &mut State,
     viewport: iced::widget::scrollable::Viewport,
-) -> Task<Message> {
+) -> Task<UiMessage> {
     if let Some(TabState::All(all_state)) =
         state.tab_manager.get_tab_mut(TabId::All)
     {
@@ -38,7 +38,7 @@ pub fn handle_all_view_scrolled(
     ),
     profiling::function
 )]
-pub fn handle_all_focus_next(state: &mut State) -> Task<Message> {
+pub fn handle_all_focus_next(state: &mut State) -> Task<UiMessage> {
     // Build ordered keys without holding a mutable borrow
     let ordered = crate::domains::ui::tabs::ordered_keys_for_all_view(state);
 
@@ -111,7 +111,7 @@ pub fn handle_all_focus_next(state: &mut State) -> Task<Message> {
     ),
     profiling::function
 )]
-pub fn handle_all_focus_prev(state: &mut State) -> Task<Message> {
+pub fn handle_all_focus_prev(state: &mut State) -> Task<UiMessage> {
     let ordered = crate::domains::ui::tabs::ordered_keys_for_all_view(state);
     if let Some(TabState::All(all_state)) =
         state.tab_manager.get_tab_mut(TabId::All)
@@ -176,7 +176,7 @@ pub fn handle_all_focus_prev(state: &mut State) -> Task<Message> {
 fn start_vertical_snap_to_key(
     state: &mut State,
     key: crate::domains::ui::views::virtual_carousel::types::CarouselKey,
-) -> Task<Message> {
+) -> Task<UiMessage> {
     let Some(TabState::All(all_state)) =
         state.tab_manager.get_tab_mut(TabId::All)
     else {
@@ -201,7 +201,7 @@ fn start_vertical_snap_to_key(
     Task::none()
 }
 
-fn start_vertical_snap_to_y(state: &mut State, target_y: f32) -> Task<Message> {
+fn start_vertical_snap_to_y(state: &mut State, target_y: f32) -> Task<UiMessage> {
     let Some(TabState::All(all_state)) =
         state.tab_manager.get_tab_mut(TabId::All)
     else {
@@ -228,7 +228,7 @@ fn start_vertical_snap_to_y(state: &mut State, target_y: f32) -> Task<Message> {
     ),
     profiling::function
 )]
-pub fn handle_all_focus_tick(state: &mut State) -> Task<Message> {
+pub fn handle_all_focus_tick(state: &mut State) -> Task<UiMessage> {
     let Some(TabState::All(all_state)) =
         state.tab_manager.get_tab_mut(TabId::All)
     else {
@@ -242,7 +242,7 @@ pub fn handle_all_focus_tick(state: &mut State) -> Task<Message> {
     if let Some(next_y) = all_state.focus.vertical_animator.tick() {
         all_state.focus.scroll_y = next_y;
         let id = all_state.focus.scrollable_id.clone();
-        return scroll_to::<Message>(id, AbsoluteOffset { x: 0.0, y: next_y });
+        return scroll_to::<UiMessage>(id, AbsoluteOffset { x: 0.0, y: next_y });
     }
 
     Task::none()

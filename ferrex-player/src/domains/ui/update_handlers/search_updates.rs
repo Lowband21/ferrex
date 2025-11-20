@@ -34,7 +34,7 @@ pub fn update_search_query(
 
     DomainUpdateResult::task(Task::batch([
         Task::done(DomainMessage::Search(
-            search_messages::Message::UpdateQuery(query),
+            search_messages::SearchMessage::UpdateQuery(query),
         )),
         scroll_restore_task,
     ]))

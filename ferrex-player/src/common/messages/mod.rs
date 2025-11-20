@@ -116,34 +116,34 @@ impl DomainUpdateResult {
 #[derive(Clone)]
 pub enum DomainMessage {
     /// Authentication domain
-    Auth(auth::messages::Message),
+    Auth(auth::messages::AuthMessage),
 
     /// Library management domain
-    Library(library::messages::Message),
+    Library(library::messages::LibraryMessage),
 
     /// Media playback domain
-    Media(media::messages::Message),
+    Media(media::messages::MediaMessage),
 
     /// Player domain
-    Player(player::messages::Message),
+    Player(player::messages::PlayerMessage),
 
     /// UI/View domain
-    Ui(ui::messages::Message),
+    Ui(ui::messages::UiMessage),
 
     /// Metadata fetching domain
-    Metadata(metadata::messages::Message),
+    Metadata(metadata::messages::MetadataMessage),
 
     /// Streaming/Transcoding domain
-    Streaming(streaming::messages::Message),
+    Streaming(streaming::messages::StreamingMessage),
 
     /// Settings domain
-    Settings(settings::messages::Message),
+    Settings(settings::messages::SettingsMessage),
 
     /// User management domain
-    UserManagement(user_management::messages::Message),
+    UserManagement(user_management::messages::UserManagementMessage),
 
     /// Search domain
-    Search(search::messages::Message),
+    Search(search::messages::SearchMessage),
 
     /// Focus orchestration
     Focus(FocusMessage),
@@ -156,62 +156,62 @@ pub enum DomainMessage {
 }
 
 // Automatic routing from domain messages
-impl From<auth::messages::Message> for DomainMessage {
-    fn from(msg: auth::messages::Message) -> Self {
+impl From<auth::messages::AuthMessage> for DomainMessage {
+    fn from(msg: auth::messages::AuthMessage) -> Self {
         DomainMessage::Auth(msg)
     }
 }
 
-impl From<library::messages::Message> for DomainMessage {
-    fn from(msg: library::messages::Message) -> Self {
+impl From<library::messages::LibraryMessage> for DomainMessage {
+    fn from(msg: library::messages::LibraryMessage) -> Self {
         DomainMessage::Library(msg)
     }
 }
 
-impl From<media::messages::Message> for DomainMessage {
-    fn from(msg: media::messages::Message) -> Self {
+impl From<media::messages::MediaMessage> for DomainMessage {
+    fn from(msg: media::messages::MediaMessage) -> Self {
         DomainMessage::Media(msg)
     }
 }
 
-impl From<player::messages::Message> for DomainMessage {
-    fn from(msg: player::messages::Message) -> Self {
+impl From<player::messages::PlayerMessage> for DomainMessage {
+    fn from(msg: player::messages::PlayerMessage) -> Self {
         DomainMessage::Player(msg)
     }
 }
 
-impl From<ui::messages::Message> for DomainMessage {
-    fn from(msg: ui::messages::Message) -> Self {
+impl From<ui::messages::UiMessage> for DomainMessage {
+    fn from(msg: ui::messages::UiMessage) -> Self {
         DomainMessage::Ui(msg)
     }
 }
 
-impl From<metadata::messages::Message> for DomainMessage {
-    fn from(msg: metadata::messages::Message) -> Self {
+impl From<metadata::messages::MetadataMessage> for DomainMessage {
+    fn from(msg: metadata::messages::MetadataMessage) -> Self {
         DomainMessage::Metadata(msg)
     }
 }
 
-impl From<streaming::messages::Message> for DomainMessage {
-    fn from(msg: streaming::messages::Message) -> Self {
+impl From<streaming::messages::StreamingMessage> for DomainMessage {
+    fn from(msg: streaming::messages::StreamingMessage) -> Self {
         DomainMessage::Streaming(msg)
     }
 }
 
-impl From<settings::messages::Message> for DomainMessage {
-    fn from(msg: settings::messages::Message) -> Self {
+impl From<settings::messages::SettingsMessage> for DomainMessage {
+    fn from(msg: settings::messages::SettingsMessage) -> Self {
         DomainMessage::Settings(msg)
     }
 }
 
-impl From<user_management::messages::Message> for DomainMessage {
-    fn from(msg: user_management::messages::Message) -> Self {
+impl From<user_management::messages::UserManagementMessage> for DomainMessage {
+    fn from(msg: user_management::messages::UserManagementMessage) -> Self {
         DomainMessage::UserManagement(msg)
     }
 }
 
-impl From<search::messages::Message> for DomainMessage {
-    fn from(msg: search::messages::Message) -> Self {
+impl From<search::messages::SearchMessage> for DomainMessage {
+    fn from(msg: search::messages::SearchMessage) -> Self {
         DomainMessage::Search(msg)
     }
 }

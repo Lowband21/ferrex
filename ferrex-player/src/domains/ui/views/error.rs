@@ -1,5 +1,5 @@
 use crate::{
-    common::ui_utils::icon_text, domains::ui::messages::Message,
+    common::ui_utils::icon_text, domains::ui::messages::UiMessage,
     domains::ui::theme,
 };
 use iced::{
@@ -8,7 +8,7 @@ use iced::{
 };
 use lucide_icons::Icon;
 
-pub fn view_video_error(error_message: &str) -> Element<'_, Message> {
+pub fn view_video_error(error_message: &str) -> Element<'_, UiMessage> {
     let mut content = column![].spacing(20).align_x(iced::Alignment::Center);
 
     // Back button
@@ -19,7 +19,7 @@ pub fn view_video_error(error_message: &str) -> Element<'_, Message> {
                     .spacing(5)
                     .align_y(iced::Alignment::Center),
             )
-            .on_press(Message::NavigateBack)
+            .on_press(UiMessage::NavigateBack)
             .style(theme::Button::Secondary.style()),
         )
         .padding(20),
@@ -43,7 +43,7 @@ pub fn view_video_error(error_message: &str) -> Element<'_, Message> {
             .align_x(iced::alignment::Horizontal::Center),
             Space::new().height(40),
             button("Back to Library")
-                .on_press(Message::NavigateBack)
+                .on_press(UiMessage::NavigateBack)
                 .style(theme::Button::Primary.style()),
         ]
         .align_x(iced::Alignment::Center),

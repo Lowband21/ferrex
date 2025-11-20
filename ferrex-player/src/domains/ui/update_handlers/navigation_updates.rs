@@ -6,7 +6,7 @@ use crate::infra::constants::layout::carousel::{
     HORIZONTAL_PADDING_TOTAL, ITEM_SPACING,
 };
 use crate::{
-    domains::ui::{ViewState, messages::Message, types, views::grid::macros},
+    domains::ui::{ViewState, messages::UiMessage, types, views::grid::macros},
     state::State,
 };
 use ferrex_core::{
@@ -71,7 +71,7 @@ fn prepare_depth_regions_for_transition(
     ),
     profiling::function
 )]
-pub fn handle_view_details(state: &mut State, media: MediaID) -> Task<Message> {
+pub fn handle_view_details(state: &mut State, media: MediaID) -> Task<UiMessage> {
     // Save current view to navigation history
     state
         .domains
@@ -140,7 +140,7 @@ pub fn handle_view_details(state: &mut State, media: MediaID) -> Task<Message> {
 pub fn handle_view_movie_details(
     state: &mut State,
     movie_id: MovieID,
-) -> Task<Message> {
+) -> Task<UiMessage> {
     log::info!("Viewing movie details for id: {})", movie_id.as_str());
 
     // Save current view to navigation history
@@ -316,7 +316,7 @@ pub fn handle_view_movie_details(
 pub fn handle_view_series(
     state: &mut State,
     series_id: SeriesID,
-) -> Task<Message> {
+) -> Task<UiMessage> {
     log::info!("Viewing series: {:?}", series_id);
 
     // Save current view to navigation history
@@ -566,7 +566,7 @@ pub fn handle_view_season(
     state: &mut State,
     series_id: SeriesID,
     season_id: SeasonID,
-) -> Task<Message> {
+) -> Task<UiMessage> {
     log::info!("Viewing season {:?} of series {:?}", season_id, series_id);
 
     // Save current view to navigation history
@@ -781,7 +781,7 @@ pub fn handle_view_season(
 pub fn handle_view_episode(
     state: &mut State,
     episode_id: EpisodeID,
-) -> Task<Message> {
+) -> Task<UiMessage> {
     log::info!("Viewing episode: {}", episode_id.as_str());
 
     // Save current view to navigation history
@@ -837,13 +837,13 @@ pub fn handle_view_episode(
     ),
     profiling::function
 )]
-pub fn handle_navigate_home(state: &mut State) -> Task<Message> {
+pub fn handle_navigate_home(state: &mut State) -> Task<UiMessage> {
     state.domains.ui.state.view = ViewState::Library;
 
     state.domains.library.state.current_library_id = None;
 
     // Refresh media to show all libraries
-    Task::done(Message::AggregateAllLibraries)
+    Task::done(UiMessage::AggregateAllLibraries)
 }
 
 #[cfg_attr(
@@ -854,7 +854,7 @@ pub fn handle_navigate_home(state: &mut State) -> Task<Message> {
     ),
     profiling::function
 )]
-pub fn handle_exit_fullscreen(state: &mut State) -> Task<Message> {
+pub fn handle_exit_fullscreen(state: &mut State) -> Task<UiMessage> {
     // Only exit fullscreen if we're actually in fullscreen
     if state.domains.player.state.is_fullscreen {
         state.domains.player.state.is_fullscreen = false;
@@ -874,7 +874,7 @@ pub fn handle_exit_fullscreen(state: &mut State) -> Task<Message> {
     ),
     profiling::function
 )]
-pub fn handle_toggle_backdrop_aspect_mode(state: &mut State) -> Task<Message> {
+pub fn handle_toggle_backdrop_aspect_mode(state: &mut State) -> Task<UiMessage> {
     // Toggle between Auto and Force21x9 modes
     state
         .domains

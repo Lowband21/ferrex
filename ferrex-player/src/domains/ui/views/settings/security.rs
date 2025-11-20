@@ -2,7 +2,7 @@
 //!
 //! Allows users to manage their PIN, password, and trusted devices
 
-use crate::domains::ui::messages::Message;
+use crate::domains::ui::messages::UiMessage;
 use crate::domains::ui::theme;
 use crate::state::State;
 use iced::widget::{Space, button, column, container, text};
@@ -16,7 +16,7 @@ use iced::{Element, Length};
     ),
     profiling::function
 )]
-pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, Message> {
+pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, UiMessage> {
     let content = column![
         text("Security Settings")
             .size(24)
@@ -34,7 +34,7 @@ pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, Message> {
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 Space::new().height(15),
                 button("Change PIN")
-                    .on_press(Message::NoOp) // TODO: Implement PIN change
+                    .on_press(UiMessage::NoOp) // TODO: Implement PIN change
                     .style(theme::Button::Primary.style())
                     .padding([10, 20]),
             ]
@@ -55,7 +55,7 @@ pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, Message> {
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 Space::new().height(15),
                 button("Change Password")
-                    .on_press(Message::NoOp) // TODO: Implement password change
+                    .on_press(UiMessage::NoOp) // TODO: Implement password change
                     .style(theme::Button::Secondary.style())
                     .padding([10, 20]),
             ]
@@ -81,7 +81,7 @@ pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, Message> {
                     .color(theme::MediaServerTheme::SUCCESS),
                 Space::new().height(10),
                 button("Manage Devices")
-                    .on_press(Message::ShowDeviceManagement)
+                    .on_press(UiMessage::ShowDeviceManagement)
                     .style(theme::Button::Secondary.style())
                     .padding([10, 20]),
             ]
@@ -92,7 +92,7 @@ pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, Message> {
         .width(Length::Fill),
         Space::new().height(30),
         button("Back")
-            .on_press(Message::BackToSettings)
+            .on_press(UiMessage::BackToSettings)
             .style(theme::Button::Secondary.style())
             .padding([10, 20]),
     ]

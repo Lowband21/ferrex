@@ -16,7 +16,7 @@ use iced::Task;
 use log::{error, info};
 
 /// Handle check setup status
-pub fn handle_check_setup_status(state: &mut State) -> Task<auth::Message> {
+pub fn handle_check_setup_status(state: &mut State) -> Task<auth::AuthMessage> {
     info!(
         "[Auth] handle_check_setup_status called - checking if first-run setup is needed"
     );
@@ -37,7 +37,7 @@ pub fn handle_check_setup_status(state: &mut State) -> Task<auth::Message> {
                     "[Auth] Setup status check result: needs_setup = {}",
                     status.needs_setup
                 );
-                auth::Message::SetupStatusChecked(status)
+                auth::AuthMessage::SetupStatusChecked(status)
             }
             Err(e) => {
                 error!("Failed to check setup status: {}", e);
@@ -45,7 +45,7 @@ pub fn handle_check_setup_status(state: &mut State) -> Task<auth::Message> {
                 // showing the setup flow rather than presenting stale user lists or
                 // an empty login. The subsequent setup attempt will validate against
                 // the server and guide the user appropriately.
-                auth::Message::SetupStatusChecked(SetupStatus {
+                auth::AuthMessage::SetupStatusChecked(SetupStatus {
                     needs_setup: true,
                     has_admin: false,
                     requires_setup_token: false,
@@ -61,7 +61,7 @@ pub fn handle_check_setup_status(state: &mut State) -> Task<auth::Message> {
 pub fn handle_setup_status_checked(
     state: &mut State,
     status: SetupStatus,
-) -> Task<auth::Message> {
+) -> Task<auth::AuthMessage> {
     info!(
         "[Auth] handle_setup_status_checked called with needs_setup = {}, requires_setup_token = {}",
         status.needs_setup, status.requires_setup_token
@@ -115,7 +115,7 @@ pub fn handle_setup_status_checked(
 pub fn handle_update_setup_field(
     state: &mut State,
     field: auth::SetupField,
-) -> Task<auth::Message> {
+) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup {
         username,
         password,
@@ -146,7 +146,7 @@ pub fn handle_update_setup_field(
 /// Toggle password visibility in first-run setup
 pub fn handle_toggle_setup_password_visibility(
     state: &mut State,
-) -> Task<auth::Message> {
+) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup { show_password, .. } =
         &mut state.domains.auth.state.auth_flow
     {
@@ -157,7 +157,7 @@ pub fn handle_toggle_setup_password_visibility(
 }
 
 /// Submit the first-run admin setup form
-pub fn handle_submit_setup(state: &mut State) -> Task<auth::Message> {
+pub fn handle_submit_setup(state: &mut State) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup {
         username,
         password,
@@ -255,14 +255,14 @@ pub fn handle_submit_setup(state: &mut State) -> Task<auth::Message> {
             |result| match result {
                 Ok(auth_token) => {
                     info!("[Auth] Admin setup successful");
-                    auth::Message::SetupComplete(
+                    auth::AuthMessage::SetupComplete(
                         auth_token.access_token,
                         auth_token.refresh_token,
                     )
                 }
                 Err(e) => {
                     error!("[Auth] Admin setup failed: {}", e);
-                    auth::Message::SetupError(e.to_string())
+                    auth::AuthMessage::SetupError(e.to_string())
                 }
             },
         );
@@ -276,7 +276,7 @@ pub fn handle_setup_complete(
     state: &mut State,
     access_token: String,
     refresh_token: String,
-) -> Task<auth::Message> {
+) -> Task<auth::AuthMessage> {
     info!("[Auth] Admin setup complete, storing tokens");
 
     let svc = state.domains.auth.state.auth_service.clone();
@@ -340,11 +340,11 @@ pub fn handle_setup_complete(
             match result {
                 Ok((user, permissions)) => {
                     info!("[Auth] Retrieved admin user: {}", user.username);
-                    auth::Message::LoginSuccess(user, permissions)
+                    auth::AuthMessage::LoginSuccess(user, permissions)
                 }
                 Err(e) => {
                     error!("[Auth] Failed to complete setup: {}", e);
-                    auth::Message::SetupError(e)
+                    auth::AuthMessage::SetupError(e)
                 }
             }
         },
@@ -355,7 +355,7 @@ pub fn handle_setup_complete(
 pub fn handle_setup_error(
     state: &mut State,
     error: String,
-) -> Task<auth::Message> {
+) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup {
         error: view_error,
         loading,
@@ -373,7 +373,7 @@ pub fn handle_setup_error(
 pub fn handle_update_claim_device_name(
     state: &mut State,
     name: String,
-) -> Task<auth::Message> {
+) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup { claim, .. } =
         &mut state.domains.auth.state.auth_flow
     {
@@ -384,7 +384,7 @@ pub fn handle_update_claim_device_name(
 }
 
 /// Start the secure claim flow
-pub fn handle_start_setup_claim(state: &mut State) -> Task<auth::Message> {
+pub fn handle_start_setup_claim(state: &mut State) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup {
         claim, claim_token, ..
     } = &mut state.domains.auth.state.auth_flow
@@ -420,8 +420,8 @@ pub fn handle_start_setup_claim(state: &mut State) -> Task<auth::Message> {
                     .map_err(|e| e.to_string())
             },
             |result| match result {
-                Ok(response) => auth::Message::SetupClaimStarted(response),
-                Err(err) => auth::Message::SetupClaimFailed(err),
+                Ok(response) => auth::AuthMessage::SetupClaimStarted(response),
+                Err(err) => auth::AuthMessage::SetupClaimFailed(err),
             },
         );
     }
@@ -433,7 +433,7 @@ pub fn handle_start_setup_claim(state: &mut State) -> Task<auth::Message> {
 pub fn handle_setup_claim_started(
     state: &mut State,
     response: StartClaimResponse,
-) -> Task<auth::Message> {
+) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup { claim, .. } =
         &mut state.domains.auth.state.auth_flow
     {
@@ -457,7 +457,7 @@ pub fn handle_setup_claim_started(
 pub fn handle_setup_claim_failed(
     state: &mut State,
     error: String,
-) -> Task<auth::Message> {
+) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup { claim, .. } =
         &mut state.domains.auth.state.auth_flow
     {
@@ -470,7 +470,7 @@ pub fn handle_setup_claim_failed(
 }
 
 /// Confirm the secure claim
-pub fn handle_confirm_setup_claim(state: &mut State) -> Task<auth::Message> {
+pub fn handle_confirm_setup_claim(state: &mut State) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup {
         claim, claim_token, ..
     } = &mut state.domains.auth.state.auth_flow
@@ -520,8 +520,8 @@ pub fn handle_confirm_setup_claim(state: &mut State) -> Task<auth::Message> {
                     .map_err(|e| e.to_string())
             },
             |result| match result {
-                Ok(response) => auth::Message::SetupClaimConfirmed(response),
-                Err(err) => auth::Message::SetupClaimConfirmFailed(err),
+                Ok(response) => auth::AuthMessage::SetupClaimConfirmed(response),
+                Err(err) => auth::AuthMessage::SetupClaimConfirmFailed(err),
             },
         );
     }
@@ -533,7 +533,7 @@ pub fn handle_confirm_setup_claim(state: &mut State) -> Task<auth::Message> {
 pub fn handle_setup_claim_confirmed(
     state: &mut State,
     response: ConfirmClaimResponse,
-) -> Task<auth::Message> {
+) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup {
         claim, claim_token, ..
     } = &mut state.domains.auth.state.auth_flow
@@ -556,7 +556,7 @@ pub fn handle_setup_claim_confirmed(
 pub fn handle_setup_claim_confirm_failed(
     state: &mut State,
     error: String,
-) -> Task<auth::Message> {
+) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup { claim, .. } =
         &mut state.domains.auth.state.auth_flow
     {
@@ -569,7 +569,7 @@ pub fn handle_setup_claim_confirm_failed(
 }
 
 /// Reset the secure claim state
-pub fn handle_reset_setup_claim(state: &mut State) -> Task<auth::Message> {
+pub fn handle_reset_setup_claim(state: &mut State) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup {
         claim, claim_token, ..
     } = &mut state.domains.auth.state.auth_flow

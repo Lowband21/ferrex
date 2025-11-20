@@ -1,9 +1,9 @@
-use crate::domains::library::messages::Message;
+use crate::domains::library::messages::LibraryMessage;
 use crate::state::State;
 use iced::Task;
 
 /// Handles RefreshLibrary message
-pub fn handle_refresh_library(state: &mut State) -> Task<Message> {
+pub fn handle_refresh_library(state: &mut State) -> Task<LibraryMessage> {
     // Loading state handled at higher level
 
     // Refresh current library's media references

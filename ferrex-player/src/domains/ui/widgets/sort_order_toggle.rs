@@ -1,6 +1,6 @@
 use crate::{
     common::ui_utils::icon_text_with_size,
-    domains::ui::{SortOrder, messages::Message, theme},
+    domains::ui::{SortOrder, messages::UiMessage, theme},
 };
 use iced::{
     Element, Length,
@@ -9,7 +9,7 @@ use iced::{
 use lucide_icons::Icon;
 
 /// Creates a sort order toggle button with consistent styling
-pub fn sort_order_toggle<'a>(current_order: SortOrder) -> Element<'a, Message> {
+pub fn sort_order_toggle<'a>(current_order: SortOrder) -> Element<'a, UiMessage> {
     let icon = match current_order {
         SortOrder::Ascending => Icon::ArrowUp,
         SortOrder::Descending => Icon::ArrowDown,
@@ -28,7 +28,7 @@ pub fn sort_order_toggle<'a>(current_order: SortOrder) -> Element<'a, Message> {
                 .center_x(Length::Fill)
                 .center_y(Length::Fill),
         )
-        .on_press(Message::ToggleSortOrder)
+        .on_press(UiMessage::ToggleSortOrder)
         .style(theme::Button::HeaderIcon.style())
         .width(Length::Fixed(36.0))
         .height(Length::Fixed(36.0)),

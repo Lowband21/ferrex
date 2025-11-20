@@ -2,7 +2,7 @@
 //!
 //! Allows users to edit their display name, email, and avatar
 
-use crate::domains::ui::messages::Message;
+use crate::domains::ui::messages::UiMessage;
 use crate::domains::ui::theme;
 use crate::state::State;
 use iced::widget::{Space, button, column, container, row, text, text_input};
@@ -16,7 +16,7 @@ use iced::{Element, Length};
     ),
     profiling::function
 )]
-pub fn view_user_profile<'a>(_state: &'a State) -> Element<'a, Message> {
+pub fn view_user_profile<'a>(_state: &'a State) -> Element<'a, UiMessage> {
     let content = column![
         text("Profile Settings")
             .size(24)
@@ -34,12 +34,12 @@ pub fn view_user_profile<'a>(_state: &'a State) -> Element<'a, Message> {
         Space::new().height(30),
         row![
             button("Cancel")
-                .on_press(Message::BackToSettings)
+                .on_press(UiMessage::BackToSettings)
                 .style(theme::Button::Secondary.style())
                 .padding([10, 20]),
             Space::new().width(10),
             button("Save Changes")
-                .on_press(Message::NoOp) // TODO: Implement save
+                .on_press(UiMessage::NoOp) // TODO: Implement save
                 .style(theme::Button::Primary.style())
                 .padding([10, 20]),
         ],

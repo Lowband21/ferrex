@@ -1,6 +1,6 @@
 //! Core types for the media card system
 
-use crate::domains::ui::messages::Message;
+use crate::domains::ui::messages::UiMessage;
 use std::time::Duration;
 
 /// Predefined card sizes with associated dimensions
@@ -232,7 +232,7 @@ pub struct OverlayButton {
     pub icon: lucide_icons::Icon,
     pub size: u16,
     pub position: ButtonPosition,
-    pub action: Message,
+    pub action: UiMessage,
 }
 
 /// Position for overlay buttons

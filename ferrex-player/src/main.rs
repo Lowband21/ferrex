@@ -8,7 +8,6 @@ use env_logger::{Builder, Target};
 use iced::window;
 use iced::{Font, Task, Theme};
 use iced_aw::ICED_AW_FONT_BYTES;
-use iced_wgpu::{self, wgpu, wgpu::Backends};
 use log::LevelFilter;
 
 fn init_logger() {
@@ -51,10 +50,6 @@ fn main() -> iced::Result {
 
     #[cfg(feature = "profile-with-tracy")]
     tracy_client::Client::start();
-
-    // iced_wgpu::graphics::set_surface_strategy(
-    //     iced_wgpu::graphics::SurfaceStrategy::Prefer10BitSdr,
-    // );
 
     let config = AppConfig::from_environment();
     let server_url = config.server_url().to_string();
@@ -154,7 +149,7 @@ fn main() -> iced::Result {
                         "[Auth] Auto-login enabled, sending CheckAuthStatus"
                     );
                     DomainMessage::Auth(
-                        domains::auth::messages::Message::CheckAuthStatus,
+                        domains::auth::messages::AuthMessage::CheckAuthStatus,
                     )
                 }
                 Ok(Some(false)) | Ok(None) => {
@@ -162,13 +157,13 @@ fn main() -> iced::Result {
                         "[Auth] Auto-login disabled or no stored auth, sending LoadUsers"
                     );
                     DomainMessage::Auth(
-                        domains::auth::messages::Message::LoadUsers,
+                        domains::auth::messages::AuthMessage::LoadUsers,
                     )
                 }
                 Err(e) => {
                     log::error!("[Auth] Error during auth check: {}", e);
                     DomainMessage::Auth(
-                        domains::auth::messages::Message::LoadUsers,
+                        domains::auth::messages::AuthMessage::LoadUsers,
                     )
                 }
             },
@@ -206,7 +201,7 @@ fn main() -> iced::Result {
                 auth_task,
                 open.map(|_| DomainMessage::NoOp),
                 Task::done(DomainMessage::Ui(
-                    domains::ui::messages::Message::MainWindowOpened(main_id),
+                    domains::ui::messages::UiMessage::MainWindowOpened(main_id),
                 )),
             ]);
 

@@ -1,6 +1,6 @@
 use crate::{
     common::ui_utils::icon_text_with_size,
-    domains::ui::{messages::Message, theme},
+    domains::ui::{messages::UiMessage, theme},
 };
 use iced::{
     Element, Length,
@@ -12,7 +12,7 @@ use lucide_icons::Icon;
 pub fn filter_button<'a>(
     active_filter_count: usize,
     is_open: bool,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     let icon = Icon::ListFilter;
 
     let button_content = if active_filter_count > 0 {
@@ -40,7 +40,7 @@ pub fn filter_button<'a>(
                 .padding([0, 12])
                 .center_y(Length::Fill),
         )
-        .on_press(Message::ToggleFilterPanel)
+        .on_press(UiMessage::ToggleFilterPanel)
         .style(button_style)
         .height(Length::Fixed(36.0)),
     )

@@ -3,15 +3,24 @@ use ferrex_model::details::{
     EpisodeDetails, ExternalIds, SeasonDetails, TmdbDetails,
 };
 
+/// Convenience trait for retrieving details of a particular given media type
 pub trait MediaDetails {
+    #[allow(missing_docs)]
     type MovieDetails;
+    #[allow(missing_docs)]
     type SeriesDetails;
+    #[allow(missing_docs)]
     type SeasonDetails;
+    #[allow(missing_docs)]
     type EpisodeDetails;
 
+    /// Convenience function to retrieve movie details option
     fn to_movie_details(&self) -> Option<&Self::MovieDetails>;
+    /// Convenience function to retrieve series details option
     fn to_series_details(&self) -> Option<&Self::SeriesDetails>;
+    /// Convenience function to retrieve season details option
     fn to_season_details(&self) -> Option<&Self::SeasonDetails>;
+    /// Convenience function to retrieve episode details option
     fn to_episode_details(&self) -> Option<&Self::EpisodeDetails>;
 }
 

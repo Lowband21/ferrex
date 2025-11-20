@@ -266,7 +266,7 @@ fn user_button_internal<'a>(
         .width(Length::Fill)
         .padding(12),
     )
-    .on_press(DomainMessage::Auth(auth::Message::SelectUser(user.id)))
+    .on_press(DomainMessage::Auth(auth::AuthMessage::SelectUser(user.id)))
     .width(Length::Fill)
     .style(|theme: &Theme, status| {
         let palette = theme.extended_palette();
@@ -371,7 +371,7 @@ fn add_user_button<'a>() -> Element<'a, DomainMessage> {
         .width(Length::Fill)
         .padding(12),
     )
-    .on_press(DomainMessage::Auth(auth::Message::ShowCreateUser))
+    .on_press(DomainMessage::Auth(auth::AuthMessage::ShowCreateUser))
     .width(Length::Fill)
     .style(|theme: &Theme, status| {
         let palette = theme.extended_palette();

@@ -8,7 +8,7 @@ pub mod subscriptions;
 
 /// Search domain messages
 #[derive(Clone)]
-pub enum Message {
+pub enum SearchMessage {
     // User actions
     /// Update search query text
     UpdateQuery(String),
@@ -63,7 +63,7 @@ pub enum Message {
     RunCalibration,
 }
 
-impl std::fmt::Debug for Message {
+impl std::fmt::Debug for SearchMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             // User actions
@@ -136,7 +136,7 @@ pub enum SearchEvent {
     SearchCleared,
 }
 
-impl Message {
+impl SearchMessage {
     /// Convert to string for debugging
     pub fn as_str(&self) -> &'static str {
         match self {

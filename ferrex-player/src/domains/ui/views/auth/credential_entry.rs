@@ -101,10 +101,12 @@ pub fn view_credential_entry<'a>(
             content = content.push(
                 text_input("Password", input.as_str())
                     .on_input(|s| {
-                        DomainMessage::Auth(auth::Message::UpdateCredential(s))
+                        DomainMessage::Auth(
+                            auth::AuthMessage::UpdateCredential(s),
+                        )
                     })
                     .on_submit(DomainMessage::Auth(
-                        auth::Message::SubmitCredential,
+                        auth::AuthMessage::SubmitCredential,
                     ))
                     .secure(!show_password)
                     .id(ids::auth_password_entry())
@@ -120,7 +122,7 @@ pub fn view_credential_entry<'a>(
                 checkbox("Show password", show_password)
                     .on_toggle(|_| {
                         DomainMessage::Auth(
-                            auth::Message::TogglePasswordVisibility,
+                            auth::AuthMessage::TogglePasswordVisibility,
                         )
                     })
                     .size(16)
@@ -133,7 +135,9 @@ pub fn view_credential_entry<'a>(
             content = content.push(
                 checkbox("Remember this device", remember_device)
                     .on_toggle(|_| {
-                        DomainMessage::Auth(auth::Message::ToggleRememberDevice)
+                        DomainMessage::Auth(
+                            auth::AuthMessage::ToggleRememberDevice,
+                        )
                     })
                     .size(16)
                     .spacing(8),
@@ -167,7 +171,7 @@ pub fn view_credential_entry<'a>(
         primary_button(submit_label)
     } else {
         primary_button(submit_label)
-            .on_press(DomainMessage::Auth(auth::Message::SubmitCredential))
+            .on_press(DomainMessage::Auth(auth::AuthMessage::SubmitCredential))
     };
 
     content = content.push(submit_button);
@@ -177,7 +181,7 @@ pub fn view_credential_entry<'a>(
     // Back button
     content = content.push(
         secondary_button("Back")
-            .on_press(DomainMessage::Auth(auth::Message::Back)),
+            .on_press(DomainMessage::Auth(auth::AuthMessage::Back)),
     );
 
     let card = auth_card(content.align_x(Alignment::Center));
@@ -212,7 +216,7 @@ pub fn view_pre_auth_login<'a>(
     content = content.push(
         text_input("Username", username)
             .on_input(|s| {
-                DomainMessage::Auth(auth::Message::PreAuthUpdateUsername(s))
+                DomainMessage::Auth(auth::AuthMessage::PreAuthUpdateUsername(s))
             })
             .id(ids::auth_pre_auth_username())
             .padding(12)
@@ -226,9 +230,9 @@ pub fn view_pre_auth_login<'a>(
     content = content.push(
         text_input("Password", password.as_str())
             .on_input(|s| {
-                DomainMessage::Auth(auth::Message::UpdateCredential(s))
+                DomainMessage::Auth(auth::AuthMessage::UpdateCredential(s))
             })
-            .on_submit(DomainMessage::Auth(auth::Message::PreAuthSubmit))
+            .on_submit(DomainMessage::Auth(auth::AuthMessage::PreAuthSubmit))
             .secure(!show_password)
             .id(ids::auth_pre_auth_password())
             .padding(12)
@@ -243,14 +247,14 @@ pub fn view_pre_auth_login<'a>(
         row![
             checkbox("Show password", show_password)
                 .on_toggle(|_| DomainMessage::Auth(
-                    auth::Message::PreAuthTogglePasswordVisibility
+                    auth::AuthMessage::PreAuthTogglePasswordVisibility
                 ))
                 .size(16)
                 .spacing(8),
             Space::new().width(Length::Fixed(16.0)),
             checkbox("Remember this device", remember_device)
                 .on_toggle(|_| DomainMessage::Auth(
-                    auth::Message::PreAuthToggleRememberDevice
+                    auth::AuthMessage::PreAuthToggleRememberDevice
                 ))
                 .size(16)
                 .spacing(8),
@@ -266,7 +270,7 @@ pub fn view_pre_auth_login<'a>(
         primary_button(submit_label)
     } else {
         primary_button(submit_label)
-            .on_press(DomainMessage::Auth(auth::Message::PreAuthSubmit))
+            .on_press(DomainMessage::Auth(auth::AuthMessage::PreAuthSubmit))
     };
 
     content = content.push(submit_button);
@@ -336,7 +340,7 @@ fn numeric_keypad<'a>(current_value: &str) -> Element<'a, DomainMessage> {
                 .align_x(iced::alignment::Horizontal::Center),
         )
         .on_press_maybe(if current_value.len() < 4 {
-            Some(DomainMessage::Auth(auth::Message::UpdateCredential(
+            Some(DomainMessage::Auth(auth::AuthMessage::UpdateCredential(
                 format!("{}{}", current_value, digit),
             )))
         } else {
@@ -395,7 +399,7 @@ fn numeric_keypad<'a>(current_value: &str) -> Element<'a, DomainMessage> {
     .on_press_maybe(if !current_value.is_empty() {
         let mut new_value = current_value.to_string();
         new_value.pop();
-        Some(DomainMessage::Auth(auth::Message::UpdateCredential(
+        Some(DomainMessage::Auth(auth::AuthMessage::UpdateCredential(
             new_value,
         )))
     } else {

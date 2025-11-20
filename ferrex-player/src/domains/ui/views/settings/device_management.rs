@@ -3,7 +3,7 @@
 //! Allows users to view and manage their authenticated devices
 
 use crate::{
-    common::ui_utils::icon_text, domains::ui::messages::Message,
+    common::ui_utils::icon_text, domains::ui::messages::UiMessage,
     domains::ui::theme, state::State,
 };
 use iced::widget::{Space, button, column, container, row, scrollable, text};
@@ -73,7 +73,7 @@ impl DeviceManagementState {
     ),
     profiling::function
 )]
-pub fn view_device_management<'a>(state: &'a State) -> Element<'a, Message> {
+pub fn view_device_management<'a>(state: &'a State) -> Element<'a, UiMessage> {
     let device_state = &state.domains.settings.device_management_state;
 
     // Handle device list content
@@ -98,7 +98,7 @@ pub fn view_device_management<'a>(state: &'a State) -> Element<'a, Message> {
                 ]
                 .align_y(iced::Alignment::Center)
             )
-            .on_press(Message::BackToSettings)
+            .on_press(UiMessage::BackToSettings)
             .style(theme::Button::Secondary.style())
             .padding([8, 16]),
             Space::new().width(20),
@@ -114,7 +114,7 @@ pub fn view_device_management<'a>(state: &'a State) -> Element<'a, Message> {
                 ]
                 .align_y(iced::Alignment::Center)
             )
-            .on_press(Message::RefreshDevices)
+            .on_press(UiMessage::RefreshDevices)
             .style(theme::Button::Secondary.style())
             .padding([6, 12]),
         ]
@@ -147,7 +147,7 @@ pub fn view_device_management<'a>(state: &'a State) -> Element<'a, Message> {
 }
 
 /// Create loading view
-fn create_loading_view<'a>() -> Element<'a, Message> {
+fn create_loading_view<'a>() -> Element<'a, UiMessage> {
     container(
         column![
             row![
@@ -169,7 +169,7 @@ fn create_loading_view<'a>() -> Element<'a, Message> {
     .into()
 }
 
-fn create_error_view<'a>(error: &'a str) -> Element<'a, Message> {
+fn create_error_view<'a>(error: &'a str) -> Element<'a, UiMessage> {
     container(
         column![
             row![
@@ -188,7 +188,7 @@ fn create_error_view<'a>(error: &'a str) -> Element<'a, Message> {
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             Space::new().height(15),
             button("Retry")
-                .on_press(Message::RefreshDevices)
+                .on_press(UiMessage::RefreshDevices)
                 .style(theme::Button::Primary.style())
                 .padding([8, 16]),
         ]
@@ -201,7 +201,7 @@ fn create_error_view<'a>(error: &'a str) -> Element<'a, Message> {
 }
 
 /// Create empty view
-fn create_empty_view<'a>() -> Element<'a, Message> {
+fn create_empty_view<'a>() -> Element<'a, UiMessage> {
     container(
         column![
             icon_text(Icon::Smartphone)
@@ -225,7 +225,7 @@ fn create_empty_view<'a>() -> Element<'a, Message> {
 }
 
 /// Create device list
-fn create_device_list<'a>(devices: &'a [UserDevice]) -> Element<'a, Message> {
+fn create_device_list<'a>(devices: &'a [UserDevice]) -> Element<'a, UiMessage> {
     let mut device_elements = Vec::new();
 
     for device in devices {
@@ -245,7 +245,7 @@ fn create_device_list<'a>(devices: &'a [UserDevice]) -> Element<'a, Message> {
 }
 
 /// Create individual device card
-fn create_device_card<'a>(device: &'a UserDevice) -> Element<'a, Message> {
+fn create_device_card<'a>(device: &'a UserDevice) -> Element<'a, UiMessage> {
     let device_icon = match device.device_type.as_str() {
         "desktop" => Icon::Monitor,
         "mobile" => Icon::Smartphone,
@@ -348,7 +348,7 @@ fn create_device_card<'a>(device: &'a UserDevice) -> Element<'a, Message> {
                         ]
                         .align_y(iced::Alignment::Center),
                     )
-                    .on_press(Message::RevokeDevice(device.device_id.clone()))
+                    .on_press(UiMessage::RevokeDevice(device.device_id.clone()))
                     .style(theme::Button::Danger.style())
                     .padding([6, 12]),
                 )

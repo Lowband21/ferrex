@@ -1,4 +1,4 @@
-use crate::domains::library::messages::Message;
+use crate::domains::library::messages::LibraryMessage;
 use crate::domains::library::server;
 use crate::state::State;
 use ferrex_core::player_prelude::{
@@ -10,7 +10,7 @@ use uuid::Uuid;
 pub fn handle_scan_library(
     state: &mut State,
     library_id: LibraryID,
-) -> Task<Message> {
+) -> Task<LibraryMessage> {
     let api_service = state.api_service.clone();
     Task::perform(
         async move {
@@ -19,12 +19,12 @@ pub fn handle_scan_library(
                 .map_err(|e| e.to_string())
         },
         move |result| match result {
-            Ok(response) => Message::ScanStarted {
+            Ok(response) => LibraryMessage::ScanStarted {
                 library_id,
                 scan_id: response.scan_id,
                 correlation_id: response.correlation_id,
             },
-            Err(error) => Message::ScanCommandFailed {
+            Err(error) => LibraryMessage::ScanCommandFailed {
                 library_id: Some(library_id),
                 error,
             },
@@ -36,7 +36,7 @@ pub fn handle_pause_scan(
     state: &mut State,
     library_id: LibraryID,
     scan_id: Uuid,
-) -> Task<Message> {
+) -> Task<LibraryMessage> {
     let api_service = state.api_service.clone();
     Task::perform(
         async move {
@@ -45,8 +45,8 @@ pub fn handle_pause_scan(
                 .map_err(|e| e.to_string())
         },
         move |result| match result {
-            Ok(_) => Message::FetchActiveScans,
-            Err(error) => Message::ScanCommandFailed {
+            Ok(_) => LibraryMessage::FetchActiveScans,
+            Err(error) => LibraryMessage::ScanCommandFailed {
                 library_id: Some(library_id),
                 error,
             },
@@ -58,7 +58,7 @@ pub fn handle_resume_scan(
     state: &mut State,
     library_id: LibraryID,
     scan_id: Uuid,
-) -> Task<Message> {
+) -> Task<LibraryMessage> {
     let api_service = state.api_service.clone();
     Task::perform(
         async move {
@@ -67,8 +67,8 @@ pub fn handle_resume_scan(
                 .map_err(|e| e.to_string())
         },
         move |result| match result {
-            Ok(_) => Message::FetchActiveScans,
-            Err(error) => Message::ScanCommandFailed {
+            Ok(_) => LibraryMessage::FetchActiveScans,
+            Err(error) => LibraryMessage::ScanCommandFailed {
                 library_id: Some(library_id),
                 error,
             },
@@ -80,7 +80,7 @@ pub fn handle_cancel_scan(
     state: &mut State,
     library_id: LibraryID,
     scan_id: Uuid,
-) -> Task<Message> {
+) -> Task<LibraryMessage> {
     let api_service = state.api_service.clone();
     Task::perform(
         async move {
@@ -89,8 +89,8 @@ pub fn handle_cancel_scan(
                 .map_err(|e| e.to_string())
         },
         move |result| match result {
-            Ok(_) => Message::FetchActiveScans,
-            Err(error) => Message::ScanCommandFailed {
+            Ok(_) => LibraryMessage::FetchActiveScans,
+            Err(error) => LibraryMessage::ScanCommandFailed {
                 library_id: Some(library_id),
                 error,
             },
@@ -98,7 +98,7 @@ pub fn handle_cancel_scan(
     )
 }
 
-pub fn handle_fetch_active_scans(state: &mut State) -> Task<Message> {
+pub fn handle_fetch_active_scans(state: &mut State) -> Task<LibraryMessage> {
     let api_service = state.api_service.clone();
     Task::perform(
         async move {
@@ -107,8 +107,8 @@ pub fn handle_fetch_active_scans(state: &mut State) -> Task<Message> {
                 .map_err(|e| e.to_string())
         },
         |result| match result {
-            Ok(scans) => Message::ActiveScansUpdated(scans),
-            Err(error) => Message::ScanCommandFailed {
+            Ok(scans) => LibraryMessage::ActiveScansUpdated(scans),
+            Err(error) => LibraryMessage::ScanCommandFailed {
                 library_id: None,
                 error,
             },
@@ -116,24 +116,24 @@ pub fn handle_fetch_active_scans(state: &mut State) -> Task<Message> {
     )
 }
 
-pub fn handle_fetch_scan_metrics(state: &mut State) -> Task<Message> {
+pub fn handle_fetch_scan_metrics(state: &mut State) -> Task<LibraryMessage> {
     let api = state.api_service.clone();
     Task::perform(
         async move { api.fetch_scan_metrics().await.map_err(|e| e.to_string()) },
         |result| match result {
-            Ok(metrics) => Message::ScanMetricsLoaded(Ok(metrics)),
-            Err(err) => Message::ScanMetricsLoaded(Err(err)),
+            Ok(metrics) => LibraryMessage::ScanMetricsLoaded(Ok(metrics)),
+            Err(err) => LibraryMessage::ScanMetricsLoaded(Err(err)),
         },
     )
 }
 
-pub fn handle_fetch_scan_config(state: &mut State) -> Task<Message> {
+pub fn handle_fetch_scan_config(state: &mut State) -> Task<LibraryMessage> {
     let api = state.api_service.clone();
     Task::perform(
         async move { api.fetch_scan_config().await.map_err(|e| e.to_string()) },
         |result| match result {
-            Ok(cfg) => Message::ScanConfigLoaded(Ok(cfg)),
-            Err(err) => Message::ScanConfigLoaded(Err(err)),
+            Ok(cfg) => LibraryMessage::ScanConfigLoaded(Ok(cfg)),
+            Err(err) => LibraryMessage::ScanConfigLoaded(Err(err)),
         },
     )
 }

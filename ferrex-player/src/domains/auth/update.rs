@@ -25,23 +25,23 @@ macro_rules! wrap_task {
 )]
 pub fn update_auth(
     state: &mut State,
-    message: auth::Message,
+    message: auth::AuthMessage,
 ) -> DomainUpdateResult {
     match message {
         // Core auth flow
-        auth::Message::CheckAuthStatus => {
+        auth::AuthMessage::CheckAuthStatus => {
             wrap_task!(handle_check_auth_status(state))
         }
 
-        auth::Message::AuthStatusConfirmedWithPin => {
+        auth::AuthMessage::AuthStatusConfirmedWithPin => {
             wrap_task!(handle_auth_status_confirmed_with_pin(state))
         }
 
-        auth::Message::CheckSetupStatus => {
+        auth::AuthMessage::CheckSetupStatus => {
             wrap_task!(handle_check_setup_status(state))
         }
 
-        auth::Message::SetupStatusChecked(status) => {
+        auth::AuthMessage::SetupStatusChecked(status) => {
             let needs_setup = status.needs_setup;
             let setup_task = handle_setup_status_checked(state, status)
                 .map(DomainMessage::Auth);
@@ -61,49 +61,49 @@ pub fn update_auth(
             DomainUpdateResult::task(Task::batch(vec![setup_task, focus_task]))
         }
 
-        auth::Message::AutoLoginCheckComplete => {
+        auth::AuthMessage::AutoLoginCheckComplete => {
             wrap_task!(handle_auto_login_check_complete(state))
         }
 
-        auth::Message::AutoLoginSuccessful(user) => {
+        auth::AuthMessage::AutoLoginSuccessful(user) => {
             wrap_task!(handle_auto_login_successful(state, user))
         }
 
         // User management
-        auth::Message::LoadUsers => wrap_task!(handle_load_users(state)),
+        auth::AuthMessage::LoadUsers => wrap_task!(handle_load_users(state)),
 
-        auth::Message::UsersLoaded(result) => {
+        auth::AuthMessage::UsersLoaded(result) => {
             wrap_task!(handle_users_loaded(state, result,))
         }
 
         // Pre-auth login
-        auth::Message::PreAuthUpdateUsername(value) => {
+        auth::AuthMessage::PreAuthUpdateUsername(value) => {
             wrap_task!(handle_pre_auth_update_username(state, value))
         }
-        auth::Message::PreAuthTogglePasswordVisibility => {
+        auth::AuthMessage::PreAuthTogglePasswordVisibility => {
             wrap_task!(handle_pre_auth_toggle_password_visibility(state))
         }
-        auth::Message::PreAuthToggleRememberDevice => {
+        auth::AuthMessage::PreAuthToggleRememberDevice => {
             wrap_task!(handle_pre_auth_toggle_remember_device(state))
         }
-        auth::Message::PreAuthSubmit => {
+        auth::AuthMessage::PreAuthSubmit => {
             wrap_task!(handle_pre_auth_submit(state))
         }
 
-        auth::Message::SelectUser(user_id) => {
+        auth::AuthMessage::SelectUser(user_id) => {
             wrap_task!(handle_select_user(state, user_id))
         }
 
-        auth::Message::ShowCreateUser => {
+        auth::AuthMessage::ShowCreateUser => {
             wrap_task!(handle_show_create_user(state))
         }
 
-        auth::Message::BackToUserSelection => {
+        auth::AuthMessage::BackToUserSelection => {
             wrap_task!(handle_back_to_user_selection(state))
         }
 
         // Login results
-        auth::Message::LoginSuccess(user, permissions) => {
+        auth::AuthMessage::LoginSuccess(user, permissions) => {
             // Handle login success with cross-domain events
             let task =
                 handle_login_success(state, user.clone(), permissions.clone());
@@ -119,18 +119,18 @@ pub fn update_auth(
             )
         }
 
-        auth::Message::WatchStatusLoaded(result) => {
+        auth::AuthMessage::WatchStatusLoaded(result) => {
             // Watch-state improves the UX, but should not control overall auth completion.
             // Auth completion is centralized in the LoginSuccess path only.
             let task = handle_watch_status_loaded(state, result.clone());
             DomainUpdateResult::task(task.map(DomainMessage::Auth))
         }
 
-        auth::Message::Logout => {
+        auth::AuthMessage::Logout => {
             wrap_task!(handle_logout(state))
         }
 
-        auth::Message::LogoutComplete => {
+        auth::AuthMessage::LogoutComplete => {
             // Handle logout complete with cross-domain events
             let task = handle_logout_complete(state);
             let events = vec![
@@ -146,7 +146,7 @@ pub fn update_auth(
         }
 
         // Device auth flow
-        auth::Message::DeviceStatusChecked(user, result) => {
+        auth::AuthMessage::DeviceStatusChecked(user, result) => {
             let device_task = handle_device_status_checked(state, user, result)
                 .map(DomainMessage::Auth);
 
@@ -166,81 +166,81 @@ pub fn update_auth(
             DomainUpdateResult::task(Task::batch(vec![device_task, focus_task]))
         }
 
-        auth::Message::UpdateCredential(input) => {
+        auth::AuthMessage::UpdateCredential(input) => {
             wrap_task!(handle_auth_flow_update_credential(state, input))
         }
 
-        auth::Message::SubmitCredential => {
+        auth::AuthMessage::SubmitCredential => {
             wrap_task!(handle_auth_flow_submit_credential(state))
         }
 
-        auth::Message::TogglePasswordVisibility => {
+        auth::AuthMessage::TogglePasswordVisibility => {
             wrap_task!(handle_auth_flow_toggle_password_visibility(state))
         }
 
-        auth::Message::ToggleRememberDevice => {
+        auth::AuthMessage::ToggleRememberDevice => {
             wrap_task!(handle_auth_flow_toggle_remember_device(state))
         }
 
-        auth::Message::RememberDeviceSynced(enabled) => {
+        auth::AuthMessage::RememberDeviceSynced(enabled) => {
             wrap_task!(handle_remember_device_synced(state, enabled))
         }
 
-        auth::Message::AuthResult(result) => {
+        auth::AuthMessage::AuthResult(result) => {
             wrap_task!(handle_auth_flow_auth_result(state, result))
         }
 
-        auth::Message::SetupPin => {
+        auth::AuthMessage::SetupPin => {
             wrap_task!(handle_auth_flow_setup_pin(state))
         }
 
-        auth::Message::UpdatePin(pin) => {
+        auth::AuthMessage::UpdatePin(pin) => {
             wrap_task!(handle_auth_flow_update_pin(state, pin))
         }
 
-        auth::Message::UpdateConfirmPin(pin) => {
+        auth::AuthMessage::UpdateConfirmPin(pin) => {
             wrap_task!(handle_auth_flow_update_confirm_pin(state, pin))
         }
 
-        auth::Message::SubmitPin => {
+        auth::AuthMessage::SubmitPin => {
             wrap_task!(handle_auth_flow_submit_pin(state))
         }
 
-        auth::Message::PinSet(result) => {
+        auth::AuthMessage::PinSet(result) => {
             wrap_task!(handle_auth_flow_pin_set(state, result))
         }
 
-        auth::Message::Retry => wrap_task!(handle_auth_flow_retry(state)),
+        auth::AuthMessage::Retry => wrap_task!(handle_auth_flow_retry(state)),
 
-        auth::Message::Back => wrap_task!(handle_auth_flow_back(state)),
+        auth::AuthMessage::Back => wrap_task!(handle_auth_flow_back(state)),
 
         // Admin PIN unlock management
-        auth::Message::EnableAdminPinUnlock => {
+        auth::AuthMessage::EnableAdminPinUnlock => {
             wrap_task!(handle_enable_admin_pin_unlock(state))
         }
 
-        auth::Message::DisableAdminPinUnlock => {
+        auth::AuthMessage::DisableAdminPinUnlock => {
             wrap_task!(handle_disable_admin_pin_unlock(state))
         }
 
-        auth::Message::AdminPinUnlockToggled(result) => {
+        auth::AuthMessage::AdminPinUnlockToggled(result) => {
             wrap_task!(handle_admin_pin_unlock_toggled(state, result))
         }
 
         // Admin setup flow
-        auth::Message::UpdateSetupField(field) => {
+        auth::AuthMessage::UpdateSetupField(field) => {
             wrap_task!(handle_update_setup_field(state, field))
         }
 
-        auth::Message::ToggleSetupPasswordVisibility => {
+        auth::AuthMessage::ToggleSetupPasswordVisibility => {
             wrap_task!(handle_toggle_setup_password_visibility(state))
         }
 
-        auth::Message::SubmitSetup => {
+        auth::AuthMessage::SubmitSetup => {
             wrap_task!(handle_submit_setup(state))
         }
 
-        auth::Message::SetupComplete(access_token, refresh_token) => {
+        auth::AuthMessage::SetupComplete(access_token, refresh_token) => {
             wrap_task!(handle_setup_complete(
                 state,
                 access_token,
@@ -248,48 +248,48 @@ pub fn update_auth(
             ))
         }
 
-        auth::Message::SetupError(error) => {
+        auth::AuthMessage::SetupError(error) => {
             wrap_task!(handle_setup_error(state, error))
         }
 
-        auth::Message::UpdateClaimDeviceName(name) => {
+        auth::AuthMessage::UpdateClaimDeviceName(name) => {
             wrap_task!(handle_update_claim_device_name(state, name))
         }
 
-        auth::Message::StartSetupClaim => {
+        auth::AuthMessage::StartSetupClaim => {
             wrap_task!(handle_start_setup_claim(state))
         }
 
-        auth::Message::SetupClaimStarted(response) => {
+        auth::AuthMessage::SetupClaimStarted(response) => {
             wrap_task!(handle_setup_claim_started(state, response))
         }
 
-        auth::Message::SetupClaimFailed(error) => {
+        auth::AuthMessage::SetupClaimFailed(error) => {
             wrap_task!(handle_setup_claim_failed(state, error))
         }
 
-        auth::Message::ConfirmSetupClaim => {
+        auth::AuthMessage::ConfirmSetupClaim => {
             wrap_task!(handle_confirm_setup_claim(state))
         }
 
-        auth::Message::SetupClaimConfirmed(response) => {
+        auth::AuthMessage::SetupClaimConfirmed(response) => {
             wrap_task!(handle_setup_claim_confirmed(state, response))
         }
 
-        auth::Message::SetupClaimConfirmFailed(error) => {
+        auth::AuthMessage::SetupClaimConfirmFailed(error) => {
             wrap_task!(handle_setup_claim_confirm_failed(state, error))
         }
 
-        auth::Message::ResetSetupClaim => {
+        auth::AuthMessage::ResetSetupClaim => {
             wrap_task!(handle_reset_setup_claim(state))
         }
 
         // Command execution
-        auth::Message::ExecuteCommand(command) => {
+        auth::AuthMessage::ExecuteCommand(command) => {
             handle_auth_command(state, command)
         }
 
-        auth::Message::CommandResult(command, result) => {
+        auth::AuthMessage::CommandResult(command, result) => {
             handle_auth_command_result(state, command, result)
         }
     }
@@ -318,7 +318,7 @@ fn handle_auth_command(
             let result = execute_auth_command(&auth_service, &command).await;
             (command, result)
         },
-        |(cmd, result)| auth::Message::CommandResult(cmd, result),
+        |(cmd, result)| auth::AuthMessage::CommandResult(cmd, result),
     );
     wrap_task!(task)
 }

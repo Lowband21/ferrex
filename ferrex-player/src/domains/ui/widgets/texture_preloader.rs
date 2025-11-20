@@ -8,7 +8,7 @@ use iced_wgpu::primitive::{
 };
 use iced_wgpu::wgpu;
 
-use crate::domains::ui::messages::Message;
+use crate::domains::ui::messages::UiMessage;
 use ferrex_core::player_prelude::{
     ImageRequest, ImageSize, ImageType, Priority,
 };
@@ -32,7 +32,7 @@ pub struct TexturePreloaderPrimitive {
     pub handles: Vec<Handle>,
 }
 
-impl Program<Message> for TexturePreloaderProgram {
+impl Program<UiMessage> for TexturePreloaderProgram {
     type State = TexturePreloaderState;
     type Primitive = TexturePreloaderPrimitive;
 
@@ -59,7 +59,7 @@ impl Program<Message> for TexturePreloaderProgram {
         _event: &iced::Event,
         _bounds: Rectangle,
         _cursor: mouse::Cursor,
-    ) -> Option<iced::widget::Action<Message>> {
+    ) -> Option<iced::widget::Action<UiMessage>> {
         // No interaction
         None
     }
@@ -180,7 +180,7 @@ impl BatchPrimitive for TexturePreloaderPrimitive {
 pub fn texture_preloader(
     handles: Vec<Handle>,
     max_per_frame: usize,
-) -> Element<'static, Message> {
+) -> Element<'static, UiMessage> {
     iced::widget::shader(TexturePreloaderProgram {
         handles,
         max_per_frame,

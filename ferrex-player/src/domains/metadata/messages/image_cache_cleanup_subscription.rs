@@ -1,9 +1,9 @@
-use super::Message;
+use super::MetadataMessage;
 use futures::stream;
 use iced::Subscription;
 
 /// Creates a subscription that periodically cleans up stale image cache entries
-pub fn image_cache_cleanup() -> Subscription<Message> {
+pub fn image_cache_cleanup() -> Subscription<MetadataMessage> {
     #[derive(Debug, Clone, Hash)]
     struct ImageCacheCleanupId;
 
@@ -25,7 +25,7 @@ pub fn image_cache_cleanup() -> Subscription<Message> {
                 log::debug!("Cleaned up stale image cache entries");
             }
 
-            Some((Message::NoOp, tokio::time::Instant::now()))
+            Some((MetadataMessage::NoOp, tokio::time::Instant::now()))
         })
     })
 }

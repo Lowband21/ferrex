@@ -1281,6 +1281,8 @@ mod tests {
             claim_reset: false,
             #[cfg(feature = "demo")]
             demo: false,
+            tls_min_version: Some("1.3".to_string()),
+            tls_cipher_suites: None,
         }
     }
 

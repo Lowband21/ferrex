@@ -1,6 +1,6 @@
 use crate::{
     domains::ui::{
-        messages::Message,
+        messages::UiMessage,
         tabs::{TabId, TabState},
         widgets::library_sort_filter_menu,
     },
@@ -24,7 +24,7 @@ use uuid::Uuid;
 pub fn view_library_controls_bar<'a>(
     state: &'a State,
     selected_library: Option<Uuid>,
-) -> Option<Element<'a, Message>> {
+) -> Option<Element<'a, UiMessage>> {
     // Only show controls for specific libraries, not the "All" view
     selected_library?;
 

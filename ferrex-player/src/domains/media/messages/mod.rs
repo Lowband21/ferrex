@@ -3,7 +3,7 @@ use ferrex_core::player_prelude::MediaID;
 pub mod subscriptions;
 
 #[derive(Clone)]
-pub enum Message {
+pub enum MediaMessage {
     // Watch progress tracking
     ProgressUpdateSent(MediaID, f64, f64), // Position that was successfully sent to server
     ProgressUpdateFailed,                  // Failed to send progress update
@@ -14,7 +14,7 @@ pub enum Message {
     Noop,
 }
 
-impl std::fmt::Debug for Message {
+impl std::fmt::Debug for MediaMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             // Progress tracking
@@ -45,7 +45,7 @@ impl std::fmt::Debug for Message {
     }
 }
 
-impl Message {
+impl MediaMessage {
     pub fn name(&self) -> &'static str {
         match self {
             // Watch progress tracking

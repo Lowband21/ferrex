@@ -1,7 +1,7 @@
 use ferrex_core::player_prelude::TranscodingStatus;
 
 #[derive(Clone)]
-pub enum Message {
+pub enum StreamingMessage {
     // Transcoding
     TranscodingStarted(Result<String, String>), // job_id or error
     TranscodingStatusUpdate(
@@ -25,7 +25,7 @@ pub enum Message {
     BandwidthMeasured(u64), // bits per second
 }
 
-impl std::fmt::Debug for Message {
+impl std::fmt::Debug for StreamingMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             // Transcoding
@@ -64,7 +64,7 @@ impl std::fmt::Debug for Message {
     }
 }
 
-impl Message {
+impl StreamingMessage {
     pub fn name(&self) -> &'static str {
         match self {
             // Transcoding

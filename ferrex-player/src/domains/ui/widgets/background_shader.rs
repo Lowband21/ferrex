@@ -3,7 +3,7 @@
 //! This widget creates visually appealing animated backgrounds with gradients,
 //! depth effects, and subtle animations for a professional streaming app experience.
 
-pub use crate::domains::ui::messages::Message;
+pub use crate::domains::ui::messages::UiMessage;
 use crate::domains::ui::types::BackdropAspectMode;
 use bytemuck::{Pod, Zeroable};
 use iced::advanced::graphics::Viewport;
@@ -1316,7 +1316,7 @@ pub fn background_shader() -> BackgroundShader {
     BackgroundShader::new()
 }
 
-impl<'a> From<BackgroundShader> for Element<'a, Message> {
+impl<'a> From<BackgroundShader> for Element<'a, UiMessage> {
     fn from(background: BackgroundShader) -> Self {
         // Generate a unique ID for this background shader instance
         let id = BACKGROUND_ID_COUNTER

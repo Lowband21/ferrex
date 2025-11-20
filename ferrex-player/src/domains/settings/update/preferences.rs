@@ -1,4 +1,4 @@
-use super::super::messages::Message;
+use super::super::messages::SettingsMessage;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::auth::errors::{AuthError, NetworkError};
 use crate::domains::auth::manager::AutoLoginScope;
@@ -44,7 +44,7 @@ pub fn handle_toggle_auto_login(
             Ok(enabled)
         },
         |result| {
-            Message::AutoLoginToggled(
+            SettingsMessage::AutoLoginToggled(
                 result.map_err(|e: AuthError| e.to_string()),
             )
         },

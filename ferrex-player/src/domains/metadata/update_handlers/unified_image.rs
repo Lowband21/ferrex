@@ -1,4 +1,4 @@
-use crate::domains::metadata::messages::Message;
+use crate::domains::metadata::messages::MetadataMessage;
 use crate::state::State;
 use ferrex_core::player_prelude::{ImageRequest, ImageSize};
 use iced::{Task, widget::image::Handle};
@@ -8,7 +8,7 @@ pub fn handle_unified_image_loaded(
     state: &mut State,
     request: ImageRequest,
     handle: Handle,
-) -> Task<Message> {
+) -> Task<MetadataMessage> {
     //log::info!("Unified image loaded: {:?}", request);
 
     // Update the unified image service cache with the loaded handle
@@ -74,7 +74,7 @@ pub fn handle_unified_image_load_failed(
     state: &mut State,
     request: ImageRequest,
     error: String,
-) -> Task<Message> {
+) -> Task<MetadataMessage> {
     log::error!("Unified image load failed: {:?} - {}", request, error);
 
     // Mark the request as failed in the unified image service
@@ -92,7 +92,7 @@ pub fn handle_unified_image_load_failed(
 pub fn handle_unified_image_cancelled(
     state: &mut State,
     request: ImageRequest,
-) -> Task<Message> {
+) -> Task<MetadataMessage> {
     log::trace!("Unified image load cancelled: {:?}", request);
     state
         .domains

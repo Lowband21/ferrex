@@ -1,6 +1,6 @@
 use super::{ensure_batch_registration, primitive::PosterPrimitive};
 use crate::{
-    domains::ui::messages::Message,
+    domains::ui::messages::UiMessage,
     infra::widgets::poster::poster_animation_types::{
         AnimatedPosterBounds, PosterAnimationType,
     },
@@ -26,10 +26,10 @@ pub struct PosterProgram {
     pub is_hovered: bool,
     pub progress: Option<f32>,
     pub progress_color: Color,
-    pub on_play: Option<Message>,
-    pub on_edit: Option<Message>,
-    pub on_options: Option<Message>,
-    pub on_click: Option<Message>,
+    pub on_play: Option<UiMessage>,
+    pub on_edit: Option<UiMessage>,
+    pub on_options: Option<UiMessage>,
+    pub on_click: Option<UiMessage>,
 }
 
 /// State for tracking mouse position within the shader widget
@@ -41,7 +41,7 @@ pub struct PosterState {
     pub is_hovered: bool,
 }
 
-impl Program<Message> for PosterProgram {
+impl Program<UiMessage> for PosterProgram {
     type State = PosterState;
     type Primitive = PosterPrimitive;
 
@@ -102,7 +102,7 @@ impl Program<Message> for PosterProgram {
         event: &Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
-    ) -> Option<iced::widget::Action<Message>> {
+    ) -> Option<iced::widget::Action<UiMessage>> {
         if let Event::Mouse(mouse_event) = event {
             //log::info!("Shader widget received mouse event: {:?}", mouse_event);
 

@@ -2,7 +2,7 @@ use super::theme;
 use super::track_selection::format_subtitle_track;
 use crate::{
     common::ui_utils::{icon_text, lucide_font},
-    domains::player::{messages::Message, state::PlayerDomainState},
+    domains::player::{messages::PlayerMessage, state::PlayerDomainState},
     infra::constants::player::seeking::*,
 };
 use iced::ContentFit;
@@ -21,9 +21,9 @@ use subwave_unified::video::BackendPreference;
 /// Helper function to create a control button with icon
 fn icon_button(
     icon: Icon,
-    message: Option<Message>,
-) -> Element<'static, Message, Theme, iced::Renderer> {
-    let btn: iced::widget::Button<'static, Message, Theme, iced::Renderer> =
+    message: Option<PlayerMessage>,
+) -> Element<'static, PlayerMessage, Theme, iced::Renderer> {
+    let btn: iced::widget::Button<'static, PlayerMessage, Theme, iced::Renderer> =
         button(icon_text(icon)).style(
             theme::button_transparent
                 as fn(&iced::Theme, button::Status) -> button::Style,
@@ -42,16 +42,16 @@ impl PlayerDomainState {
     /// Build the full controls overlay
     pub fn build_controls(
         &self,
-    ) -> iced::Element<'_, Message, Theme, iced::Renderer> {
+    ) -> iced::Element<'_, PlayerMessage, Theme, iced::Renderer> {
         let controls = column![
             // Top bar with title and buttons
             container(
                 row![
                     // Left side - navigation buttons with spacing
                     row![
-                        icon_button(Icon::ArrowLeft, Some(Message::NavigateBack)),
+                        icon_button(Icon::ArrowLeft, Some(PlayerMessage::NavigateBack)),
                         Space::new().width(Length::Fixed(5.0)),
-                        icon_button(Icon::House, Some(Message::NavigateHome)),
+                        icon_button(Icon::House, Some(PlayerMessage::NavigateHome)),
                     ]
                     .align_y(Alignment::Center),
                     // Center - Title with HDR indicator
@@ -89,7 +89,7 @@ impl PlayerDomainState {
                         } else {
                             Icon::Maximize2
                         },
-                        Some(Message::ToggleFullscreen)
+                        Some(PlayerMessage::ToggleFullscreen)
                     ),
                 ]
                 .spacing(10)
@@ -123,7 +123,7 @@ impl PlayerDomainState {
     /// The seek bar has a visual height of 4px but a hit zone of 30px for easier interaction.
     /// Mouse clicks are validated to be within 7x the visual bar height (28px) vertically to prevent
     /// accidental seeks when clicking elsewhere on the screen.
-    fn build_seek_bar(&self) -> Element<'_, Message, Theme, iced::Renderer> {
+    fn build_seek_bar(&self) -> Element<'_, PlayerMessage, Theme, iced::Renderer> {
         let bar_height = super::state::SEEK_BAR_VISUAL_HEIGHT;
         let hit_area_height =
             crate::infra::constants::player_controls::SEEK_BAR_HIT_ZONE_HEIGHT;
@@ -192,7 +192,7 @@ impl PlayerDomainState {
             .width(Length::Fill)
             .height(hit_area_height),
         )
-        .on_press(Message::SeekBarPressed)
+        .on_press(PlayerMessage::SeekBarPressed)
         // Mouse move and release are now handled at the player view level for global tracking
         .into()
     }
@@ -200,14 +200,14 @@ impl PlayerDomainState {
     /// Build the main control buttons
     fn build_control_buttons(
         &self,
-    ) -> Element<'_, Message, Theme, iced::Renderer> {
+    ) -> Element<'_, PlayerMessage, Theme, iced::Renderer> {
         //// Use source duration if available (for HLS this is the full media duration)
         //let duration = self.source_duration.unwrap_or(self.last_valid_duration);
         // HLS not currently functional
         let duration = self.last_valid_duration;
         {
             // Build a Wayland-only backend toggle element
-            let backend_toggle: Element<Message, Theme> =
+            let backend_toggle: Element<PlayerMessage, Theme> =
                 if std::env::var("WAYLAND_DISPLAY").is_ok() {
                     let label =
                         match self.video_opt.as_ref().map(|v| v.backend()) {
@@ -217,7 +217,7 @@ impl PlayerDomainState {
                             _ => "Use AppSink",
                         };
                     button(text(label).size(14))
-                        .on_press(Message::ToggleAppsinkBackend)
+                        .on_press(PlayerMessage::ToggleAppsinkBackend)
                         .style(theme::button_transparent)
                         .padding(8)
                         .into()
@@ -245,10 +245,10 @@ impl PlayerDomainState {
                 // Center section (1/3 width) - Playback controls
                 container(
                     row![
-                        // Previous episode (disabled for now)
-                        icon_button(Icon::SkipBack, None),
+                        // Previous episode
+                        icon_button(Icon::SkipBack, Some(PlayerMessage::PreviousEpisode)),
                         // Seek backward
-                        icon_button(Icon::Rewind, Some(Message::SeekRelative(SEEK_BACKWARD_COURSE))),
+                        icon_button(Icon::Rewind, Some(PlayerMessage::SeekRelative(SEEK_BACKWARD_COURSE))),
                         // Play/Pause
                         button(
                             text(if self.is_playing() {
@@ -259,15 +259,15 @@ impl PlayerDomainState {
                             .font(lucide_font())
                             .size(24)
                         )
-                        .on_press(Message::PlayPause)
+                        .on_press(PlayerMessage::PlayPause)
                         .style(theme::button_transparent)
                         .padding(8),
                         // Seek forward
-                        icon_button(Icon::FastForward, Some(Message::SeekRelative(SEEK_FORWARD_COURSE))),
-                        // Next episode (disabled for now)
-                        icon_button(Icon::SkipForward, None),
+                        icon_button(Icon::FastForward, Some(PlayerMessage::SeekRelative(SEEK_FORWARD_COURSE))),
+                        // Next episode
+                        icon_button(Icon::SkipForward, Some(PlayerMessage::NextEpisode)),
                         // Stop - navigates back
-                        icon_button(Icon::Square, Some(Message::Stop)),
+                        icon_button(Icon::Square, Some(PlayerMessage::Stop)),
                     ]
                     .spacing(6)
                     .align_y(Alignment::Center)
@@ -287,11 +287,11 @@ impl PlayerDomainState {
                             .font(lucide_font())
                             .size(20)
                         )
-                        .on_press(Message::ToggleMute)
+                        .on_press(PlayerMessage::ToggleMute)
                         .style(theme::button_transparent)
                         .padding(8),
                         container(
-                            slider(0.0..=1.0, self.volume, Message::SetVolume)
+                            slider(0.0..=1.0, self.volume, PlayerMessage::SetVolume)
                                 .step(0.01)
                                 .width(Length::Fixed(80.0))
                                 .style(theme::slider_volume)
@@ -312,7 +312,7 @@ impl PlayerDomainState {
                                     .font(lucide_font())
                                     .size(20),
                             )
-                            .on_press(Message::CycleSubtitleSimple)
+                            .on_press(PlayerMessage::CycleSubtitleSimple)
                             .style(if self.subtitles_enabled {
                                 theme::button_player_active
                             } else {
@@ -334,7 +334,7 @@ impl PlayerDomainState {
                         backend_toggle,
                         // Video settings button (kept minimal)
                         button(text(Icon::Gauge.unicode()).font(lucide_font()).size(20))
-                            .on_press(Message::ToggleQualityMenu)
+                            .on_press(PlayerMessage::ToggleQualityMenu)
                             .style(if self.show_quality_menu {
                                 theme::button_player_active
                             } else {
@@ -343,7 +343,7 @@ impl PlayerDomainState {
                             .padding(8),
                         // Settings button
                         button(text(Icon::Settings.unicode()).font(lucide_font()).size(20))
-                            .on_press(Message::ToggleSettings)
+                            .on_press(PlayerMessage::ToggleSettings)
                             .style(theme::button_transparent)
                             .padding(8),
                     ]
@@ -362,7 +362,7 @@ impl PlayerDomainState {
     /// Build the settings panel content
     pub fn build_settings_panel(
         &self,
-    ) -> iced::Element<'_, Message, Theme, iced::Renderer> {
+    ) -> iced::Element<'_, PlayerMessage, Theme, iced::Renderer> {
         container(
             column![
                 // Header
@@ -372,7 +372,7 @@ impl PlayerDomainState {
                     button(
                         text(Icon::X.unicode()).font(lucide_font()).size(20)
                     )
-                    .on_press(Message::ToggleSettings)
+                    .on_press(PlayerMessage::ToggleSettings)
                     .style(theme::button_ghost)
                     .padding(4),
                 ]
@@ -388,7 +388,7 @@ impl PlayerDomainState {
                     pick_list(
                         &[0.5, 0.75, 1.0, 1.25, 1.5, 2.0][..],
                         Some(self.playback_speed),
-                        Message::SetPlaybackSpeed
+                        PlayerMessage::SetPlaybackSpeed
                     )
                     .width(Length::Fixed(100.0))
                     .style(theme::pick_list_dark::<f64>),
@@ -408,7 +408,7 @@ impl PlayerDomainState {
                             ContentFit::ScaleDown,
                         ][..],
                         Some(self.content_fit),
-                        Message::SetContentFit
+                        PlayerMessage::SetContentFit
                     )
                     .width(Length::Fixed(120.0))
                     .style(theme::pick_list_dark::<ContentFit>),
@@ -501,7 +501,7 @@ impl PlayerDomainState {
                     text("External:").size(14),
                     Space::new().width(Length::Fill),
                     button(text("Play Externally").size(14))
-                        .on_press(Message::PlayExternal)
+                        .on_press(PlayerMessage::PlayExternal)
                         .style(theme::button_transparent)
                         .padding(6),
                 ]
@@ -543,7 +543,7 @@ impl PlayerDomainState {
     /// Build audio track selector
     fn build_audio_track_selector(
         &self,
-    ) -> Element<'_, Message, Theme, iced::Renderer> {
+    ) -> Element<'_, PlayerMessage, Theme, iced::Renderer> {
         if self.available_audio_tracks.is_empty() {
             text("No audio tracks available")
                 .size(14)
@@ -558,7 +558,7 @@ impl PlayerDomainState {
                     self.available_audio_tracks
                         .get(self.current_audio_track as usize)
                         .cloned(),
-                    |track| Message::AudioTrackSelected(track.index)
+                    |track| PlayerMessage::AudioTrackSelected(track.index)
                 )
                 .width(Length::Fixed(200.0))
                 .style(theme::pick_list_dark::<AudioTrack>)
@@ -572,7 +572,7 @@ impl PlayerDomainState {
     /// Build subtitle controls for settings panel
     fn build_subtitle_controls(
         &self,
-    ) -> Element<'_, Message, Theme, iced::Renderer> {
+    ) -> Element<'_, PlayerMessage, Theme, iced::Renderer> {
         if self.available_subtitle_tracks.is_empty() {
             text("No subtitle tracks available")
                 .size(14)
@@ -611,10 +611,10 @@ impl PlayerDomainState {
                 pick_list(subtitle_options, current_selection, |option| {
                     match option {
                         SubtitleOption::Disabled => {
-                            Message::SubtitleTrackSelected(None)
+                            PlayerMessage::SubtitleTrackSelected(None)
                         }
                         SubtitleOption::Track(track) => {
-                            Message::SubtitleTrackSelected(Some(track.index))
+                            PlayerMessage::SubtitleTrackSelected(Some(track.index))
                         }
                     }
                 })
@@ -630,14 +630,14 @@ impl PlayerDomainState {
     /// Build the quality/tone mapping menu popup
     pub fn build_quality_menu(
         &self,
-    ) -> iced::Element<'_, Message, Theme, iced::Renderer> {
+    ) -> iced::Element<'_, PlayerMessage, Theme, iced::Renderer> {
         let content = column![
             // Header
             row![
                 text("Video Settings").size(16).style(theme::text_bright),
                 Space::new().width(Length::Fill),
                 button(text(Icon::X.unicode()).font(lucide_font()).size(16))
-                    .on_press(Message::ToggleQualityMenu)
+                    .on_press(PlayerMessage::ToggleQualityMenu)
                     .style(theme::button_ghost)
                     .padding(2),
             ]
@@ -655,7 +655,7 @@ impl PlayerDomainState {
     /// Build the subtitle menu popup
     pub fn build_subtitle_menu(
         &self,
-    ) -> iced::Element<'_, Message, Theme, iced::Renderer> {
+    ) -> iced::Element<'_, PlayerMessage, Theme, iced::Renderer> {
         container(
             column![
                 // Header
@@ -665,7 +665,7 @@ impl PlayerDomainState {
                     button(
                         text(Icon::X.unicode()).font(lucide_font()).size(16)
                     )
-                    .on_press(Message::ToggleSubtitleMenu)
+                    .on_press(PlayerMessage::ToggleSubtitleMenu)
                     .style(theme::button_ghost)
                     .padding(2),
                 ]
@@ -673,7 +673,7 @@ impl PlayerDomainState {
                 Space::new().height(Length::Fixed(15.0)),
                 // Disabled option
                 button({
-                    let check_icon: Element<Message> =
+                    let check_icon: Element<PlayerMessage> =
                         if !self.subtitles_enabled {
                             text(Icon::Check.unicode())
                                 .font(lucide_font())
@@ -690,7 +690,7 @@ impl PlayerDomainState {
                     ]
                     .align_y(Alignment::Center)
                 })
-                .on_press(Message::SubtitleTrackSelected(None))
+                .on_press(PlayerMessage::SubtitleTrackSelected(None))
                 .width(Length::Fill)
                 .style(theme::button_menu_item)
                 .padding([6, 10]),
@@ -706,7 +706,7 @@ impl PlayerDomainState {
                                     == Some(track.index);
 
                             button({
-                                let check_icon: Element<Message> =
+                                let check_icon: Element<PlayerMessage> =
                                     if is_selected {
                                         text(Icon::Check.unicode())
                                             .font(lucide_font())
@@ -725,7 +725,7 @@ impl PlayerDomainState {
                                 ]
                                 .align_y(Alignment::Center)
                             })
-                            .on_press(Message::SubtitleTrackSelected(Some(
+                            .on_press(PlayerMessage::SubtitleTrackSelected(Some(
                                 track.index,
                             )))
                             .width(Length::Fill)

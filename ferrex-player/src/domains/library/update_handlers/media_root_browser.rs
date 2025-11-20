@@ -7,12 +7,12 @@ use crate::{
         media_root_browser::{
             Message as BrowserMessage, State as BrowserState,
         },
-        messages::Message,
+        messages::LibraryMessage,
     },
     state::State,
 };
 
-pub fn update(state: &mut State, message: BrowserMessage) -> Task<Message> {
+pub fn update(state: &mut State, message: BrowserMessage) -> Task<LibraryMessage> {
     match message {
         BrowserMessage::Open => handle_open(state),
         BrowserMessage::Close => handle_close(state),
@@ -28,7 +28,7 @@ fn browser_state(state: &mut State) -> &mut BrowserState {
     &mut state.domains.library.state.media_root_browser
 }
 
-fn handle_open(state: &mut State) -> Task<Message> {
+fn handle_open(state: &mut State) -> Task<LibraryMessage> {
     {
         let browser = browser_state(state);
         browser.visible = true;
@@ -39,7 +39,7 @@ fn handle_open(state: &mut State) -> Task<Message> {
     handle_browse(state, None)
 }
 
-fn handle_close(state: &mut State) -> Task<Message> {
+fn handle_close(state: &mut State) -> Task<LibraryMessage> {
     let browser = browser_state(state);
     browser.visible = false;
     browser.is_loading = false;
@@ -47,7 +47,7 @@ fn handle_close(state: &mut State) -> Task<Message> {
     Task::none()
 }
 
-fn handle_browse(state: &mut State, path: Option<String>) -> Task<Message> {
+fn handle_browse(state: &mut State, path: Option<String>) -> Task<LibraryMessage> {
     let Some(api) = state.domains.library.state.api_service.clone() else {
         let browser = browser_state(state);
         browser.error = Some(
@@ -68,7 +68,7 @@ fn handle_browse(state: &mut State, path: Option<String>) -> Task<Message> {
                 .map_err(|e| e.to_string())
         },
         |result| {
-            Message::MediaRootBrowser(BrowserMessage::ListingLoaded(result))
+            LibraryMessage::MediaRootBrowser(BrowserMessage::ListingLoaded(result))
         },
     )
 }
@@ -76,7 +76,7 @@ fn handle_browse(state: &mut State, path: Option<String>) -> Task<Message> {
 fn handle_listing_loaded(
     state: &mut State,
     result: Result<MediaRootBrowseResponse, String>,
-) -> Task<Message> {
+) -> Task<LibraryMessage> {
     let browser = browser_state(state);
     browser.is_loading = false;
     match result {
@@ -97,7 +97,7 @@ fn handle_listing_loaded(
 fn handle_path_selected(
     state: &mut State,
     relative_path: String,
-) -> Task<Message> {
+) -> Task<LibraryMessage> {
     let media_root = browser_state(state).media_root.clone();
 
     let Some(root) = media_root else {

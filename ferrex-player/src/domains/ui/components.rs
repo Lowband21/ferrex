@@ -1,5 +1,5 @@
 use crate::common::ui_utils::icon_text;
-use crate::domains::ui::messages::Message;
+use crate::domains::ui::messages::UiMessage;
 use crate::domains::ui::widgets::image_for;
 use crate::infra::constants::layout::carousel::ITEM_SPACING;
 use crate::infra::constants::poster::CORNER_RADIUS;
@@ -27,7 +27,7 @@ use rkyv::rancor::Error;
 )]
 pub fn create_cast_scrollable(
     cast: &[ArchivedCastMember],
-) -> Element<'static, Message> {
+) -> Element<'static, UiMessage> {
     if cast.is_empty() {
         return Space::new().into();
     }
@@ -77,7 +77,7 @@ pub fn create_cast_scrollable(
     ),
     profiling::function
 )]
-fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, Message> {
+fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, UiMessage> {
     let card_width = 120.0;
     let image_height = 180.0;
 
@@ -96,7 +96,7 @@ fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, Message> {
         ArchivedOption::None => 0,
     };
 
-    let profile_image: Element<'static, Message> =
+    let profile_image: Element<'static, UiMessage> =
         if let Some(uuid) = profile_uuid {
             image_for(uuid)
                 .size(ImageSize::Profile)
@@ -143,7 +143,7 @@ fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, Message> {
 /// Create the backdrop aspect ratio toggle button
 pub fn create_backdrop_aspect_button<'a>(
     state: &'a State,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     let aspect_button_text = match state
         .domains
         .ui
@@ -156,7 +156,7 @@ pub fn create_backdrop_aspect_button<'a>(
     };
 
     button(text(aspect_button_text).size(14))
-        .on_press(Message::ToggleBackdropAspectMode)
+        .on_press(UiMessage::ToggleBackdropAspectMode)
         .style(theme::Button::BackdropControl.style())
         .padding([4, 8])
         .into()
@@ -164,10 +164,10 @@ pub fn create_backdrop_aspect_button<'a>(
 
 /// Create an action button row with play button and optional additional buttons
 pub fn create_action_button_row<'a>(
-    play_message: Message,
-    play_in_mpv_message: Option<Message>,
-    additional_buttons: Vec<Element<'a, Message>>,
-) -> Element<'a, Message> {
+    play_message: UiMessage,
+    play_in_mpv_message: Option<UiMessage>,
+    additional_buttons: Vec<Element<'a, UiMessage>>,
+) -> Element<'a, UiMessage> {
     // Play button with DetailAction style
     let play_button = button(
         row![icon_text(Icon::Play), text("Play").size(16)]
@@ -184,7 +184,7 @@ pub fn create_action_button_row<'a>(
         .style(theme::Button::HeaderIcon.style());
 
     // Build menu items
-    let mut items: Vec<Item<'_, Message, iced::Theme, iced::Renderer>> =
+    let mut items: Vec<Item<'_, UiMessage, iced::Theme, iced::Renderer>> =
         Vec::new();
 
     if let Some(mpv_msg) = play_in_mpv_message.clone() {
@@ -217,7 +217,7 @@ pub fn create_action_button_row<'a>(
 /// Create technical details cards for media file metadata
 pub fn create_technical_details<'a>(
     metadata: &'a crate::infra::api_types::MediaFileMetadata,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     let mut tech_row = row![Space::new().width(20)].spacing(8);
 
     // Resolution

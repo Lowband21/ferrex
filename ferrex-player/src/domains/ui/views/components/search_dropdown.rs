@@ -44,7 +44,7 @@ pub fn view_search_dropdown(state: &State) -> Option<Element<'_, Message>> {
             .height(Length::Fill),
     )
     .on_press(DomainMessage::Search(
-        crate::domains::search::messages::Message::ClearSearch,
+        crate::domains::search::messages::SearchMessage::ClearSearch,
     ))
     .style(
         |_theme: &iced::Theme, _status: button::Status| button::Style {
@@ -142,17 +142,17 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
         text_input("Search...", &search_state.query)
             .id(TextInputId::new(SEARCH_WINDOW_INPUT_ID))
             .on_input(|value| DomainMessage::Ui(
-                crate::domains::ui::messages::Message::UpdateSearchQuery(value),
+                crate::domains::ui::messages::UiMessage::UpdateSearchQuery(value),
             ))
             .on_submit(DomainMessage::Ui(
-                crate::domains::ui::messages::Message::ExecuteSearch,
+                crate::domains::ui::messages::UiMessage::ExecuteSearch,
             ))
             .padding(Padding::from([12.0, 16.0]))
             .size(16)
             .width(Length::FillPortion(4)),
         button(text("Search").size(15))
             .on_press(DomainMessage::Ui(
-                crate::domains::ui::messages::Message::ExecuteSearch,
+                crate::domains::ui::messages::UiMessage::ExecuteSearch,
             ))
             .style(ButtonStyle::Primary.style())
             .width(Length::FillPortion(1))
@@ -338,7 +338,7 @@ fn build_results_content(
                     .center_x(Length::Fill),
                 )
                 .on_press(DomainMessage::Search(
-                    crate::domains::search::messages::Message::LoadMore,
+                    crate::domains::search::messages::SearchMessage::LoadMore,
                 ))
                 .style(if is_window {
                     ButtonStyle::Primary.style()
@@ -497,7 +497,7 @@ fn view_search_result(
                     }),
             )
             .on_press(DomainMessage::Search(
-                crate::domains::search::messages::Message::SelectResult(
+                crate::domains::search::messages::SearchMessage::SelectResult(
                     result.media_ref.clone(),
                 ),
             ))
@@ -592,7 +592,7 @@ fn view_search_result(
                     }),
             )
             .on_press(DomainMessage::Search(
-                crate::domains::search::messages::Message::SelectResult(
+                crate::domains::search::messages::SearchMessage::SelectResult(
                     result.media_ref.clone(),
                 ),
             ))
@@ -657,7 +657,7 @@ pub fn view_search_fullscreen(state: &State) -> Element<'_, Message> {
     let header = row![
         button(text("← Back").size(14))
             .on_press(DomainMessage::Search(
-                crate::domains::search::messages::Message::SetMode(
+                crate::domains::search::messages::SearchMessage::SetMode(
                     SearchMode::Dropdown
                 )
             ))
@@ -675,17 +675,17 @@ pub fn view_search_fullscreen(state: &State) -> Element<'_, Message> {
         text_input("Search...", &search_state.query)
             .id(TextInputId::new(SEARCH_WINDOW_INPUT_ID))
             .on_input(|v| DomainMessage::Ui(
-                crate::domains::ui::messages::Message::UpdateSearchQuery(v)
+                crate::domains::ui::messages::UiMessage::UpdateSearchQuery(v)
             ))
             .on_submit(DomainMessage::Ui(
-                crate::domains::ui::messages::Message::ExecuteSearch
+                crate::domains::ui::messages::UiMessage::ExecuteSearch
             ))
             .padding(Padding::from([12.0, 14.0]))
             .size(14)
             .width(Length::Fill),
         button(text("Search").size(14))
             .on_press(DomainMessage::Ui(
-                crate::domains::ui::messages::Message::ExecuteSearch
+                crate::domains::ui::messages::UiMessage::ExecuteSearch
             ))
             .style(ButtonStyle::Primary.style()),
     ]
@@ -732,7 +732,7 @@ pub fn view_search_fullscreen(state: &State) -> Element<'_, Message> {
                 container(
                     button(text("Load More Results").size(14))
                         .on_press(DomainMessage::Search(
-                            crate::domains::search::messages::Message::LoadMore,
+                            crate::domains::search::messages::SearchMessage::LoadMore,
                         ))
                         .style(ButtonStyle::Primary.style()),
                 )
@@ -823,7 +823,7 @@ fn view_search_result_fullscreen(
             }),
     )
     .on_press(DomainMessage::Search(
-        crate::domains::search::messages::Message::SelectResult(
+        crate::domains::search::messages::SearchMessage::SelectResult(
             result.media_ref.clone(),
         ),
     ))

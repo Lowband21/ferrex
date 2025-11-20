@@ -4,7 +4,7 @@ use iced::Task;
 
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
-    domains::library::messages::Message,
+    domains::library::messages::LibraryMessage,
     domains::ui::types::ViewState,
     infra::api_types::Media,
     state::State,

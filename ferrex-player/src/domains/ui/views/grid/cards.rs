@@ -13,7 +13,7 @@ use iced::widget::text::Wrapping;
 use iced::widget::{button, container, mouse_area, text};
 use iced::{Alignment, Length};
 // Module organization
-use crate::domains::ui::messages::Message;
+use crate::domains::ui::messages::UiMessage;
 use crate::domains::ui::views::grid::macros::parse_hex_color;
 use crate::domains::ui::widgets::image_for;
 use crate::infra::api_types::WatchProgress;
@@ -38,7 +38,7 @@ pub fn create_movie_card<'a>(
     is_visible: bool,
     watch_progress: Option<WatchProgress>,
     state: &'a State,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     let is_hovered = hovered_media_id
         .as_ref()
         .map(|id| id == &movie_id)
@@ -67,7 +67,7 @@ pub fn create_series_card<'a>(
     is_visible: bool,
     watch_progress: Option<WatchProgress>,
     state: &'a State,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     let is_hovered = hovered_media_id
         .as_ref()
         .map(|id| id == &series_id)
@@ -96,7 +96,7 @@ pub fn movie_reference_card_with_state<'a>(
     is_hovered: bool,
     is_visible: bool,
     watch_progress: Option<WatchProgress>,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     // Try from UI yoke cache first
     let uuid = movie_id.to_uuid();
     let yoke_arc: Arc<crate::infra::repository::MovieYoke> =
@@ -146,7 +146,7 @@ pub fn movie_reference_card_with_state<'a>(
                             uuid,
                             e
                         );
-                        let placeholder_img: Element<'_, Message> =
+                        let placeholder_img: Element<'_, UiMessage> =
                             image_for(movie_id.to_uuid())
                                 .size(ImageSize::Poster)
                                 .image_type(ImageType::Movie)
@@ -169,10 +169,10 @@ pub fn movie_reference_card_with_state<'a>(
                                 .is_hovered(is_hovered)
                                 .into();
                         let image_with_hover = mouse_area(placeholder_img)
-                            .on_enter(Message::MediaHovered(uuid))
-                            .on_exit(Message::MediaUnhovered(uuid));
+                            .on_enter(UiMessage::MediaHovered(uuid))
+                            .on_exit(UiMessage::MediaUnhovered(uuid));
                         let poster_element = button(image_with_hover)
-                            .on_press(Message::ViewMovieDetails(movie_id))
+                            .on_press(UiMessage::ViewMovieDetails(movie_id))
                             .padding(0)
                             .style(theme::Button::MediaCard.style());
                         let text_content = column![
@@ -222,8 +222,8 @@ pub fn movie_reference_card_with_state<'a>(
         .priority(priority)
         .skip_request(true)
         .is_hovered(is_hovered)
-        .on_play(Message::PlayMediaWithId(media_id))
-        .on_click(Message::ViewDetails(media_id));
+        .on_play(UiMessage::PlayMediaWithId(media_id))
+        .on_click(UiMessage::ViewDetails(media_id));
 
     // Add theme color if available
     if let Some(theme_color_str) = theme_color {
@@ -263,16 +263,16 @@ pub fn movie_reference_card_with_state<'a>(
     }
 
     // Create the full card manually to match media_card! structure
-    let image_element: Element<'_, Message> = img.into();
+    let image_element: Element<'_, UiMessage> = img.into();
 
     // Wrap with hover detection
     let image_with_hover = mouse_area(image_element)
-        .on_enter(Message::MediaHovered(movie_id.to_uuid()))
-        .on_exit(Message::MediaUnhovered(movie_id.to_uuid()));
+        .on_enter(UiMessage::MediaHovered(movie_id.to_uuid()))
+        .on_exit(UiMessage::MediaUnhovered(movie_id.to_uuid()));
 
     // Create poster button
     let poster_element = button(image_with_hover)
-        .on_press(Message::ViewMovieDetails(
+        .on_press(UiMessage::ViewMovieDetails(
             movie_id, //deserialize::<MovieReference, Error>(movie).unwrap(),
         ))
         .padding(0)
@@ -320,7 +320,7 @@ pub fn series_reference_card_with_state<'a>(
     is_hovered: bool,
     is_visible: bool,
     _watch_status: Option<WatchProgress>, // Number of remaining episodes equal to integer from watch_status, individual episode watch progress can be passed with the decimal part
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     // Try from UI yoke cache first
     let uuid = series_id.to_uuid();
     let yoke_arc: Arc<crate::infra::repository::SeriesYoke> =
@@ -370,7 +370,7 @@ pub fn series_reference_card_with_state<'a>(
                             e
                         );
                         // Fallback placeholder card preserving mouse handlers
-                        let placeholder_img: Element<'_, Message> =
+                        let placeholder_img: Element<'_, UiMessage> =
                             image_for(series_id.to_uuid())
                                 .size(ImageSize::Poster)
                                 .image_type(ImageType::Series)
@@ -393,10 +393,10 @@ pub fn series_reference_card_with_state<'a>(
                                 .is_hovered(is_hovered)
                                 .into();
                         let image_with_hover = mouse_area(placeholder_img)
-                            .on_enter(Message::MediaHovered(uuid))
-                            .on_exit(Message::MediaUnhovered(uuid));
+                            .on_enter(UiMessage::MediaHovered(uuid))
+                            .on_exit(UiMessage::MediaUnhovered(uuid));
                         let poster_element = button(image_with_hover)
-                            .on_press(Message::ViewTvShow(series_id))
+                            .on_press(UiMessage::ViewTvShow(series_id))
                             .padding(0)
                             .style(theme::Button::MediaCard.style());
                         let text_content = column![
@@ -452,8 +452,8 @@ pub fn series_reference_card_with_state<'a>(
         .priority(priority)
         .is_hovered(is_hovered)
         .skip_request(true)
-        .on_play(Message::PlaySeriesNextEpisode(series_id))
-        .on_click(Message::ViewTvShow(series_id));
+        .on_play(UiMessage::PlaySeriesNextEpisode(series_id))
+        .on_click(UiMessage::ViewTvShow(series_id));
 
     // Add theme color if available
     if let Some(theme_color_str) = &theme_color {
@@ -485,14 +485,14 @@ pub fn series_reference_card_with_state<'a>(
         }
     }
 
-    let image_element: Element<'_, Message> = img.into();
+    let image_element: Element<'_, UiMessage> = img.into();
 
     let image_with_hover = mouse_area(image_element)
-        .on_enter(Message::MediaHovered(series_id.to_uuid()))
-        .on_exit(Message::MediaUnhovered(series_id.to_uuid()));
+        .on_enter(UiMessage::MediaHovered(series_id.to_uuid()))
+        .on_exit(UiMessage::MediaUnhovered(series_id.to_uuid()));
 
     let poster_element = button(image_with_hover)
-        .on_press(Message::ViewTvShow(series_id))
+        .on_press(UiMessage::ViewTvShow(series_id))
         .padding(0)
         .style(theme::Button::MediaCard.style());
 

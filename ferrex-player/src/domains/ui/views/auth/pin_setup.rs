@@ -103,7 +103,7 @@ pub fn view_pin_setup<'a>(
     let can_submit = pin.len() == 4 && confirm_pin.len() == 4;
     let submit_button = if can_submit {
         primary_button("Set PIN")
-            .on_press(DomainMessage::Auth(auth::Message::SubmitPin))
+            .on_press(DomainMessage::Auth(auth::AuthMessage::SubmitPin))
     } else {
         primary_button("Set PIN")
     };
@@ -115,7 +115,7 @@ pub fn view_pin_setup<'a>(
     // Skip button
     content = content.push(
         secondary_button("Skip for now")
-            .on_press(DomainMessage::Auth(auth::Message::Back)),
+            .on_press(DomainMessage::Auth(auth::AuthMessage::Back)),
     );
 
     let card = auth_card(content.align_x(Alignment::Center));
@@ -191,12 +191,12 @@ fn numeric_keypad<'a>(
 
     let create_digit_button = |digit: char| {
         let message = if is_confirm {
-            DomainMessage::Auth(auth::Message::UpdateConfirmPin(format!(
+            DomainMessage::Auth(auth::AuthMessage::UpdateConfirmPin(format!(
                 "{}{}",
                 current_value, digit
             )))
         } else {
-            DomainMessage::Auth(auth::Message::UpdatePin(format!(
+            DomainMessage::Auth(auth::AuthMessage::UpdatePin(format!(
                 "{}{}",
                 current_value, digit
             )))
@@ -263,9 +263,9 @@ fn numeric_keypad<'a>(
             .align_x(iced::alignment::Horizontal::Center),
     )
     .on_press(if is_confirm {
-        DomainMessage::Auth(auth::Message::UpdateConfirmPin(String::new()))
+        DomainMessage::Auth(auth::AuthMessage::UpdateConfirmPin(String::new()))
     } else {
-        DomainMessage::Auth(auth::Message::UpdatePin(String::new()))
+        DomainMessage::Auth(auth::AuthMessage::UpdatePin(String::new()))
     })
     .width(Length::Fixed(button_size * 2.0 + 8.0))
     .height(Length::Fixed(button_size))

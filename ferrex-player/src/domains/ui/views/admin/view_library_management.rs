@@ -6,7 +6,7 @@ use crate::{
     common::ui_utils::icon_text,
     domains::{
         auth::permissions::{self, StatePermissionExt},
-        ui::{messages::Message, theme, views::admin::view_library_form},
+        ui::{messages::UiMessage, theme, views::admin::view_library_form},
     },
     infra::repository::accessor::{Accessor, ReadOnly},
     state::State,
@@ -34,7 +34,7 @@ use yoke::Yoke;
     ),
     profiling::function
 )]
-pub fn view_library_management(state: &State) -> Element<'_, Message> {
+pub fn view_library_management(state: &State) -> Element<'_, UiMessage> {
     let permissions = state.permission_checker();
 
     // Check if user has permission to view libraries
@@ -50,7 +50,7 @@ pub fn view_library_management(state: &State) -> Element<'_, Message> {
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 Space::new().height(40),
                 button("Back to Admin Dashboard")
-                    .on_press(Message::HideLibraryManagement)
+                    .on_press(UiMessage::HideLibraryManagement)
                     .style(theme::Button::Secondary.style())
                     .padding([12, 20]),
             ]
@@ -78,7 +78,7 @@ pub fn view_library_management(state: &State) -> Element<'_, Message> {
                 .spacing(5)
                 .align_y(iced::Alignment::Center)
         )
-        .on_press(Message::HideLibraryManagement)
+        .on_press(UiMessage::HideLibraryManagement)
         .style(theme::Button::Secondary.style()),
         Space::new().width(Length::Fill),
         text("Library Management")
@@ -92,7 +92,7 @@ pub fn view_library_management(state: &State) -> Element<'_, Message> {
     if permissions.has_permission("libraries:create") {
         header_row = header_row.push(
             button("Create Library")
-                .on_press(Message::ShowLibraryForm(None))
+                .on_press(UiMessage::ShowLibraryForm(None))
                 .style(theme::Button::Primary.style()),
         );
         header_row = header_row.push(Space::new().width(10));
@@ -102,7 +102,7 @@ pub fn view_library_management(state: &State) -> Element<'_, Message> {
     if permissions.can_reset_database() {
         header_row = header_row.push(
             button("🗑 Clear All Data")
-                .on_press(Message::ShowClearDatabaseConfirm)
+                .on_press(UiMessage::ShowClearDatabaseConfirm)
                 .style(theme::Button::Destructive.style()),
         );
     }
@@ -195,7 +195,7 @@ fn create_library_card<'a>(
     library_id: &Uuid,
     //library: &'a LibraryYoke,
     permissions: &permissions::PermissionChecker,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     let library_opt =
         repo_accessor.get_archived_library_yoke(library_id).unwrap(); // This should be safe but I should handle it anyway
 
@@ -219,7 +219,7 @@ fn create_library_card<'a>(
         if permissions.can_scan_libraries() && library.enabled {
             action_buttons = action_buttons.push(
                 button("Scan")
-                    .on_press(Message::ScanLibrary(LibraryID(
+                    .on_press(UiMessage::ScanLibrary(LibraryID(
                         library.id.as_uuid(),
                     )))
                     .style(theme::Button::Secondary.style()),
@@ -227,7 +227,7 @@ fn create_library_card<'a>(
             // Reset: delete and recreate library with start_scan=true
             action_buttons = action_buttons.push(
                 button("Reset Library")
-                    .on_press(Message::ResetLibrary(LibraryID(
+                    .on_press(UiMessage::ResetLibrary(LibraryID(
                         library.id.as_uuid(),
                     )))
                     .style(theme::Button::Secondary.style()),
@@ -238,7 +238,7 @@ fn create_library_card<'a>(
         if permissions.has_permission("libraries:update") {
             action_buttons = action_buttons.push(
                 button("Edit")
-                    .on_press(Message::ShowLibraryForm(Some(
+                    .on_press(UiMessage::ShowLibraryForm(Some(
                         deserialize::<Library, Error>(library)
                             .expect("Failed to deserialize library"),
                     )))
@@ -250,7 +250,7 @@ fn create_library_card<'a>(
         if permissions.has_permission("libraries:delete") {
             action_buttons = action_buttons.push(
                 button("Delete")
-                    .on_press(Message::DeleteLibrary(LibraryID(
+                    .on_press(UiMessage::DeleteLibrary(LibraryID(
                         library.id.as_uuid(),
                     )))
                     .style(theme::Button::Destructive.style()),
@@ -319,7 +319,7 @@ fn create_library_card<'a>(
     }
 }
 
-fn scan_status_panel(state: &State) -> Element<'_, Message> {
+fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
     let mut scans: Vec<ScanSnapshotDto> = state
         .domains
         .library
@@ -375,7 +375,7 @@ fn scan_status_panel(state: &State) -> Element<'_, Message> {
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
             Space::new().width(Length::Fill),
             button("Refresh Metrics")
-                .on_press(Message::FetchScanMetrics)
+                .on_press(UiMessage::FetchScanMetrics)
                 .style(theme::Button::Secondary.style())
         ]
         .align_y(iced::Alignment::Center);
@@ -394,7 +394,7 @@ fn scan_status_panel(state: &State) -> Element<'_, Message> {
                         .color(theme::MediaServerTheme::TEXT_SECONDARY),
                     Space::new().width(Length::Fill),
                     button("Load Metrics")
-                        .on_press(Message::FetchScanMetrics)
+                        .on_press(UiMessage::FetchScanMetrics)
                         .style(theme::Button::Secondary.style()),
                 ]
                 .align_y(iced::Alignment::Center),
@@ -412,7 +412,7 @@ fn scan_status_panel(state: &State) -> Element<'_, Message> {
                         .color(theme::MediaServerTheme::TEXT_SECONDARY),
                     Space::new().width(Length::Fill),
                     button("Start Scan")
-                        .on_press(Message::NoOp)
+                        .on_press(UiMessage::NoOp)
                         .style(theme::Button::Secondary.style()),
                 ]
                 .align_y(iced::Alignment::Center),
@@ -547,7 +547,7 @@ fn scan_status_panel(state: &State) -> Element<'_, Message> {
                 ScanLifecycleStatus::Running => {
                     actions = actions.push(
                         button("Pause")
-                            .on_press(Message::PauseLibraryScan(
+                            .on_press(UiMessage::PauseLibraryScan(
                                 snapshot.library_id,
                                 snapshot.scan_id,
                             ))
@@ -555,7 +555,7 @@ fn scan_status_panel(state: &State) -> Element<'_, Message> {
                     );
                     actions = actions.push(
                         button("Cancel")
-                            .on_press(Message::CancelLibraryScan(
+                            .on_press(UiMessage::CancelLibraryScan(
                                 snapshot.library_id,
                                 snapshot.scan_id,
                             ))
@@ -565,7 +565,7 @@ fn scan_status_panel(state: &State) -> Element<'_, Message> {
                 ScanLifecycleStatus::Paused => {
                     actions = actions.push(
                         button("Resume")
-                            .on_press(Message::ResumeLibraryScan(
+                            .on_press(UiMessage::ResumeLibraryScan(
                                 snapshot.library_id,
                                 snapshot.scan_id,
                             ))
@@ -573,7 +573,7 @@ fn scan_status_panel(state: &State) -> Element<'_, Message> {
                     );
                     actions = actions.push(
                         button("Cancel")
-                            .on_press(Message::CancelLibraryScan(
+                            .on_press(UiMessage::CancelLibraryScan(
                                 snapshot.library_id,
                                 snapshot.scan_id,
                             ))
@@ -583,7 +583,7 @@ fn scan_status_panel(state: &State) -> Element<'_, Message> {
                 ScanLifecycleStatus::Pending => {
                     actions = actions.push(
                         button("Cancel")
-                            .on_press(Message::CancelLibraryScan(
+                            .on_press(UiMessage::CancelLibraryScan(
                                 snapshot.library_id,
                                 snapshot.scan_id,
                             ))
@@ -642,7 +642,7 @@ fn truncate_path(path: &str) -> String {
 }
 
 #[cfg(feature = "demo")]
-fn demo_controls_panel(state: &State) -> Element<'_, Message> {
+fn demo_controls_panel(state: &State) -> Element<'_, UiMessage> {
     let controls = &state.domains.library.state.demo_controls;
 
     let header = row![
@@ -660,7 +660,7 @@ fn demo_controls_panel(state: &State) -> Element<'_, Message> {
                 .size(14)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             text_input("Desired movie count", &controls.movies_input)
-                .on_input(Message::DemoMoviesTargetChanged)
+                .on_input(UiMessage::DemoMoviesTargetChanged)
                 .padding(8)
                 .size(16),
             text(
@@ -679,7 +679,7 @@ fn demo_controls_panel(state: &State) -> Element<'_, Message> {
                 .size(14)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             text_input("Desired series count", &controls.series_input)
-                .on_input(Message::DemoSeriesTargetChanged)
+                .on_input(UiMessage::DemoSeriesTargetChanged)
                 .padding(8)
                 .size(16),
             text(
@@ -710,7 +710,7 @@ fn demo_controls_panel(state: &State) -> Element<'_, Message> {
             .padding([10, 20])
     } else {
         button(apply_label)
-            .on_press(Message::DemoApplySizing)
+            .on_press(UiMessage::DemoApplySizing)
             .style(theme::Button::Primary.style())
             .padding([10, 20])
     };
@@ -729,7 +729,7 @@ fn demo_controls_panel(state: &State) -> Element<'_, Message> {
             .padding([10, 20])
     } else {
         button(refresh_label)
-            .on_press(Message::DemoRefreshStatus)
+            .on_press(UiMessage::DemoRefreshStatus)
             .style(theme::Button::Secondary.style())
             .padding([10, 20])
     };

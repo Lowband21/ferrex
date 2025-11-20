@@ -7,7 +7,7 @@ use crate::infra::api_types::{Media, SeriesReference};
 use ferrex_core::player_prelude::{ImageRequest, MediaID};
 
 #[derive(Clone)]
-pub enum Message {
+pub enum MetadataMessage {
     // Metadata service
     InitializeService,
 
@@ -26,33 +26,37 @@ pub enum Message {
     NoOp,
 }
 
-impl Message {
+impl MetadataMessage {
     pub fn name(&self) -> &'static str {
         match self {
-            Message::InitializeService => "Metadata::InitializeService",
-            Message::MediaDetailsLoaded(_) => "Metadata::MediaDetailsLoaded",
+            MetadataMessage::InitializeService => "Metadata::InitializeService",
+            MetadataMessage::MediaDetailsLoaded(_) => {
+                "Metadata::MediaDetailsLoaded"
+            }
             //Message::MediaDetailsFetched(_, _) => "Metadata::MediaDetailsFetched",
             //Message::MetadataUpdated(_) => "Metadata::MetadataUpdated",
-            Message::ImageLoaded(_, _) => "Metadata::ImageLoaded",
-            Message::UnifiedImageLoaded(_, _) => "Metadata::UnifiedImageLoaded",
-            Message::UnifiedImageLoadFailed(_, _) => {
+            MetadataMessage::ImageLoaded(_, _) => "Metadata::ImageLoaded",
+            MetadataMessage::UnifiedImageLoaded(_, _) => {
+                "Metadata::UnifiedImageLoaded"
+            }
+            MetadataMessage::UnifiedImageLoadFailed(_, _) => {
                 "Metadata::UnifiedImageLoadFailed"
             }
-            Message::UnifiedImageCancelled(_) => {
+            MetadataMessage::UnifiedImageCancelled(_) => {
                 "Metadata::UnifiedImageCancelled"
             }
             //Message::MediaOrganized(_, _) => "Metadata::MediaOrganized",
-            Message::SeriesSortingCompleted(_) => {
+            MetadataMessage::SeriesSortingCompleted(_) => {
                 "Metadata::SeriesSortingCompleted"
             }
-            Message::ForceRescan => "Metadata::ForceRescan",
+            MetadataMessage::ForceRescan => "Metadata::ForceRescan",
             //Message::FetchBatchMetadata(_) => "Metadata::FetchBatchMetadata",
-            Message::NoOp => "Metadata::NoOp",
+            MetadataMessage::NoOp => "Metadata::NoOp",
         }
     }
 }
 
-impl std::fmt::Debug for Message {
+impl std::fmt::Debug for MetadataMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InitializeService => write!(f, "Metadata::InitializeService"),

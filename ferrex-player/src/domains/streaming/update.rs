@@ -1,4 +1,4 @@
-use super::messages::Message;
+use super::messages::StreamingMessage;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::state::State;
 use iced::Task;
@@ -13,7 +13,7 @@ use iced::Task;
 )]
 pub fn update_streaming(
     state: &mut State,
-    message: Message,
+    message: StreamingMessage,
 ) -> DomainUpdateResult {
     #[cfg(any(
         feature = "profile-with-puffin",
@@ -24,38 +24,38 @@ pub fn update_streaming(
 
     match message {
         // Transcoding messages
-        Message::TranscodingStarted(result) => {
+        StreamingMessage::TranscodingStarted(result) => {
             super::update_handlers::transcoding::handle_transcoding_started(state, result)
         }
 
-        Message::TranscodingStatusUpdate(result) => {
+        StreamingMessage::TranscodingStatusUpdate(result) => {
             super::update_handlers::transcoding::handle_transcoding_status_update(state, result)
         }
 
-        Message::CheckTranscodingStatus => {
+        StreamingMessage::CheckTranscodingStatus => {
             super::update_handlers::transcoding::handle_check_transcoding_status(state)
         }
 
         // HLS Streaming messages
-        Message::MasterPlaylistLoaded(playlist_opt) => {
+        StreamingMessage::MasterPlaylistLoaded(playlist_opt) => {
             handle_master_playlist_loaded(state, playlist_opt)
         }
 
-        Message::MasterPlaylistReady(playlist_opt) => {
+        StreamingMessage::MasterPlaylistReady(playlist_opt) => {
             handle_master_playlist_ready(state, playlist_opt)
         }
 
         // Segment management
-        Message::StartSegmentPrefetch(segment_index) => {
+        StreamingMessage::StartSegmentPrefetch(segment_index) => {
             handle_start_segment_prefetch(state, segment_index)
         }
 
-        Message::SegmentPrefetched(index, result) => {
+        StreamingMessage::SegmentPrefetched(index, result) => {
             handle_segment_prefetched(state, index, result)
         }
 
         // Bandwidth adaptation
-        Message::BandwidthMeasured(bandwidth) => handle_bandwidth_measured(state, bandwidth),
+        StreamingMessage::BandwidthMeasured(bandwidth) => handle_bandwidth_measured(state, bandwidth),
     }
 }
 
@@ -97,7 +97,7 @@ fn handle_master_playlist_ready(
         // Now that we confirmed the playlist exists, send direct message to Player domain
         DomainUpdateResult::task(Task::done(
             crate::common::messages::DomainMessage::Player(
-                crate::domains::player::messages::Message::VideoReadyToPlay,
+                crate::domains::player::messages::PlayerMessage::VideoReadyToPlay,
             ),
         ))
     } else {
@@ -107,7 +107,7 @@ fn handle_master_playlist_ready(
             async {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             },
-            |_| DomainMessage::Streaming(Message::CheckTranscodingStatus),
+            |_| DomainMessage::Streaming(StreamingMessage::CheckTranscodingStatus),
         ))
     }
 }

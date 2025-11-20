@@ -3,7 +3,7 @@ use ferrex_core::player_prelude::User;
 use uuid::Uuid;
 
 #[derive(Clone)]
-pub enum Message {
+pub enum UserManagementMessage {
     // User CRUD operations
     LoadUsers,
     UsersLoaded(Result<Vec<AdminUserInfo>, String>),
@@ -59,7 +59,7 @@ pub enum Message {
     BackToUserList,
 }
 
-impl Message {
+impl UserManagementMessage {
     /// Returns a sanitized display string that hides sensitive credential data
     pub fn sanitized_display(&self) -> String {
         match self {
@@ -181,133 +181,133 @@ impl Message {
     }
 }
 
-impl std::fmt::Debug for Message {
+impl std::fmt::Debug for UserManagementMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Message::LoadUsers => {
+            UserManagementMessage::LoadUsers => {
                 write!(f, "UserManagement::LoadUsers")
             }
-            Message::UsersLoaded(users) => {
+            UserManagementMessage::UsersLoaded(users) => {
                 write!(f, "UserManagement::UsersLoaded({:#?})", users)
             }
-            Message::SelectUser(uuid) => {
+            UserManagementMessage::SelectUser(uuid) => {
                 write!(f, "UserManagement::SelectUser({})", uuid)
             }
-            Message::UserSelected(user) => {
+            UserManagementMessage::UserSelected(user) => {
                 write!(f, "UserManagement::UserSelected({})", user.id)
             }
-            Message::CreateUser => {
+            UserManagementMessage::CreateUser => {
                 write!(f, "UserManagement::CreateUser")
             }
-            Message::CreateUserFormUpdateUsername(_) => {
+            UserManagementMessage::CreateUserFormUpdateUsername(_) => {
                 write!(f, "UserManagement::CreateUserFormUpdateUsername")
             }
-            Message::CreateUserFormUpdateDisplayName(_) => {
+            UserManagementMessage::CreateUserFormUpdateDisplayName(_) => {
                 write!(f, "UserManagement::CreateUserFormUpdateDisplayName")
             }
-            Message::CreateUserFormUpdatePassword(_) => {
+            UserManagementMessage::CreateUserFormUpdatePassword(_) => {
                 write!(f, "UserManagement::CreateUserFormUpdatePassword")
             }
-            Message::CreateUserFormUpdateConfirmPassword(_) => {
+            UserManagementMessage::CreateUserFormUpdateConfirmPassword(_) => {
                 write!(f, "UserManagement::CreateUserFormUpdateConfirmPassword")
             }
-            Message::CreateUserFormTogglePasswordVisibility => {
+            UserManagementMessage::CreateUserFormTogglePasswordVisibility => {
                 write!(
                     f,
                     "UserManagement::CreateUserFormTogglePasswordVisibility"
                 )
             }
-            Message::CreateUserFormSubmit => {
+            UserManagementMessage::CreateUserFormSubmit => {
                 write!(f, "UserManagement::CreateUserFormSubmit")
             }
-            Message::CreateUserSuccess(user) => {
+            UserManagementMessage::CreateUserSuccess(user) => {
                 write!(f, "UserManagement::CreateUserSuccess({})", user.id)
             }
-            Message::CreateUserError(_) => {
+            UserManagementMessage::CreateUserError(_) => {
                 write!(f, "UserManagement::CreateUserError")
             }
-            Message::CreateUserCancel => {
+            UserManagementMessage::CreateUserCancel => {
                 write!(f, "UserManagement::CreateUserCancel")
             }
-            Message::UpdateUser(uuid) => {
+            UserManagementMessage::UpdateUser(uuid) => {
                 write!(f, "UserManagement::UpdateUser({})", uuid)
             }
-            Message::UpdateUserFormUpdateUsername(_) => {
+            UserManagementMessage::UpdateUserFormUpdateUsername(_) => {
                 write!(f, "UserManagement::UpdateUserFormUpdateUsername")
             }
-            Message::UpdateUserFormUpdateDisplayName(_) => {
+            UserManagementMessage::UpdateUserFormUpdateDisplayName(_) => {
                 write!(f, "UserManagement::UpdateUserFormUpdateDisplayName")
             }
-            Message::UpdateUserFormUpdatePassword(_) => {
+            UserManagementMessage::UpdateUserFormUpdatePassword(_) => {
                 write!(f, "UserManagement::UpdateUserFormUpdatePassword")
             }
-            Message::UpdateUserFormUpdateConfirmPassword(_) => {
+            UserManagementMessage::UpdateUserFormUpdateConfirmPassword(_) => {
                 write!(f, "UserManagement::UpdateUserFormUpdateConfirmPassword")
             }
-            Message::UpdateUserFormTogglePasswordVisibility => {
+            UserManagementMessage::UpdateUserFormTogglePasswordVisibility => {
                 write!(
                     f,
                     "UserManagement::UpdateUserFormTogglePasswordVisibility"
                 )
             }
-            Message::UpdateUserFormSubmit => {
+            UserManagementMessage::UpdateUserFormSubmit => {
                 write!(f, "UserManagement::UpdateUserFormSubmit")
             }
-            Message::UpdateUserSuccess(user) => {
+            UserManagementMessage::UpdateUserSuccess(user) => {
                 write!(f, "UserManagement::UpdateUserSuccess({})", user.id)
             }
-            Message::UpdateUserError(_) => {
+            UserManagementMessage::UpdateUserError(_) => {
                 write!(f, "UserManagement::UpdateUserError")
             }
-            Message::UpdateUserCancel => {
+            UserManagementMessage::UpdateUserCancel => {
                 write!(f, "UserManagement::UpdateUserCancel")
             }
-            Message::DeleteUser(uuid) => {
+            UserManagementMessage::DeleteUser(uuid) => {
                 write!(f, "UserManagement::DeleteUser({})", uuid)
             }
-            Message::DeleteUserConfirm(uuid) => {
+            UserManagementMessage::DeleteUserConfirm(uuid) => {
                 write!(f, "UserManagement::DeleteUserConfirm({})", uuid)
             }
-            Message::DeleteUserSuccess(uuid) => {
+            UserManagementMessage::DeleteUserSuccess(uuid) => {
                 write!(f, "UserManagement::DeleteUserSuccess({})", uuid)
             }
-            Message::DeleteUserError(_) => {
+            UserManagementMessage::DeleteUserError(_) => {
                 write!(f, "UserManagement::DeleteUserError")
             }
-            Message::DeleteUserCancel => {
+            UserManagementMessage::DeleteUserCancel => {
                 write!(f, "UserManagement::DeleteUserCancel")
             }
-            Message::FirstRunCreateUser => {
+            UserManagementMessage::FirstRunCreateUser => {
                 write!(f, "UserManagement::FirstRunCreateUser")
             }
-            Message::FirstRunUpdateUsername(_) => {
+            UserManagementMessage::FirstRunUpdateUsername(_) => {
                 write!(f, "UserManagement::FirstRunUpdateUsername")
             }
-            Message::FirstRunUpdateDisplayName(_) => {
+            UserManagementMessage::FirstRunUpdateDisplayName(_) => {
                 write!(f, "UserManagement::FirstRunUpdateDisplayName")
             }
-            Message::FirstRunUpdatePassword(_) => {
+            UserManagementMessage::FirstRunUpdatePassword(_) => {
                 write!(f, "UserManagement::FirstRunUpdatePassword")
             }
-            Message::FirstRunUpdateConfirmPassword(_) => {
+            UserManagementMessage::FirstRunUpdateConfirmPassword(_) => {
                 write!(f, "UserManagement::FirstRunUpdateConfirmPassword")
             }
-            Message::FirstRunTogglePasswordVisibility => {
+            UserManagementMessage::FirstRunTogglePasswordVisibility => {
                 write!(f, "UserManagement::FirstRunTogglePasswordVisibility")
             }
-            Message::FirstRunSubmit => {
+            UserManagementMessage::FirstRunSubmit => {
                 write!(f, "UserManagement::FirstRunSubmit")
             }
-            Message::FirstRunSuccess(user) => {
+            UserManagementMessage::FirstRunSuccess(user) => {
                 write!(f, "UserManagement::FirstRunSuccess({})", user.id)
             }
-            Message::FirstRunError(_) => {
+            UserManagementMessage::FirstRunError(_) => {
                 write!(f, "UserManagement::FirstRunError")
             }
-            Message::ShowUserList => {
+            UserManagementMessage::ShowUserList => {
                 write!(f, "UserManagement::ShowUserList")
             }
-            Message::BackToUserList => {
+            UserManagementMessage::BackToUserList => {
                 write!(f, "UserManagement::BackToUserList")
             }
         }

@@ -1,4 +1,4 @@
-use super::Message;
+use super::MediaMessage;
 use crate::common::messages::DomainMessage;
 use crate::domains::ui::types::ViewState;
 use crate::state::State;
@@ -13,7 +13,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         subscriptions.push(
             iced::time::every(std::time::Duration::from_secs(1)).map(|_| {
                 DomainMessage::Player(
-                    crate::domains::player::messages::Message::PollExternalMpv,
+                    crate::domains::player::messages::PlayerMessage::PollExternalMpv,
                 )
             }),
         );
@@ -29,7 +29,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         if state.domains.player.state.controls {
             subscriptions.push(
                 iced::time::every(std::time::Duration::from_millis(500))
-                    .map(|_| DomainMessage::Player(crate::domains::player::messages::Message::CheckControlsVisibility)),
+                    .map(|_| DomainMessage::Player(crate::domains::player::messages::PlayerMessage::CheckControlsVisibility)),
             );
         }
 
@@ -59,7 +59,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                 iced::time::every(std::time::Duration::from_secs(10)).map(
                     |_| {
                         DomainMessage::Player(
-                            crate::domains::player::messages::Message::NewFrame,
+                            crate::domains::player::messages::PlayerMessage::NewFrame,
                         )
                     },
                 ),
@@ -129,7 +129,7 @@ fn watch_progress_subscription(state: &State) -> Subscription<DomainMessage> {
                 // Send progress update every 10 seconds while playing
                 iced::time::every(Duration::from_secs(10)).map(move |_| {
                     log::debug!("Watch progress subscription: Triggering SendProgressUpdate");
-                    DomainMessage::Media(Message::SendProgressUpdateWithData(
+                    DomainMessage::Media(MediaMessage::SendProgressUpdateWithData(
                         media_id, position, duration,
                     ))
                 })

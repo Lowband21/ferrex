@@ -79,7 +79,7 @@ pub fn handle_load_devices(state: &mut State) -> DomainUpdateResult {
                 Err(e) => Err(format!("Failed to load devices: {}", e)),
             }
         },
-        settings::Message::DevicesLoaded,
+        settings::SettingsMessage::DevicesLoaded,
     );
     DomainUpdateResult::task(task.map(DomainMessage::Settings))
 }
@@ -139,7 +139,7 @@ pub fn handle_revoke_device(
                 Err(e) => Err(format!("Failed to revoke device: {}", e)),
             }
         },
-        settings::Message::DeviceRevoked,
+        settings::SettingsMessage::DeviceRevoked,
     );
     DomainUpdateResult::task(task.map(DomainMessage::Settings))
 }

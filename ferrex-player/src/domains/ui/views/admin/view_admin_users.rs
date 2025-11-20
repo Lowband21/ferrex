@@ -1,5 +1,5 @@
 use crate::domains::auth::permissions::StatePermissionExt;
-use crate::domains::ui::messages::Message;
+use crate::domains::ui::messages::UiMessage;
 use crate::domains::ui::theme;
 use crate::infra::api_types::AdminUserInfo;
 use crate::state::State;
@@ -7,7 +7,7 @@ use chrono::Utc;
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Element, Length};
 
-pub fn view_admin_users(state: &State) -> Element<'_, Message> {
+pub fn view_admin_users(state: &State) -> Element<'_, UiMessage> {
     // Permission gate: require ability to view users
     let permissions = state.permission_checker();
     if !permissions.can_view_users() {
@@ -35,7 +35,7 @@ pub fn view_admin_users(state: &State) -> Element<'_, Message> {
         button("Create User")
             .style(theme::Button::Primary.style())
             .padding([8, 14])
-            .on_press(Message::NoOp), // TODO: Wire to create modal
+            .on_press(UiMessage::NoOp), // TODO: Wire to create modal
     ]
     .align_y(iced::Alignment::Center);
 
@@ -78,7 +78,7 @@ pub fn view_admin_users(state: &State) -> Element<'_, Message> {
             .style(theme::Container::Card.style())
             .width(Length::Fill),
     )
-    .on_scroll(|_v| Message::NoOp)
+    .on_scroll(|_v| UiMessage::NoOp)
     .height(Length::Fill);
 
     container(
@@ -98,7 +98,7 @@ pub fn view_admin_users(state: &State) -> Element<'_, Message> {
     .into()
 }
 
-fn user_row(user: &AdminUserInfo) -> Element<'_, Message> {
+fn user_row(user: &AdminUserInfo) -> Element<'_, UiMessage> {
     let roles = if user.roles.is_empty() {
         "-".to_string()
     } else {
@@ -113,12 +113,12 @@ fn user_row(user: &AdminUserInfo) -> Element<'_, Message> {
         button("Edit")
             .style(theme::Button::Secondary.style())
             .padding([6, 10])
-            .on_press(Message::NoOp), // TODO: Wire to edit modal
+            .on_press(UiMessage::NoOp), // TODO: Wire to edit modal
         Space::new().width(8),
         button("Delete")
             .style(theme::Button::Danger.style())
             .padding([6, 10])
-            .on_press(Message::UserAdminDelete(user.id)),
+            .on_press(UiMessage::UserAdminDelete(user.id)),
     ]
     .align_y(iced::Alignment::Center);
 

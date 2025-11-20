@@ -1,4 +1,4 @@
-use crate::domains::ui::messages::Message;
+use crate::domains::ui::messages::UiMessage;
 use crate::domains::ui::tabs::{TabId, TabState};
 use crate::domains::ui::theme;
 use crate::domains::ui::update_handlers::virtual_carousel_helpers as vchelper;
@@ -26,7 +26,7 @@ use std::time::Instant;
     ),
     profiling::function
 )]
-pub fn view_all_content<'a>(state: &'a State) -> Element<'a, Message> {
+pub fn view_all_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
     #[cfg(any(
         feature = "profile-with-puffin",
         feature = "profile-with-tracy",
@@ -618,7 +618,7 @@ pub fn view_all_content<'a>(state: &'a State) -> Element<'a, Message> {
         .direction(scrollable::Direction::Vertical(
             scrollable::Scrollbar::default(),
         ))
-        .on_scroll(|viewport| Message::AllViewScrolled(viewport))
+        .on_scroll(|viewport| UiMessage::AllViewScrolled(viewport))
         .width(Length::Fill)
         .height(Length::Fill)
         .into()

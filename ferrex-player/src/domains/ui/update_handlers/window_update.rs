@@ -5,7 +5,7 @@ use crate::domains::ui::views::virtual_carousel::{
     planner, types::CarouselKey,
 };
 use crate::infra::api_types::LibraryType;
-use crate::{domains::ui::messages::Message, state::State};
+use crate::{domains::ui::messages::UiMessage, state::State};
 use ferrex_core::player_prelude::PosterKind;
 use ferrex_model::SeasonID;
 
@@ -17,7 +17,7 @@ use ferrex_model::SeasonID;
     ),
     profiling::function
 )]
-pub fn handle_window_resized(state: &mut State, size: Size) -> Task<Message> {
+pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
     log::debug!("Window resized to: {}x{}", size.width, size.height);
 
     // Grid state handling moved to ViewModels
@@ -220,7 +220,7 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<Message> {
 pub fn handle_window_moved(
     state: &mut State,
     position: Option<iced::Point>,
-) -> Task<Message> {
+) -> Task<UiMessage> {
     // Store the window position for later use (e.g., when spawning MPV)
     if let Some(position) = position {
         log::info!("Window moved to: ({}, {})", position.x, position.y);

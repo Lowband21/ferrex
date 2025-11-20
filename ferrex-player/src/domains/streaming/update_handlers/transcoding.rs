@@ -1,6 +1,6 @@
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
-    domains::streaming::messages::Message,
+    domains::streaming::messages::StreamingMessage,
     domains::ui::types::ViewState,
     state::State,
 };
@@ -34,7 +34,7 @@ pub fn handle_transcoding_started(
                 {
                     return DomainUpdateResult::task(Task::done(
                         crate::common::messages::DomainMessage::Player(
-                            crate::domains::player::messages::Message::VideoReadyToPlay,
+                            crate::domains::player::messages::PlayerMessage::VideoReadyToPlay,
                         ),
                     ));
                 } else {
@@ -50,7 +50,7 @@ pub fn handle_transcoding_started(
 
             // Start checking status immediately
             DomainUpdateResult::task(Task::perform(async {}, |_| {
-                DomainMessage::Streaming(Message::CheckTranscodingStatus)
+                DomainMessage::Streaming(StreamingMessage::CheckTranscodingStatus)
             }))
         }
         Err(e) => {
@@ -97,7 +97,7 @@ pub fn handle_check_transcoding_status(state: &State) -> DomainUpdateResult {
                 }
             },
             |result| {
-                DomainMessage::Streaming(Message::TranscodingStatusUpdate(
+                DomainMessage::Streaming(StreamingMessage::TranscodingStatusUpdate(
                     result,
                 ))
             },
@@ -193,7 +193,7 @@ pub fn handle_transcoding_status_update(
                 {
                     return DomainUpdateResult::task(Task::done(
                         crate::common::messages::DomainMessage::Player(
-                            crate::domains::player::messages::Message::VideoReadyToPlay,
+                            crate::domains::player::messages::PlayerMessage::VideoReadyToPlay,
                         ),
                     ));
                 } else {
@@ -230,7 +230,7 @@ pub fn handle_transcoding_status_update(
                     },
                     |_| {
                         DomainMessage::Streaming(
-                            Message::CheckTranscodingStatus,
+                            StreamingMessage::CheckTranscodingStatus,
                         )
                     },
                 ));
@@ -285,7 +285,7 @@ pub fn handle_transcoding_status_update(
                                 },
                                 |playlist| {
                                     DomainMessage::Streaming(
-                                        Message::MasterPlaylistReady(playlist),
+                                        StreamingMessage::MasterPlaylistReady(playlist),
                                     )
                                 },
                             ))
@@ -302,7 +302,7 @@ pub fn handle_transcoding_status_update(
                     } else {
                         // Send direct message to Player domain
                         tasks.push(Task::done(crate::common::messages::DomainMessage::Player(
-                            crate::domains::player::messages::Message::VideoReadyToPlay,
+                            crate::domains::player::messages::PlayerMessage::VideoReadyToPlay,
                         )));
                     }
                 }
@@ -398,7 +398,7 @@ pub fn handle_transcoding_status_update(
                                 },
                                 |playlist| {
                                     DomainMessage::Streaming(
-                                        Message::MasterPlaylistLoaded(playlist),
+                                        StreamingMessage::MasterPlaylistLoaded(playlist),
                                     )
                                 },
                             ))
@@ -410,13 +410,13 @@ pub fn handle_transcoding_status_update(
                             DomainUpdateResult::task(Task::batch(vec![
                                 playlist_task,
                                 Task::done(crate::common::messages::DomainMessage::Player(
-                                    crate::domains::player::messages::Message::VideoReadyToPlay,
+                                    crate::domains::player::messages::PlayerMessage::VideoReadyToPlay,
                                 )),
                             ]))
                         } else {
                             DomainUpdateResult::task(Task::done(
                                 crate::common::messages::DomainMessage::Player(
-                                    crate::domains::player::messages::Message::VideoReadyToPlay,
+                                    crate::domains::player::messages::PlayerMessage::VideoReadyToPlay,
                                 ),
                             ))
                         }
@@ -435,7 +435,7 @@ pub fn handle_transcoding_status_update(
                     },
                     |_| {
                         DomainMessage::Streaming(
-                            Message::CheckTranscodingStatus,
+                            StreamingMessage::CheckTranscodingStatus,
                         )
                     },
                 ))

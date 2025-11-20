@@ -146,19 +146,15 @@ impl ExternalMpvHandle {
                             if let Ok(s) = std::str::from_utf8(&buf[..n]) {
                                 for line in s.lines() {
                                     log::debug!("mpv(stdout): {}", line);
-                                    if let Some(ref path) = log_file {
-                                        if let Ok(mut f) =
+                                    if let Some(ref path) = log_file
+                                        && let Ok(mut f) =
                                             std::fs::OpenOptions::new()
                                                 .create(true)
                                                 .append(true)
                                                 .open(path)
-                                        {
-                                            let _ = writeln!(
-                                                f,
-                                                "[stdout] {}",
-                                                line
-                                            );
-                                        }
+                                    {
+                                        let _ =
+                                            writeln!(f, "[stdout] {}", line);
                                     }
                                 }
                             }
@@ -179,19 +175,15 @@ impl ExternalMpvHandle {
                             if let Ok(s) = std::str::from_utf8(&buf[..n]) {
                                 for line in s.lines() {
                                     log::warn!("mpv(stderr): {}", line);
-                                    if let Some(ref path) = log_file {
-                                        if let Ok(mut f) =
+                                    if let Some(ref path) = log_file
+                                        && let Ok(mut f) =
                                             std::fs::OpenOptions::new()
                                                 .create(true)
                                                 .append(true)
                                                 .open(path)
-                                        {
-                                            let _ = writeln!(
-                                                f,
-                                                "[stderr] {}",
-                                                line
-                                            );
-                                        }
+                                    {
+                                        let _ =
+                                            writeln!(f, "[stderr] {}", line);
                                     }
                                 }
                             }
@@ -365,6 +357,7 @@ See mpv log for details: {}",
     }
 
     /// Send a command to MPV via IPC
+    #[allow(unused)]
     fn send_command(
         &mut self,
         args: &[&str],

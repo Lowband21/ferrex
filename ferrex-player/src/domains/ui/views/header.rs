@@ -1,7 +1,7 @@
 use crate::domains::auth::permissions::StatePermissionExt;
 use crate::{
     common::ui_utils::icon_text_with_size,
-    domains::ui::{messages::Message, theme, types::ViewState},
+    domains::ui::{messages::UiMessage, theme, types::ViewState},
     infra::constants::layout::header::HEIGHT,
     state::State,
 };
@@ -23,7 +23,7 @@ use uuid::Uuid;
     ),
     profiling::function
 )]
-pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
+pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
     match &state.domains.ui.state.view {
         ViewState::Library => {
             // New header layout: Left (Home, Back if history exists, Library tabs), Center (Search), Right (Controls)
@@ -36,7 +36,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::NavigateHome)
+                .on_press(UiMessage::NavigateHome)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
@@ -51,7 +51,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                             .center_x(Length::Fill)
                             .center_y(Length::Fill),
                     )
-                    .on_press(Message::NavigateBack)
+                    .on_press(UiMessage::NavigateBack)
                     .style(theme::Button::HeaderIcon.style())
                     .width(Length::Fixed(HEIGHT))
                     .height(HEIGHT)
@@ -85,7 +85,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     .center_x(Length::Fill)
                     .center_y(Length::Fill),
             )
-            .on_press(Message::OpenSearchWindow)
+            .on_press(UiMessage::OpenSearchWindow)
             .style(theme::Button::HeaderIcon.style())
             .width(Length::Fixed(HEIGHT))
             .height(HEIGHT);
@@ -104,7 +104,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     .center_x(Length::Fill)
                     .center_y(Length::Fill),
                 )
-                .on_press(Message::ToggleFullscreen)
+                .on_press(UiMessage::ToggleFullscreen)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
@@ -133,7 +133,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             }
 
             right_section = right_section.push({
-                let element: Element<Message> = if state
+                let element: Element<UiMessage> = if state
                     .permission_checker()
                     .can_view_admin_dashboard()
                 {
@@ -142,7 +142,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                             .center_x(Length::Fill)
                             .center_y(Length::Fill),
                     )
-                    .on_press(Message::ShowLibraryManagement)
+                    .on_press(UiMessage::ShowLibraryManagement)
                     .style(theme::Button::HeaderIcon.style())
                     .width(Length::Fixed(HEIGHT))
                     .height(HEIGHT)
@@ -159,7 +159,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::ShowProfile)
+                .on_press(UiMessage::ShowProfile)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
@@ -207,7 +207,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::NavigateHome)
+                .on_press(UiMessage::NavigateHome)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
@@ -221,7 +221,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::NavigateBack)
+                .on_press(UiMessage::NavigateBack)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
@@ -244,7 +244,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     .center_x(Length::Fill)
                     .center_y(Length::Fill),
             )
-            .on_press(Message::OpenSearchWindow)
+            .on_press(UiMessage::OpenSearchWindow)
             .style(theme::Button::HeaderIcon.style())
             .width(Length::Fixed(HEIGHT))
             .height(HEIGHT);
@@ -264,13 +264,13 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     .center_x(Length::Fill)
                     .center_y(Length::Fill)
                 )
-                .on_press(Message::ToggleFullscreen)
+                .on_press(UiMessage::ToggleFullscreen)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
                 // Admin settings (show only if user has permissions)
                 {
-                    let admin_element: Element<'_, Message> = if state
+                    let admin_element: Element<'_, UiMessage> = if state
                         .permission_checker()
                         .can_view_admin_dashboard()
                     {
@@ -282,7 +282,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                             .center_x(Length::Fill)
                             .center_y(Length::Fill),
                         )
-                        .on_press(Message::ShowLibraryManagement)
+                        .on_press(UiMessage::ShowLibraryManagement)
                         .style(theme::Button::HeaderIcon.style())
                         .width(Length::Fixed(HEIGHT))
                         .height(HEIGHT)
@@ -297,7 +297,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill)
                 )
-                .on_press(Message::ShowProfile)
+                .on_press(UiMessage::ShowProfile)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
@@ -342,7 +342,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::NavigateHome)
+                .on_press(UiMessage::NavigateHome)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
@@ -356,7 +356,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::HideAdminDashboard)
+                .on_press(UiMessage::HideAdminDashboard)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
@@ -381,7 +381,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     .center_x(Length::Fill)
                     .center_y(Length::Fill)
                 )
-                .on_press(Message::ToggleFullscreen)
+                .on_press(UiMessage::ToggleFullscreen)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
@@ -390,7 +390,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
 
             // Library management (admin) button
             right_section = right_section.push({
-                let element: Element<Message> = if state
+                let element: Element<UiMessage> = if state
                     .permission_checker()
                     .can_view_admin_dashboard()
                 {
@@ -399,7 +399,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                             .center_x(Length::Fill)
                             .center_y(Length::Fill),
                     )
-                    .on_press(Message::ShowLibraryManagement)
+                    .on_press(UiMessage::ShowLibraryManagement)
                     .style(theme::Button::HeaderIcon.style())
                     .width(Length::Fixed(HEIGHT))
                     .height(HEIGHT)
@@ -412,14 +412,14 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
 
             // Users management button
             right_section = right_section.push({
-                let element: Element<Message> =
+                let element: Element<UiMessage> =
                     if state.permission_checker().can_view_users() {
                         button(
                             container(icon_text_with_size(Icon::Users, 16.0))
                                 .center_x(Length::Fill)
                                 .center_y(Length::Fill),
                         )
-                        .on_press(Message::ShowUserManagement)
+                        .on_press(UiMessage::ShowUserManagement)
                         .style(theme::Button::HeaderIcon.style())
                         .width(Length::Fixed(HEIGHT))
                         .height(HEIGHT)
@@ -437,7 +437,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::ShowProfile)
+                .on_press(UiMessage::ShowProfile)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
@@ -482,7 +482,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::NavigateHome)
+                .on_press(UiMessage::NavigateHome)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
@@ -491,7 +491,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::NavigateBack)
+                .on_press(UiMessage::NavigateBack)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
@@ -511,7 +511,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     .center_x(Length::Fill)
                     .center_y(Length::Fill)
                 )
-                .on_press(Message::ToggleFullscreen)
+                .on_press(UiMessage::ToggleFullscreen)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
@@ -524,7 +524,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::ShowProfile)
+                .on_press(UiMessage::ShowProfile)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
@@ -569,7 +569,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::NavigateHome)
+                .on_press(UiMessage::NavigateHome)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
@@ -583,7 +583,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::NavigateBack)
+                .on_press(UiMessage::NavigateBack)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
@@ -631,7 +631,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::NavigateHome)
+                .on_press(UiMessage::NavigateHome)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
@@ -645,7 +645,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
-                .on_press(Message::NavigateBack)
+                .on_press(UiMessage::NavigateBack)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT)
@@ -686,7 +686,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
     }
 }
 
-fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
+fn create_library_tabs<'a>(state: &'a State) -> Element<'a, UiMessage> {
     use crate::domains::ui::tabs::TabId;
     use crate::domains::ui::types::DisplayMode;
 
@@ -694,7 +694,7 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
         // No libraries configured - show only curated view
         row![
             button(container(text("All").size(14)).center_y(Length::Fill))
-                .on_press(Message::SetDisplayMode(DisplayMode::Curated))
+                .on_press(UiMessage::SetDisplayMode(DisplayMode::Curated))
                 .style(theme::Button::HeaderIcon.style())
                 .padding([0, 16])
                 .height(HEIGHT),
@@ -702,7 +702,7 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
         .into()
     } else {
         // Show library tabs
-        let mut tabs_vec: Vec<Element<Message>> = Vec::new();
+        let mut tabs_vec: Vec<Element<UiMessage>> = Vec::new();
 
         // Check if "All" tab is active
         let is_all_active = state.tab_manager.active_tab_id() == TabId::All;
@@ -715,7 +715,7 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
         // Add "All" tab - shows curated collections from all libraries
         tabs_vec.push(
             button(container(text("All").size(14)).center_y(Length::Fill))
-                .on_press(Message::SetDisplayMode(DisplayMode::Curated))
+                .on_press(UiMessage::SetDisplayMode(DisplayMode::Curated))
                 .style(all_button_style)
                 .padding([0, 16])
                 .height(HEIGHT)
@@ -748,7 +748,7 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
 
             tabs_vec.push(
                 button(container(text(name).size(14)).center_y(Length::Fill))
-                    .on_press(Message::SelectLibraryAndMode(id))
+                    .on_press(UiMessage::SelectLibraryAndMode(id))
                     .style(button_style)
                     .padding([0, 16])
                     .height(HEIGHT)

@@ -4,6 +4,7 @@
 //! update handlers can stay simple and consistent.
 
 use crate::state::State;
+use crate::infra::repository::accessor::{Accessor, ReadOnly};
 use ferrex_core::player_prelude::{
     EpisodeID, EpisodeLike, MediaIDLike, SeasonID, SeasonLike, SeriesID,
     SeriesLike,

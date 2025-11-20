@@ -12,7 +12,7 @@ use rkyv::util::AlignedVec;
 use uuid::Uuid;
 
 #[derive(Clone)]
-pub enum Message {
+pub enum LibraryMessage {
     // Core library loading
     //TvShowsLoaded(Result<Vec<crate::domains::media::models::TvShowDetails>, String>),
     RefreshLibrary,
@@ -111,7 +111,7 @@ pub enum Message {
     RefreshViewModels,
 }
 
-impl Message {
+impl LibraryMessage {
     pub fn name(&self) -> &'static str {
         match self {
             // Core library loading
@@ -202,7 +202,7 @@ impl Message {
     }
 }
 
-impl std::fmt::Debug for Message {
+impl std::fmt::Debug for LibraryMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             // Core library loading

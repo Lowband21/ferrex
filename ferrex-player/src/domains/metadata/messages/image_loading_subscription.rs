@@ -1,4 +1,4 @@
-use super::Message;
+use super::MetadataMessage;
 use crate::infra::services::api::ApiService;
 use ferrex_core::api::routes::{utils, v1};
 use ferrex_core::player_prelude::{ImageSize, ImageType};
@@ -14,7 +14,7 @@ pub fn image_loading(
     api_service: Arc<dyn ApiService>,
     server_url: String,
     receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
-) -> Subscription<Message> {
+) -> Subscription<MetadataMessage> {
     // Subscription data that includes both ID and context
     #[derive(Debug, Clone)]
     struct ImageLoaderSubscription {
@@ -74,12 +74,12 @@ fn image_loader_stream_concurrent(
     wake_receiver_arc: Arc<
         Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>,
     >,
-) -> impl futures::Stream<Item = Message> {
+) -> impl futures::Stream<Item = MetadataMessage> {
     enum ImageLoaderState {
         Running {
             last_spawn_time: Option<std::time::Instant>,
             receiver: Option<tokio::sync::mpsc::UnboundedReceiver<()>>,
-            inflight: FuturesUnordered<tokio::task::JoinHandle<Message>>,
+            inflight: FuturesUnordered<tokio::task::JoinHandle<MetadataMessage>>,
         },
         Finished,
     }
@@ -196,7 +196,7 @@ fn image_loader_stream_concurrent(
                                     };
 
                                     if srv.is_empty() {
-                                        return Message::UnifiedImageLoadFailed(
+                                        return MetadataMessage::UnifiedImageLoadFailed(
                                             request_for_fetch,
                                             "Server URL is empty".to_string(),
                                         );
@@ -284,7 +284,7 @@ fn image_loader_stream_concurrent(
                                                     &full_url,
                                                     &msg,
                                                 );
-                                                return Message::UnifiedImageLoadFailed(
+                                                return MetadataMessage::UnifiedImageLoadFailed(
                                                     request_for_fetch,
                                                     msg,
                                                 );
@@ -353,7 +353,7 @@ fn image_loader_stream_concurrent(
                                                     &full_url,
                                                     &msg,
                                                 );
-                                                return Message::UnifiedImageLoadFailed(request_for_fetch, msg);
+                                                return MetadataMessage::UnifiedImageLoadFailed(request_for_fetch, msg);
                                             }
 
                                             // Decode and resize to exact widget dimensions before creating the handle.
@@ -381,7 +381,7 @@ fn image_loader_stream_concurrent(
                                                         &full_url,
                                                         &format!("{}", e),
                                                     );
-                                                        return Message::UnifiedImageLoadFailed(
+                                                        return MetadataMessage::UnifiedImageLoadFailed(
                                                         request_for_fetch,
                                                         msg,
                                                     );
@@ -418,7 +418,7 @@ fn image_loader_stream_concurrent(
                                                     &full_url,
                                                     &msg,
                                                 );
-                                                return Message::UnifiedImageLoadFailed(
+                                                return MetadataMessage::UnifiedImageLoadFailed(
                                                     request_for_fetch,
                                                     msg,
                                                 );
@@ -444,7 +444,7 @@ fn image_loader_stream_concurrent(
                                                 &full_url,
                                                 byte_len,
                                             );
-                                            Message::UnifiedImageLoaded(
+                                            MetadataMessage::UnifiedImageLoaded(
                                                 request_for_fetch,
                                                 handle,
                                             )
@@ -468,7 +468,7 @@ fn image_loader_stream_concurrent(
                                                 &full_url,
                                                 &format!("{}", e),
                                             );
-                                            Message::UnifiedImageLoadFailed(
+                                            MetadataMessage::UnifiedImageLoadFailed(
                                                 request_for_fetch,
                                                 msg,
                                             )
@@ -481,7 +481,7 @@ fn image_loader_stream_concurrent(
                                         if let Some(image_service) = crate::infra::service_registry::get_image_service() {
                                             image_service.get().mark_cancelled(&request_for_cancel);
                                         }
-                                        Message::UnifiedImageCancelled(request_for_cancel)
+                                        MetadataMessage::UnifiedImageCancelled(request_for_cancel)
                                     }
                                     msg = fetch => msg,
                                 }
@@ -517,7 +517,7 @@ fn image_loader_stream_concurrent(
                                         "Image fetch task join error: {}",
                                         e
                                     );
-                                    Message::NoOp
+                                    MetadataMessage::NoOp
                                 }
                             };
                             return Some((
@@ -548,7 +548,7 @@ fn image_loader_stream_concurrent(
                         }
 
                         Some((
-                            Message::NoOp,
+                            MetadataMessage::NoOp,
                             ImageLoaderState::Running {
                                 last_spawn_time,
                                 receiver,

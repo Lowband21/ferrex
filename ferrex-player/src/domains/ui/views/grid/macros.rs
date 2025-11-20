@@ -20,9 +20,9 @@ macro_rules! virtual_reference_grid {
             item_index: &[Uuid],
             grid_state: &super::VirtualGridState,
             hovered_media_id: &Option<Uuid>,
-            on_scroll: impl Fn(iced::widget::scrollable::Viewport) -> $crate::domains::ui::messages::Message + 'a,
+            on_scroll: impl Fn(iced::widget::scrollable::Viewport) -> $crate::domains::ui::messages::UiMessage + 'a,
             state: &'a $crate::state::State,
-        ) -> iced::Element<'a, $crate::domains::ui::messages::Message> {
+        ) -> iced::Element<'a, $crate::domains::ui::messages::UiMessage> {
             let len = item_index.len();
             //let reference_grid = iced::debug::time($profiler_label);
             use iced::{
@@ -402,7 +402,7 @@ macro_rules! media_card {
         };
 
         // Create the main image/poster element using image_for
-        let image_element: Element<'_, $crate::domains::ui::messages::Message> = {
+        let image_element: Element<'_, $crate::domains::ui::messages::UiMessage> = {
             use $crate::domains::ui::widgets::image_for;
 
             // Determine requested image category from macro parameter (Poster/Backdrop/Thumbnail/Profile/Full)
@@ -456,12 +456,12 @@ macro_rules! media_card {
         // Wrap the image element with precise hover detection
         // This tracks only the actual poster bounds, not the container
         let image_with_hover = iced::widget::mouse_area(image_element)
-            .on_enter($crate::domains::ui::messages::Message::MediaHovered($image_key))
-            .on_exit($crate::domains::ui::messages::Message::MediaUnhovered($image_key));
+            .on_enter($crate::domains::ui::messages::UiMessage::MediaHovered($image_key))
+            .on_exit($crate::domains::ui::messages::UiMessage::MediaUnhovered($image_key));
 
         // Create the poster element
         // Always wrap in button for non-hover clicks, but the shader handles its own overlay buttons
-        let poster_element: Element<'_, $crate::domains::ui::messages::Message> = button(image_with_hover)
+        let poster_element: Element<'_, $crate::domains::ui::messages::UiMessage> = button(image_with_hover)
             .on_press($click_msg)
             .padding(0)
             .style(theme::Button::MediaCard.style())
@@ -476,7 +476,7 @@ macro_rules! media_card {
         let container_height = height + v_padding * 2.0;
 
         // Center the poster within the container to account for padding
-        let poster_with_overlay_element: Element<'_, $crate::domains::ui::messages::Message> = container(poster_element)
+        let poster_with_overlay_element: Element<'_, $crate::domains::ui::messages::UiMessage> = container(poster_element)
             .width(Length::Fixed(container_width))
             .height(Length::Fixed(container_height))
             .align_x(iced::alignment::Horizontal::Center)

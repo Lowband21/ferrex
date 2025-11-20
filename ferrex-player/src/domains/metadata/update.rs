@@ -1,4 +1,4 @@
-use super::messages::Message;
+use super::messages::MetadataMessage;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::ui::messages as ui;
 use crate::state::State;
@@ -14,7 +14,7 @@ use iced::Task;
 )]
 pub fn update_metadata(
     state: &mut State,
-    message: Message,
+    message: MetadataMessage,
 ) -> DomainUpdateResult {
     #[cfg(any(
         feature = "profile-with-puffin",
@@ -24,7 +24,7 @@ pub fn update_metadata(
     profiling::scope!(crate::infra::profiling_scopes::scopes::METADATA_UPDATE);
 
     match message {
-        Message::InitializeService => {
+        MetadataMessage::InitializeService => {
             log::info!("Metadata service initialization requested");
             // TODO: Initialize metadata service if needed
             DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
@@ -42,7 +42,7 @@ pub fn update_metadata(
             // SeasonLoaded doesn't produce a metadata message in return, discard the result
             legacy_task.discard()
         } */
-        Message::MediaDetailsLoaded(result) => {
+        MetadataMessage::MediaDetailsLoaded(result) => {
             match result {
                 Ok(details) => {
                     log::info!("Media details loaded: {} items", details.len());
@@ -89,7 +89,7 @@ pub fn update_metadata(
         //    // TODO: Update state with organized media
         //    DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
         //}
-        Message::SeriesSortingCompleted(series_refs) => {
+        MetadataMessage::SeriesSortingCompleted(series_refs) => {
             log::info!(
                 "Series sorting completed: {} series",
                 series_refs.len()
@@ -97,29 +97,29 @@ pub fn update_metadata(
             // TODO: Update UI with sorted series
             DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
         }
-        Message::ForceRescan => {
+        MetadataMessage::ForceRescan => {
             log::info!("Force rescan requested");
             // TODO: Trigger forced rescan of media library
             DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
         }
-        Message::ImageLoaded(_, items) => todo!(),
-        Message::UnifiedImageLoaded(request, handle) => {
+        MetadataMessage::ImageLoaded(_, items) => todo!(),
+        MetadataMessage::UnifiedImageLoaded(request, handle) => {
             let meta_task = crate::domains::metadata::update_handlers::unified_image::handle_unified_image_loaded(state, request, handle)
                 .map(DomainMessage::Metadata);
             // Nudge UI to render promptly to avoid coalesced updates
             let ui_nudge =
-                Task::done(DomainMessage::Ui(ui::Message::UpdateTransitions));
+                Task::done(DomainMessage::Ui(ui::UiMessage::UpdateTransitions));
             DomainUpdateResult::task(Task::batch(vec![meta_task, ui_nudge]))
         }
-        Message::UnifiedImageLoadFailed(request, error) => {
+        MetadataMessage::UnifiedImageLoadFailed(request, error) => {
             let task = crate::domains::metadata::update_handlers::unified_image::handle_unified_image_load_failed(state, request, error);
             DomainUpdateResult::task(task.map(DomainMessage::Metadata))
         }
-        Message::UnifiedImageCancelled(request) => {
+        MetadataMessage::UnifiedImageCancelled(request) => {
             let task = crate::domains::metadata::update_handlers::unified_image::handle_unified_image_cancelled(state, request);
             DomainUpdateResult::task(task.map(DomainMessage::Metadata))
         }
-        Message::NoOp => {
+        MetadataMessage::NoOp => {
             DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
         }
     }

@@ -171,7 +171,7 @@ pub fn view_first_run_setup<'a>(
 
     let username_input = text_input("Username", username)
         .on_input(|s| {
-            auth::Message::UpdateSetupField(auth::SetupField::Username(s))
+            auth::AuthMessage::UpdateSetupField(auth::SetupField::Username(s))
                 .into()
         })
         .id(ids::auth_first_run_username())
@@ -181,7 +181,7 @@ pub fn view_first_run_setup<'a>(
 
     let display_name_input = text_input("Display Name", display_name)
         .on_input(|s| {
-            auth::Message::UpdateSetupField(auth::SetupField::DisplayName(s))
+            auth::AuthMessage::UpdateSetupField(auth::SetupField::DisplayName(s))
                 .into()
         })
         .id(ids::auth_first_run_display_name())
@@ -191,7 +191,7 @@ pub fn view_first_run_setup<'a>(
 
     let password_input = text_input("Password", password.as_str())
         .on_input(|s| {
-            auth::Message::UpdateSetupField(auth::SetupField::Password(s))
+            auth::AuthMessage::UpdateSetupField(auth::SetupField::Password(s))
                 .into()
         })
         .secure(!show_password)
@@ -203,7 +203,7 @@ pub fn view_first_run_setup<'a>(
     let confirm_password_input =
         text_input("Confirm Password", confirm_password.as_str())
             .on_input(|s| {
-                auth::Message::UpdateSetupField(
+                auth::AuthMessage::UpdateSetupField(
                     auth::SetupField::ConfirmPassword(s),
                 )
                 .into()
@@ -215,14 +215,14 @@ pub fn view_first_run_setup<'a>(
             .style(theme::TextInput::style());
 
     let show_password_checkbox = checkbox("Show password", show_password)
-        .on_toggle(|_| auth::Message::ToggleSetupPasswordVisibility.into())
+        .on_toggle(|_| auth::AuthMessage::ToggleSetupPasswordVisibility.into())
         .size(16)
         .text_size(14);
 
     let setup_token_input =
         text_input("Setup Token (if required)", setup_token)
             .on_input(|s| {
-                auth::Message::UpdateSetupField(auth::SetupField::SetupToken(s))
+                auth::AuthMessage::UpdateSetupField(auth::SetupField::SetupToken(s))
                     .into()
             })
             .id(ids::auth_first_run_setup_token())
@@ -300,7 +300,7 @@ pub fn view_first_run_setup<'a>(
 
     let device_name_input =
         text_input("Player Name (appears in audit logs)", &claim.device_name)
-            .on_input(|s| auth::Message::UpdateClaimDeviceName(s).into())
+            .on_input(|s| auth::AuthMessage::UpdateClaimDeviceName(s).into())
             .id(ids::auth_first_run_device_name())
             .padding(12)
             .size(16)
@@ -318,7 +318,7 @@ pub fn view_first_run_setup<'a>(
 
     if !claim.is_requesting {
         request_button =
-            request_button.on_press(auth::Message::StartSetupClaim.into());
+            request_button.on_press(auth::AuthMessage::StartSetupClaim.into());
     }
 
     let mut confirm_button = button(text("Confirm Binding").size(14))
@@ -330,7 +330,7 @@ pub fn view_first_run_setup<'a>(
         && !claim.is_expired();
     if can_confirm {
         confirm_button =
-            confirm_button.on_press(auth::Message::ConfirmSetupClaim.into());
+            confirm_button.on_press(auth::AuthMessage::ConfirmSetupClaim.into());
     } else {
         confirm_button = confirm_button.style(theme::Button::Disabled.style());
     }
@@ -338,7 +338,7 @@ pub fn view_first_run_setup<'a>(
     let reset_button = button(text("Reset Binding").size(14))
         .padding([10, 16])
         .style(theme::Button::Text.style())
-        .on_press(auth::Message::ResetSetupClaim.into());
+        .on_press(auth::AuthMessage::ResetSetupClaim.into());
 
     let mut claim_status_row = column![request_button];
 
@@ -423,7 +423,7 @@ pub fn view_first_run_setup<'a>(
 
     if ready_to_submit {
         create_button =
-            create_button.on_press(auth::Message::SubmitSetup.into());
+            create_button.on_press(auth::AuthMessage::SubmitSetup.into());
     }
 
     let mut content = column![

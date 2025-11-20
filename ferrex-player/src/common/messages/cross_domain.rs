@@ -41,7 +41,7 @@ pub fn handle_event(
                 command.sanitized_display()
             );
             Task::done(DomainMessage::Auth(
-                auth::messages::Message::ExecuteCommand(command),
+                auth::messages::AuthMessage::ExecuteCommand(command),
             ))
         }
 
@@ -63,7 +63,7 @@ pub fn handle_event(
                         }
                     };
                     Task::done(DomainMessage::Settings(
-                        crate::domains::settings::messages::Message::PasswordChangeResult(
+                        crate::domains::settings::messages::SettingsMessage::PasswordChangeResult(
                             settings_result,
                         ),
                     ))
@@ -77,7 +77,7 @@ pub fn handle_event(
                         }
                     };
                     Task::done(DomainMessage::Settings(
-                        crate::domains::settings::messages::Message::PinChangeResult(
+                        crate::domains::settings::messages::SettingsMessage::PinChangeResult(
                             settings_result,
                         ),
                     ))
@@ -144,7 +144,9 @@ pub fn handle_event(
             Task::batch(vec![
                 scroll_task,
                 Task::done(DomainMessage::Library(
-                    library::messages::Message::SelectLibrary(Some(library_id)),
+                    library::messages::LibraryMessage::SelectLibrary(Some(
+                        library_id,
+                    )),
                 )),
                 // Notify UI to update view models
                 // [MediaStoreNotifier] RefreshViewModels no longer needed here
@@ -166,7 +168,7 @@ pub fn handle_event(
                 broadcast,
                 // Update the library domain directly without re-emitting events
                 Task::done(DomainMessage::Library(
-                    library::messages::Message::SelectLibrary(None),
+                    library::messages::LibraryMessage::SelectLibrary(None),
                 )),
             ])
         }
@@ -215,7 +217,7 @@ pub fn handle_event(
                         .await;
                 },
                 |_| {
-                    DomainMessage::Search(crate::domains::search::messages::Message::RunCalibration)
+                    DomainMessage::Search(crate::domains::search::messages::SearchMessage::RunCalibration)
                 },
             )
         }
@@ -224,7 +226,7 @@ pub fn handle_event(
         CrossDomainEvent::MediaToggleFullscreen => {
             log::info!("[CrossDomain] Toggle fullscreen requested");
             Task::done(DomainMessage::Player(
-                crate::domains::player::messages::Message::ToggleFullscreen,
+                crate::domains::player::messages::PlayerMessage::ToggleFullscreen,
             ))
         }
 
@@ -271,7 +273,7 @@ pub fn handle_event(
             state.domains.player.state.pending_resume_position = resume_opt;
 
             Task::done(DomainMessage::Player(
-                crate::domains::player::messages::Message::PlayMediaWithId(
+                crate::domains::player::messages::PlayerMessage::PlayMediaWithId(
                     media_file, media_id,
                 ),
             ))
@@ -331,7 +333,7 @@ pub fn handle_event(
         CrossDomainEvent::MediaStartedPlaying(media_file) => {
             log::info!("[CrossDomain] Media started playing");
             Task::done(DomainMessage::Player(
-                player::messages::Message::PlayMedia(media_file),
+                player::messages::PlayerMessage::PlayMedia(media_file),
             ))
         }
 
@@ -460,17 +462,17 @@ pub fn handle_event(
 
             let ui_message = match media_ref {
                 Media::Movie(movie) => {
-                    ui::messages::Message::ViewMovieDetails(movie.id)
+                    ui::messages::UiMessage::ViewMovieDetails(movie.id)
                 }
                 Media::Series(series) => {
-                    ui::messages::Message::ViewTvShow(series.id)
+                    ui::messages::UiMessage::ViewTvShow(series.id)
                 }
-                Media::Season(season) => ui::messages::Message::ViewSeason(
+                Media::Season(season) => ui::messages::UiMessage::ViewSeason(
                     season.series_id,
                     season.id,
                 ),
                 Media::Episode(episode) => {
-                    ui::messages::Message::ViewEpisode(episode.id)
+                    ui::messages::UiMessage::ViewEpisode(episode.id)
                 }
             };
 
@@ -534,13 +536,13 @@ fn handle_authentication_complete(state: &State) -> Task<DomainMessage> {
     // Load libraries
     log::info!("[CrossDomain] Creating LoadLibraries task (first time only)");
     tasks.push(Task::done(DomainMessage::Library(
-        library::messages::Message::LoadLibraries,
+        library::messages::LibraryMessage::LoadLibraries,
     )));
 
     // Check for active scans
     log::info!("[CrossDomain] Creating CheckActiveScans task");
     tasks.push(Task::done(DomainMessage::Library(
-        library::messages::Message::FetchActiveScans,
+        library::messages::LibraryMessage::FetchActiveScans,
     )));
 
     // Additional initialization tasks can be added here
@@ -558,7 +560,7 @@ fn handle_database_cleared(_state: &State) -> Task<DomainMessage> {
 
     // After database is cleared, we need to reload libraries
     Task::done(DomainMessage::Library(
-        library::messages::Message::LoadLibraries,
+        library::messages::LibraryMessage::LoadLibraries,
     ))
 }
 
@@ -575,7 +577,7 @@ fn handle_library_refresh_request(state: &State) -> Task<DomainMessage> {
             | LibrariesLoadState::Failed { .. } => {
                 // Reload libraries
                 tasks.push(Task::done(DomainMessage::Library(
-                    library::messages::Message::LoadLibraries,
+                    library::messages::LibraryMessage::LoadLibraries,
                 )));
             }
             LibrariesLoadState::InProgress
@@ -586,7 +588,7 @@ fn handle_library_refresh_request(state: &State) -> Task<DomainMessage> {
     // If we have a current library, refresh its content
     if let Some(_library_id) = state.domains.library.state.current_library_id {
         tasks.push(Task::done(DomainMessage::Library(
-            library::messages::Message::RefreshLibrary,
+            library::messages::LibraryMessage::RefreshLibrary,
         )));
     }
 

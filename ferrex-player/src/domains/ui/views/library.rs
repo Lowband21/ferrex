@@ -2,7 +2,7 @@ use super::library_filter_panel::library_filter_panel;
 use crate::{
     domains::ui::{
         DisplayMode,
-        messages::Message,
+        messages::UiMessage,
         theme,
         views::{
             all::view_all_content,
@@ -29,7 +29,7 @@ use uuid::Uuid;
     ),
     profiling::function
 )]
-fn library_loading() -> Element<'static, Message> {
+fn library_loading() -> Element<'static, UiMessage> {
     container(
         column![
             text("Media Library")
@@ -60,7 +60,7 @@ fn library_loading() -> Element<'static, Message> {
     ),
     profiling::function
 )]
-pub fn view_library(state: &State) -> Element<'_, Message> {
+pub fn view_library(state: &State) -> Element<'_, UiMessage> {
     // debug timing disabled in tests to simplify renderer unification
 
     if state.loading {
@@ -68,14 +68,14 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
         library_loading()
     } else {
         // LEGACY: Error message if any
-        let error_section: Element<Message> =
+        let error_section: Element<UiMessage> =
             if let Some(error) = &state.domains.ui.state.error_message {
                 container(
                     row![
                         text(error).color(theme::MediaServerTheme::ERROR),
                         Space::new().width(Length::Fill),
                         button("×")
-                            .on_press(Message::ClearError)
+                            .on_press(UiMessage::ClearError)
                             .style(theme::Button::Text.style()),
                     ]
                     .align_y(iced::Alignment::Center),
@@ -169,7 +169,7 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                                     &lib_state.cached_index_ids,
                                     &lib_state.grid_state,
                                     &state.domains.ui.state.hovered_media_id,
-                                    Message::TabGridScrolled,
+                                    UiMessage::TabGridScrolled,
                                     state,
                                 );
 
@@ -207,7 +207,7 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                                     &lib_state.cached_index_ids,
                                     &lib_state.grid_state,
                                     &state.domains.ui.state.hovered_media_id,
-                                    Message::TabGridScrolled,
+                                    UiMessage::TabGridScrolled,
                                     state,
                                 );
 
@@ -226,7 +226,7 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                 }
             };
 
-            let filter_panel: Option<Element<Message>> =
+            let filter_panel: Option<Element<UiMessage>> =
                 if state.domains.ui.state.show_filter_panel {
                     Some(library_filter_panel(state))
                 } else {

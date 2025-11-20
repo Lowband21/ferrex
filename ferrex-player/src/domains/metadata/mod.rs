@@ -11,7 +11,7 @@ pub mod update_handlers;
 
 use self::demand_planner::PlannerHandle;
 use self::image_service::UnifiedImageService;
-use self::messages::Message as MetadataMessage;
+use self::messages::MetadataMessage as MetadataMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infra::services::api::ApiService;
 use iced::Task;

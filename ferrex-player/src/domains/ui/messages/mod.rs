@@ -17,7 +17,7 @@ use iced::widget::scrollable;
 use uuid::Uuid;
 
 #[derive(Clone)]
-pub enum Message {
+pub enum UiMessage {
     // View mode control
     SetDisplayMode(DisplayMode), // New library-centric display mode
     SelectLibraryAndMode(LibraryID), // Select library and set to Library display mode
@@ -210,7 +210,7 @@ pub enum Message {
     NoOp,
 }
 
-impl Message {
+impl UiMessage {
     pub fn name(&self) -> &'static str {
         match self {
             // View mode control
@@ -405,7 +405,7 @@ impl Message {
     }
 }
 
-impl std::fmt::Debug for Message {
+impl std::fmt::Debug for UiMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::SetDisplayMode(mode) => {
@@ -637,7 +637,7 @@ impl std::fmt::Debug for Message {
             Self::PlayMediaWithIdInMpv(media_id) => {
                 write!(f, "UI::PlayMediaWithIdInMpv({:?})", media_id)
             }
-            Message::PlaySeriesNextEpisode(series_id) => {
+            UiMessage::PlaySeriesNextEpisode(series_id) => {
                 write!(f, "PlaySeriesNextEpisode({:?})", series_id)
             }
             Self::UpdateLibraryFormType(_) => {

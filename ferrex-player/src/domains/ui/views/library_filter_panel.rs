@@ -8,7 +8,7 @@ use lucide_icons::Icon;
 use crate::{
     common::ui_utils::icon_text_with_size,
     domains::ui::{
-        messages::Message,
+        messages::UiMessage,
         theme::{self, MediaServerTheme},
     },
     state::State,
@@ -19,7 +19,7 @@ use ferrex_core::player_prelude::{
 
 const GENRES_PER_ROW: usize = 4;
 
-pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
+pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, UiMessage> {
     let ui_state = &state.domains.ui.state;
 
     let mut genre_groups = column![].spacing(8).width(Length::Fill);
@@ -39,7 +39,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
             ))
             .padding([6, 12])
             .style(filter_chip_style(is_selected))
-            .on_press(Message::ToggleFilterGenre(*genre));
+            .on_press(UiMessage::ToggleFilterGenre(*genre));
             chunk_row = chunk_row.push(chip);
         }
 
@@ -50,7 +50,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
     let decades = UiDecade::all();
     let selected_decade = ui_state.selected_decade;
     let decade_pick = pick_list(decades, selected_decade, |opt| {
-        Message::SetFilterDecade(opt)
+        UiMessage::SetFilterDecade(opt)
     })
     .placeholder("Decade")
     .width(Length::Fixed(140.0));
@@ -59,7 +59,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
     let resolutions = UiResolution::all();
     let res_pick =
         pick_list(resolutions, Some(ui_state.selected_resolution), |opt| {
-            Message::SetFilterResolution(opt)
+            UiMessage::SetFilterResolution(opt)
         })
         .placeholder("Resolution")
         .width(Length::Fixed(140.0));
@@ -69,7 +69,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
     let ws_pick = pick_list(
         watch_statuses,
         Some(ui_state.selected_watch_status),
-        Message::SetFilterWatchStatus,
+        UiMessage::SetFilterWatchStatus,
     )
     .placeholder("Watch Status")
     .width(Length::Fixed(160.0));
@@ -102,10 +102,10 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
 
     let actions = row![
         button(text("Clear"))
-            .on_press(Message::ClearFilters)
+            .on_press(UiMessage::ClearFilters)
             .style(theme::Button::Text.style()),
         button(text("Apply"))
-            .on_press(Message::ApplyFilters)
+            .on_press(UiMessage::ApplyFilters)
             .style(theme::Button::Primary.style()),
     ]
     .spacing(12);
@@ -118,7 +118,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
         button(icon_text_with_size(Icon::X, 16.0))
             .padding([6, 8])
             .style(theme::Button::Icon.style())
-            .on_press(Message::ToggleFilterPanel),
+            .on_press(UiMessage::ToggleFilterPanel),
     ]
     .align_y(Alignment::Center);
 

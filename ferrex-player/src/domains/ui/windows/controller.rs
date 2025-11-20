@@ -77,7 +77,7 @@ pub fn open_search(
     state.search_window_id = Some(id);
 
     tasks.push(open.map(|opened| {
-        DomainMessage::Ui(ui::Message::SearchWindowOpened(opened))
+        DomainMessage::Ui(ui::UiMessage::SearchWindowOpened(opened))
     }));
 
     DomainUpdateResult::task(Task::batch(tasks))

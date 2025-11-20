@@ -25,7 +25,7 @@ pub enum SetupField {
 }
 
 #[derive(Clone)]
-pub enum Message {
+pub enum AuthMessage {
     // Core auth flow
     CheckAuthStatus,
     AuthStatusConfirmedWithPin,
@@ -94,7 +94,7 @@ pub enum Message {
     CommandResult(AuthCommand, AuthCommandResult),
 }
 
-impl std::fmt::Debug for Message {
+impl std::fmt::Debug for AuthMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             // Core auth flow
@@ -224,7 +224,7 @@ impl std::fmt::Debug for Message {
     }
 }
 
-impl Message {
+impl AuthMessage {
     /// Returns a sanitized display string that hides sensitive credential data
     pub fn sanitized_display(&self) -> String {
         match self {

@@ -28,7 +28,7 @@ use crate::{
     common::messages::{CrossDomainEvent, DomainMessage},
     domains::ui::{
         background_state::BackgroundShaderState,
-        messages::Message as UIMessage,
+        messages::UiMessage as UIMessage,
         scroll_manager::ScrollPositionManager,
         types::{DisplayMode, ViewState},
     },

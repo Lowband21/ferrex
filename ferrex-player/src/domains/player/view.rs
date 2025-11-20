@@ -1,4 +1,4 @@
-use super::messages::Message;
+use super::messages::PlayerMessage;
 use super::state::{PlayerDomainState, TrackNotification};
 use super::theme;
 use iced::Theme;
@@ -18,7 +18,7 @@ use iced::{
 impl PlayerDomainState {
     /// Build the main player view
     /// Note: Returns wgpu renderer elements since waylandsink video playback requires GPU acceleration
-    pub fn view(&self) -> iced::Element<'_, Message, Theme> {
+    pub fn view(&self) -> iced::Element<'_, PlayerMessage, Theme> {
         log::trace!(
             "PlayerState::view() called - position: {:.2}s, duration: {:.2}s, source_duration: {:?}, controls: {}",
             self.last_valid_position,
@@ -55,12 +55,12 @@ impl PlayerDomainState {
             let clickable_video = self.video_view(video);
 
             // Overlay stack: video, then controls
-            let player_with_overlay: iced::Element<Message, Theme> =
+            let player_with_overlay: iced::Element<PlayerMessage, Theme> =
                 if self.controls {
                     let controls = self.controls_overlay();
 
                     let mut children: Vec<
-                        iced::Element<Message, Theme, iced_wgpu::Renderer>,
+                        iced::Element<PlayerMessage, Theme, iced_wgpu::Renderer>,
                     > = vec![clickable_video];
 
                     children.push(controls);
@@ -70,7 +70,7 @@ impl PlayerDomainState {
                     clickable_video
                 };
 
-            let player_with_settings: iced::Element<Message, Theme> =
+            let player_with_settings: iced::Element<PlayerMessage, Theme> =
                 if self.show_settings {
                     let settings = self.settings_panel();
                     let positioned_settings = container(row![
@@ -99,7 +99,7 @@ impl PlayerDomainState {
                 };
 
             let player_with_menus: iced::Element<
-                Message,
+                PlayerMessage,
                 Theme,
                 iced_wgpu::Renderer,
             > = if self.show_quality_menu {
@@ -121,7 +121,7 @@ impl PlayerDomainState {
             };
 
             let player_with_notification: iced::Element<
-                Message,
+                PlayerMessage,
                 Theme,
                 iced_wgpu::Renderer,
             > = if let Some(notification) = &self.track_notification {
@@ -138,8 +138,8 @@ impl PlayerDomainState {
 
             // Wrap with mouse movement detection and release handling for seek bar
             let interactive = mouse_area(player_with_notification)
-                .on_move(Message::MouseMoved)
-                .on_release(Message::SeekRelease);
+                .on_move(PlayerMessage::MouseMoved)
+                .on_release(PlayerMessage::SeekRelease);
 
             container(interactive)
                 .width(Length::Fill)
@@ -188,7 +188,7 @@ impl PlayerDomainState {
     fn video_view<'a>(
         &self,
         video: &'a subwave_unified::video::SubwaveVideo,
-    ) -> Element<'a, Message> {
+    ) -> Element<'a, PlayerMessage> {
         // Create the appropriate video player widget based on the backend
         // Determine if overlay is active (controls or menus visible)
         let overlay_active = self.controls
@@ -197,9 +197,9 @@ impl PlayerDomainState {
             || self.show_quality_menu
             || self.track_notification.is_some();
 
-        let player: iced::Element<Message, Theme, iced_wgpu::Renderer> = {
+        let player: iced::Element<PlayerMessage, Theme, iced_wgpu::Renderer> = {
             let on_new_frame = if overlay_active {
-                Some(Message::NewFrame)
+                Some(PlayerMessage::NewFrame)
             } else {
                 None
             };
@@ -210,12 +210,12 @@ impl PlayerDomainState {
         //let video_with_background = container(player).width(Length::Fill).height(Length::Fill);
 
         iced::widget::mouse_area(player)
-            .on_press(Message::VideoClicked)
+            .on_press(PlayerMessage::VideoClicked)
             .into()
     }
 
     /// Build the controls overlay
-    fn controls_overlay(&self) -> iced::Element<'_, Message, Theme> {
+    fn controls_overlay(&self) -> iced::Element<'_, PlayerMessage, Theme> {
         // Delegate to controls.rs for the full implementation
         self.build_controls()
     }
@@ -224,7 +224,7 @@ impl PlayerDomainState {
     fn notification_overlay<'a>(
         &self,
         notification: &'a TrackNotification,
-    ) -> iced::Element<'a, Message, Theme> {
+    ) -> iced::Element<'a, PlayerMessage, Theme> {
         container(
             container(
                 text(&notification.message)
@@ -243,7 +243,7 @@ impl PlayerDomainState {
     /// Build the settings panel
     fn settings_panel(
         &self,
-    ) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
+    ) -> iced::Element<'_, PlayerMessage, Theme, iced_wgpu::Renderer> {
         // Delegate to controls.rs for the full implementation
         self.build_settings_panel()
     }
@@ -251,7 +251,7 @@ impl PlayerDomainState {
     /// Build the quality menu overlay
     fn quality_menu_overlay(
         &self,
-    ) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
+    ) -> iced::Element<'_, PlayerMessage, Theme, iced_wgpu::Renderer> {
         // Position the menu near the quality button (bottom right)
         container(row![
             Space::new().width(Length::Fill),
@@ -273,7 +273,7 @@ impl PlayerDomainState {
 
     fn subtitle_menu_overlay(
         &self,
-    ) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
+    ) -> iced::Element<'_, PlayerMessage, Theme, iced_wgpu::Renderer> {
         // Position the menu near the subtitle button (bottom right)
         container(row![
             Space::new().width(Length::Fill),
@@ -294,10 +294,10 @@ impl PlayerDomainState {
     }
 
     /// Build a minimal player view for embedding (e.g., in library view)
-    pub fn minimal_view(&self) -> Option<Element<'_, Message>> {
+    pub fn minimal_view(&self) -> Option<Element<'_, PlayerMessage>> {
         self.video_opt.as_ref().map(|video| {
             let player = video
-                .widget(self.content_fit, Some(Message::NewFrame))
+                .widget(self.content_fit, Some(PlayerMessage::NewFrame))
                 .map(|m| m);
 
             container(player)

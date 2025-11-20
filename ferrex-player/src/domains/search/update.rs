@@ -4,7 +4,7 @@ use iced::Task;
 use iced::widget::operation::snap_to;
 use std::time::Instant;
 
-use super::messages::Message;
+use super::messages::SearchMessage;
 use super::types::{SEARCH_RESULTS_SCROLL_ID, SearchMode, SearchStrategy};
 use crate::common::messages::{
     CrossDomainEvent, DomainMessage, DomainUpdateResult,
@@ -14,7 +14,7 @@ use crate::infra::constants::layout::search as search_layout;
 use crate::state::State;
 use iced::widget::scrollable::RelativeOffset;
 
-pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
+pub fn update(state: &mut State, message: SearchMessage) -> DomainUpdateResult {
     #[cfg(any(
         feature = "profile-with-puffin",
         feature = "profile-with-tracy",
@@ -23,7 +23,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
     profiling::scope!("search_update");
 
     match message {
-        Message::UpdateQuery(query) => {
+        SearchMessage::UpdateQuery(query) => {
             state.domains.search.state.escape_pending = false;
             state.domains.search.state.query = query.clone();
             state.domains.search.state.selected_index = None;
@@ -45,16 +45,16 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
                             query
                         },
                         |query| {
-                            DomainMessage::Search(Message::SearchDebounced(
-                                query,
-                            ))
+                            DomainMessage::Search(
+                                SearchMessage::SearchDebounced(query),
+                            )
                         },
                     ),
                 ]))
             }
         }
 
-        Message::SearchDebounced(query) => {
+        SearchMessage::SearchDebounced(query) => {
             // Check if this is still the current query (user might have typed more)
             if state.domains.search.state.query == query {
                 // Instant search - stay in dropdown mode
@@ -64,17 +64,17 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             }
         }
 
-        Message::ExecuteSearch => {
+        SearchMessage::ExecuteSearch => {
             // Explicit search - switch to full screen
             handle_execute_search(state, true)
         }
 
-        Message::ClearSearch => {
+        SearchMessage::ClearSearch => {
             state.domains.search.state.clear();
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::SelectResult(media_ref) => {
+        SearchMessage::SelectResult(media_ref) => {
             // Emit cross-domain event to navigate to the selected media
             let event = CrossDomainEvent::NavigateToMedia(media_ref.clone());
 
@@ -88,12 +88,12 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             DomainUpdateResult::task(Task::batch([
                 navigation_task,
                 Task::done(DomainMessage::Ui(
-                    ui_messages::Message::CloseSearchWindow,
+                    ui_messages::UiMessage::CloseSearchWindow,
                 )),
             ]))
         }
 
-        Message::LoadMore => {
+        SearchMessage::LoadMore => {
             // Increase displayed results count
             let current = state.domains.search.state.displayed_results;
             let page_size = state.domains.search.state.page_size;
@@ -101,7 +101,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::ToggleMode => {
+        SearchMessage::ToggleMode => {
             let new_mode = match state.domains.search.state.mode {
                 SearchMode::Dropdown => SearchMode::FullScreen,
                 SearchMode::FullScreen => SearchMode::Dropdown,
@@ -110,12 +110,12 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::SetMode(mode) => {
+        SearchMessage::SetMode(mode) => {
             state.domains.search.state.set_mode(mode);
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::SelectPrevious => {
+        SearchMessage::SelectPrevious => {
             if state.domains.search.state.escape_pending {
                 state.domains.search.state.select_previous();
                 let scroll_task = scroll_selected_into_view(state);
@@ -124,7 +124,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::SelectNext => {
+        SearchMessage::SelectNext => {
             if state.domains.search.state.escape_pending {
                 state.domains.search.state.select_next();
                 let scroll_task = scroll_selected_into_view(state);
@@ -133,7 +133,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::SelectCurrent => {
+        SearchMessage::SelectCurrent => {
             let selected_media = {
                 let search_state = &mut state.domains.search.state;
 
@@ -160,7 +160,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
                 result.task = Task::batch([
                     result.task,
                     Task::done(DomainMessage::Ui(
-                        ui_messages::Message::CloseSearchWindow,
+                        ui_messages::UiMessage::CloseSearchWindow,
                     )),
                 ]);
                 result
@@ -169,11 +169,11 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             }
         }
 
-        Message::HandleEscape => {
+        SearchMessage::HandleEscape => {
             if state.domains.search.state.escape_pending {
                 state.domains.search.state.escape_pending = false;
                 DomainUpdateResult::task(Task::done(DomainMessage::Ui(
-                    ui_messages::Message::CloseSearchWindow,
+                    ui_messages::UiMessage::CloseSearchWindow,
                 )))
             } else {
                 {
@@ -189,7 +189,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             }
         }
 
-        Message::ResultsReceived {
+        SearchMessage::ResultsReceived {
             query,
             results,
             total_count,
@@ -230,18 +230,18 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             }
         }
 
-        Message::SearchError(error) => {
+        SearchMessage::SearchError(error) => {
             state.domains.search.state.is_searching = false;
             state.domains.search.state.error = Some(error);
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::SetSearching(searching) => {
+        SearchMessage::SetSearching(searching) => {
             state.domains.search.state.is_searching = searching;
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::RecordMetrics(metric) => {
+        SearchMessage::RecordMetrics(metric) => {
             // Record performance metrics in the decision engine
             state
                 .domains
@@ -272,7 +272,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::RequestMediaDetails(media_ref) => {
+        SearchMessage::RequestMediaDetails(media_ref) => {
             // Request details from media domain
             let event = CrossDomainEvent::RequestMediaDetails(media_ref);
             DomainUpdateResult::task(Task::perform(
@@ -281,7 +281,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             ))
         }
 
-        Message::RefreshFromMediaStore => {
+        SearchMessage::RefreshFromMediaStore => {
             // Media changed; re-run search if we have a query
             if !state.domains.search.state.query.is_empty() {
                 handle_execute_search(state, false)
@@ -290,7 +290,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             }
         }
 
-        Message::_CalibrationComplete(results) => {
+        SearchMessage::_CalibrationComplete(results) => {
             // Store calibration results in the decision engine
             log::info!(
                 "Search calibration complete - optimal strategy: {:?}",
@@ -305,7 +305,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::RunCalibration => {
+        SearchMessage::RunCalibration => {
             // Run calibration to determine optimal search strategy
             log::info!("Starting search calibration...");
             let service = state.domains.search.service.clone();
@@ -316,7 +316,7 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
                         .await
                 },
                 |results| {
-                    DomainMessage::Search(Message::_CalibrationComplete(
+                    DomainMessage::Search(SearchMessage::_CalibrationComplete(
                         results,
                     ))
                 },
@@ -357,7 +357,7 @@ fn handle_execute_search(
         return DomainUpdateResult::task(Task::perform(
             async move { (query, results, total_count) },
             |(query, results, total_count)| {
-                DomainMessage::Search(Message::ResultsReceived {
+                DomainMessage::Search(SearchMessage::ResultsReceived {
                     query,
                     results,
                     total_count,
@@ -395,13 +395,15 @@ fn handle_execute_search(
         },
         move |(query, result)| match result {
             Ok((results, total_count)) => {
-                DomainMessage::Search(Message::ResultsReceived {
+                DomainMessage::Search(SearchMessage::ResultsReceived {
                     query,
                     results,
                     total_count,
                 })
             }
-            Err(error) => DomainMessage::Search(Message::SearchError(error)),
+            Err(error) => {
+                DomainMessage::Search(SearchMessage::SearchError(error))
+            }
         },
     ))
 }

@@ -1,9 +1,11 @@
-use std::time::Instant;
+use crate::{
+    domains::{player::messages::PlayerMessage, ui::types::ViewState},
+    state::State,
+};
 
 use iced::Task;
-
-use crate::domains::ui::types::ViewState;
-use crate::state::State;
+use std::time::Instant;
+use subwave_unified::video::SubwaveVideo;
 
 // Helper functions
 #[cfg_attr(
@@ -35,12 +37,9 @@ pub fn close_video(state: &mut State) {
     ),
     profiling::function
 )]
-// Removed old load_external_video helper; external MPV handoff is routed
-// via Player::PlayExternal and a shared helper in update.rs
-
 pub fn load_video(
     state: &mut State,
-) -> Task<crate::domains::player::messages::Message> {
+) -> Task<crate::domains::player::messages::PlayerMessage> {
     // Check if video is already loaded or loading
     if state.domains.player.state.video_opt.is_some() {
         log::warn!("Video already loaded, skipping duplicate load");
@@ -156,16 +155,6 @@ pub fn load_video(
         use_hdr_pipeline
     };
 
-    /* // Performed in iced_video_player, redundant to do here
-    // Initialize GStreamer if needed
-    if let Err(e) = gst::init() {
-        log::warn!("GStreamer init returned: {:?}", e);
-    } else {
-        log::info!("GStreamer initialized successfully");
-    } */
-
-    // Check GStreamer version
-
     // Validate URL is valid UTF-8 before using
     let url_string = url.as_str();
     if !url_string.is_ascii() {
@@ -193,9 +182,8 @@ pub fn load_video(
     state.domains.ui.state.view = ViewState::Player;
 
     // Create video synchronously on the UI thread and update state immediately
-    match subwave_unified::video::SubwaveVideo::new(&url) {
-        Ok(mut video) => {
-            // Update duration if available
+    match SubwaveVideo::open_at_seconds(&url, res_pos) {
+        Ok(video) => {
             let duration = video.duration().as_secs_f64();
             if duration > 0.0 {
                 state.domains.player.state.last_valid_duration = duration;
@@ -242,9 +230,7 @@ pub fn load_video(
             state.domains.player.state.is_loading_video = false;
             state.domains.ui.state.view = ViewState::Player;
 
-            Task::done(crate::domains::player::messages::Message::VideoLoaded(
-                true,
-            ))
+            Task::done(PlayerMessage::VideoLoaded(true))
         }
         Err(e) => {
             log::error!("Failed to create video: {}", e);
@@ -252,7 +238,7 @@ pub fn load_video(
                 message: format!("{}", e),
             };
             state.domains.player.state.is_loading_video = false;
-            Task::done(crate::domains::player::messages::Message::VideoLoaded(
+            Task::done(crate::domains::player::messages::PlayerMessage::VideoLoaded(
                 false,
             ))
         }

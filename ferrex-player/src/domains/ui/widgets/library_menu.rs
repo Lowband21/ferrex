@@ -1,6 +1,6 @@
 use crate::domains::ui::{
     SortBy, SortOrder,
-    messages::Message,
+    messages::UiMessage,
     theme::{self, FerrexTheme},
     widgets::sort_dropdown::SortOption,
 };
@@ -19,7 +19,7 @@ pub fn library_sort_filter_menu<'a>(
     active_filter_count: usize,
     is_filter_panel_open: bool,
     item_count: usize,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     let sort_item = build_sort_menu(current_sort, current_order);
     let filter_item =
         build_filter_menu(active_filter_count, is_filter_panel_open);
@@ -37,7 +37,7 @@ pub fn library_sort_filter_menu<'a>(
         .padding(0)
         .center_y(Length::Fill),
     )
-    .on_press(Message::NoOp)
+    .on_press(UiMessage::NoOp)
     .style(theme::Button::HeaderMenuSecondary.style())
     .height(Length::Fill);
 
@@ -54,7 +54,7 @@ pub fn library_sort_filter_menu<'a>(
 fn build_sort_menu(
     current_sort: SortBy,
     current_order: SortOrder,
-) -> Item<'static, Message, iced::Theme, iced::Renderer> {
+) -> Item<'static, UiMessage, iced::Theme, iced::Renderer> {
     let summary_label = sort_summary_label(current_sort, current_order);
 
     let mut sort_items = Vec::with_capacity(SortOption::OPTIONS.len() + 1);
@@ -62,7 +62,7 @@ fn build_sort_menu(
     sort_items.push(menu_item(
         "Toggle sort order",
         Some(Icon::ArrowUpDown),
-        Message::ToggleSortOrder,
+        UiMessage::ToggleSortOrder,
     ));
 
     for option in SortOption::OPTIONS {
@@ -75,7 +75,7 @@ fn build_sort_menu(
         sort_items.push(menu_item(
             option.label,
             icon,
-            Message::SetSortBy(option.value),
+            UiMessage::SetSortBy(option.value),
         ));
     }
 
@@ -108,7 +108,7 @@ fn build_sort_menu(
 fn build_filter_menu(
     active_filter_count: usize,
     is_filter_panel_open: bool,
-) -> Item<'static, Message, iced::Theme, iced::Renderer> {
+) -> Item<'static, UiMessage, iced::Theme, iced::Renderer> {
     let filter_summary = if active_filter_count > 0 {
         format!("{} active", active_filter_count)
     } else {
@@ -122,8 +122,8 @@ fn build_filter_menu(
     };
 
     let filter_items = vec![
-        menu_item("Open filters", Some(Icon::ListFilter), Message::NoOp),
-        menu_item("Clear filters", Some(Icon::CircleX), Message::NoOp),
+        menu_item("Open filters", Some(Icon::ListFilter), UiMessage::NoOp),
+        menu_item("Clear filters", Some(Icon::CircleX), UiMessage::NoOp),
     ];
 
     let filter_button = button(
@@ -155,8 +155,8 @@ fn build_filter_menu(
 fn menu_item(
     label: &'static str,
     icon: Option<Icon>,
-    message: Message,
-) -> Item<'static, Message, iced::Theme, iced::Renderer> {
+    message: UiMessage,
+) -> Item<'static, UiMessage, iced::Theme, iced::Renderer> {
     Item::new(
         button(menu_row(label, icon))
             .on_press(message)
@@ -167,8 +167,8 @@ fn menu_item(
 fn menu_row(
     label: &'static str,
     icon: Option<Icon>,
-) -> container::Container<'static, Message> {
-    let mut content: Row<'static, Message> =
+) -> container::Container<'static, UiMessage> {
+    let mut content: Row<'static, UiMessage> =
         Row::new().align_y(Alignment::Center);
 
     if let Some(icon) = icon {

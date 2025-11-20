@@ -1,10 +1,10 @@
-use super::messages::Message;
+use super::messages::MediaMessage;
 use crate::{
     common::messages::{DomainMessage, DomainUpdateResult},
     state::State,
 };
 use ferrex_core::player_prelude::{
-    MediaIDLike, UpdateProgressRequest, UserWatchState,
+    EpisodeKey, MediaID, MediaIDLike, UpdateProgressRequest, UserWatchState,
 };
 use iced::Task;
 
@@ -17,14 +17,17 @@ use iced::Task;
     ),
     profiling::function
 )]
-pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
+pub fn update_media(
+    state: &mut State,
+    message: MediaMessage,
+) -> DomainUpdateResult {
     match message {
-        Message::Noop => {
+        MediaMessage::Noop => {
             // No-op message, used for task chaining
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::WatchProgressFetched(_media_id, _resume_position) => {
+        MediaMessage::WatchProgressFetched(_media_id, _resume_position) => {
             // This message is for future use when we fetch watch progress asynchronously
             // Currently handled synchronously in PlayMediaWithId
             DomainUpdateResult::task(Task::none())
@@ -74,7 +77,7 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
             DomainUpdateResult::task(Task::none())
         }*/
         // Handle watch progress tracking
-        Message::ProgressUpdateSent(media_id, position, duration) => {
+        MediaMessage::ProgressUpdateSent(media_id, position, duration) => {
             // Update the last sent position
             state.domains.player.state.last_progress_sent = position;
             state.domains.player.state.last_progress_update =
@@ -194,20 +197,24 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                 log::debug!("Triggering UI refresh for watch progress update");
                 // Use UpdateViewModelFilters for a lightweight refresh
                 DomainUpdateResult::task(Task::done(DomainMessage::Ui(
-                    crate::domains::ui::messages::Message::UpdateViewModelFilters,
+                    crate::domains::ui::messages::UiMessage::UpdateViewModelFilters,
                 )))
             } else {
                 DomainUpdateResult::task(Task::none())
             }
         }
 
-        Message::ProgressUpdateFailed => {
+        MediaMessage::ProgressUpdateFailed => {
             // Log was already done in subscription, just track the failure
             log::debug!("Progress update failed, will retry on next interval");
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::SendProgressUpdateWithData(media_id, position, duration) => {
+        MediaMessage::SendProgressUpdateWithData(
+            media_id,
+            position,
+            duration,
+        ) => {
             log::debug!(
                 "SendProgressUpdateWithData: Starting progress update with captured data"
             );
@@ -239,7 +246,7 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                         },
                         move |result| match result {
                             Ok(pos) => DomainMessage::Media(
-                                Message::ProgressUpdateSent(
+                                MediaMessage::ProgressUpdateSent(
                                     media_id, pos, duration,
                                 ),
                             ),
@@ -249,7 +256,7 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                                     e
                                 );
                                 DomainMessage::Media(
-                                    Message::ProgressUpdateFailed,
+                                    MediaMessage::ProgressUpdateFailed,
                                 )
                             }
                         },

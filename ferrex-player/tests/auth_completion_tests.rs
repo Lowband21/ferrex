@@ -40,7 +40,7 @@ async fn login_success_emits_authentication_complete() {
     let result: DomainUpdateResult =
         ferrex_player::domains::auth::update::update_auth(
             &mut state,
-            auth_msgs::Message::LoginSuccess(user.clone(), perms.clone()),
+            auth_msgs::AuthMessage::LoginSuccess(user.clone(), perms.clone()),
         );
 
     // Expect both UserAuthenticated and AuthenticationComplete events
@@ -77,7 +77,7 @@ async fn watch_state_loaded_does_not_emit_authentication_complete() {
     let result_ok: DomainUpdateResult =
         ferrex_player::domains::auth::update::update_auth(
             &mut state,
-            auth_msgs::Message::WatchStatusLoaded(Ok(
+            auth_msgs::AuthMessage::WatchStatusLoaded(Ok(
                 ferrex_core::player_prelude::UserWatchState::default(),
             )),
         );
@@ -89,7 +89,7 @@ async fn watch_state_loaded_does_not_emit_authentication_complete() {
     let result_err: DomainUpdateResult =
         ferrex_player::domains::auth::update::update_auth(
             &mut state,
-            auth_msgs::Message::WatchStatusLoaded(Err("neterr".to_string())),
+            auth_msgs::AuthMessage::WatchStatusLoaded(Err("neterr".to_string())),
         );
     assert!(
         result_err.events.is_empty(),

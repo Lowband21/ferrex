@@ -1,5 +1,5 @@
 use crate::common::messages::DomainMessage;
-use crate::domains::player::messages::Message;
+use crate::domains::player::messages::PlayerMessage;
 use crate::infra::constants::player::seeking::*;
 use crate::state::State;
 use iced::Subscription;
@@ -17,7 +17,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     {
         subs.push(
             iced::time::every(std::time::Duration::from_millis(500)).map(
-                |_| DomainMessage::Player(Message::CheckControlsVisibility),
+                |_| DomainMessage::Player(PlayerMessage::CheckControlsVisibility),
             ),
         );
     }
@@ -26,7 +26,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     if state.domains.player.state.external_mpv_active {
         subs.push(
             iced::time::every(std::time::Duration::from_secs(1))
-                .map(|_| DomainMessage::Player(Message::PollExternalMpv)),
+                .map(|_| DomainMessage::Player(PlayerMessage::PollExternalMpv)),
         );
     }
 
@@ -39,7 +39,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     {
         subs.push(
             iced::time::every(std::time::Duration::from_secs(10))
-                .map(|_| DomainMessage::Player(Message::ProgressHeartbeat)),
+                .map(|_| DomainMessage::Player(PlayerMessage::ProgressHeartbeat)),
         );
     }
 
@@ -69,40 +69,40 @@ fn keyboard_shortcuts(state: &State) -> Subscription<DomainMessage> {
     iced::keyboard::on_key_press(|key, modifiers| {
         use iced::keyboard::{Key, key::Named};
         let msg = match key {
-            Key::Named(Named::Space) => Some(Message::PlayPause),
+            Key::Named(Named::Space) => Some(PlayerMessage::PlayPause),
             Key::Named(Named::ArrowLeft) => {
                 if modifiers.shift() {
-                    Some(Message::SeekRelative(SEEK_BACKWARD_FINE))
+                    Some(PlayerMessage::SeekRelative(SEEK_BACKWARD_FINE))
                 } else {
-                    Some(Message::SeekRelative(SEEK_BACKWARD_COURSE))
+                    Some(PlayerMessage::SeekRelative(SEEK_BACKWARD_COURSE))
                 }
             }
             Key::Named(Named::ArrowRight) => {
                 if modifiers.shift() {
-                    Some(Message::SeekRelative(SEEK_FORWARD_FINE))
+                    Some(PlayerMessage::SeekRelative(SEEK_FORWARD_FINE))
                 } else {
-                    Some(Message::SeekRelative(SEEK_FORWARD_COURSE))
+                    Some(PlayerMessage::SeekRelative(SEEK_FORWARD_COURSE))
                 }
             }
-            Key::Named(Named::ArrowUp) => Some(Message::SetVolume(1.1)),
-            Key::Named(Named::ArrowDown) => Some(Message::SetVolume(0.9)),
+            Key::Named(Named::ArrowUp) => Some(PlayerMessage::SetVolume(1.1)),
+            Key::Named(Named::ArrowDown) => Some(PlayerMessage::SetVolume(0.9)),
             Key::Named(Named::Escape) => None,
             Key::Character(c) if c.as_str() == "f" || c.as_str() == "F" => {
-                Some(Message::ToggleFullscreen)
+                Some(PlayerMessage::ToggleFullscreen)
             }
-            Key::Named(Named::F11) => Some(Message::ToggleFullscreen),
+            Key::Named(Named::F11) => Some(PlayerMessage::ToggleFullscreen),
             Key::Character(c) if c.as_str() == "m" || c.as_str() == "M" => {
-                Some(Message::ToggleMute)
+                Some(PlayerMessage::ToggleMute)
             }
             Key::Character(c) if c.as_str() == "s" || c.as_str() == "S" => {
                 if modifiers.shift() {
-                    Some(Message::ToggleSubtitleMenu)
+                    Some(PlayerMessage::ToggleSubtitleMenu)
                 } else {
-                    Some(Message::CycleSubtitleSimple)
+                    Some(PlayerMessage::CycleSubtitleSimple)
                 }
             }
             Key::Character(c) if c.as_str() == "a" || c.as_str() == "A" => {
-                Some(Message::CycleAudioTrack)
+                Some(PlayerMessage::CycleAudioTrack)
             }
             _ => None,
         };

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crate::domains::metadata::demand_planner::DemandSnapshot;
 use crate::infra::api_types::LibraryType;
 use crate::{
-    domains::ui::{messages::Message, tabs::TabState},
+    domains::ui::{messages::UiMessage, tabs::TabState},
     infra::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS,
     state::State,
 };
@@ -22,7 +22,7 @@ use iced::{Task, widget::scrollable::Viewport};
 pub fn handle_detail_view_scrolled(
     state: &mut State,
     viewport: Viewport,
-) -> Task<Message> {
+) -> Task<UiMessage> {
     // Update scroll offset for fixed backdrop
     let scroll_offset = viewport.absolute_offset().y;
     log::debug!(
@@ -67,7 +67,7 @@ pub fn handle_detail_view_scrolled(
 pub fn handle_tab_grid_scrolled(
     state: &mut State,
     viewport: Viewport,
-) -> Task<Message> {
+) -> Task<UiMessage> {
     // Get the active tab and update its scroll state
     let active_tab_id = state.tab_manager.active_tab_id();
 

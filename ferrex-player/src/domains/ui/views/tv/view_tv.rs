@@ -8,7 +8,7 @@ use crate::infra::api_types::{
 };
 use crate::{
     domains::ui::{
-        messages::Message, theme, views::grid::macros::ThemeColorAccess,
+        messages::UiMessage, theme, views::grid::macros::ThemeColorAccess,
         widgets::image_for::image_for,
     },
     media_card,
@@ -33,7 +33,7 @@ use iced::{
 pub fn view_series_detail<'a>(
     state: &'a State,
     series_id: SeriesID,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     // Resolve series yoke via UI cache with lazy fetch (interior mutable cache)
     let series_uuid = series_id.to_uuid();
     let series_yoke_arc = match state
@@ -133,7 +133,7 @@ pub fn view_series_detail<'a>(
     {
         poster = poster.theme_color(color);
     }
-    let poster_element: Element<Message> = poster.into();
+    let poster_element: Element<UiMessage> = poster.into();
 
     let series_details_opt = series.details();
 
@@ -225,13 +225,11 @@ pub fn view_series_detail<'a>(
         );
     }
 
-    // Play button: play first in-progress or first unwatched episode in the series
-    if let Some(next_ep_id) =
-        selectors::select_next_episode_for_series(state, series_id)
-    {
+    // Play/Resume button – uses identity endpoint when available, falls back to local selection
+    if selectors::select_next_episode_for_series(state, series_id).is_some() {
         let button_row = components::create_action_button_row(
-            Message::PlayMediaWithId(MediaID::Episode(next_ep_id)),
-            Some(Message::PlayMediaWithIdInMpv(MediaID::Episode(next_ep_id))),
+            UiMessage::PlaySeriesNextEpisode(series_id),
+            Some(UiMessage::PlaySeriesNextEpisode(series_id)),
             vec![],
         );
         details = details.push(Space::new().height(10));
@@ -308,8 +306,8 @@ pub fn view_series_detail<'a>(
                                     fallback: "📺",
                                 },
                                 size: Medium,
-                                on_click: Message::ViewSeason(s.series_id, s.id),
-                                on_play: Message::NoOp,
+                                on_click: UiMessage::ViewSeason(s.series_id, s.id),
+                                on_play: UiMessage::NoOp,
                                 hover_icon: lucide_icons::Icon::List,
                                 is_hovered: false,
                             }
@@ -366,7 +364,7 @@ pub fn view_season_detail<'a>(
     state: &'a State,
     _series_id: &'a SeriesID,
     season_id: &'a SeasonID,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     // Resolve season yoke via UI cache with lazy fetch
     let season_uuid = season_id.to_uuid();
     let season_yoke_arc = match state
@@ -448,7 +446,7 @@ pub fn view_season_detail<'a>(
     {
         poster = poster.theme_color(color);
     }
-    let poster_element: Element<Message> = poster.into();
+    let poster_element: Element<UiMessage> = poster.into();
 
     // Details column
     let mut details = column![].spacing(15).padding(20).width(Length::Fill);
@@ -478,8 +476,8 @@ pub fn view_season_detail<'a>(
         selectors::select_next_episode_for_season(state, *season_id)
     {
         let button_row = components::create_action_button_row(
-            Message::PlayMediaWithId(MediaID::Episode(next_ep_id)),
-            Some(Message::PlayMediaWithIdInMpv(MediaID::Episode(next_ep_id))),
+            UiMessage::PlayMediaWithId(MediaID::Episode(next_ep_id)),
+            Some(UiMessage::PlayMediaWithIdInMpv(MediaID::Episode(next_ep_id))),
             vec![],
         );
         details = details.push(Space::new().height(10));
@@ -555,8 +553,8 @@ pub fn view_season_detail<'a>(
                                     fallback: "🎞",
                                 },
                                 size: Wide,
-                                on_click: Message::PlayMediaWithId(MediaID::Episode(e.id)),
-                                on_play: Message::PlayMediaWithId(MediaID::Episode(e.id)),
+                                on_click: UiMessage::PlayMediaWithId(MediaID::Episode(e.id)),
+                                on_play: UiMessage::PlayMediaWithId(MediaID::Episode(e.id)),
                                 hover_icon: lucide_icons::Icon::Play,
                                 is_hovered: false,
                             }
@@ -613,7 +611,7 @@ pub fn view_season_detail<'a>(
 pub fn view_episode_detail<'a>(
     state: &'a State,
     episode_id: &'a EpisodeID,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     // Try to get episode yoke from cache or fetch on-demand
     let ep_uuid = episode_id.to_uuid();
     let episode_yoke_arc =
@@ -679,7 +677,7 @@ pub fn view_episode_detail<'a>(
     content = content.push(Space::new().height(Length::Fixed(content_offset)));
 
     // Episode still image
-    let still_element: Element<Message> = image_for(episode.id.to_uuid())
+    let still_element: Element<UiMessage> = image_for(episode.id.to_uuid())
         .size(ImageSize::Thumbnail)
         .image_type(ImageType::Episode)
         .width(Length::Fixed(640.0))
@@ -736,10 +734,10 @@ pub fn view_episode_detail<'a>(
 
     // Play button
     let button_row = components::create_action_button_row(
-        Message::PlayMediaWithId(MediaID::Episode(EpisodeID(
+        UiMessage::PlayMediaWithId(MediaID::Episode(EpisodeID(
             episode.id.to_uuid(),
         ))),
-        Some(Message::PlayMediaWithIdInMpv(MediaID::Episode(EpisodeID(
+        Some(UiMessage::PlayMediaWithIdInMpv(MediaID::Episode(EpisodeID(
             episode.id.to_uuid(),
         )))),
         vec![],

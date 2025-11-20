@@ -13,7 +13,7 @@ async fn empty_users_plus_setup_failure_transitions_to_first_run() {
     // Simulate entering the load-users path
     let _ = ferrex_player::domains::auth::update::update_auth(
         &mut state,
-        auth_msgs::Message::LoadUsers,
+        auth_msgs::AuthMessage::LoadUsers,
     );
 
     // Sanity: now in loading state
@@ -33,7 +33,7 @@ async fn empty_users_plus_setup_failure_transitions_to_first_run() {
 
     let _ = ferrex_player::domains::auth::update::update_auth(
         &mut state,
-        auth_msgs::Message::SetupStatusChecked(setup_status),
+        auth_msgs::AuthMessage::SetupStatusChecked(setup_status),
     );
 
     // Expect to transition to FirstRunSetup UI

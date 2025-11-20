@@ -1,4 +1,4 @@
-use crate::domains::library::messages::Message;
+use crate::domains::library::messages::LibraryMessage;
 use crate::infra::{
     api_types::{Media, MediaID},
     services::api::ApiService,
@@ -46,7 +46,7 @@ impl Hash for MediaEventsId {
 pub fn media_events(
     server_url: String,
     api_service: Arc<dyn ApiService>,
-) -> Subscription<Message> {
+) -> Subscription<LibraryMessage> {
     Subscription::run_with(
         MediaEventsId {
             server_url: server_url.clone(),
@@ -58,7 +58,7 @@ pub fn media_events(
 
 fn build_media_subscription_stream(
     id: &MediaEventsId,
-) -> BoxStream<'static, Message> {
+) -> BoxStream<'static, LibraryMessage> {
     let server_url = id.server_url.clone();
     let api = Arc::clone(&id.api);
     Box::pin(stream::unfold(
@@ -100,7 +100,7 @@ impl MediaEventState {
         }
     }
 
-    async fn next_event(&mut self) -> Option<Message> {
+    async fn next_event(&mut self) -> Option<LibraryMessage> {
         loop {
             // Create event source if needed
             if self.event_receiver.is_none() {
@@ -219,7 +219,7 @@ impl MediaEventState {
     fn handle_sse_message(
         &mut self,
         msg: eventsource_stream::Event,
-    ) -> Option<Message> {
+    ) -> Option<LibraryMessage> {
         // Skip keepalive messages silently
         if matches!(msg.data.as_str(), "keepalive" | "keep-alive")
             || msg.data.is_empty()
@@ -288,16 +288,16 @@ impl MediaEventState {
         false
     }
 
-    fn convert_media_event(&self, event: MediaEvent) -> Option<Message> {
+    fn convert_media_event(&self, event: MediaEvent) -> Option<LibraryMessage> {
         match event {
             // These events indicate we should refresh our library data
             MediaEvent::MovieAdded { movie } => {
                 log::info!("Movie added: {}", movie.title.as_str());
-                Some(Message::MediaDiscovered(vec![Media::Movie(movie)]))
+                Some(LibraryMessage::MediaDiscovered(vec![Media::Movie(movie)]))
             }
             MediaEvent::SeriesAdded { series } => {
                 log::info!("Series added: {}", series.title.as_str());
-                Some(Message::MediaDiscovered(vec![Media::Series(series)]))
+                Some(LibraryMessage::MediaDiscovered(vec![Media::Series(series)]))
             }
             MediaEvent::SeasonAdded { season } => {
                 log::info!(
@@ -305,7 +305,7 @@ impl MediaEventState {
                     season.season_number.value(),
                     season.series_id.as_str()
                 );
-                Some(Message::MediaDiscovered(vec![Media::Season(season)]))
+                Some(LibraryMessage::MediaDiscovered(vec![Media::Season(season)]))
             }
             MediaEvent::EpisodeAdded { episode } => {
                 log::info!(
@@ -313,21 +313,21 @@ impl MediaEventState {
                     episode.season_number.value(),
                     episode.episode_number.value()
                 );
-                Some(Message::MediaDiscovered(vec![Media::Episode(episode)]))
+                Some(LibraryMessage::MediaDiscovered(vec![Media::Episode(episode)]))
             }
 
             // Updates require refreshing existing data
             MediaEvent::MovieUpdated { movie } => {
                 log::info!("Movie updated: {}", movie.title.as_str());
-                Some(Message::MediaUpdated(Media::Movie(movie)))
+                Some(LibraryMessage::MediaUpdated(Media::Movie(movie)))
             }
             MediaEvent::SeriesUpdated { series } => {
                 log::info!("Series updated: {}", series.title.as_str());
-                Some(Message::MediaUpdated(Media::Series(series)))
+                Some(LibraryMessage::MediaUpdated(Media::Series(series)))
             }
             MediaEvent::SeasonUpdated { season } => {
                 log::info!("Season updated: S{}", season.season_number.value());
-                Some(Message::MediaUpdated(Media::Season(season)))
+                Some(LibraryMessage::MediaUpdated(Media::Season(season)))
             }
             MediaEvent::EpisodeUpdated { episode } => {
                 log::info!(
@@ -335,13 +335,13 @@ impl MediaEventState {
                     episode.season_number.value(),
                     episode.episode_number.value()
                 );
-                Some(Message::MediaUpdated(Media::Episode(episode)))
+                Some(LibraryMessage::MediaUpdated(Media::Episode(episode)))
             }
 
             // Deletion events
             MediaEvent::MediaDeleted { id } => {
                 log::info!("Media deleted: {:?}", id);
-                Some(Message::MediaDeleted(id))
+                Some(LibraryMessage::MediaDeleted(id))
             }
 
             // Scan events are already handled by scan subscription
@@ -404,20 +404,20 @@ impl Drop for MediaEventState {
 }
 
 // Helper extension to convert Media to legacy MediaFile if needed
-impl Message {
+impl LibraryMessage {
     /// Create a MediaDiscovered message from media references
     pub fn media_discovered(references: Vec<Media>) -> Self {
-        Message::MediaDiscovered(references)
+        LibraryMessage::MediaDiscovered(references)
     }
 
     /// Create a MediaUpdated message from a media reference
     pub fn media_updated(reference: Media) -> Self {
-        Message::MediaUpdated(reference)
+        LibraryMessage::MediaUpdated(reference)
     }
 
     /// Create a MediaDeleted message from a media ID
     pub fn media_deleted(id: MediaID) -> Self {
-        Message::MediaDeleted(id)
+        LibraryMessage::MediaDeleted(id)
     }
 }
 

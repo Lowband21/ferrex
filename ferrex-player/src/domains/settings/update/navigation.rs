@@ -1,6 +1,6 @@
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::auth::security::SecureCredential;
-use crate::domains::settings::messages::Message;
+use crate::domains::settings::messages::SettingsMessage;
 use crate::domains::settings::state::SettingsView as SettingsSubview;
 use crate::domains::ui;
 use crate::state::State;
@@ -20,10 +20,10 @@ pub fn handle_show_profile(state: &mut State) -> DomainUpdateResult {
                 .ok_or_else(|| "No current user".to_string())
         },
         |result| match result {
-            Ok(user) => Message::UpdateDisplayName(user.display_name),
+            Ok(user) => SettingsMessage::UpdateDisplayName(user.display_name),
             Err(e) => {
                 log::error!("Failed to load user profile: {}", e);
-                Message::ProfileChangeResult(Err(e))
+                SettingsMessage::ProfileChangeResult(Err(e))
             }
         },
     );
@@ -46,7 +46,7 @@ pub fn handle_show_preferences(state: &mut State) -> DomainUpdateResult {
         },
         |enabled| {
             // Set the initial state then return message
-            Message::AutoLoginToggled(Ok(enabled))
+            SettingsMessage::AutoLoginToggled(Ok(enabled))
         },
     );
     DomainUpdateResult::task(task.map(DomainMessage::Settings))
@@ -58,7 +58,7 @@ pub fn handle_show_security(state: &mut State) -> DomainUpdateResult {
 
     // Check if user has PIN when entering security view
     DomainUpdateResult::task(
-        Task::done(Message::CheckUserHasPin).map(DomainMessage::Settings),
+        Task::done(SettingsMessage::CheckUserHasPin).map(DomainMessage::Settings),
     )
 }
 
@@ -105,6 +105,6 @@ pub fn handle_back_to_home(state: &mut State) -> DomainUpdateResult {
 
     // Send direct UI domain message to navigate home
     DomainUpdateResult::task(Task::done(DomainMessage::Ui(
-        ui::messages::Message::NavigateHome,
+        ui::messages::UiMessage::NavigateHome,
     )))
 }

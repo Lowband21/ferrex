@@ -6,7 +6,7 @@ use std::fmt;
 use std::time::Duration;
 
 #[derive(Clone)]
-pub enum Message {
+pub enum PlayerMessage {
     // Media control
     PlayMedia(MediaFile),
     PlayMediaWithId(MediaFile, MediaID),
@@ -84,108 +84,126 @@ pub enum Message {
     ProgressHeartbeat,
 }
 
-impl fmt::Debug for Message {
+impl fmt::Debug for PlayerMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Using write! macro directly is more efficient than the derived version
         // which builds up intermediate structures
         match self {
             // Media control
-            Message::PlayMedia(media) => write!(f, "PlayMedia({:?})", media),
-            Message::PlayMediaWithId(media, id) => {
+            PlayerMessage::PlayMedia(media) => {
+                write!(f, "PlayMedia({:?})", media)
+            }
+            PlayerMessage::PlayMediaWithId(media, id) => {
                 write!(f, "PlayMediaWithId({:?}, {:?})", media, id)
             }
-            Message::NavigateBack => write!(f, "NavigateBack"),
-            Message::NavigateHome => write!(f, "NavigateHome"),
+            PlayerMessage::NavigateBack => write!(f, "NavigateBack"),
+            PlayerMessage::NavigateHome => write!(f, "NavigateHome"),
 
             // Playback control - grouping simple variants
-            Message::Play => write!(f, "Play"),
-            Message::Pause => write!(f, "Pause"),
-            Message::PlayPause => write!(f, "PlayPause"),
-            Message::Stop => write!(f, "Stop"),
-            Message::ResetAfterStop => write!(f, "ResetAfterStop"),
+            PlayerMessage::Play => write!(f, "Play"),
+            PlayerMessage::Pause => write!(f, "Pause"),
+            PlayerMessage::PlayPause => write!(f, "PlayPause"),
+            PlayerMessage::Stop => write!(f, "Stop"),
+            PlayerMessage::ResetAfterStop => write!(f, "ResetAfterStop"),
 
             // Seeking
-            Message::Seek(pos) => write!(f, "Seek({})", pos),
-            Message::SeekTo(duration) => write!(f, "SeekTo({:?})", duration),
-            Message::SeekRelative(delta) => {
+            PlayerMessage::Seek(pos) => write!(f, "Seek({})", pos),
+            PlayerMessage::SeekTo(duration) => {
+                write!(f, "SeekTo({:?})", duration)
+            }
+            PlayerMessage::SeekRelative(delta) => {
                 write!(f, "SeekRelative({})", delta)
             }
-            Message::SeekRelease => write!(f, "SeekRelease"),
-            Message::SeekBarPressed => write!(f, "SeekBarPressed"),
-            Message::SeekDone => write!(f, "SeekDone"),
+            PlayerMessage::SeekRelease => write!(f, "SeekRelease"),
+            PlayerMessage::SeekBarPressed => write!(f, "SeekBarPressed"),
+            PlayerMessage::SeekDone => write!(f, "SeekDone"),
 
             // Volume
-            Message::SetVolume(vol) => write!(f, "SetVolume({})", vol),
-            Message::ToggleMute => write!(f, "ToggleMute"),
+            PlayerMessage::SetVolume(vol) => write!(f, "SetVolume({})", vol),
+            PlayerMessage::ToggleMute => write!(f, "ToggleMute"),
 
             // Playlist control
-            Message::ToggleShuffle => write!(f, "ToggleShuffle"),
-            Message::ToggleRepeat => write!(f, "ToggleRepeat"),
+            PlayerMessage::ToggleShuffle => write!(f, "ToggleShuffle"),
+            PlayerMessage::ToggleRepeat => write!(f, "ToggleRepeat"),
 
             // Video events
-            Message::VideoLoaded(success) => {
+            PlayerMessage::VideoLoaded(success) => {
                 write!(f, "VideoLoaded({})", success)
             }
-            Message::VideoReadyToPlay => write!(f, "VideoReadyToPlay"),
-            Message::EndOfStream => write!(f, "EndOfStream"),
-            Message::NewFrame => write!(f, "NewFrame"),
-            Message::Reload => write!(f, "Reload"),
+            PlayerMessage::VideoReadyToPlay => write!(f, "VideoReadyToPlay"),
+            PlayerMessage::EndOfStream => write!(f, "EndOfStream"),
+            PlayerMessage::NewFrame => write!(f, "NewFrame"),
+            PlayerMessage::Reload => write!(f, "Reload"),
 
             // External player control
-            Message::PlayExternal => write!(f, "PlayExternal"),
-            Message::SetStreamUrl(_) => write!(f, "SetStreamUrl(<redacted>)"),
+            PlayerMessage::PlayExternal => write!(f, "PlayExternal"),
+            PlayerMessage::SetStreamUrl(_) => {
+                write!(f, "SetStreamUrl(<redacted>)")
+            }
 
             // UI control
-            Message::ShowControls => write!(f, "ShowControls"),
-            Message::ToggleFullscreen => write!(f, "ToggleFullscreen"),
-            Message::DisableFullscreen => write!(f, "DisableFullscreen"),
-            Message::ToggleSettings => write!(f, "ToggleSettings"),
-            Message::MouseMoved(point) => write!(f, "MouseMoved({:?})", point),
-            Message::VideoClicked => write!(f, "VideoClicked"),
-            Message::VideoDoubleClicked => write!(f, "VideoDoubleClicked"),
+            PlayerMessage::ShowControls => write!(f, "ShowControls"),
+            PlayerMessage::ToggleFullscreen => write!(f, "ToggleFullscreen"),
+            PlayerMessage::DisableFullscreen => write!(f, "DisableFullscreen"),
+            PlayerMessage::ToggleSettings => write!(f, "ToggleSettings"),
+            PlayerMessage::MouseMoved(point) => {
+                write!(f, "MouseMoved({:?})", point)
+            }
+            PlayerMessage::VideoClicked => write!(f, "VideoClicked"),
+            PlayerMessage::VideoDoubleClicked => {
+                write!(f, "VideoDoubleClicked")
+            }
 
             // Settings
-            Message::SetPlaybackSpeed(speed) => {
+            PlayerMessage::SetPlaybackSpeed(speed) => {
                 write!(f, "SetPlaybackSpeed({})", speed)
             }
-            Message::SetContentFit(fit) => {
+            PlayerMessage::SetContentFit(fit) => {
                 write!(f, "SetContentFit({:?})", fit)
             }
 
             // Track selection
-            Message::AudioTrackSelected(track) => {
+            PlayerMessage::AudioTrackSelected(track) => {
                 write!(f, "AudioTrackSelected({})", track)
             }
-            Message::SubtitleTrackSelected(track) => match track {
+            PlayerMessage::SubtitleTrackSelected(track) => match track {
                 Some(t) => write!(f, "SubtitleTrackSelected(Some({}))", t),
                 None => write!(f, "SubtitleTrackSelected(None)"),
             },
-            Message::ToggleSubtitles => write!(f, "ToggleSubtitles"),
-            Message::ToggleSubtitleMenu => write!(f, "ToggleSubtitleMenu"),
-            Message::ToggleQualityMenu => write!(f, "ToggleQualityMenu"),
-            Message::ToggleAppsinkBackend => write!(f, "ToggleAppsinkBackend"),
-            Message::CycleAudioTrack => write!(f, "CycleAudioTrack"),
-            Message::CycleSubtitleTrack => write!(f, "CycleSubtitleTrack"),
-            Message::CycleSubtitleSimple => write!(f, "CycleSubtitleSimple"),
-            Message::TracksLoaded => write!(f, "TracksLoaded"),
-            Message::CheckControlsVisibility => {
+            PlayerMessage::ToggleSubtitles => write!(f, "ToggleSubtitles"),
+            PlayerMessage::ToggleSubtitleMenu => {
+                write!(f, "ToggleSubtitleMenu")
+            }
+            PlayerMessage::ToggleQualityMenu => write!(f, "ToggleQualityMenu"),
+            PlayerMessage::ToggleAppsinkBackend => {
+                write!(f, "ToggleAppsinkBackend")
+            }
+            PlayerMessage::CycleAudioTrack => write!(f, "CycleAudioTrack"),
+            PlayerMessage::CycleSubtitleTrack => {
+                write!(f, "CycleSubtitleTrack")
+            }
+            PlayerMessage::CycleSubtitleSimple => {
+                write!(f, "CycleSubtitleSimple")
+            }
+            PlayerMessage::TracksLoaded => write!(f, "TracksLoaded"),
+            PlayerMessage::CheckControlsVisibility => {
                 write!(f, "CheckControlsVisibility")
             }
-            Message::ExternalPlaybackStarted => {
+            PlayerMessage::ExternalPlaybackStarted => {
                 write!(f, "ExternalPlaybackStarted")
             }
-            Message::ProgressHeartbeat => write!(f, "ProgressHeartbeat"),
-            Message::ExternalPlaybackUpdate { position, duration } => {
+            PlayerMessage::ProgressHeartbeat => write!(f, "ProgressHeartbeat"),
+            PlayerMessage::ExternalPlaybackUpdate { position, duration } => {
                 write!(
                     f,
                     "ExternalPlaybackUpdate {{ position: {}, duration: {} }}",
                     position, duration
                 )
             }
-            Message::ExternalPlaybackEnded => {
+            PlayerMessage::ExternalPlaybackEnded => {
                 write!(f, "ExternalPlaybackEnded")
             }
-            Message::PollExternalMpv => write!(f, "PollExternalMpv"),
+            PlayerMessage::PollExternalMpv => write!(f, "PollExternalMpv"),
         }
     }
 }

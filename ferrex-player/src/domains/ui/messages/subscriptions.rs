@@ -1,11 +1,11 @@
 use std::time::{Duration, Instant};
 
-use super::Message;
+use super::UiMessage;
 
 use crate::{
     common::messages::DomainMessage,
     domains::{
-        search::messages::Message as SearchMessage,
+        search::messages::SearchMessage,
         ui::{
             motion_controller::messages::{
                 Direction as Dir, MotionMessage as KM,
@@ -54,7 +54,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         subscriptions.push(iced::window::close_requests().with(search_id).map(
             |(search_id, id)| {
                 if id == search_id {
-                    DomainMessage::Ui(Message::CloseSearchWindow)
+                    DomainMessage::Ui(UiMessage::CloseSearchWindow)
                 } else {
                     DomainMessage::NoOp
                 }
@@ -85,30 +85,30 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                 match key {
                     Key::Named(Named::ArrowRight) => {
                         if modifiers.shift() {
-                            DomainMessage::Ui(Message::VirtualCarousel(
+                            DomainMessage::Ui(UiMessage::VirtualCarousel(
                                 VCM::NextPageActive,
                             ))
                         } else {
                             // Disable kinetic hold: step by one item with snap
-                            DomainMessage::Ui(Message::VirtualCarousel(
+                            DomainMessage::Ui(UiMessage::VirtualCarousel(
                                 VCM::NextItemActive,
                             ))
                         }
                     }
                     Key::Named(Named::ArrowLeft) => {
                         if modifiers.shift() {
-                            DomainMessage::Ui(Message::VirtualCarousel(
+                            DomainMessage::Ui(UiMessage::VirtualCarousel(
                                 VCM::PrevPageActive,
                             ))
                         } else {
                             // Disable kinetic hold: step by one item with snap
-                            DomainMessage::Ui(Message::VirtualCarousel(
+                            DomainMessage::Ui(UiMessage::VirtualCarousel(
                                 VCM::PrevItemActive,
                             ))
                         }
                     }
                     Key::Named(Named::Shift) => DomainMessage::Ui(
-                        Message::VirtualCarousel(VCM::SetBoostActive(true)),
+                        UiMessage::VirtualCarousel(VCM::SetBoostActive(true)),
                     ),
                     _ => DomainMessage::NoOp,
                 }
@@ -127,7 +127,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                     Key::Named(Named::ArrowRight) => DomainMessage::NoOp,
                     Key::Named(Named::ArrowLeft) => DomainMessage::NoOp,
                     Key::Named(Named::Shift) => DomainMessage::Ui(
-                        Message::VirtualCarousel(VCM::SetBoostActive(false)),
+                        UiMessage::VirtualCarousel(VCM::SetBoostActive(false)),
                     ),
                     _ => DomainMessage::NoOp,
                 }
@@ -138,7 +138,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         // Track mouse movement globally to gate hover-driven focus switches
         subscriptions.push(event::listen().map(|ev| match ev {
             RuntimeEvent::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
-                DomainMessage::Ui(Message::MouseMoved)
+                DomainMessage::Ui(UiMessage::MouseMoved)
             }
             _ => DomainMessage::NoOp,
         }));
@@ -161,10 +161,10 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                 use iced::keyboard::key::Named;
                 match key {
                     Key::Named(Named::ArrowDown) => {
-                        DomainMessage::Ui(Message::AllFocusNext)
+                        DomainMessage::Ui(UiMessage::AllFocusNext)
                     }
                     Key::Named(Named::ArrowUp) => {
-                        DomainMessage::Ui(Message::AllFocusPrev)
+                        DomainMessage::Ui(UiMessage::AllFocusPrev)
                     }
                     _ => DomainMessage::NoOp,
                 }
@@ -178,7 +178,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
             iced::time::every(std::time::Duration::from_nanos(
                 performance_config::scrolling::TICK_NS,
             ))
-            .map(|_| DomainMessage::Ui(Message::KineticScroll(KM::Tick))),
+            .map(|_| DomainMessage::Ui(UiMessage::KineticScroll(KM::Tick))),
         );
     }
 
@@ -227,7 +227,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                         virtual_carousel::motion::TICK_NS,
                     ))
                     .map(|_| {
-                        DomainMessage::Ui(Message::VirtualCarousel(
+                        DomainMessage::Ui(UiMessage::VirtualCarousel(
                             VCM::MotionTickActive,
                         ))
                     }),
@@ -246,7 +246,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
             iced::time::every(Duration::from_nanos(
                 virtual_carousel::motion::TICK_NS,
             ))
-            .map(|_| DomainMessage::Ui(Message::AllFocusTick)),
+            .map(|_| DomainMessage::Ui(UiMessage::AllFocusTick)),
         );
     }
 
@@ -264,7 +264,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                 virtual_carousel::motion::TICK_NS,
             ))
             .map(|_| {
-                DomainMessage::Ui(Message::VirtualCarousel(
+                DomainMessage::Ui(UiMessage::VirtualCarousel(
                     VCM::MotionTickActive,
                 ))
             }),
@@ -296,7 +296,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     {
         subscriptions.push(
             iced::time::every(std::time::Duration::from_nanos(8_333_333)) // ~120 FPS
-                .map(|_| DomainMessage::Ui(Message::UpdateTransitions)),
+                .map(|_| DomainMessage::Ui(UiMessage::UpdateTransitions)),
         );
     }
 
@@ -369,13 +369,13 @@ fn main_window_grid_key_handler(
             }
             match key {
                 Key::Named(Named::ArrowDown) => Some(DomainMessage::Ui(
-                    Message::KineticScroll(KM::Start(Dir::Down)),
+                    UiMessage::KineticScroll(KM::Start(Dir::Down)),
                 )),
                 Key::Named(Named::ArrowUp) => Some(DomainMessage::Ui(
-                    Message::KineticScroll(KM::Start(Dir::Up)),
+                    UiMessage::KineticScroll(KM::Start(Dir::Up)),
                 )),
                 Key::Named(Named::Shift) => Some(DomainMessage::Ui(
-                    Message::KineticScroll(KM::SetBoost(true)),
+                    UiMessage::KineticScroll(KM::SetBoost(true)),
                 )),
                 _ => None,
             }
@@ -390,13 +390,13 @@ fn main_window_grid_key_handler(
             }
             match key {
                 Key::Named(Named::ArrowDown) => Some(DomainMessage::Ui(
-                    Message::KineticScroll(KM::Stop(Dir::Down)),
+                    UiMessage::KineticScroll(KM::Stop(Dir::Down)),
                 )),
                 Key::Named(Named::ArrowUp) => Some(DomainMessage::Ui(
-                    Message::KineticScroll(KM::Stop(Dir::Up)),
+                    UiMessage::KineticScroll(KM::Stop(Dir::Up)),
                 )),
                 Key::Named(Named::Shift) => Some(DomainMessage::Ui(
-                    Message::KineticScroll(KM::SetBoost(false)),
+                    UiMessage::KineticScroll(KM::SetBoost(false)),
                 )),
                 _ => None,
             }

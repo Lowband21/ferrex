@@ -203,7 +203,7 @@ fn create_user_carousel<'a>(
                 .font(lucide_font())
                 .size(20),
         )
-        .on_press(DomainMessage::Auth(auth::Message::SelectUser(
+        .on_press(DomainMessage::Auth(auth::AuthMessage::SelectUser(
             state.users[0].id,
         ))) // TODO: Proper navigation
         .padding(8)
@@ -224,7 +224,7 @@ fn create_user_carousel<'a>(
                 .font(lucide_font())
                 .size(20),
         )
-        .on_press(DomainMessage::Auth(auth::Message::SelectUser(
+        .on_press(DomainMessage::Auth(auth::AuthMessage::SelectUser(
             state.users[0].id,
         ))) // TODO: Proper navigation
         .padding(8)
@@ -378,7 +378,7 @@ fn create_user_avatar<'a>(
     .width(Length::Fixed(120.0));
 
     button(avatar_content)
-        .on_press(DomainMessage::Auth(auth::Message::SelectUser(user.id)))
+        .on_press(DomainMessage::Auth(auth::AuthMessage::SelectUser(user.id)))
         .style(|_theme: &Theme, _status| button::Style {
             background: None,
             ..Default::default()
@@ -480,7 +480,7 @@ fn create_add_user_button<'a>() -> Element<'a, DomainMessage> {
     .width(Length::Fixed(120.0));
 
     button(add_user_content)
-        .on_press(DomainMessage::Auth(auth::Message::ShowCreateUser))
+        .on_press(DomainMessage::Auth(auth::AuthMessage::ShowCreateUser))
         .style(|theme: &Theme, status| {
             let palette = theme.extended_palette();
             match status {

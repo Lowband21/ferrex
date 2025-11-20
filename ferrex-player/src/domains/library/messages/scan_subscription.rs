@@ -1,4 +1,4 @@
-use super::Message;
+use super::LibraryMessage;
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use ferrex_core::player_prelude::ScanProgressEvent;
 use iced::Subscription;
@@ -43,7 +43,7 @@ pub fn scan_progress(
     server_url: String,
     api_service: Arc<dyn ApiService>,
     scan_id: Uuid,
-) -> Subscription<Message> {
+) -> Subscription<LibraryMessage> {
     Subscription::run_with(
         ScanProgressId {
             server_url: server_url.clone(),
@@ -56,7 +56,7 @@ pub fn scan_progress(
 
 fn build_scan_subscription_stream(
     id: &ScanProgressId,
-) -> BoxStream<'static, Message> {
+) -> BoxStream<'static, LibraryMessage> {
     let server_url = id.server_url.clone();
     let scan_id = id.scan_id;
     let api = Arc::clone(&id.api);
@@ -99,7 +99,7 @@ impl ScanState {
         }
     }
 
-    async fn next_event(&mut self) -> Option<Message> {
+    async fn next_event(&mut self) -> Option<LibraryMessage> {
         loop {
             if self.event_receiver.is_none() {
                 self.spawn_event_source();
@@ -200,7 +200,7 @@ impl ScanState {
     fn handle_sse_message(
         &mut self,
         msg: eventsource_stream::Event,
-    ) -> Option<Message> {
+    ) -> Option<LibraryMessage> {
         if matches!(msg.data.as_str(), "keepalive" | "keep-alive")
             || msg.data.is_empty()
         {
@@ -217,7 +217,7 @@ impl ScanState {
                     event.completed_items,
                     event.total_items
                 );
-                Some(Message::ScanProgressFrame(event))
+                Some(LibraryMessage::ScanProgressFrame(event))
             }
             Err(err) => {
                 log::error!(

@@ -1,7 +1,7 @@
 use crate::{
     domains::{
         auth::types::AuthenticationFlow,
-        library::{LibrariesLoadState, messages::Message},
+        library::{LibrariesLoadState, messages::LibraryMessage},
         ui::{
             update_handlers::{
                 emit_initial_all_tab_snapshots_combined, init_all_tab_view,
@@ -50,7 +50,7 @@ pub async fn fetch_libraries(
 pub fn handle_libraries_loaded(
     state: &mut State,
     result: Result<AlignedVec, String>,
-) -> Task<Message> {
+) -> Task<LibraryMessage> {
     match result {
         Ok(bytes) => {
             // Create and populate MediaRepo with the loaded data

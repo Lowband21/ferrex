@@ -8,7 +8,7 @@ use crate::infra::widgets::poster::poster_animation_types::{
     AnimatedPosterBounds, AnimationBehavior, PosterAnimationType,
 };
 use crate::{
-    domains::ui::messages::Message,
+    domains::ui::messages::UiMessage,
     domains::ui::widgets::poster,
     infra::api_types::{
         EpisodeReference, MovieReference, SeasonReference, SeriesReference,
@@ -47,8 +47,8 @@ pub struct ImageFor {
     animation: AnimationBehavior,
     theme_color: Option<Color>,
     is_hovered: bool,
-    on_play: Option<Message>,
-    on_click: Option<Message>,
+    on_play: Option<UiMessage>,
+    on_click: Option<UiMessage>,
     progress: Option<f32>,
     progress_color: Option<Color>,
     // Optimization: Cache to avoid repeated lookups
@@ -199,13 +199,13 @@ impl ImageFor {
     }
 
     /// Set the play button callback
-    pub fn on_play(mut self, message: Message) -> Self {
+    pub fn on_play(mut self, message: UiMessage) -> Self {
         self.on_play = Some(message);
         self
     }
 
     /// Set the click callback (for empty space)
-    pub fn on_click(mut self, message: Message) -> Self {
+    pub fn on_click(mut self, message: UiMessage) -> Self {
         self.on_click = Some(message);
         self
     }
@@ -249,7 +249,7 @@ static PLANNER_WARNED: once_cell::sync::Lazy<
     std::sync::Mutex::new(std::collections::HashSet::new())
 });
 
-impl<'a> From<ImageFor> for Element<'a, Message> {
+impl<'a> From<ImageFor> for Element<'a, UiMessage> {
     fn from(mut image: ImageFor) -> Self {
         // Get fixed dimensions for layout
         let width = match image.width {
@@ -477,7 +477,7 @@ fn create_shader_from_cached<'a>(
     animation: AnimationBehavior,
     image: &ImageFor,
     bounds: AnimatedPosterBounds,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     // Check if we should skip atlas upload for VeryFast scrolling
     let mut shader = poster(handle, Some(request_hash))
         .radius(image.radius)
@@ -538,7 +538,7 @@ fn create_loading_placeholder<'a>(
     radius: f32,
     theme_color: Option<Color>,
     request_hash: u64,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     // Create a placeholder handle - we'll use a 1x1 transparent pixel
     // The shader will render the theme color on the backface
     let placeholder_handle = Handle::from_rgba(1, 1, vec![0, 0, 0, 0]);

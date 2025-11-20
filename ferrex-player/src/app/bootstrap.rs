@@ -257,17 +257,17 @@ pub fn runtime_boot(config: &AppConfig) -> (State, Task<DomainMessage>) {
                 log::info!(
                     "[Auth] Auto-login enabled, sending CheckAuthStatus"
                 );
-                DomainMessage::Auth(auth_messages::Message::CheckAuthStatus)
+                DomainMessage::Auth(auth_messages::AuthMessage::CheckAuthStatus)
             }
             Ok(Some(false)) | Ok(None) => {
                 log::info!(
                     "[Auth] Auto-login disabled or no stored auth, sending LoadUsers"
                 );
-                DomainMessage::Auth(auth_messages::Message::LoadUsers)
+                DomainMessage::Auth(auth_messages::AuthMessage::LoadUsers)
             }
             Err(e) => {
                 log::error!("[Auth] Error during auth check: {}", e);
-                DomainMessage::Auth(auth_messages::Message::LoadUsers)
+                DomainMessage::Auth(auth_messages::AuthMessage::LoadUsers)
             }
         },
     );
@@ -304,7 +304,7 @@ pub fn runtime_boot(config: &AppConfig) -> (State, Task<DomainMessage>) {
                                             "[Demo] Applied stored auth; proceeding to CheckAuthStatus"
                                         );
                                         DomainMessage::Auth(
-                                            auth_messages::Message::CheckAuthStatus,
+                                            auth_messages::AuthMessage::CheckAuthStatus,
                                         )
                                     }
                                     Err(e) => {
@@ -321,7 +321,7 @@ pub fn runtime_boot(config: &AppConfig) -> (State, Task<DomainMessage>) {
                                             .await
                                             .map_err(|err| err.to_string());
                                         DomainMessage::Auth(
-                                            auth_messages::Message::AuthResult(
+                                            auth_messages::AuthMessage::AuthResult(
                                                 result,
                                             ),
                                         )
@@ -340,7 +340,7 @@ pub fn runtime_boot(config: &AppConfig) -> (State, Task<DomainMessage>) {
                                     .await
                                     .map_err(|err| err.to_string());
                                 DomainMessage::Auth(
-                                    auth_messages::Message::AuthResult(result),
+                                    auth_messages::AuthMessage::AuthResult(result),
                                 )
                             }
                         }
@@ -357,7 +357,7 @@ pub fn runtime_boot(config: &AppConfig) -> (State, Task<DomainMessage>) {
                                 .await
                                 .map_err(|err| err.to_string());
                             DomainMessage::Auth(
-                                auth_messages::Message::AuthResult(result),
+                                auth_messages::AuthMessage::AuthResult(result),
                             )
                         }
                     }

@@ -13,7 +13,7 @@ pub mod view;
 
 pub mod external_mpv;
 
-use self::messages::Message;
+use self::messages::PlayerMessage;
 use self::state::PlayerDomainState;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infra::services::api::ApiService;
@@ -58,7 +58,7 @@ impl PlayerDomain {
     /// Update function - delegates to player update logic
     /// Note: This method is not currently used as update_player is called directly from main update.rs
     /// If this method is needed, window_size should be passed as a parameter
-    pub fn update(&mut self, _message: Message) -> Task<DomainMessage> {
+    pub fn update(&mut self, _message: PlayerMessage) -> Task<DomainMessage> {
         // Not used in current routing; player updates are handled at root with access to full State
         Task::none()
     }

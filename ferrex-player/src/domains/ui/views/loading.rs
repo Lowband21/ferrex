@@ -1,6 +1,6 @@
 use crate::{
     common::ui_utils::{icon_text, lucide_font},
-    domains::ui::messages::Message,
+    domains::ui::messages::UiMessage,
     domains::ui::theme,
     state::State,
 };
@@ -22,7 +22,7 @@ use lucide_icons::Icon;
 pub fn view_loading_video<'a>(
     state: &'a State,
     url: &'a str,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     let mut content = column![].spacing(20).align_x(iced::Alignment::Center);
 
     // Back button
@@ -33,7 +33,7 @@ pub fn view_loading_video<'a>(
                     .spacing(5)
                     .align_y(iced::Alignment::Center),
             )
-            .on_press(Message::NavigateBack)
+            .on_press(UiMessage::NavigateBack)
             .style(theme::Button::Secondary.style()),
         )
         .padding(20),

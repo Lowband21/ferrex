@@ -1,7 +1,7 @@
 use iced::Subscription;
 
 use crate::common::messages::DomainMessage;
-use crate::domains::ui::messages::Message as UiMessage;
+use crate::domains::ui::messages::UiMessage as UiMessage;
 use crate::domains::ui::windows::WindowKind;
 use crate::state::State;
 

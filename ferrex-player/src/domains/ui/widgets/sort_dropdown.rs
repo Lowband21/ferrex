@@ -1,6 +1,6 @@
 pub use self::sort_option::SortOption;
 
-use crate::domains::ui::{messages::Message, theme::MediaServerTheme};
+use crate::domains::ui::{messages::UiMessage, theme::MediaServerTheme};
 use ferrex_core::player_prelude::SortBy;
 use iced::{
     Background, Border, Color, Element, Length,
@@ -70,7 +70,7 @@ mod sort_option {
 }
 
 /// Creates a sort dropdown widget with consistent styling
-pub fn sort_dropdown<'a>(current_sort: SortBy) -> Element<'a, Message> {
+pub fn sort_dropdown<'a>(current_sort: SortBy) -> Element<'a, UiMessage> {
     let selected = SortOption::OPTIONS
         .iter()
         .find(|opt| opt.value == current_sort)
@@ -78,7 +78,7 @@ pub fn sort_dropdown<'a>(current_sort: SortBy) -> Element<'a, Message> {
 
     container(
         pick_list(SortOption::OPTIONS, selected, |option| {
-            Message::SetSortBy(option.value)
+            UiMessage::SetSortBy(option.value)
         })
         .placeholder("Sort by...")
         .width(Length::Fixed(160.0))

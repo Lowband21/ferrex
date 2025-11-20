@@ -16,7 +16,7 @@ pub fn augment_show_library_management_tasks(
     controls.error = None;
 
     tasks.push(Task::done(DomainMessage::Library(
-        library::messages::Message::FetchDemoStatus,
+        library::messages::LibraryMessage::FetchDemoStatus,
     )));
     tasks
 }
@@ -49,7 +49,7 @@ pub fn handle_apply_sizing(state: &mut State) -> DomainUpdateResult {
             controls.error = None;
             controls.is_updating = true;
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::ApplyDemoSizing(request),
+                library::messages::LibraryMessage::ApplyDemoSizing(request),
             )))
         }
         Err(err) => {
@@ -64,7 +64,7 @@ pub fn handle_refresh_status(state: &mut State) -> DomainUpdateResult {
     controls.is_loading = true;
     controls.error = None;
     DomainUpdateResult::task(Task::done(DomainMessage::Library(
-        library::messages::Message::FetchDemoStatus,
+        library::messages::LibraryMessage::FetchDemoStatus,
     )))
 }
 

@@ -2,7 +2,7 @@
 //!
 //! Allows users to customize their viewing experience
 
-use crate::domains::ui::messages::Message;
+use crate::domains::ui::messages::UiMessage;
 use crate::domains::ui::theme;
 use crate::state::State;
 use ferrex_core::player_prelude::{GridSize, PlaybackQuality, ResumeBehavior};
@@ -19,7 +19,7 @@ use iced::{Element, Length};
     ),
     profiling::function
 )]
-pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
+pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, UiMessage> {
     let content = column![
         text("Preferences")
             .size(24)
@@ -36,7 +36,7 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             Space::new().width(Length::Fill),
             toggler(true) // TODO: Connect to preferences
-                .on_toggle(|_| Message::NoOp),
+                .on_toggle(|_| UiMessage::NoOp),
         ]
         .align_y(iced::Alignment::Center),
         Space::new().height(10),
@@ -55,7 +55,7 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
                     PlaybackQuality::Low480p,
                 ],
                 Some(PlaybackQuality::Auto),
-                |_| Message::NoOp, // TODO: Implement quality change
+                |_| UiMessage::NoOp, // TODO: Implement quality change
             )
             .width(Length::Fixed(150.0)),
         ]
@@ -73,7 +73,7 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
                     ResumeBehavior::Never,
                 ],
                 Some(ResumeBehavior::Ask),
-                |_| Message::NoOp, // TODO: Implement resume behavior change
+                |_| UiMessage::NoOp, // TODO: Implement resume behavior change
             )
             .width(Length::Fixed(150.0)),
         ]
@@ -90,7 +90,7 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             Space::new().width(Length::Fill),
             toggler(false) // TODO: Connect to preferences
-                .on_toggle(|_| Message::NoOp),
+                .on_toggle(|_| UiMessage::NoOp),
         ]
         .align_y(iced::Alignment::Center),
         Space::new().height(10),
@@ -100,7 +100,7 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             row![
                 text("Small").size(14),
-                slider(0.5..=2.0, 1.0, |_| Message::NoOp)
+                slider(0.5..=2.0, 1.0, |_| UiMessage::NoOp)
                     .width(Length::Fixed(200.0)),
                 text("Large").size(14),
             ]
@@ -122,7 +122,7 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
             pick_list(
                 vec![GridSize::Small, GridSize::Medium, GridSize::Large],
                 Some(GridSize::Medium),
-                |_| Message::NoOp, // TODO: Implement grid size change
+                |_| UiMessage::NoOp, // TODO: Implement grid size change
             )
             .width(Length::Fixed(150.0)),
         ]
@@ -134,18 +134,18 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             Space::new().width(Length::Fill),
             toggler(false) // TODO: Connect to preferences
-                .on_toggle(|_| Message::NoOp),
+                .on_toggle(|_| UiMessage::NoOp),
         ]
         .align_y(iced::Alignment::Center),
         Space::new().height(30),
         row![
             button("Back")
-                .on_press(Message::BackToSettings)
+                .on_press(UiMessage::BackToSettings)
                 .style(theme::Button::Secondary.style())
                 .padding([10, 20]),
             Space::new().width(10),
             button("Save Changes")
-                .on_press(Message::NoOp) // TODO: Implement save
+                .on_press(UiMessage::NoOp) // TODO: Implement save
                 .style(theme::Button::Primary.style())
                 .padding([10, 20]),
         ],

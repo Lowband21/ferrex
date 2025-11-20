@@ -3,7 +3,7 @@ use crate::domains::ui::views::grid::macros::parse_hex_color;
 use crate::infra::api_types::MediaDetailsOption;
 use crate::infra::widgets::poster::poster_animation_types::PosterAnimationType;
 use crate::{
-    domains::ui::components, domains::ui::messages::Message,
+    domains::ui::components, domains::ui::messages::UiMessage,
     domains::ui::theme, domains::ui::widgets::image_for::image_for,
     state::State,
 };
@@ -36,7 +36,7 @@ use rkyv::rancor::Error;
 pub fn view_movie_detail<'a>(
     state: &'a State,
     movie_id: MovieID,
-) -> Element<'a, Message> {
+) -> Element<'a, UiMessage> {
     // Borrow from UI yoke cache to satisfy lifetime 'a
     let movie_uuid = movie_id.to_uuid();
     match state.domains.ui.state.movie_yoke_cache.peek(&movie_uuid) {
@@ -244,8 +244,8 @@ pub fn view_movie_detail<'a>(
 
             let button_row =
                 crate::domains::ui::components::create_action_button_row(
-                    Message::PlayMediaWithId(media_id),
-                    Some(Message::PlayMediaWithIdInMpv(media_id)),
+                    UiMessage::PlayMediaWithId(media_id),
+                    Some(UiMessage::PlayMediaWithIdInMpv(media_id)),
                     vec![], // No additional buttons yet
                 );
 

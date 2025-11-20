@@ -2,7 +2,7 @@ use iced::Task;
 use iced::widget::{operation::scroll_to, scrollable::AbsoluteOffset};
 
 use super::messages::{Direction, MotionMessage};
-use crate::domains::ui::messages::Message;
+use crate::domains::ui::messages::UiMessage;
 use crate::domains::ui::tabs::TabState;
 use crate::domains::ui::types::{DisplayMode, ViewState};
 use crate::state::State;
@@ -15,7 +15,7 @@ use crate::state::State;
     ),
     profiling::function
 )]
-pub fn update(state: &mut State, msg: MotionMessage) -> Task<Message> {
+pub fn update(state: &mut State, msg: MotionMessage) -> Task<UiMessage> {
     match msg {
         MotionMessage::Start(dir) => handle_start(state, dir),
         MotionMessage::Stop(dir) => handle_stop(state, dir),
@@ -24,7 +24,7 @@ pub fn update(state: &mut State, msg: MotionMessage) -> Task<Message> {
     }
 }
 
-fn handle_start(state: &mut State, dir: Direction) -> Task<Message> {
+fn handle_start(state: &mut State, dir: Direction) -> Task<UiMessage> {
     // Limit to library grid context
     if !matches!(state.domains.ui.state.view, ViewState::Library) {
         return Task::none();
@@ -44,7 +44,7 @@ fn handle_start(state: &mut State, dir: Direction) -> Task<Message> {
     Task::none()
 }
 
-fn handle_stop(state: &mut State, dir: Direction) -> Task<Message> {
+fn handle_stop(state: &mut State, dir: Direction) -> Task<UiMessage> {
     let d = match dir {
         Direction::Up => -1,
         Direction::Down => 1,
@@ -53,12 +53,12 @@ fn handle_stop(state: &mut State, dir: Direction) -> Task<Message> {
     Task::none()
 }
 
-fn handle_boost(state: &mut State, active: bool) -> Task<Message> {
+fn handle_boost(state: &mut State, active: bool) -> Task<UiMessage> {
     state.domains.ui.state.motion_controller.set_boost(active);
     Task::none()
 }
 
-fn handle_tick(state: &mut State) -> Task<Message> {
+fn handle_tick(state: &mut State) -> Task<UiMessage> {
     // Only operate in Library tab with a grid
     let TabState::Library(lib_state) = state.tab_manager.active_tab() else {
         return Task::none();
@@ -91,7 +91,7 @@ fn handle_tick(state: &mut State) -> Task<Message> {
     };
 
     let id = grid.scrollable_id.clone();
-    scroll_to::<Message>(
+    scroll_to::<UiMessage>(
         id,
         AbsoluteOffset {
             x: 0.0,

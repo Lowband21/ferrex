@@ -9,7 +9,7 @@ mod poster_program;
 mod primitive;
 mod render_pipeline;
 
-use crate::domains::ui::messages::Message;
+use crate::domains::ui::messages::UiMessage;
 use crate::infra::widgets::poster::poster_animation_types::PosterAnimationType;
 
 use iced::{Color, Element, Length, widget::image::Handle};
@@ -39,10 +39,10 @@ pub struct Poster {
     theme_color: Color,
     bounds: Option<poster_animation_types::AnimatedPosterBounds>,
     is_hovered: bool,
-    on_play: Option<Message>,
-    on_edit: Option<Message>,
-    on_options: Option<Message>,
-    on_click: Option<Message>, // For clicking empty space (details page)
+    on_play: Option<UiMessage>,
+    on_edit: Option<UiMessage>,
+    on_options: Option<UiMessage>,
+    on_click: Option<UiMessage>, // For clicking empty space (details page)
     progress: Option<f32>,     // Progress percentage (0.0 to 1.0)
     progress_color: Color,     // Color for the progress bar
 }
@@ -139,25 +139,25 @@ impl Poster {
     }
 
     /// Sets the play button callback
-    pub fn on_play(mut self, message: Message) -> Self {
+    pub fn on_play(mut self, message: UiMessage) -> Self {
         self.on_play = Some(message);
         self
     }
 
     /// Sets the edit button callback
-    pub fn on_edit(mut self, message: Message) -> Self {
+    pub fn on_edit(mut self, message: UiMessage) -> Self {
         self.on_edit = Some(message);
         self
     }
 
     /// Sets the options button callback
-    pub fn on_options(mut self, message: Message) -> Self {
+    pub fn on_options(mut self, message: UiMessage) -> Self {
         self.on_options = Some(message);
         self
     }
 
     /// Sets the click callback (for clicking empty space)
-    pub fn on_click(mut self, message: Message) -> Self {
+    pub fn on_click(mut self, message: UiMessage) -> Self {
         self.on_click = Some(message);
         self
     }
@@ -180,7 +180,7 @@ pub fn poster(handle: Handle, id: Option<u64>) -> Poster {
     Poster::new(handle, id)
 }
 
-impl<'a> From<Poster> for Element<'a, Message> {
+impl<'a> From<Poster> for Element<'a, UiMessage> {
     fn from(image: Poster) -> Self {
         let shader = iced::widget::shader(poster_program::PosterProgram {
             id: image.id,

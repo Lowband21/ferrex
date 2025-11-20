@@ -13,7 +13,7 @@ use crate::{
     common::ui_utils::{Icon, icon_text},
     domains::{
         settings::state::SettingsView,
-        ui::{theme, widgets::background_shader::Message},
+        ui::{theme, widgets::background_shader::UiMessage},
     },
     state::State,
 };
@@ -32,7 +32,7 @@ pub mod security;
     ),
     profiling::function
 )]
-pub fn view_user_settings<'a>(state: &'a State) -> Element<'a, Message> {
+pub fn view_user_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
     match &state.domains.settings.current_view {
         SettingsView::Main => view_main_settings(state),
         SettingsView::Profile => profile::view_user_profile(state),
@@ -52,7 +52,7 @@ pub fn view_user_settings<'a>(state: &'a State) -> Element<'a, Message> {
     ),
     profiling::function
 )]
-fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
+fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
     // RUS-136: Get current user from auth domain state instead of auth_manager
     let current_user: Option<User> = match &state.domains.auth.state.auth_flow {
         crate::domains::auth::types::AuthenticationFlow::Authenticated {
@@ -75,7 +75,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
                 ]
                 .align_y(iced::Alignment::Center)
             )
-            .on_press(Message::NavigateHome)
+            .on_press(UiMessage::NavigateHome)
             .style(theme::Button::Secondary.style())
             .padding([8, 16]),
             Space::new().width(20),
@@ -103,28 +103,28 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
             "👤",
             "Profile",
             "Manage your display name and avatar",
-            Message::ShowUserProfile,
+            UiMessage::ShowUserProfile,
         ),
         // Preferences section
         create_settings_section(
             "⚙️",
             "Preferences",
             "Customize your viewing experience",
-            Message::ShowUserPreferences,
+            UiMessage::ShowUserPreferences,
         ),
         // Security section
         create_settings_section(
             "🔐",
             "Security",
             "Change PIN, manage devices",
-            Message::ShowUserSecurity,
+            UiMessage::ShowUserSecurity,
         ),
         // Device management section
         create_settings_section(
             "📱",
             "Device Management",
             "View and manage trusted devices",
-            Message::ShowDeviceManagement,
+            UiMessage::ShowDeviceManagement,
         ),
         // Theme section (inline toggle)
         container(
@@ -143,7 +143,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
                     .spacing(5),
                     Space::new().width(Length::Fill),
                     toggler(false) // TODO: Connect to actual theme state
-                        .on_toggle(|_| Message::NoOp), // TODO: Implement theme toggle
+                        .on_toggle(|_| UiMessage::NoOp), // TODO: Implement theme toggle
                 ]
                 .align_y(iced::Alignment::Center),
             ]
@@ -170,7 +170,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
                     toggler(
                         state.domains.settings.preferences.auto_login_enabled
                     )
-                    .on_toggle(Message::ToggleAutoLogin),
+                    .on_toggle(UiMessage::ToggleAutoLogin),
                 ]
                 .align_y(iced::Alignment::Center),
             ]
@@ -188,7 +188,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
             ]
             .align_y(iced::Alignment::Center),
         )
-        .on_press(Message::Logout)
+        .on_press(UiMessage::Logout)
         .style(theme::Button::Danger.style())
         .padding([12, 20])
         .width(Length::Fixed(150.0)),
@@ -215,8 +215,8 @@ fn create_settings_section<'a>(
     icon: &'a str,
     title: &'a str,
     description: &'a str,
-    message: Message,
-) -> Element<'a, Message> {
+    message: UiMessage,
+) -> Element<'a, UiMessage> {
     button(
         container(
             row![

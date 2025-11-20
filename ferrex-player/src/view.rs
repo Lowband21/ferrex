@@ -66,7 +66,7 @@ pub fn view(
 
         bg_shader = bg_shader.effect(BackgroundEffect::Gradient);
 
-        let bg_shader_element: Element<ui::messages::Message> =
+        let bg_shader_element: Element<ui::messages::UiMessage> =
             bg_shader.into();
         let bg_shader_mapped: Element<DomainMessage> =
             bg_shader_element.map(DomainMessage::from);
@@ -154,7 +154,9 @@ pub fn view(
                 scrollable(content)
                     .on_scroll(|viewport| {
                         DomainMessage::from(
-                            ui::messages::Message::DetailViewScrolled(viewport),
+                            ui::messages::UiMessage::DetailViewScrolled(
+                                viewport,
+                            ),
                         )
                     })
                     .width(Length::Fill)
@@ -266,7 +268,7 @@ pub fn view(
         }
         // Create a stack with background as base layer
         // Convert bg_shader to Element first, then map from ui::Message to DomainMessage
-        let bg_shader_element: Element<ui::messages::Message> =
+        let bg_shader_element: Element<ui::messages::UiMessage> =
             bg_shader.into();
         let bg_shader_mapped: Element<DomainMessage> =
             bg_shader_element.map(DomainMessage::from);
@@ -293,7 +295,7 @@ pub fn view(
     ),
     profiling::function
 )]
-fn view_player(state: &State) -> Element<'_, player::messages::Message> {
+fn view_player(state: &State) -> Element<'_, player::messages::PlayerMessage> {
     state.domains.player.state.view()
 }
 

@@ -11,7 +11,7 @@ use iced::{
     },
 };
 
-use crate::domains::ui::{messages::Message, theme};
+use crate::domains::ui::{messages::UiMessage, theme};
 use lucide_icons::Icon;
 
 use super::{state::VirtualCarouselState, types::CarouselKey};
@@ -26,9 +26,9 @@ pub fn virtual_carousel<'a, F>(
     state: &VirtualCarouselState,
     create_item: F,
     is_active: bool,
-) -> Element<'a, Message>
+) -> Element<'a, UiMessage>
 where
-    F: Fn(usize) -> Option<Element<'a, Message>>,
+    F: Fn(usize) -> Option<Element<'a, UiMessage>>,
 {
     // Header with title and nav buttons
     let can_left = state.scroll_x > 0.0;
@@ -41,7 +41,7 @@ where
                 .size(20)
                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
         )
-        .on_press(Message::VirtualCarousel(
+        .on_press(UiMessage::VirtualCarousel(
             super::messages::VirtualCarouselMessage::PrevItem(key.clone()),
         ))
         .padding(8)
@@ -64,7 +64,7 @@ where
                 .size(20)
                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
         )
-        .on_press(Message::VirtualCarousel(
+        .on_press(UiMessage::VirtualCarousel(
             super::messages::VirtualCarouselMessage::NextItem(key.clone()),
         ))
         .padding(8)
@@ -152,7 +152,7 @@ where
             scrollable::Scrollbar::new().width(0).scroller_width(0),
         ))
         .on_scroll(move |viewport| {
-            Message::VirtualCarousel(
+            UiMessage::VirtualCarousel(
                 super::messages::VirtualCarouselMessage::ViewportChanged(
                     key_for_scroll.clone(),
                     viewport,
@@ -169,10 +169,10 @@ where
 
     // Wrap section with mouse_area to track hover for focus
     let section_with_hover = mouse_area(section)
-        .on_enter(Message::VirtualCarousel(
+        .on_enter(UiMessage::VirtualCarousel(
             super::messages::VirtualCarouselMessage::FocusKey(key_for_enter),
         ))
-        .on_exit(Message::VirtualCarousel(
+        .on_exit(UiMessage::VirtualCarousel(
             super::messages::VirtualCarouselMessage::BlurKey(key_for_exit),
         ));
 

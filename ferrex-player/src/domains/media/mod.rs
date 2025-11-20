@@ -7,7 +7,7 @@ pub mod selectors;
 pub mod update;
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::domains::media::messages::Message as MediaMessage;
+use crate::domains::media::messages::MediaMessage;
 use crate::infra::repository::{Accessor, ReadWrite};
 use crate::infra::{api_types::UserWatchState, services::api::ApiService};
 use ferrex_core::player_prelude::{

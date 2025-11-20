@@ -1,5 +1,5 @@
 #[derive(Debug, Clone)]
-pub enum Message {
+pub enum SettingsMessage {
     // Navigation
     ShowProfile,
     ShowPreferences,
@@ -49,7 +49,7 @@ pub enum Message {
     DeviceRevoked(Result<String, String>), // device_id or error
 }
 
-impl Message {
+impl SettingsMessage {
     pub fn name(&self) -> &'static str {
         match self {
             // Navigation
@@ -103,7 +103,7 @@ impl Message {
     }
 }
 
-impl std::fmt::Display for Message {
+impl std::fmt::Display for SettingsMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name())
     }
