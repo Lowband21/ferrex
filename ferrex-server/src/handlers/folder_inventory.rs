@@ -2,19 +2,18 @@
 
 use axum::{
     extract::{Path, Query, State},
-    response::Json,
     http::StatusCode,
+    response::Json,
 };
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use chrono::{DateTime, Utc};
 use ferrex_core::database::traits::{
-    FolderInventory, FolderProcessingStatus, ScanStatus,
-    MediaDatabaseTrait,
+    FolderInventory, FolderProcessingStatus, MediaDatabaseTrait, ScanStatus,
 };
 use ferrex_core::database::MediaDatabase;
 use ferrex_core::User;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 use crate::AppState;
 use axum::Extension;
@@ -25,20 +24,24 @@ pub struct FolderInventoryQuery {
     /// Page number (1-based)
     #[serde(default = "default_page")]
     pub page: u32,
-    
+
     /// Items per page
     #[serde(default = "default_per_page")]
     pub per_page: u32,
-    
+
     /// Filter by processing status
     pub status: Option<FolderProcessingStatus>,
-    
+
     /// Search by path substring
     pub search: Option<String>,
 }
 
-fn default_page() -> u32 { 1 }
-fn default_per_page() -> u32 { 50 }
+fn default_page() -> u32 {
+    1
+}
+fn default_per_page() -> u32 {
+    50
+}
 
 /// Response for folder inventory listing
 #[derive(Debug, Serialize)]
@@ -122,7 +125,7 @@ pub struct RescanResponse {
 }
 
 /// GET /api/folders/inventory/{library_id}
-/// 
+///
 /// List folders in a library with their scanning status
 pub async fn get_folder_inventory(
     State(state): State<AppState>,
@@ -131,48 +134,46 @@ pub async fn get_folder_inventory(
     Extension(_user): Extension<User>,
 ) -> Result<Json<FolderInventoryResponse>, StatusCode> {
     // Fetch all folders for the library
-    let all_folders = state.database.backend()
+    let all_folders = state
+        .database
+        .backend()
         .get_folder_inventory(library_id)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get folder inventory: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    
+
     // Apply filters
     let mut filtered = all_folders;
-    
+
     // Filter by status if provided
     if let Some(status) = params.status {
         filtered.retain(|f| f.processing_status == status);
     }
-    
+
     // Filter by search term if provided
     if let Some(search) = &params.search {
         let search_lower = search.to_lowercase();
         filtered.retain(|f| f.folder_path.to_lowercase().contains(&search_lower));
     }
-    
+
     // Calculate pagination
     let total_items = filtered.len();
     let total_pages = ((total_items as f32) / (params.per_page as f32)).ceil() as u32;
     let total_pages = total_pages.max(1);
-    
+
     // Apply pagination
     let skip = ((params.page - 1) * params.per_page) as usize;
     let take = params.per_page as usize;
-    let paginated: Vec<FolderInventory> = filtered
-        .into_iter()
-        .skip(skip)
-        .take(take)
-        .collect();
-    
+    let paginated: Vec<FolderInventory> = filtered.into_iter().skip(skip).take(take).collect();
+
     // Convert to response items
     let folders: Vec<FolderInventoryItem> = paginated
         .into_iter()
         .map(FolderInventoryItem::from)
         .collect();
-    
+
     let response = FolderInventoryResponse {
         folders,
         pagination: PaginationInfo {
@@ -182,12 +183,12 @@ pub async fn get_folder_inventory(
             total_pages,
         },
     };
-    
+
     Ok(Json(response))
 }
 
 /// GET /api/folders/progress/{library_id}
-/// 
+///
 /// Get scan progress statistics for a library
 pub async fn get_scan_progress(
     State(state): State<AppState>,
@@ -195,14 +196,16 @@ pub async fn get_scan_progress(
     Extension(_user): Extension<User>,
 ) -> Result<Json<ScanProgressResponse>, StatusCode> {
     // Fetch all folders for the library
-    let folders = state.database.backend()
+    let folders = state
+        .database
+        .backend()
         .get_folder_inventory(library_id)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get folder inventory: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    
+
     // Calculate statistics
     let total_folders = folders.len();
     let mut pending_folders = 0;
@@ -212,14 +215,14 @@ pub async fn get_scan_progress(
     let mut total_files = 0i32;
     let mut processed_files = 0i32;
     let mut errors = Vec::new();
-    
+
     for folder in &folders {
         total_files += folder.total_files;
         processed_files += folder.processed_files;
-        
+
         match folder.processing_status {
             FolderProcessingStatus::Pending => pending_folders += 1,
-            FolderProcessingStatus::Queued => pending_folders += 1,  // Count queued as pending
+            FolderProcessingStatus::Queued => pending_folders += 1, // Count queued as pending
             FolderProcessingStatus::Processing => processing_folders += 1,
             FolderProcessingStatus::Completed => completed_folders += 1,
             FolderProcessingStatus::Failed => {
@@ -240,14 +243,14 @@ pub async fn get_scan_progress(
             }
         }
     }
-    
+
     // Calculate progress percentage
     let progress_percentage = if total_folders > 0 {
         (completed_folders as f32 / total_folders as f32) * 100.0
     } else {
         0.0
     };
-    
+
     let response = ScanProgressResponse {
         library_id,
         total_folders,
@@ -260,7 +263,7 @@ pub async fn get_scan_progress(
         progress_percentage,
         errors,
     };
-    
+
     Ok(Json(response))
 }
 
@@ -271,7 +274,7 @@ pub struct RescanFolderRequest {
 }
 
 /// POST /api/folders/rescan/{folder_id}
-/// 
+///
 /// Trigger a manual rescan of a specific folder
 /// Requires library_id in the request body since we can't look up folders by ID alone
 pub async fn trigger_folder_rescan(
@@ -281,59 +284,77 @@ pub async fn trigger_folder_rescan(
     Json(request): Json<RescanFolderRequest>,
 ) -> Result<Json<RescanResponse>, StatusCode> {
     // Get folders for the library and find our specific folder
-    let folders = state.database.backend()
+    let folders = state
+        .database
+        .backend()
         .get_folder_inventory(request.library_id)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get folder inventory: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    
+
     let folder = folders
         .into_iter()
         .find(|f| f.id == folder_id)
         .ok_or_else(|| {
-            tracing::warn!("Folder {} not found in library {}", folder_id, request.library_id);
+            tracing::warn!(
+                "Folder {} not found in library {}",
+                folder_id,
+                request.library_id
+            );
             StatusCode::NOT_FOUND
         })?;
-    
+
     // Update folder status to pending to trigger rescan
-    state.database.backend()
-        .update_folder_status(
-            folder_id,
-            FolderProcessingStatus::Pending,
-            None
-        )
+    state
+        .database
+        .backend()
+        .update_folder_status(folder_id, FolderProcessingStatus::Pending, None)
         .await
         .map_err(|e| {
             tracing::error!("Failed to update folder status: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    
+
     // Try to trigger immediate scan if a scan isn't already running
     // The scan manager will handle whether a scan is already running internally
-    if let Ok(Some(library)) = state.database.backend()
+    if let Ok(Some(library)) = state
+        .database
+        .backend()
         .get_library(&request.library_id.to_string())
-        .await {
-        match state.scan_manager.start_library_scan(Arc::new(library), false).await {
+        .await
+    {
+        match state
+            .scan_manager
+            .start_library_scan(Arc::new(library), false)
+            .await
+        {
             Ok(scan_id) => {
-                tracing::info!("Started scan {} for library {} to process folder {}", 
-                    scan_id, request.library_id, folder_id);
+                tracing::info!(
+                    "Started scan {} for library {} to process folder {}",
+                    scan_id,
+                    request.library_id,
+                    folder_id
+                );
             }
             Err(e) => {
                 // This is not a critical error - the folder will still be picked up
                 // on the next scheduled scan
-                tracing::debug!("Could not start immediate scan for library {}: {:?}", 
-                    request.library_id, e);
+                tracing::debug!(
+                    "Could not start immediate scan for library {}: {:?}",
+                    request.library_id,
+                    e
+                );
             }
         }
     }
-    
+
     let response = RescanResponse {
         folder_id,
         status: "pending".to_string(),
         message: format!("Folder {} queued for rescan", folder.folder_path),
     };
-    
+
     Ok(Json(response))
 }
