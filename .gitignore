@@ -1,4 +1,5 @@
 # Rust
+.cargo
 target/
 Cargo.lock
 **/*.rs.bk
@@ -108,7 +109,7 @@ test_*.sh
 !test_metadata_flow.sh
 
 # Fork directories (managed separately)
-iced_video_player_fork/
+iced_video_player/
 
 # Reference repositories
 reference_repos/

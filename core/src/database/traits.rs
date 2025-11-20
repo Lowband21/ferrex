@@ -56,9 +56,12 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn initialize_schema(&self) -> Result<()>;
     async fn store_media(&self, media_file: MediaFile) -> Result<String>;
     async fn get_media(&self, id: &str) -> Result<Option<MediaFile>>;
+    async fn get_media_by_path(&self, path: &str) -> Result<Option<MediaFile>>;
     async fn list_media(&self, filters: MediaFilters) -> Result<Vec<MediaFile>>;
     async fn get_stats(&self) -> Result<MediaStats>;
     async fn file_exists(&self, path: &str) -> Result<bool>;
+    async fn delete_media(&self, id: &str) -> Result<()>;
+    async fn get_all_media(&self) -> Result<Vec<MediaFile>>;
     
     async fn store_external_metadata(&self, media_id: &str, metadata: &MediaMetadata) -> Result<()>;
     async fn store_tv_show(&self, show_info: &TvShowInfo) -> Result<String>;

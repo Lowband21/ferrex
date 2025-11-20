@@ -1,14 +1,16 @@
 mod config;
 mod metadata_service;
 mod thumbnail_service;
+mod scan_manager;
 
 use axum::{
     extract::{Path, Query, State},
     http::{header, HeaderMap, StatusCode},
-    response::{Json, Response},
+    response::{Json, Response, sse::Sse},
     routing::{get, post},
     Router,
 };
+use tokio::sync::Semaphore;
 use std::sync::Arc;
 use rusty_media_core::{MediaScanner, ScanResult, MetadataExtractor, MediaDatabase, database::traits::MediaFilters, TvShowDetails, SeasonSummary, SeasonDetails, EpisodeSummary};
 use serde::{Deserialize, Serialize};
@@ -27,6 +29,7 @@ struct AppState {
     config: Arc<Config>,
     metadata_service: Arc<metadata_service::MetadataService>,
     thumbnail_service: Arc<thumbnail_service::ThumbnailService>,
+    scan_manager: Arc<scan_manager::ScanManager>,
 }
 
 #[tokio::main]
@@ -106,11 +109,18 @@ async fn main() -> anyhow::Result<()> {
         ).expect("Failed to initialize thumbnail service")
     );
 
+    let scan_manager = Arc::new(scan_manager::ScanManager::new(
+        db.clone(),
+        metadata_service.clone(),
+        thumbnail_service.clone(),
+    ));
+
     let state = AppState {
         db,
         config: config.clone(),
         metadata_service,
         thumbnail_service,
+        scan_manager,
     };
 
     let app = create_app(state);
@@ -133,7 +143,16 @@ fn create_app(state: AppState) -> Router {
         .route("/metadata", post(metadata_handler))
         .route("/library", get(library_get_handler).post(library_post_handler))
         .route("/library/scan-and-store", post(scan_and_store_handler))
+        .route("/scan/start", post(start_scan_handler))
+        .route("/scan/progress/:id", get(scan_progress_handler))
+        .route("/scan/progress/:id/sse", get(scan_progress_sse_handler))
+        .route("/scan/active", get(active_scans_handler))
+        .route("/scan/history", get(scan_history_handler))
+        .route("/scan/cancel/:id", post(cancel_scan_handler))
+        .route("/library/events/sse", get(media_events_sse_handler))
         .route("/stream/:id", get(stream_handler))
+        .route("/library/status", get(library_status_handler))
+        .route("/media/:id/availability", get(media_availability_handler))
         .route("/config", get(config_handler))
         .route("/metadata/fetch/:id", post(fetch_metadata_handler))
         .route("/poster/:id", get(poster_handler))
@@ -143,6 +162,11 @@ fn create_app(state: AppState) -> Router {
         .route("/shows", get(list_shows_handler))
         .route("/shows/:show_name", get(show_details_handler))
         .route("/shows/:show_name/seasons/:season_num", get(season_details_handler))
+        // Temporary maintenance endpoint
+        .route("/maintenance/delete-by-title/:title", axum::routing::delete(delete_by_title_handler))
+        .route("/metadata/fetch-batch", post(fetch_metadata_batch_handler))
+        .route("/posters/batch", post(fetch_posters_batch_handler))
+        .route("/metadata/queue-missing", post(queue_missing_metadata_handler))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)
@@ -569,26 +593,28 @@ async fn stream_handler(
     Path(id): Path<String>, 
     headers: HeaderMap
 ) -> Result<Response, StatusCode> {
-    info!("Stream request for media ID: {}", id);
+    info!("=== STREAM REQUEST DEBUG ===");
+    info!("Requested media ID: {}", id);
+    info!("Request headers: {:?}", headers);
     
-    // For PostgreSQL, we need just the UUID, not "media:uuid"
-    // For SurrealDB, we would need "media:uuid"
-    let db_id = if id.starts_with("media:") {
-        // Strip the "media:" prefix for PostgreSQL
-        id.strip_prefix("media:").unwrap_or(&id).to_string()
-    } else {
-        id.clone()
-    };
+    // Use the ID directly - the database layer will handle any format conversion
+    let db_id = id.clone();
+    
+    info!("Database ID to query: {}", db_id);
     
     // Get media file from database
     let media_file = match state.db.backend().get_media(&db_id).await {
-        Ok(Some(media)) => media,
+        Ok(Some(media)) => {
+            info!("Found media file: {:?}", media.filename);
+            info!("Media path: {:?}", media.path);
+            media
+        },
         Ok(None) => {
-            warn!("Media file not found: {}", id);
+            warn!("Media file not found in database for ID: {} (db_id: {})", id, db_id);
             return Err(StatusCode::NOT_FOUND);
         }
         Err(e) => {
-            warn!("Database error retrieving media {}: {}", id, e);
+            warn!("Database error retrieving media {} (db_id: {}): {}", id, db_id, e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -596,8 +622,28 @@ async fn stream_handler(
     // Check if file exists on disk
     if !media_file.path.exists() {
         warn!("Media file not found on disk: {:?}", media_file.path);
-        return Err(StatusCode::NOT_FOUND);
+        
+        // Check if the entire library is offline
+        if let Some(media_root) = &state.config.media_root {
+            if !media_root.exists() {
+                warn!("Media library root is offline: {:?}", media_root);
+                // Return 503 Service Unavailable with custom header
+                return Ok(Response::builder()
+                    .status(StatusCode::SERVICE_UNAVAILABLE)
+                    .header("X-Media-Error", "library-offline")
+                    .body(axum::body::Body::empty())
+                    .unwrap());
+            }
+        }
+        
+        // Otherwise, it's just this file that's missing
+        return Ok(Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .header("X-Media-Error", "file-missing")
+            .body(axum::body::Body::empty())
+            .unwrap());
     }
+    info!("File exists on disk, size: {} bytes", media_file.size);
     
     // Open file for streaming
     let file = match tokio::fs::File::open(&media_file.path).await {
@@ -612,7 +658,10 @@ async fn stream_handler(
     let file_size = media_file.size;
     
     // Determine content type based on file extension
-    let content_type = match media_file.path.extension().and_then(|ext| ext.to_str()) {
+    let extension = media_file.path.extension().and_then(|ext| ext.to_str());
+    info!("File extension: {:?}", extension);
+    
+    let content_type = match extension {
         Some("mp4") => "video/mp4",
         Some("mkv") => "video/x-matroska",
         Some("avi") => "video/x-msvideo",
@@ -628,6 +677,7 @@ async fn stream_handler(
         Some("mts") | Some("m2ts") => "video/mp2t",
         _ => "application/octet-stream",
     };
+    info!("Content-Type: {}", content_type);
     
     // Check for range request (for video seeking)
     if let Some(range_header) = headers.get(header::RANGE) {
@@ -643,27 +693,26 @@ async fn stream_handler(
                     return Err(StatusCode::INTERNAL_SERVER_ERROR);
                 }
                 
-                // Read the requested range
+                // Stream the requested range
                 let content_length = range.end - range.start + 1;
-                let mut buffer = vec![0; content_length as usize];
-                match file.read_exact(&mut buffer).await {
-                    Ok(_) => {
-                        info!("Serving range {}-{} ({} bytes)", range.start, range.end, content_length);
-                        
-                        return Ok(Response::builder()
-                            .status(StatusCode::PARTIAL_CONTENT)
-                            .header(header::CONTENT_TYPE, content_type)
-                            .header(header::CONTENT_LENGTH, content_length.to_string())
-                            .header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", range.start, range.end, file_size))
-                            .header(header::ACCEPT_RANGES, "bytes")
-                            .body(axum::body::Body::from(buffer))
-                            .unwrap());
-                    }
-                    Err(e) => {
-                        warn!("Failed to read file range: {}", e);
-                        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-                    }
-                }
+                info!("Serving range {}-{} ({} bytes)", range.start, range.end, content_length);
+                
+                // Use file.take() to limit the read to the requested range
+                use tokio_util::io::ReaderStream;
+                let limited_file = file.take(content_length);
+                let stream = ReaderStream::new(limited_file);
+                
+                return Ok(Response::builder()
+                    .status(StatusCode::PARTIAL_CONTENT)
+                    .header(header::CONTENT_TYPE, content_type)
+                    .header(header::CONTENT_LENGTH, content_length.to_string())
+                    .header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", range.start, range.end, file_size))
+                    .header(header::ACCEPT_RANGES, "bytes")
+                    // Add cache headers to help with seeking performance
+                    .header("Cache-Control", "public, max-age=3600")
+                    .header("Connection", "keep-alive")
+                    .body(axum::body::Body::from_stream(stream))
+                    .unwrap());
             }
         }
     }
@@ -679,6 +728,9 @@ async fn stream_handler(
         .header(header::CONTENT_TYPE, content_type)
         .header(header::CONTENT_LENGTH, file_size.to_string())
         .header(header::ACCEPT_RANGES, "bytes")
+        // Add cache headers to help with seeking performance
+        .header("Cache-Control", "public, max-age=3600")
+        .header("Connection", "keep-alive")
         .body(body)
         .unwrap())
 }
@@ -1159,6 +1211,103 @@ async fn season_details_handler(
     }
 }
 
+// New scan management handlers
+async fn start_scan_handler(
+    State(state): State<AppState>,
+    Json(request): Json<scan_manager::ScanRequest>,
+) -> Result<Json<Value>, StatusCode> {
+    match state.scan_manager.start_scan(request).await {
+        Ok(scan_id) => Ok(Json(json!({
+            "status": "success",
+            "scan_id": scan_id,
+            "message": "Scan started successfully"
+        }))),
+        Err(e) => {
+            warn!("Failed to start scan: {}", e);
+            Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
+async fn scan_progress_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    match state.scan_manager.get_scan_progress(&id).await {
+        Some(progress) => Ok(Json(json!({
+            "status": "success",
+            "progress": progress
+        }))),
+        None => Ok(Json(json!({
+            "status": "error",
+            "error": "Scan not found"
+        })))
+    }
+}
+
+async fn scan_progress_sse_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Sse<impl futures_util::Stream<Item = Result<axum::response::sse::Event, anyhow::Error>>>, StatusCode> {
+    info!("SSE connection requested for scan {}", id);
+    let receiver = state.scan_manager.subscribe_to_progress(id.clone()).await;
+    Ok(scan_manager::scan_progress_sse(id, receiver))
+}
+
+async fn media_events_sse_handler(
+    State(state): State<AppState>,
+) -> Result<Sse<impl futures_util::Stream<Item = Result<axum::response::sse::Event, anyhow::Error>>>, StatusCode> {
+    info!("SSE connection requested for media events");
+    let receiver = state.scan_manager.subscribe_to_media_events().await;
+    Ok(scan_manager::media_events_sse(receiver))
+}
+
+async fn active_scans_handler(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, StatusCode> {
+    let active_scans = state.scan_manager.get_active_scans().await;
+    Ok(Json(json!({
+        "status": "success",
+        "scans": active_scans,
+        "count": active_scans.len()
+    })))
+}
+
+async fn scan_history_handler(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, StatusCode> {
+    let limit = params.get("limit")
+        .and_then(|l| l.parse::<usize>().ok())
+        .unwrap_or(10);
+    
+    let history = state.scan_manager.get_scan_history(limit).await;
+    Ok(Json(json!({
+        "status": "success",
+        "history": history,
+        "count": history.len()
+    })))
+}
+
+async fn cancel_scan_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    match state.scan_manager.cancel_scan(&id).await {
+        Ok(_) => Ok(Json(json!({
+            "status": "success",
+            "message": "Scan cancelled"
+        }))),
+        Err(e) => Ok(Json(json!({
+            "status": "error",
+            "error": e.to_string()
+        })))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1179,7 +1328,12 @@ mod tests {
                 db.clone(),
             ).expect("Failed to initialize thumbnail service")
         );
-        let state = AppState { db, config, metadata_service, thumbnail_service };
+        let scan_manager = Arc::new(scan_manager::ScanManager::new(
+            db.clone(),
+            metadata_service.clone(),
+            thumbnail_service.clone(),
+        ));
+        let state = AppState { db, config, metadata_service, thumbnail_service, scan_manager };
         let app = create_app(state);
 
         let response = app
@@ -1189,4 +1343,369 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
     }
+}
+
+// Temporary maintenance handler to delete media by title
+async fn delete_by_title_handler(
+    State(state): State<AppState>,
+    Path(title): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    info!("Maintenance: Deleting all media with title containing: {}", title);
+    
+    // Get all media files
+    let all_media = match state.db.backend().get_all_media().await {
+        Ok(media) => media,
+        Err(e) => {
+            warn!("Failed to get all media: {}", e);
+            return Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })));
+        }
+    };
+    
+    let mut deleted_count = 0;
+    let mut errors = Vec::new();
+    let title_lower = title.to_lowercase();
+    
+    for media in all_media {
+        // Check if filename contains the title (case insensitive)
+        if media.filename.to_lowercase().contains(&title_lower) {
+            info!("Deleting media: {} (ID: {})", media.filename, media.id);
+            
+            if let Err(e) = state.db.backend().delete_media(&media.id.to_string()).await {
+                errors.push(format!("Failed to delete {}: {}", media.filename, e));
+            } else {
+                deleted_count += 1;
+                
+                // Clean up associated files
+                let media_id_str = media.id.to_string();
+                let media_id = media_id_str.split(':').last().unwrap_or(&media_id_str);
+                
+                // Clean up thumbnail
+                let thumbnail_path = state.thumbnail_service.get_thumbnail_path(media_id);
+                if thumbnail_path.exists() {
+                    if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
+                        warn!("Failed to delete thumbnail: {}", e);
+                    }
+                }
+                
+                // Clean up poster
+                let poster_path = state.metadata_service.get_poster_path(media_id);
+                if poster_path.exists() {
+                    if let Err(e) = tokio::fs::remove_file(&poster_path).await {
+                        warn!("Failed to delete poster: {}", e);
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(Json(json!({
+        "status": "success",
+        "message": format!("Deleted {} media files containing '{}'", deleted_count, title),
+        "deleted": deleted_count,
+        "errors": errors
+    })))
+}
+
+#[derive(Deserialize)]
+struct BatchMetadataRequest {
+    media_ids: Vec<String>,
+    priority: Option<String>, // "posters_only" or "full"
+}
+
+#[derive(Serialize)]
+struct BatchMetadataResponse {
+    updated: Vec<String>,
+    errors: Vec<String>,
+}
+
+async fn fetch_metadata_batch_handler(
+    State(state): State<AppState>,
+    Json(request): Json<BatchMetadataRequest>,
+) -> Result<Json<Value>, StatusCode> {
+    info!("Batch metadata request for {} items", request.media_ids.len());
+    
+    let priority = request.priority.as_deref().unwrap_or("posters_only");
+    let mut updated = Vec::new();
+    let mut errors = Vec::new();
+    
+    // Limit batch size to prevent overload
+    let batch_size = std::cmp::min(request.media_ids.len(), 50);
+    let media_ids = &request.media_ids[..batch_size];
+    
+    // Use semaphore to limit concurrent requests
+    let semaphore = Arc::new(Semaphore::new(5)); // Max 5 concurrent metadata fetches
+    
+    let futures = media_ids.iter().map(|id| {
+        let state = state.clone();
+        let semaphore = semaphore.clone();
+        let id = id.clone();
+        let priority = priority.to_string();
+        
+        async move {
+            let _permit = semaphore.acquire().await.unwrap();
+            
+            // Strip "media:" prefix if present
+            let db_id = if id.starts_with("media:") {
+                id.strip_prefix("media:").unwrap_or(&id).to_string()
+            } else {
+                id.clone()
+            };
+            
+            // Get media from database
+            match state.db.backend().get_media(&db_id).await {
+                Ok(Some(media)) => {
+                    // Check if we already have the data we need
+                    let has_poster = media.metadata.as_ref()
+                        .and_then(|m| m.external_info.as_ref())
+                        .and_then(|e| e.poster_url.as_ref())
+                        .is_some();
+                    
+                    if priority == "posters_only" && has_poster {
+                        return Ok(id); // Already has poster, skip
+                    }
+                    
+                    // Fetch metadata
+                    match state.metadata_service.fetch_metadata(&media).await {
+                        Ok(detailed_info) => {
+                            let mut updated_media = media;
+                            if let Some(ref mut metadata) = updated_media.metadata {
+                                metadata.external_info = Some(detailed_info.external_info.clone());
+                            }
+                            
+                            // Store updated media
+                            if let Err(e) = state.db.backend().store_media(updated_media).await {
+                                Err(format!("Failed to update {}: {}", id, e))
+                            } else {
+                                // Cache poster if available
+                                if let Some(poster_url) = &detailed_info.external_info.poster_url {
+                                    let media_id = db_id.split(':').last().unwrap_or(&db_id);
+                                    let _ = state.metadata_service.cache_poster(poster_url, media_id).await;
+                                }
+                                Ok(id)
+                            }
+                        }
+                        Err(e) => Err(format!("Failed to fetch metadata for {}: {}", id, e))
+                    }
+                }
+                Ok(None) => Err(format!("Media not found: {}", id)),
+                Err(e) => Err(format!("Database error for {}: {}", id, e))
+            }
+        }
+    });
+    
+    // Process all requests concurrently
+    let results = futures::future::join_all(futures).await;
+    
+    for result in results {
+        match result {
+            Ok(id) => updated.push(id),
+            Err(e) => errors.push(e),
+        }
+    }
+    
+    Ok(Json(json!({
+        "status": "success",
+        "updated": updated,
+        "errors": errors,
+        "total_requested": media_ids.len(),
+        "total_updated": updated.len()
+    })))
+}
+
+#[derive(Deserialize)]
+struct BatchPostersRequest {
+    media_ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct PosterInfo {
+    media_id: String,
+    has_poster: bool,
+    poster_url: Option<String>,
+}
+
+async fn fetch_posters_batch_handler(
+    State(state): State<AppState>,
+    Json(request): Json<BatchPostersRequest>,
+) -> Result<Json<Value>, StatusCode> {
+    info!("Batch poster check for {} items", request.media_ids.len());
+    
+    let mut poster_info = Vec::new();
+    
+    for id in request.media_ids.iter().take(100) { // Limit to 100 items
+        let media_id = id.split(':').last().unwrap_or(id);
+        let has_poster = state.metadata_service.get_cached_poster(media_id).is_some();
+        
+        poster_info.push(PosterInfo {
+            media_id: id.clone(),
+            has_poster,
+            poster_url: if has_poster {
+                Some(format!("/poster/{}", media_id))
+            } else {
+                None
+            }
+        });
+    }
+    
+    Ok(Json(json!({
+        "status": "success",
+        "posters": poster_info
+    })))
+}
+
+#[derive(Deserialize)]
+struct QueueMissingMetadataRequest {
+    media_ids: Vec<String>,
+}
+
+async fn queue_missing_metadata_handler(
+    State(state): State<AppState>,
+    Json(request): Json<QueueMissingMetadataRequest>,
+) -> Result<Json<Value>, StatusCode> {
+    info!("Queuing metadata fetch for {} items", request.media_ids.len());
+    
+    // Spawn a background task to fetch metadata without blocking
+    let scan_manager = state.scan_manager.clone();
+    let db = state.db.clone();
+    let metadata_service = state.metadata_service.clone();
+    let media_ids = request.media_ids.clone();
+    
+    tokio::spawn(async move {
+        // Process in small batches with delays to avoid overloading
+        for chunk in media_ids.chunks(10) {
+            for id in chunk {
+                // Strip media: prefix if present
+                let db_id = if id.starts_with("media:") {
+                    id.strip_prefix("media:").unwrap_or(id).to_string()
+                } else {
+                    id.clone()
+                };
+                
+                // Get media from database
+                if let Ok(Some(media)) = db.backend().get_media(&db_id).await {
+                    // Check if metadata is actually missing
+                    let needs_metadata = media.metadata.as_ref()
+                        .and_then(|m| m.external_info.as_ref())
+                        .and_then(|e| e.poster_url.as_ref())
+                        .is_none();
+                    
+                    if needs_metadata {
+                        // Fetch metadata
+                        match metadata_service.fetch_metadata(&media).await {
+                            Ok(detailed_info) => {
+                                let mut updated_media = media;
+                                if let Some(ref mut metadata) = updated_media.metadata {
+                                    metadata.external_info = Some(detailed_info.external_info.clone());
+                                }
+                                
+                                // Store updated media
+                                if let Ok(_) = db.backend().store_media(updated_media.clone()).await {
+                                    info!("Updated metadata for {}", id);
+                                    
+                                    // Send media updated event
+                                    scan_manager.send_media_event(scan_manager::MediaEvent::MediaUpdated { 
+                                        media: updated_media 
+                                    }).await;
+                                    
+                                    // Cache poster if available
+                                    if let Some(poster_url) = &detailed_info.external_info.poster_url {
+                                        let media_id = db_id.split(':').last().unwrap_or(&db_id);
+                                        let _ = metadata_service.cache_poster(poster_url, media_id).await;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Failed to fetch metadata for {}: {}", id, e);
+                            }
+                        }
+                    }
+                }
+                
+                // Small delay between items
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            
+            // Longer delay between batches
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    });
+    
+    Ok(Json(json!({
+        "status": "success",
+        "message": format!("Queued {} items for metadata fetch", request.media_ids.len())
+    })))
+}
+
+async fn library_status_handler(
+    State(state): State<AppState>
+) -> Result<Json<Value>, StatusCode> {
+    // Check if media root exists
+    let library_status = if let Some(media_root) = &state.config.media_root {
+        if media_root.exists() {
+            "online"
+        } else {
+            "offline"
+        }
+    } else {
+        "not_configured"
+    };
+    
+    Ok(Json(json!({
+        "status": library_status,
+        "media_root": state.config.media_root.as_ref().map(|p| p.display().to_string()),
+        "media_root_exists": state.config.media_root.as_ref().map(|p| p.exists()).unwrap_or(false)
+    })))
+}
+
+async fn media_availability_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>
+) -> Result<Json<Value>, StatusCode> {
+    // Get media file from database
+    let media_file = match state.db.backend().get_media(&id).await {
+        Ok(Some(media)) => media,
+        Ok(None) => {
+            return Ok(Json(json!({
+                "available": false,
+                "reason": "not_found",
+                "message": "Media not found in database"
+            })));
+        }
+        Err(_) => {
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    
+    // Check if file exists
+    if !media_file.path.exists() {
+        // Check if library is offline
+        if let Some(media_root) = &state.config.media_root {
+            if !media_root.exists() {
+                return Ok(Json(json!({
+                    "available": false,
+                    "reason": "library_offline",
+                    "message": "Media library is offline",
+                    "path": media_file.path.display().to_string()
+                })));
+            }
+        }
+        
+        // File is missing but library is online
+        return Ok(Json(json!({
+            "available": false,
+            "reason": "file_missing",
+            "message": "Media file not found on disk",
+            "path": media_file.path.display().to_string()
+        })));
+    }
+    
+    // File exists and is available
+    Ok(Json(json!({
+        "available": true,
+        "path": media_file.path.display().to_string(),
+        "size": media_file.size
+    })))
 }

@@ -98,6 +98,29 @@ impl MediaDatabaseTrait for SurrealDatabase {
         }
     }
     
+    async fn get_media_by_path(&self, path: &str) -> Result<Option<MediaFile>> {
+        debug!("Retrieving media file by path: {}", path);
+        
+        let mut result = self.db
+            .query("SELECT * FROM media WHERE path = $path")
+            .bind(("path", path))
+            .await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to retrieve media by path: {}", e)))?;
+        
+        let records: Vec<MediaRecord> = result
+            .take(0)
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to parse media records: {}", e)))?;
+        
+        Ok(records.into_iter().next().map(|record| MediaFile {
+            id: uuid::Uuid::new_v4(), // SurrealDB doesn't return the ID in the same way
+            path: record.path,
+            filename: record.filename,
+            size: record.size,
+            created_at: record.created_at,
+            metadata: record.metadata,
+        }))
+    }
+    
     async fn get_media(&self, id: &str) -> Result<Option<MediaFile>> {
         debug!("Retrieving media file: {}", id);
         
@@ -282,5 +305,21 @@ impl MediaDatabaseTrait for SurrealDatabase {
     async fn link_episode_to_file(&self, _media_file_id: &str, _show_tmdb_id: &str, _season: i32, _episode: i32) -> Result<()> {
         warn!("Episode linking not implemented for SurrealDB backend");
         Ok(())
+    }
+    
+    async fn delete_media(&self, id: &str) -> Result<()> {
+        self.db
+            .delete::<Option<MediaFile>>(("media", id))
+            .await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to delete media: {}", e)))?;
+        Ok(())
+    }
+    
+    async fn get_all_media(&self) -> Result<Vec<MediaFile>> {
+        let media_files: Vec<MediaFile> = self.db
+            .select("media")
+            .await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to get all media: {}", e)))?;
+        Ok(media_files)
     }
 }

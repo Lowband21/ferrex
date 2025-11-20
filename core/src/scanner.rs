@@ -85,7 +85,7 @@ impl MediaScanner {
     pub fn scan_directory<P: AsRef<Path>>(&self, root_path: P) -> Result<ScanResult> {
         let root_path = root_path.as_ref();
         
-        info!("Starting media scan of: {}", root_path.display());
+        info!("Starting media scan of: {} (follow_links: {})", root_path.display(), self.follow_links);
         
         if !root_path.exists() {
             return Err(MediaError::NotFound(format!(
@@ -101,13 +101,12 @@ impl MediaScanner {
             )));
         }
 
-        let mut walker = WalkDir::new(root_path);
+        let mut walker = WalkDir::new(root_path)
+            .follow_links(self.follow_links);
         
         if let Some(depth) = self.max_depth {
             walker = walker.max_depth(depth);
         }
-        
-        walker = walker.follow_links(self.follow_links);
 
         let mut result = ScanResult {
             total_files: 0,
@@ -119,6 +118,15 @@ impl MediaScanner {
         for entry in walker {
             match entry {
                 Ok(entry) => {
+                    // Debug output for each entry
+                    let path = entry.path();
+                    let is_symlink = entry.path_is_symlink();
+                    let file_type = entry.file_type();
+                    
+                    if is_symlink {
+                        debug!("Walker found symlink: {} (is_dir: {})", path.display(), file_type.is_dir());
+                    }
+                    
                     if let Err(e) = self.process_entry(&entry, &mut result) {
                         warn!("Error processing {}: {}", entry.path().display(), e);
                         result.errors.push(format!("{}: {}", entry.path().display(), e));
@@ -144,6 +152,13 @@ impl MediaScanner {
 
     /// Process a single directory entry
     fn process_entry(&self, entry: &DirEntry, result: &mut ScanResult) -> Result<()> {
+        // Log symlinks for debugging
+        if entry.path_is_symlink() {
+            if let Ok(target) = std::fs::read_link(entry.path()) {
+                debug!("Found symlink: {} -> {}", entry.path().display(), target.display());
+            }
+        }
+        
         // Skip directories
         if entry.file_type().is_dir() {
             return Ok(());

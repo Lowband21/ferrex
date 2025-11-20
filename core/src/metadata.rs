@@ -277,7 +277,15 @@ impl MetadataExtractor {
                 // Get the first directory after tvshows - this should be the show name
                 let parts: Vec<&str> = after_tv_folder.split(&['/', '\\'][..]).collect();
                 if !parts.is_empty() && !parts[0].is_empty() {
-                    let show_name = parts[0].to_string();
+                    let mut show_name = parts[0].to_string();
+                    
+                    // Clean up show name - remove year in parentheses if present
+                    // This is important for TMDB searches
+                    if let Some(year_match) = Regex::new(r"\s*\(\d{4}\)\s*$").unwrap().find(&show_name) {
+                        show_name = show_name[..year_match.start()].to_string();
+                        info!("Removed year from show name for cleaner search");
+                    }
+                    
                     info!("Extracted show name: {}", show_name);
                     return Some(show_name);
                 }
@@ -396,7 +404,7 @@ impl MetadataExtractor {
         // Remove everything after the first occurrence of common quality/format indicators
         // This handles cases like "Movie Title (2014) (1080p..." by cutting at the second parenthesis
         let quality_cutoff_regex = Regex::new(
-            r"(?i)\s*[\(\[]?\s*(BluRay|Bluray|BDRip|BRRip|WEBRip|WEB-DL|WebDl|HDTV|DVDRip|CAM|TS|HC|HDCAM|HDRip|dvd|dvdrip|xvid|divx|x264|x265|h264|h265|hevc|10bit|10\s*bit|HDR|HDR10|DV|AC3|AAC|DTS|FLAC|1080p|720p|480p|2160p|4K|UHD|[\(\[]?\d{3,4}p).*$"
+            r"(?i)\s*[\(\[]?\s*(BluRay|Bluray|BDRip|BRRip|WEBRip|WEB-DL|WebDl|HDTV|DVDRip|CAM|TS|HC|HDCAM|HDRip|dvd|dvdrip|xvid|divx|x264|x265|h264|h265|hevc|10bit|10\s*bit|HDR|HDR10|DV|AC3|AAC|DTS|FLAC|Remux|REMUX|1080p|720p|480p|2160p|4K|UHD|[\(\[]?\d{3,4}p).*$"
         ).unwrap();
         cleaned = quality_cutoff_regex.replace(&cleaned, "").to_string();
         
@@ -722,6 +730,29 @@ impl MetadataExtractor {
         }
         
         None
+    }
+    
+    /// Clean show name for TMDB searches by removing year and other metadata
+    fn clean_show_name_for_search(&self, show_name: &str) -> String {
+        let mut cleaned = show_name.to_string();
+        
+        // Remove year in parentheses (e.g., "The Americans (2013)" -> "The Americans")
+        cleaned = Regex::new(r"\s*\(\d{4}\)\s*$").unwrap()
+            .replace(&cleaned, "")
+            .to_string();
+        
+        // Remove year after title (e.g., "The Americans 2013" -> "The Americans")
+        cleaned = Regex::new(r"\s+\d{4}\s*$").unwrap()
+            .replace(&cleaned, "")
+            .to_string();
+        
+        // Clean up any remaining dots or underscores
+        cleaned = cleaned.replace('.', " ").replace('_', " ");
+        
+        // Normalize whitespace
+        cleaned = cleaned.split_whitespace().collect::<Vec<&str>>().join(" ");
+        
+        cleaned.trim().to_string()
     }
     
     /// Clean filename by removing known metadata patterns (similar to Jellyfin's CleanStrings)

@@ -37,8 +37,17 @@ impl MetadataService {
         // For TV shows, use show_name for search, not the full title
         let search_title = match parsed_info.media_type {
             rusty_media_core::MediaType::TvEpisode => {
-                parsed_info.show_name.clone()
-                    .unwrap_or_else(|| parsed_info.title.clone())
+                let show_name = parsed_info.show_name.clone()
+                    .unwrap_or_else(|| parsed_info.title.clone());
+                
+                // Clean show name for TMDB search - remove year in parentheses
+                // e.g., "The Americans (2013)" -> "The Americans"
+                let cleaned = regex::Regex::new(r"\s*\(\d{4}\)\s*$").unwrap()
+                    .replace(&show_name, "")
+                    .to_string();
+                
+                tracing::info!("Cleaned show name for search: '{}' -> '{}'", show_name, cleaned);
+                cleaned
             }
             _ => parsed_info.title.clone()
         };
@@ -188,6 +197,11 @@ impl MetadataService {
         } else {
             None
         }
+    }
+    
+    /// Get poster path for a media item
+    pub fn get_poster_path(&self, media_id: &str) -> PathBuf {
+        self.cache_dir.join("posters").join(format!("{}.jpg", media_id))
     }
     
     /// Cache a season poster

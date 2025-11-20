@@ -88,7 +88,7 @@ impl RedisCache {
     pub async fn flush_all(&mut self) -> Result<()> {
         warn!("Flushing entire Redis cache");
         
-        redis::cmd("FLUSHDB").query_async(&mut self.conn).await
+        redis::cmd("FLUSHDB").query_async::<_, ()>(&mut self.conn).await
             .map_err(|e| MediaError::InvalidMedia(format!("Redis FLUSHDB failed: {}", e)))?;
         
         Ok(())
