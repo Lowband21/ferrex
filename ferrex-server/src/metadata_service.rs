@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusty_media_core::{
+use ferrex_core::{
     providers::traits::{DetailedMediaInfo, MediaQuery},
     MediaFile, MetadataProvider, ProviderError, TmdbProvider,
 };
@@ -40,7 +40,7 @@ impl MetadataService {
 
         // For TV shows, use show_name for search, not the full title
         let search_title = match parsed_info.media_type {
-            rusty_media_core::MediaType::TvEpisode => {
+            ferrex_core::MediaType::TvEpisode => {
                 let show_name = parsed_info
                     .show_name
                     .clone()
@@ -102,7 +102,7 @@ impl MetadataService {
 
     /// Download and cache a poster image
     pub async fn cache_poster(&self, poster_path: &str, media_id: &str) -> Result<PathBuf> {
-        let poster_filename = format!("{}_poster.jpg", media_id);
+        let poster_filename = format!("{}_poster.png", media_id);
         let cache_path = self.cache_dir.join("posters").join(&poster_filename);
 
         // Check if already cached
@@ -137,11 +137,20 @@ impl MetadataService {
 
     /// Get a cached poster path if it exists
     pub fn get_cached_poster(&self, media_id: &str) -> Option<PathBuf> {
-        let poster_filename = format!("{}_poster.jpg", media_id);
-        let cache_path = self.cache_dir.join("posters").join(&poster_filename);
+        // Try PNG first 
+        let png_filename = format!("{}_poster.png", media_id);
+        let png_path = self.cache_dir.join("posters").join(&png_filename);
 
-        if cache_path.exists() {
-            Some(cache_path)
+        if png_path.exists() {
+            return Some(png_path);
+        }
+
+        // Fall back to JPG for backwards compatibility
+        let jpg_filename = format!("{}_poster.jpg", media_id);
+        let jpg_path = self.cache_dir.join("posters").join(&jpg_filename);
+
+        if jpg_path.exists() {
+            Some(jpg_path)
         } else {
             None
         }
@@ -162,7 +171,7 @@ impl MetadataService {
 
     /// Cache an image from a URL with a specific cache key
     pub async fn cache_image_from_url(&self, url: &str, cache_key: &str) -> Result<PathBuf> {
-        let cache_filename = format!("{}.jpg", cache_key);
+        let cache_filename = format!("{}.png", cache_key); // Changed to PNG
         let cache_path = self.cache_dir.join("posters").join(&cache_filename);
 
         // Check if already cached
@@ -193,13 +202,25 @@ impl MetadataService {
     /// Get cached poster for show or season
     pub fn get_cached_show_poster(&self, show_name: &str) -> Option<PathBuf> {
         let cache_key = format!("show_{}", show_name.replace(' ', "_"));
-        let cache_path = self
+
+        // Try PNG first
+        let png_path = self
+            .cache_dir
+            .join("posters")
+            .join(format!("{}.png", cache_key));
+
+        if png_path.exists() {
+            return Some(png_path);
+        }
+
+        // Fall back to JPG
+        let jpg_path = self
             .cache_dir
             .join("posters")
             .join(format!("{}.jpg", cache_key));
 
-        if cache_path.exists() {
-            Some(cache_path)
+        if jpg_path.exists() {
+            Some(jpg_path)
         } else {
             None
         }
@@ -208,13 +229,25 @@ impl MetadataService {
     /// Get cached poster for season
     pub fn get_cached_season_poster(&self, show_name: &str, season_num: u32) -> Option<PathBuf> {
         let cache_key = format!("season_{}_{}", show_name.replace(' ', "_"), season_num);
-        let cache_path = self
+
+        // Try PNG first
+        let png_path = self
+            .cache_dir
+            .join("posters")
+            .join(format!("{}.png", cache_key));
+
+        if png_path.exists() {
+            return Some(png_path);
+        }
+
+        // Fall back to JPG
+        let jpg_path = self
             .cache_dir
             .join("posters")
             .join(format!("{}.jpg", cache_key));
 
-        if cache_path.exists() {
-            Some(cache_path)
+        if jpg_path.exists() {
+            Some(jpg_path)
         } else {
             None
         }
@@ -224,7 +257,7 @@ impl MetadataService {
     pub fn get_poster_path(&self, media_id: &str) -> PathBuf {
         self.cache_dir
             .join("posters")
-            .join(format!("{}.jpg", media_id))
+            .join(format!("{}.png", media_id)) // Changed to PNG
     }
 
     /// Cache a season poster
@@ -235,7 +268,7 @@ impl MetadataService {
         season_num: u32,
     ) -> Result<PathBuf> {
         let cache_key = format!("season_{}_{}", show_name.replace(' ', "_"), season_num);
-        let cache_filename = format!("{}.jpg", cache_key);
+        let cache_filename = format!("{}.png", cache_key); // Changed to PNG
         let cache_path = self.cache_dir.join("posters").join(&cache_filename);
 
         // Check if already cached

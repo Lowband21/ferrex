@@ -110,6 +110,7 @@ test_*.sh
 
 # Fork directories (managed separately)
 iced_video_player/
+lucide_icons_iced_0.14
 
 # Reference repositories
 reference_repos/

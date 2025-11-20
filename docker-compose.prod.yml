@@ -3,28 +3,28 @@ version: '3.8'
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: rusty_media_postgres
+    container_name: ferrex_media_postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-rusty_media}
+      POSTGRES_USER: ${POSTGRES_USER:-ferrex_media}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-rusty_media}
+      POSTGRES_DB: ${POSTGRES_DB:-ferrex_media}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backup:/backup
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rusty_media}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ferrex_media}"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
     networks:
-      - rusty_media_net
+      - ferrex_media_net
 
   redis:
     image: redis:7-alpine
-    container_name: rusty_media_redis
+    container_name: ferrex_media_redis
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
@@ -37,13 +37,13 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - rusty_media_net
+      - ferrex_media_net
 
-  rusty_media_server:
-    image: ${DOCKER_REGISTRY:-docker.io}/${DOCKER_IMAGE:-rusty_media_server}:${VERSION:-latest}
-    container_name: rusty_media_server
+  ferrex_server:
+    image: ${DOCKER_REGISTRY:-docker.io}/${DOCKER_IMAGE:-ferrex_media_server}:${VERSION:-latest}
+    container_name: ferrex_server
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-rusty_media}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rusty_media}
+      DATABASE_URL: postgres://${POSTGRES_USER:-ferrex_media}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ferrex_media}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/
       MEDIA_PATHS: ${MEDIA_PATHS:-/media}
       SERVER_PORT: ${SERVER_PORT:-3000}
@@ -67,15 +67,15 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - rusty_media_net
+      - ferrex_media_net
 
   backup:
     image: postgres:16-alpine
-    container_name: rusty_media_backup
+    container_name: ferrex_media_backup
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-rusty_media}
+      POSTGRES_USER: ${POSTGRES_USER:-ferrex_media}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-rusty_media}
+      POSTGRES_DB: ${POSTGRES_DB:-ferrex_media}
     volumes:
       - ./backup:/backup
       - ./scripts/backup.sh:/backup.sh:ro
@@ -85,7 +85,7 @@ services:
       - postgres
     restart: unless-stopped
     networks:
-      - rusty_media_net
+      - ferrex_media_net
 
 volumes:
   postgres_data:
@@ -96,7 +96,7 @@ volumes:
     driver: local
 
 networks:
-  rusty_media_net:
+  ferrex_media_net:
     driver: bridge
     ipam:
       config:

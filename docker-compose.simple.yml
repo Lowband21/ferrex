@@ -4,11 +4,11 @@ services:
   # PostgreSQL for testing
   db:
     image: postgres:15-alpine
-    container_name: rusty_media_db_simple
+    container_name: ferrex_media_db_simple
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=rusty_media
+      - POSTGRES_DB=ferrex_media
     ports:
       - "5432:5432"
     volumes:
@@ -17,7 +17,7 @@ services:
   # Redis for caching
   cache:
     image: redis:7-alpine
-    container_name: rusty_media_cache_simple
+    container_name: ferrex_media_cache_simple
     ports:
       - "6379:6379"
     command: redis-server --appendonly yes

@@ -11,7 +11,7 @@ use axum::{
     Router,
 };
 use config::Config;
-use rusty_media_core::{
+use ferrex_core::{
     database::traits::MediaFilters, EpisodeSummary, MediaDatabase, MediaScanner, MetadataExtractor,
     ScanResult, SeasonDetails, SeasonSummary, TvShowDetails,
 };
@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "rusty_media_server=debug,tower_http=debug".into()),
+                .unwrap_or_else(|_| "ferrex_server=debug,tower_http=debug".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -187,6 +187,8 @@ fn create_app(state: AppState) -> Router {
             "/metadata/queue-missing",
             post(queue_missing_metadata_handler),
         )
+        // Database maintenance endpoints (for testing/debugging)
+        .route("/maintenance/clear-database", post(clear_database_handler))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)
@@ -609,7 +611,7 @@ async fn scan_and_store_handler(
             // Extract thumbnail for TV episodes during scan
             if let Some(metadata) = &media_file.metadata {
                 if let Some(parsed) = &metadata.parsed_info {
-                    if parsed.media_type == rusty_media_core::MediaType::TvEpisode {
+                    if parsed.media_type == ferrex_core::MediaType::TvEpisode {
                         let media_id = id.split(':').last().unwrap_or(&id);
                         match state
                             .thumbnail_service
@@ -963,9 +965,21 @@ async fn poster_handler(
         match tokio::fs::read(&poster_path).await {
             Ok(bytes) => {
                 let mut response = Response::new(bytes.into());
+                
+                // Determine content type based on file extension
+                let content_type = if poster_path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("png"))
+                    .unwrap_or(false) 
+                {
+                    "image/png"
+                } else {
+                    "image/jpeg"
+                };
+                
                 response.headers_mut().insert(
                     header::CONTENT_TYPE,
-                    header::HeaderValue::from_static("image/jpeg"),
+                    header::HeaderValue::from_static(content_type),
                 );
                 Ok(response)
             }
@@ -1482,12 +1496,14 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
+    use ferrex_core::MediaFile;
+    use std::path::PathBuf;
     use tower::ServiceExt;
 
     #[tokio::test]
     async fn test_ping_endpoint() {
         let config = Arc::new(Config::from_env().unwrap());
-        let db = Arc::new(MediaDatabase::new_memory().await.unwrap());
+        let db = Arc::new(MediaDatabase::new_surrealdb().await.unwrap());
         let metadata_service = Arc::new(metadata_service::MetadataService::new(
             None,
             config.cache_dir.clone(),
@@ -1516,6 +1532,59 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_clear_database_endpoint() {
+        let config = Arc::new(Config::from_env().unwrap());
+        let db = Arc::new(MediaDatabase::new_surrealdb().await.unwrap());
+        
+        // Initialize database schema
+        db.backend().initialize_schema().await.unwrap();
+        
+        let metadata_service = Arc::new(metadata_service::MetadataService::new(
+            None,
+            config.cache_dir.clone(),
+        ));
+        let thumbnail_service = Arc::new(
+            thumbnail_service::ThumbnailService::new(config.cache_dir.clone(), db.clone())
+                .expect("Failed to initialize thumbnail service"),
+        );
+        let scan_manager = Arc::new(scan_manager::ScanManager::new(
+            db.clone(),
+            metadata_service.clone(),
+            thumbnail_service.clone(),
+        ));
+        let state = AppState {
+            db: db.clone(),
+            config,
+            metadata_service,
+            thumbnail_service,
+            scan_manager,
+        };
+        let app = create_app(state);
+
+        // Call clear database endpoint
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/maintenance/clear-database")
+                    .header("content-type", "application/json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        
+        // Check that we get a valid JSON response
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+        assert!(body_str.contains("\"status\":\"success\""));
     }
 }
 
@@ -1581,6 +1650,89 @@ async fn delete_by_title_handler(
     Ok(Json(json!({
         "status": "success",
         "message": format!("Deleted {} media files containing '{}'", deleted_count, title),
+        "deleted": deleted_count,
+        "errors": errors
+    })))
+}
+
+// Clear all media from the database (for testing/debugging)
+async fn clear_database_handler(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
+    info!("Maintenance: Clearing entire database");
+
+    // Get all media files
+    let all_media = match state.db.backend().get_all_media().await {
+        Ok(media) => media,
+        Err(e) => {
+            warn!("Failed to get all media: {}", e);
+            return Ok(Json(json!({
+                "status": "error",
+                "error": e.to_string()
+            })));
+        }
+    };
+
+    let total_count = all_media.len();
+    let mut deleted_count = 0;
+    let mut errors = Vec::new();
+
+    for media in all_media {
+        info!("Deleting media: {} (ID: {})", media.filename, media.id);
+
+        if let Err(e) = state.db.backend().delete_media(&media.id.to_string()).await {
+            errors.push(format!("Failed to delete {}: {}", media.filename, e));
+        } else {
+            deleted_count += 1;
+
+            // Clean up associated files
+            let media_id_str = media.id.to_string();
+            let media_id = media_id_str.split(':').last().unwrap_or(&media_id_str);
+
+            // Clean up thumbnail
+            let thumbnail_path = state.thumbnail_service.get_thumbnail_path(media_id);
+            if thumbnail_path.exists() {
+                if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
+                    warn!("Failed to delete thumbnail: {}", e);
+                }
+            }
+
+            // Clean up poster (try both PNG and JPG)
+            let png_poster_path = state.config.cache_dir.join("posters").join(format!("{}_poster.png", media_id));
+            if png_poster_path.exists() {
+                if let Err(e) = tokio::fs::remove_file(&png_poster_path).await {
+                    warn!("Failed to delete PNG poster: {}", e);
+                }
+            }
+            
+            let jpg_poster_path = state.config.cache_dir.join("posters").join(format!("{}_poster.jpg", media_id));
+            if jpg_poster_path.exists() {
+                if let Err(e) = tokio::fs::remove_file(&jpg_poster_path).await {
+                    warn!("Failed to delete JPG poster: {}", e);
+                }
+            }
+        }
+    }
+
+    // Clear the entire poster cache directory as a final cleanup
+    let poster_cache_dir = state.config.cache_dir.join("posters");
+    if poster_cache_dir.exists() {
+        match tokio::fs::read_dir(&poster_cache_dir).await {
+            Ok(mut entries) => {
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    if let Err(e) = tokio::fs::remove_file(entry.path()).await {
+                        warn!("Failed to delete poster cache file {:?}: {}", entry.path(), e);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to read poster cache directory: {}", e);
+            }
+        }
+    }
+
+    Ok(Json(json!({
+        "status": "success",
+        "message": format!("Cleared database: deleted {} out of {} media files", deleted_count, total_count),
+        "total": total_count,
         "deleted": deleted_count,
         "errors": errors
     })))

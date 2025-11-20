@@ -1,0 +1,73 @@
+[package]
+name = "ferrex-player"
+version = "0.1.0"
+edition = "2021"
+
+[profile.dev]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+
+
+[dependencies]
+# Core GUI framework
+#iced = { version = "0.13.1", features = ["tokio", "debug", "image", "canvas", "advanced", "wgpu"] }
+iced = { git = "https://github.com/iced-rs/iced.git", features = ["tokio", "debug", "image", "canvas", "advanced", "wgpu"] }
+
+# Icons
+lucide-icons = { path = "../lucide_icons_iced_0.14", features = ["iced"] }
+
+# Video playback
+#iced_video_player = { git = "https://github.com/Lowband21/iced_video_player", branch = "http-seeking-pitch-correction" }
+iced_video_player = { path = "../iced_video_player" }
+gstreamer = "0.23"
+gstreamer-app = "0.23"
+gstreamer-pbutils = "0.23"
+glib = "0.20"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# HTTP client for media server
+reqwest = { version = "0.11", features = ["json", "stream"] }
+reqwest-eventsource = "0.6"
+eventsource-stream = "0.2"
+futures = "0.3"
+
+# URL handling
+url = "2"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# File dialogs
+rfd = "0.13"
+
+# Regular expressions
+regex = "1"
+
+# Image handling for thumbnails
+image = "0.24"
+
+# Directories
+dirs = "5"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Lazy statics for profiling
+lazy_static = "1.5"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+uuid.workspace = true
+
+[features]
+default = []

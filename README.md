@@ -1,10 +1,10 @@
-# Rusty Media Server
+# Ferrex Media Server
 
 A high-performance, self-hosted media server written in Rust with native cross-platform clients. Think Plex, but faster and with native desktop applications.
 
 ## 🎬 Overview
 
-Rusty Media Server provides a complete media server solution with:
+Ferrex Media Server provides a complete media server solution with:
 - High-performance streaming server built with Axum
 - Native desktop client using Iced (no Electron!)
 - Smart media organization with TMDB metadata integration
@@ -46,8 +46,8 @@ Rusty Media Server provides a complete media server solution with:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/rusty_media_server
-cd rusty_media_server
+git clone https://github.com/yourusername/ferrex_media_server
+cd ferrex_media_server
 
 # Set up environment
 cp .env.example .env
@@ -56,10 +56,10 @@ cp .env.example .env
 # - TMDB_API_KEY for poster fetching (optional)
 
 # Run the server
-cargo run --bin rusty-media-server
+cargo run --bin ferrex-server
 
 # Run the desktop client (in another terminal)
-cargo run --bin rusty-media-player
+cargo run --bin ferrex-player
 ```
 
 Click "Scan Media Library" in the client to index your media!

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use ffmpeg_next as ffmpeg;
-use rusty_media_core::MediaDatabase;
+use ferrex_core::MediaDatabase;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;

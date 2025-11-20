@@ -1,5 +1,5 @@
 [package]
-name = "rusty-media-core"
+name = "ferrex-core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

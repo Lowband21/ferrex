@@ -1,5 +1,5 @@
 [package]
-name = "rusty-media-server"
+name = "ferrex-server"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -59,7 +59,7 @@ image = "0.24"
 regex.workspace = true
 
 # Internal dependencies
-rusty-media-core = { path = "../core" }
+ferrex-core = { path = "../ferrex-core" }
 
 [dev-dependencies]
 mockall.workspace = true

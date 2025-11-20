@@ -1,9 +1,10 @@
 [workspace]
 members = [
-    "server",
-    "core",
-    "desktop_iced",
+    "ferrex-server",
+    "ferrex-core",
+    "ferrex-player",
 ]
+exclude = ["lucide_icons_iced_0.14"]
 resolver = "2"
 
 [workspace.package]
@@ -11,7 +12,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/yourusername/rusty_media_server"
+repository = "https://github.com/yourusername/ferrex_media_server"
 
 [workspace.dependencies]
 # Async runtime
@@ -71,9 +72,9 @@ lto = "thin"
 codegen-units = 1
 opt-level = 3
 
-[profile.dev.package.desktop_iced]
+[profile.dev.package.ferrex-player]
 opt-level = 2
 
-[profile.release.package.desktop_iced]
+[profile.release.package.ferrex-player]
 opt-level = 2
 

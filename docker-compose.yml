@@ -6,7 +6,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.dev
-    container_name: rusty_media_server_dev
+    container_name: ferrex_media_server_dev
     volumes:
       - .:/app:z
       - cargo-cache:/usr/local/cargo/registry
@@ -16,29 +16,29 @@ services:
       - "3000:3000"
     environment:
       - RUST_LOG=debug
-      - DATABASE_URL=postgresql://postgres:password@db:5432/rusty_media
+      - DATABASE_URL=postgresql://postgres:password@db:5432/ferrex_media
       - REDIS_URL=redis://cache:6379
     depends_on:
       - db
       - cache
     networks:
-      - rusty_media_net
+      - ferrex_media_net
     command: cargo watch -x 'run --bin server' -w server/src
 
   # PostgreSQL database (optional, for future use)
   db:
     image: postgres:16-alpine
-    container_name: rusty_media_db
+    container_name: ferrex_media_db
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=rusty_media
+      - POSTGRES_DB=ferrex_media
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     networks:
-      - rusty_media_net
+      - ferrex_media_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -48,11 +48,11 @@ services:
   # Redis cache (optional, for future use)
   cache:
     image: redis:7-alpine
-    container_name: rusty_media_cache
+    container_name: ferrex_media_cache
     ports:
       - "6379:6379"
     networks:
-      - rusty_media_net
+      - ferrex_media_net
     command: redis-server --appendonly yes
     volumes:
       - redis-data:/data
@@ -65,7 +65,7 @@ services:
   # MinIO for S3-compatible storage testing
   minio:
     image: minio/minio:latest
-    container_name: rusty_media_minio
+    container_name: ferrex_media_minio
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -75,7 +75,7 @@ services:
     volumes:
       - minio-data:/data
     networks:
-      - rusty_media_net
+      - ferrex_media_net
     command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -92,5 +92,5 @@ volumes:
   target-cache:
 
 networks:
-  rusty_media_net:
+  ferrex_media_net:
     driver: bridge

@@ -2,7 +2,7 @@ use crate::MediaDatabase;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use futures::stream::{self, StreamExt};
 use futures_util::stream::Stream;
-use rusty_media_core::{MediaFile, MediaScanner, MetadataExtractor};
+use ferrex_core::{MediaFile, MediaScanner, MetadataExtractor};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -442,7 +442,7 @@ impl ScanManager {
                             // Extract thumbnail for TV episodes concurrently
                             if let Some(metadata) = &media_file.metadata {
                                 if let Some(parsed) = &metadata.parsed_info {
-                                    if parsed.media_type == rusty_media_core::MediaType::TvEpisode {
+                                    if parsed.media_type == ferrex_core::MediaType::TvEpisode {
                                         let _thumb_permit = thumb_sem.acquire().await.unwrap();
                                         let media_id = id.split(':').last().unwrap_or(&id);
                                         if let Err(e) = scan_manager

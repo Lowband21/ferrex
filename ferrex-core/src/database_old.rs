@@ -29,7 +29,7 @@ impl MediaDatabase {
         let db = Surreal::new::<Mem>(()).await
             .map_err(|e| MediaError::InvalidMedia(format!("Failed to create database: {}", e)))?;
         
-        let namespace = "rusty_media".to_string();
+        let namespace = "ferrex_media".to_string();
         let database_name = "media_server".to_string();
         
         // Use the database

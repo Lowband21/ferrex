@@ -26,7 +26,7 @@ RUN mkdir -p server/src core/src && \
     echo "//dummy" > core/src/lib.rs
 
 # Build dependencies
-RUN cargo build --release --package rusty-media-server
+RUN cargo build --release --package ferrex-server
 
 # Copy actual source code
 COPY server/src server/src
@@ -35,7 +35,7 @@ COPY server/migrations server/migrations
 
 # Rebuild with actual source
 RUN touch server/src/main.rs && \
-    cargo build --release --package rusty-media-server
+    cargo build --release --package ferrex-server
 
 # Runtime stage
 FROM alpine:3.19
@@ -48,23 +48,23 @@ RUN apk add --no-cache \
     tini
 
 # Create non-root user
-RUN addgroup -g 1000 rusty && \
-    adduser -u 1000 -G rusty -D rusty
+RUN addgroup -g 1000 ferrex && \
+    adduser -u 1000 -G ferrex -D ferrex
 
 # Create necessary directories
 RUN mkdir -p /app/data /app/migrations && \
-    chown -R rusty:rusty /app
+    chown -R ferrex:ferrex /app
 
 WORKDIR /app
 
 # Copy binary from builder
-COPY --from=builder /app/target/release/rusty-media-server /app/rusty-media-server
+COPY --from=builder /app/target/release/ferrex-server /app/ferrex-server
 
 # Copy migrations
 COPY --from=builder /app/server/migrations /app/migrations
 
 # Switch to non-root user
-USER rusty
+USER ferrex
 
 # Expose port
 EXPOSE 3000
@@ -77,4 +77,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 ENTRYPOINT ["/sbin/tini", "--"]
 
 # Run the server
-CMD ["/app/rusty-media-server"]
+CMD ["/app/ferrex-server"]
