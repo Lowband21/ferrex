@@ -168,6 +168,13 @@ impl AuthService for AuthManagerAdapter {
         Ok(self.manager.is_auto_login_enabled().await)
     }
 
+    async fn validate_session(&self) -> RepositoryResult<(User, UserPermissions)> {
+        self.manager
+            .validate_session()
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(format!("Validate session failed: {}", e)))
+    }
+
     async fn authenticate(
         &self,
         user: User,

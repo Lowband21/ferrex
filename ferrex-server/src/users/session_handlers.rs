@@ -6,7 +6,10 @@ use axum::{
 use ferrex_core::user::{User, UserSession};
 use uuid::Uuid;
 
-use crate::{AppState, errors::AppResult};
+use crate::infra::{
+    app_state::AppState,
+    errors::{AppError, AppResult},
+};
 
 /// Get all active sessions for the current user
 pub async fn get_user_sessions_handler(
@@ -29,9 +32,7 @@ pub async fn delete_session_handler(
 
     // Check if the session belongs to the user
     if !sessions.iter().any(|s| s.id == session_id) {
-        return Err(crate::errors::AppError::forbidden(
-            "You can only delete your own sessions",
-        ));
+        return Err(AppError::forbidden("You can only delete your own sessions"));
     }
 
     // Delete the session
@@ -40,7 +41,7 @@ pub async fn delete_session_handler(
         .backend()
         .delete_session(session_id)
         .await
-        .map_err(|_| crate::errors::AppError::internal("Failed to delete session"))?;
+        .map_err(|_| AppError::internal("Failed to delete session"))?;
 
     // Also delete any refresh tokens associated with this session
     // Note: This is handled by the database implementation
@@ -63,7 +64,7 @@ pub async fn delete_all_sessions_handler(
         .backend()
         .update_user(&updated_user)
         .await
-        .map_err(|_| crate::errors::AppError::internal("Failed to update user preferences"))?;
+        .map_err(|_| AppError::internal("Failed to update user preferences"))?;
 
     // Get all sessions
     let sessions = state
@@ -71,7 +72,7 @@ pub async fn delete_all_sessions_handler(
         .backend()
         .get_user_sessions(user.id)
         .await
-        .map_err(|_| crate::errors::AppError::internal("Failed to get user sessions"))?;
+        .map_err(|_| AppError::internal("Failed to get user sessions"))?;
 
     // Delete each session
     for session in sessions {
@@ -84,7 +85,7 @@ pub async fn delete_all_sessions_handler(
         .backend()
         .delete_user_refresh_tokens(user.id)
         .await
-        .map_err(|_| crate::errors::AppError::internal("Failed to delete refresh tokens"))?;
+        .map_err(|_| AppError::internal("Failed to delete refresh tokens"))?;
 
     Ok(StatusCode::NO_CONTENT)
 }

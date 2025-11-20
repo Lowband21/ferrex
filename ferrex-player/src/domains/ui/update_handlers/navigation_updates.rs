@@ -5,7 +5,7 @@ use uuid::Uuid;
 use super::super::views::carousel::CarouselState;
 use crate::{
     domains::{
-        metadata::image_types::ImageRequest,
+        metadata::image_types::{ImageRequest, Priority},
         ui::{ViewState, messages::Message, types, views::grid::macros},
     },
     infrastructure::api_types::{Media, MovieReference},
@@ -196,7 +196,7 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
         //    .gradient_transitions
         //    .transition_to(new_center);
 
-        // Queue request if not in cache
+        // Queue image requests if not in cache
         if let Some(movie_details) = movie.details() {
             if movie_details.backdrop_path.is_some() {
                 let request =
@@ -206,6 +206,29 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
                 }
             } else {
                 log::warn!("Cannot find path for movie backdrop");
+            }
+
+            // Ensure the hero poster is ready when the detail view renders
+            let poster_request =
+                ImageRequest::new(movie.id.to_uuid(), ImageSize::Full, ImageType::Movie)
+                    .with_priority(Priority::Visible);
+            if state.image_service.get(&poster_request).is_none() {
+                state.image_service.request_image(poster_request);
+            }
+
+            // Preload primary cast portraits for the carousel
+            for cast_member in movie_details.cast.iter().take(12) {
+                let person_uuid = Uuid::new_v5(
+                    &Uuid::NAMESPACE_OID,
+                    format!("person-{}", cast_member.id).as_bytes(),
+                );
+                let cast_request =
+                    ImageRequest::new(person_uuid, ImageSize::Profile, ImageType::Person)
+                        .with_priority(Priority::Preload);
+
+                if state.image_service.get(&cast_request).is_none() {
+                    state.image_service.request_image(cast_request);
+                }
             }
         } else {
             log::warn!("Movie {} has no details", movie.title());
@@ -310,6 +333,29 @@ pub fn handle_view_series(state: &mut State, series_id: SeriesID) -> Task<Messag
                 }
             } else {
                 log::warn!("Cannot find path for series backdrop");
+            }
+
+            // Preload the primary series poster
+            let poster_request =
+                ImageRequest::new(series.id.to_uuid(), ImageSize::Full, ImageType::Series)
+                    .with_priority(Priority::Visible);
+            if state.image_service.get(&poster_request).is_none() {
+                state.image_service.request_image(poster_request);
+            }
+
+            // Prefetch lead cast portraits for the detail view carousel
+            for cast_member in details.cast.iter().take(12) {
+                let person_uuid = Uuid::new_v5(
+                    &Uuid::NAMESPACE_OID,
+                    format!("person-{}", cast_member.id).as_bytes(),
+                );
+                let cast_request =
+                    ImageRequest::new(person_uuid, ImageSize::Profile, ImageType::Person)
+                        .with_priority(Priority::Preload);
+
+                if state.image_service.get(&cast_request).is_none() {
+                    state.image_service.request_image(cast_request);
+                }
             }
         } else {
             log::warn!("Series {} has no details", series.title());

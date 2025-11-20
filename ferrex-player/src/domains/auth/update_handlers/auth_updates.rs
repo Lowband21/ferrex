@@ -371,39 +371,21 @@ pub fn handle_check_auth_status(state: &mut State) -> Task<auth::Message> {
 
     log::info!("[Auth] handle_check_auth_status called - auto-login successful");
 
-    // Auto-login has already authenticated the user in main.rs
-    // We should mark as authenticated and load libraries (both top-level and domain state)
-    state.is_authenticated = true;
-    state.domains.auth.state.is_authenticated = true;
-
-    // Set auth flow to CheckingAutoLogin so handle_login_success knows this is auto-login
     state.domains.auth.state.auth_flow = AuthenticationFlow::CheckingAutoLogin;
 
-    // Get user and permissions from auth state
     let auth_service = &state.domains.auth.state.auth_service;
-    let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
+    let svc: Arc<dyn AuthService> = Arc::clone(auth_service);
 
-    let (user, permissions) = tokio::task::block_in_place(move || {
-        tokio::runtime::Handle::current().block_on(async move {
-            let user = svc.get_current_user().await.ok().flatten();
-            let permissions = svc.get_current_permissions().await.ok().flatten();
-            (user, permissions)
-        })
-    });
-
-    if let (Some(user), Some(permissions)) = (user, permissions) {
-        log::info!("[Auth] Auto-login authenticated as user: {}", user.username);
-        // Store permissions in state
-        state.domains.auth.state.user_permissions = Some(permissions.clone());
-        // Return a LoginSuccess message to trigger the proper event flow
-        // This ensures cross-domain events (AuthenticationComplete) are emitted
-        return Task::done(auth::Message::LoginSuccess(user, permissions));
-    }
-
-    // If we couldn't get user/permissions, fall back to loading users
-    log::error!("[Auth] Auto-login succeeded but couldn't retrieve user/permissions");
-    state.domains.auth.state.auth_flow = AuthenticationFlow::LoadingUsers;
-    handle_load_users(state)
+    Task::perform(
+        async move { svc.validate_session().await.map_err(|e| e.to_string()) },
+        |result| match result {
+            Ok((user, permissions)) => auth::Message::LoginSuccess(user, permissions),
+            Err(err) => {
+                log::warn!("[Auth] Auto-login validation failed: {}", err);
+                auth::Message::AutoLoginCheckComplete
+            }
+        },
+    )
 }
 
 /// Handle auth status confirmed with PIN (user has valid stored auth and PIN)
@@ -474,6 +456,9 @@ pub fn handle_setup_status_checked(state: &mut State, needs_setup: bool) -> Task
 
     if needs_setup {
         log::info!("First-run setup needed, showing admin setup");
+        state.is_authenticated = false;
+        state.domains.auth.state.is_authenticated = false;
+        state.domains.auth.state.user_permissions = None;
         // Initialize first-run setup state
         state.domains.auth.state.auth_flow =
             crate::domains::auth::types::AuthenticationFlow::FirstRunSetup {
@@ -553,25 +538,12 @@ pub fn handle_setup_status_checked(state: &mut State, needs_setup: bool) -> Task
 pub fn handle_auto_login_check_complete(state: &mut State) -> Task<auth::Message> {
     log::info!("[Auth] Auto-login check complete, loading users");
 
-    // Load users for normal flow
-    let auth_service = &state.domains.auth.state.auth_service;
-    let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
-    Task::perform(
-        async move {
-            log::info!("[Auth] Fetching all users from server");
-            svc.get_all_users().await.map_err(|e| e.to_string())
-        },
-        |result| match result {
-            Ok(users) => {
-                log::info!("[Auth] Successfully loaded {} users", users.len());
-                auth::Message::UsersLoaded(Ok(users))
-            }
-            Err(e) => {
-                log::error!("[Auth] Failed to load users: {}", e);
-                auth::Message::UsersLoaded(Err(e))
-            }
-        },
-    )
+    // Reset auth state and reuse the existing user-loading flow logic
+    state.is_authenticated = false;
+    state.domains.auth.state.is_authenticated = false;
+    state.domains.auth.state.user_permissions = None;
+
+    handle_load_users(state)
 }
 
 /// Handle successful auto-login

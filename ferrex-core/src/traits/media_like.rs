@@ -1,17 +1,8 @@
-use std::borrow::Cow;
-
 use crate::{
-    ArchivedEpisodeReference, ArchivedMedia, ArchivedMediaFile, ArchivedMediaID,
-    ArchivedMovieReference, ArchivedSeasonReference, ArchivedSeriesReference, Browsable, EpisodeID,
-    EpisodeNumber, EpisodeReference, EpisodeURL, LibraryID, Media, MediaDetailsOption, MediaID,
+    ArchivedEpisodeReference, ArchivedMedia, ArchivedMediaID, ArchivedMovieReference,
+    ArchivedSeasonReference, ArchivedSeriesReference, EpisodeReference, Media, MediaID,
     MediaIDLike, MediaOps, MediaType, MovieReference, SeasonReference, SeriesReference,
 };
-
-use rkyv::{
-    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize, deserialize, rancor::Error,
-};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 // A trait that allows us to treat archived and non-archived media references as the same type
 pub trait MediaLike {

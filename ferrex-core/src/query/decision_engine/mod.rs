@@ -18,7 +18,10 @@ pub use monitor::{NetworkMonitor, NetworkQuality};
 pub use types::{ExecutionMode, QueryContext, QueryStrategy, StrategyConfig};
 
 use crate::query::sorting::SortableEntity;
-use std::sync::{Arc, RwLock};
+use std::{
+    fmt,
+    sync::{Arc, RwLock},
+};
 
 /// The main decision engine that orchestrates strategy selection
 pub struct DecisionEngine {
@@ -26,6 +29,29 @@ pub struct DecisionEngine {
     metrics: Arc<RwLock<QueryMetrics>>,
     network_monitor: NetworkMonitor,
     cost_estimator: CostEstimator,
+}
+
+impl fmt::Debug for DecisionEngine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let metrics_snapshot = self
+            .metrics
+            .read()
+            .map(|metrics| {
+                (
+                    metrics.client_sort_times.len(),
+                    metrics.server_query_times.len(),
+                    metrics.network_latencies.len(),
+                )
+            })
+            .unwrap_or_default();
+
+        f.debug_struct("DecisionEngine")
+            .field("config", &self.config)
+            .field("metrics_counts", &metrics_snapshot)
+            .field("network_monitor", &self.network_monitor)
+            .field("cost_estimator", &self.cost_estimator)
+            .finish()
+    }
 }
 
 /// Metrics tracking for query performance

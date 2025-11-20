@@ -1,37 +1,67 @@
 use crate::domains::library::messages::Message;
 use crate::infrastructure::{
+    adapters::ApiClientAdapter,
     api_types::{Media, MediaID},
-    constants::routes::API_BASE,
+    services::api::ApiService,
 };
+use ferrex_core::api_routes::v1;
 use ferrex_core::{MediaEvent, MediaIDLike};
 use futures::StreamExt;
-use futures::stream;
+use futures::stream::{self, BoxStream};
 use iced::Subscription;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-/// Creates a subscription to server-sent events for library media changes
-pub fn media_events(server_url: String) -> Subscription<Message> {
-    #[derive(Debug, Clone, Hash)]
-    struct MediaEventsId(String);
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
+#[derive(Debug, Clone)]
+struct MediaEventsId {
+    server_url: String,
+    api: Arc<ApiClientAdapter>,
+}
+
+impl PartialEq for MediaEventsId {
+    fn eq(&self, other: &Self) -> bool {
+        self.server_url == other.server_url && Arc::ptr_eq(&self.api, &other.api)
+    }
+}
+
+impl Eq for MediaEventsId {}
+
+impl Hash for MediaEventsId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.server_url.hash(state);
+        Arc::as_ptr(&self.api).hash(state);
+    }
+}
+
+/// Creates a subscription to server-sent events for library media changes
+pub fn media_events(
+    server_url: String,
+    api_service: Arc<ApiClientAdapter>,
+) -> Subscription<Message> {
     Subscription::run_with(
-        MediaEventsId(server_url.clone()),
-        |MediaEventsId(server_url)| {
-            stream::unfold(
-                MediaEventState::new(server_url.to_owned()),
-                |mut state| async move {
-                    match state.next_event().await {
-                        Some(message) => Some((message, state)),
-                        None => {
-                            // Stream ended permanently
-                            None
-                        }
-                    }
-                },
-            )
+        MediaEventsId {
+            server_url: server_url.clone(),
+            api: Arc::clone(&api_service),
         },
+        build_media_subscription_stream,
     )
+}
+
+fn build_media_subscription_stream(id: &MediaEventsId) -> BoxStream<'static, Message> {
+    let server_url = id.server_url.clone();
+    let api = Arc::clone(&id.api);
+    Box::pin(stream::unfold(
+        MediaEventState::new(server_url.to_owned(), api),
+        |mut state| async move {
+            match state.next_event().await {
+                Some(message) => Some((message, state)),
+                None => None,
+            }
+        },
+    ))
 }
 
 /// Internal event type for channel communication
@@ -50,16 +80,18 @@ struct MediaEventState {
     task_handle: Option<tokio::task::JoinHandle<()>>,
     retry_count: u32,
     max_retries: u32,
+    api_service: Arc<ApiClientAdapter>,
 }
 
 impl MediaEventState {
-    fn new(server_url: String) -> Self {
+    fn new(server_url: String, api_service: Arc<ApiClientAdapter>) -> Self {
         Self {
             server_url,
             event_receiver: None,
             task_handle: None,
             retry_count: 0,
             max_retries: 10,
+            api_service,
         }
     }
 
@@ -131,32 +163,44 @@ impl MediaEventState {
             tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
         }
 
-        let url = format!("{}{}/library/events/sse", self.server_url, API_BASE);
+        let url = format!("{}{}", self.server_url, v1::events::MEDIA);
         log::info!("Creating media events SSE connection to: {}", url);
 
         // Create channel for communication
         let (tx, rx) = mpsc::unbounded_channel();
         self.event_receiver = Some(rx);
 
+        let api = Arc::clone(&self.api_service);
         // Spawn task to handle EventSource
         let task_handle = tokio::spawn(async move {
-            let mut event_source = reqwest_eventsource::EventSource::get(&url);
-
-            while let Some(event) = event_source.next().await {
-                let sse_event = match event {
-                    Ok(reqwest_eventsource::Event::Open) => MediaSseEvent::Open,
-                    Ok(reqwest_eventsource::Event::Message(msg)) => MediaSseEvent::Message(msg),
-                    Err(e) => MediaSseEvent::Error(e.to_string()),
-                };
-
-                if tx.send(sse_event).is_err() {
-                    // Receiver dropped, exit task
-                    break;
-                }
+            let client = reqwest::Client::new();
+            let mut request = client.get(&url);
+            if let Some(token) = api.get_token().await {
+                request = request.bearer_auth(token.access_token);
             }
 
-            // Send closed event
-            let _ = tx.send(MediaSseEvent::Closed);
+            match reqwest_eventsource::EventSource::new(request) {
+                Ok(mut event_source) => {
+                    while let Some(event) = event_source.next().await {
+                        let sse_event = match event {
+                            Ok(reqwest_eventsource::Event::Open) => MediaSseEvent::Open,
+                            Ok(reqwest_eventsource::Event::Message(msg)) => {
+                                MediaSseEvent::Message(msg)
+                            }
+                            Err(e) => MediaSseEvent::Error(e.to_string()),
+                        };
+
+                        if tx.send(sse_event).is_err() {
+                            break;
+                        }
+                    }
+
+                    let _ = tx.send(MediaSseEvent::Closed);
+                }
+                Err(err) => {
+                    let _ = tx.send(MediaSseEvent::Error(err.to_string()));
+                }
+            }
         });
 
         self.task_handle = Some(task_handle);
@@ -266,14 +310,14 @@ impl MediaEventState {
             }
 
             // Scan events are already handled by scan subscription
-            MediaEvent::ScanStarted { scan_id } => {
+            MediaEvent::ScanStarted { scan_id, .. } => {
                 log::debug!(
                     "Ignoring ScanStarted event {} - handled by scan subscription",
                     scan_id
                 );
                 None
             }
-            MediaEvent::ScanCompleted { scan_id } => {
+            MediaEvent::ScanCompleted { scan_id, .. } => {
                 log::debug!(
                     "Ignoring ScanCompleted event {} - handled by scan subscription",
                     scan_id
@@ -287,7 +331,7 @@ impl MediaEventState {
                 );
                 None
             }
-            MediaEvent::ScanFailed { scan_id, error } => {
+            MediaEvent::ScanFailed { scan_id, error, .. } => {
                 log::error!("Scan {} failed: {}", scan_id, error);
                 // Could emit a scan failed message if needed
                 None

@@ -1,9 +1,7 @@
-use anyhow::Result;
+use std::fmt;
 use std::sync::Arc;
-use uuid::Uuid;
 
 use crate::auth::domain::repositories::UserAuthenticationRepository;
-use crate::auth::domain::value_objects::PinCode;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PinManagementError {
@@ -19,6 +17,14 @@ pub enum PinManagementError {
 
 pub struct PinManagementService {
     user_repo: Arc<dyn UserAuthenticationRepository>,
+}
+
+impl fmt::Debug for PinManagementService {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PinManagementService")
+            .field("user_repo_refs", &Arc::strong_count(&self.user_repo))
+            .finish()
+    }
 }
 
 impl PinManagementService {

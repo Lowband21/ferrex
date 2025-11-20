@@ -3,10 +3,10 @@ use std::time::Instant;
 
 use crate::domains::library::messages::Message;
 use crate::infrastructure::adapters::ApiClientAdapter;
-use crate::infrastructure::constants::routes;
 use crate::infrastructure::repository::repository::MediaRepo;
 use crate::infrastructure::services::api::ApiService;
 use crate::state_refactored::State;
+use ferrex_core::api_routes::v1;
 use iced::Task;
 use rkyv::util::AlignedVec;
 
@@ -15,7 +15,7 @@ pub async fn fetch_libraries(api_service: Arc<ApiClientAdapter>) -> anyhow::Resu
     let now = Instant::now();
     let bytes: AlignedVec = api_service
         .as_ref()
-        .get_rkyv(routes::libraries::GET, None)
+        .get_rkyv(v1::libraries::COLLECTION, None)
         .await?;
 
     let elapsed = now.elapsed();
@@ -39,19 +39,6 @@ pub fn handle_libraries_loaded(
     state: &mut State,
     result: Result<AlignedVec, String>,
 ) -> Task<Message> {
-    // Idempotency guard: skip if repo already populated
-    if state
-        .media_repo
-        .read()
-        .as_ref()
-        .map(|r| !r.is_empty())
-        .unwrap_or(false)
-    {
-        log::warn!("[Library] Libraries already loaded; ignoring duplicate LibrariesLoaded");
-        state.loading = false;
-        return Task::none();
-    }
-
     match result {
         Ok(bytes) => {
             // Create and populate MediaRepo with the loaded data

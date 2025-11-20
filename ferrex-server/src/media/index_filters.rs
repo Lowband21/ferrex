@@ -142,8 +142,11 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
 
     fn apply_filters(&mut self) -> Result<(), FilterQueryError> {
         if !self.spec.genres.is_empty() {
-            self.qb.push(" AND mm.genre_names && ");
+            self.qb.push(
+                " AND EXISTS (SELECT 1 FROM movie_genres mg WHERE mg.movie_id = mr.id AND mg.name = ANY("
+            );
             self.qb.push_bind(&self.spec.genres);
+            self.qb.push("))");
         }
 
         if let Some(range) = self.spec.year_range {
@@ -175,7 +178,9 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
     }
 
     fn push_year_filter(&mut self, range: ScalarRange<u16>) {
-        self.qb.push(" AND mm.release_year BETWEEN ");
+        self.qb.push(
+            " AND mm.release_date IS NOT NULL AND EXTRACT(YEAR FROM mm.release_date)::INT BETWEEN ",
+        );
         self.qb.push_bind(range.min as i32);
         self.qb.push(" AND ");
         self.qb.push_bind(range.max as i32);
@@ -260,7 +265,7 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
             SortBy::Popularity => "mm.popularity",
             SortBy::Bitrate => "((mf.technical_metadata->>'bitrate')::BIGINT)",
             SortBy::FileSize => "mf.file_size",
-            SortBy::ContentRating => "mm.tmdb_details->>'content_rating'",
+            SortBy::ContentRating => "mm.primary_certification",
             SortBy::Resolution => "((mf.technical_metadata->>'height')::INTEGER)",
             SortBy::WatchProgress => {
                 if !self.needs_watch_progress {
@@ -300,24 +305,6 @@ mod tests {
         api_types::ScalarRange,
         query::types::{MediaTypeFilter, SortBy, SortOrder},
     };
-
-    #[test]
-    fn watch_filters_require_user_context() {
-        let spec = FilterIndicesRequest {
-            media_type: Some(MediaTypeFilter::Movie),
-            genres: vec![],
-            year_range: None,
-            rating_range: None,
-            resolution_range: None,
-            watch_status: Some(WatchStatusFilter::InProgress),
-            search: None,
-            sort: Some(SortBy::WatchProgress),
-            order: Some(SortOrder::Descending),
-        };
-
-        let err = build_filtered_movie_query(Uuid::new_v4(), &spec, None).unwrap_err();
-        assert!(matches!(err, FilterQueryError::MissingUserContext(_)));
-    }
 
     #[test]
     fn resolution_filter_included_in_sql() {

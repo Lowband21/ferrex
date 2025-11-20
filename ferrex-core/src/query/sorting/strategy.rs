@@ -4,7 +4,7 @@
 //! that can be composed, cached, and optimized based on dataset characteristics.
 
 use super::{HasField, SortFieldMarker, SortKey, SortableEntity};
-use std::marker::PhantomData;
+use std::{fmt, marker::PhantomData};
 
 /// A sorting strategy that can be composed
 pub trait SortStrategy<T>: Send + Sync {
@@ -42,6 +42,21 @@ where
     pub field: F,
     pub reverse: bool,
     pub _phantom: PhantomData<T>,
+}
+
+impl<T, F> fmt::Debug for FieldSort<T, F>
+where
+    T: SortableEntity,
+    F: SortFieldMarker,
+    T::AvailableFields: HasField<F>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let field_type = std::any::type_name::<F>();
+        f.debug_struct("FieldSort")
+            .field("field_type", &field_type)
+            .field("reverse", &self.reverse)
+            .finish()
+    }
 }
 
 impl<T, F> FieldSort<T, F>
@@ -115,6 +130,14 @@ pub struct ChainedSort<T> {
     strategies: Vec<Box<dyn SortStrategy<T>>>,
 }
 
+impl<T> fmt::Debug for ChainedSort<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ChainedSort")
+            .field("strategy_count", &self.strategies.len())
+            .finish()
+    }
+}
+
 impl<T> ChainedSort<T> {
     /// Create a new chained sort
     pub fn new() -> Self {
@@ -163,6 +186,18 @@ pub struct AdaptiveSort<T> {
     fallback: Box<dyn SortStrategy<T>>,
 }
 
+impl<T> fmt::Debug for AdaptiveSort<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let preferred_type = std::any::type_name_of_val(&*self.preferred);
+        let fallback_type = std::any::type_name_of_val(&*self.fallback);
+
+        f.debug_struct("AdaptiveSort")
+            .field("preferred_strategy", &preferred_type)
+            .field("fallback_strategy", &fallback_type)
+            .finish()
+    }
+}
+
 impl<T> AdaptiveSort<T> {
     /// Create a new adaptive sort
     pub fn new(
@@ -204,6 +239,21 @@ impl<T: Clone> SortStrategy<T> for AdaptiveSort<T> {
 pub struct ConstFieldSort<T, F, const REVERSE: bool> {
     pub field: F,
     pub _phantom: PhantomData<T>,
+}
+
+impl<T, F, const REVERSE: bool> fmt::Debug for ConstFieldSort<T, F, REVERSE>
+where
+    T: SortableEntity,
+    F: SortFieldMarker,
+    T::AvailableFields: HasField<F>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let field_type = std::any::type_name::<F>();
+        f.debug_struct("ConstFieldSort")
+            .field("field_type", &field_type)
+            .field("reverse", &REVERSE)
+            .finish()
+    }
 }
 
 impl<T, F, const REVERSE: bool> ConstFieldSort<T, F, REVERSE>

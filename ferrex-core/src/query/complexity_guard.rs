@@ -44,6 +44,7 @@ impl Default for ComplexityConfig {
 }
 
 /// Guard that enforces query complexity limits
+#[derive(Debug, Clone)]
 pub struct QueryComplexityGuard {
     config: ComplexityConfig,
 }

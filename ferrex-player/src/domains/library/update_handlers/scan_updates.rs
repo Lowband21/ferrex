@@ -1,164 +1,227 @@
-use std::time::Duration;
-
 use crate::domains::library::messages::Message;
-use crate::domains::library::server::scan::{start_scan_all_libraries, start_scan_library};
-use crate::domains::library::LibraryDomainState;
+use crate::domains::library::server;
 use crate::infrastructure::services::api::ApiService;
 use crate::state_refactored::State;
-use ferrex_core::{LibraryID, ScanProgress, ScanStatus};
+use ferrex_core::LibraryID;
+use ferrex_core::api_scan::{ScanConfig, ScanMetrics};
+use ferrex_core::api_types::{ScanProgressEvent, ScanSnapshotDto};
 use iced::Task;
 use uuid::Uuid;
 
-pub fn handle_scan_library(
+pub fn handle_scan_library(state: &mut State, library_id: LibraryID) -> Task<Message> {
+    let api_service = state.api_service.clone();
+    Task::perform(
+        async move {
+            server::scan::start_library_scan(api_service, library_id, None)
+                .await
+                .map_err(|e| e.to_string())
+        },
+        move |result| match result {
+            Ok(response) => Message::ScanStarted {
+                library_id,
+                scan_id: response.scan_id,
+                correlation_id: response.correlation_id,
+            },
+            Err(error) => Message::ScanCommandFailed {
+                library_id: Some(library_id),
+                error,
+            },
+        },
+    )
+}
+
+pub fn handle_pause_scan(state: &mut State, library_id: LibraryID, scan_id: Uuid) -> Task<Message> {
+    let api_service = state.api_service.clone();
+    Task::perform(
+        async move {
+            server::scan::pause_library_scan(api_service, library_id, scan_id)
+                .await
+                .map_err(|e| e.to_string())
+        },
+        move |result| match result {
+            Ok(_) => Message::FetchActiveScans,
+            Err(error) => Message::ScanCommandFailed {
+                library_id: Some(library_id),
+                error,
+            },
+        },
+    )
+}
+
+pub fn handle_resume_scan(
     state: &mut State,
     library_id: LibraryID,
-    server_url: String,
+    scan_id: Uuid,
 ) -> Task<Message> {
-    log::info!("Starting scan for library: {}", library_id);
-    state.domains.library.state.scanning = true;
-    state.domains.library.state.scan_progress = None;
     let api_service = state.api_service.clone();
     Task::perform(
-        start_scan_library(api_service, library_id, false),
-        |result| match result {
-            Ok(scan_id) => Message::ScanStarted(scan_id),
-            Err(e) => Message::NoOp, //Message::ScanErrored(e.to_string()), // TODO: This is failing silently, we need to handle the error properly with a new message that indicates the failure
+        async move {
+            server::scan::resume_library_scan(api_service, library_id, scan_id)
+                .await
+                .map_err(|e| e.to_string())
+        },
+        move |result| match result {
+            Ok(_) => Message::FetchActiveScans,
+            Err(error) => Message::ScanCommandFailed {
+                library_id: Some(library_id),
+                error,
+            },
         },
     )
 }
 
-pub fn handle_scan_all_libraries(state: &mut State) -> Task<Message> {
-    state.domains.library.state.scanning = true;
-    state.domains.library.state.scan_progress = None;
+pub fn handle_cancel_scan(
+    state: &mut State,
+    library_id: LibraryID,
+    scan_id: Uuid,
+) -> Task<Message> {
     let api_service = state.api_service.clone();
-
     Task::perform(
-        start_scan_all_libraries(api_service, false),
-        |result| match result {
-            Ok(scan_id) => Message::ScanStarted(scan_id),
-            Err(e) => Message::NoOp, //Message::ScanErrored(e.to_string()), // TODO: This is failing silently, we need to handle the error properly with a new message that indicates the failure
+        async move {
+            server::scan::cancel_library_scan(api_service, library_id, scan_id)
+                .await
+                .map_err(|e| e.to_string())
+        },
+        move |result| match result {
+            Ok(_) => Message::FetchActiveScans,
+            Err(error) => Message::ScanCommandFailed {
+                library_id: Some(library_id),
+                error,
+            },
         },
     )
 }
 
-pub fn handle_force_rescan(state: &mut State) -> Task<Message> {
-    state.domains.library.state.scanning = true;
-    state.domains.library.state.scan_progress = None;
+pub fn handle_fetch_active_scans(state: &mut State) -> Task<Message> {
     let api_service = state.api_service.clone();
-
     Task::perform(
-        start_scan_all_libraries(api_service, false),
+        async move {
+            server::scan::fetch_active_scans(api_service)
+                .await
+                .map_err(|e| e.to_string())
+        },
         |result| match result {
-            Ok(scan_id) => Message::ScanStarted(scan_id),
-            Err(e) => Message::NoOp, //Message::ScanErrored(e.to_string()), // TODO: This is failing silently, we need to handle the error properly with a new message that indicates the failure
+            Ok(scans) => Message::ActiveScansUpdated(scans),
+            Err(error) => Message::ScanCommandFailed {
+                library_id: None,
+                error,
+            },
         },
     )
 }
 
-pub fn handle_scan_started(state: &mut State, scan_id: Uuid) -> Task<Message> {
-    log::info!("Scan started with ID: {}", scan_id);
-    state.domains.library.state.active_scan_id = Some(scan_id);
-    state.domains.library.state.show_scan_progress = true; // Auto-show progress overlay
-
-    Task::none()
+pub fn handle_fetch_scan_metrics(state: &mut State) -> Task<Message> {
+    let api = state.api_service.clone();
+    Task::perform(
+        async move { api.fetch_scan_metrics().await.map_err(|e| e.to_string()) },
+        |result| match result {
+            Ok(metrics) => Message::ScanMetricsLoaded(Ok(metrics)),
+            Err(err) => Message::ScanMetricsLoaded(Err(err)),
+        },
+    )
 }
 
-pub fn handle_scan_progress_update(state: &mut State, progress: ScanProgress) -> Task<Message> {
-    log::info!(
-        "Received scan progress update:\n\
-        folders scanned: {}/{}\n\
-        movies scanned: {}, series scanned: {}, seasons scanned: {}, episodes scanned: {}\n\
-        Estimated time remaining: {} seconds",
-        progress.folders_scanned,
-        progress.folders_to_scan,
-        progress.movies_scanned,
-        progress.series_scanned,
-        progress.seasons_scanned,
-        progress.episodes_scanned,
-        progress
-            .estimated_time_remaining
-            .unwrap_or(Duration::ZERO)
-            .as_secs()
-    );
-    log::info!(
-        "Scan progress state - show_scan_progress: {}, active_scan_id: {:?}",
-        state.domains.library.state.show_scan_progress,
-        state.domains.library.state.active_scan_id
+pub fn handle_fetch_scan_config(state: &mut State) -> Task<Message> {
+    let api = state.api_service.clone();
+    Task::perform(
+        async move { api.fetch_scan_config().await.map_err(|e| e.to_string()) },
+        |result| match result {
+            Ok(cfg) => Message::ScanConfigLoaded(Ok(cfg)),
+            Err(err) => Message::ScanConfigLoaded(Err(err)),
+        },
+    )
+}
+
+pub fn apply_active_scan_snapshot(state: &mut State, snapshots: Vec<ScanSnapshotDto>) {
+    if snapshots.is_empty() {
+        log::debug!("Active scan snapshot list empty");
+    } else {
+        log::info!(
+            "Received {} active scan snapshot(s) from server",
+            snapshots.len()
+        );
+    }
+
+    state.domains.library.state.active_scans.clear();
+    for snapshot in snapshots {
+        if matches!(
+            snapshot.status,
+            ferrex_core::api_types::ScanLifecycleStatus::Completed
+                | ferrex_core::api_types::ScanLifecycleStatus::Failed
+                | ferrex_core::api_types::ScanLifecycleStatus::Canceled
+        ) {
+            continue;
+        }
+        state
+            .domains
+            .library
+            .state
+            .active_scans
+            .insert(snapshot.scan_id, snapshot);
+    }
+
+    if state.domains.library.state.active_scans.is_empty() {
+        log::debug!("No running scans after filtering terminal statuses");
+    }
+}
+
+pub fn apply_scan_progress_frame(state: &mut State, frame: ScanProgressEvent) {
+    log::debug!(
+        "Scan progress frame received: scan={}, seq={}, status={}, completed={}/{}",
+        frame.scan_id,
+        frame.sequence,
+        frame.status,
+        frame.completed_items,
+        frame.total_items
     );
 
-    state.domains.library.state.scan_progress = Some(progress.clone());
-    log::info!(
-        "Set scan_progress to Some - overlay should be visible if show_scan_progress is true"
-    );
+    state
+        .domains
+        .library
+        .state
+        .latest_progress
+        .insert(frame.scan_id, frame.clone());
 
-    // Check if scan is completed
-    if progress.status == ScanStatus::Completed
-        || progress.status == ScanStatus::Failed
-        || progress.status == ScanStatus::Cancelled
+    if let Some(snapshot) = state
+        .domains
+        .library
+        .state
+        .active_scans
+        .get_mut(&frame.scan_id)
     {
-        state.domains.library.state.scanning = false;
+        snapshot.completed_items = frame.completed_items;
+        snapshot.total_items = frame.total_items;
+        snapshot.retrying_items = frame.retrying_items.unwrap_or(snapshot.retrying_items);
+        snapshot.dead_lettered_items = frame
+            .dead_lettered_items
+            .unwrap_or(snapshot.dead_lettered_items);
+        snapshot.current_path = frame.current_path.clone();
 
-        if progress.status == ScanStatus::Completed {
-            // Refresh library after successful scan
-            log::info!("Scan completed successfully, refreshing library");
-            // Clear scan progress after a short delay
-            Task::batch([
-                Task::done(Message::RefreshLibrary),
-                Task::perform(
-                    async {
-                        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-                    },
-                    |_| Message::ClearScanProgress,
-                ),
-            ])
-        } else if progress.status == ScanStatus::Failed {
-            // Error handling moved to higher level
-            // Clear scan progress after a delay
-            Task::perform(
-                async {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                },
-                |_| Message::ClearScanProgress,
-            )
-        } else {
-            // Cancelled - clear immediately
-            state.domains.library.state.scan_progress = None;
-            state.domains.library.state.active_scan_id = None;
-            Task::none()
+        if let Some(mapped) = map_status(&frame.status) {
+            snapshot.status = mapped;
         }
     } else {
-        Task::none()
+        log::warn!(
+            "Progress frame received for scan {} but no active snapshot is registered",
+            frame.scan_id
+        );
     }
 }
 
-pub fn handle_clear_scan_progress(state: &mut State) -> Task<Message> {
-    state.domains.library.state.scan_progress = None;
-    state.domains.library.state.active_scan_id = None; // Clear active_scan_id when we clear the progress
-    state.domains.library.state.show_scan_progress = false;
-    Task::none()
+pub fn remove_scan(state: &mut State, scan_id: Uuid) {
+    state.domains.library.state.active_scans.remove(&scan_id);
+    state.domains.library.state.latest_progress.remove(&scan_id);
+    log::info!("Removed scan {} from active tracking", scan_id);
 }
 
-pub fn handle_toggle_scan_progress(state: &mut State) -> Task<Message> {
-    state.domains.library.state.show_scan_progress =
-        !state.domains.library.state.show_scan_progress;
-    log::info!(
-        "Toggled scan progress overlay to: {}, scan_progress exists: {}",
-        state.domains.library.state.show_scan_progress,
-        state.domains.library.state.scan_progress.is_some()
-    );
-    Task::none()
-}
-
-pub fn handle_active_scans_checked(state: &mut State, scans: Vec<ScanProgress>) -> Task<Message> {
-    if let Some(active_scan) = scans
-        .into_iter()
-        .find(|s| s.status == ScanStatus::Scanning || s.status == ScanStatus::Pending)
-    {
-        log::info!("Found active scan {}, reconnecting...", active_scan.scan_id);
-        state.domains.library.state.active_scan_id = Some(active_scan.scan_id.clone());
-        state.domains.library.state.scan_progress = Some(active_scan);
-        state.domains.library.state.scanning = true;
-        //state.show_scan_progress = true;
+fn map_status(status: &str) -> Option<ferrex_core::api_types::ScanLifecycleStatus> {
+    match status {
+        "pending" => Some(ferrex_core::api_types::ScanLifecycleStatus::Pending),
+        "running" => Some(ferrex_core::api_types::ScanLifecycleStatus::Running),
+        "paused" => Some(ferrex_core::api_types::ScanLifecycleStatus::Paused),
+        "completed" => Some(ferrex_core::api_types::ScanLifecycleStatus::Completed),
+        "failed" => Some(ferrex_core::api_types::ScanLifecycleStatus::Failed),
+        "canceled" | "cancelled" => Some(ferrex_core::api_types::ScanLifecycleStatus::Canceled),
+        _ => None,
     }
-    Task::none()
 }

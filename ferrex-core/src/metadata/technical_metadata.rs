@@ -20,6 +20,7 @@ pub struct TechnicalMetadata {
     pub bit_depth: Option<u32>,
 }
 
+#[derive(Debug, Default, Clone, Copy)]
 pub struct TechnicalMetadataExtractor {
     initialized: bool,
 }

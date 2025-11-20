@@ -1,8 +1,8 @@
 use axum::{
+    Extension, Json,
     extract::{Path, State},
     http::HeaderMap,
     http::StatusCode,
-    Extension, Json,
 };
 use ferrex_core::{
     api_types::ApiResponse,
@@ -14,15 +14,17 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::{
-    AppState,
-    errors::{AppError, AppResult},
+    infra::{
+        app_state::AppState,
+        errors::{AppError, AppResult},
+    },
     users::{UserService, user_service::UpdateUserParams},
 };
 
 /// Helper function to get the database pool
 fn get_pool(state: &AppState) -> Result<&sqlx::PgPool, AppError> {
     state
-        .database
+        .db
         .as_any()
         .downcast_ref::<PostgresDatabase>()
         .ok_or_else(|| AppError::internal("Database not available".to_string()))
@@ -155,15 +157,17 @@ pub async fn list_users_authenticated_handler(
 
     let users = if is_admin {
         // Admin gets full user list
-        state.database.backend().get_all_users().await?
+        state.db.backend().get_all_users().await?
     } else {
         // Regular users only see themselves
-        vec![state
-            .database
-            .backend()
-            .get_user_by_id(user.id)
-            .await?
-            .ok_or_else(|| AppError::not_found("User not found".to_string()))?]
+        vec![
+            state
+                .db
+                .backend()
+                .get_user_by_id(user.id)
+                .await?
+                .ok_or_else(|| AppError::not_found("User not found".to_string()))?,
+        ]
     };
 
     // Get device information for PIN status - already extracted as Extension
@@ -218,17 +222,15 @@ pub async fn get_user_handler(
 ) -> AppResult<Json<User>> {
     // Users can only view their own profile for now
     if current_user.id != user_id {
-        return Err(crate::errors::AppError::forbidden(
-            "You can only view your own profile",
-        ));
+        return Err(AppError::forbidden("You can only view your own profile"));
     }
 
     let user = state
-        .database
+        .db
         .backend()
         .get_user_by_id(user_id)
         .await?
-        .ok_or_else(|| crate::errors::AppError::not_found("User not found"))?;
+        .ok_or_else(|| AppError::not_found("User not found"))?;
 
     Ok(Json(user))
 }
@@ -242,9 +244,7 @@ pub async fn update_user_handler(
 ) -> AppResult<Json<User>> {
     // Users can only update their own profile
     if current_user.id != user_id {
-        return Err(crate::errors::AppError::forbidden(
-            "You can only update your own profile",
-        ));
+        return Err(AppError::forbidden("You can only update your own profile"));
     }
 
     // Validate the update request
@@ -252,11 +252,11 @@ pub async fn update_user_handler(
 
     // Get current user data
     let mut user = state
-        .database
+        .db
         .backend()
         .get_user_by_id(user_id)
         .await?
-        .ok_or_else(|| crate::errors::AppError::not_found("User not found"))?;
+        .ok_or_else(|| AppError::not_found("User not found"))?;
 
     // Update fields that are provided
     if let Some(ref display_name) = request.display_name {
@@ -268,33 +268,31 @@ pub async fn update_user_handler(
         // Verify current password first
         if let Some(current_password) = request.current_password {
             use argon2::{
-                password_hash::{PasswordHash, PasswordVerifier},
                 Argon2,
+                password_hash::{PasswordHash, PasswordVerifier},
             };
 
             // Get password hash from credentials table
             let password_hash = state
-                .database
+                .db
                 .backend()
                 .get_user_password_hash(user.id)
                 .await
-                .map_err(|_| crate::errors::AppError::internal("Failed to get password hash"))?
-                .ok_or_else(|| crate::errors::AppError::bad_request("No password set"))?;
+                .map_err(|_| AppError::internal("Failed to get password hash"))?
+                .ok_or_else(|| AppError::bad_request("No password set"))?;
 
             let parsed_hash = PasswordHash::new(&password_hash)
-                .map_err(|_| crate::errors::AppError::internal("Invalid password hash"))?;
+                .map_err(|_| AppError::internal("Invalid password hash"))?;
 
             let argon2 = Argon2::default();
             if argon2
                 .verify_password(current_password.as_bytes(), &parsed_hash)
                 .is_err()
             {
-                return Err(crate::errors::AppError::bad_request(
-                    "Current password is incorrect",
-                ));
+                return Err(AppError::bad_request("Current password is incorrect"));
             }
         } else {
-            return Err(crate::errors::AppError::bad_request(
+            return Err(AppError::bad_request(
                 "Current password is required to change password",
             ));
         }
@@ -323,9 +321,7 @@ pub async fn delete_user_handler(
 ) -> AppResult<StatusCode> {
     // Users can only delete their own account
     if current_user.id != user_id {
-        return Err(crate::errors::AppError::forbidden(
-            "You can only delete your own account",
-        ));
+        return Err(AppError::forbidden("You can only delete your own account"));
     }
 
     // Use UserService to delete user
@@ -356,23 +352,19 @@ pub async fn change_password_handler(
         .backend()
         .get_user_password_hash(current_user.id)
         .await
-        .map_err(|_| crate::errors::AppError::internal("Failed to get password hash"))?
-        .ok_or_else(|| {
-            crate::errors::AppError::bad_request("Cannot change password for user without password")
-        })?;
+        .map_err(|_| AppError::internal("Failed to get password hash"))?
+        .ok_or_else(|| AppError::bad_request("Cannot change password for user without password"))?;
 
     // Verify current password
     let parsed_hash = PasswordHash::new(&password_hash)
-        .map_err(|_| crate::errors::AppError::internal("Invalid password hash"))?;
+        .map_err(|_| AppError::internal("Invalid password hash"))?;
 
     let argon2 = Argon2::default();
     if argon2
         .verify_password(request.current_password.as_bytes(), &parsed_hash)
         .is_err()
     {
-        return Err(crate::errors::AppError::bad_request(
-            "Current password is incorrect",
-        ));
+        return Err(AppError::bad_request("Current password is incorrect"));
     }
 
     // Update password

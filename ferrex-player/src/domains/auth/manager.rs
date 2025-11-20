@@ -5,12 +5,14 @@ use crate::domains::auth::errors::{
 use crate::domains::auth::state_types::{AuthState, AuthStateStore};
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
+use ferrex_core::api_types::ApiResponse;
 use ferrex_core::auth::{AuthResult as ServerAuthResult, DeviceInfo, Platform};
 use ferrex_core::rbac::UserPermissions;
 use ferrex_core::user::{AuthToken, LoginRequest, RegisterRequest, User};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use log::{debug, error, info, warn};
-use serde::{Deserialize, Serialize};
+use reqwest::StatusCode;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
@@ -417,20 +419,120 @@ impl AuthManager {
             .set_token(Some(stored_auth.token.clone()))
             .await;
 
-        // Update auth state using AuthStateStore
-        self.auth_state.authenticate(
-            stored_auth.user.clone(),
-            stored_auth.token.clone(),
-            stored_auth.permissions.unwrap_or_else(|| UserPermissions {
-                user_id: stored_auth.user.id,
-                roles: Vec::new(),
-                permissions: std::collections::HashMap::new(),
-                permission_details: None,
-            }),
-            stored_auth.server_url.clone(),
-        );
+        match self.fetch_user_and_permissions().await {
+            Ok((user, permissions)) => {
+                self.auth_state.authenticate(
+                    user.clone(),
+                    stored_auth.token.clone(),
+                    permissions.clone(),
+                    stored_auth.server_url.clone(),
+                );
 
-        Ok(())
+                // Persist refreshed auth snapshot for future startups
+                if let Err(err) = self.save_current_auth().await {
+                    warn!("Failed to persist refreshed auth: {}", err);
+                }
+
+                Ok(())
+            }
+            Err(err) => {
+                self.api_client.set_token(None).await;
+                self.auth_state.logout();
+
+                if matches!(&err, AuthError::Network(NetworkError::InvalidCredentials)) {
+                    if let Err(clear_err) = self.clear_keychain().await {
+                        warn!("Failed to clear invalid auth cache: {}", clear_err);
+                    }
+                }
+
+                Err(err)
+            }
+        }
+    }
+
+    /// Validate that the currently configured session is still authorized
+    pub async fn validate_session(&self) -> AuthResult<(User, UserPermissions)> {
+        let (token, server_url) = self
+            .auth_state
+            .with_state(|state| match state {
+                AuthState::Authenticated {
+                    token, server_url, ..
+                } => Some((token.clone(), server_url.clone())),
+                _ => None,
+            })
+            .ok_or(AuthError::Token(TokenError::NotAuthenticated))?;
+
+        self.api_client.set_token(Some(token.clone())).await;
+
+        match self.fetch_user_and_permissions().await {
+            Ok((user, permissions)) => {
+                self.auth_state
+                    .authenticate(user.clone(), token, permissions.clone(), server_url);
+
+                if let Err(err) = self.save_current_auth().await {
+                    warn!("Failed to persist refreshed auth: {}", err);
+                }
+
+                Ok((user, permissions))
+            }
+            Err(err) => {
+                self.api_client.set_token(None).await;
+                self.auth_state.logout();
+
+                if matches!(&err, AuthError::Network(NetworkError::InvalidCredentials)) {
+                    if let Err(clear_err) = self.clear_keychain().await {
+                        warn!("Failed to clear invalid auth cache: {}", clear_err);
+                    }
+                }
+
+                Err(err)
+            }
+        }
+    }
+
+    async fn fetch_user_and_permissions(&self) -> AuthResult<(User, UserPermissions)> {
+        let user: User = self.fetch_api_data("/users/me").await?;
+        let permissions: UserPermissions = self.fetch_api_data("/users/me/permissions").await?;
+        Ok((user, permissions))
+    }
+
+    async fn fetch_api_data<T>(&self, path: &str) -> AuthResult<T>
+    where
+        T: DeserializeOwned,
+    {
+        let url = self.api_client.build_url(path, false);
+        let request = self.api_client.client.get(&url);
+        let request = self.api_client.build_request(request).await;
+        let response = request
+            .send()
+            .await
+            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+
+        match response.status() {
+            StatusCode::OK => {
+                let api_response: ApiResponse<T> = response.json().await.map_err(|e| {
+                    AuthError::Network(NetworkError::InvalidResponse(e.to_string()))
+                })?;
+
+                api_response.data.ok_or_else(|| {
+                    AuthError::Network(NetworkError::InvalidResponse(format!(
+                        "No data returned for {}",
+                        path
+                    )))
+                })
+            }
+            StatusCode::UNAUTHORIZED => Err(AuthError::Network(NetworkError::InvalidCredentials)),
+            status => {
+                let body = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "<unavailable>".to_string());
+                Err(AuthError::Network(NetworkError::RequestFailed(format!(
+                    "{} {}",
+                    status, body
+                ))))
+            }
+        }
     }
 
     /// Save authentication to encrypted storage

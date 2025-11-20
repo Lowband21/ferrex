@@ -59,11 +59,9 @@ pub fn handle_database_cleared(
             state.domains.library.state.library_media_cache.clear();
 
             // Reset scan state
-            state.domains.library.state.scanning = false;
             state.loading = false;
-            state.domains.library.state.active_scan_id = None;
-            state.domains.library.state.scan_progress = None;
-            state.domains.library.state.show_scan_progress = false;
+            state.domains.library.state.active_scans.clear();
+            state.domains.library.state.latest_progress.clear();
 
             // Clear detail view data
             state.domains.media.state.current_season_details = None;

@@ -6,8 +6,10 @@ use crate::infrastructure::{
     api_types::{Library, Media, MediaID},
     repository::RepositoryError,
 };
+use ferrex_core::api_scan::{ScanConfig, ScanMetrics};
 use ferrex_core::{
-    LibraryID, MediaFile, MediaIDLike, ScanProgress, api_types::LibraryMediaResponse,
+    LibraryID, MediaFile, MediaIDLike,
+    api_types::{LibraryMediaResponse, ScanProgressEvent, ScanSnapshotDto},
 };
 use rkyv::util::AlignedVec;
 use uuid::Uuid;
@@ -21,7 +23,10 @@ pub enum Message {
     // Library management
     LibrariesLoaded(Result<AlignedVec, String>),
     LoadLibraries,
-    CreateLibrary(Library),
+    CreateLibrary {
+        library: Library,
+        start_scan: bool,
+    },
     LibraryCreated(Result<Library, String>),
     UpdateLibrary(Library),
     LibraryUpdated(Result<Library, String>),
@@ -39,16 +44,43 @@ pub enum Message {
     UpdateLibraryFormPaths(String),
     UpdateLibraryFormScanInterval(String),
     ToggleLibraryFormEnabled,
+    ToggleLibraryFormStartScan,
     SubmitLibraryForm,
 
     // Scanning
-    ScanStarted(Uuid),
-    ScanProgressUpdate(ScanProgress),
-    ScanCompleted(Result<Uuid, String>),
-    ClearScanProgress,
-    ToggleScanProgress,
-    CheckActiveScans,
-    ActiveScansChecked(Vec<ScanProgress>),
+    ScanStarted {
+        library_id: LibraryID,
+        scan_id: Uuid,
+        correlation_id: Uuid,
+    },
+    ScanProgressFrame(ScanProgressEvent),
+    FetchActiveScans,
+    ActiveScansUpdated(Vec<ScanSnapshotDto>),
+    ScanCommandFailed {
+        library_id: Option<LibraryID>,
+        error: String,
+    },
+    PauseScan {
+        library_id: LibraryID,
+        scan_id: Uuid,
+    },
+    ResumeScan {
+        library_id: LibraryID,
+        scan_id: Uuid,
+    },
+    CancelScan {
+        library_id: LibraryID,
+        scan_id: Uuid,
+    },
+    // Scanner metrics/config
+    FetchScanMetrics,
+    ScanMetricsLoaded(Result<ScanMetrics, String>),
+    FetchScanConfig,
+    ScanConfigLoaded(Result<ScanConfig, String>),
+
+    // Destructive: delete and recreate library with start_scan=true
+    ResetLibrary(LibraryID),
+    ResetLibraryDone(Result<(), String>),
 
     // Media references
     LibraryMediasLoaded(Result<LibraryMediaResponse, String>),
@@ -83,7 +115,7 @@ impl Message {
             // Library management
             Self::LibrariesLoaded(_) => "Library::LibrariesLoaded",
             Self::LoadLibraries => "Library::LoadLibraries",
-            Self::CreateLibrary(_) => "Library::CreateLibrary",
+            Self::CreateLibrary { .. } => "Library::CreateLibrary",
             Self::LibraryCreated(_) => "Library::LibraryCreated",
             Self::UpdateLibrary(_) => "Library::UpdateLibrary",
             Self::LibraryUpdated(_) => "Library::LibraryUpdated",
@@ -100,17 +132,19 @@ impl Message {
             Self::UpdateLibraryFormPaths(_) => "Library::UpdateLibraryFormPaths",
             Self::UpdateLibraryFormScanInterval(_) => "Library::UpdateLibraryFormScanInterval",
             Self::ToggleLibraryFormEnabled => "Library::ToggleLibraryFormEnabled",
+            Self::ToggleLibraryFormStartScan => "Library::ToggleLibraryFormStartScan",
             Self::SubmitLibraryForm => "Library::SubmitLibraryForm",
 
             // Scanning
             Self::ScanLibrary(_) => "Library::ScanLibrary",
-            Self::ScanStarted(_) => "Library::ScanStarted",
-            Self::ScanProgressUpdate(_) => "Library::ScanProgressUpdate",
-            Self::ScanCompleted(_) => "Library::ScanCompleted",
-            Self::ClearScanProgress => "Library::ClearScanProgress",
-            Self::ToggleScanProgress => "Library::ToggleScanProgress",
-            Self::CheckActiveScans => "Library::CheckActiveScans",
-            Self::ActiveScansChecked(_) => "Library::ActiveScansChecked",
+            Self::ScanStarted { .. } => "Library::ScanStarted",
+            Self::ScanProgressFrame(_) => "Library::ScanProgressFrame",
+            Self::FetchActiveScans => "Library::FetchActiveScans",
+            Self::ActiveScansUpdated(_) => "Library::ActiveScansUpdated",
+            Self::ScanCommandFailed { .. } => "Library::ScanCommandFailed",
+            Self::PauseScan { .. } => "Library::PauseScan",
+            Self::ResumeScan { .. } => "Library::ResumeScan",
+            Self::CancelScan { .. } => "Library::CancelScan",
 
             // Media references
             Self::LibraryMediasLoaded(_) => "Library::LibraryMediasLoaded",
@@ -133,6 +167,14 @@ impl Message {
 
             // View model updates
             Self::RefreshViewModels => "Library::RefreshViewModels",
+            // Scanner diagnostics
+            Self::FetchScanMetrics => "Library::FetchScanMetrics",
+            Self::ScanMetricsLoaded(_) => "Library::ScanMetricsLoaded",
+            Self::FetchScanConfig => "Library::FetchScanConfig",
+            Self::ScanConfigLoaded(_) => "Library::ScanConfigLoaded",
+            // Reset
+            Self::ResetLibrary(_) => "Library::ResetLibrary",
+            Self::ResetLibraryDone(_) => "Library::ResetLibraryDone",
         }
     }
 }
@@ -153,7 +195,14 @@ impl std::fmt::Debug for Message {
                 Err(e) => write!(f, "Library::LibrariesLoaded(Err: {})", e),
             },
             Self::LoadLibraries => write!(f, "Library::LoadLibraries"),
-            Self::CreateLibrary(lib) => write!(f, "Library::CreateLibrary({})", lib.name),
+            Self::CreateLibrary {
+                library,
+                start_scan,
+            } => write!(
+                f,
+                "Library::CreateLibrary({}, start_scan={})",
+                library.name, start_scan
+            ),
             Self::LibraryCreated(result) => match result {
                 Ok(lib) => write!(f, "Library::LibraryCreated(Ok: {})", lib.name),
                 Err(e) => write!(f, "Library::LibraryCreated(Err: {})", e),
@@ -199,24 +248,48 @@ impl std::fmt::Debug for Message {
                 write!(f, "Library::UpdateLibraryFormScanInterval({})", i)
             }
             Self::ToggleLibraryFormEnabled => write!(f, "Library::ToggleLibraryFormEnabled"),
+            Self::ToggleLibraryFormStartScan => {
+                write!(f, "Library::ToggleLibraryFormStartScan")
+            }
             Self::SubmitLibraryForm => write!(f, "Library::SubmitLibraryForm"),
 
             // Scanning
             Self::ScanLibrary(_) => write!(f, "Library::ScanLibrary"),
-            Self::ScanStarted(scan_id) => write!(f, "Library::ScanStarted({})", scan_id),
-            Self::ScanProgressUpdate(progress) => {
-                write!(f, "Library::ScanProgressUpdate({:?})", progress.status)
+            Self::ScanStarted {
+                library_id,
+                scan_id,
+                correlation_id,
+            } => write!(
+                f,
+                "Library::ScanStarted(library={}, scan={}, correlation={})",
+                library_id, scan_id, correlation_id
+            ),
+            Self::ScanProgressFrame(frame) => write!(
+                f,
+                "Library::ScanProgressFrame(lib={}, seq={})",
+                frame.library_id, frame.sequence
+            ),
+            Self::FetchActiveScans => write!(f, "Library::FetchActiveScans"),
+            Self::ActiveScansUpdated(scans) => {
+                write!(f, "Library::ActiveScansUpdated({} scans)", scans.len())
             }
-            Self::ScanCompleted(result) => match result {
-                Ok(scan_id) => write!(f, "Library::ScanCompleted(Ok: {})", scan_id),
-                Err(e) => write!(f, "Library::ScanCompleted(Err: {})", e),
-            },
-            Self::ClearScanProgress => write!(f, "Library::ClearScanProgress"),
-            Self::ToggleScanProgress => write!(f, "Library::ToggleScanProgress"),
-            Self::CheckActiveScans => write!(f, "Library::CheckActiveScans"),
-            Self::ActiveScansChecked(scans) => {
-                write!(f, "Library::ActiveScansChecked({} scans)", scans.len())
-            }
+            Self::ScanCommandFailed { library_id, error } => write!(
+                f,
+                "Library::ScanCommandFailed(library={:?}, error={})",
+                library_id, error
+            ),
+            Self::PauseScan {
+                library_id,
+                scan_id,
+            } => write!(f, "Library::PauseScan({}, {})", library_id, scan_id),
+            Self::ResumeScan {
+                library_id,
+                scan_id,
+            } => write!(f, "Library::ResumeScan({}, {})", library_id, scan_id),
+            Self::CancelScan {
+                library_id,
+                scan_id,
+            } => write!(f, "Library::CancelScan({}, {})", library_id, scan_id),
 
             // Media references
             Self::LibraryMediasLoaded(result) => match result {
@@ -274,6 +347,24 @@ impl std::fmt::Debug for Message {
 
             // View model refresh
             Self::RefreshViewModels => write!(f, "Library::RefreshViewModels"),
+            // Scanner diagnostics
+            Self::FetchScanMetrics => write!(f, "Library::FetchScanMetrics"),
+            Self::ScanMetricsLoaded(result) => match result {
+                Ok(m) => write!(
+                    f,
+                    "Library::ScanMetricsLoaded(Ok: active={})",
+                    m.active_scans
+                ),
+                Err(e) => write!(f, "Library::ScanMetricsLoaded(Err: {})", e),
+            },
+            Self::FetchScanConfig => write!(f, "Library::FetchScanConfig"),
+            Self::ScanConfigLoaded(_) => write!(f, "Library::ScanConfigLoaded"),
+            // Reset
+            Self::ResetLibrary(id) => write!(f, "Library::ResetLibrary({})", id),
+            Self::ResetLibraryDone(result) => match result {
+                Ok(()) => write!(f, "Library::ResetLibraryDone(Ok)"),
+                Err(e) => write!(f, "Library::ResetLibraryDone(Err: {})", e),
+            },
         }
     }
 }

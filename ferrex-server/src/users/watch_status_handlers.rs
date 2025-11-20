@@ -11,7 +11,7 @@ use ferrex_core::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::AppState;
+use crate::infra::app_state::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct ContinueWatchingQuery {

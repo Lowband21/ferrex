@@ -135,7 +135,7 @@ impl MediaFile {
             .to_string_lossy()
             .to_string();
 
-        let metadata = path.metadata()?;
+        let metadata = path.metadata().map_err(crate::MediaError::Io)?;
 
         // Get actual file creation time from filesystem metadata
         let created_at = metadata

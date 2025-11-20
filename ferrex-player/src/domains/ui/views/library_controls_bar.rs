@@ -1,14 +1,16 @@
 use crate::{
     domains::ui::{
         messages::Message,
+        tabs::{TabId, TabState},
         widgets::{filter_button, sort_dropdown, sort_order_toggle},
     },
     infrastructure::constants::layout::header::HEIGHT,
     state_refactored::State,
 };
+use ferrex_core::LibraryID;
 use iced::{
     Element, Length,
-    widget::{Space, container, row},
+    widget::{Space, container, row, text},
 };
 use uuid::Uuid;
 
@@ -36,6 +38,23 @@ pub fn view_library_controls_bar<'a>(
     let current_sort = ui_state.sort_by;
     let current_order = ui_state.sort_order;
 
+    let item_count = selected_library
+        .and_then(|library_uuid| {
+            let library_id = LibraryID(library_uuid);
+            state
+                .tab_manager
+                .get_tab(TabId::Library(library_id))
+                .and_then(|tab| match tab {
+                    TabState::Library(lib_state) => Some(lib_state.grid_state.total_items),
+                    _ => None,
+                })
+        })
+        .or_else(|| match state.tab_manager.active_tab() {
+            TabState::Library(lib_state) => Some(lib_state.grid_state.total_items),
+            _ => None,
+        })
+        .unwrap_or(0);
+
     let active_filter_count = ui_state.selected_genres.len()
         + ui_state.selected_decade.iter().count()
         + if ui_state.selected_resolution != ferrex_core::UiResolution::Any {
@@ -56,6 +75,7 @@ pub fn view_library_controls_bar<'a>(
         sort_order_toggle(current_order),
         filter_button(active_filter_count, is_filter_open),
         Space::with_width(Length::Fill),
+        text(item_count.to_string()),
     ]
     .spacing(12)
     .padding([0, 16])

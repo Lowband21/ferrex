@@ -347,23 +347,29 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 .navigation_history
                 .push(state.domains.ui.state.view.clone());
 
+            state.domains.library.state.library_form_success = None;
             state.domains.ui.state.view = ViewState::LibraryManagement;
             state.domains.library.state.show_library_management = true;
+
+            let fetch_scans_task = Task::done(DomainMessage::Library(
+                library::messages::Message::FetchActiveScans,
+            ));
 
             // Request library refresh if needed
             if !state.domains.ui.state.repo_accessor.is_initialized() {
                 DomainUpdateResult::with_events(
-                    Task::none(),
+                    fetch_scans_task,
                     vec![CrossDomainEvent::RequestLibraryRefresh],
                 )
             } else {
-                DomainUpdateResult::task(Task::none())
+                DomainUpdateResult::task(fetch_scans_task)
             }
         }
         ui::Message::HideLibraryManagement => {
             state.domains.ui.state.view = ViewState::Library;
             state.domains.library.state.show_library_management = false;
             state.domains.library.state.library_form_data = None; // Clear form when leaving management view
+            state.domains.library.state.library_form_success = None;
             DomainUpdateResult::task(Task::none())
         }
         ui::Message::ShowClearDatabaseConfirm => {
@@ -1125,12 +1131,6 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 vec![CrossDomainEvent::MediaToggleFullscreen],
             )
         }
-        ui::Message::ToggleScanProgress => {
-            // Send direct message to library domain
-            DomainUpdateResult::task(Task::done(DomainMessage::Library(
-                library::messages::Message::ToggleScanProgress,
-            )))
-        }
         ui::Message::SelectLibrary(library_id) => {
             // Forward to library domain via cross-domain event
             log::info!(
@@ -1273,12 +1273,46 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 library::messages::Message::ToggleLibraryFormEnabled,
             )))
         }
+        ui::Message::ToggleLibraryFormStartScan => {
+            // Send direct message to library domain
+            DomainUpdateResult::task(Task::done(DomainMessage::Library(
+                library::messages::Message::ToggleLibraryFormStartScan,
+            )))
+        }
         ui::Message::SubmitLibraryForm => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::SubmitLibraryForm,
             )))
         }
+        ui::Message::PauseLibraryScan(library_id, scan_id) => DomainUpdateResult::task(Task::done(
+            DomainMessage::Library(library::messages::Message::PauseScan {
+                library_id,
+                scan_id,
+            }),
+        )),
+        ui::Message::ResumeLibraryScan(library_id, scan_id) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Library(
+                library::messages::Message::ResumeScan {
+                    library_id,
+                    scan_id,
+                },
+            )))
+        }
+        ui::Message::CancelLibraryScan(library_id, scan_id) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Library(
+                library::messages::Message::CancelScan {
+                    library_id,
+                    scan_id,
+                },
+            )))
+        }
+        ui::Message::FetchScanMetrics => DomainUpdateResult::task(Task::done(
+            DomainMessage::Library(library::messages::Message::FetchScanMetrics),
+        )),
+        ui::Message::ResetLibrary(library_id) => DomainUpdateResult::task(Task::done(
+            DomainMessage::Library(library::messages::Message::ResetLibrary(library_id)),
+        )),
 
         // Aggregate all libraries
         ui::Message::AggregateAllLibraries => {

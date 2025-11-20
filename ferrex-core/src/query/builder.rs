@@ -3,6 +3,7 @@ use crate::{LibraryID, api_types::ScalarRange, watch_status::WatchStatusFilter};
 use uuid::Uuid;
 
 /// Fluent API for building media queries
+#[derive(Debug, Clone)]
 pub struct MediaQueryBuilder {
     query: MediaQuery,
 }

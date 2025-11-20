@@ -1,3 +1,4 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -49,6 +50,7 @@ pub trait NamingStrategy: Send + Sync {
     ) -> String;
 }
 
+#[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultNamingStrategy;
 
 impl DefaultNamingStrategy {
@@ -112,6 +114,18 @@ pub struct TmdbFolderGenerator {
     tmdb: Arc<TmdbApiProvider>,
     naming: Arc<dyn NamingStrategy>,
     video_ext: String,
+}
+
+impl fmt::Debug for TmdbFolderGenerator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let naming_type = std::any::type_name_of_val(self.naming.as_ref());
+
+        f.debug_struct("TmdbFolderGenerator")
+            .field("tmdb", &self.tmdb)
+            .field("naming_strategy", &naming_type)
+            .field("video_ext", &self.video_ext)
+            .finish()
+    }
 }
 
 impl TmdbFolderGenerator {

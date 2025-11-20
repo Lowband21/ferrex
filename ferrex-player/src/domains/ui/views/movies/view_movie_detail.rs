@@ -191,8 +191,14 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
             // Genres
             if let Some(ref movie_details) = movie_details_opt {
                 if !movie_details.genres.is_empty() {
+                    let genre_text = movie_details
+                        .genres
+                        .iter()
+                        .map(|genre| genre.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     details = details.push(
-                        text(movie_details.genres.join(", "))
+                        text(genre_text)
                             .size(14)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                     );
@@ -244,12 +250,18 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
 
                     // Production companies below synopsis
                     if !movie_details.production_companies.is_empty() {
+                        let companies = movie_details
+                            .production_companies
+                            .iter()
+                            .map(|company| company.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ");
                         details = details.push(Space::with_height(15));
                         details = details.push(row![
                             text("Production: ")
                                 .size(14)
                                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                            text(movie_details.production_companies.join(", "))
+                            text(companies)
                                 .size(14)
                                 .color(theme::MediaServerTheme::TEXT_PRIMARY)
                         ]);
@@ -414,8 +426,7 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 ref movie_details,
             )) = movie.details
             {
-                let cast_section =
-                    components::create_cast_scrollable(&movie_details.cast, ImageType::Movie);
+                let cast_section = components::create_cast_scrollable(&movie_details.cast);
                 content = content.push(cast_section);
             }
 

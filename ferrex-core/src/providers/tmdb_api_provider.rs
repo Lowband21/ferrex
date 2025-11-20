@@ -2,6 +2,7 @@ use crate::{
     LibraryID, MediaDetailsOption, MovieID, MovieReference, MovieTitle, MovieURL, SeriesID,
     SeriesReference, SeriesTitle, SeriesURL,
 };
+use std::fmt;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
@@ -28,12 +29,19 @@ pub enum ProviderError {
 use tmdb_api::{
     client::{reqwest::ReqwestExecutor, Client},
     movie::{
+        alternative_titles::{MovieAlternativeTitles, MovieAlternativeTitlesResult},
         credits::{MovieCredits, MovieCreditsResult},
         details::MovieDetails,
+        external_ids::{MovieExternalIds, MovieExternalIdsResult},
         images::{MovieImages, MovieImagesResult},
+        keywords::{MovieKeywords, MovieKeywordsResult},
         popular::MoviePopular,
+        recommendations::MovieRecommendations,
         release_dates::{MovieReleaseDates, MovieReleaseDatesResult},
         search::MovieSearch,
+        similar::GetSimilarMovies,
+        translations::{MovieTranslations, MovieTranslationsResult},
+        videos::{MovieVideos, MovieVideosResult},
     },
     prelude::Command,
     tvshow::{
@@ -42,12 +50,14 @@ use tmdb_api::{
         details::TVShowDetails,
         episode::details::TVShowEpisodeDetails,
         images::{TVShowImages, TVShowImagesResult},
+        keywords::{TVShowKeywords, TVShowKeywordsResult},
         popular::TVShowPopular,
         search::TVShowSearch,
         season::details::TVShowSeasonDetails,
     },
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Media {
     Movie,
     Series,
@@ -101,6 +111,14 @@ impl BackdropSize {
 
 pub struct TmdbApiProvider {
     client: Client<ReqwestExecutor>,
+}
+
+impl fmt::Debug for TmdbApiProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TmdbApiProvider")
+            .field("client", &"tmdb_api::Client<ReqwestExecutor>")
+            .finish()
+    }
 }
 
 impl TmdbApiProvider {
@@ -209,6 +227,77 @@ impl TmdbApiProvider {
         id: u64,
     ) -> Result<MovieReleaseDatesResult, ProviderError> {
         MovieReleaseDates::new(id)
+            .execute(&self.client)
+            .await
+            .map_err(|e| ProviderError::ApiError(e.to_string()))
+    }
+
+    /// Get movie keywords
+    pub async fn get_movie_keywords(&self, id: u64) -> Result<MovieKeywordsResult, ProviderError> {
+        MovieKeywords::new(id)
+            .execute(&self.client)
+            .await
+            .map_err(|e| ProviderError::ApiError(e.to_string()))
+    }
+
+    /// Get movie videos (trailers, clips, etc.)
+    pub async fn get_movie_videos(&self, id: u64) -> Result<MovieVideosResult, ProviderError> {
+        MovieVideos::new(id)
+            .execute(&self.client)
+            .await
+            .map_err(|e| ProviderError::ApiError(e.to_string()))
+    }
+
+    /// Get movie translations
+    pub async fn get_movie_translations(
+        &self,
+        id: u64,
+    ) -> Result<MovieTranslationsResult, ProviderError> {
+        MovieTranslations::new(id)
+            .execute(&self.client)
+            .await
+            .map_err(|e| ProviderError::ApiError(e.to_string()))
+    }
+
+    /// Get movie alternative titles
+    pub async fn get_movie_alternative_titles(
+        &self,
+        id: u64,
+    ) -> Result<MovieAlternativeTitlesResult, ProviderError> {
+        MovieAlternativeTitles::new(id)
+            .execute(&self.client)
+            .await
+            .map_err(|e| ProviderError::ApiError(e.to_string()))
+    }
+
+    /// Get movie recommendations (first page)
+    pub async fn get_movie_recommendations(
+        &self,
+        id: u64,
+    ) -> Result<tmdb_api::common::PaginatedResult<tmdb_api::movie::MovieShort>, ProviderError> {
+        MovieRecommendations::new(id)
+            .execute(&self.client)
+            .await
+            .map_err(|e| ProviderError::ApiError(e.to_string()))
+    }
+
+    /// Get similar movies (first page)
+    pub async fn get_movie_similar(
+        &self,
+        id: u64,
+    ) -> Result<tmdb_api::common::PaginatedResult<tmdb_api::movie::MovieShort>, ProviderError> {
+        GetSimilarMovies::new(id)
+            .execute(&self.client)
+            .await
+            .map_err(|e| ProviderError::ApiError(e.to_string()))
+    }
+
+    /// Get movie external IDs
+    pub async fn get_movie_external_ids(
+        &self,
+        id: u64,
+    ) -> Result<MovieExternalIdsResult, ProviderError> {
+        MovieExternalIds::new(id)
             .execute(&self.client)
             .await
             .map_err(|e| ProviderError::ApiError(e.to_string()))

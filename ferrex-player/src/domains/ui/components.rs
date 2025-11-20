@@ -21,10 +21,7 @@ use rkyv::rancor::Error;
     ),
     profiling::function
 )]
-pub fn create_cast_scrollable(
-    cast: &[ArchivedCastMember],
-    image_type: ImageType,
-) -> Element<'static, Message> {
+pub fn create_cast_scrollable(cast: &[ArchivedCastMember]) -> Element<'static, Message> {
     if cast.is_empty() {
         return Space::new(0, 0).into();
     }
@@ -38,7 +35,7 @@ pub fn create_cast_scrollable(
     let mut cast_row = row![].spacing(15);
 
     for actor in cast.iter().take(15) {
-        let cast_card = create_cast_card(actor, image_type);
+        let cast_card = create_cast_card(actor);
         cast_row = cast_row.push(cast_card);
     }
 
@@ -60,10 +57,7 @@ pub fn create_cast_scrollable(
     ),
     profiling::function
 )]
-fn create_cast_card(
-    actor: &ArchivedCastMember,
-    image_type: ImageType,
-) -> Element<'static, Message> {
+fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, Message> {
     let card_width = 120.0;
     let image_height = 180.0;
 
@@ -82,7 +76,7 @@ fn create_cast_card(
     // Use image_for widget with rounded_image_shader
     let profile_image = image_for(person_uuid)
         .size(ImageSize::Profile)
-        .image_type(image_type)
+        .image_type(ImageType::Person)
         .width(Length::Fixed(card_width))
         .height(Length::Fixed(image_height))
         .radius(CORNER_RADIUS)

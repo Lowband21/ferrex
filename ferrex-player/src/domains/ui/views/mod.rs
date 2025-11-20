@@ -12,7 +12,6 @@ pub mod loading;
 pub mod movies;
 pub mod password_login;
 pub mod pin_entry;
-pub mod scanning;
 pub mod settings;
 pub mod tv;
 pub mod user_selection;

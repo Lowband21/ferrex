@@ -143,10 +143,10 @@ profile-with-puffin = [
 ]
 profile-with-tracy = [
     "dep:profiling",
-    "profiling/profile-with-tracy",
-    "dep:tracy-client",
+    #"profiling/profile-with-tracy",
+    #"dep:tracy-client",
 ]
-profile-with-tracing = ["dep:profiling", "profiling/profile-with-tracing"]
+profile-with-tracing = ["dep:profiling"]#"profiling/profile-with-tracing"]
 
 profiling-stats = ["dep:hdrhistogram"]
 

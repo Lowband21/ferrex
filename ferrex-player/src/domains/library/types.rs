@@ -12,4 +12,5 @@ pub struct LibraryFormData {
     pub scan_interval_minutes: String,
     pub enabled: bool,
     pub editing: bool, // true if editing existing library, false if creating new
+    pub start_scan: bool,
 }

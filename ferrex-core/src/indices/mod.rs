@@ -3,12 +3,20 @@ use crate::{
     database::traits::MediaDatabaseTrait,
     query::{SortBy, SortOrder},
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fmt, sync::Arc};
 use uuid::Uuid;
 
 /// Manages in-memory sorting for libraries
 pub struct IndexManager {
     db: Arc<MediaDatabase>,
+}
+
+impl fmt::Debug for IndexManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IndexManager")
+            .field("db", &self.db)
+            .finish()
+    }
 }
 
 impl IndexManager {

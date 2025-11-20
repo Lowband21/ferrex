@@ -1,5 +1,6 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
+use constant_time_eq::constant_time_eq;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;
@@ -103,8 +104,6 @@ impl SessionToken {
 
     /// Constant-time comparison with another token
     pub fn secure_compare(&self, other: &str) -> bool {
-        use ring::constant_time;
-
         let self_bytes = self.value.as_bytes();
         let other_bytes = other.as_bytes();
 
@@ -112,7 +111,7 @@ impl SessionToken {
             return false;
         }
 
-        constant_time::verify_slices_are_equal(self_bytes, other_bytes).is_ok()
+        constant_time_eq(self_bytes, other_bytes)
     }
 }
 

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::PgPool;
+use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -10,6 +11,14 @@ use crate::auth::domain::value_objects::DeviceFingerprint;
 
 pub struct PostgresDeviceSessionRepository {
     pool: Arc<PgPool>,
+}
+
+impl fmt::Debug for PostgresDeviceSessionRepository {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PostgresDeviceSessionRepository")
+            .field("pool_refs", &Arc::strong_count(&self.pool))
+            .finish()
+    }
 }
 
 impl PostgresDeviceSessionRepository {

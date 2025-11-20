@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::Duration;
+use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -32,6 +33,15 @@ pub struct AuthenticationService {
     session_repo: Arc<dyn DeviceSessionRepository>,
 }
 
+impl fmt::Debug for AuthenticationService {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthenticationService")
+            .field("user_repo_refs", &Arc::strong_count(&self.user_repo))
+            .field("session_repo_refs", &Arc::strong_count(&self.session_repo))
+            .finish()
+    }
+}
+
 impl AuthenticationService {
     pub fn new(
         user_repo: Arc<dyn UserAuthenticationRepository>,
@@ -46,17 +56,15 @@ impl AuthenticationService {
     pub async fn authenticate_user(
         &self,
         username: &str,
-        password: &str,
+        _password: &str,
     ) -> Result<UserAuthentication, AuthenticationError> {
-        let user = self
+        let _user = self
             .user_repo
             .find_by_username(username)
             .await?
             .ok_or(AuthenticationError::UserNotFound)?;
 
-        // For now, just return the user if found
-        // TODO: Add password verification
-        Ok(user)
+        todo!();
     }
 
     /// Authenticate using PIN on a registered device

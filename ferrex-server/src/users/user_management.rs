@@ -13,7 +13,7 @@ use ferrex_core::{api_types::ApiResponse, user::User};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{AppState, errors::AppResult};
+use crate::infra::{app_state::AppState, errors::AppResult};
 
 /// Query parameters for user listing
 #[derive(Debug, Deserialize)]

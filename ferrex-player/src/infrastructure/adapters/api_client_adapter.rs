@@ -12,19 +12,21 @@ use uuid::Uuid;
 
 use crate::infrastructure::ApiClient;
 use crate::infrastructure::api_client::SetupStatus;
-use crate::infrastructure::constants::{
-    routes,
-    routes::{libraries::GET_SORTED_INDICES, utils::replace_param},
-};
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::api::ApiService;
+use ferrex_core::api_routes::utils::replace_param;
+use ferrex_core::api_routes::v1;
+use ferrex_core::api_scan::ScanConfig;
 use ferrex_core::auth::device::AuthenticatedDevice;
 use ferrex_core::types::library::Library;
 use ferrex_core::user::{AuthToken, User};
 use ferrex_core::watch_status::{UpdateProgressRequest, UserWatchState};
 use ferrex_core::{
-    FilterIndicesRequest, IndicesResponse, LibraryID, Media, MediaIDLike, ScanRequest,
-    ScanResponse, SortBy, SortOrder,
+    FilterIndicesRequest, IndicesResponse, LibraryID, Media, MediaIDLike, SortBy, SortOrder,
+    api_types::{
+        ActiveScansResponse, CreateLibraryRequest, LatestProgressResponse,
+        ScanCommandAcceptedResponse, ScanCommandRequest, StartScanRequest, UpdateLibraryRequest,
+    },
 };
 
 /// Adapter that implements ApiService using the existing ApiClient
@@ -56,11 +58,7 @@ impl ApiClientAdapter {
         let mut all_ids: Vec<Uuid> = Vec::new();
         let mut offset: usize = 0;
         let page_size: usize = 500;
-        let base = routes::utils::replace_param(
-            routes::libraries::SORTED_IDS,
-            ":id",
-            library_id.to_string(),
-        );
+        let base = replace_param(v1::libraries::SORTED_IDS, "{id}", library_id.to_string());
 
         loop {
             let path = format!(
@@ -106,7 +104,11 @@ impl ApiClientAdapter {
         sort: SortBy,
         order: SortOrder,
     ) -> RepositoryResult<Vec<u32>> {
-        let path = replace_param(GET_SORTED_INDICES, ":id", library_id.to_string());
+        let path = replace_param(
+            v1::libraries::SORTED_INDICES,
+            "{id}",
+            library_id.to_string(),
+        );
         // Pass sort/order as query string (snake_case for sort field)
         let sort_str = match sort {
             SortBy::Title => "title",
@@ -142,9 +144,11 @@ impl ApiClientAdapter {
         library_id: Uuid,
         spec: &FilterIndicesRequest,
     ) -> RepositoryResult<Vec<u32>> {
-        use crate::infrastructure::constants::routes::libraries::POST_FILTER_INDICES;
-        use crate::infrastructure::constants::routes::utils::replace_param;
-        let path = replace_param(POST_FILTER_INDICES, ":id", library_id.to_string());
+        let path = replace_param(
+            v1::libraries::FILTERED_INDICES,
+            "{id}",
+            library_id.to_string(),
+        );
         let url = self.client.build_url(&path, false);
         let req = self.client.client.post(&url).json(spec);
         let req = self.client.build_request(req).await;
@@ -218,7 +222,7 @@ impl ApiService for ApiClientAdapter {
     }
 
     async fn fetch_libraries(&self) -> RepositoryResult<Vec<Library>> {
-        self.get("/libraries").await
+        self.get(v1::libraries::COLLECTION).await
     }
 
     async fn fetch_library_media(&self, library_id: Uuid) -> RepositoryResult<Vec<Media>> {
@@ -226,7 +230,7 @@ impl ApiService for ApiClientAdapter {
 
         // Build URL for the library media endpoint
         let url = self.client.build_url(
-            &replace_param(routes::libraries::GET_MEDIA, ":id", library_id.to_string()),
+            &replace_param(v1::libraries::MEDIA, "{id}", library_id.to_string()),
             false,
         );
         log::info!("Fetching library media from {}", url);
@@ -249,30 +253,6 @@ impl ApiService for ApiClientAdapter {
             })?;
 
         Ok(response.media)
-    }
-
-    async fn scan_all_libraries(&self, force_refresh: bool) -> RepositoryResult<ScanResponse> {
-        let response: ScanResponse = self.put(&"/libraries/scan", &force_refresh).await?;
-
-        Ok(response)
-    }
-
-    async fn scan_library(
-        &self,
-        library_id: LibraryID,
-        force_refresh: bool,
-    ) -> RepositoryResult<ScanResponse> {
-        let response: ScanResponse = self
-            .post(
-                &"/library/scan",
-                &ScanRequest {
-                    library_id,
-                    force_refresh,
-                },
-            )
-            .await?;
-
-        Ok(response)
     }
 
     async fn health_check(&self) -> RepositoryResult<bool> {
@@ -328,7 +308,7 @@ impl ApiService for ApiClientAdapter {
     async fn check_setup_status(&self) -> RepositoryResult<SetupStatus> {
         // ApiClient's check_setup_status returns bool, but we need SetupStatus
         // Call the endpoint directly to get the full status
-        self.get::<SetupStatus>("/setup/status").await
+        self.get::<SetupStatus>(v1::setup::STATUS).await
     }
 
     async fn create_initial_admin(
@@ -346,7 +326,7 @@ impl ApiService for ApiClientAdapter {
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
 
         // Now get the user info
-        let user: User = self.get("/users/me").await?;
+        let user: User = self.get(v1::users::CURRENT).await?;
 
         Ok((user, token))
     }
@@ -374,13 +354,9 @@ impl ApiService for ApiClientAdapter {
         self.client.get_token().await
     }
 
-    async fn create_library(
-        &self,
-        request: ferrex_core::api_types::CreateLibraryRequest,
-    ) -> RepositoryResult<LibraryID> {
-        use crate::infrastructure::constants::routes::libraries;
+    async fn create_library(&self, request: CreateLibraryRequest) -> RepositoryResult<LibraryID> {
         self.client
-            .post(libraries::CREATE, &request)
+            .post(v1::libraries::COLLECTION, &request)
             .await
             .map_err(|e| RepositoryError::CreateFailed(e.to_string()))
     }
@@ -388,9 +364,9 @@ impl ApiService for ApiClientAdapter {
     async fn update_library(
         &self,
         id: LibraryID,
-        request: ferrex_core::api_types::UpdateLibraryRequest,
+        request: UpdateLibraryRequest,
     ) -> RepositoryResult<()> {
-        let path = format!("/libraries/{}", id.as_uuid());
+        let path = replace_param(v1::libraries::ITEM, "{id}", id.as_uuid().to_string());
         let _: String = self
             .client
             .put(&path, &request)
@@ -400,12 +376,94 @@ impl ApiService for ApiClientAdapter {
     }
 
     async fn delete_library(&self, id: LibraryID) -> RepositoryResult<()> {
-        let path = format!("/libraries/{}", id.as_uuid());
+        let path = replace_param(v1::libraries::ITEM, "{id}", id.as_uuid().to_string());
         let _: String = self
             .client
             .delete(&path)
             .await
             .map_err(|e| RepositoryError::DeleteFailed(e.to_string()))?;
         Ok(())
+    }
+
+    async fn start_library_scan(
+        &self,
+        library_id: LibraryID,
+        request: StartScanRequest,
+    ) -> RepositoryResult<ScanCommandAcceptedResponse> {
+        let path = replace_param(v1::libraries::scans::START, "{id}", library_id.to_string());
+        self.client
+            .post(&path, &request)
+            .await
+            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
+    }
+
+    async fn pause_library_scan(
+        &self,
+        library_id: LibraryID,
+        request: ScanCommandRequest,
+    ) -> RepositoryResult<ScanCommandAcceptedResponse> {
+        let path = replace_param(v1::libraries::scans::PAUSE, "{id}", library_id.to_string());
+        self.client
+            .post(&path, &request)
+            .await
+            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
+    }
+
+    async fn resume_library_scan(
+        &self,
+        library_id: LibraryID,
+        request: ScanCommandRequest,
+    ) -> RepositoryResult<ScanCommandAcceptedResponse> {
+        let path = replace_param(v1::libraries::scans::RESUME, "{id}", library_id.to_string());
+        self.client
+            .post(&path, &request)
+            .await
+            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
+    }
+
+    async fn cancel_library_scan(
+        &self,
+        library_id: LibraryID,
+        request: ScanCommandRequest,
+    ) -> RepositoryResult<ScanCommandAcceptedResponse> {
+        let path = replace_param(v1::libraries::scans::CANCEL, "{id}", library_id.to_string());
+        self.client
+            .post(&path, &request)
+            .await
+            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
+    }
+
+    async fn fetch_active_scans(&self) -> RepositoryResult<ActiveScansResponse> {
+        self.client
+            .get(v1::scan::ACTIVE)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn fetch_latest_scan_progress(
+        &self,
+        scan_id: uuid::Uuid,
+    ) -> RepositoryResult<LatestProgressResponse> {
+        let path = format!("{}?scan_id={}", v1::scan::PROGRESS, scan_id);
+        self.client
+            .get(&path)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn fetch_scan_metrics(&self) -> RepositoryResult<ferrex_core::api_scan::ScanMetrics> {
+        self.client
+            .get(v1::scan::METRICS)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn fetch_scan_config(&self) -> RepositoryResult<ScanConfig> {
+        let wrapped: ferrex_core::api_scan::ScanConfig = self
+            .client
+            .get(v1::scan::CONFIG)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
+        Ok(wrapped)
     }
 }

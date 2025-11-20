@@ -7,6 +7,7 @@ use super::fields::*;
 use super::traits::{HasField, SortFieldSet};
 
 /// Field set for movies with full metadata
+#[derive(Debug, Default, Clone, Copy)]
 pub struct MovieFieldSet;
 
 impl SortFieldSet for MovieFieldSet {}
@@ -26,6 +27,7 @@ impl HasField<LastWatchedField> for MovieFieldSet {}
 impl HasField<WatchProgressField> for MovieFieldSet {}
 
 /// Field set for TV series with full metadata
+#[derive(Debug, Default, Clone, Copy)]
 pub struct SeriesFieldSet;
 
 impl SortFieldSet for SeriesFieldSet {}
@@ -40,6 +42,7 @@ impl HasField<LastWatchedField> for SeriesFieldSet {}
 impl HasField<WatchProgressField> for SeriesFieldSet {} // Overall series progress
 
 /// Field set for episodes
+#[derive(Debug, Default, Clone, Copy)]
 pub struct EpisodeFieldSet;
 
 impl SortFieldSet for EpisodeFieldSet {}
@@ -58,6 +61,7 @@ impl HasField<WatchProgressField> for EpisodeFieldSet {}
 // Note: Episodes don't have popularity field typically
 
 /// Field set for seasons
+#[derive(Debug, Default, Clone, Copy)]
 pub struct SeasonFieldSet;
 
 impl SortFieldSet for SeasonFieldSet {}
@@ -73,6 +77,7 @@ impl HasField<WatchProgressField> for SeasonFieldSet {} // Season completion
 ///
 /// This is used when metadata hasn't been fetched yet or isn't available.
 /// Only supports fields that can be derived from file information.
+#[derive(Debug, Default, Clone, Copy)]
 pub struct BasicMediaFieldSet;
 
 impl SortFieldSet for BasicMediaFieldSet {}
@@ -86,6 +91,7 @@ impl HasField<DateAddedField> for BasicMediaFieldSet {} // File creation/scan ti
 ///
 /// Used when sorting heterogeneous collections (movies + series + episodes).
 /// Only supports fields common to all media types.
+#[derive(Debug, Default, Clone, Copy)]
 pub struct MixedMediaFieldSet;
 
 impl SortFieldSet for MixedMediaFieldSet {}

@@ -33,7 +33,7 @@ impl HdrMetadataExtractor {
                     .ok_or_else(|| MediaError::InvalidMedia("Invalid file path".to_string()))?,
             ])
             .output()
-            .map_err(|e| MediaError::Io(e))?;
+            .map_err(MediaError::Io)?;
 
         if !output.status.success() {
             return Err(MediaError::InvalidMedia("ffprobe failed".to_string()));

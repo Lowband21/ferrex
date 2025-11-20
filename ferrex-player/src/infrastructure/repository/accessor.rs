@@ -250,15 +250,9 @@ impl<R: ReadCap> Accessor<R> {
         library_id: &LibraryID,
     ) -> RepositoryResult<Vec<Uuid>> {
         self.with_repo(|repo| {
-            // Preferred path: server-provided sorted indices
-            if let Some(map) = &repo.sorted_indices {
-                if let Some(vec) = map.get(&library_id.as_uuid()) {
-                    return Ok(vec.clone());
-                }
-            }
+            let lib_uuid = library_id.as_uuid();
 
-            // Fallback: compute indices directly from archived library
-            // 1) Determine library type
+            // Determine library type from archived snapshot
             let owned_lib =
                 repo.get_library_internal(library_id)
                     .ok_or(RepositoryError::NotFound {
@@ -266,35 +260,73 @@ impl<R: ReadCap> Accessor<R> {
                         id: library_id.to_string(),
                     })?;
 
-            // 2) Get archived library yoke (zero-copy access)
-            let lib_uuid = library_id.as_uuid();
-            let yoke = repo.get_archived_library_yoke_internal(&lib_uuid).ok_or(
-                RepositoryError::NotFound {
-                    entity_type: "ArchivedLibrary".to_string(),
-                    id: library_id.to_string(),
-                },
-            )?;
+            // Preferred path: server-provided sorted indices (movies only for now)
+            let mut ids = if let Some(vec) = repo
+                .sorted_indices
+                .as_ref()
+                .and_then(|map| map.get(&lib_uuid))
+            {
+                vec.clone()
+            } else {
+                // Fallback: compute indices directly from archived library
+                let yoke = repo.get_archived_library_yoke_internal(&lib_uuid).ok_or(
+                    RepositoryError::NotFound {
+                        entity_type: "ArchivedLibrary".to_string(),
+                        id: library_id.to_string(),
+                    },
+                )?;
 
-            let archived = yoke.get();
-            let slice = archived.media_as_slice();
+                let archived = yoke.get();
+                let slice = archived.media_as_slice();
 
-            // 3) Filter top-level media by library type and collect UUIDs
-            let ids: Vec<Uuid> = match owned_lib.library_type {
-                ferrex_core::LibraryType::Movies => slice
-                    .iter()
-                    .filter_map(|m| match m {
-                        ArchivedMedia::Movie(movie) => Some(Uuid::from_bytes(movie.id.0)),
-                        _ => None,
-                    })
-                    .collect(),
-                ferrex_core::LibraryType::Series => slice
-                    .iter()
-                    .filter_map(|m| match m {
-                        ArchivedMedia::Series(series) => Some(Uuid::from_bytes(series.id.0)),
-                        _ => None,
-                    })
-                    .collect(),
+                match owned_lib.library_type {
+                    ferrex_core::LibraryType::Movies => slice
+                        .iter()
+                        .filter_map(|m| match m {
+                            ArchivedMedia::Movie(movie) => Some(Uuid::from_bytes(movie.id.0)),
+                            _ => None,
+                        })
+                        .collect(),
+                    ferrex_core::LibraryType::Series => slice
+                        .iter()
+                        .filter_map(|m| match m {
+                            ArchivedMedia::Series(series) => Some(Uuid::from_bytes(series.id.0)),
+                            _ => None,
+                        })
+                        .collect(),
+                }
             };
+
+            // Remove any ids marked deleted in the overlay
+            if !repo.modifications.deleted.is_empty() {
+                ids.retain(|id| !repo.modifications.deleted.contains(id));
+            }
+
+            // Append runtime additions for this library, filtered by library type
+            if let Some(additions) = repo.modifications.added_by_library.get(&lib_uuid) {
+                let mut new_ids: Vec<Uuid> = additions.iter().copied().collect();
+                new_ids.sort();
+
+                for media_id in new_ids {
+                    if ids.contains(&media_id) {
+                        continue;
+                    }
+
+                    let Some(media) = repo.modifications.added.get(&media_id) else {
+                        continue;
+                    };
+
+                    let matches_library = match (&owned_lib.library_type, media) {
+                        (ferrex_core::LibraryType::Movies, Media::Movie(_)) => true,
+                        (ferrex_core::LibraryType::Series, Media::Series(_)) => true,
+                        _ => false,
+                    };
+
+                    if matches_library {
+                        ids.push(media_id);
+                    }
+                }
+            }
 
             Ok(ids)
         })

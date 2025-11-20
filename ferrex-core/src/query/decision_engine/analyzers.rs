@@ -19,6 +19,7 @@ pub enum DataCompleteness {
 }
 
 /// Analyzer for determining data completeness
+#[derive(Debug, Default, Clone, Copy)]
 pub struct DataCompletenessAnalyzer;
 
 impl DataCompletenessAnalyzer {
@@ -149,6 +150,7 @@ impl DataCompletenessAnalyzer {
 }
 
 /// Analyzer for query complexity
+#[derive(Debug, Default, Clone, Copy)]
 pub struct QueryComplexityAnalyzer;
 
 impl QueryComplexityAnalyzer {
@@ -246,8 +248,17 @@ mod tests {
                         vote_count: Some(100),
                         popularity: Some(50.0),
                         content_rating: None,
+                        content_ratings: Vec::new(),
+                        release_dates: Vec::new(),
                         genres: vec![],
+                        spoken_languages: vec![],
                         production_companies: vec![],
+                        production_countries: vec![],
+                        homepage: None,
+                        status: None,
+                        tagline: None,
+                        budget: None,
+                        revenue: None,
                         poster_path: None,
                         backdrop_path: None,
                         logo_path: None,
@@ -257,6 +268,12 @@ mod tests {
                         videos: vec![],
                         keywords: vec![],
                         external_ids: Default::default(),
+                        alternative_titles: Vec::new(),
+                        translations: Vec::new(),
+                        collection: None,
+                        recommendations: Vec::new(),
+                        similar: Vec::new(),
+                        original_title: None,
                     },
                 ))
             } else {

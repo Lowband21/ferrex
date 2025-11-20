@@ -18,8 +18,8 @@ pub struct RefreshRequest {
 use uuid::Uuid;
 
 use super::jwt::{generate_access_token, generate_refresh_token};
-use crate::{
-    AppState,
+use crate::infra::{
+    app_state::AppState,
     errors::{AppError, AppResult},
 };
 

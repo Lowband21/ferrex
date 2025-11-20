@@ -72,6 +72,7 @@ pub enum Container {
     Header,
     HeaderAccent,
     ErrorBox,
+    SuccessBox,
     Modal,
     ModalOverlay,
     TechDetail,
@@ -166,6 +167,17 @@ impl Container {
                 background: Some(Background::Color(Color::from_rgba(1.0, 0.2, 0.2, 0.1))),
                 border: Border {
                     color: MediaServerTheme::ERROR_COLOR,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                shadow: Shadow::default(),
+                snap: false,
+            },
+            Container::SuccessBox => |_| container::Style {
+                text_color: Some(MediaServerTheme::TEXT_PRIMARY),
+                background: Some(Background::Color(Color::from_rgba(0.0, 0.8, 0.4, 0.12))),
+                border: Border {
+                    color: MediaServerTheme::SUCCESS,
                     width: 1.0,
                     radius: 4.0.into(),
                 },

@@ -3,17 +3,16 @@
 //! This module provides thread-safe management of authentication states
 //! across multiple devices, with persistence and recovery capabilities.
 
-use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch};
-use tokio::time::{interval, timeout};
+use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::auth::AuthError;
 use crate::auth::state_machine::*;
 use crate::error::Result;
 
@@ -56,6 +55,17 @@ pub struct AuthStateManager {
 
     /// Configuration
     config: StateManagerConfig,
+}
+
+impl fmt::Debug for AuthStateManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let state_count = self.states.read().map(|states| states.len()).unwrap_or(0);
+
+        f.debug_struct("AuthStateManager")
+            .field("state_count", &state_count)
+            .field("config", &self.config)
+            .finish()
+    }
 }
 
 /// Configuration for the state manager

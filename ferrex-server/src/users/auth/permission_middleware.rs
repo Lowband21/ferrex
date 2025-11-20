@@ -8,7 +8,7 @@ use ferrex_core::{api_types::ApiResponse, rbac::UserPermissions, user::User};
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::AppState;
+use crate::infra::app_state::AppState;
 
 /// Middleware that checks if the user has a specific permission
 /// This should be run AFTER auth_middleware which sets the User extension
@@ -155,7 +155,7 @@ pub async fn require_permission_async(
         perms.clone()
     } else {
         // Load permissions from database
-        match state.database.backend().get_user_permissions(user.id).await {
+        match state.db.backend().get_user_permissions(user.id).await {
             Ok(perms) => {
                 request.extensions_mut().insert(perms.clone());
                 perms

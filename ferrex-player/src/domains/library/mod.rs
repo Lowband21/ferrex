@@ -13,9 +13,10 @@ use self::types::LibraryFormData;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use crate::infrastructure::repository::accessor::{Accessor, ReadWrite};
-use ferrex_core::api_types::LibraryMediaCache;
+use ferrex_core::api_scan::{ScanConfig, ScanMetrics};
+use ferrex_core::api_types::{LibraryMediaCache, ScanProgressEvent, ScanSnapshotDto};
 use ferrex_core::types::library::Library;
-use ferrex_core::{ArchivedLibrary, LibraryID, ScanProgress};
+use ferrex_core::{ArchivedLibrary, LibraryID};
 use iced::Task;
 use rkyv::vec::ArchivedVec;
 use std::collections::HashMap;
@@ -29,12 +30,15 @@ pub struct LibraryDomainState {
     pub show_library_management: bool,
     pub library_form_data: Option<LibraryFormData>,
     pub library_form_errors: Vec<String>,
+    pub library_form_success: Option<String>,
     pub library_media_cache: HashMap<Uuid, LibraryMediaCache>,
-    pub scanning: bool,
-    pub active_scan_id: Option<Uuid>,
-    pub scan_progress: Option<ScanProgress>,
-    pub show_scan_progress: bool,
+    pub active_scans: HashMap<Uuid, ScanSnapshotDto>,
+    pub latest_progress: HashMap<Uuid, ScanProgressEvent>,
     pub initial_library_fetch: bool,
+
+    // Diagnostics
+    pub scan_metrics: Option<ScanMetrics>,
+    pub scan_config: Option<ScanConfig>,
 
     pub api_service: Option<Arc<ApiClientAdapter>>,
 
@@ -51,12 +55,13 @@ impl LibraryDomainState {
             show_library_management: false,
             library_form_data: None,
             library_form_errors: Vec::new(),
+            library_form_success: None,
             library_media_cache: HashMap::new(),
-            scanning: false,
-            active_scan_id: None,
-            scan_progress: None,
-            show_scan_progress: false,
+            active_scans: HashMap::new(),
+            latest_progress: HashMap::new(),
             initial_library_fetch: false,
+            scan_metrics: None,
+            scan_config: None,
             api_service,
             repo_accessor,
         }

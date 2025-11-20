@@ -2,13 +2,17 @@ use crate::{
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
     domains::{
         library::update_handlers::fetch_libraries,
-        ui::{types::ViewState, view_models::ViewModel},
+        ui::{tabs::TabId, types::ViewState, view_models::ViewModel},
     },
+    infrastructure::api_types::Media,
     state_refactored::State,
 };
 
 use super::messages::Message;
 use iced::Task;
+use std::collections::HashSet;
+
+use ferrex_core::{LibraryID, MediaIDLike, MediaOps};
 
 #[cfg_attr(
     any(
@@ -51,10 +55,14 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
-        Message::CreateLibrary(library) => {
+        Message::CreateLibrary {
+            library,
+            start_scan,
+        } => {
             let task = super::update_handlers::library_management::handle_create_library(
                 state,
                 library,
+                start_scan,
                 state.server_url.clone(),
             );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
@@ -107,12 +115,96 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
         }
 
         Message::ScanLibrary(library_id) => {
-            let task = super::update_handlers::scan_updates::handle_scan_library(
-                state,
-                library_id,
-                state.server_url.clone(),
+            let task = super::update_handlers::scan_updates::handle_scan_library(state, library_id);
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        Message::PauseScan {
+            library_id,
+            scan_id,
+        } => {
+            let task =
+                super::update_handlers::scan_updates::handle_pause_scan(state, library_id, scan_id);
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        Message::ResumeScan {
+            library_id,
+            scan_id,
+        } => {
+            let task = super::update_handlers::scan_updates::handle_resume_scan(
+                state, library_id, scan_id,
             );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        Message::CancelScan {
+            library_id,
+            scan_id,
+        } => {
+            let task = super::update_handlers::scan_updates::handle_cancel_scan(
+                state, library_id, scan_id,
+            );
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        Message::FetchScanMetrics => {
+            let task = super::update_handlers::scan_updates::handle_fetch_scan_metrics(state);
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        Message::ScanMetricsLoaded(result) => {
+            match result {
+                Ok(metrics) => {
+                    state.domains.library.state.scan_metrics = Some(metrics);
+                }
+                Err(err) => {
+                    log::warn!("Failed to fetch scan metrics: {}", err);
+                }
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+
+        Message::FetchScanConfig => {
+            let task = super::update_handlers::scan_updates::handle_fetch_scan_config(state);
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        Message::ScanConfigLoaded(result) => {
+            match result {
+                Ok(cfg) => {
+                    state.domains.library.state.scan_config = Some(cfg);
+                }
+                Err(err) => {
+                    log::warn!("Failed to fetch scan config: {}", err);
+                }
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+
+        Message::ResetLibrary(library_id) => {
+            let task =
+                super::update_handlers::library_management::handle_reset_library(state, library_id);
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        Message::ResetLibraryDone(result) => {
+            if let Err(err) = result {
+                state.domains.ui.state.error_message =
+                    Some(format!("Library reset failed: {}", err));
+            } else {
+                // Refresh libraries and active scans after fresh rescan
+                let fetch = super::update_handlers::library_loaded::fetch_libraries(
+                    state.api_service.clone(),
+                );
+                return DomainUpdateResult::task(
+                    Task::perform(fetch, |res| {
+                        Message::LibrariesLoaded(res.map_err(|e| e.to_string()))
+                    })
+                    .map(DomainMessage::Library),
+                );
+            }
+            DomainUpdateResult::task(Task::none())
         }
 
         // Library form management - using actual handlers
@@ -165,6 +257,14 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
+        Message::ToggleLibraryFormStartScan => {
+            let task =
+                super::update_handlers::library_management::handle_toggle_library_form_start_scan(
+                    state,
+                );
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
         Message::SubmitLibraryForm => {
             let task =
                 super::update_handlers::library_management::handle_submit_library_form(state);
@@ -173,63 +273,78 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
 
         // Scanning - duplicate handler removed
         // Already handled above
-        Message::ScanStarted(scan_id) => {
-            let task = super::update_handlers::scan_updates::handle_scan_started(state, scan_id);
+        Message::ScanStarted {
+            library_id,
+            scan_id,
+            correlation_id,
+        } => {
+            log::info!(
+                "Scan started: library={}, scan={}, correlation={}",
+                library_id,
+                scan_id,
+                correlation_id
+            );
+
+            state.domains.library.state.active_scans.insert(
+                scan_id,
+                ferrex_core::api_types::ScanSnapshotDto {
+                    scan_id,
+                    library_id,
+                    status: ferrex_core::api_types::ScanLifecycleStatus::Running,
+                    completed_items: 0,
+                    total_items: 0,
+                    retrying_items: 0,
+                    dead_lettered_items: 0,
+                    correlation_id,
+                    idempotency_key: String::new(),
+                    current_path: None,
+                    started_at: chrono::Utc::now(),
+                    terminal_at: None,
+                    sequence: 0,
+                },
+            );
+
+            let task = super::update_handlers::scan_updates::handle_fetch_active_scans(state);
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
-        Message::ScanProgressUpdate(progress) => {
-            let task =
-                super::update_handlers::scan_updates::handle_scan_progress_update(state, progress);
+        Message::FetchActiveScans => {
+            let task = super::update_handlers::scan_updates::handle_fetch_active_scans(state);
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
-        Message::ScanCompleted(result) => {
-            // Inline handler from update.rs
-            state.domains.library.state.scanning = false;
-
-            /*
-            // NEW: Exit batch mode in MediaStore when scan completes
-            if let Ok(mut store) = state.domains.media.state.media_store.write() {
-                log::info!("Exiting batch mode in MediaStore - scan completed");
-                store.end_batch();
-            } */
-            match result {
-                Ok(msg) => {
-                    log::info!("Scan completed: {}", msg);
-                    // Refresh library after successful scan
-                    let task =
-                        super::update_handlers::refresh_library::handle_refresh_library(state);
-                    DomainUpdateResult::task(task.map(DomainMessage::Library))
-                }
-                Err(e) => {
-                    log::error!("Scan failed: {}", e);
-                    state.domains.ui.state.error_message = Some(format!("Scan failed: {}", e));
-                    DomainUpdateResult::task(Task::none())
-                }
-            }
-        }
-
-        Message::ClearScanProgress => {
-            let task = super::update_handlers::scan_updates::handle_clear_scan_progress(state);
-            DomainUpdateResult::task(task.map(DomainMessage::Library))
-        }
-
-        Message::ToggleScanProgress => {
-            let task = super::update_handlers::scan_updates::handle_toggle_scan_progress(state);
-            DomainUpdateResult::task(task.map(DomainMessage::Library))
-        }
-
-        Message::CheckActiveScans => {
-            // No handler exists for this message
-            log::warn!("CheckActiveScans: No handler available");
+        Message::ActiveScansUpdated(snapshots) => {
+            super::update_handlers::scan_updates::apply_active_scan_snapshot(state, snapshots);
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::ActiveScansChecked(scans) => {
-            let task =
-                super::update_handlers::scan_updates::handle_active_scans_checked(state, scans);
-            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        Message::ScanProgressFrame(frame) => {
+            let status = frame.status.clone();
+            super::update_handlers::scan_updates::apply_scan_progress_frame(state, frame.clone());
+
+            match status.as_str() {
+                "completed" => {
+                    super::update_handlers::scan_updates::remove_scan(state, frame.scan_id);
+                    let refresh_task =
+                        super::update_handlers::refresh_library::handle_refresh_library(state);
+                    DomainUpdateResult::task(refresh_task.map(DomainMessage::Library))
+                }
+                "failed" | "canceled" => {
+                    super::update_handlers::scan_updates::remove_scan(state, frame.scan_id);
+                    DomainUpdateResult::task(Task::none())
+                }
+                _ => DomainUpdateResult::task(Task::none()),
+            }
+        }
+
+        Message::ScanCommandFailed { library_id, error } => {
+            if let Some(id) = library_id {
+                log::error!("Scan command failed for {}: {}", id, error);
+            } else {
+                log::error!("Scan command failed: {}", error);
+            }
+            state.domains.ui.state.error_message = Some(error);
+            DomainUpdateResult::task(Task::none())
         }
 
         // Media references - inline handlers from update.rs
@@ -313,11 +428,8 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
             // Scan the currently selected library if one is selected
             if let Some(library_id) = state.domains.library.state.current_library_id {
                 log::info!("Scanning library: {}", library_id);
-                let task = super::update_handlers::scan_updates::handle_scan_library(
-                    state,
-                    library_id,
-                    state.server_url.clone(),
-                );
+                let task =
+                    super::update_handlers::scan_updates::handle_scan_library(state, library_id);
                 DomainUpdateResult::task(task.map(DomainMessage::Library))
             } else {
                 log::warn!("No library currently selected to scan");
@@ -327,31 +439,105 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
 
         // Media events from server
         Message::MediaDiscovered(references) => {
-            /*
-            let task = crate::domains::media::update_handlers::media_events_library::handle_media_discovered(
-                state, references,
-            );
-            DomainUpdateResult::task(task.map(DomainMessage::Library))*/
+            if references.is_empty() {
+                return DomainUpdateResult::task(Task::none());
+            }
+
+            let mut touched_libraries: HashSet<LibraryID> = HashSet::new();
+
+            for media in references {
+                let Some(library_id) = media_library_id(&media) else {
+                    log::warn!("Discovered media missing library id; skipping");
+                    continue;
+                };
+
+                let media_uuid = media.media_id().to_uuid();
+
+                match state
+                    .domains
+                    .library
+                    .state
+                    .repo_accessor
+                    .upsert(media, &library_id)
+                {
+                    Ok(()) => {
+                        touched_libraries.insert(library_id);
+                    }
+                    Err(err) => {
+                        log::error!(
+                            "Failed to upsert discovered media {} in library {}: {}",
+                            media_uuid,
+                            library_id,
+                            err
+                        );
+                    }
+                }
+            }
+
+            refresh_tabs_for_libraries(state, &touched_libraries);
+
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::MediaUpdated(reference) => {
-            /*
-            let task =
-                crate::domains::media::update_handlers::media_events_library::handle_media_updated(
-                    state, reference,
-                );
-            DomainUpdateResult::task(task.map(DomainMessage::Library)) */
+        Message::MediaUpdated(media) => {
+            let Some(library_id) = media_library_id(&media) else {
+                log::warn!("Updated media missing library id; skipping");
+                return DomainUpdateResult::task(Task::none());
+            };
+
+            let media_uuid = media.media_id().to_uuid();
+
+            let mut touched_libraries: HashSet<LibraryID> = HashSet::new();
+
+            match state
+                .domains
+                .library
+                .state
+                .repo_accessor
+                .upsert(media, &library_id)
+            {
+                Ok(()) => {
+                    touched_libraries.insert(library_id);
+                }
+                Err(err) => {
+                    log::error!(
+                        "Failed to apply media update {} in library {}: {}",
+                        media_uuid,
+                        library_id,
+                        err
+                    );
+                }
+            }
+
+            refresh_tabs_for_libraries(state, &touched_libraries);
+
             DomainUpdateResult::task(Task::none())
         }
 
         Message::MediaDeleted(id) => {
-            /*
-            let task =
-                crate::domains::media::update_handlers::media_events_library::handle_media_deleted(
-                    state, id,
-                );
-            DomainUpdateResult::task(task.map(DomainMessage::Library))*/
+            let mut touched_libraries: HashSet<LibraryID> = HashSet::new();
+
+            let library_for_refresh = match state.domains.library.state.repo_accessor.get(&id) {
+                Ok(media) => media_library_id(&media),
+                Err(err) => {
+                    log::warn!("Failed to resolve media {} before deletion: {}", id, err);
+                    None
+                }
+            };
+
+            match state.domains.library.state.repo_accessor.delete(&id) {
+                Ok(()) => {
+                    if let Some(lib_id) = library_for_refresh {
+                        touched_libraries.insert(lib_id);
+                    }
+                }
+                Err(err) => {
+                    log::error!("Failed to delete media {}: {}", id, err);
+                }
+            }
+
+            refresh_tabs_for_libraries(state, &touched_libraries);
+
             DomainUpdateResult::task(Task::none())
         }
 
@@ -387,5 +573,35 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
           //    log::info!("TV shows loaded: {:?}", result.as_ref().map(|v| v.len()));
           //    DomainUpdateResult::task(Task::none())
           //}
+    }
+}
+
+fn media_library_id(media: &Media) -> Option<LibraryID> {
+    match media {
+        Media::Movie(movie) => Some(movie.library_id),
+        Media::Series(series) => Some(series.library_id),
+        Media::Season(season) => Some(season.library_id),
+        Media::Episode(episode) => Some(episode.library_id),
+    }
+}
+
+fn refresh_tabs_for_libraries(state: &mut State, libraries: &HashSet<LibraryID>) {
+    if libraries.is_empty() {
+        return;
+    }
+
+    let active_tab = state.tab_manager.active_tab_id();
+    let mut active_needs_refresh = false;
+
+    for library_id in libraries {
+        let tab_id = TabId::Library(*library_id);
+        state.tab_manager.mark_tab_needs_refresh(tab_id);
+        if active_tab == tab_id {
+            active_needs_refresh = true;
+        }
+    }
+
+    if active_needs_refresh {
+        state.tab_manager.refresh_active_tab();
     }
 }

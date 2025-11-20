@@ -132,7 +132,6 @@ pub enum Message {
 
     // Cross-domain proxy messages
     ToggleFullscreen,                 // Proxy for Media::ToggleFullscreen
-    ToggleScanProgress,               // Proxy for Library::ToggleScanProgress
     SelectLibrary(Option<LibraryID>), // Proxy for Library::SelectLibrary
     PlayMediaWithId(MediaID),         // Proxy for Media::PlayMediaWithId
     PlaySeriesNextEpisode(ferrex_core::SeriesID), // Play next unwatched/in-progress episode
@@ -153,7 +152,14 @@ pub enum Message {
     UpdateLibraryFormPaths(String),        // Proxy for Library::UpdateLibraryFormPaths
     UpdateLibraryFormScanInterval(String), // Proxy for Library::UpdateLibraryFormScanInterval
     ToggleLibraryFormEnabled,              // Proxy for Library::ToggleLibraryFormEnabled
+    ToggleLibraryFormStartScan,            // Proxy for Library::ToggleLibraryFormStartScan
     SubmitLibraryForm,                     // Proxy for Library::SubmitLibraryForm
+    PauseLibraryScan(LibraryID, Uuid),     // Proxy for Library::PauseScan
+    ResumeLibraryScan(LibraryID, Uuid),    // Proxy for Library::ResumeScan
+    CancelLibraryScan(LibraryID, Uuid),    // Proxy for Library::CancelScan
+    // Scanner metrics + admin actions
+    FetchScanMetrics,        // Proxy for Library::FetchScanMetrics
+    ResetLibrary(LibraryID), // Proxy for Library::ResetLibrary
 
     // No-op variant for UI elements that are not yet implemented
     NoOp,
@@ -280,7 +286,6 @@ impl Message {
 
             // Cross-domain proxy messages
             Self::ToggleFullscreen => "UI::ToggleFullscreen",
-            Self::ToggleScanProgress => "UI::ToggleScanProgress",
             Self::SelectLibrary(_) => "UI::SelectLibrary",
             Self::PlayMediaWithId(_) => "UI::PlayMediaWithId",
             Self::PlaySeriesNextEpisode(_) => "UI::PlaySeriesNextEpisode",
@@ -301,7 +306,13 @@ impl Message {
             Self::UpdateLibraryFormPaths(_) => "UI::UpdateLibraryFormPaths",
             Self::UpdateLibraryFormScanInterval(_) => "UI::UpdateLibraryFormScanInterval",
             Self::ToggleLibraryFormEnabled => "UI::ToggleLibraryFormEnabled",
+            Self::ToggleLibraryFormStartScan => "UI::ToggleLibraryFormStartScan",
             Self::SubmitLibraryForm => "UI::SubmitLibraryForm",
+            Self::PauseLibraryScan(_, _) => "UI::PauseLibraryScan",
+            Self::ResumeLibraryScan(_, _) => "UI::ResumeLibraryScan",
+            Self::CancelLibraryScan(_, _) => "UI::CancelLibraryScan",
+            Self::FetchScanMetrics => "UI::FetchScanMetrics",
+            Self::ResetLibrary(_) => "UI::ResetLibrary",
 
             // No-op
             Self::NoOp => "UI::NoOp",
@@ -428,7 +439,6 @@ impl std::fmt::Debug for Message {
             Self::CheckMediaStoreRefresh => write!(f, "UI::CheckMediaStoreRefresh"),
             Self::QueueVisibleDetailsForFetch => write!(f, "UI::QueueVisibleDetailsForFetch"),
             Self::ToggleFullscreen => write!(f, "UI::ToggleFullscreen"),
-            Self::ToggleScanProgress => write!(f, "UI::ToggleScanProgress"),
             Self::SelectLibrary(uuid) => write!(f, "UI::SelectLibrary({:?})", uuid),
             Self::PlayMediaWithId(media_id) => {
                 write!(f, "UI::PlayMediaWithId({:?})", media_id)
@@ -442,7 +452,19 @@ impl std::fmt::Debug for Message {
                 write!(f, "UI::UpdateLibraryFormScanInterval()")
             }
             Self::ToggleLibraryFormEnabled => write!(f, "UI::ToggleLibraryFormEnabled"),
+            Self::ToggleLibraryFormStartScan => write!(f, "UI::ToggleLibraryFormStartScan"),
             Self::SubmitLibraryForm => write!(f, "UI::SubmitLibraryForm"),
+            Self::PauseLibraryScan(library_id, scan_id) => {
+                write!(f, "UI::PauseLibraryScan({}, {})", library_id, scan_id)
+            }
+            Self::ResumeLibraryScan(library_id, scan_id) => {
+                write!(f, "UI::ResumeLibraryScan({}, {})", library_id, scan_id)
+            }
+            Self::CancelLibraryScan(library_id, scan_id) => {
+                write!(f, "UI::CancelLibraryScan({}, {})", library_id, scan_id)
+            }
+            Self::FetchScanMetrics => write!(f, "UI::FetchScanMetrics"),
+            Self::ResetLibrary(id) => write!(f, "UI::ResetLibrary({})", id),
             Self::NoOp => write!(f, "UI::NoOp"),
         }
     }

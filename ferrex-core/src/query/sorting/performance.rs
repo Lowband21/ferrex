@@ -5,6 +5,7 @@
 
 use super::strategy::{SortCost, SortStrategy};
 use crate::query::sorting::utils::calculate_items_hash;
+use std::fmt;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
@@ -21,6 +22,17 @@ pub struct ParallelSort<T: Send + Sync, S> {
     pub strategy: S,
     pub threshold: usize,
     pub _phantom: PhantomData<T>,
+}
+
+impl<T: Send + Sync, S> fmt::Debug for ParallelSort<T, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let strategy_type = std::any::type_name_of_val(&self.strategy);
+
+        f.debug_struct("ParallelSort")
+            .field("threshold", &self.threshold)
+            .field("strategy", &strategy_type)
+            .finish()
+    }
 }
 
 impl<T: Send + Sync, S> ParallelSort<T, S> {
@@ -103,9 +115,44 @@ pub struct CachedSort<T: Send + Sync, S> {
     pub cache: Arc<RwLock<SortCache<T>>>,
 }
 
+impl<T: Send + Sync, S> fmt::Debug for CachedSort<T, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let strategy_type = std::any::type_name_of_val(&self.strategy);
+        let cache_summary = self
+            .cache
+            .read()
+            .map(|cache| {
+                cache
+                    .last_sort
+                    .as_ref()
+                    .map(|state| state.sorted_indices.len())
+            })
+            .unwrap_or(None);
+
+        f.debug_struct("CachedSort")
+            .field("strategy", &strategy_type)
+            .field("cached_result_len", &cache_summary)
+            .finish()
+    }
+}
+
 /// Cache for sorted items
 pub struct SortCache<T: Send + Sync> {
     pub last_sort: Option<CachedSortState<T>>,
+}
+
+impl<T: Send + Sync> fmt::Debug for SortCache<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let cached_len = self
+            .last_sort
+            .as_ref()
+            .map(|state| state.sorted_indices.len());
+
+        f.debug_struct("SortCache")
+            .field("has_entry", &self.last_sort.is_some())
+            .field("cached_indices", &cached_len)
+            .finish()
+    }
 }
 
 /// State of a cached sort operation
@@ -115,6 +162,17 @@ pub struct CachedSortState<T: Send + Sync> {
     pub timestamp: Instant,
     pub ttl: Duration,
     pub _phantom: PhantomData<T>,
+}
+
+impl<T: Send + Sync> fmt::Debug for CachedSortState<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CachedSortState")
+            .field("items_hash", &self.items_hash)
+            .field("sorted_len", &self.sorted_indices.len())
+            .field("age_ms", &self.timestamp.elapsed().as_millis())
+            .field("ttl_secs", &self.ttl.as_secs())
+            .finish()
+    }
 }
 
 impl<T: Send + Sync> Default for SortCache<T> {
@@ -240,6 +298,16 @@ where
 pub struct LazySort<T: Send + Sync, S> {
     pub strategy: S,
     pub _phantom: PhantomData<T>,
+}
+
+impl<T: Send + Sync, S> fmt::Debug for LazySort<T, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let strategy_type = std::any::type_name_of_val(&self.strategy);
+
+        f.debug_struct("LazySort")
+            .field("strategy", &strategy_type)
+            .finish()
+    }
 }
 
 impl<T: Send + Sync, S> LazySort<T, S> {

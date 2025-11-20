@@ -14,8 +14,12 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::{AppState, errors::AppResult};
 use ferrex_core::database::postgres::PostgresDatabase;
+
+use crate::infra::{
+    app_state::AppState,
+    errors::{AppError, AppResult},
+};
 
 /// Device trust validation query parameters
 #[derive(Debug, Deserialize)]
@@ -27,12 +31,12 @@ pub struct DeviceTrustQuery {
 }
 
 /// Helper function to get the database pool
-fn get_pool(state: &AppState) -> Result<&sqlx::PgPool, crate::errors::AppError> {
+fn get_pool(state: &AppState) -> Result<&sqlx::PgPool, AppError> {
     state
-        .database
+        .db
         .as_any()
         .downcast_ref::<PostgresDatabase>()
-        .ok_or_else(|| crate::errors::AppError::internal("Database not available".to_string()))
+        .ok_or_else(|| AppError::internal("Database not available".to_string()))
         .map(|db| db.pool())
 }
 
@@ -68,7 +72,7 @@ pub async fn validate_device_trust(
     let device_id = params
         .device_id
         .or(device_id_ext)
-        .ok_or_else(|| crate::errors::AppError::bad_request("Device ID required".to_string()))?;
+        .ok_or_else(|| AppError::bad_request("Device ID required".to_string()))?;
 
     info!(
         "Validating device trust for user {} device {}",
@@ -96,7 +100,7 @@ pub async fn validate_device_trust(
     )
     .fetch_optional(get_pool(&state)?)
     .await
-    .map_err(|e| crate::errors::AppError::internal(format!("Database error: {}", e)))?;
+    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
 
     let status = match device_record {
         Some(record) => {
@@ -141,7 +145,7 @@ pub async fn validate_device_trust(
                     )
                     .execute(get_pool(&state)?)
                     .await
-                    .map_err(|e| crate::errors::AppError::internal(format!("Database error: {}", e)));
+                    .map_err(|e| AppError::internal(format!("Database error: {}", e)));
 
                     DeviceTrustStatus {
                         is_trusted: true,
@@ -219,13 +223,11 @@ pub async fn revoke_device_trust(
     )
     .fetch_optional(get_pool(&state)?)
     .await
-    .map_err(|e| crate::errors::AppError::internal(format!("Database error: {}", e)))?
+    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?
     .is_some();
 
     if !device_exists {
-        return Err(crate::errors::AppError::not_found(
-            "Device not found".to_string(),
-        ));
+        return Err(AppError::not_found("Device not found".to_string()));
     }
 
     // Revoke all sessions for this device
@@ -236,7 +238,7 @@ pub async fn revoke_device_trust(
     )
     .execute(get_pool(&state)?)
     .await
-    .map_err(|e| crate::errors::AppError::internal(format!("Database error: {}", e)))?;
+    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
 
     // Optionally, also invalidate all active sessions for this device
     sqlx::query!(
@@ -247,7 +249,7 @@ pub async fn revoke_device_trust(
     )
     .execute(get_pool(&state)?)
     .await
-    .map_err(|e| crate::errors::AppError::internal(format!("Database error: {}", e)))?;
+    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
 
     info!(
         "Successfully revoked device trust for device {}",
@@ -297,7 +299,7 @@ pub async fn list_trusted_devices(
     )
     .fetch_all(get_pool(&state)?)
     .await
-    .map_err(|e| crate::errors::AppError::internal(format!("Database error: {}", e)))?
+    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?
     .into_iter()
     .map(|row| TrustedDevice {
         device_id: row.device_id,
@@ -331,7 +333,7 @@ pub async fn extend_device_trust(
     let device_id = request
         .device_id
         .or(device_id_ext)
-        .ok_or_else(|| crate::errors::AppError::bad_request("Device ID required".to_string()))?;
+        .ok_or_else(|| AppError::bad_request("Device ID required".to_string()))?;
     let extension_days = request.days.unwrap_or(30).min(90); // Max 90 days
 
     info!(
@@ -358,7 +360,7 @@ pub async fn extend_device_trust(
     )
     .fetch_optional(get_pool(&state)?)
     .await
-    .map_err(|e| crate::errors::AppError::internal(format!("Database error: {}", e)))?;
+    .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
 
     match current_trust {
         Some(record) if record.trusted_until.is_some_and(|t| t > Utc::now()) => {
@@ -381,7 +383,7 @@ pub async fn extend_device_trust(
             )
             .execute(get_pool(&state)?)
             .await
-            .map_err(|e| crate::errors::AppError::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| AppError::internal(format!("Database error: {}", e)))?;
 
             Ok(Json(ApiResponse::success(DeviceTrustStatus {
                 is_trusted: true,
@@ -391,7 +393,7 @@ pub async fn extend_device_trust(
                 reason: None,
             })))
         }
-        _ => Err(crate::errors::AppError::bad_request(
+        _ => Err(AppError::bad_request(
             "Device not found or trust already expired".to_string(),
         )),
     }

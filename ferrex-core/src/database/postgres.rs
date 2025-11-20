@@ -1,9 +1,11 @@
 use super::traits::*;
+use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
 use crate::{
     EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeNumber, EpisodeReference,
     EpisodeURL, LibraryReference, MediaDetailsOption, MediaIDLike, MovieReference, MovieTitle,
     MovieURL, SeasonDetails, SeasonNumber, SeasonReference, SeasonURL, SeriesReference,
     SeriesTitle, SeriesURL, TmdbDetails, UrlLike,
+    database::postgres_ext::tmdb_metadata::TmdbMetadataRepository,
 };
 use crate::{
     EpisodeID, Library, LibraryID, LibraryType, Media, MediaError, MediaFile, MediaFileMetadata,
@@ -204,436 +206,94 @@ impl PostgresDatabase {
     }
 
     /// Store MovieReference within an existing transaction
-    async fn store_movie_reference_in_transaction(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        movie: &MovieReference,
-        actual_file_id: Uuid,
-        metadata: Option<&EnhancedMovieDetails>,
-    ) -> Result<()> {
-        let movie_uuid = movie.id.as_uuid();
-        let library_id = movie.file.library_id;
-
-        // For movies without TMDB data (tmdb_id = 0), we need different handling
-        // since multiple movies can have tmdb_id = 0
-        let target_movie_id: Uuid = if movie.tmdb_id == 0 {
-            // For tmdb_id = 0, check if this specific file already has a movie reference
-            let existing = sqlx::query!(
-                "SELECT id FROM movie_references WHERE file_id = $1",
-                actual_file_id
-            )
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(|e| {
-                MediaError::Internal(format!("Failed to check existing movie reference: {}", e))
-            })?;
-
-            if let Some(existing_row) = existing {
-                // Update the existing reference
-                sqlx::query!(
-                    r#"
-                    UPDATE movie_references
-                    SET title = $1, theme_color = $2, updated_at = NOW()
-                    WHERE id = $3
-                    "#,
-                    movie.title.as_str(),
-                    movie.theme_color.as_deref(),
-                    existing_row.id
-                )
-                .execute(&mut **tx)
-                .await
-                .map_err(|e| {
-                    MediaError::Internal(format!("Failed to update movie reference: {}", e))
-                })?;
-                existing_row.id
-            } else {
-                // Insert new reference and use provided UUID
-                sqlx::query!(
-                    r#"
-                    INSERT INTO movie_references (id, library_id, file_id, tmdb_id, title, theme_color)
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                    "#,
-                    movie_uuid,
-                    library_id.as_uuid(),
-                    actual_file_id,
-                    0i64, // tmdb_id = 0 for movies without TMDB data
-                    movie.title.as_str(),
-                    movie.theme_color.as_deref()
-                )
-                .execute(&mut **tx)
-                .await
-                .map_err(|e| MediaError::Internal(format!("Failed to insert movie reference: {}", e)))?;
-                *movie_uuid
-            }
-        } else {
-            // For movies with TMDB data, use the normal UPSERT with conflict handling, returning the actual id
-            let row = sqlx::query!(
-                r#"
-                INSERT INTO movie_references (id, library_id, file_id, tmdb_id, title, theme_color)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (tmdb_id, library_id) DO UPDATE SET
-                    file_id = EXCLUDED.file_id,
-                    title = EXCLUDED.title,
-                    theme_color = EXCLUDED.theme_color,
-                    updated_at = NOW()
-                RETURNING id
-                "#,
-                movie_uuid,
-                library_id.as_uuid(),
-                actual_file_id,
-                movie.tmdb_id as i64,
-                movie.title.as_str(),
-                movie.theme_color.as_deref()
-            )
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to store movie reference: {}", e)))?;
-            row.id
-        };
-
-        // Store enhanced metadata if provided
-        if let Some(meta) = metadata {
-            let tmdb_details = serde_json::to_value(meta).map_err(|e| {
-                MediaError::InvalidMedia(format!("Failed to serialize movie metadata: {}", e))
-            })?;
-            let images = serde_json::to_value(&meta.images).map_err(|e| {
-                MediaError::InvalidMedia(format!("Failed to serialize images: {}", e))
-            })?;
-
-            sqlx::query!(
-                r#"
-                INSERT INTO movie_metadata (movie_id, tmdb_details, images)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (movie_id) DO UPDATE SET
-                    tmdb_details = EXCLUDED.tmdb_details,
-                    images = EXCLUDED.images,
-                    updated_at = NOW()
-                "#,
-                target_movie_id,
-                tmdb_details,
-                images
-            )
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to store movie metadata: {}", e)))?;
-        }
-
-        Ok(())
-    }
-
-    /// Store MovieReference with enhanced metadata
-    async fn store_movie_reference_complete(
-        &self,
-        movie: &MovieReference,
-        metadata: Option<&EnhancedMovieDetails>,
-    ) -> Result<()> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Transaction failed: {}", e)))?;
-
-        // Store media file within the transaction and get actual ID
-        let actual_file_id = self
-            .store_media_file_in_transaction(&mut tx, &movie.file)
-            .await?;
-
-        // Store the movie reference with the actual file ID
-        let movie_uuid = movie.id.as_uuid();
-        let library_id = movie.file.library_id;
-
-        // For movies without TMDB data (tmdb_id = 0), we need different handling
-        // since multiple movies can have tmdb_id = 0
-        let target_movie_id: Uuid = if movie.tmdb_id == 0 {
-            // For tmdb_id = 0, check if this specific file already has a movie reference
-            let existing = sqlx::query!(
-                "SELECT id FROM movie_references WHERE file_id = $1",
-                actual_file_id
-            )
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| {
-                MediaError::Internal(format!("Failed to check existing movie reference: {}", e))
-            })?;
-
-            if let Some(existing_row) = existing {
-                // Update the existing reference
-                sqlx::query!(
-                    r#"
-                    UPDATE movie_references
-                    SET title = $1, theme_color = $2, updated_at = NOW()
-                    WHERE id = $3
-                    "#,
-                    movie.title.as_str(),
-                    movie.theme_color.as_deref(),
-                    existing_row.id
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| {
-                    MediaError::Internal(format!("Failed to update movie reference: {}", e))
-                })?;
-                existing_row.id
-            } else {
-                // Insert new reference and use provided UUID
-                sqlx::query!(
-                    r#"
-                    INSERT INTO movie_references (id, library_id, file_id, tmdb_id, title, theme_color)
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                    "#,
-                    movie_uuid,
-                    library_id.as_uuid(),
-                    actual_file_id,
-                    0i64, // tmdb_id = 0 for movies without TMDB data
-                    movie.title.as_str(),
-                    movie.theme_color.as_deref()
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| MediaError::Internal(format!("Failed to insert movie reference: {}", e)))?;
-                *movie_uuid
-            }
-        } else {
-            // For movies with TMDB data, use the normal UPSERT with conflict handling, returning actual id
-            let row = sqlx::query!(
-                r#"
-                INSERT INTO movie_references (id, library_id, file_id, tmdb_id, title, theme_color)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (tmdb_id, library_id) DO UPDATE SET
-                    file_id = EXCLUDED.file_id,
-                    title = EXCLUDED.title,
-                    theme_color = EXCLUDED.theme_color,
-                    updated_at = NOW()
-                RETURNING id
-                "#,
-                movie_uuid,
-                library_id.as_uuid(),
-                actual_file_id,
-                movie.tmdb_id as i64,
-                movie.title.as_str(),
-                movie.theme_color.as_deref()
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to store movie reference: {}", e)))?;
-            row.id
-        };
-
-        // Store enhanced metadata if provided
-        if let Some(meta) = metadata {
-            let tmdb_details = serde_json::to_value(meta).map_err(|e| {
-                MediaError::InvalidMedia(format!("Failed to serialize movie metadata: {}", e))
-            })?;
-            let images = serde_json::to_value(&meta.images).map_err(|e| {
-                MediaError::InvalidMedia(format!("Failed to serialize images: {}", e))
-            })?;
-            let cast_crew = serde_json::json!({
-                "cast": meta.cast,
-                "crew": meta.crew
-            });
-            let videos = serde_json::to_value(&meta.videos).map_err(|e| {
-                MediaError::InvalidMedia(format!("Failed to serialize videos: {}", e))
-            })?;
-            let external_ids = serde_json::to_value(&meta.external_ids).map_err(|e| {
-                MediaError::InvalidMedia(format!("Failed to serialize external IDs: {}", e))
-            })?;
-
-            sqlx::query!(
-                r#"
-                INSERT INTO movie_metadata (
-                    movie_id, tmdb_details, images, cast_crew, videos, keywords, external_ids
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                ON CONFLICT (movie_id) DO UPDATE SET
-                    tmdb_details = EXCLUDED.tmdb_details,
-                    images = EXCLUDED.images,
-                    cast_crew = EXCLUDED.cast_crew,
-                    videos = EXCLUDED.videos,
-                    keywords = EXCLUDED.keywords,
-                    external_ids = EXCLUDED.external_ids,
-                    updated_at = NOW()
-                "#,
-                target_movie_id,
-                tmdb_details,
-                images,
-                cast_crew,
-                videos,
-                &meta.keywords,
-                external_ids
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to store movie metadata: {}", e)))?;
-        }
-
-        tx.commit()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
-
-        Ok(())
-    }
-
-    /// Batch store movie references for performance
-    pub async fn store_movie_references_batch(
-        &self,
-        movies: Vec<(MovieReference, Option<EnhancedMovieDetails>)>,
-    ) -> Result<()> {
-        if movies.is_empty() {
-            return Ok(());
-        }
-
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Transaction failed: {}", e)))?;
-
-        // Process in chunks to avoid overwhelming the transaction
-        const CHUNK_SIZE: usize = 50;
-        let total_movies = movies.len();
-
-        for (idx, chunk) in movies.chunks(CHUNK_SIZE).enumerate() {
-            for (movie_ref, metadata) in chunk {
-                // Store media file within transaction first
-                let actual_file_id = self
-                    .store_media_file_in_transaction(&mut tx, &movie_ref.file)
-                    .await?;
-
-                // Now store movie reference with the actual file ID
-                self.store_movie_reference_in_transaction(
-                    &mut tx,
-                    movie_ref,
-                    actual_file_id,
-                    metadata.as_ref(),
-                )
-                .await?;
-            }
-
-            if idx > 0 && idx % 5 == 0 {
-                info!("Processed {} / {} movies", idx * CHUNK_SIZE, total_movies);
-            }
-        }
-
-        tx.commit().await.map_err(|e| {
-            MediaError::Internal(format!("Failed to commit batch transaction: {}", e))
-        })?;
-
-        info!("Batch stored {} movie references", total_movies);
-        Ok(())
-    }
-
     /// Get movie with optional full metadata
     pub async fn get_movie_with_metadata(
         &self,
         id: &MovieID,
         include_metadata: bool,
     ) -> Result<Option<(MovieReference, Option<EnhancedMovieDetails>)>> {
-        let movie_uuid = id.as_uuid();
+        let movie_uuid = id.to_uuid();
 
-        let query = if include_metadata {
+        let row = sqlx::query(
             r#"
             SELECT
-                mr.id, mr.tmdb_id, mr.title, mr.theme_color, mr.library_id,
-                mf.id as file_id, mf.file_path, mf.filename, mf.file_size, mf.created_at as file_created_at,
-                mf.technical_metadata, mf.parsed_info,
-                mm.tmdb_details, mm.images, mm.cast_crew, mm.videos, mm.keywords, mm.external_ids
-            FROM movie_references mr
-            JOIN media_files mf ON mr.file_id = mf.id
-            LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id
-            WHERE mr.id = $1
-            "#
-        } else {
-            r#"
-            SELECT
-                mr.id, mr.tmdb_id, mr.title, mr.theme_color, mr.library_id,
-                mf.id as file_id, mf.file_path, mf.filename, mf.file_size, mf.created_at as file_created_at,
-                mf.technical_metadata, mf.parsed_info,
-                NULL::jsonb as tmdb_details, NULL::jsonb as images, NULL::jsonb as cast_crew,
-                NULL::jsonb as videos, NULL::text[] as keywords, NULL::jsonb as external_ids
+                mr.id,
+                mr.tmdb_id,
+                mr.title,
+                mr.theme_color,
+                mr.library_id,
+                mf.id AS file_id,
+                mf.file_path,
+                mf.filename,
+                mf.file_size,
+                mf.created_at AS file_created_at,
+                mf.technical_metadata
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             WHERE mr.id = $1
-            "#
-        };
-
-        let row = sqlx::query(query)
-            .bind(movie_uuid)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
+            "#,
+        )
+        .bind(movie_uuid)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
 
         let Some(row) = row else {
             return Ok(None);
         };
 
-        let library_id = LibraryID(row.try_get("library_id")?);
+        if include_metadata {
+            let repository = TmdbMetadataRepository::new(self);
+            let movie_ref = repository.load_movie_reference(row).await?;
+            let metadata = match &movie_ref.details {
+                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => Some(details.clone()),
+                _ => None,
+            };
 
-        // Build MediaFile
-        let technical_metadata: Option<serde_json::Value> = row.try_get("technical_metadata").ok();
-        let media_file_metadata = technical_metadata
-            .map(|tm| serde_json::from_value(tm))
-            .transpose()
-            .map_err(|e| MediaError::Internal(format!("Failed to deserialize metadata: {}", e)))?;
+            Ok(Some((movie_ref, metadata)))
+        } else {
+            let library_id = LibraryID(row.try_get("library_id")?);
 
-        let media_file = MediaFile {
-            id: row.try_get("file_id")?,
-            path: PathBuf::from(row.try_get::<String, _>("file_path")?),
-            filename: row.try_get("filename")?,
-            size: row.try_get::<i64, _>("file_size")? as u64,
-            created_at: row.try_get("file_created_at")?,
-            media_file_metadata,
-            library_id,
-        };
-
-        // Build metadata if requested and available
-        let metadata = if include_metadata {
-            let tmdb_json = row.try_get::<Option<serde_json::Value>, _>("tmdb_details")?;
-
-            if tmdb_json.is_none() {
-                tracing::debug!(
-                    "No TMDB metadata found for movie {}",
-                    row.try_get::<Uuid, _>("id")?
-                );
-            } else {
-                tracing::debug!(
-                    "Found TMDB metadata for movie {}",
-                    row.try_get::<Uuid, _>("id")?
-                );
-            }
-
-            tmdb_json
-                .map(|details| serde_json::from_value::<EnhancedMovieDetails>(details))
+            let technical_metadata: Option<serde_json::Value> =
+                row.try_get("technical_metadata").ok();
+            let media_file_metadata = technical_metadata
+                .map(|tm| serde_json::from_value(tm))
                 .transpose()
                 .map_err(|e| {
-                    MediaError::Internal(format!("Failed to deserialize movie metadata: {}", e))
-                })?
-        } else {
-            None
-        };
+                    MediaError::Internal(format!("Failed to deserialize metadata: {}", e))
+                })?;
 
-        // Build MovieReference with proper details
-        let details = if let Some(ref metadata_details) = metadata {
-            // If we have metadata, use it in the details field
-            MediaDetailsOption::Details(TmdbDetails::Movie(metadata_details.clone()))
-        } else {
-            // Otherwise, provide an endpoint to fetch it later
-            MediaDetailsOption::Endpoint(format!("/movie/{}", row.try_get::<Uuid, _>("id")?))
-        };
+            let media_file = MediaFile {
+                id: row.try_get("file_id")?,
+                path: PathBuf::from(row.try_get::<String, _>("file_path")?),
+                filename: row.try_get("filename")?,
+                size: row.try_get::<i64, _>("file_size")? as u64,
+                created_at: row.try_get("file_created_at")?,
+                media_file_metadata,
+                library_id,
+            };
 
-        let movie_ref = MovieReference {
-            id: MovieID(row.try_get::<Uuid, _>("id")?),
-            library_id,
-            tmdb_id: row.try_get::<i64, _>("tmdb_id")? as u64,
-            title: MovieTitle::new(row.try_get("title")?)?,
-            details,
-            endpoint: MovieURL::from_string(format!("/stream/{}", media_file.id)),
-            file: media_file,
-            theme_color: row
-                .try_get::<Option<String>, _>("theme_color")
-                .unwrap_or(None),
-        };
+            let tmdb_id: i64 = row.try_get("tmdb_id")?;
+            let title: String = row.try_get("title")?;
+            let movie_id: Uuid = row.try_get("id")?;
+            let file_id: Uuid = row.try_get("file_id")?;
+            let theme_color: Option<String> = row.try_get("theme_color")?;
 
-        Ok(Some((movie_ref, metadata)))
+            let movie_ref = MovieReference {
+                id: MovieID(movie_id),
+                library_id,
+                tmdb_id: tmdb_id as u64,
+                title: MovieTitle::new(title.clone()).map_err(|e| {
+                    MediaError::Internal(format!("Invalid stored movie title '{}': {}", title, e))
+                })?,
+                details: MediaDetailsOption::Endpoint(format!("/movie/{}", movie_id)),
+                endpoint: MovieURL::from_string(format!("/stream/{}", file_id)),
+                file: media_file,
+                theme_color,
+            };
+
+            Ok(Some((movie_ref, None)))
+        }
     }
 }
 
@@ -1118,276 +778,27 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     // Reference type methods
     async fn store_movie_reference(&self, movie: &MovieReference) -> Result<()> {
-        // Extract metadata from the details field if available
-        let metadata = match &movie.details {
-            MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
-                tracing::info!("Storing movie {} with TMDB metadata", movie.title.as_str());
-                Some(details)
-            }
-            MediaDetailsOption::Details(_) => {
-                tracing::warn!(
-                    "Movie {} has non-movie TMDB details type",
-                    movie.title.as_str()
-                );
-                None
-            }
-            MediaDetailsOption::Endpoint(_) => {
-                tracing::info!(
-                    "Storing movie {} without metadata (endpoint only)",
-                    movie.title.as_str()
-                );
-                None
-            }
-        };
-
-        self.store_movie_reference_complete(movie, metadata).await
+        TmdbMetadataRepository::new(self)
+            .store_movie_reference(movie)
+            .await
     }
 
     async fn store_series_reference(&self, series: &SeriesReference) -> Result<()> {
-        let mut buff = Uuid::encode_buffer();
-        info!(
-            "store_series_reference called for series: {} (ID: {}, TMDB: {}, Library: {})",
-            series.title.as_str(),
-            series.id.as_str(&mut buff),
-            series.tmdb_id,
-            series.library_id
-        );
-
-        // Extract metadata from the details field if available
-        let metadata = match &series.details {
-            MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
-                info!(
-                    "Storing series {} with TMDB metadata",
-                    series.title.as_str()
-                );
-                Some(details)
-            }
-            MediaDetailsOption::Details(_) => {
-                error!(
-                    "Series {} has non-series TMDB details type",
-                    series.title.as_str()
-                );
-                None
-            }
-            MediaDetailsOption::Endpoint(_) => {
-                info!(
-                    "Storing series {} without metadata (endpoint only)",
-                    series.title.as_str()
-                );
-                None
-            }
-        };
-
-        // Store the series reference and metadata together
-        self.store_series_reference_complete(series, metadata).await
+        TmdbMetadataRepository::new(self)
+            .store_series_reference(series)
+            .await
     }
 
     async fn store_season_reference(&self, season: &SeasonReference) -> Result<Uuid> {
-        // Extract metadata if available
-        let metadata = match &season.details {
-            MediaDetailsOption::Details(TmdbDetails::Season(details)) => {
-                Some(serde_json::to_value(details).map_err(|e| {
-                    MediaError::Internal(format!("Failed to serialize season metadata: {}", e))
-                })?)
-            }
-            _ => None,
-        };
-
-        // Store the season reference
-        let season_uuid = season.id.as_uuid();
-        let series_uuid = season.series_id.as_uuid();
-
-        // Use RETURNING to get the actual ID (either new or existing)
-        let actual_season_id = sqlx::query_scalar!(
-            r#"
-            INSERT INTO season_references (id, season_number, series_id, library_id, tmdb_series_id, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (series_id, season_number) DO UPDATE
-            SET tmdb_series_id = EXCLUDED.tmdb_series_id,
-                library_id = EXCLUDED.library_id,
-                updated_at = NOW()
-            RETURNING id
-            "#,
-            season_uuid,
-            season.season_number.value() as i32,
-            series_uuid,
-            season.library_id.as_uuid(),
-            season.tmdb_series_id as i64,
-            season.created_at
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Failed to store season reference: {}", e)))?;
-
-        // Store metadata if available
-        if let Some(meta) = metadata {
-            // Create empty images object if not present
-            let images = json!({"posters": []});
-
-            sqlx::query!(
-                r#"
-                INSERT INTO season_metadata (season_id, tmdb_details, images)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (season_id) DO UPDATE
-                SET tmdb_details = EXCLUDED.tmdb_details,
-                    images = EXCLUDED.images,
-                    updated_at = NOW()
-                "#,
-                actual_season_id,
-                meta,
-                images
-            )
-            .execute(&self.pool)
+        TmdbMetadataRepository::new(self)
+            .store_season_reference(season)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to store season metadata: {}", e)))?;
-        }
-
-        Ok(actual_season_id)
     }
 
     async fn store_episode_reference(&self, episode: &EpisodeReference) -> Result<()> {
-        let mut buff = Uuid::encode_buffer();
-        info!(
-            "Storing episode reference: {} S{}E{}",
-            episode.id.as_str(&mut buff),
-            episode.season_number.value(),
-            episode.episode_number.value()
-        );
-
-        // Parse IDs
-        let episode_uuid = episode.id.as_uuid();
-        let series_uuid = episode.series_id.as_uuid();
-        let season_uuid = episode.season_id.as_uuid();
-        let file_uuid = episode.id.as_uuid();
-
-        // Start transaction
-        let mut tx = self
-            .pool
-            .begin()
+        TmdbMetadataRepository::new(self)
+            .store_episode_reference(episode)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to start transaction: {}", e)))?;
-
-        // First, check if episode already exists for this series/season/episode number
-        let existing_episode_id: Option<Uuid> = sqlx::query_scalar!(
-            r#"
-            SELECT id
-            FROM episode_references
-            WHERE series_id = $1
-              AND season_number = $2
-              AND episode_number = $3
-            "#,
-            series_uuid,
-            episode.season_number.value() as i16,
-            episode.episode_number.value() as i16
-        )
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Failed to check existing episode: {}", e)))?;
-
-        let actual_episode_id = if let Some(existing_id) = existing_episode_id {
-            // Episode exists, update it
-            info!(
-                "Episode already exists with ID {}, updating instead of creating new",
-                existing_id
-            );
-
-            sqlx::query!(
-                r#"
-                UPDATE episode_references
-                SET season_id = $1,
-                    file_id = $2,
-                    tmdb_series_id = $3,
-                    updated_at = NOW()
-                WHERE id = $4
-                "#,
-                season_uuid,
-                file_uuid,
-                episode.tmdb_series_id as i64,
-                existing_id
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                MediaError::Internal(format!("Failed to update episode reference: {}", e))
-            })?;
-
-            existing_id
-        } else {
-            // Episode doesn't exist, insert it
-            sqlx::query!(
-                r#"
-                INSERT INTO episode_references (
-                    id, series_id, season_id, file_id,
-                    season_number, episode_number, tmdb_series_id
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-                "#,
-                episode_uuid,
-                series_uuid,
-                season_uuid,
-                file_uuid,
-                episode.season_number.value() as i16,
-                episode.episode_number.value() as i16,
-                episode.tmdb_series_id as i64
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                MediaError::Internal(format!("Failed to insert episode reference: {}", e))
-            })?;
-
-            *episode_uuid
-        };
-
-        // Log if we're using a different ID than expected (conflict occurred)
-        if &actual_episode_id != episode_uuid {
-            info!(
-                "Episode already exists with ID {}, updating instead of creating new",
-                actual_episode_id
-            );
-        }
-
-        // Store metadata if available
-        if let MediaDetailsOption::Details(TmdbDetails::Episode(details)) = &episode.details {
-            let tmdb_details_json = serde_json::to_value(details).map_err(|e| {
-                MediaError::Internal(format!("Failed to serialize episode details: {}", e))
-            })?;
-
-            sqlx::query!(
-                r#"
-                INSERT INTO episode_metadata (
-                    episode_id, tmdb_details, still_images
-                ) VALUES ($1, $2, $3)
-                ON CONFLICT (episode_id) DO UPDATE SET
-                    tmdb_details = EXCLUDED.tmdb_details,
-                    updated_at = NOW()
-                "#,
-                actual_episode_id, // Use the actual ID from the database
-                tmdb_details_json,
-                serde_json::json!([])
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                MediaError::Internal(format!("Failed to insert episode metadata: {}", e))
-            })?;
-        }
-
-        // Commit transaction
-        tx.commit()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
-
-        let mut buff = Uuid::encode_buffer();
-
-        info!(
-            "Successfully stored episode reference: {} S{}E{} (actual ID: {})",
-            episode.id.as_str(&mut buff),
-            episode.season_number.value(),
-            episode.episode_number.value(),
-            actual_episode_id
-        );
-
-        Ok(())
     }
 
     async fn get_all_movie_references(&self) -> Result<Vec<MovieReference>> {
@@ -1449,22 +860,26 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_series_seasons(&self, series_id: &SeriesID) -> Result<Vec<SeasonReference>> {
-        let series_uuid = series_id.as_uuid();
+        let series_uuid = series_id.to_uuid();
 
         info!("Getting seasons for series: {}", series_uuid);
 
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT
-                sr.id, sr.series_id, sr.season_number, sr.library_id, sr.tmdb_series_id, sr.created_at,
-                sm.tmdb_details
-            FROM season_references sr
-            LEFT JOIN season_metadata sm ON sr.id = sm.season_id
-            WHERE sr.series_id = $1
-            ORDER BY sr.season_number
+                id,
+                series_id,
+                season_number,
+                library_id,
+                tmdb_series_id,
+                created_at,
+                theme_color
+            FROM season_references
+            WHERE series_id = $1
+            ORDER BY season_number
             "#,
-            series_uuid
         )
+        .bind(series_uuid)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get series seasons: {}", e)))?;
@@ -1477,105 +892,51 @@ impl MediaDatabaseTrait for PostgresDatabase {
             series_id.as_str(&mut buff)
         );
 
-        let mut seasons = Vec::new();
-        for row in rows {
-            // Parse TMDB details if available
-            let details = if row.tmdb_details.is_null() {
-                MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
-            } else {
-                match serde_json::from_value::<SeasonDetails>(row.tmdb_details) {
-                    Ok(season_details) => {
-                        MediaDetailsOption::Details(TmdbDetails::Season(season_details))
-                    }
-                    Err(e) => {
-                        warn!("Failed to parse season TMDB details: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
-                    }
-                }
-            };
+        let repository = TmdbMetadataRepository::new(self);
+        let mut seasons = Vec::with_capacity(rows.len());
 
-            seasons.push(SeasonReference {
-                id: SeasonID(row.id),
-                season_number: SeasonNumber::new(row.season_number as u8),
-                series_id: SeriesID(row.series_id),
-                library_id: LibraryID(row.library_id),
-                tmdb_series_id: row.tmdb_series_id as u64,
-                details,
-                endpoint: SeasonURL::from_string(format!("/media/{}", row.id)),
-                created_at: row.created_at,
-                theme_color: None, // Seasons typically inherit theme color from the series
-            });
+        for row in rows {
+            let season = repository.load_season_reference(row).await?;
+            seasons.push(season);
         }
 
         Ok(seasons)
     }
 
     async fn get_season_episodes(&self, season_id: &SeasonID) -> Result<Vec<EpisodeReference>> {
-        let rows = sqlx::query!(
+        let repository = TmdbMetadataRepository::new(self);
+
+        let rows = sqlx::query(
             r#"
             SELECT
-                er.id, er.episode_number, er.season_number, er.season_id, er.series_id,
-                er.tmdb_series_id, er.file_id,
-                em.tmdb_details,
-                mf.id as media_file_id, mf.file_path, mf.filename, mf.file_size,
-                mf.created_at as file_created_at, mf.technical_metadata, mf.library_id
+                er.id,
+                er.episode_number,
+                er.season_number,
+                er.season_id,
+                er.series_id,
+                er.tmdb_series_id,
+                mf.id AS file_id,
+                mf.library_id,
+                mf.file_path,
+                mf.filename,
+                mf.file_size,
+                mf.created_at AS file_created_at,
+                mf.technical_metadata
             FROM episode_references er
             JOIN media_files mf ON er.file_id = mf.id
-            LEFT JOIN episode_metadata em ON er.id = em.episode_id
             WHERE er.season_id = $1
             ORDER BY er.episode_number
             "#,
-            season_id.as_uuid()
         )
+        .bind(season_id.to_uuid())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get season episodes: {}", e)))?;
 
-        let mut episodes = Vec::new();
+        let mut episodes = Vec::with_capacity(rows.len());
         for row in rows {
-            // Parse technical metadata
-            let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
-            let parsed_metadata = technical_metadata
-                .and_then(|tm| serde_json::from_value::<MediaFileMetadata>(tm).ok());
-
-            // Create media file
-            let media_file = MediaFile {
-                id: row.media_file_id,
-                path: PathBuf::from(&row.file_path),
-                filename: row.filename.clone(),
-                size: row.file_size as u64,
-                created_at: row.file_created_at,
-                media_file_metadata: parsed_metadata,
-                library_id: LibraryID(row.library_id),
-            };
-
-            // Parse TMDB details if available
-            let details = if row.tmdb_details.is_null() {
-                MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
-            } else {
-                match serde_json::from_value::<EpisodeDetails>(row.tmdb_details) {
-                    Ok(episode_details) => {
-                        MediaDetailsOption::Details(TmdbDetails::Episode(episode_details))
-                    }
-                    Err(e) => {
-                        warn!("Failed to parse episode TMDB details: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
-                    }
-                }
-            };
-
-            episodes.push(EpisodeReference {
-                id: EpisodeID(row.id),
-                library_id: LibraryID(row.library_id),
-                episode_number: EpisodeNumber::new(row.episode_number as u8),
-                season_number: SeasonNumber::new(row.season_number as u8),
-                season_id: SeasonID(row.season_id),
-                series_id: SeriesID(row.series_id),
-                tmdb_series_id: row.tmdb_series_id as u64,
-                details,
-                endpoint: EpisodeURL::from_string(format!("/stream/{}", row.file_id)),
-                file: media_file,
-            });
+            let episode = repository.load_episode_reference(row).await?;
+            episodes.push(episode);
         }
 
         Ok(episodes)
@@ -1591,182 +952,94 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_series_reference(&self, id: &SeriesID) -> Result<SeriesReference> {
-        let series_uuid = id.as_uuid();
+        let series_uuid = id.to_uuid();
 
-        // First get the series reference
-        let series_row = sqlx::query!(
+        let row = sqlx::query(
             r#"
-            SELECT id, library_id, tmdb_id as "tmdb_id?", title, theme_color, created_at
+            SELECT id, library_id, tmdb_id, title, theme_color, created_at
             FROM series_references
             WHERE id = $1
             "#,
-            series_uuid
         )
+        .bind(series_uuid)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?
         .ok_or_else(|| MediaError::NotFound("Series not found".to_string()))?;
 
-        // Try to get metadata if available
-        let metadata_row = sqlx::query!(
-            r#"
-            SELECT tmdb_details
-            FROM series_metadata
-            WHERE series_id = $1
-            "#,
-            series_uuid
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
+        let repository = TmdbMetadataRepository::new(self);
+        let series_ref = repository.load_series_reference(row).await?;
 
-        // Build the details field
-        let details = if let Some(metadata) = metadata_row {
-            match serde_json::from_value::<EnhancedSeriesDetails>(metadata.tmdb_details) {
-                Ok(series_details) => {
-                    MediaDetailsOption::Details(TmdbDetails::Series(series_details))
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to deserialize series metadata: {}", e);
-                    MediaDetailsOption::Endpoint(format!("/series/{}", series_uuid))
-                }
-            }
-        } else {
-            MediaDetailsOption::Endpoint(format!("/series/{}", series_uuid))
-        };
-
-        // Handle nullable tmdb_id - use 0 if null (indicates no TMDB match)
-        let tmdb_id = series_row.tmdb_id.unwrap_or(0) as u64;
-
-        Ok(SeriesReference {
-            id: SeriesID(series_row.id),
-            library_id: LibraryID(series_row.library_id),
-            tmdb_id,
-            title: SeriesTitle::new(series_row.title)?,
-            details,
-            endpoint: SeriesURL::from_string(format!("/series/{}", series_uuid)),
-            created_at: series_row.created_at,
-            theme_color: series_row.theme_color,
-        })
+        Ok(series_ref)
     }
 
     async fn get_season_reference(&self, id: &SeasonID) -> Result<SeasonReference> {
-        let season_uuid = id.as_uuid();
+        let season_uuid = id.to_uuid();
 
-        let row = sqlx::query!(
+        let row = sqlx::query(
             r#"
             SELECT
-                sr.id, sr.series_id, sr.season_number, sr.library_id, sr.tmdb_series_id, sr.created_at,
-                sm.tmdb_details
-            FROM season_references sr
-            LEFT JOIN season_metadata sm ON sr.id = sm.season_id
-            WHERE sr.id = $1
+                id,
+                series_id,
+                season_number,
+                library_id,
+                tmdb_series_id,
+                created_at,
+                theme_color
+            FROM season_references
+            WHERE id = $1
             "#,
-            season_uuid
         )
+        .bind(season_uuid)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?
         .ok_or_else(|| MediaError::NotFound("Season not found".to_string()))?;
 
-        // Parse TMDB details if available
-        let details = if row.tmdb_details.is_null() {
-            MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
-        } else {
-            match serde_json::from_value::<SeasonDetails>(row.tmdb_details) {
-                Ok(season_details) => {
-                    MediaDetailsOption::Details(TmdbDetails::Season(season_details))
-                }
-                Err(e) => {
-                    warn!("Failed to parse season TMDB details: {}", e);
-                    MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
-                }
-            }
-        };
+        let repository = TmdbMetadataRepository::new(self);
+        let season_ref = repository.load_season_reference(row).await?;
 
-        Ok(SeasonReference {
-            id: SeasonID(row.id),
-            season_number: SeasonNumber::new(row.season_number as u8),
-            series_id: SeriesID(row.series_id),
-            library_id: LibraryID(row.library_id),
-            tmdb_series_id: row.tmdb_series_id as u64,
-            details,
-            endpoint: SeasonURL::from_string(format!("/media/{}", row.id)),
-            created_at: row.created_at,
-            theme_color: None, // Seasons typically inherit theme color from the series
-        })
+        Ok(season_ref)
     }
 
     async fn get_episode_reference(&self, id: &EpisodeID) -> Result<EpisodeReference> {
-        let episode_uuid = id.as_uuid();
+        let episode_uuid = id.to_uuid();
 
-        let row = sqlx::query!(
+        let row = sqlx::query(
             r#"
             SELECT
-                er.id, er.episode_number, er.season_number, er.season_id, er.series_id,
-                er.tmdb_series_id, er.file_id,
-                em.tmdb_details,
-                mf.id as media_file_id, mf.file_path, mf.filename, mf.file_size,
-                mf.created_at as file_created_at, mf.technical_metadata, mf.library_id
+                er.id,
+                er.episode_number,
+                er.season_number,
+                er.season_id,
+                er.series_id,
+                er.tmdb_series_id,
+                mf.id AS file_id,
+                mf.library_id,
+                mf.file_path,
+                mf.filename,
+                mf.file_size,
+                mf.created_at AS file_created_at,
+                mf.technical_metadata
             FROM episode_references er
             JOIN media_files mf ON er.file_id = mf.id
-            LEFT JOIN episode_metadata em ON er.id = em.episode_id
             WHERE er.id = $1
             "#,
-            episode_uuid
         )
+        .bind(episode_uuid)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?
         .ok_or_else(|| MediaError::NotFound("Episode not found".to_string()))?;
 
-        // Parse technical metadata
-        let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
-        let parsed_metadata =
-            technical_metadata.and_then(|tm| serde_json::from_value::<MediaFileMetadata>(tm).ok());
+        let repository = TmdbMetadataRepository::new(self);
+        let episode_ref = repository.load_episode_reference(row).await?;
 
-        // Create media file
-        let media_file = MediaFile {
-            id: row.media_file_id,
-            path: PathBuf::from(&row.file_path),
-            filename: row.filename.clone(),
-            size: row.file_size as u64,
-            created_at: row.file_created_at,
-            media_file_metadata: parsed_metadata,
-            library_id: LibraryID(row.library_id),
-        };
-
-        // Parse TMDB details if available
-        let details = if row.tmdb_details.is_null() {
-            MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
-        } else {
-            match serde_json::from_value::<EpisodeDetails>(row.tmdb_details) {
-                Ok(episode_details) => {
-                    MediaDetailsOption::Details(TmdbDetails::Episode(episode_details))
-                }
-                Err(e) => {
-                    warn!("Failed to parse episode TMDB details: {}", e);
-                    MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
-                }
-            }
-        };
-
-        Ok(EpisodeReference {
-            id: EpisodeID(row.id),
-            library_id: LibraryID(row.library_id),
-            series_id: SeriesID(row.series_id),
-            season_id: SeasonID(row.season_id),
-            season_number: SeasonNumber::new(row.season_number as u8),
-            episode_number: EpisodeNumber::new(row.episode_number as u8),
-            tmdb_series_id: row.tmdb_series_id as u64,
-            details,
-            endpoint: EpisodeURL::from_string(format!("/stream/{}", row.file_id)),
-            file: media_file,
-        })
+        Ok(episode_ref)
     }
 
     async fn update_movie_tmdb_id(&self, id: &MovieID, tmdb_id: u64) -> Result<()> {
-        let movie_uuid = id.as_uuid();
+        let movie_uuid = id.to_uuid();
 
         sqlx::query!(
             "UPDATE movie_references SET tmdb_id = $1, updated_at = NOW() WHERE id = $2",
@@ -1781,7 +1054,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn update_series_tmdb_id(&self, id: &SeriesID, tmdb_id: u64) -> Result<()> {
-        let series_uuid = id.as_uuid();
+        let series_uuid = id.to_uuid();
 
         sqlx::query!(
             "UPDATE series_references SET tmdb_id = $1, updated_at = NOW() WHERE id = $2",
@@ -1800,37 +1073,27 @@ impl MediaDatabaseTrait for PostgresDatabase {
         library_id: LibraryID,
         tmdb_id: u64,
     ) -> Result<Option<SeriesReference>> {
-        let row = sqlx::query!(
+        let repository = TmdbMetadataRepository::new(self);
+
+        let row = sqlx::query(
             r#"
-            SELECT id, library_id, tmdb_id as "tmdb_id?", title, theme_color, created_at
+            SELECT id, library_id, tmdb_id, title, theme_color, created_at
             FROM series_references
             WHERE library_id = $1 AND tmdb_id = $2
             "#,
-            library_id.as_uuid(),
-            tmdb_id as i64
         )
+        .bind(library_id.as_uuid())
+        .bind(tmdb_id as i64)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
 
-        if let Some(row) = row {
-            // tmdb_id should not be null when querying by tmdb_id
-            let tmdb_id = row.tmdb_id.ok_or_else(|| {
-                MediaError::Internal("Series found by tmdb_id but tmdb_id is null".to_string())
-            })?;
-
-            Ok(Some(SeriesReference {
-                id: SeriesID(row.id),
-                library_id: LibraryID(row.library_id),
-                tmdb_id: tmdb_id as u64,
-                title: SeriesTitle::new(row.title)?,
-                details: MediaDetailsOption::Endpoint(format!("/series/{}", row.id)),
-                endpoint: SeriesURL::from_string(format!("/series/{}", row.id)),
-                created_at: row.created_at,
-                theme_color: row.theme_color,
-            }))
-        } else {
-            Ok(None)
+        match row {
+            Some(row) => {
+                let series = repository.load_series_reference(row).await?;
+                Ok(Some(series))
+            }
+            None => Ok(None),
         }
     }
 
@@ -2063,14 +1326,25 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let row = sqlx::query!(
             r#"
-            INSERT INTO image_variants (id, image_id, variant, file_path, file_size, width, height, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO image_variants (
+                id,
+                image_id,
+                variant,
+                file_path,
+                file_size,
+                width,
+                height,
+                created_at,
+                downloaded_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
             ON CONFLICT (image_id, variant) DO UPDATE SET
                 file_path = EXCLUDED.file_path,
                 file_size = EXCLUDED.file_size,
                 width = EXCLUDED.width,
-                height = EXCLUDED.height
-            RETURNING id, image_id, variant, file_path, file_size, width, height, created_at
+                height = EXCLUDED.height,
+                downloaded_at = NOW()
+            RETURNING id, image_id, variant, file_path, file_size, width, height, created_at, downloaded_at
             "#,
             id,
             image_id,
@@ -2094,6 +1368,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             width: row.width,
             height: row.height,
             created_at: row.created_at,
+            downloaded_at: row.downloaded_at,
         })
     }
 
@@ -2104,7 +1379,16 @@ impl MediaDatabaseTrait for PostgresDatabase {
     ) -> Result<Option<ImageVariant>> {
         let row = sqlx::query!(
             r#"
-            SELECT id, image_id, variant, file_path, file_size, width, height, created_at
+            SELECT
+                id,
+                image_id,
+                variant,
+                file_path,
+                file_size,
+                width,
+                height,
+                created_at,
+                downloaded_at
             FROM image_variants
             WHERE image_id = $1 AND variant = $2
             "#,
@@ -2124,13 +1408,23 @@ impl MediaDatabaseTrait for PostgresDatabase {
             width: r.width,
             height: r.height,
             created_at: r.created_at,
+            downloaded_at: r.downloaded_at,
         }))
     }
 
     async fn get_image_variants(&self, image_id: Uuid) -> Result<Vec<ImageVariant>> {
         let rows = sqlx::query!(
             r#"
-            SELECT id, image_id, variant, file_path, file_size, width, height, created_at
+            SELECT
+                id,
+                image_id,
+                variant,
+                file_path,
+                file_size,
+                width,
+                height,
+                created_at,
+                downloaded_at
             FROM image_variants
             WHERE image_id = $1
             ORDER BY variant
@@ -2152,6 +1446,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 width: r.width,
                 height: r.height,
                 created_at: r.created_at,
+                downloaded_at: r.downloaded_at,
             })
             .collect())
     }
@@ -2334,6 +1629,274 @@ impl MediaDatabaseTrait for PostgresDatabase {
         }
 
         Ok(None)
+    }
+
+    async fn upsert_media_image_variant(
+        &self,
+        record: &MediaImageVariantRecord,
+    ) -> Result<MediaImageVariantRecord> {
+        let key = &record.key;
+        let row = sqlx::query!(
+            r#"
+            INSERT INTO media_image_variants (
+                media_type,
+                media_id,
+                image_type,
+                order_index,
+                variant,
+                cached,
+                width,
+                height,
+                content_hash,
+                theme_color,
+                requested_at,
+                cached_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            ON CONFLICT (media_type, media_id, image_type, order_index, variant) DO UPDATE SET
+                cached = EXCLUDED.cached,
+                width = EXCLUDED.width,
+                height = EXCLUDED.height,
+                content_hash = EXCLUDED.content_hash,
+                theme_color = EXCLUDED.theme_color,
+                requested_at = LEAST(media_image_variants.requested_at, EXCLUDED.requested_at),
+                cached_at = COALESCE(EXCLUDED.cached_at, media_image_variants.cached_at)
+            RETURNING
+                media_type,
+                media_id,
+                image_type,
+                order_index,
+                variant,
+                cached,
+                width,
+                height,
+                content_hash,
+                theme_color,
+                requested_at,
+                cached_at
+            "#,
+            key.media_type,
+            key.media_id,
+            key.image_type,
+            key.order_index,
+            key.variant,
+            record.cached,
+            record.width,
+            record.height,
+            record.content_hash.as_deref(),
+            record.theme_color.as_deref(),
+            record.requested_at,
+            record.cached_at
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to upsert media image variant: {}", e))
+        })?;
+
+        Ok(MediaImageVariantRecord {
+            requested_at: row.requested_at,
+            cached_at: row.cached_at,
+            cached: row.cached,
+            width: row.width,
+            height: row.height,
+            content_hash: row.content_hash,
+            theme_color: row.theme_color,
+            key: MediaImageVariantKey {
+                media_type: row.media_type,
+                media_id: row.media_id,
+                image_type: row.image_type,
+                order_index: row.order_index,
+                variant: row.variant,
+            },
+        })
+    }
+
+    async fn mark_media_image_variant_cached(
+        &self,
+        key: &MediaImageVariantKey,
+        width: Option<i32>,
+        height: Option<i32>,
+        content_hash: Option<&str>,
+        theme_color: Option<&str>,
+    ) -> Result<MediaImageVariantRecord> {
+        let row = sqlx::query!(
+            r#"
+            UPDATE media_image_variants
+            SET
+                cached = true,
+                width = COALESCE($5, width),
+                height = COALESCE($6, height),
+                content_hash = COALESCE($7, content_hash),
+                theme_color = COALESCE($8, theme_color),
+                cached_at = NOW()
+            WHERE media_type = $1
+              AND media_id = $2
+              AND image_type = $3
+              AND order_index = $4
+              AND variant = $9
+            RETURNING
+                media_type,
+                media_id,
+                image_type,
+                order_index,
+                variant,
+                cached,
+                width,
+                height,
+                content_hash,
+                theme_color,
+                requested_at,
+                cached_at
+            "#,
+            key.media_type,
+            key.media_id,
+            key.image_type,
+            key.order_index,
+            width,
+            height,
+            content_hash,
+            theme_color,
+            key.variant
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to mark media image variant cached: {}", e))
+        })?;
+
+        if let Some(row) = row {
+            return Ok(MediaImageVariantRecord {
+                requested_at: row.requested_at,
+                cached_at: row.cached_at,
+                cached: row.cached,
+                width: row.width,
+                height: row.height,
+                content_hash: row.content_hash,
+                theme_color: row.theme_color,
+                key: MediaImageVariantKey {
+                    media_type: row.media_type,
+                    media_id: row.media_id,
+                    image_type: row.image_type,
+                    order_index: row.order_index,
+                    variant: row.variant,
+                },
+            });
+        }
+
+        let record = MediaImageVariantRecord {
+            requested_at: Utc::now(),
+            cached_at: Some(Utc::now()),
+            cached: true,
+            width,
+            height,
+            content_hash: content_hash.map(|s| s.to_string()),
+            theme_color: theme_color.map(|s| s.to_string()),
+            key: key.clone(),
+        };
+
+        self.upsert_media_image_variant(&record).await
+    }
+
+    async fn list_media_image_variants(
+        &self,
+        media_type: &str,
+        media_id: Uuid,
+    ) -> Result<Vec<MediaImageVariantRecord>> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                media_type,
+                media_id,
+                image_type,
+                order_index,
+                variant,
+                cached,
+                width,
+                height,
+                content_hash,
+                theme_color,
+                requested_at,
+                cached_at
+            FROM media_image_variants
+            WHERE media_type = $1 AND media_id = $2
+            ORDER BY image_type, order_index, variant
+            "#,
+            media_type,
+            media_id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Failed to list media image variants: {}", e)))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| MediaImageVariantRecord {
+                requested_at: row.requested_at,
+                cached_at: row.cached_at,
+                cached: row.cached,
+                width: row.width,
+                height: row.height,
+                content_hash: row.content_hash,
+                theme_color: row.theme_color,
+                key: MediaImageVariantKey {
+                    media_type: row.media_type,
+                    media_id: row.media_id,
+                    image_type: row.image_type,
+                    order_index: row.order_index,
+                    variant: row.variant,
+                },
+            })
+            .collect())
+    }
+
+    async fn update_media_theme_color(
+        &self,
+        media_type: &str,
+        media_id: Uuid,
+        theme_color: Option<&str>,
+    ) -> Result<()> {
+        match media_type {
+            "movie" => {
+                sqlx::query!(
+                    "UPDATE movie_references SET theme_color = $2 WHERE id = $1",
+                    media_id,
+                    theme_color
+                )
+                .execute(&self.pool)
+                .await
+                .map_err(|e| {
+                    MediaError::Internal(format!("Failed to update movie theme color: {}", e))
+                })?;
+            }
+            "series" => {
+                sqlx::query!(
+                    "UPDATE series_references SET theme_color = $2 WHERE id = $1",
+                    media_id,
+                    theme_color
+                )
+                .execute(&self.pool)
+                .await
+                .map_err(|e| {
+                    MediaError::Internal(format!("Failed to update series theme color: {}", e))
+                })?;
+            }
+            "season" => {
+                sqlx::query!(
+                    "UPDATE season_references SET theme_color = $2 WHERE id = $1",
+                    media_id,
+                    theme_color
+                )
+                .execute(&self.pool)
+                .await
+                .map_err(|e| {
+                    MediaError::Internal(format!("Failed to update season theme color: {}", e))
+                })?;
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 
     async fn cleanup_orphaned_images(&self) -> Result<u32> {
@@ -3791,71 +3354,35 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let mut media = Vec::new();
         match library_type {
             LibraryType::Movies => {
-                let rows = sqlx::query!(
+                let repository = TmdbMetadataRepository::new(self);
+                let rows = sqlx::query(
                     r#"
                     SELECT
-                        mr.id, mr.tmdb_id, mr.title, mr.theme_color,
-                        mf.id as file_id, mf.file_path, mf.filename, mf.file_size, mf.created_at as file_created_at,
-                        mf.technical_metadata, mf.parsed_info,
-                        mm.tmdb_details as "tmdb_details?"
+                        mr.id,
+                        mr.tmdb_id,
+                        mr.title,
+                        mr.theme_color,
+                        mf.id AS file_id,
+                        mf.library_id,
+                        mf.file_path,
+                        mf.filename,
+                        mf.file_size,
+                        mf.created_at AS file_created_at,
+                        mf.technical_metadata
                     FROM movie_references mr
                     JOIN media_files mf ON mr.file_id = mf.id
-                    LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id
-                    WHERE mr.library_id = $1
+                    WHERE mf.library_id = $1
                     ORDER BY mr.title
                     "#,
-                    library_id.as_uuid()
                 )
+                .bind(library_id.as_uuid())
                 .fetch_all(&self.pool)
                 .await
                 .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
 
                 for row in rows {
-                    let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
-                    let media_file_metadata = technical_metadata
-                        .map(|tm| serde_json::from_value(tm))
-                        .transpose()
-                        .map_err(|e| {
-                            MediaError::Internal(format!("Failed to deserialize metadata: {}", e))
-                        })?;
-
-                    let media_file = MediaFile {
-                        id: row.file_id,
-                        path: PathBuf::from(row.file_path),
-                        filename: row.filename,
-                        size: row.file_size as u64,
-                        created_at: row.file_created_at,
-                        media_file_metadata,
-                        library_id: library_id,
-                    };
-
-                    // Build metadata if available
-                    let details = if let Some(tmdb_json) = row.tmdb_details {
-                        match serde_json::from_value::<EnhancedMovieDetails>(tmdb_json) {
-                            Ok(metadata_details) => {
-                                MediaDetailsOption::Details(TmdbDetails::Movie(metadata_details))
-                            }
-                            Err(e) => {
-                                warn!("Failed to deserialize movie metadata: {}", e);
-                                MediaDetailsOption::Endpoint(format!("/movie/{}", row.id))
-                            }
-                        }
-                    } else {
-                        MediaDetailsOption::Endpoint(format!("/movie/{}", row.id))
-                    };
-
-                    let movie_ref = Media::Movie(MovieReference {
-                        id: MovieID(row.id),
-                        library_id,
-                        tmdb_id: row.tmdb_id as u64,
-                        title: MovieTitle::new(row.title)?,
-                        details,
-                        endpoint: MovieURL::from_string(format!("/stream/{}", row.file_id)),
-                        file: media_file,
-                        theme_color: row.theme_color,
-                    });
-
-                    media.push(movie_ref);
+                    let movie = repository.load_movie_reference(row).await?;
+                    media.push(Media::Movie(movie));
                 }
             }
             LibraryType::Series => {
@@ -3894,71 +3421,35 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     // Lookup a single movie by file path
     async fn get_movie_reference_by_path(&self, path: &str) -> Result<Option<MovieReference>> {
-        let row = sqlx::query!(
+        let repository = TmdbMetadataRepository::new(self);
+        let row = sqlx::query(
             r#"
             SELECT
-                mr.id, mr.tmdb_id, mr.title, mr.theme_color, mr.library_id,
-                mf.id as file_id, mf.file_path, mf.filename, mf.file_size, mf.created_at as file_created_at,
-                mf.technical_metadata,
-                mm.tmdb_details as "tmdb_details?"
+                mr.id,
+                mr.tmdb_id,
+                mr.title,
+                mr.theme_color,
+                mf.id AS file_id,
+                mf.library_id,
+                mf.file_path,
+                mf.filename,
+                mf.file_size,
+                mf.created_at AS file_created_at,
+                mf.technical_metadata
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
-            LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id
             WHERE mf.file_path = $1
             LIMIT 1
             "#,
-            path
         )
+        .bind(path)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
 
         if let Some(row) = row {
-            let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
-            let media_file_metadata = technical_metadata
-                .map(|tm| serde_json::from_value(tm))
-                .transpose()
-                .map_err(|e| {
-                    MediaError::Internal(format!("Failed to deserialize metadata: {}", e))
-                })?;
-
-            let library_id = LibraryID(row.library_id);
-            let media_file = MediaFile {
-                id: row.file_id,
-                path: PathBuf::from(row.file_path),
-                filename: row.filename,
-                size: row.file_size as u64,
-                created_at: row.file_created_at,
-                media_file_metadata,
-                library_id,
-            };
-
-            let details = if let Some(tmdb_json) = row.tmdb_details {
-                match serde_json::from_value::<EnhancedMovieDetails>(tmdb_json) {
-                    Ok(metadata_details) => {
-                        MediaDetailsOption::Details(TmdbDetails::Movie(metadata_details))
-                    }
-                    Err(e) => {
-                        warn!("Failed to deserialize movie metadata: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/movie/{}", row.id))
-                    }
-                }
-            } else {
-                MediaDetailsOption::Endpoint(format!("/movie/{}", row.id))
-            };
-
-            let movie_ref = MovieReference {
-                id: MovieID(row.id),
-                library_id,
-                tmdb_id: row.tmdb_id as u64,
-                title: MovieTitle::new(row.title)?,
-                details,
-                endpoint: MovieURL::from_string(format!("/stream/{}", media_file.id)),
-                file: media_file,
-                theme_color: row.theme_color,
-            };
-
-            Ok(Some(movie_ref))
+            let movie = repository.load_movie_reference(row).await?;
+            Ok(Some(movie))
         } else {
             Ok(None)
         }
@@ -3972,75 +3463,36 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         // Convert IDs to UUIDs
         let uuids: Vec<Uuid> = ids.iter().map(|id| id.to_uuid()).collect();
-        let uuids = uuids;
+        let repository = TmdbMetadataRepository::new(self);
 
-        // Build query with ANY clause
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT
-                mr.id, mr.tmdb_id, mr.title, mr.theme_color, mr.library_id,
-                mf.id as file_id, mf.file_path, mf.filename, mf.file_size, mf.created_at as file_created_at,
-                mf.technical_metadata, mf.parsed_info,
-                mm.tmdb_details as "tmdb_details?"
+                mr.id,
+                mr.tmdb_id,
+                mr.title,
+                mr.theme_color,
+                mf.id AS file_id,
+                mf.library_id,
+                mf.file_path,
+                mf.filename,
+                mf.file_size,
+                mf.created_at AS file_created_at,
+                mf.technical_metadata
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
-            LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id
             WHERE mr.id = ANY($1)
             "#,
-            &uuids
         )
+        .bind(uuids.as_slice())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
 
-        let mut movies = Vec::new();
+        let mut movies = Vec::with_capacity(rows.len());
         for row in rows {
-            // Build MediaFile
-            let technical_metadata: Option<serde_json::Value> = row.technical_metadata; // TODO: See if we can optimize this with rkyv
-            let media_file_metadata = technical_metadata
-                .map(|tm| serde_json::from_value(tm))
-                .transpose()
-                .map_err(|e| {
-                    MediaError::Internal(format!("Failed to deserialize metadata: {}", e))
-                })?;
-
-            let media_file = MediaFile {
-                id: row.file_id,
-                path: PathBuf::from(row.file_path),
-                filename: row.filename,
-                size: row.file_size as u64,
-                created_at: row.file_created_at,
-                media_file_metadata,
-                library_id: LibraryID(row.library_id),
-            };
-
-            // Build metadata if available
-            let details = if let Some(tmdb_json) = row.tmdb_details {
-                match serde_json::from_value::<EnhancedMovieDetails>(tmdb_json) {
-                    Ok(metadata_details) => {
-                        MediaDetailsOption::Details(TmdbDetails::Movie(metadata_details))
-                    }
-                    Err(e) => {
-                        warn!("Failed to deserialize movie metadata: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/movie/{}", row.id))
-                    }
-                }
-            } else {
-                MediaDetailsOption::Endpoint(format!("/movie/{}", row.id))
-            };
-
-            let movie_ref = MovieReference {
-                id: MovieID(row.id),
-                library_id: LibraryID(row.library_id),
-                tmdb_id: row.tmdb_id as u64,
-                title: MovieTitle::new(row.title)?,
-                details,
-                endpoint: MovieURL::from_string(format!("/stream/{}", row.file_id)),
-                file: media_file,
-                theme_color: row.theme_color,
-            };
-
-            movies.push(movie_ref);
+            let movie = repository.load_movie_reference(row).await?;
+            movies.push(movie);
         }
 
         Ok(movies)
@@ -4054,117 +3506,61 @@ impl MediaDatabaseTrait for PostgresDatabase {
         // Convert IDs to UUIDs
         let uuids: Vec<Uuid> = ids.iter().map(|id| id.to_uuid()).collect();
 
-        // Fetch series references with metadata
-        let rows = sqlx::query!(
+        let repository = TmdbMetadataRepository::new(self);
+
+        let rows = sqlx::query(
             r#"
             SELECT
-                sr.id, sr.library_id, sr.tmdb_id as "tmdb_id?", sr.title, sr.theme_color, sr.created_at,
-                sm.tmdb_details as "tmdb_details?"
+                sr.id,
+                sr.library_id,
+                sr.tmdb_id,
+                sr.title,
+                sr.theme_color,
+                sr.created_at
             FROM series_references sr
-            LEFT JOIN series_metadata sm ON sr.id = sm.series_id
             WHERE sr.id = ANY($1)
             "#,
-            &uuids
         )
+        .bind(uuids.as_slice())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
 
-        let mut series_list = Vec::new();
+        let mut series_list = Vec::with_capacity(rows.len());
         for row in rows {
-            // Extract required fields - these are non-nullable in the query
-            let row_id = row.id;
-            let library_id = row.library_id;
-            let title = row.title;
-            let created_at = row.created_at;
-
-            // Build the details field
-            let details = match row.tmdb_details {
-                Some(metadata) if !metadata.is_null() => {
-                    match serde_json::from_value::<EnhancedSeriesDetails>(metadata) {
-                        Ok(series_details) => {
-                            MediaDetailsOption::Details(TmdbDetails::Series(series_details))
-                        }
-                        Err(e) => {
-                            warn!("Failed to deserialize series metadata: {}", e);
-                            MediaDetailsOption::Endpoint(format!("/series/{}", row_id))
-                        }
-                    }
-                }
-                _ => MediaDetailsOption::Endpoint(format!("/series/{}", row_id)),
-            };
-
-            let tmdb_id = row.tmdb_id.unwrap_or(0) as u64;
-
-            series_list.push(SeriesReference {
-                id: SeriesID(row_id),
-                library_id: LibraryID(library_id),
-                tmdb_id,
-                title: SeriesTitle::new(title)?,
-                details,
-                endpoint: SeriesURL::from_string(format!("/series/{}", row_id)),
-                created_at,
-                theme_color: row.theme_color,
-            });
+            let series = repository.load_series_reference(row).await?;
+            series_list.push(series);
         }
 
         Ok(series_list)
     }
 
     async fn get_library_series(&self, library_id: &LibraryID) -> Result<Vec<SeriesReference>> {
-        // Build query with ANY clause
-        let rows = sqlx::query!(
+        let repository = TmdbMetadataRepository::new(self);
+
+        let rows = sqlx::query(
             r#"
             SELECT
-                sr.id, sr.library_id, sr.tmdb_id as "tmdb_id?", sr.title, sr.theme_color, sr.created_at,
-                sm.tmdb_details as "tmdb_details?"
+                sr.id,
+                sr.library_id,
+                sr.tmdb_id,
+                sr.title,
+                sr.theme_color,
+                sr.created_at
             FROM series_references sr
-            LEFT JOIN series_metadata sm ON sr.id = sm.series_id
             WHERE sr.library_id = $1
             ORDER BY sr.title
             "#,
-            library_id.as_uuid()
         )
+        .bind(library_id.as_uuid())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
 
-        let mut series_list = Vec::new();
+        let mut series_list = Vec::with_capacity(rows.len());
         for row in rows {
-            // Extract required fields - these are non-nullable in the query
-            let row_id = row.id;
-            let library_id = row.library_id;
-            let title = row.title;
-            let created_at = row.created_at;
-
-            // Build the details field
-            let details = match row.tmdb_details {
-                Some(metadata) if !metadata.is_null() => {
-                    match serde_json::from_value::<EnhancedSeriesDetails>(metadata) {
-                        Ok(series_details) => {
-                            MediaDetailsOption::Details(TmdbDetails::Series(series_details))
-                        }
-                        Err(e) => {
-                            warn!("Failed to deserialize series metadata: {}", e);
-                            MediaDetailsOption::Endpoint(format!("/series/{}", row_id))
-                        }
-                    }
-                }
-                _ => MediaDetailsOption::Endpoint(format!("/series/{}", row_id)),
-            };
-
-            let tmdb_id = row.tmdb_id.unwrap_or(0) as u64;
-
-            series_list.push(SeriesReference {
-                id: SeriesID(row_id),
-                library_id: LibraryID(library_id),
-                tmdb_id,
-                title: SeriesTitle::new(title)?,
-                details,
-                endpoint: SeriesURL::from_string(format!("/series/{}", row_id)),
-                created_at,
-                theme_color: row.theme_color,
-            });
+            let series = repository.load_series_reference(row).await?;
+            series_list.push(series);
         }
 
         Ok(series_list)
@@ -4178,97 +3574,63 @@ impl MediaDatabaseTrait for PostgresDatabase {
         // Convert IDs to UUIDs
         let uuids: Vec<Uuid> = ids.iter().map(|id| id.to_uuid()).collect();
 
-        let rows = sqlx::query!(
+        let repository = TmdbMetadataRepository::new(self);
+
+        let rows = sqlx::query(
             r#"
             SELECT
-                sr.id, sr.series_id, sr.season_number, sr.library_id, sr.tmdb_series_id, sr.created_at,
-                sm.tmdb_details
+                sr.id,
+                sr.series_id,
+                sr.season_number,
+                sr.library_id,
+                sr.tmdb_series_id,
+                sr.created_at,
+                sr.theme_color
             FROM season_references sr
-            LEFT JOIN season_metadata sm ON sr.id = sm.season_id
             WHERE sr.id = ANY($1)
             "#,
-            &uuids
         )
+        .bind(uuids.as_slice())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get seasons: {}", e)))?;
 
-        let mut seasons = Vec::new();
+        let mut seasons = Vec::with_capacity(rows.len());
         for row in rows {
-            // Parse TMDB details if available
-            let details = match row.tmdb_details {
-                None => MediaDetailsOption::Endpoint(format!("/media/{}", row.id)),
-                Some(tmdb_json) => match serde_json::from_value::<SeasonDetails>(tmdb_json) {
-                    Ok(season_details) => {
-                        MediaDetailsOption::Details(TmdbDetails::Season(season_details))
-                    }
-                    Err(e) => {
-                        warn!("Failed to parse season TMDB details: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
-                    }
-                },
-            };
-
-            seasons.push(SeasonReference {
-                id: SeasonID(row.id),
-                season_number: SeasonNumber::new(row.season_number as u8),
-                series_id: SeriesID(row.series_id),
-                library_id: LibraryID(row.library_id),
-                tmdb_series_id: row.tmdb_series_id as u64,
-                details,
-                endpoint: SeasonURL::from_string(format!("/media/{}", row.id)),
-                created_at: row.created_at,
-                theme_color: None,
-            });
+            let season = repository.load_season_reference(row).await?;
+            seasons.push(season);
         }
 
         Ok(seasons)
     }
 
     async fn get_library_seasons(&self, library_id: &LibraryID) -> Result<Vec<SeasonReference>> {
-        let rows = sqlx::query!(
+        let repository = TmdbMetadataRepository::new(self);
+
+        let rows = sqlx::query(
             r#"
             SELECT
-                sr.id, sr.series_id, sr.season_number, sr.library_id, sr.tmdb_series_id, sr.created_at,
-                sm.tmdb_details as "tmdb_details?"
+                sr.id,
+                sr.series_id,
+                sr.season_number,
+                sr.library_id,
+                sr.tmdb_series_id,
+                sr.created_at,
+                sr.theme_color
             FROM season_references sr
-            LEFT JOIN season_metadata sm ON sr.id = sm.season_id
             WHERE sr.library_id = $1
             ORDER BY sr.series_id, sr.season_number
             "#,
-            library_id.as_uuid()
         )
+        .bind(library_id.as_uuid())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get seasons: {}", e)))?;
 
-        let mut seasons = Vec::new();
+        let mut seasons = Vec::with_capacity(rows.len());
         for row in rows {
-            // Parse TMDB details if available
-            let details = match row.tmdb_details {
-                None => MediaDetailsOption::Endpoint(format!("/media/{}", row.id)),
-                Some(tmdb_json) => match serde_json::from_value::<SeasonDetails>(tmdb_json) {
-                    Ok(season_details) => {
-                        MediaDetailsOption::Details(TmdbDetails::Season(season_details))
-                    }
-                    Err(e) => {
-                        warn!("Failed to parse season TMDB details: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
-                    }
-                },
-            };
-
-            seasons.push(SeasonReference {
-                id: SeasonID(row.id),
-                season_number: SeasonNumber::new(row.season_number as u8),
-                series_id: SeriesID(row.series_id),
-                library_id: LibraryID(row.library_id),
-                tmdb_series_id: row.tmdb_series_id as u64,
-                details,
-                endpoint: SeasonURL::from_string(format!("/media/{}", row.id)),
-                created_at: row.created_at,
-                theme_color: None,
-            });
+            let season = repository.load_season_reference(row).await?;
+            seasons.push(season);
         }
 
         Ok(seasons)
@@ -4285,139 +3647,77 @@ impl MediaDatabaseTrait for PostgresDatabase {
         // Convert IDs to UUIDs
         let uuids: Vec<Uuid> = ids.iter().map(|id| id.to_uuid()).collect();
 
-        let rows = sqlx::query!(
+        let repository = TmdbMetadataRepository::new(self);
+
+        let rows = sqlx::query(
             r#"
             SELECT
-                er.id, er.episode_number, er.season_number, er.season_id, er.series_id,
-                er.tmdb_series_id, er.file_id,
-                em.tmdb_details,
-                mf.id as media_file_id, mf.file_path, mf.filename, mf.file_size,
-                mf.created_at as file_created_at, mf.technical_metadata, mf.library_id
+                er.id,
+                er.episode_number,
+                er.season_number,
+                er.season_id,
+                er.series_id,
+                er.tmdb_series_id,
+                mf.id AS file_id,
+                mf.library_id,
+                mf.file_path,
+                mf.filename,
+                mf.file_size,
+                mf.created_at AS file_created_at,
+                mf.technical_metadata
             FROM episode_references er
             JOIN media_files mf ON er.file_id = mf.id
-            LEFT JOIN episode_metadata em ON er.id = em.episode_id
             WHERE er.id = ANY($1)
             "#,
-            &uuids
         )
+        .bind(uuids.as_slice())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get episodes: {}", e)))?;
 
-        let mut episodes = Vec::new();
+        let mut episodes = Vec::with_capacity(rows.len());
         for row in rows {
-            // Parse technical metadata
-            let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
-            let parsed_metadata = technical_metadata
-                .and_then(|tm| serde_json::from_value::<MediaFileMetadata>(tm).ok());
-
-            // Create media file
-            let media_file = MediaFile {
-                id: row.media_file_id,
-                path: PathBuf::from(&row.file_path),
-                filename: row.filename.clone(),
-                size: row.file_size as u64,
-                created_at: row.file_created_at,
-                media_file_metadata: parsed_metadata,
-                library_id: LibraryID(row.library_id),
-            };
-
-            // Parse TMDB details if available
-            let details = match row.tmdb_details {
-                None => MediaDetailsOption::Endpoint(format!("/media/{}", row.id)),
-                Some(tmdb_json) => match serde_json::from_value::<EpisodeDetails>(tmdb_json) {
-                    Ok(episode_details) => {
-                        MediaDetailsOption::Details(TmdbDetails::Episode(episode_details))
-                    }
-                    Err(e) => {
-                        warn!("Failed to parse episode TMDB details: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
-                    }
-                },
-            };
-
-            episodes.push(EpisodeReference {
-                id: EpisodeID(row.id),
-                library_id: LibraryID(row.library_id),
-                series_id: SeriesID(row.series_id),
-                season_id: SeasonID(row.season_id),
-                season_number: SeasonNumber::new(row.season_number as u8),
-                episode_number: EpisodeNumber::new(row.episode_number as u8),
-                tmdb_series_id: row.tmdb_series_id as u64,
-                details,
-                endpoint: EpisodeURL::from_string(format!("/stream/{}", row.file_id)),
-                file: media_file,
-            });
+            let episode = repository.load_episode_reference(row).await?;
+            episodes.push(episode);
         }
 
         Ok(episodes)
     }
 
     async fn get_library_episodes(&self, library_id: &LibraryID) -> Result<Vec<EpisodeReference>> {
-        let rows = sqlx::query!(
+        let repository = TmdbMetadataRepository::new(self);
+
+        let rows = sqlx::query(
             r#"
             SELECT
-                er.id, er.episode_number, er.season_number, er.season_id, er.series_id,
-                er.tmdb_series_id, er.file_id,
-                em.tmdb_details as "tmdb_details?",
-                mf.id as media_file_id, mf.file_path, mf.filename, mf.file_size,
-                mf.created_at as file_created_at, mf.technical_metadata, mf.library_id
+                er.id,
+                er.episode_number,
+                er.season_number,
+                er.season_id,
+                er.series_id,
+                er.tmdb_series_id,
+                mf.id AS file_id,
+                mf.library_id,
+                mf.file_path,
+                mf.filename,
+                mf.file_size,
+                mf.created_at AS file_created_at,
+                mf.technical_metadata
             FROM episode_references er
             JOIN media_files mf ON er.file_id = mf.id
-            LEFT JOIN episode_metadata em ON er.id = em.episode_id
             WHERE mf.library_id = $1
             ORDER BY er.series_id ASC, er.season_number ASC, er.episode_number ASC
             "#,
-            library_id.as_uuid()
         )
+        .bind(library_id.as_uuid())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get episodes: {}", e)))?;
 
-        let mut episodes = Vec::new();
+        let mut episodes = Vec::with_capacity(rows.len());
         for row in rows {
-            // Parse technical metadata
-            let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
-            let parsed_metadata = technical_metadata
-                .and_then(|tm| serde_json::from_value::<MediaFileMetadata>(tm).ok());
-
-            // Create media file
-            let media_file = MediaFile {
-                id: row.media_file_id,
-                path: PathBuf::from(&row.file_path),
-                filename: row.filename.clone(),
-                size: row.file_size as u64,
-                created_at: row.file_created_at,
-                media_file_metadata: parsed_metadata,
-                library_id: LibraryID(row.library_id),
-            };
-
-            // Parse TMDB details if available
-            let details = match row.tmdb_details {
-                None => MediaDetailsOption::Endpoint(format!("/media/{}", row.id)),
-                Some(tmdb_json) => match serde_json::from_value::<EpisodeDetails>(tmdb_json) {
-                    Ok(episode_details) => {
-                        MediaDetailsOption::Details(TmdbDetails::Episode(episode_details))
-                    }
-                    Err(e) => {
-                        warn!("Failed to parse episode TMDB details: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
-                    }
-                },
-            };
-
-            episodes.push(EpisodeReference {
-                id: EpisodeID(row.id),
-                library_id: LibraryID(row.library_id),
-                series_id: SeriesID(row.series_id),
-                season_id: SeasonID(row.season_id),
-                season_number: SeasonNumber::new(row.season_number as u8),
-                episode_number: EpisodeNumber::new(row.episode_number as u8),
-                tmdb_series_id: row.tmdb_series_id as u64,
-                details,
-                endpoint: EpisodeURL::from_string(format!("/stream/{}", row.file_id)),
-                file: media_file,
-            });
+            let episode = repository.load_episode_reference(row).await?;
+            episodes.push(episode);
         }
 
         Ok(episodes)
@@ -4504,226 +3804,5 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     async fn get_season_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>> {
         self.get_season_folders_impl(parent_folder_id).await
-    }
-}
-
-impl PostgresDatabase {
-    /// Store SeriesReference with enhanced metadata (helper method)
-    async fn store_series_reference_complete(
-        &self,
-        series: &SeriesReference,
-        metadata: Option<&EnhancedSeriesDetails>,
-    ) -> Result<()> {
-        let series_uuid = series.id.as_uuid();
-
-        // Convert tmdb_id, treating 0 as None (no TMDB match)
-        let tmdb_id = if series.tmdb_id > 0 {
-            Some(series.tmdb_id as i64)
-        } else {
-            None
-        };
-
-        // Start a transaction
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Transaction failed: {}", e)))?;
-
-        // Handle the different conflict scenarios:
-        // 1. If tmdb_id is None, only conflict on id
-        // 2. If tmdb_id is Some, we need to handle both id and (tmdb_id, library_id) conflicts
-        if tmdb_id.is_none() {
-            // Series without TMDB match - simple insert/update on id conflict
-            info!("Storing series without TMDB ID: {}", series.title.as_str());
-            sqlx::query!(
-                r#"
-                INSERT INTO series_references (id, library_id, tmdb_id, title, theme_color, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, NOW())
-                ON CONFLICT (id) DO UPDATE SET
-                    library_id = EXCLUDED.library_id,
-                    title = EXCLUDED.title,
-                    theme_color = EXCLUDED.theme_color,
-                    updated_at = NOW()
-                "#,
-                series_uuid,
-                series.library_id.as_uuid(),
-                tmdb_id,
-                series.title.as_str(),
-                series.theme_color.as_deref(),
-                series.created_at
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                error!("SQL error storing series without TMDB ID: {}", e);
-                MediaError::Internal(format!("Failed to store series reference: {}", e))
-            })?;
-            info!(
-                "Successfully stored series without TMDB ID: {}",
-                series.title.as_str()
-            );
-        } else {
-            // Series with TMDB match - handle both possible conflicts
-            info!(
-                "Storing series with TMDB ID {}: {}",
-                tmdb_id.unwrap(),
-                series.title.as_str()
-            );
-            // First check if a series with this tmdb_id already exists
-            let existing = sqlx::query!(
-                r#"
-                SELECT id FROM series_references
-                WHERE tmdb_id = $1 AND library_id = $2
-                "#,
-                tmdb_id,
-                series.library_id.as_uuid()
-            )
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to check existing series: {}", e)))?;
-
-            if let Some(existing_row) = existing {
-                if &existing_row.id != series_uuid {
-                    // Different ID - this means find_or_create_series didn't find the existing series
-                    // This is a logic error - the scanner should have used the existing series ID
-                    return Err(MediaError::Internal(format!(
-                        "Series with TMDB ID {} already exists in library {} with different ID. Scanner should use existing series.",
-                        tmdb_id.unwrap_or(0),
-                        series.library_id
-                    )));
-                } else {
-                    // Same ID - regular upsert
-                    sqlx::query!(
-                        r#"
-                        INSERT INTO series_references (id, library_id, tmdb_id, title, theme_color, created_at, updated_at)
-                        VALUES ($1, $2, $3, $4, $5, $6, NOW())
-                        ON CONFLICT (id) DO UPDATE SET
-                            library_id = EXCLUDED.library_id,
-                            tmdb_id = EXCLUDED.tmdb_id,
-                            title = EXCLUDED.title,
-                            theme_color = EXCLUDED.theme_color,
-                            updated_at = NOW()
-                        "#,
-                        series_uuid,
-                        series.library_id.as_uuid(),
-                        tmdb_id,
-                        series.title.as_str(),
-                        series.theme_color.as_deref(),
-                        series.created_at
-                    )
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| MediaError::Internal(format!("Failed to store series reference: {}", e)))?;
-                }
-            } else {
-                // No existing series with this tmdb_id - safe to insert
-                sqlx::query!(
-                    r#"
-                    INSERT INTO series_references (id, library_id, tmdb_id, title, theme_color, created_at, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-                    ON CONFLICT (id) DO UPDATE SET
-                        library_id = EXCLUDED.library_id,
-                        tmdb_id = EXCLUDED.tmdb_id,
-                        title = EXCLUDED.title,
-                        theme_color = EXCLUDED.theme_color,
-                        updated_at = NOW()
-                    "#,
-                    series_uuid,
-                    series.library_id.as_uuid(),
-                    tmdb_id,
-                    series.title.as_str(),
-                    series.theme_color.as_deref()
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| {
-                    error!("SQL error storing series with TMDB ID: {}", e);
-                    MediaError::Internal(format!("Failed to store series reference: {}", e))
-                })?;
-                info!(
-                    "Successfully stored series with TMDB ID {}: {}",
-                    tmdb_id.unwrap(),
-                    series.title.as_str()
-                );
-            }
-        }
-
-        // Store metadata if provided
-        if let Some(details) = metadata {
-            info!(
-                "Storing TMDB metadata for series: {} (overview: {})",
-                series.title.as_str(),
-                details.overview.as_deref().unwrap_or("None")
-            );
-
-            let tmdb_json = serde_json::to_value(details).map_err(|e| {
-                MediaError::Internal(format!("Failed to serialize metadata: {}", e))
-            })?;
-
-            // Extract arrays from the details structure
-            let images_json = serde_json::json!({
-                "posters": details.images.posters,
-                "backdrops": details.images.backdrops,
-                "logos": details.images.logos
-            });
-
-            let cast_crew_json = serde_json::json!({
-                "cast": details.cast,
-                "crew": details.crew
-            });
-
-            let videos_json = serde_json::to_value(&details.videos)
-                .map_err(|e| MediaError::Internal(format!("Failed to serialize videos: {}", e)))?;
-
-            let keywords: Vec<String> = details.keywords.clone();
-
-            let external_ids_json = serde_json::to_value(&details.external_ids).map_err(|e| {
-                MediaError::Internal(format!("Failed to serialize external IDs: {}", e))
-            })?;
-
-            sqlx::query!(
-                r#"
-                INSERT INTO series_metadata (
-                    series_id, tmdb_details, images, cast_crew, videos, keywords, external_ids,
-                    created_at, updated_at
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-                ON CONFLICT (series_id) DO UPDATE SET
-                    tmdb_details = EXCLUDED.tmdb_details,
-                    images = EXCLUDED.images,
-                    cast_crew = EXCLUDED.cast_crew,
-                    videos = EXCLUDED.videos,
-                    keywords = EXCLUDED.keywords,
-                    external_ids = EXCLUDED.external_ids,
-                    updated_at = NOW()
-                "#,
-                series_uuid,
-                tmdb_json,
-                images_json,
-                cast_crew_json,
-                videos_json,
-                &keywords,
-                external_ids_json
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                error!("SQL error storing series metadata: {}", e);
-                MediaError::Internal(format!("Failed to store series metadata: {}", e))
-            })?;
-
-            info!(
-                "Successfully stored TMDB metadata for series: {}",
-                series.title.as_str()
-            );
-        }
-
-        // Commit the transaction
-        tx.commit()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
-
-        Ok(())
     }
 }

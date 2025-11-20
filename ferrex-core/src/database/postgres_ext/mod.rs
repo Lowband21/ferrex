@@ -3,6 +3,7 @@ pub mod query;
 pub mod query_optimized;
 pub mod rbac;
 pub mod sync_sessions;
+pub mod tmdb_metadata;
 pub mod users;
 pub mod watch_status;
 
@@ -10,5 +11,6 @@ pub mod watch_status;
 pub use folder_inventory::*;
 pub use rbac::*;
 pub use sync_sessions::*;
+pub use tmdb_metadata::*;
 pub use users::*;
 pub use watch_status::*;

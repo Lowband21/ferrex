@@ -11,13 +11,15 @@ use uuid::Uuid;
     Deserialize,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     Hash,
     Copy,
     Archive,
     RkyvSerialize,
     RkyvDeserialize,
 )]
-#[rkyv(derive(Debug, Clone, PartialEq, Eq, Hash, Copy))]
+#[rkyv(derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy))]
 pub struct LibraryID(#[rkyv(with = crate::rkyv_wrappers::UuidWrapper)] pub Uuid);
 
 impl LibraryID {

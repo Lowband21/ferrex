@@ -1,78 +1,76 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use ferrex_core::{LibraryID, ScanProgress, ScanStatus};
+use ferrex_core::LibraryID;
+use ferrex_core::api_types::{
+    ActiveScansResponse, LatestProgressResponse, ScanCommandAcceptedResponse, ScanCommandRequest,
+    ScanSnapshotDto, StartScanRequest,
+};
 use uuid::Uuid;
 
-use crate::{
-    infrastructure::{adapters::ApiClientAdapter, services::api::ApiService},
-    state_refactored::State,
-};
+use crate::infrastructure::{adapters::ApiClientAdapter, services::api::ApiService};
 
-pub async fn start_scan_all_libraries(
-    client: Arc<ApiClientAdapter>,
-    force_rescan: bool,
-) -> Result<Uuid, anyhow::Error> {
-    match client.scan_all_libraries(false).await {
-        Ok(scan_response) => match (scan_response.status, scan_response.scan_id) {
-            (ScanStatus::Scanning, Some(scan_id)) => Ok(scan_id),
-            (ScanStatus::Pending, Some(scan_id)) => Ok(scan_id),
-            (ScanStatus::Completed, _) => Err(anyhow!("Scan already completed")),
-            (ScanStatus::Failed, _) => Err(anyhow!("Scan failed")),
-            (ScanStatus::Cancelled, _) => Err(anyhow!("Scan cancelled")),
-            (_, _) => Err(anyhow!(
-                "Scan ID not found for Scanning or Pending scan status"
-            )),
-        },
-        Err(e) => Err(anyhow!(e.to_string())),
-    }
-}
-
-// Library-specific scan function
-pub async fn start_scan_library(
+pub async fn start_library_scan(
     client: Arc<ApiClientAdapter>,
     library_id: LibraryID,
-    force_rescan: bool,
-) -> Result<Uuid, anyhow::Error> {
-    log::info!("Starting library scan library_id: {}", library_id,);
-    match client.scan_library(library_id, false).await {
-        Ok(scan_response) => match (scan_response.status, scan_response.scan_id) {
-            (ScanStatus::Scanning, Some(scan_id)) => Ok(scan_id),
-            (ScanStatus::Pending, Some(scan_id)) => Ok(scan_id),
-            (ScanStatus::Completed, _) => Err(anyhow!("Scan already completed")),
-            (ScanStatus::Failed, _) => Err(anyhow!("Scan failed")),
-            (ScanStatus::Cancelled, _) => Err(anyhow!("Scan cancelled")),
-            (_, _) => Err(anyhow!(
-                "Scan ID not found for Scanning or Pending scan status"
-            )),
-        },
-        Err(e) => Err(anyhow!(e.to_string())),
-    }
+    correlation_id: Option<Uuid>,
+) -> Result<ScanCommandAcceptedResponse, anyhow::Error> {
+    client
+        .start_library_scan(library_id, StartScanRequest { correlation_id })
+        .await
+        .map_err(|e| anyhow!(e.to_string()))
 }
 
-pub async fn check_active_scans(server_url: String) -> Vec<ScanProgress> {
-    match reqwest::get(format!("{}/scan/active", server_url)).await {
-        Ok(response) => match response.json::<serde_json::Value>().await {
-            Ok(json) => {
-                if let Some(scans) = json.get("scans").and_then(|s| s.as_array()) {
-                    scans
-                        .iter()
-                        .filter_map(|scan| {
-                            serde_json::from_value::<ScanProgress>(scan.clone()).ok()
-                        })
-                        .collect()
-                } else {
-                    vec![]
-                }
-            }
-            Err(e) => {
-                log::error!("Failed to parse active scans response: {}", e);
-                vec![]
-            }
-        },
-        Err(e) => {
-            log::error!("Failed to check active scans: {}", e);
-            vec![]
-        }
-    }
+pub async fn pause_library_scan(
+    client: Arc<ApiClientAdapter>,
+    library_id: LibraryID,
+    scan_id: Uuid,
+) -> Result<ScanCommandAcceptedResponse, anyhow::Error> {
+    client
+        .pause_library_scan(library_id, ScanCommandRequest { scan_id })
+        .await
+        .map_err(|e| anyhow!(e.to_string()))
+}
+
+pub async fn resume_library_scan(
+    client: Arc<ApiClientAdapter>,
+    library_id: LibraryID,
+    scan_id: Uuid,
+) -> Result<ScanCommandAcceptedResponse, anyhow::Error> {
+    client
+        .resume_library_scan(library_id, ScanCommandRequest { scan_id })
+        .await
+        .map_err(|e| anyhow!(e.to_string()))
+}
+
+pub async fn cancel_library_scan(
+    client: Arc<ApiClientAdapter>,
+    library_id: LibraryID,
+    scan_id: Uuid,
+) -> Result<ScanCommandAcceptedResponse, anyhow::Error> {
+    client
+        .cancel_library_scan(library_id, ScanCommandRequest { scan_id })
+        .await
+        .map_err(|e| anyhow!(e.to_string()))
+}
+
+pub async fn fetch_active_scans(
+    client: Arc<ApiClientAdapter>,
+) -> Result<Vec<ScanSnapshotDto>, anyhow::Error> {
+    let response: ActiveScansResponse = client
+        .fetch_active_scans()
+        .await
+        .map_err(|e| anyhow!(e.to_string()))?;
+    Ok(response.scans)
+}
+
+pub async fn fetch_latest_scan_progress(
+    client: Arc<ApiClientAdapter>,
+    scan_id: Uuid,
+) -> Result<Option<LatestProgressResponse>, anyhow::Error> {
+    let response = client
+        .fetch_latest_scan_progress(scan_id)
+        .await
+        .map_err(|e| anyhow!(e.to_string()))?;
+    Ok(Some(response))
 }

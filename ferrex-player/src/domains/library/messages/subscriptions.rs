@@ -1,27 +1,47 @@
 use crate::common::messages::DomainMessage;
+use crate::infrastructure::adapters::ApiClientAdapter;
 use crate::state_refactored::State;
 use iced::Subscription;
+use std::collections::HashSet;
+use std::sync::Arc;
 
 /// Creates all library-related subscriptions
 pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let mut subscriptions = vec![];
 
-    // Subscribe to scan progress if we have an active scan
-    if let Some(scan_id) = &state.domains.library.state.active_scan_id {
-        //log::info!("Creating scan progress subscription for scan ID: {}", scan_id);
-        subscriptions.push(
-            super::scan_subscription::scan_progress(state.server_url.clone(), *scan_id)
+    // Subscribe to scan progress for each active scan ID we know about
+    if !state.server_url.is_empty() {
+        let api = Arc::clone(&state.api_service);
+        let mut scan_ids: HashSet<_> = state
+            .domains
+            .library
+            .state
+            .active_scans
+            .keys()
+            .copied()
+            .collect();
+        scan_ids.extend(state.domains.library.state.latest_progress.keys().copied());
+
+        for scan_id in scan_ids {
+            subscriptions.push(
+                super::scan_subscription::scan_progress(
+                    state.server_url.clone(),
+                    Arc::clone(&api),
+                    scan_id,
+                )
                 .map(DomainMessage::Library),
-        );
-    } else {
-        //log::debug!("No active scan ID, not creating scan progress subscription");
+            );
+        }
     }
 
     // Subscribe to media events SSE stream
     if !state.server_url.is_empty() {
         subscriptions.push(
-            super::media_events_subscription::media_events(state.server_url.clone())
-                .map(DomainMessage::Library),
+            super::media_events_subscription::media_events(
+                state.server_url.clone(),
+                Arc::clone(&state.api_service),
+            )
+            .map(DomainMessage::Library),
         );
     }
 

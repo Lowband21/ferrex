@@ -1,0 +1,710 @@
+use axum::{
+    body::Bytes,
+    extract::{Extension, Path, Query, State},
+    http::StatusCode,
+    response::{IntoResponse, Json},
+};
+use ferrex_core::LibraryActorConfig;
+use ferrex_core::LibraryType;
+use ferrex_core::ManualMatchRequest;
+use ferrex_core::Media;
+use ferrex_core::MediaDetailsOption;
+use ferrex_core::MediaEvent;
+use ferrex_core::MediaIDLike;
+use ferrex_core::indices::IndexManager;
+use ferrex_core::query::types::{SortBy, SortOrder};
+use ferrex_core::user::User;
+use ferrex_core::{
+    ApiResponse, CreateLibraryRequest, FetchMediaRequest, Library, LibraryID, LibraryMediaResponse,
+    LibraryReference, MediaID, UpdateLibraryRequest, database::traits::MediaFilters,
+};
+use ferrex_core::{FilterIndicesRequest, IndicesResponse};
+use rkyv::rancor::Error as RkyvError;
+use serde::Deserialize;
+use sqlx::Row;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tracing::{error, info, warn};
+use uuid::Uuid;
+
+use crate::{
+    infra::app_state::AppState,
+    media::index_filters::{FilterQueryError, build_filtered_movie_query},
+};
+
+pub async fn get_library_media_util(
+    state: &AppState,
+    library: LibraryReference,
+) -> Result<LibraryMediaResponse, StatusCode> {
+    let media = match state
+        .db
+        .backend()
+        .get_library_media_references(library.id, library.library_type)
+        .await
+    {
+        Ok(media) => media,
+        Err(e) => {
+            warn!("Failed to get library movies: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    Ok(LibraryMediaResponse { library, media })
+}
+
+/// Get all references for a library (lightweight, no TMDB metadata)
+pub async fn get_library_media_handler(
+    State(state): State<AppState>,
+    Path(library_id): Path<Uuid>,
+) -> impl IntoResponse {
+    info!("Getting media references for library: {}", library_id);
+
+    // Get library reference
+    let library = match state.db.backend().get_library_reference(library_id).await {
+        Ok(lib) => lib,
+        Err(e) => {
+            error!("Failed to get library reference: {}", e);
+            return Err(StatusCode::NOT_FOUND);
+        }
+    };
+
+    let response = get_library_media_util(&state, library).await?;
+
+    info!(
+        "Found {} media items for library {}",
+        response.media.len(),
+        library_id
+    );
+
+    // Serialize to rkyv format
+    match rkyv::to_bytes::<rkyv::rancor::Error>(&response) {
+        Ok(bytes) => Ok::<_, StatusCode>(Bytes::from(bytes.into_vec())),
+        Err(e) => {
+            error!("Failed to serialize response with rkyv: {:?}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+pub async fn get_libraries_with_media_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match state.db.backend().list_library_references().await {
+        Ok(libraries) => {
+            let mut library_results = Vec::new();
+            for library_ref in libraries {
+                let library = state
+                    .db
+                    .backend()
+                    .get_library(&library_ref.id)
+                    .await
+                    .map_err(|e| {
+                        error!("Failed to get library: {}", e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })?;
+                let library_media_response = get_library_media_util(&state, library_ref).await?;
+                if let Some(mut library) = library {
+                    library.media = Some(library_media_response.media);
+                    library_results.push(library);
+                }
+            }
+            let library_responses: Vec<_> = library_results.into_iter().collect::<Vec<_>>();
+
+            // Serialize to rkyv format
+            match rkyv::to_bytes::<rkyv::rancor::Error>(&library_responses) {
+                Ok(bytes) => Ok::<_, StatusCode>(Bytes::from(bytes.into_vec())),
+                Err(e) => {
+                    error!("Failed to serialize response with rkyv: {:?}", e);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to get libraries: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SortedIdsQuery {
+    pub sort: Option<String>,
+    pub order: Option<String>,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+fn parse_sort_field(s: &str) -> Option<SortBy> {
+    match s.to_lowercase().as_str() {
+        "title" => Some(SortBy::Title),
+        "date_added" | "added" => Some(SortBy::DateAdded),
+        "release_date" | "year" => Some(SortBy::ReleaseDate),
+        "rating" => Some(SortBy::Rating),
+        "popularity" => Some(SortBy::Popularity),
+        "runtime" | "duration" => Some(SortBy::Runtime),
+        "file_size" | "size" => Some(SortBy::FileSize),
+        "resolution" => Some(SortBy::Resolution),
+        "bitrate" => Some(SortBy::Bitrate),
+        _ => None,
+    }
+}
+
+fn parse_sort_order(s: &str) -> Option<SortOrder> {
+    match s.to_lowercase().as_str() {
+        "asc" | "ascending" => Some(SortOrder::Ascending),
+        "desc" | "descending" => Some(SortOrder::Descending),
+        _ => None,
+    }
+}
+
+/// Get presorted media indices for a library (movie libraries supported)
+pub async fn get_library_sorted_indices_handler(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(library_id): Path<Uuid>,
+    Query(params): Query<SortedIdsQuery>,
+) -> impl IntoResponse {
+    info!("Getting presorted IDs for library: {}", library_id);
+
+    // Lookup library reference to get library type
+    let library_ref = match state.db.backend().get_library_reference(library_id).await {
+        Ok(lib) => lib,
+        Err(e) => {
+            error!("Failed to get library reference: {}", e);
+            return Err(StatusCode::NOT_FOUND);
+        }
+    };
+
+    // Map sort and order with sensible defaults (default: title asc)
+    let sort_field = params
+        .sort
+        .as_deref()
+        .and_then(parse_sort_field)
+        .unwrap_or(SortBy::Title);
+    let sort_order = params
+        .order
+        .as_deref()
+        .and_then(parse_sort_order)
+        .unwrap_or(SortOrder::Ascending);
+
+    let _offset = params.offset.unwrap_or(0);
+    let _limit = params.limit.unwrap_or(60).min(500);
+
+    // Only support Movie libraries initially; return 501 for others
+    let lib_type = library_ref.library_type;
+    if lib_type != LibraryType::Movies {
+        warn!(
+            "Sorted IDs endpoint currently supports movies only; library {:?} not supported",
+            lib_type
+        );
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+
+    // Build sorted IDs using core index manager (in-memory sort for now)
+    let index_mgr = IndexManager::new(state.db.clone());
+    let sorted_ids = match index_mgr
+        .sort_media_ids_for_library(
+            library_ref.id,
+            lib_type,
+            sort_field,
+            sort_order,
+            Some(user.id),
+        )
+        .await
+    {
+        Ok(ids) => ids,
+        Err(e) => {
+            error!("Failed to sort media for library {}: {}", library_id, e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Persist indices for static sorts for faster future reuse
+    // Note: persistence of indices is removed in Phase 1 simplified design
+
+    // Build base-order map (by title asc) to translate UUID -> position
+    let pool = state
+        .db
+        .backend()
+        .as_any()
+        .downcast_ref::<ferrex_core::database::postgres::PostgresDatabase>()
+        .expect("Postgres backend")
+        .pool();
+    let base_ids: Vec<Uuid> = match sqlx::query_scalar!(
+        r#"SELECT mr.id FROM movie_references mr WHERE mr.library_id=$1 ORDER BY mr.title"#,
+        library_ref.id.as_uuid()
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            error!("Failed to get base order for library {}: {}", library_id, e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    let mut pos_map = HashMap::with_capacity(base_ids.len());
+    for (i, id) in base_ids.iter().enumerate() {
+        pos_map.insert(*id, i as u32);
+    }
+
+    let mut positions: Vec<u32> = Vec::with_capacity(sorted_ids.len());
+    for id in sorted_ids.into_iter() {
+        if let Some(p) = pos_map.get(&id) {
+            positions.push(*p);
+        }
+    }
+
+    // Compose rkyv response
+    let response = IndicesResponse {
+        content_version: 1,
+        indices: positions,
+    };
+
+    match rkyv::to_bytes::<RkyvError>(&response) {
+        Ok(bytes) => Ok::<_, StatusCode>((
+            [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+            Bytes::from(bytes.into_vec()),
+        )),
+        Err(e) => {
+            error!("Failed to serialize indices response: {:?}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// Filter indices (movies Phase 1)
+pub async fn post_library_filtered_indices_handler(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(library_id): Path<Uuid>,
+    Json(spec): Json<FilterIndicesRequest>,
+) -> impl IntoResponse {
+    info!("Getting filtered indices for library: {}", library_id);
+
+    let library_ref = match state.db.backend().get_library_reference(library_id).await {
+        Ok(lib) => lib,
+        Err(e) => {
+            error!("Failed to get library reference: {}", e);
+            return Err(StatusCode::NOT_FOUND);
+        }
+    };
+
+    if library_ref.library_type != LibraryType::Movies {
+        warn!("Filtered indices currently supports movies only");
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+
+    let index_manager = IndexManager::new(state.db.clone());
+    let pos_map = match index_manager
+        .compute_title_position_map(library_ref.id, library_ref.library_type)
+        .await
+    {
+        Ok(map) => map,
+        Err(e) => {
+            error!(
+                "Failed to compute base positions for library {}: {}",
+                library_id, e
+            );
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    let pool = state
+        .db
+        .backend()
+        .as_any()
+        .downcast_ref::<ferrex_core::database::postgres::PostgresDatabase>()
+        .expect("Postgres backend")
+        .pool();
+
+    let mut qb = match build_filtered_movie_query(library_ref.id.as_uuid(), &spec, Some(user.id)) {
+        Ok(builder) => builder,
+        Err(err) => {
+            warn!("Rejected filtered indices request: {}", err);
+            return Err(match err {
+                FilterQueryError::MissingUserContext(_) => StatusCode::BAD_REQUEST,
+                FilterQueryError::UnsupportedMediaType(_) => StatusCode::NOT_IMPLEMENTED,
+                FilterQueryError::InvalidNumeric(_) => StatusCode::BAD_REQUEST,
+            });
+        }
+    };
+
+    let rows = match qb.build().fetch_all(pool).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!("Failed to execute filtered indices query: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    let mut positions = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id: Uuid = row.get("id");
+        if let Some(p) = pos_map.get(&id) {
+            positions.push(*p);
+        }
+    }
+
+    let response = IndicesResponse {
+        content_version: 1,
+        indices: positions,
+    };
+
+    match rkyv::to_bytes::<RkyvError>(&response) {
+        Ok(bytes) => Ok::<_, StatusCode>((
+            [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+            Bytes::from(bytes.into_vec()),
+        )),
+        Err(e) => {
+            error!("Failed to serialize indices response: {:?}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// Fetch a specific media item with full metadata from database
+/// If metadata is missing (MediaDetailsOption::Endpoint), fetches from TMDB on-demand
+pub async fn fetch_media_handler(
+    State(state): State<AppState>,
+    Json(request): Json<FetchMediaRequest>,
+) -> Result<Json<ApiResponse<Media>>, StatusCode> {
+    info!(
+        "Fetching media: {:?} from library {}",
+        request.media_id, request.library_id
+    );
+
+    match request.media_id {
+        MediaID::Movie(id) => match state.db.backend().get_movie_reference(&id).await {
+            Ok(movie) => {
+                if matches!(movie.details, MediaDetailsOption::Endpoint(_)) {
+                    warn!(
+                        "Movie {} is missing required TMDB metadata; manual intervention required",
+                        movie.id
+                    );
+                    return Ok(Json(ApiResponse::error(
+                        "Movie metadata unavailable; manual matching required".into(),
+                    )));
+                }
+
+                Ok(Json(ApiResponse::success(Media::Movie(movie))))
+            }
+            Err(e) => {
+                error!("Failed to get movie reference: {}", e);
+                Ok(Json(ApiResponse::error(e.to_string())))
+            }
+        },
+        MediaID::Series(id) => match state.db.backend().get_series_reference(&id).await {
+            Ok(series) => {
+                if matches!(series.details, MediaDetailsOption::Endpoint(_)) {
+                    warn!(
+                        "Series {} is missing required TMDB metadata; manual intervention required",
+                        series.id
+                    );
+                    return Ok(Json(ApiResponse::error(
+                        "Series metadata unavailable; manual matching required".into(),
+                    )));
+                }
+
+                Ok(Json(ApiResponse::success(Media::Series(series))))
+            }
+            Err(e) => {
+                error!("Failed to get series reference: {}", e);
+                Ok(Json(ApiResponse::error(e.to_string())))
+            }
+        },
+        MediaID::Season(id) => {
+            match state.db.backend().get_season_reference(&id).await {
+                Ok(season) => {
+                    // TODO: Implement on-demand season metadata fetching if needed
+                    Ok(Json(ApiResponse::success(Media::Season(season))))
+                }
+                Err(e) => {
+                    error!("Failed to get season reference: {}", e);
+                    Ok(Json(ApiResponse::error(e.to_string())))
+                }
+            }
+        }
+        MediaID::Episode(id) => {
+            match state.db.backend().get_episode_reference(&id).await {
+                Ok(episode) => {
+                    // TODO: Implement on-demand episode metadata fetching if needed
+                    Ok(Json(ApiResponse::success(Media::Episode(episode))))
+                }
+                Err(e) => {
+                    error!("Failed to get episode reference: {}", e);
+                    Ok(Json(ApiResponse::error(e.to_string())))
+                }
+            }
+        }
+    }
+}
+
+/// Manual TMDB matching for media items
+/*
+pub async fn manual_match_media_handler(
+    State(state): State<AppState>,
+    Json(request): Json<ManualMatchRequest>,
+) -> Result<Json<ApiResponse<String>>, StatusCode> {
+    info!(
+        "Manual match request: {:?} to TMDB ID {}",
+        request.media_id, request.tmdb_id
+    );
+
+    match request.media_id {
+        MediaID::Movie(id) => {
+            match state
+                .db
+                .backend()
+                .update_movie_tmdb_id(&id, request.tmdb_id)
+                .await
+            {
+                Ok(_) => {
+                    // Send update event
+                    if let Ok(movie) = state.db.backend().get_movie_reference(&id).await {
+                        state.scan_control.publish_media_event(MediaEvent::MovieUpdated { movie });
+                    }
+                    Ok(Json(ApiResponse::success(
+                        "Movie TMDB ID updated".to_string(),
+                    )))
+                }
+                Err(e) => {
+                    error!("Failed to update movie TMDB ID: {}", e);
+                    Ok(Json(ApiResponse::error(e.to_string())))
+                }
+            }
+        }
+        MediaID::Series(id) => {
+            match state
+                .db
+                .backend()
+                .update_series_tmdb_id(&id, request.tmdb_id)
+                .await
+            {
+                Ok(_) => {
+                    // Update all episodes in this series
+                    // TODO: This should cascade to seasons and episodes
+
+                    // Send update event
+                    if let Ok(series) = state.db.backend().get_series_reference(&id).await {
+                        state.scan_control.publish_media_event(MediaEvent::SeriesUpdated { series });
+                    }
+                    Ok(Json(ApiResponse::success(
+                        "Series TMDB ID updated".to_string(),
+                    )))
+                }
+                Err(e) => {
+                    error!("Failed to update series TMDB ID: {}", e);
+                    Ok(Json(ApiResponse::error(e.to_string())))
+                }
+            }
+        }
+        _ => Ok(Json(ApiResponse::error(
+            "Manual matching only supported for movies and series".to_string(),
+        ))),
+    }
+}
+*/
+
+/// Get all libraries (without media references)
+pub async fn list_libraries_handler(
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<Vec<LibraryReference>>>, StatusCode> {
+    info!("Listing all libraries");
+
+    match state.db.backend().list_library_references().await {
+        Ok(libraries) => {
+            info!("Found {} libraries", libraries.len());
+            Ok(Json(ApiResponse::success(libraries)))
+        }
+        Err(e) => {
+            error!("Failed to list libraries: {}", e);
+            Ok(Json(ApiResponse::error(e.to_string())))
+        }
+    }
+}
+
+/// Get a specific library (without media references)
+pub async fn get_library_handler(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ApiResponse<LibraryReference>>, StatusCode> {
+    info!("Getting library: {}", id);
+
+    match state.db.backend().get_library_reference(id).await {
+        Ok(library) => Ok(Json(ApiResponse::success(library))),
+        Err(e) => {
+            error!("Failed to get library: {}", e);
+            Ok(Json(ApiResponse::error(e.to_string())))
+        }
+    }
+}
+
+/// Create a new library
+pub async fn create_library_handler(
+    State(state): State<AppState>,
+    Json(request): Json<CreateLibraryRequest>,
+) -> Result<Json<ApiResponse<String>>, StatusCode> {
+    info!("Creating new library: {}", request.name);
+
+    let library_id = LibraryID::new();
+    info!("Generated library ID: {}", library_id);
+
+    let library = Library {
+        id: library_id,
+        name: request.name,
+        library_type: request.library_type,
+        paths: request.paths.into_iter().map(PathBuf::from).collect(),
+        scan_interval_minutes: request.scan_interval_minutes,
+        enabled: request.enabled,
+        last_scan: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        media: None,
+        auto_scan: true,
+        watch_for_changes: true,
+        analyze_on_scan: false,
+        max_retry_attempts: 3,
+    };
+
+    info!(
+        "Storing library with ID: {} and type: {:?}",
+        library.id, library.library_type
+    );
+
+    let db = state.db.clone();
+    let orchestrator = state.scan_control.orchestrator();
+
+    match db.backend().create_library(library.clone()).await {
+        Ok(id) => {
+            info!("Library successfully created in database with ID: {}", id);
+
+            let actor_config = LibraryActorConfig {
+                library: LibraryReference {
+                    id: library.id,
+                    name: library.name.clone(),
+                    library_type: library.library_type,
+                    paths: library.paths.clone(),
+                },
+                root_paths: library.paths.clone(),
+                max_outstanding_jobs: 8,
+            };
+
+            if let Err(err) = orchestrator.register_library(actor_config).await {
+                error!(
+                    "Failed to register library {} with orchestrator: {}",
+                    library.id, err
+                );
+
+                if let Err(delete_err) = db.backend().delete_library(&library.id.to_string()).await
+                {
+                    error!(
+                        "Failed to roll back library {} after orchestrator error: {}",
+                        library.id, delete_err
+                    );
+                }
+
+                return Ok(Json(ApiResponse::error(
+                    "failed_to_register_library".to_string(),
+                )));
+            }
+
+            if request.start_scan && library.enabled {
+                match state
+                    .scan_control
+                    .start_library_scan(library.id, None)
+                    .await
+                {
+                    Ok(accepted) => {
+                        info!(
+                            "Immediate scan started for library {} with scan ID: {}",
+                            library.id, accepted.scan_id
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to trigger immediate scan for library {}: {}",
+                            library.id, e
+                        );
+                    }
+                }
+            } else {
+                info!(
+                    "Initial scan skipped for library {} (enabled={}, start_scan={})",
+                    library.id, library.enabled, request.start_scan
+                );
+            }
+
+            Ok(Json(ApiResponse::success(id)))
+        }
+        Err(e) => {
+            error!("Failed to create library: {}", e);
+            Ok(Json(ApiResponse::error(e.to_string())))
+        }
+    }
+}
+
+/// Update an existing library
+pub async fn update_library_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>, // TODO: Use LibraryID directly
+    Json(request): Json<UpdateLibraryRequest>,
+) -> Result<Json<ApiResponse<String>>, StatusCode> {
+    info!("Updating library: {}", id);
+
+    // Get the existing library
+    let uuid = Uuid::parse_str(&id).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let mut library = match state.db.backend().get_library(&LibraryID(uuid)).await {
+        Ok(Some(lib)) => lib,
+        Ok(None) => {
+            return Ok(Json(ApiResponse::error("Library not found".to_string())));
+        }
+        Err(e) => {
+            error!("Failed to get library: {}", e);
+            return Ok(Json(ApiResponse::error(e.to_string())));
+        }
+    };
+
+    // Update fields if provided
+    if let Some(name) = request.name {
+        library.name = name;
+    }
+    if let Some(paths) = request.paths {
+        library.paths = paths.into_iter().map(PathBuf::from).collect();
+    }
+    if let Some(scan_interval) = request.scan_interval_minutes {
+        library.scan_interval_minutes = scan_interval;
+    }
+    if let Some(enabled) = request.enabled {
+        library.enabled = enabled;
+    }
+    library.updated_at = chrono::Utc::now();
+
+    match state.db.backend().update_library(&id, library).await {
+        Ok(_) => {
+            info!("Library updated: {}", id);
+            Ok(Json(ApiResponse::success("Library updated".to_string())))
+        }
+        Err(e) => {
+            error!("Failed to update library: {}", e);
+            Ok(Json(ApiResponse::error(e.to_string())))
+        }
+    }
+}
+
+/// Delete a library
+pub async fn delete_library_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<String>>, StatusCode> {
+    info!("Deleting library: {}", id);
+
+    match state.db.backend().delete_library(&id).await {
+        Ok(_) => {
+            info!("Library deleted: {}", id);
+            Ok(Json(ApiResponse::success("Library deleted".to_string())))
+        }
+        Err(e) => {
+            error!("Failed to delete library: {}", e);
+            Ok(Json(ApiResponse::error(e.to_string())))
+        }
+    }
+}

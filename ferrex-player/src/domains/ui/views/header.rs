@@ -118,62 +118,59 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
-                // Scan activity
-                button(
-                    container(icon_text(Icon::FileScan))
-                        .center_x(Length::Fill)
-                        .center_y(Length::Fill)
-                )
-                .on_press_maybe(
-                    if state.domains.library.state.scanning
-                        || state.domains.library.state.show_scan_progress
-                    {
-                        Some(Message::ToggleScanProgress)
+            ]
+            .align_y(iced::Alignment::Center);
+
+            let mut right_section = right_section;
+
+            if !state.domains.library.state.active_scans.is_empty() {
+                let active_count = state.domains.library.state.active_scans.len();
+                right_section = right_section.push(
+                    container(
+                        row![
+                            icon_text(Icon::FileScan),
+                            text(format!(" {}", active_count))
+                                .size(14)
+                                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                        ]
+                        .spacing(6)
+                        .align_y(iced::Alignment::Center),
+                    )
+                    .padding([0, 12])
+                    .style(theme::Container::HeaderAccent.style()),
+                );
+            }
+
+            right_section = right_section.push({
+                let element: Element<Message> =
+                    if state.permission_checker().can_view_admin_dashboard() {
+                        button(
+                            container(icon_text(Icon::Settings))
+                                .center_x(Length::Fill)
+                                .center_y(Length::Fill),
+                        )
+                        .on_press(Message::ShowLibraryManagement)
+                        .style(theme::Button::HeaderIcon.style())
+                        .width(Length::Fixed(HEIGHT))
+                        .height(HEIGHT)
+                        .into()
                     } else {
-                        None
-                    }
-                )
-                .style(
-                    if state.domains.library.state.scanning
-                        || state.domains.library.state.show_scan_progress
-                    {
-                        theme::Button::Primary.style()
-                    } else {
-                        theme::Button::HeaderIcon.style()
-                    }
-                )
-                .width(Length::Fixed(HEIGHT))
-                .height(HEIGHT),
-                // Admin settings (show only if user has permissions)
-                {
-                    let element: Element<Message> =
-                        if state.permission_checker().can_view_admin_dashboard() {
-                            button(
-                                container(icon_text(Icon::Settings))
-                                    .center_x(Length::Fill)
-                                    .center_y(Length::Fill),
-                            )
-                            .on_press(Message::ShowLibraryManagement)
-                            .style(theme::Button::HeaderIcon.style())
-                            .width(Length::Fixed(HEIGHT))
-                            .height(HEIGHT)
-                            .into()
-                        } else {
-                            Space::with_width(HEIGHT).into()
-                        };
-                    element
-                },
+                        Space::with_width(HEIGHT).into()
+                    };
+                element
+            });
+
+            right_section = right_section.push(
                 button(
                     container(icon_text(Icon::UserPen))
                         .center_x(Length::Fill)
-                        .center_y(Length::Fill)
+                        .center_y(Length::Fill),
                 )
                 .on_press(Message::ShowProfile)
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
-            ]
-            .align_y(iced::Alignment::Center);
+            );
 
             // Stack layout to achieve proper center alignment
             Stack::new()

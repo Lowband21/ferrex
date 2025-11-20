@@ -1,6 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 

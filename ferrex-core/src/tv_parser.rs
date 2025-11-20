@@ -4,6 +4,7 @@ use std::path::Path;
 use tracing::debug;
 
 /// TV show parsing utilities for Jellyfin-compatible patterns
+#[derive(Debug, Default, Clone, Copy)]
 pub struct TvParser;
 
 /// Represents parsed episode information

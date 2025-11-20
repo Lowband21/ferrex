@@ -5,15 +5,25 @@ pub mod traits;
 
 pub use cache::RedisCache;
 pub use postgres::{PoolStats, PostgresDatabase};
-pub use traits::{MediaDatabaseTrait, ScanPriority};
+pub use traits::MediaDatabaseTrait;
 
 use crate::{LibraryID, MovieID, Result, SeriesID};
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 #[derive(Clone)]
 pub struct MediaDatabase {
     backend: Arc<dyn MediaDatabaseTrait>,
     cache: Option<Arc<RedisCache>>,
+}
+
+impl fmt::Debug for MediaDatabase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let backend_type = std::any::type_name_of_val(self.backend.as_ref());
+        f.debug_struct("MediaDatabase")
+            .field("backend_type", &backend_type)
+            .field("cache_configured", &self.cache.is_some())
+            .finish()
+    }
 }
 
 impl MediaDatabase {
@@ -27,6 +37,15 @@ impl MediaDatabase {
         };
 
         Ok(Self { backend, cache })
+    }
+
+    /// Construct a media database from an arbitrary backend implementation.
+    /// Primarily used in tests where spinning up a real database is unnecessary.
+    pub fn with_backend(backend: Arc<dyn MediaDatabaseTrait>) -> Self {
+        Self {
+            backend,
+            cache: None,
+        }
     }
 
     pub fn backend(&self) -> &dyn MediaDatabaseTrait {

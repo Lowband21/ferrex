@@ -10,7 +10,7 @@ use ferrex_core::user::User;
 use uuid::Uuid;
 
 use super::jwt::validate_token;
-use crate::AppState;
+use crate::infra::app_state::AppState;
 use ferrex_core::database::postgres::PostgresDatabase;
 
 pub async fn auth_middleware(
@@ -23,7 +23,7 @@ pub async fn auth_middleware(
 
     // Load user permissions
     let permissions = state
-        .database
+        .db
         .backend()
         .get_user_permissions(user.id)
         .await
@@ -43,7 +43,7 @@ pub async fn optional_auth_middleware(
     if let Ok(token) = extract_bearer_token(&request) {
         if let Ok((user, device_id)) = validate_and_get_user(&state, &token).await {
             // Also load permissions when user is authenticated
-            if let Ok(permissions) = state.database.backend().get_user_permissions(user.id).await {
+            if let Ok(permissions) = state.db.backend().get_user_permissions(user.id).await {
                 request.extensions_mut().insert(permissions);
             }
             request.extensions_mut().insert(user);

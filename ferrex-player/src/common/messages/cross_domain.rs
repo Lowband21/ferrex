@@ -376,10 +376,9 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
             Task::done(DomainMessage::Ui(ui_message))
         }
 
-        CrossDomainEvent::RequestMediaDetails(media_ref) => {
+        CrossDomainEvent::RequestMediaDetails(_media_ref) => {
             log::debug!("[CrossDomain] Media details requested");
-            // This could trigger metadata fetching if needed
-            Task::none()
+            todo!();
         }
 
         CrossDomainEvent::NoOp => Task::none(),
@@ -424,7 +423,7 @@ fn handle_authentication_complete(state: &State) -> Task<DomainMessage> {
     // Check for active scans
     log::info!("[CrossDomain] Creating CheckActiveScans task");
     tasks.push(Task::done(DomainMessage::Library(
-        library::messages::Message::CheckActiveScans,
+        library::messages::Message::FetchActiveScans,
     )));
 
     // Additional initialization tasks can be added here

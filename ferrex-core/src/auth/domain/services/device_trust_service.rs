@@ -1,9 +1,7 @@
-use anyhow::Result;
+use std::fmt;
 use std::sync::Arc;
-use uuid::Uuid;
 
 use crate::auth::domain::repositories::DeviceSessionRepository;
-use crate::auth::domain::value_objects::DeviceFingerprint;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceTrustError {
@@ -17,6 +15,14 @@ pub enum DeviceTrustError {
 
 pub struct DeviceTrustService {
     session_repo: Arc<dyn DeviceSessionRepository>,
+}
+
+impl fmt::Debug for DeviceTrustService {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeviceTrustService")
+            .field("session_repo_refs", &Arc::strong_count(&self.session_repo))
+            .finish()
+    }
 }
 
 impl DeviceTrustService {

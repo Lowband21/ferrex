@@ -8,6 +8,7 @@ use ferrex_core::{
     ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedMovieReference,
     ArchivedSeriesReference, LibraryID, MediaOps,
 };
+use std::collections::HashSet;
 use uuid::Uuid;
 
 /// State for an individual tab
@@ -261,6 +262,29 @@ impl LibraryTabState {
             }
         }
 
+        if let Ok(authoritative_ids) = self.accessor.get_sorted_index_by_library(&self.library_id) {
+            let authoritative_set: HashSet<Uuid> = authoritative_ids.iter().copied().collect();
+
+            let mut trimmed_indices = Vec::with_capacity(filtered_indices.len());
+            let mut trimmed_ids = Vec::with_capacity(ids.len());
+
+            for (idx_value, id_value) in filtered_indices.iter().copied().zip(ids.into_iter()) {
+                if authoritative_set.contains(&id_value) {
+                    trimmed_indices.push(idx_value);
+                    trimmed_ids.push(id_value);
+                }
+            }
+
+            filtered_indices = trimmed_indices;
+            ids = trimmed_ids;
+
+            for id in authoritative_ids {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+
         self.filtered_indices = Some(filtered_indices);
         self.cached_index_ids = ids;
         self.grid_state.total_items = self.cached_index_ids.len();
@@ -278,44 +302,22 @@ impl LibraryTabState {
         self.filtered_indices = None;
 
         if self.accessor.is_initialized() {
-            let lib_uuid = self.library_id.as_uuid();
-            let yoke_opt = self
-                .accessor
-                .get_archived_library_yoke(&lib_uuid)
-                .ok()
-                .flatten();
-
-            if let Some(yoke) = yoke_opt {
-                let slice = yoke.get().media_as_slice();
-                self.cached_index_ids = match self.library_type {
-                    LibraryType::Movies => slice
-                        .iter()
-                        .filter_map(|media| {
-                            if let ArchivedMedia::Movie(movie) = media {
-                                Some(Uuid::from_bytes(movie.id.0))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                    LibraryType::Series => slice
-                        .iter()
-                        .filter_map(|media| {
-                            if let ArchivedMedia::Series(series) = media {
-                                Some(Uuid::from_bytes(series.id.0))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                };
-
-                self.grid_state.total_items = self.cached_index_ids.len();
-                self.grid_state.calculate_visible_range();
-            } else {
-                self.cached_index_ids.clear();
-                self.grid_state.total_items = 0;
-                self.grid_state.calculate_visible_range();
+            match self.accessor.get_sorted_index_by_library(&self.library_id) {
+                Ok(ids) => {
+                    self.cached_index_ids = ids;
+                    self.grid_state.total_items = self.cached_index_ids.len();
+                    self.grid_state.calculate_visible_range();
+                }
+                Err(err) => {
+                    log::warn!(
+                        "Failed to refresh library {} from repo: {}",
+                        self.library_id,
+                        err
+                    );
+                    self.cached_index_ids.clear();
+                    self.grid_state.total_items = 0;
+                    self.grid_state.calculate_visible_range();
+                }
             }
 
             self.cached_media = match self.library_type {

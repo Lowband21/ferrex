@@ -7,7 +7,6 @@ use crate::{
         views::{
             all::view_all_content,
             grid::{macro_gen, virtual_movie_references_grid, virtual_series_references_grid},
-            scanning::overlay::create_scan_progress_overlay,
         },
         widgets::{collect_cached_handles_for_media, texture_preloader},
     },
@@ -84,8 +83,6 @@ pub fn view_library(state: &State) -> Element<Message> {
             } else {
                 container(Space::with_height(0)).into()
             };
-
-        let scan_progress_section: Element<Message> = container(Space::with_height(0)).into();
 
         if !state.domains.ui.state.repo_accessor.is_initialized() {
             // Empty state
@@ -199,7 +196,7 @@ pub fn view_library(state: &State) -> Element<Message> {
             };
 
             // Create main content with proper spacing
-            let mut main_col = column![error_section, scan_progress_section,];
+            let mut main_col = column![error_section];
             if let Some(panel) = filter_panel {
                 main_col = main_col.push(panel);
             }
@@ -209,19 +206,8 @@ pub fn view_library(state: &State) -> Element<Message> {
                     .height(Length::Fill),
             );
 
-            // Add scan progress overlay if visible
-            if state.domains.library.state.show_scan_progress
-                && state.domains.library.state.scan_progress.is_some()
-            {
-                view_library.finish();
-                create_scan_progress_overlay(
-                    main_content,
-                    &state.domains.library.state.scan_progress,
-                )
-            } else {
-                view_library.finish();
-                main_content.into()
-            }
+            view_library.finish();
+            main_content.into()
         }
     }
 }

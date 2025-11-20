@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use std::collections::{HashMap, VecDeque};
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 /// Minimal, async-capable filesystem abstraction used by scanners.
@@ -33,6 +34,7 @@ pub trait ReadDirStream {
 }
 
 /// Real filesystem implementation backed by tokio::fs.
+#[derive(Debug, Default, Clone, Copy)]
 pub struct RealFs;
 
 impl RealFs {
@@ -88,6 +90,14 @@ impl ReadDirStream for RealReadDir {
 #[derive(Default, Clone)]
 pub struct InMemoryFs {
     nodes: HashMap<PathBuf, Node>,
+}
+
+impl fmt::Debug for InMemoryFs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InMemoryFs")
+            .field("node_count", &self.nodes.len())
+            .finish()
+    }
 }
 
 #[derive(Clone)]

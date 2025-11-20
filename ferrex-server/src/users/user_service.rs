@@ -16,8 +16,10 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::{
-    AppState,
-    errors::{AppError, AppResult},
+    infra::{
+        app_state::AppState,
+        errors::{AppError, AppResult},
+    },
     users::auth::{generate_access_token, generate_refresh_token},
 };
 
@@ -192,7 +194,7 @@ impl<'a> UserService<'a> {
         // Check if username exists
         if let Ok(Some(_)) = self
             .state
-            .database
+            .db
             .backend()
             .get_user_by_username(&params.username)
             .await
@@ -222,7 +224,7 @@ impl<'a> UserService<'a> {
         // This is necessary because the trait method doesn't accept password parameter
         let postgres_db = self
             .state
-            .database
+            .db
             .backend()
             .as_any()
             .downcast_ref::<ferrex_core::database::PostgresDatabase>()
@@ -250,7 +252,7 @@ impl<'a> UserService<'a> {
         // Get existing user
         let mut user = self
             .state
-            .database
+            .db
             .backend()
             .get_user_by_id(user_id)
             .await
@@ -266,7 +268,7 @@ impl<'a> UserService<'a> {
             let password_hash = Self::hash_password(&password)?;
             // Update password in credentials table
             self.state
-                .database
+                .db
                 .backend()
                 .update_user_password(user_id, &password_hash)
                 .await
@@ -275,7 +277,7 @@ impl<'a> UserService<'a> {
 
         // Update in database
         self.state
-            .database
+            .db
             .backend()
             .update_user(&user)
             .await
@@ -291,7 +293,7 @@ impl<'a> UserService<'a> {
         // Check if user is admin to determine if we need to check for last admin
         let is_admin = self
             .state
-            .database
+            .db
             .backend()
             .user_has_role(user_id, "admin")
             .await
@@ -299,7 +301,7 @@ impl<'a> UserService<'a> {
 
         // Use atomic delete operation that handles race conditions
         self.state
-            .database
+            .db
             .backend()
             .delete_user_atomic(user_id, is_admin)
             .await
@@ -324,7 +326,7 @@ impl<'a> UserService<'a> {
         // Verify user exists
         let user = self
             .state
-            .database
+            .db
             .backend()
             .get_user_by_id(user_id)
             .await
@@ -334,7 +336,7 @@ impl<'a> UserService<'a> {
         // Verify role exists
         let roles = self
             .state
-            .database
+            .db
             .backend()
             .get_all_roles()
             .await
@@ -347,7 +349,7 @@ impl<'a> UserService<'a> {
 
         // Assign role
         self.state
-            .database
+            .db
             .backend()
             .assign_user_role(user_id, role_id, assigned_by)
             .await
@@ -378,7 +380,7 @@ impl<'a> UserService<'a> {
 
         // Use atomic remove operation that handles race conditions
         self.state
-            .database
+            .db
             .backend()
             .remove_user_role_atomic(user_id, role_id, check_last_admin)
             .await
@@ -411,7 +413,7 @@ impl<'a> UserService<'a> {
         // Store refresh token
         let expires_at = Utc::now() + chrono::Duration::days(30);
         self.state
-            .database
+            .db
             .backend()
             .store_refresh_token(&refresh_token, user_id, device_name, expires_at)
             .await
@@ -428,20 +430,14 @@ impl<'a> UserService<'a> {
     pub async fn needs_setup(&self) -> AppResult<bool> {
         let users = self
             .state
-            .database
+            .db
             .backend()
             .get_all_users()
             .await
             .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
 
         for user in users {
-            if let Ok(perms) = self
-                .state
-                .database
-                .backend()
-                .get_user_permissions(user.id)
-                .await
-            {
+            if let Ok(perms) = self.state.db.backend().get_user_permissions(user.id).await {
                 if perms.has_role("admin") {
                     return Ok(false);
                 }

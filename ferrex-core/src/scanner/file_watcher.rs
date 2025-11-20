@@ -8,6 +8,7 @@ use notify_debouncer_full::{
     DebounceEventResult, DebouncedEvent, Debouncer, NoCache, new_debouncer,
 };
 use std::collections::HashMap;
+use std::fmt;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -23,6 +24,19 @@ pub struct FileWatcher {
     watchers: Arc<RwLock<HashMap<LibraryID, LibraryWatcher>>>,
     event_tx: mpsc::UnboundedSender<FileWatchEvent>,
     event_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<FileWatchEvent>>>,
+}
+
+impl fmt::Debug for FileWatcher {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let watcher_count = self.watchers.try_read().map(|map| map.len()).unwrap_or(0);
+        let receiver_locked = self.event_rx.try_lock().is_err();
+
+        f.debug_struct("FileWatcher")
+            .field("db", &self.db)
+            .field("watcher_count", &watcher_count)
+            .field("receiver_locked", &receiver_locked)
+            .finish()
+    }
 }
 
 /// Internal watcher variants per library

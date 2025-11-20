@@ -1,6 +1,7 @@
 //! Network quality monitoring for strategy selection
 
 use std::collections::VecDeque;
+use std::fmt;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -23,6 +24,32 @@ pub enum NetworkQuality {
 /// Monitor for tracking network conditions
 pub struct NetworkMonitor {
     measurements: Arc<RwLock<NetworkMeasurements>>,
+}
+
+impl fmt::Debug for NetworkMonitor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let summary = self
+            .measurements
+            .read()
+            .map(|m| {
+                (
+                    m.latencies.len(),
+                    m.bandwidths.len(),
+                    m.packet_loss,
+                    m.is_offline,
+                    m.last_update.elapsed().as_millis(),
+                )
+            })
+            .unwrap_or((0, 0, 0.0, false, 0));
+
+        f.debug_struct("NetworkMonitor")
+            .field("latency_samples", &summary.0)
+            .field("bandwidth_samples", &summary.1)
+            .field("packet_loss", &summary.2)
+            .field("offline", &summary.3)
+            .field("last_update_age_ms", &summary.4)
+            .finish()
+    }
 }
 
 /// Network performance measurements

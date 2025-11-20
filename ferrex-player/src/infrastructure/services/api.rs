@@ -5,12 +5,15 @@
 
 use crate::infrastructure::repository::RepositoryResult;
 use async_trait::async_trait;
-use ferrex_core::api_types::{CreateLibraryRequest, UpdateLibraryRequest};
+use ferrex_core::api_types::{
+    ActiveScansResponse, CreateLibraryRequest, LatestProgressResponse, ScanCommandAcceptedResponse,
+    ScanCommandRequest, StartScanRequest, UpdateLibraryRequest,
+};
 use ferrex_core::auth::device::AuthenticatedDevice;
 use ferrex_core::types::library::Library;
 use ferrex_core::user::AuthToken;
 use ferrex_core::watch_status::{UpdateProgressRequest, UserWatchState};
-use ferrex_core::{LibraryID, Media, ScanResponse};
+use ferrex_core::{LibraryID, Media};
 use rkyv::util::AlignedVec;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -69,13 +72,47 @@ pub trait ApiService: Send + Sync {
     async fn delete_library(&self, id: LibraryID) -> RepositoryResult<()>;
 
     /// Start a library scan
-    async fn scan_library(
+    async fn start_library_scan(
         &self,
         library_id: LibraryID,
-        force_refresh: bool,
-    ) -> RepositoryResult<ScanResponse>;
+        request: StartScanRequest,
+    ) -> RepositoryResult<ScanCommandAcceptedResponse>;
 
-    async fn scan_all_libraries(&self, force_refresh: bool) -> RepositoryResult<ScanResponse>;
+    /// Pause an active library scan
+    async fn pause_library_scan(
+        &self,
+        library_id: LibraryID,
+        request: ScanCommandRequest,
+    ) -> RepositoryResult<ScanCommandAcceptedResponse>;
+
+    /// Resume a paused library scan
+    async fn resume_library_scan(
+        &self,
+        library_id: LibraryID,
+        request: ScanCommandRequest,
+    ) -> RepositoryResult<ScanCommandAcceptedResponse>;
+
+    /// Cancel an active library scan
+    async fn cancel_library_scan(
+        &self,
+        library_id: LibraryID,
+        request: ScanCommandRequest,
+    ) -> RepositoryResult<ScanCommandAcceptedResponse>;
+
+    /// Fetch all active scans across libraries
+    async fn fetch_active_scans(&self) -> RepositoryResult<ActiveScansResponse>;
+
+    /// Fetch the latest progress frame for a scan
+    async fn fetch_latest_scan_progress(
+        &self,
+        scan_id: uuid::Uuid,
+    ) -> RepositoryResult<LatestProgressResponse>;
+
+    /// Fetch scanner metrics (queue depths, active scan counts)
+    async fn fetch_scan_metrics(&self) -> RepositoryResult<ferrex_core::api_scan::ScanMetrics>;
+
+    /// Fetch orchestrator configuration currently in effect
+    async fn fetch_scan_config(&self) -> RepositoryResult<ferrex_core::api_scan::ScanConfig>;
 
     /// Check server health
     async fn health_check(&self) -> RepositoryResult<bool>;
@@ -128,3 +165,5 @@ pub trait ApiService: Send + Sync {
     /// Get the current authentication token
     async fn get_token(&self) -> Option<AuthToken>;
 }
+
+// Domain-specific scan API DTOs are defined in ferrex_core::api_scan

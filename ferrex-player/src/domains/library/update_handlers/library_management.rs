@@ -12,6 +12,7 @@ use uuid::Uuid;
 pub fn handle_create_library(
     state: &mut State,
     library: Library,
+    start_scan: bool,
     _server_url: String,
 ) -> Task<Message> {
     let req = ferrex_core::api_types::CreateLibraryRequest {
@@ -24,6 +25,7 @@ pub fn handle_create_library(
             .collect(),
         scan_interval_minutes: library.scan_interval_minutes,
         enabled: library.enabled,
+        start_scan,
     };
 
     let api = state.api_service.clone();
@@ -38,10 +40,12 @@ pub fn handle_create_library(
 
 pub fn handle_library_created(state: &mut State, result: Result<Library, String>) -> Task<Message> {
     match result {
-        Ok(_library) => {
+        Ok(library) => {
             log::info!("Created library successfully; refreshing libraries");
             state.domains.library.state.library_form_data = None; // Close form on success
             state.domains.library.state.library_form_errors.clear();
+            state.domains.library.state.library_form_success =
+                Some(format!("Library \"{}\" created successfully", library.name));
             Task::perform(
                 super::library_loaded::fetch_libraries(state.api_service.clone()),
                 |res| Message::LibrariesLoaded(res.map_err(|e| e.to_string())),
@@ -50,6 +54,7 @@ pub fn handle_library_created(state: &mut State, result: Result<Library, String>
         Err(e) => {
             log::error!("Failed to create library: {}", e);
             state.domains.library.state.library_form_errors.clear();
+            state.domains.library.state.library_form_success = None;
             state
                 .domains
                 .library
@@ -159,6 +164,7 @@ pub fn handle_library_deleted(
 
 pub fn handle_show_library_form(state: &mut State, library: Option<Library>) -> Task<Message> {
     state.domains.library.state.library_form_errors.clear();
+    state.domains.library.state.library_form_success = None;
     state.domains.library.state.library_form_data = Some(match library {
         Some(lib) => {
             // Editing existing library
@@ -177,6 +183,7 @@ pub fn handle_show_library_form(state: &mut State, library: Option<Library>) -> 
                 scan_interval_minutes: lib.scan_interval_minutes.to_string(),
                 enabled: lib.enabled,
                 editing: true,
+                start_scan: true,
             }
         }
         None => {
@@ -189,6 +196,7 @@ pub fn handle_show_library_form(state: &mut State, library: Option<Library>) -> 
                 scan_interval_minutes: "60".to_string(),
                 enabled: true,
                 editing: false,
+                start_scan: true,
             }
         }
     });
@@ -199,6 +207,70 @@ pub fn handle_hide_library_form(state: &mut State) -> Task<Message> {
     state.domains.library.state.library_form_data = None;
     state.domains.library.state.library_form_errors.clear();
     Task::none()
+}
+
+/// Delete a library and recreate it with the same properties, triggering a fresh bulk scan.
+pub fn handle_reset_library(state: &mut State, library_id: LibraryID) -> Task<Message> {
+    use rkyv::{deserialize, rancor::Error};
+
+    // Read current library from repo (archived)
+    let archived = state
+        .domains
+        .library
+        .state
+        .repo_accessor
+        .get_archived_library_yoke(&library_id.as_uuid());
+
+    let Ok(Some(yoke)) = archived else {
+        return Task::done(Message::ResetLibraryDone(Err(
+            "library_not_found".to_string()
+        )));
+    };
+
+    let lib = match deserialize::<crate::infrastructure::api_types::Library, Error>(*yoke.get()) {
+        Ok(v) => v,
+        Err(_) => {
+            return Task::done(Message::ResetLibraryDone(Err(
+                "deserialize_failed".to_string()
+            )));
+        }
+    };
+
+    let delete_api = state.api_service.clone();
+    let create_api = state.api_service.clone();
+
+    Task::perform(
+        async move {
+            // Delete existing library
+            delete_api
+                .delete_library(library_id)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            // Recreate with same properties and start_scan=true
+            let req = ferrex_core::api_types::CreateLibraryRequest {
+                name: lib.name.clone(),
+                library_type: lib.library_type,
+                paths: lib
+                    .paths
+                    .iter()
+                    .filter_map(|p| p.to_str().map(|s| s.to_string()))
+                    .collect(),
+                scan_interval_minutes: lib.scan_interval_minutes,
+                enabled: lib.enabled,
+                start_scan: true,
+            };
+            let _id = create_api
+                .create_library(req)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        },
+        |result| match result {
+            Ok(()) => Message::ResetLibraryDone(Ok(())),
+            Err(err) => Message::ResetLibraryDone(Err(err)),
+        },
+    )
 }
 
 pub fn handle_update_libarary_form_name(state: &mut State, name: String) -> Task<Message> {
@@ -239,10 +311,18 @@ pub fn handle_toggle_library_form_enabled(state: &mut State) -> Task<Message> {
     Task::none()
 }
 
+pub fn handle_toggle_library_form_start_scan(state: &mut State) -> Task<Message> {
+    if let Some(ref mut form_data) = state.domains.library.state.library_form_data {
+        form_data.start_scan = !form_data.start_scan;
+    }
+    Task::none()
+}
+
 pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
     if let Some(ref form_data) = state.domains.library.state.library_form_data {
         // Validate form
         state.domains.library.state.library_form_errors.clear();
+        state.domains.library.state.library_form_success = None;
 
         if form_data.name.trim().is_empty() {
             state
@@ -345,6 +425,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
         } else {
             // Create new library
             let api = state.api_service.clone();
+            let start_scan = form_data.start_scan;
             Task::perform(
                 async move {
                     let req = ferrex_core::api_types::CreateLibraryRequest {
@@ -357,6 +438,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
                             .collect(),
                         scan_interval_minutes: library.scan_interval_minutes,
                         enabled: library.enabled,
+                        start_scan,
                     };
                     api.create_library(req).await.map(|_| library)
                 },

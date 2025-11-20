@@ -1,5 +1,6 @@
-use crate::{types::media::*, LibraryReference};
-use crate::{LibraryID, LibraryType, MediaID, ScanProgress};
+use crate::{LibraryID, LibraryType, MediaID};
+use crate::{LibraryReference, types::media::*};
+use chrono::{DateTime, Utc};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -91,6 +92,8 @@ pub struct CreateLibraryRequest {
     pub scan_interval_minutes: u32,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default = "default_start_scan")]
+    pub start_scan: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,7 +112,121 @@ fn default_enabled() -> bool {
     true
 }
 
+fn default_start_scan() -> bool {
+    true
+}
+
+// ===== Scan Control Types =====
+
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize,
+)]
+#[serde(rename_all = "snake_case")]
+#[rkyv(derive(Debug, PartialEq, Eq))]
+pub enum ScanLifecycleStatus {
+    Pending,
+    Running,
+    Paused,
+    Completed,
+    Failed,
+    Canceled,
+}
+
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct ScanSnapshotDto {
+    #[rkyv(with = crate::rkyv_wrappers::UuidWrapper)]
+    pub scan_id: uuid::Uuid,
+    pub library_id: LibraryID,
+    pub status: ScanLifecycleStatus,
+    pub completed_items: u64,
+    pub total_items: u64,
+    pub retrying_items: u64,
+    pub dead_lettered_items: u64,
+    #[rkyv(with = crate::rkyv_wrappers::UuidWrapper)]
+    pub correlation_id: uuid::Uuid,
+    pub idempotency_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_path: Option<String>,
+    #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
+    pub started_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[rkyv(with = crate::rkyv_wrappers::OptionDateTime)]
+    pub terminal_at: Option<DateTime<Utc>>,
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveScansResponse {
+    pub scans: Vec<ScanSnapshotDto>,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LatestProgressResponse {
+    pub scan_id: uuid::Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest: Option<ScanProgressEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartScanRequest {
+    #[serde(default)]
+    pub correlation_id: Option<uuid::Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanCommandRequest {
+    pub scan_id: uuid::Uuid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanCommandAcceptedResponse {
+    pub scan_id: uuid::Uuid,
+    pub correlation_id: uuid::Uuid,
+}
+
 // ===== Media Event Types for SSE =====
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ScanStageLatencySummary {
+    pub scan: u64,
+    pub analyze: u64,
+    pub index: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanProgressEvent {
+    pub version: String,
+    pub scan_id: Uuid,
+    pub library_id: LibraryID,
+    pub status: String,
+    pub completed_items: u64,
+    pub total_items: u64,
+    pub sequence: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path_key: Option<String>,
+    pub p95_stage_latencies_ms: ScanStageLatencySummary,
+    pub correlation_id: Uuid,
+    pub idempotency_key: String,
+    pub emitted_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retrying_items: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dead_lettered_items: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanEventMetadata {
+    pub version: String,
+    pub correlation_id: Uuid,
+    pub idempotency_key: String,
+    pub library_id: LibraryID,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -150,17 +267,20 @@ pub enum MediaEvent {
     // Scan events
     ScanStarted {
         scan_id: Uuid,
+        metadata: ScanEventMetadata,
     },
     ScanProgress {
         scan_id: Uuid,
-        progress: ScanProgress,
+        progress: ScanProgressEvent,
     },
     ScanCompleted {
         scan_id: Uuid,
+        metadata: ScanEventMetadata,
     },
     ScanFailed {
         scan_id: Uuid,
         error: String,
+        metadata: ScanEventMetadata,
     },
 }
 

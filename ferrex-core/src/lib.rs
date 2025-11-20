@@ -54,6 +54,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(missing_docs)]
 
+/// Common API routes used across Ferrex services
+pub mod api_routes;
+
+/// Domain-specific scan API payloads shared between server and player
+pub mod api_scan;
 /// Common API types used across the Ferrex ecosystem
 pub mod api_types;
 
@@ -61,6 +66,14 @@ pub mod api_types;
 #[cfg(feature = "database")]
 #[cfg_attr(docsrs, doc(cfg(feature = "database")))]
 pub mod database;
+
+/// Database abstraction layer and implementations
+#[cfg(feature = "database")]
+#[cfg_attr(docsrs, doc(cfg(feature = "database")))]
+pub mod persistence;
+
+#[cfg(feature = "database")]
+pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 /// Error types and error handling utilities
 pub mod error;
@@ -73,11 +86,12 @@ pub mod extras_parser;
 #[cfg_attr(docsrs, doc(cfg(feature = "database")))]
 pub mod image_service;
 
+/// Shared image domain records
+#[cfg(feature = "database")]
+pub mod image;
+
 /// rkyv wrapper types for external dependencies
 pub mod rkyv_wrappers;
-
-/// Media reference sorting and filtering extensions
-pub mod media_reference_ext;
 
 /// FFmpeg-based metadata extraction
 #[cfg(feature = "ffmpeg")]
@@ -97,15 +111,20 @@ pub mod indices;
 /// Role-Based Access Control (RBAC) system
 pub mod rbac;
 
-/// Media library scanner using streaming approach
-#[cfg(feature = "database")]
-#[cfg_attr(docsrs, doc(cfg(feature = "database")))]
-pub mod streaming_scanner_v2;
-
 /// Public scanner interface (wraps streaming_scanner_v2)
 #[cfg(feature = "database")]
 #[cfg_attr(docsrs, doc(cfg(feature = "database")))]
 pub mod scanner;
+
+/// Scan orchestrator domain scaffolding
+#[cfg(feature = "database")]
+#[cfg_attr(docsrs, doc(cfg(feature = "database")))]
+pub mod orchestration;
+
+/// Filesystem watch adapters feeding the orchestrator actors
+#[cfg(feature = "database")]
+#[cfg_attr(docsrs, doc(cfg(feature = "database")))]
+pub mod fs_watch;
 
 /// Synchronized playback session management
 pub mod sync_session;
@@ -131,6 +150,7 @@ pub mod user_management;
 /// Media watch status and progress tracking
 pub mod watch_status;
 
+pub use api_scan::*;
 pub use api_types::*;
 pub use auth::*;
 #[cfg(feature = "database")]
@@ -138,15 +158,16 @@ pub use database::*;
 pub use error::*;
 pub use extras_parser::ExtrasParser;
 #[cfg(feature = "database")]
+pub use fs_watch::*;
+#[cfg(feature = "database")]
 pub use image_service::{ImageService, TmdbImageSize};
-pub use media_reference_ext::{MediaFilters, MediaSortBy};
 #[cfg(feature = "ffmpeg")]
 pub use metadata::*;
+#[cfg(feature = "database")]
+pub use orchestration::*;
 pub use providers::{ProviderError, TmdbApiProvider};
 pub use query::*;
 pub use rbac::*;
-#[cfg(feature = "database")]
-pub use streaming_scanner_v2::*;
 pub use sync_session::*;
 pub use tv_parser::{EpisodeInfo, TvParser};
 pub use types::library::*;

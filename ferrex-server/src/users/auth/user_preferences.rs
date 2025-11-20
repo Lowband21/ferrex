@@ -1,5 +1,5 @@
-use crate::{
-    AppState,
+use crate::infra::{
+    app_state::AppState,
     errors::{AppError, AppResult},
 };
 use axum::{Extension, Json, extract::State};

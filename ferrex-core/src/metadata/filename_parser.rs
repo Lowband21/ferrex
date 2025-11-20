@@ -5,6 +5,7 @@ use regex::Regex;
 use std::path::Path;
 use tracing::{debug, info};
 
+#[derive(Debug, Clone, Default)]
 pub struct FilenameParser {
     library_type: Option<LibraryType>,
 }

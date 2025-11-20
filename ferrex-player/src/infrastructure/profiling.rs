@@ -186,7 +186,7 @@ impl Profiler {
     /// Update memory statistics
     #[cfg(feature = "memory-stats")]
     pub fn update_memory_stats(&self) {
-        if let Ok(stats) = memory_stats::memory_stats() {
+        if let Some(stats) = memory_stats::memory_stats() {
             let current = stats.physical_mem as u64;
 
             // Update peak memory if needed
@@ -208,7 +208,7 @@ impl Profiler {
     /// Get current memory statistics
     #[cfg(feature = "memory-stats")]
     pub fn get_memory_stats(&self) -> MemoryStats {
-        let stats = memory_stats::memory_stats().ok();
+        let stats = memory_stats::memory_stats();
         let baseline = self.baseline_memory.load(Ordering::Relaxed);
         let peak = self.peak_memory.load(Ordering::Relaxed);
 

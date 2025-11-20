@@ -6,10 +6,12 @@
 //!
 //! - `movie_references` (`id`, `library_id`, `file_id`, `tmdb_id`, `title`, `theme_color`, `created_at`, `updated_at`)
 //!   paired with `media_files` for technical metadata such as bitrate and resolution.
-//! - `movie_metadata` (`movie_id`, derived columns `release_year`, `release_date`, `vote_average`, `runtime`,
-//!   `popularity`, `genre_names`, `overview`, etc.) supplying filterable/sortable attributes.
-//! - `series_references`/`series_metadata` mirror the same structure for future TV support
-//!   with derived `first_air_year`, `vote_average`, `genre_names`, and popularity metrics.
+//! - `movie_metadata` (`movie_id`, `release_date`, `vote_average`, `runtime`, `popularity`, `overview`, etc.)
+//!   provides core numeric fields, while genre or cast filters are resolved via the
+//!   normalized `movie_genres`/`movie_cast` join tables.
+//! - `series_references`/`series_metadata` mirror the same structure for TV support with
+//!   per-season data in `season_references` and related join tables for genres, credits,
+//!   and popularity metrics.
 //! - `user_watch_progress` (`user_id`, `media_uuid`, `media_type`, `position`, `duration`, `last_watched`, `updated_at`)
 //!   holds in-progress playback, while `user_completed_media` stores completed entries. Both tables index
 //!   `(user_id, media_uuid)` for fast joins when applying watch-status filters or sort keys such as last watched.

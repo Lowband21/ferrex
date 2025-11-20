@@ -4,6 +4,7 @@
 //! choose between different sorting strategies based on data characteristics.
 
 use super::strategy::{SortCost, SortStrategy};
+use std::fmt;
 use std::sync::Arc;
 
 /// Smart fallback sort with rule-based strategy selection
@@ -14,6 +15,14 @@ pub struct SmartFallbackSort<T> {
     pub rules: Vec<FallbackRule<T>>,
 }
 
+impl<T> fmt::Debug for SmartFallbackSort<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SmartFallbackSort")
+            .field("rule_count", &self.rules.len())
+            .finish()
+    }
+}
+
 /// A rule that determines when to use a particular sorting strategy
 pub struct FallbackRule<T> {
     /// Condition that must be met for this rule to apply
@@ -22,6 +31,17 @@ pub struct FallbackRule<T> {
     pub strategy: Box<dyn SortStrategy<T>>,
     /// Priority of this rule (higher = checked first)
     pub priority: u8,
+}
+
+impl<T> fmt::Debug for FallbackRule<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let strategy_type = std::any::type_name_of_val(&*self.strategy);
+
+        f.debug_struct("FallbackRule")
+            .field("priority", &self.priority)
+            .field("strategy", &strategy_type)
+            .finish()
+    }
 }
 
 impl<T> SmartFallbackSort<T> {
@@ -96,6 +116,14 @@ pub struct FallbackSortBuilder<T> {
     fallback: SmartFallbackSort<T>,
 }
 
+impl<T> fmt::Debug for FallbackSortBuilder<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FallbackSortBuilder")
+            .field("pending_rules", &self.fallback.rules.len())
+            .finish()
+    }
+}
+
 impl<T> FallbackSortBuilder<T> {
     /// Create a new builder
     pub fn new() -> Self {
@@ -148,6 +176,18 @@ pub struct MetadataFallbackSort<T> {
     pub without_metadata: Box<dyn SortStrategy<T>>,
     /// Function to check if metadata is available
     pub has_metadata: Arc<dyn Fn(&T) -> bool + Send + Sync>,
+}
+
+impl<T> fmt::Debug for MetadataFallbackSort<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let with_type = std::any::type_name_of_val(&*self.with_metadata);
+        let without_type = std::any::type_name_of_val(&*self.without_metadata);
+
+        f.debug_struct("MetadataFallbackSort")
+            .field("with_metadata_strategy", &with_type)
+            .field("without_metadata_strategy", &without_type)
+            .finish()
+    }
 }
 
 impl<T> MetadataFallbackSort<T> {

@@ -53,11 +53,22 @@ impl PostgresDatabase {
         let mut sql_builder = QueryBuilder::<Postgres>::new(
             r#"
             SELECT
-                mr.id, mr.tmdb_id, mr.title, mr.theme_color,
-                mf.id as file_id, mf.file_path, mf.filename, mf.file_size,
-                mf.created_at as file_created_at, mf.technical_metadata, mf.library_id,
-                mm.release_date, mm.vote_average, mm.runtime, mm.popularity,
-                mm.genre_names, mm.release_year, mm.overview, mm.cast_names
+                mr.id,
+                mr.tmdb_id,
+                mr.title,
+                mr.theme_color,
+                mf.id AS file_id,
+                mf.file_path,
+                mf.filename,
+                mf.file_size,
+                mf.created_at AS file_created_at,
+                mf.technical_metadata,
+                mf.library_id,
+                mm.release_date,
+                mm.vote_average,
+                mm.runtime,
+                mm.popularity,
+                mm.overview
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id
@@ -74,13 +85,18 @@ impl PostgresDatabase {
 
         // Add genre filter
         if !query.filters.genres.is_empty() {
-            sql_builder.push(" AND mm.genre_names && ");
+            sql_builder.push(
+                " AND EXISTS (SELECT 1 FROM movie_genres mg WHERE mg.movie_id = mr.id AND mg.name = ANY("
+            );
             sql_builder.push_bind(&query.filters.genres);
+            sql_builder.push("))");
         }
 
         // Add year range filter
         if let Some(range) = &query.filters.year_range {
-            sql_builder.push(" AND mm.release_year BETWEEN ");
+            sql_builder.push(
+                " AND mm.release_date IS NOT NULL AND EXTRACT(YEAR FROM mm.release_date)::INT BETWEEN "
+            );
             sql_builder.push_bind(range.min as i32);
             sql_builder.push(" AND ");
             sql_builder.push_bind(range.max as i32);
@@ -144,9 +160,16 @@ impl PostgresDatabase {
             r#"
             WITH series_data AS (
                 SELECT
-                    sr.id, sr.tmdb_id, sr.title,
-                    sm.first_air_date, sm.vote_average, sm.popularity,
-                    sm.genre_names, sm.first_air_year, sm.overview, sm.cast_names
+                    sr.id,
+                    sr.library_id,
+                    sr.tmdb_id,
+                    sr.title,
+                    sr.theme_color,
+                    sr.created_at,
+                    sm.first_air_date,
+                    sm.vote_average,
+                    sm.popularity,
+                    sm.overview
                 FROM series_references sr
                 LEFT JOIN series_metadata sm ON sr.id = sm.series_id
                 WHERE 1=1
@@ -162,13 +185,18 @@ impl PostgresDatabase {
 
         // Add genre filter
         if !query.filters.genres.is_empty() {
-            sql_builder.push(" AND sm.genre_names && ");
+            sql_builder.push(
+                " AND EXISTS (SELECT 1 FROM series_genres sg WHERE sg.series_id = sd.id AND sg.name = ANY("
+            );
             sql_builder.push_bind(&query.filters.genres);
+            sql_builder.push("))");
         }
 
         // Add year range filter
         if let Some(range) = &query.filters.year_range {
-            sql_builder.push(" AND sm.first_air_year BETWEEN ");
+            sql_builder.push(
+                " AND sd.first_air_date IS NOT NULL AND EXTRACT(YEAR FROM sd.first_air_date)::INT BETWEEN "
+            );
             sql_builder.push_bind(range.min as i32);
             sql_builder.push(" AND ");
             sql_builder.push_bind(range.max as i32);
@@ -186,12 +214,27 @@ impl PostgresDatabase {
             r#"
             )
             SELECT
-                sd.*,
-                sn.id as season_id, sn.season_number,
-                ep.id as episode_id, ep.season_number as ep_season,
-                ep.episode_number, ep.file_id,
-                mf.file_path, mf.filename, mf.file_size,
-                mf.created_at as file_created_at, mf.library_id
+                sd.id AS series_id,
+                sd.library_id AS series_library_id,
+                sd.tmdb_id AS series_tmdb_id,
+                sd.title AS series_title,
+                sd.theme_color AS series_theme_color,
+                sd.created_at AS series_created_at,
+                sd.first_air_date AS series_first_air_date,
+                sd.vote_average AS series_vote_average,
+                sd.popularity AS series_popularity,
+                sd.overview AS series_overview,
+                sn.id AS season_id,
+                sn.season_number,
+                ep.id AS episode_id,
+                ep.season_number AS ep_season,
+                ep.episode_number,
+                ep.file_id,
+                mf.file_path,
+                mf.filename,
+                mf.file_size,
+                mf.created_at AS file_created_at,
+                mf.library_id AS file_library_id
             FROM series_data sd
             LEFT JOIN LATERAL (
                 SELECT * FROM season_references
@@ -401,86 +444,93 @@ impl PostgresDatabase {
     }
 
     fn add_search_clause(&self, sql_builder: &mut QueryBuilder<Postgres>, search: &SearchQuery) {
-        // For fuzzy search, use trigram similarity
-        if search.fuzzy {
-            // Use trigram similarity for fuzzy search
-            sql_builder.push(" AND (");
+        let include_title = search.fields.is_empty()
+            || search.fields.contains(&SearchField::All)
+            || search.fields.contains(&SearchField::Title);
+        let include_overview = search.fields.is_empty()
+            || search.fields.contains(&SearchField::All)
+            || search.fields.contains(&SearchField::Overview);
+        let include_cast = search.fields.is_empty()
+            || search.fields.contains(&SearchField::All)
+            || search.fields.contains(&SearchField::Cast);
 
-            if search.fields.is_empty() || search.fields.contains(&SearchField::All) {
+        // If no supported fields are requested, avoid altering the query
+        if !include_title && !include_overview && !include_cast {
+            return;
+        }
+
+        sql_builder.push(" AND (");
+        let mut has_clause = false;
+
+        if search.fuzzy {
+            if include_title {
+                if has_clause {
+                    sql_builder.push(" OR ");
+                }
+                has_clause = true;
                 sql_builder.push("mr.title % ");
                 sql_builder.push_bind(search.text.clone());
-                sql_builder.push(" OR mm.overview % ");
-                sql_builder.push_bind(search.text.clone());
-            } else {
-                let mut first = true;
-                for field in &search.fields {
-                    if !first {
-                        sql_builder.push(" OR ");
-                    }
-                    first = false;
-
-                    match field {
-                        SearchField::Title => {
-                            sql_builder.push("mr.title % ");
-                            sql_builder.push_bind(search.text.clone());
-                        }
-                        SearchField::Overview => {
-                            sql_builder.push("mm.overview % ");
-                            sql_builder.push_bind(search.text.clone());
-                        }
-                        SearchField::Cast => {
-                            sql_builder.push(
-                                "EXISTS (SELECT 1 FROM unnest(mm.cast_names) AS name WHERE name % ",
-                            );
-                            sql_builder.push_bind(search.text.clone());
-                            sql_builder.push(")");
-                        }
-                        _ => {}
-                    }
-                }
             }
-            sql_builder.push(")");
-        } else {
-            // Exact search with LIKE
-            if search.fields.is_empty() || search.fields.contains(&SearchField::All) {
-                sql_builder.push(" AND (");
-                sql_builder.push("mr.title ILIKE ");
-                sql_builder.push_bind(format!("%{}%", search.text));
-                sql_builder.push(" OR mm.overview ILIKE ");
-                sql_builder.push_bind(format!("%{}%", search.text));
-                sql_builder.push(" OR ARRAY[");
-                sql_builder.push_bind(search.text.clone());
-                sql_builder.push("] && mm.cast_names)");
-            } else {
-                sql_builder.push(" AND (");
-                let mut first = true;
 
-                for field in &search.fields {
-                    if !first {
-                        sql_builder.push(" OR ");
-                    }
-                    first = false;
-
-                    match field {
-                        SearchField::Title => {
-                            sql_builder.push("mr.title ILIKE ");
-                            sql_builder.push_bind(format!("%{}%", search.text));
-                        }
-                        SearchField::Overview => {
-                            sql_builder.push("mm.overview ILIKE ");
-                            sql_builder.push_bind(format!("%{}%", search.text));
-                        }
-                        SearchField::Cast => {
-                            sql_builder.push("ARRAY[");
-                            sql_builder.push_bind(search.text.clone());
-                            sql_builder.push("] && mm.cast_names");
-                        }
-                        _ => {}
-                    }
+            if include_overview {
+                if has_clause {
+                    sql_builder.push(" OR ");
                 }
+                has_clause = true;
+                sql_builder.push("mm.overview % ");
+                sql_builder.push_bind(search.text.clone());
+            }
+
+            if include_cast {
+                if has_clause {
+                    sql_builder.push(" OR ");
+                }
+                has_clause = true;
+                sql_builder.push(
+                    "EXISTS (SELECT 1 FROM movie_cast search_mc JOIN persons search_p ON search_p.tmdb_id = search_mc.person_tmdb_id WHERE search_mc.movie_id = mr.id AND search_p.name % "
+                );
+                sql_builder.push_bind(search.text.clone());
+                sql_builder.push(")");
+            }
+        } else {
+            let like_pattern = format!("%{}%", search.text);
+
+            if include_title {
+                if has_clause {
+                    sql_builder.push(" OR ");
+                }
+                has_clause = true;
+                sql_builder.push("mr.title ILIKE ");
+                sql_builder.push_bind(like_pattern.clone());
+            }
+
+            if include_overview {
+                if has_clause {
+                    sql_builder.push(" OR ");
+                }
+                has_clause = true;
+                sql_builder.push("mm.overview ILIKE ");
+                sql_builder.push_bind(like_pattern.clone());
+            }
+
+            if include_cast {
+                if has_clause {
+                    sql_builder.push(" OR ");
+                }
+                has_clause = true;
+                sql_builder.push(
+                    "EXISTS (SELECT 1 FROM movie_cast search_mc JOIN persons search_p ON search_p.tmdb_id = search_mc.person_tmdb_id WHERE search_mc.movie_id = mr.id AND search_p.name ILIKE "
+                );
+                sql_builder.push_bind(like_pattern);
                 sql_builder.push(")");
             }
         }
+
+        if !has_clause {
+            sql_builder.push("FALSE");
+        }
+
+        sql_builder.push(")");
     }
 
     fn add_movie_sort_clause(&self, sql_builder: &mut QueryBuilder<Postgres>, sort: &SortCriteria) {
@@ -512,11 +562,11 @@ impl PostgresDatabase {
         sql_builder.push(" ORDER BY ");
 
         let (field, null_position) = match sort.primary {
-            SortBy::Title => ("LOWER(sd.title)", "LAST"),
-            SortBy::DateAdded => ("file_created_at", "LAST"),
-            SortBy::ReleaseDate => ("sd.first_air_date", "LAST"),
-            SortBy::Rating => ("sd.vote_average", "LAST"),
-            _ => ("file_created_at", "LAST"),
+            SortBy::Title => ("LOWER(series_title)", "LAST"),
+            SortBy::DateAdded => ("COALESCE(file_created_at, series_created_at)", "LAST"),
+            SortBy::ReleaseDate => ("series_first_air_date", "LAST"),
+            SortBy::Rating => ("series_vote_average", "LAST"),
+            _ => ("COALESCE(file_created_at, series_created_at)", "LAST"),
         };
 
         sql_builder.push(field);
@@ -893,22 +943,24 @@ impl PostgresDatabase {
         let mut results = Vec::new();
 
         for row in rows {
-            let series_id: Uuid = row.get("id");
-            let library_id = LibraryID(row.get("library_id"));
+            let series_id: Uuid = row.get("series_id");
+            let library_id = LibraryID(row.get("series_library_id"));
 
             // Create or get series reference
             if !series_map.contains_key(&series_id) {
                 let series_ref = SeriesReference {
                     id: SeriesID(series_id),
                     library_id,
-                    tmdb_id: row.get::<i64, _>("tmdb_id") as u64,
-                    title: SeriesTitle::new(row.get("title"))?,
+                    tmdb_id: row.get::<i64, _>("series_tmdb_id") as u64,
+                    title: SeriesTitle::new(row.get("series_title"))?,
                     details: MediaDetailsOption::Endpoint(format!("/series/{}", series_id)),
                     endpoint: SeriesURL::from_string(format!("/series/{}", series_id)),
                     created_at: row
-                        .try_get("created_at")
+                        .try_get("series_created_at")
                         .unwrap_or_else(|_| chrono::Utc::now()),
-                    theme_color: row.try_get("theme_color").ok(),
+                    theme_color: row
+                        .try_get::<Option<String>, _>("series_theme_color")
+                        .unwrap_or(None),
                 };
 
                 series_map.insert(series_id, series_ref.clone());
@@ -932,7 +984,7 @@ impl PostgresDatabase {
                         series_id: SeriesID(series_id),
                         season_number: SeasonNumber::new(season_number as u8),
                         library_id,
-                        tmdb_series_id: row.get::<i64, _>("tmdb_id") as u64,
+                        tmdb_series_id: row.get::<i64, _>("series_tmdb_id") as u64,
                         details: MediaDetailsOption::Endpoint(format!(
                             "/series/{}/season/{}",
                             series_id, season_number
@@ -942,7 +994,7 @@ impl PostgresDatabase {
                             series_id, season_number
                         )),
                         created_at: row
-                            .try_get("created_at")
+                            .try_get("series_created_at")
                             .unwrap_or_else(|_| chrono::Utc::now()),
                         theme_color: None,
                     };
@@ -971,7 +1023,10 @@ impl PostgresDatabase {
                     size: row.get::<i64, _>("file_size") as u64,
                     created_at: row.get("file_created_at"),
                     media_file_metadata: None,
-                    library_id,
+                    library_id: row
+                        .try_get::<Uuid, _>("file_library_id")
+                        .map(LibraryID)
+                        .unwrap_or(library_id),
                 };
 
                 let episode_ref = EpisodeReference {
@@ -981,7 +1036,7 @@ impl PostgresDatabase {
                     season_id: SeasonID(row.get::<Uuid, _>("season_id")),
                     season_number: SeasonNumber::new(season_number as u8),
                     episode_number: EpisodeNumber::new(episode_number as u8),
-                    tmdb_series_id: row.get::<i64, _>("tmdb_id") as u64,
+                    tmdb_series_id: row.get::<i64, _>("series_tmdb_id") as u64,
                     details: MediaDetailsOption::Endpoint(format!(
                         "/series/{}/season/{}/episode/{}",
                         series_id, season_number, episode_number

@@ -15,7 +15,7 @@ use ferrex_core::{
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::{AppState, errors::AppResult};
+use crate::infra::{app_state::AppState, errors::AppResult};
 
 /// Response containing all roles in the system
 #[derive(Debug, Serialize)]
@@ -40,14 +40,14 @@ pub async fn list_roles_handler(
 ) -> AppResult<Json<ApiResponse<RolesResponse>>> {
     // Permission check is handled by middleware
 
-    let roles = state.database.backend().get_all_roles().await?;
+    let roles = state.db.backend().get_all_roles().await?;
 
     // For each role, get its permissions
     let mut roles_with_perms = Vec::new();
     for role in roles {
         // This is a simplified version - in production you'd want a more efficient query
         let permissions = state
-            .database
+            .db
             .backend()
             .get_all_permissions()
             .await?
@@ -75,7 +75,7 @@ pub async fn list_permissions_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> AppResult<Json<ApiResponse<Vec<Permission>>>> {
-    let permissions = state.database.backend().get_all_permissions().await?;
+    let permissions = state.db.backend().get_all_permissions().await?;
 
     Ok(Json(ApiResponse::success(permissions)))
 }
@@ -94,11 +94,7 @@ pub async fn get_user_permissions_handler(
         // Permission check is handled by middleware
     }
 
-    let permissions = state
-        .database
-        .backend()
-        .get_user_permissions(user_id)
-        .await?;
+    let permissions = state.db.backend().get_user_permissions(user_id).await?;
 
     Ok(Json(ApiResponse::success(permissions)))
 }
@@ -114,7 +110,7 @@ pub async fn assign_user_roles_handler(
 ) -> AppResult<Json<ApiResponse<()>>> {
     // First, remove all existing roles
     let current_roles = state
-        .database
+        .db
         .backend()
         .get_user_permissions(user_id)
         .await?
@@ -122,7 +118,7 @@ pub async fn assign_user_roles_handler(
 
     for role in current_roles {
         state
-            .database
+            .db
             .backend()
             .remove_user_role(user_id, role.id)
             .await?;
@@ -131,7 +127,7 @@ pub async fn assign_user_roles_handler(
     // Then assign the new roles
     for role_id in request {
         state
-            .database
+            .db
             .backend()
             .assign_user_role(user_id, role_id, admin.id)
             .await?;
@@ -150,7 +146,7 @@ pub async fn override_user_permission_handler(
     Json(request): Json<OverridePermissionRequest>,
 ) -> AppResult<Json<ApiResponse<()>>> {
     state
-        .database
+        .db
         .backend()
         .override_user_permission(
             user_id,
@@ -171,11 +167,7 @@ pub async fn get_my_permissions_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> AppResult<Json<ApiResponse<ferrex_core::rbac::UserPermissions>>> {
-    let permissions = state
-        .database
-        .backend()
-        .get_user_permissions(user.id)
-        .await?;
+    let permissions = state.db.backend().get_user_permissions(user.id).await?;
 
     Ok(Json(ApiResponse::success(permissions)))
 }

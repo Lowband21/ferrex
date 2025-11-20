@@ -4,7 +4,7 @@
 //! replacing direct AuthManager access per RUS-136.
 
 use crate::domains::auth::storage::StoredAuth;
-use crate::infrastructure::repository::RepositoryResult;
+use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use async_trait::async_trait;
 use ferrex_core::rbac::UserPermissions;
 use ferrex_core::user::{AuthToken, User};
@@ -82,6 +82,9 @@ pub trait AuthService: Send + Sync {
 
     /// Check if auto-login is enabled for a specific user on this device
     async fn is_auto_login_enabled(&self, user_id: &Uuid) -> RepositoryResult<bool>;
+
+    /// Validate the current session against the server returning fresh identity data
+    async fn validate_session(&self) -> RepositoryResult<(User, UserPermissions)>;
 
     /// Check if auto-login is enabled for the current user (both server and device preferences)
     async fn is_current_user_auto_login_enabled(&self) -> RepositoryResult<bool>;
@@ -305,6 +308,27 @@ pub mod mock {
 
         async fn is_auto_login_enabled(&self, _user_id: &Uuid) -> RepositoryResult<bool> {
             Ok(false)
+        }
+
+        async fn validate_session(&self) -> RepositoryResult<(User, UserPermissions)> {
+            let user = self
+                .users
+                .read()
+                .await
+                .values()
+                .next()
+                .cloned()
+                .ok_or_else(|| RepositoryError::QueryFailed("No user available".into()))?;
+
+            Ok((
+                user.clone(),
+                UserPermissions {
+                    user_id: user.id,
+                    roles: vec![],
+                    permissions: HashMap::new(),
+                    permission_details: None,
+                },
+            ))
         }
 
         async fn is_current_user_auto_login_enabled(&self) -> RepositoryResult<bool> {

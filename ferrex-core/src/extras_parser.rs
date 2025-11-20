@@ -4,6 +4,7 @@ use std::path::Path;
 use tracing::debug;
 
 /// Extras parsing utilities for detecting and categorizing movie/TV show extras
+#[derive(Debug, Default, Clone, Copy)]
 pub struct ExtrasParser;
 
 impl ExtrasParser {

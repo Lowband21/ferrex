@@ -243,12 +243,20 @@ impl MovieReference {
     pub fn genres(&self) -> Option<Vec<&str>> {
         match &self.details {
             MediaDetailsOption::Details(details) => match details {
-                TmdbDetails::Movie(movie) => {
-                    Some(movie.genres.iter().map(|genre| genre.as_str()).collect())
-                }
-                TmdbDetails::Series(series) => {
-                    Some(series.genres.iter().map(|genre| genre.as_str()).collect())
-                }
+                TmdbDetails::Movie(movie) => Some(
+                    movie
+                        .genres
+                        .iter()
+                        .map(|genre| genre.name.as_str())
+                        .collect(),
+                ),
+                TmdbDetails::Series(series) => Some(
+                    series
+                        .genres
+                        .iter()
+                        .map(|genre| genre.name.as_str())
+                        .collect(),
+                ),
                 _ => None, // Episodes and seasons don't have their own genres
             },
             _ => None,
@@ -327,12 +335,20 @@ impl SeriesReference {
     pub fn genres(&self) -> Option<Vec<&str>> {
         match &self.details {
             MediaDetailsOption::Details(details) => match details {
-                TmdbDetails::Movie(movie) => {
-                    Some(movie.genres.iter().map(|s| s.as_str()).collect())
-                }
-                TmdbDetails::Series(series) => {
-                    Some(series.genres.iter().map(|s| s.as_str()).collect())
-                }
+                TmdbDetails::Movie(movie) => Some(
+                    movie
+                        .genres
+                        .iter()
+                        .map(|genre| genre.name.as_str())
+                        .collect(),
+                ),
+                TmdbDetails::Series(series) => Some(
+                    series
+                        .genres
+                        .iter()
+                        .map(|genre| genre.name.as_str())
+                        .collect(),
+                ),
                 _ => None, // Seasons and Episodes don't have genres
             },
             _ => None,
@@ -407,12 +423,20 @@ impl SeasonReference {
     pub fn genres(&self) -> Option<Vec<&str>> {
         match &self.details {
             MediaDetailsOption::Details(details) => match details {
-                TmdbDetails::Movie(movie) => {
-                    Some(movie.genres.iter().map(|s| s.as_str()).collect())
-                }
-                TmdbDetails::Series(series) => {
-                    Some(series.genres.iter().map(|s| s.as_str()).collect())
-                }
+                TmdbDetails::Movie(movie) => Some(
+                    movie
+                        .genres
+                        .iter()
+                        .map(|genre| genre.name.as_str())
+                        .collect(),
+                ),
+                TmdbDetails::Series(series) => Some(
+                    series
+                        .genres
+                        .iter()
+                        .map(|genre| genre.name.as_str())
+                        .collect(),
+                ),
                 _ => None, // Episodes and seasons don't have their own genres
             },
             _ => None,
@@ -487,12 +511,20 @@ impl EpisodeReference {
     pub fn genres(&self) -> Option<Vec<&str>> {
         match &self.details {
             MediaDetailsOption::Details(details) => match details {
-                TmdbDetails::Movie(movie) => {
-                    Some(movie.genres.iter().map(|s| s.as_str()).collect())
-                }
-                TmdbDetails::Series(series) => {
-                    Some(series.genres.iter().map(|s| s.as_str()).collect())
-                }
+                TmdbDetails::Movie(movie) => Some(
+                    movie
+                        .genres
+                        .iter()
+                        .map(|genre| genre.name.as_str())
+                        .collect(),
+                ),
+                TmdbDetails::Series(series) => Some(
+                    series
+                        .genres
+                        .iter()
+                        .map(|genre| genre.name.as_str())
+                        .collect(),
+                ),
                 _ => None, // Episodes and seasons don't have their own genres
             },
             _ => None,

@@ -117,12 +117,15 @@ impl SeriesDetailsLike for EnhancedSeriesDetails {
         self.popularity
     }
     fn genres(&self) -> Vec<&str> {
-        self.genres.iter().map(|genre| genre.as_str()).collect()
+        self.genres
+            .iter()
+            .map(|genre| genre.name.as_str())
+            .collect()
     }
     fn networks(&self) -> Vec<&str> {
         self.networks
             .iter()
-            .map(|network| network.as_str())
+            .map(|network| network.name.as_str())
             .collect()
     }
     fn cast(&self) -> Vec<&Self::Cast> {
@@ -134,7 +137,7 @@ impl SeriesDetailsLike for EnhancedSeriesDetails {
     fn keywords(&self) -> Vec<&str> {
         self.keywords
             .iter()
-            .map(|keyword| keyword.as_str())
+            .map(|keyword| keyword.name.as_str())
             .collect()
     }
     fn external_ids(&self) -> &Self::ExIds {
@@ -198,12 +201,15 @@ impl SeriesDetailsLike for ArchivedEnhancedSeriesDetails {
         }
     }
     fn genres(&self) -> Vec<&str> {
-        self.genres.iter().map(|genre| genre.as_str()).collect()
+        self.genres
+            .iter()
+            .map(|genre| genre.name.as_str())
+            .collect()
     }
     fn networks(&self) -> Vec<&str> {
         self.networks
             .iter()
-            .map(|network| network.as_str())
+            .map(|network| network.name.as_str())
             .collect()
     }
     fn cast(&self) -> Vec<&Self::Cast> {
@@ -215,7 +221,7 @@ impl SeriesDetailsLike for ArchivedEnhancedSeriesDetails {
     fn keywords(&self) -> Vec<&str> {
         self.keywords
             .iter()
-            .map(|keyword| keyword.as_str())
+            .map(|keyword| keyword.name.as_str())
             .collect()
     }
     fn external_ids(&self) -> &Self::ExIds {

@@ -2,7 +2,7 @@ use argon2::{
     Argon2,
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
 };
-use ring::constant_time;
+use constant_time_eq::constant_time_eq;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -210,12 +210,11 @@ impl PinCode {
         let expected_success = 1u8;
 
         // Use constant-time comparison to prevent timing attacks
-        let is_equal =
-            constant_time::verify_slices_are_equal(&[verification_passed], &[expected_success]);
+        let is_equal = constant_time_eq(&[verification_passed], &[expected_success]);
 
         pin_value.zeroize();
 
-        Ok(is_equal.is_ok())
+        Ok(is_equal)
     }
 
     /// Get the hash for storage

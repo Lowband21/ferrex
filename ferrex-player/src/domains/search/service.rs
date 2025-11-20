@@ -396,7 +396,7 @@ impl SearchService {
             )) = &movie.details
             {
                 for genre in &details.genres {
-                    if let Some(score) = self.calculate_match_score(genre, query, fuzzy) {
+                    if let Some(score) = self.calculate_match_score(&genre.name, query, fuzzy) {
                         best_score = best_score.max(score * 0.9);
                     }
                 }
@@ -457,7 +457,7 @@ impl SearchService {
             )) = &series.details
             {
                 for genre in &details.genres {
-                    if let Some(score) = self.calculate_match_score(genre, query, fuzzy) {
+                    if let Some(score) = self.calculate_match_score(&genre.name, query, fuzzy) {
                         best_score = best_score.max(score * 0.9);
                     }
                 }

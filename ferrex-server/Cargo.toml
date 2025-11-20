@@ -24,6 +24,7 @@ httpdate = "^1.0"
 # Serialization
 serde.workspace = true
 serde_json.workspace = true
+toml = "^0.9"
 rkyv.workspace = true
 
 # Concurrency
@@ -68,6 +69,7 @@ futures-util.workspace = true
 futures.workspace = true
 async-trait.workspace = true
 
+tokio-stream.workspace = true
 # Media processing
 ffmpeg-next.workspace = true
 image.workspace = true
@@ -83,6 +85,7 @@ urlencoding = "2.1"
 
 dashmap.workspace = true
 num-traits = "0.2.19"
+blake3 = "1.8.2"
 
 # Process management
 [target.'cfg(unix)'.dependencies]

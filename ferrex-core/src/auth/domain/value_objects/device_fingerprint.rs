@@ -138,34 +138,6 @@ impl DeviceFingerprint {
     pub fn as_str(&self) -> &str {
         &self.hash
     }
-
-    /// Constant-time comparison with another fingerprint
-    pub fn secure_compare(&self, other: &str) -> bool {
-        use ring::constant_time;
-
-        let self_bytes = self.hash.as_bytes();
-        let other_bytes = other.as_bytes();
-
-        if self_bytes.len() != other_bytes.len() {
-            return false;
-        }
-
-        constant_time::verify_slices_are_equal(self_bytes, other_bytes).is_ok()
-    }
-
-    /// Check if this fingerprint matches another (allows for minor variations)
-    ///
-    /// This can be used to implement fuzzy matching if some components change
-    /// but we still want to recognize the device (e.g., OS update)
-    pub fn matches_with_tolerance(&self, other: &DeviceFingerprint, tolerance: u8) -> bool {
-        if tolerance == 0 {
-            return self.secure_compare(&other.hash);
-        }
-
-        // For now, just do exact matching
-        // Future: implement component-wise comparison with tolerance
-        self.secure_compare(&other.hash)
-    }
 }
 
 impl fmt::Display for DeviceFingerprint {

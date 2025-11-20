@@ -1,3 +1,4 @@
+use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
 use crate::{
     EpisodeID, EpisodeReference, Library, LibraryID, LibraryReference, LibraryType, Media,
     MediaFile, MediaFileMetadata, MediaID, MovieID, MovieReference, Result, SeasonID,
@@ -169,6 +170,8 @@ pub struct ImageVariant {
     pub height: Option<i32>,
     #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[rkyv(with = crate::rkyv_wrappers::OptionDateTime)]
+    pub downloaded_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -283,6 +286,8 @@ pub trait MediaDatabaseTrait: Send + Sync {
     fn as_any(&self) -> &dyn std::any::Any;
 
     async fn initialize_schema(&self) -> Result<()>;
+
+    // Generic store media? Shouldn't we store the media file with the associated library?
     async fn store_media(&self, media_file: MediaFile) -> Result<Uuid>;
     async fn store_media_batch(&self, media_files: Vec<MediaFile>) -> Result<Vec<Uuid>>;
     async fn get_media(&self, id: &Uuid) -> Result<Option<MediaFile>>;
@@ -427,6 +432,31 @@ pub trait MediaDatabaseTrait: Send + Sync {
         &self,
         params: &ImageLookupParams,
     ) -> Result<Option<(ImageRecord, Option<ImageVariant>)>>;
+
+    async fn upsert_media_image_variant(
+        &self,
+        record: &MediaImageVariantRecord,
+    ) -> Result<MediaImageVariantRecord>;
+    async fn mark_media_image_variant_cached(
+        &self,
+        key: &MediaImageVariantKey,
+        width: Option<i32>,
+        height: Option<i32>,
+        content_hash: Option<&str>,
+        theme_color: Option<&str>,
+    ) -> Result<MediaImageVariantRecord>;
+    async fn list_media_image_variants(
+        &self,
+        media_type: &str,
+        media_id: Uuid,
+    ) -> Result<Vec<MediaImageVariantRecord>>;
+
+    async fn update_media_theme_color(
+        &self,
+        media_type: &str,
+        media_id: Uuid,
+        theme_color: Option<&str>,
+    ) -> Result<()>;
 
     // Cleanup and maintenance
     async fn cleanup_orphaned_images(&self) -> Result<u32>;

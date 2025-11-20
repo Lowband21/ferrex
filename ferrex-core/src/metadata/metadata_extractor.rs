@@ -6,6 +6,7 @@ use crate::{LibraryType, MediaError, MediaFileMetadata, Result};
 use std::path::Path;
 use tracing::{info, warn};
 
+#[derive(Debug, Clone)]
 pub struct MetadataExtractor {
     /// Library context for type-specific parsing
     library_type: Option<LibraryType>,

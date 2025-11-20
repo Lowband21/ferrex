@@ -55,14 +55,18 @@ async-trait = "^0.1"
 
 # Database
 surrealdb = { version = "^2.3", features = ["kv-mem"] }
-sqlx = { version = "^0.7", features = [
+sqlx = { version = "0.8.6", features = [
     "runtime-tokio",
     "postgres",
     "chrono",
     "uuid",
     "migrate",
+    "macros",
+    "derive",
     "bigdecimal",
+    "rust_decimal",
     "ipnetwork",
+    "json"
 ] }
 redis = { version = "^0.32", features = ["tokio-comp", "connection-manager", "aio"] }
 

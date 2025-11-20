@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::ArchivedMedia;
 
-// Wrapper for Uuid
+// A rkyv feature for uuid exists, we should use that instead
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct UuidWrapper;
 
@@ -41,6 +41,7 @@ impl<D: Fallible + ?Sized> DeserializeWith<[u8; 16], Uuid, D> for UuidWrapper {
 }
 
 // Wrapper for PathBuf
+#[derive(Debug, Clone, Copy, Default)]
 pub struct PathBufWrapper;
 
 impl ArchiveWith<PathBuf> for PathBufWrapper {
@@ -77,6 +78,7 @@ where
 }
 
 // Wrapper for chrono::DateTime<chrono::Utc>
+#[derive(Debug, Clone, Copy, Default)]
 pub struct DateTimeWrapper;
 
 impl ArchiveWith<chrono::DateTime<chrono::Utc>> for DateTimeWrapper {
@@ -121,6 +123,7 @@ where
 }
 
 // Wrapper for Vec<PathBuf>
+#[derive(Debug, Clone, Copy, Default)]
 pub struct VecPathBuf;
 
 impl ArchiveWith<Vec<PathBuf>> for VecPathBuf {
@@ -166,6 +169,7 @@ where
 }
 
 // Wrapper for Option<DateTime>
+#[derive(Debug, Clone, Copy, Default)]
 pub struct OptionDateTime;
 
 impl ArchiveWith<Option<chrono::DateTime<chrono::Utc>>> for OptionDateTime {
@@ -212,6 +216,7 @@ where
 }
 
 // Wrapper for std::time::Duration
+#[derive(Debug, Clone, Copy, Default)]
 pub struct DurationWrapper;
 
 impl ArchiveWith<std::time::Duration> for DurationWrapper {

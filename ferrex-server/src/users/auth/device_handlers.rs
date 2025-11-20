@@ -21,8 +21,8 @@ use sha2::{Digest, Sha256};
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::{
-    AppState,
+use crate::infra::{
+    app_state::AppState,
     errors::{AppError, AppResult},
 };
 

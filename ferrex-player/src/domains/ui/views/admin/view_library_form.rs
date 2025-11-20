@@ -164,6 +164,14 @@ pub fn view_library_form<'a>(
             .text_size(16),
     );
 
+    if !form_data.editing {
+        form_content = form_content.push(
+            checkbox("Start initial scan after creation", form_data.start_scan)
+                .on_toggle(|_| Message::ToggleLibraryFormStartScan)
+                .text_size(16),
+        );
+    }
+
     content = content.push(
         container(form_content.padding(20))
             .style(theme::Container::Card.style())

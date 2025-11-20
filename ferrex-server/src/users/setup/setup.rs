@@ -34,8 +34,10 @@ use axum::extract::ConnectInfo;
 use std::net::SocketAddr;
 
 use crate::{
-    AppState,
-    errors::{AppError, AppResult},
+    infra::{
+        app_state::AppState,
+        errors::{AppError, AppResult},
+    },
     users::{
         UserService,
         user_service::{CreateUserParams, PasswordRequirements},
@@ -173,14 +175,14 @@ pub async fn check_setup_status(
 
     // Get user and library counts
     let users = state
-        .database
+        .db
         .backend()
         .get_all_users()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
 
     let libraries = state
-        .database
+        .db
         .backend()
         .list_libraries()
         .await
@@ -298,14 +300,14 @@ async fn check_setup_status_internal(state: &AppState) -> AppResult<SetupStatus>
     let needs_setup = user_service.needs_setup().await?;
 
     let users = state
-        .database
+        .db
         .backend()
         .get_all_users()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
 
     let libraries = state
-        .database
+        .db
         .backend()
         .list_libraries()
         .await

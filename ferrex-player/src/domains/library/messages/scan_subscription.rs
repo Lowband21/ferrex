@@ -1,34 +1,72 @@
 use super::Message;
-use ferrex_core::ScanProgress;
+use ferrex_core::api_types::ScanProgressEvent;
 use iced::Subscription;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-/// Creates a subscription to monitor library scan progress via Server-Sent Events (SSE)
-pub fn scan_progress(server_url: String, scan_id: Uuid) -> Subscription<Message> {
-    #[derive(Debug, Clone, Hash)]
-    struct ScanProgressId(String, Uuid);
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
+use crate::infrastructure::{adapters::ApiClientAdapter, services::api::ApiService};
+
+use futures::stream::BoxStream;
+
+#[derive(Debug, Clone)]
+struct ScanProgressId {
+    server_url: String,
+    scan_id: Uuid,
+    api: Arc<ApiClientAdapter>,
+}
+
+impl PartialEq for ScanProgressId {
+    fn eq(&self, other: &Self) -> bool {
+        self.scan_id == other.scan_id
+            && self.server_url == other.server_url
+            && Arc::ptr_eq(&self.api, &other.api)
+    }
+}
+
+impl Eq for ScanProgressId {}
+
+impl Hash for ScanProgressId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.server_url.hash(state);
+        self.scan_id.hash(state);
+        Arc::as_ptr(&self.api).hash(state);
+    }
+}
+
+/// Creates a subscription to monitor library scan progress via Server-Sent Events (SSE)
+pub fn scan_progress(
+    server_url: String,
+    api_service: Arc<ApiClientAdapter>,
+    scan_id: Uuid,
+) -> Subscription<Message> {
     Subscription::run_with(
-        ScanProgressId(server_url.clone(), scan_id),
-        |ScanProgressId(server_url, scan_id)| {
-            futures::stream::unfold(
-                ScanState::new(server_url.to_string(), *scan_id),
-                |mut state| async move {
-                    match state.next_event().await {
-                        Some(message) => Some((message, state)),
-                        None => {
-                            // Stream has ended, no more events
-                            None
-                        }
-                    }
-                },
-            )
+        ScanProgressId {
+            server_url: server_url.clone(),
+            scan_id,
+            api: Arc::clone(&api_service),
         },
+        build_scan_subscription_stream,
     )
 }
 
-/// Internal event type for channel communication
+fn build_scan_subscription_stream(id: &ScanProgressId) -> BoxStream<'static, Message> {
+    let server_url = id.server_url.clone();
+    let scan_id = id.scan_id;
+    let api = Arc::clone(&id.api);
+    Box::pin(futures::stream::unfold(
+        ScanState::new(server_url, scan_id, api),
+        |mut state| async move {
+            match state.next_event().await {
+                Some(message) => Some((message, state)),
+                None => None,
+            }
+        },
+    ))
+}
+
 #[derive(Debug)]
 enum ScanEvent {
     Open,
@@ -37,271 +75,141 @@ enum ScanEvent {
     Closed,
 }
 
-/// State machine for SSE scan progress subscription
 struct ScanState {
     server_url: String,
     scan_id: Uuid,
     event_receiver: Option<mpsc::UnboundedReceiver<ScanEvent>>,
     task_handle: Option<tokio::task::JoinHandle<()>>,
-    retry_count: u32,
-    max_retries: u32,
+    api_service: Arc<ApiClientAdapter>,
 }
 
 impl ScanState {
-    fn new(server_url: String, scan_id: Uuid) -> Self {
+    fn new(server_url: String, scan_id: Uuid, api_service: Arc<ApiClientAdapter>) -> Self {
         Self {
             server_url,
             scan_id,
             event_receiver: None,
             task_handle: None,
-            retry_count: 0,
-            max_retries: 3,
+            api_service,
         }
     }
 
     async fn next_event(&mut self) -> Option<Message> {
         loop {
-            // Create event source if needed
             if self.event_receiver.is_none() {
-                self.create_event_source();
+                self.spawn_event_source();
             }
 
-            // Try to get next event from channel
             if let Some(receiver) = &mut self.event_receiver {
                 match receiver.recv().await {
                     Some(ScanEvent::Open) => {
-                        log::info!("SSE connection opened for scan {}", self.scan_id);
-                        self.retry_count = 0; // Reset retry count on successful connection
-
-                        // Fetch initial progress
-                        if let Some(message) = self.fetch_initial_progress().await {
-                            return Some(message);
-                        }
-                        // Continue to next event if no initial progress
+                        log::info!("scan SSE opened for {}", self.scan_id);
                         continue;
                     }
-
-                    Some(ScanEvent::Message(msg)) => {
-                        if let Some(message) = self.handle_sse_message(msg) {
+                    Some(ScanEvent::Message(event)) => {
+                        if let Some(message) = self.handle_sse_message(event) {
                             return Some(message);
                         }
-                        // Continue to next event if no message
                         continue;
                     }
-
-                    Some(ScanEvent::Error(e)) => {
-                        log::error!("SSE error for scan {}: {}", self.scan_id, e);
-                        if let Some(message) = self.handle_connection_error().await {
-                            return Some(message);
-                        }
-                        // Continue to retry
-                        continue;
+                    Some(ScanEvent::Error(err)) => {
+                        log::warn!("scan SSE error for {}: {}", self.scan_id, err);
+                        self.reset_stream();
+                        return None;
                     }
-
                     Some(ScanEvent::Closed) | None => {
-                        log::warn!("SSE stream ended for scan {}", self.scan_id);
-                        // Clean up task handle
-                        if let Some(handle) = self.task_handle.take() {
-                            handle.abort();
-                        }
-                        // Try HTTP fallback before giving up
-                        return self.fetch_progress_http().await;
+                        log::info!("scan SSE closed for {}", self.scan_id);
+                        self.reset_stream();
+                        return None;
                     }
                 }
             } else {
-                // Failed to create event source
-                return Some(Message::ScanCompleted(Err(
-                    "Failed to establish connection".to_string(),
-                )));
+                return None;
             }
         }
     }
 
-    fn create_event_source(&mut self) {
-        let url = format!("{}/scan/progress/{}/sse", self.server_url, self.scan_id);
-        log::info!("Creating SSE connection to: {}", url);
-
-        // Create channel for communication
+    fn spawn_event_source(&mut self) {
+        let base = self.server_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/scan/{}/progress", base, self.scan_id);
         let (tx, rx) = mpsc::unbounded_channel();
         self.event_receiver = Some(rx);
 
-        // Spawn task to handle EventSource
-        let task_handle = tokio::spawn(async move {
+        let api = Arc::clone(&self.api_service);
+        log::info!(
+            "Opening scan progress stream for {} at {}",
+            self.scan_id,
+            url
+        );
+        let handle = tokio::spawn(async move {
             use futures::StreamExt;
+            let client = reqwest::Client::new();
+            let mut request = client.get(&url);
+            if let Some(token) = api.get_token().await {
+                request = request.bearer_auth(token.access_token);
+            }
+            match reqwest_eventsource::EventSource::new(request) {
+                Ok(mut event_source) => {
+                    while let Some(event) = event_source.next().await {
+                        let scan_event = match event {
+                            Ok(reqwest_eventsource::Event::Open) => ScanEvent::Open,
+                            Ok(reqwest_eventsource::Event::Message(msg)) => ScanEvent::Message(msg),
+                            Err(e) => ScanEvent::Error(e.to_string()),
+                        };
 
-            let mut event_source = reqwest_eventsource::EventSource::get(&url);
+                        if tx.send(scan_event).is_err() {
+                            log::warn!(
+                                "Scan SSE channel closed before event could be delivered for {}",
+                                url
+                            );
+                            break;
+                        }
+                    }
 
-            while let Some(event) = event_source.next().await {
-                let scan_event = match event {
-                    Ok(reqwest_eventsource::Event::Open) => ScanEvent::Open,
-                    Ok(reqwest_eventsource::Event::Message(msg)) => ScanEvent::Message(msg),
-                    Err(e) => ScanEvent::Error(e.to_string()),
-                };
-
-                if tx.send(scan_event).is_err() {
-                    // Receiver dropped, exit task
-                    break;
+                    let _ = tx.send(ScanEvent::Closed);
+                }
+                Err(err) => {
+                    let _ = tx.send(ScanEvent::Error(err.to_string()));
                 }
             }
-
-            // Send closed event
-            let _ = tx.send(ScanEvent::Closed);
         });
 
-        self.task_handle = Some(task_handle);
+        self.task_handle = Some(handle);
     }
 
-    fn handle_sse_message(&mut self, msg: eventsource_stream::Event) -> Option<Message> {
-        // Skip keepalive messages silently
-        if msg.data == "keepalive" || msg.data.is_empty() {
-            log::debug!("Received SSE keepalive");
-            // Return None to continue to next event
-            return None;
-        }
-
-        if msg.event == "progress" {
-            log::debug!("Received scan progress SSE event");
-
-            match serde_json::from_str::<ScanProgress>(&msg.data) {
-                Ok(progress) => {
-                    log::info!(
-                        "Scan progress: {}/{} files, status: {:?}",
-                        progress.folders_scanned,
-                        progress.folders_to_scan,
-                        progress.status
-                    );
-
-                    // Check if scan is complete
-                    if matches!(progress.status, ferrex_core::ScanStatus::Completed) {
-                        Some(Message::ScanCompleted(Ok(self.scan_id)))
-                    } else if matches!(progress.status, ferrex_core::ScanStatus::Failed) {
-                        Some(Message::ScanCompleted(Err(progress
-                            .errors
-                            .first()
-                            .cloned()
-                            .unwrap_or_else(|| "Scan failed".to_string()))))
-                    } else {
-                        Some(Message::ScanProgressUpdate(progress))
-                    }
-                }
-                Err(e) => {
-                    log::error!("Failed to parse scan progress: {} - Data: {}", e, msg.data);
-                    // Continue listening for valid messages
-                    None
-                }
-            }
-        } else if msg.event == "complete" {
-            log::info!("Received scan complete event");
-            Some(Message::ScanCompleted(Ok(self.scan_id.clone())))
-        } else if msg.event == "error" {
-            log::error!("Received scan error event: {}", msg.data);
-            Some(Message::ScanCompleted(Err(msg.data)))
-        } else {
-            // Unknown event type, continue listening
-            log::debug!("Unknown SSE event type: {}", msg.event);
-            None
-        }
-    }
-
-    async fn handle_connection_error(&mut self) -> Option<Message> {
-        self.retry_count += 1;
-
-        if self.retry_count > self.max_retries {
-            log::error!("Max retries exceeded for scan {}", self.scan_id);
-            return Some(Message::ScanCompleted(Err(
-                "Connection lost after multiple retries".to_string(),
-            )));
-        }
-
-        // Clean up current connection
+    fn reset_stream(&mut self) {
         self.event_receiver = None;
         if let Some(handle) = self.task_handle.take() {
             handle.abort();
         }
-
-        // Wait before retry
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-        // Continue in the loop to retry
-        None
     }
 
-    async fn fetch_initial_progress(&mut self) -> Option<Message> {
-        match self.fetch_scan_progress().await {
-            Ok(progress) => {
-                log::info!(
-                    "Initial scan status: {:?}, folders scanned: {}/{}",
-                    progress.status,
-                    progress.folders_scanned,
-                    progress.folders_to_scan
+    fn handle_sse_message(&mut self, msg: eventsource_stream::Event) -> Option<Message> {
+        if msg.data.is_empty() || msg.data == "keep-alive" {
+            return None;
+        }
+
+        match serde_json::from_str::<ScanProgressEvent>(&msg.data) {
+            Ok(event) => {
+                log::debug!(
+                    "SSE progress event: scan={}, seq={}, status={}, completed={}/{}",
+                    event.scan_id,
+                    event.sequence,
+                    event.status,
+                    event.completed_items,
+                    event.total_items
                 );
-                Some(Message::ScanProgressUpdate(progress))
+                Some(Message::ScanProgressFrame(event))
             }
-            Err(e) => {
-                log::warn!("Failed to fetch initial progress: {}", e);
-                // Don't fail the subscription, just continue listening for SSE events
+            Err(err) => {
+                log::error!(
+                    "Failed to parse scan progress event for {}: {} (payload={})",
+                    self.scan_id,
+                    err,
+                    msg.data
+                );
                 None
             }
-        }
-    }
-
-    async fn fetch_progress_http(&mut self) -> Option<Message> {
-        match self.fetch_scan_progress().await {
-            Ok(progress) => {
-                // Check if scan is complete
-                if matches!(progress.status, ferrex_core::ScanStatus::Completed) {
-                    Some(Message::ScanCompleted(Ok(self.scan_id)))
-                } else if matches!(progress.status, ferrex_core::ScanStatus::Failed) {
-                    Some(Message::ScanCompleted(Err(progress
-                        .errors
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| "Scan failed".to_string()))))
-                } else {
-                    // Scan is still ongoing but SSE connection failed
-                    // Return a message indicating the scan is still running
-                    Some(Message::ScanProgressUpdate(progress))
-                }
-            }
-            Err(e) => {
-                // Scan might be complete or connection lost
-                log::error!("HTTP fallback failed: {}", e);
-                Some(Message::ScanCompleted(Err(format!(
-                    "Connection lost: {}",
-                    e
-                ))))
-            }
-        }
-    }
-
-    async fn fetch_scan_progress(&self) -> Result<ScanProgress, String> {
-        let response = reqwest::get(format!(
-            "{}/scan/progress/{}",
-            self.server_url, self.scan_id
-        ))
-        .await
-        .map_err(|e| format!("Network error: {}", e))?;
-
-        let json = response
-            .json::<serde_json::Value>()
-            .await
-            .map_err(|e| format!("Parse error: {}", e))?;
-
-        // Extract progress from response
-        let progress_data = json
-            .get("progress")
-            .ok_or_else(|| "No progress field in response".to_string())?;
-
-        serde_json::from_value::<ScanProgress>(progress_data.clone())
-            .map_err(|e| format!("Failed to parse progress: {}", e))
-    }
-}
-
-impl Drop for ScanState {
-    fn drop(&mut self) {
-        // Clean up the spawned task when the state is dropped
-        if let Some(handle) = self.task_handle.take() {
-            handle.abort();
         }
     }
 }

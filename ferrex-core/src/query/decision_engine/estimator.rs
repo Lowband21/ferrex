@@ -5,6 +5,7 @@ use crate::query::decision_engine::{
 };
 
 /// Estimates the cost (in milliseconds) of different execution strategies
+#[derive(Debug, Clone)]
 pub struct CostEstimator {
     /// Base costs for different operations
     base_costs: BaseCosts,

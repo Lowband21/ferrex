@@ -3,6 +3,7 @@ use crate::{MediaError, Result, query::MediaQuery};
 use redis::{AsyncCommands, aio::ConnectionManager};
 use serde::{Serialize, de::DeserializeOwned};
 use std::collections::hash_map::DefaultHasher;
+use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 use tracing::{debug, info, warn};
@@ -11,6 +12,14 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct RedisCache {
     conn: ConnectionManager,
+}
+
+impl fmt::Debug for RedisCache {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RedisCache")
+            .field("connection", &"ConnectionManager")
+            .finish()
+    }
 }
 
 impl RedisCache {
@@ -124,6 +133,7 @@ impl RedisCache {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct CacheKeys;
 
 impl CacheKeys {

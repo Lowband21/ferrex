@@ -1375,16 +1375,7 @@ impl Primitive for RoundedImagePrimitive {
             }
         }
 
-        // Profile texture upload to atlas
-        #[cfg(feature = "profile-with-tracy")]
-        let upload_span = crate::infrastructure::gpu_profiling::gpu_span("TextureUpload", encoder);
-
         let atlas_entry = image_cache.upload_raster(device, encoder, &self.handle);
-
-        #[cfg(feature = "profile-with-tracy")]
-        if let Some(span) = upload_span {
-            crate::infrastructure::gpu_profiling::end_gpu_span(span, encoder);
-        }
 
         // Create instance for this primitive
         let instance = create_instance(
@@ -1463,29 +1454,17 @@ impl Primitive for RoundedImagePrimitive {
         profiling::scope!(crate::infrastructure::profiling_scopes::scopes::VIEW_DRAW);
 
         // Start GPU profiling span
-        #[cfg(feature = "profile-with-tracy")]
-        let gpu_span =
-            crate::infrastructure::gpu_profiling::gpu_span("RoundedImageRender", encoder);
-
         let pipeline = storage.get::<Pipeline>().unwrap();
         let state = storage.get::<State>().unwrap();
 
         // Get globals bind group
         let Some(globals_bind_group) = &state.globals_bind_group else {
             log::warn!("Globals bind group not initialized");
-            #[cfg(feature = "profile-with-tracy")]
-            if let Some(span) = gpu_span {
-                crate::infrastructure::gpu_profiling::end_gpu_span(span, encoder);
-            }
             return;
         };
 
         // Skip if no instances to render
         if state.primitive_data.is_empty() {
-            #[cfg(feature = "profile-with-tracy")]
-            if let Some(span) = gpu_span {
-                crate::infrastructure::gpu_profiling::end_gpu_span(span, encoder);
-            }
             return;
         }
 
@@ -1493,10 +1472,6 @@ impl Primitive for RoundedImagePrimitive {
         let key = self as *const _ as usize;
         let Some(primitive_data) = state.primitive_data.get(&key) else {
             log::warn!("No data for primitive {:p}", self);
-            #[cfg(feature = "profile-with-tracy")]
-            if let Some(span) = gpu_span {
-                crate::infrastructure::gpu_profiling::end_gpu_span(span, encoder);
-            }
             return;
         };
 
@@ -1549,10 +1524,6 @@ impl Primitive for RoundedImagePrimitive {
         drop(render_pass);
 
         // End GPU profiling span
-        #[cfg(feature = "profile-with-tracy")]
-        if let Some(span) = gpu_span {
-            crate::infrastructure::gpu_profiling::end_gpu_span(span, encoder);
-        }
     }
 }
 
