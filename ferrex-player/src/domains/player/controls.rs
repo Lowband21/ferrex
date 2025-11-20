@@ -2,6 +2,7 @@ use super::theme;
 use super::track_selection::format_subtitle_track;
 use crate::domains::player::{messages::Message, state::PlayerDomainState};
 use crate::domains::search::metrics::ConnectionQuality;
+use crate::infrastructure::constants::player::seeking::*;
 use iced::Theme;
 use iced::{
     Alignment, Element, Length,
@@ -128,15 +129,15 @@ impl PlayerDomainState {
 
         // Calculate percentages
         // Use source duration if available (for HLS this is the full media duration)
-        let duration = self.source_duration.unwrap_or(self.duration);
+        let duration = self.source_duration.unwrap_or(self.last_valid_duration);
         let played_percentage = if duration > 0.0 {
-            let percentage = (self.position / duration).clamp(0.0, 1.0);
+            let percentage = (self.last_valid_position / duration).clamp(0.0, 1.0) as f64;
             percentage
         } else {
             log::debug!(
                 "Seek bar: No duration available (source: {:?}, duration: {})",
                 self.source_duration,
-                self.duration
+                self.last_valid_duration
             );
             0.0
         };
@@ -197,16 +198,10 @@ impl PlayerDomainState {
 
     /// Build the main control buttons
     fn build_control_buttons(&self) -> Element<Message> {
-        // Use source duration if available (for HLS this is the full media duration)
-        let duration = self.source_duration.unwrap_or(self.duration);
-
-        //log::debug!(
-        //    "Building control buttons - position: {:.2}s, duration: {:.2}s, source_duration: {:?}",
-        //    self.position,
-        //    self.duration,
-        //    self.source_duration
-        //);
-
+        //// Use source duration if available (for HLS this is the full media duration)
+        //let duration = self.source_duration.unwrap_or(self.last_valid_duration);
+        // HLS not currently functional
+        let duration = self.last_valid_duration;
         {
             // Build a Wayland-only backend toggle element
             let backend_toggle: Element<Message, Theme> =
@@ -230,11 +225,11 @@ impl PlayerDomainState {
                     text(if duration > 0.0 {
                         format!(
                             "{} / {}",
-                            super::view::format_time(self.position),
+                            super::view::format_time(self.last_valid_position),
                             super::view::format_time(duration)
                         )
                     } else {
-                        format!("{} / --:--", super::view::format_time(self.position))
+                        format!("{} / --:--", super::view::format_time(self.last_valid_position))
                     })
                     .size(14)
                     .color([1.0, 1.0, 1.0, 1.0])
@@ -247,7 +242,7 @@ impl PlayerDomainState {
                         // Previous episode (disabled for now)
                         icon_button(Icon::SkipBack, None),
                         // Seek backward
-                        icon_button(Icon::Rewind, Some(Message::SeekBackward)),
+                        icon_button(Icon::Rewind, Some(Message::SeekRelative(SEEK_BACKWARD_COURSE))),
                         // Play/Pause
                         button(
                             text(if self.is_playing() {
@@ -262,7 +257,7 @@ impl PlayerDomainState {
                         .style(theme::button_transparent)
                         .padding(8),
                         // Seek forward
-                        icon_button(Icon::FastForward, Some(Message::SeekForward)),
+                        icon_button(Icon::FastForward, Some(Message::SeekRelative(SEEK_FORWARD_COURSE))),
                         // Next episode (disabled for now)
                         icon_button(Icon::SkipForward, None),
                         // Stop - navigates back
@@ -471,6 +466,17 @@ impl PlayerDomainState {
                 } else {
                     container(Space::with_height(0))
                 },
+                Space::with_height(Length::Fixed(10.0)),
+                // External playback
+                row![
+                    text("External:").size(14),
+                    Space::with_width(Length::Fill),
+                    button(text("Play Externally").size(14))
+                        .on_press(Message::PlayExternal)
+                        .style(theme::button_transparent)
+                        .padding(6),
+                ]
+                .align_y(Alignment::Center),
                 Space::with_height(Length::Fixed(10.0)),
                 // Keyboard shortcuts info (more compact)
                 container(

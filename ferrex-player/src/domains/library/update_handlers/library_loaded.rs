@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::domains::library::messages::Message;
-use crate::domains::media::repository::repository::MediaRepo;
+use crate::infrastructure::repository::repository::MediaRepo;
 use crate::infrastructure::adapters::ApiClientAdapter;
 use crate::infrastructure::constants::routes;
 use crate::infrastructure::services::api::ApiService;

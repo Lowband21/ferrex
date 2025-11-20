@@ -26,22 +26,13 @@ pub enum ProviderError {
 
 // async_trait removed - unused
 use tmdb_api::{
-    client::Client,
-    client::reqwest::ReqwestExecutor,
+    client::{reqwest::ReqwestExecutor, Client},
     movie::{
-        credits::{MovieCredits, MovieCreditsResult},
-        details::MovieDetails,
-        images::{MovieImages, MovieImagesResult},
-        search::MovieSearch,
+        credits::{MovieCredits, MovieCreditsResult}, details::MovieDetails, images::{MovieImages, MovieImagesResult}, popular::MoviePopular, search::MovieSearch
     },
     prelude::Command,
     tvshow::{
-        aggregate_credits::{TVShowAggregateCredits, TVShowAggregateCreditsResult},
-        details::TVShowDetails,
-        episode::details::TVShowEpisodeDetails,
-        images::{TVShowImages, TVShowImagesResult},
-        search::TVShowSearch,
-        season::details::TVShowSeasonDetails,
+        aggregate_credits::{TVShowAggregateCredits, TVShowAggregateCreditsResult}, details::TVShowDetails, episode::details::TVShowEpisodeDetails, images::{TVShowImages, TVShowImagesResult}, popular::TVShowPopular, search::TVShowSearch, season::details::TVShowSeasonDetails
     },
 };
 
@@ -101,10 +92,36 @@ pub struct TmdbApiProvider {
 }
 
 impl TmdbApiProvider {
-    pub fn new() -> Self {
+pub fn new() -> Self {
         let api_key = std::env::var("TMDB_API_KEY").unwrap_or_else(|_| String::new());
-        let client = Client::<ReqwestExecutor>::new(api_key);
+        let client = Client::new(api_key);
         Self { client }
+    }
+
+    /// Fetch a page of popular movies
+    pub async fn list_popular_movies(
+        &self,
+        page: Option<u32>,
+        language: Option<String>,
+        region: Option<String>,
+    ) -> Result<tmdb_api::common::PaginatedResult<tmdb_api::movie::MovieShort>, ProviderError> {
+
+        let movie_popular = MoviePopular::default().with_language(language).with_region(region).with_page(page);
+        let popular_movies_cmd = movie_popular.execute(&self.client).await;
+
+        popular_movies_cmd.map_err(|e| ProviderError::ApiError(e.to_string()))
+    }
+
+    /// Fetch a page of popular TV shows
+    pub async fn list_popular_tvshows(
+        &self,
+        page: Option<u32>,
+        language: Option<String>,
+    ) -> Result<tmdb_api::common::PaginatedResult<tmdb_api::tvshow::TVShowShort>, ProviderError> {
+        let tv_show_popular = TVShowPopular::default().with_language(language).with_page(page);
+        let popular_tvshows_cmd = tv_show_popular.execute(&self.client).await;
+
+        popular_tvshows_cmd.map_err(|e| ProviderError::ApiError(e.to_string()))
     }
 
     /// Search for movies and return lightweight references

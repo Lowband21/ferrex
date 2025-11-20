@@ -215,7 +215,7 @@ impl PostgresDatabase {
 
         // For movies without TMDB data (tmdb_id = 0), we need different handling
         // since multiple movies can have tmdb_id = 0
-        if movie.tmdb_id == 0 {
+        let target_movie_id: Uuid = if movie.tmdb_id == 0 {
             // For tmdb_id = 0, check if this specific file already has a movie reference
             let existing = sqlx::query!(
                 "SELECT id FROM movie_references WHERE file_id = $1",
@@ -244,8 +244,9 @@ impl PostgresDatabase {
                 .map_err(|e| {
                     MediaError::Internal(format!("Failed to update movie reference: {}", e))
                 })?;
+                existing_row.id
             } else {
-                // Insert new reference
+                // Insert new reference and use provided UUID
                 sqlx::query!(
                     r#"
                     INSERT INTO movie_references (id, library_id, file_id, tmdb_id, title, theme_color)
@@ -261,10 +262,11 @@ impl PostgresDatabase {
                 .execute(&mut **tx)
                 .await
                 .map_err(|e| MediaError::Internal(format!("Failed to insert movie reference: {}", e)))?;
+                *movie_uuid
             }
         } else {
-            // For movies with TMDB data, use the normal UPSERT with conflict handling
-            sqlx::query!(
+            // For movies with TMDB data, use the normal UPSERT with conflict handling, returning the actual id
+            let row = sqlx::query!(
                 r#"
                 INSERT INTO movie_references (id, library_id, file_id, tmdb_id, title, theme_color)
                 VALUES ($1, $2, $3, $4, $5, $6)
@@ -273,6 +275,7 @@ impl PostgresDatabase {
                     title = EXCLUDED.title,
                     theme_color = EXCLUDED.theme_color,
                     updated_at = NOW()
+                RETURNING id
                 "#,
                 movie_uuid,
                 library_id.as_uuid(),
@@ -281,10 +284,11 @@ impl PostgresDatabase {
                 movie.title.as_str(),
                 movie.theme_color.as_deref()
             )
-            .execute(&mut **tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(|e| MediaError::Internal(format!("Failed to store movie reference: {}", e)))?;
-        }
+            row.id
+        };
 
         // Store enhanced metadata if provided
         if let Some(meta) = metadata {
@@ -304,7 +308,7 @@ impl PostgresDatabase {
                     images = EXCLUDED.images,
                     updated_at = NOW()
                 "#,
-                movie_uuid,
+                target_movie_id,
                 tmdb_details,
                 images
             )
@@ -339,7 +343,7 @@ impl PostgresDatabase {
 
         // For movies without TMDB data (tmdb_id = 0), we need different handling
         // since multiple movies can have tmdb_id = 0
-        if movie.tmdb_id == 0 {
+        let target_movie_id: Uuid = if movie.tmdb_id == 0 {
             // For tmdb_id = 0, check if this specific file already has a movie reference
             let existing = sqlx::query!(
                 "SELECT id FROM movie_references WHERE file_id = $1",
@@ -368,8 +372,9 @@ impl PostgresDatabase {
                 .map_err(|e| {
                     MediaError::Internal(format!("Failed to update movie reference: {}", e))
                 })?;
+                existing_row.id
             } else {
-                // Insert new reference
+                // Insert new reference and use provided UUID
                 sqlx::query!(
                     r#"
                     INSERT INTO movie_references (id, library_id, file_id, tmdb_id, title, theme_color)
@@ -385,10 +390,11 @@ impl PostgresDatabase {
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| MediaError::Internal(format!("Failed to insert movie reference: {}", e)))?;
+                *movie_uuid
             }
         } else {
-            // For movies with TMDB data, use the normal UPSERT with conflict handling
-            sqlx::query!(
+            // For movies with TMDB data, use the normal UPSERT with conflict handling, returning actual id
+            let row = sqlx::query!(
                 r#"
                 INSERT INTO movie_references (id, library_id, file_id, tmdb_id, title, theme_color)
                 VALUES ($1, $2, $3, $4, $5, $6)
@@ -397,6 +403,7 @@ impl PostgresDatabase {
                     title = EXCLUDED.title,
                     theme_color = EXCLUDED.theme_color,
                     updated_at = NOW()
+                RETURNING id
                 "#,
                 movie_uuid,
                 library_id.as_uuid(),
@@ -405,10 +412,11 @@ impl PostgresDatabase {
                 movie.title.as_str(),
                 movie.theme_color.as_deref()
             )
-            .execute(&mut *tx)
+            .fetch_one(&mut *tx)
             .await
             .map_err(|e| MediaError::Internal(format!("Failed to store movie reference: {}", e)))?;
-        }
+            row.id
+        };
 
         // Store enhanced metadata if provided
         if let Some(meta) = metadata {
@@ -444,7 +452,7 @@ impl PostgresDatabase {
                     external_ids = EXCLUDED.external_ids,
                     updated_at = NOW()
                 "#,
-                movie_uuid,
+                target_movie_id,
                 tmdb_details,
                 images,
                 cast_crew,
@@ -1095,13 +1103,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
         Ok(())
     }
 
-    async fn update_library_last_scan(&self, id: &str) -> Result<()> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {}", e)))?;
+    async fn update_library_last_scan(&self, uuid: &LibraryID) -> Result<()> {
 
         sqlx::query!(
             "UPDATE libraries SET last_scan = NOW(), updated_at = NOW() WHERE id = $1",
-            uuid
+            uuid.as_uuid()
         )
         .execute(&self.pool)
         .await
@@ -3884,6 +3890,74 @@ impl MediaDatabaseTrait for PostgresDatabase {
         }
 
         Ok(media)
+    }
+
+    // Lookup a single movie by file path
+    async fn get_movie_reference_by_path(&self, path: &str) -> Result<Option<MovieReference>> {
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                mr.id, mr.tmdb_id, mr.title, mr.theme_color, mr.library_id,
+                mf.id as file_id, mf.file_path, mf.filename, mf.file_size, mf.created_at as file_created_at,
+                mf.technical_metadata,
+                mm.tmdb_details as "tmdb_details?"
+            FROM movie_references mr
+            JOIN media_files mf ON mr.file_id = mf.id
+            LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id
+            WHERE mf.file_path = $1
+            LIMIT 1
+            "#,
+            path
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
+
+        if let Some(row) = row {
+            let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
+            let media_file_metadata = technical_metadata
+                .map(|tm| serde_json::from_value(tm))
+                .transpose()
+                .map_err(|e| MediaError::Internal(format!("Failed to deserialize metadata: {}", e)))?;
+
+            let library_id = LibraryID(row.library_id);
+            let media_file = MediaFile {
+                id: row.file_id,
+                path: PathBuf::from(row.file_path),
+                filename: row.filename,
+                size: row.file_size as u64,
+                created_at: row.file_created_at,
+                media_file_metadata,
+                library_id,
+            };
+
+            let details = if let Some(tmdb_json) = row.tmdb_details {
+                match serde_json::from_value::<EnhancedMovieDetails>(tmdb_json) {
+                    Ok(metadata_details) => MediaDetailsOption::Details(TmdbDetails::Movie(metadata_details)),
+                    Err(e) => {
+                        warn!("Failed to deserialize movie metadata: {}", e);
+                        MediaDetailsOption::Endpoint(format!("/movie/{}", row.id))
+                    }
+                }
+            } else {
+                MediaDetailsOption::Endpoint(format!("/movie/{}", row.id))
+            };
+
+            let movie_ref = MovieReference {
+                id: MovieID(row.id),
+                library_id,
+                tmdb_id: row.tmdb_id as u64,
+                title: MovieTitle::new(row.title)?,
+                details,
+                endpoint: MovieURL::from_string(format!("/stream/{}", media_file.id)),
+                file: media_file,
+                theme_color: row.theme_color,
+            };
+
+            Ok(Some(movie_ref))
+        } else {
+            Ok(None)
+        }
     }
 
     // Bulk reference retrieval methods for performance

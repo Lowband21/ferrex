@@ -12,6 +12,7 @@ pub mod titles;
 pub mod transcoding;
 pub mod urls;
 pub mod util_types;
+pub mod scan;
 
 // Re-export everything from submodules
 pub use details::*;
@@ -26,3 +27,4 @@ pub use titles::*;
 pub use transcoding::*;
 pub use urls::*;
 pub use util_types::*;
+pub use scan::*;

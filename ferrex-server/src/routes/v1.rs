@@ -1,19 +1,29 @@
-use crate::{
-    AppState, admin_handlers,
-    api::user_management,
-    auth, dev_handlers, handlers, image_handlers,
-    library_handlers_v2::{
-        create_library_handler, delete_library_handler, get_libraries_with_media_handler,
-        get_library_handler, get_library_media_handler, update_library_handler,
-    },
-    media_reference_handlers, query_handlers, role_handlers,
-    scan_handlers::{media_events_sse_handler, scan_library_handler},
-    session_handlers, stream_handlers, sync_handlers, user_handlers, watch_status_handlers,
-    websocket,
-};
 use axum::{
-    Router, middleware,
+    middleware,
     routing::{get, post, put},
+    Router,
+};
+
+use crate::{
+    dev_handlers,
+    media::{
+        image_handlers,
+        library_handlers_v2::{
+            create_library_handler, delete_library_handler, get_libraries_with_media_handler,
+            get_library_handler, get_library_media_handler, update_library_handler,
+        },
+        query_handlers,
+        scan::{
+            get_folder_inventory, get_scan_progress, scan_handlers::{media_events_sse_handler, scan_all_libraries_handler, scan_library_handler}
+        },
+    },
+    stream::{stream_handlers, transcoding::transcoding_handlers},
+    users::{
+        admin_handlers, auth, role_handlers, session_handlers,
+        setup::setup::{check_setup_status, create_initial_admin}, user_handlers, user_management,
+        watch_status_handlers,
+    },
+    websocket, AppState,
 };
 
 /// Create all v1 API routes
@@ -38,8 +48,8 @@ pub fn create_v1_router(state: AppState) -> Router<AppState> {
         .route("/users", get(user_management::list_users))
         .route("/users/public", get(user_handlers::list_users_handler))
         // Public setup endpoints (for first-run)
-        .route("/setup/status", get(handlers::check_setup_status))
-        .route("/setup/admin", post(handlers::create_initial_admin))
+        .route("/setup/status", get(check_setup_status))
+        .route("/setup/admin", post(create_initial_admin))
         .route("/stream/{id}", get(crate::stream_handler))
         //
         .merge(create_libraries_routes(state.clone()))
@@ -145,10 +155,6 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         // Media endpoints
         //
         .route(
-            "/media/{id}",
-            get(media_reference_handlers::get_media_reference_handler),
-        )
-        .route(
             "/media/{id}/progress",
             get(watch_status_handlers::get_media_progress_handler),
         )
@@ -160,41 +166,68 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
             "/media/{id}/is-completed",
             get(watch_status_handlers::is_completed_handler),
         )
+        // Folder inventory monitoring and control
+        .route(
+            "/folders/inventory/{library_id}",
+            get(get_folder_inventory),
+        )
+        .route(
+            "/folders/progress/{library_id}",
+            get(get_scan_progress),
+        )
+        //.route(
+        //    "/folders/rescan/{folder_id}",
+        //    post(trigger_folder_rescan),
+        //)
         // Query system
         .route("/media/query", post(query_handlers::query_media_handler))
-        // Batch media fetch
+        // Scanning: pending-based triggers and counts
+        //.route(
+        //    "/libraries/{id}/scan/pending",
+        //    post(crate::media::scan::scan_handlers::scan_pending_for_library_handler),
+        //)
+        //.route(
+        //    "/libraries/scan/pending",
+        //    post(crate::media::scan::scan_handlers::scan_pending_for_all_libraries_handler),
+        //)
         .route(
-            "/media/batch",
-            post(media_reference_handlers::get_media_batch_handler),
+            "/libraries/{id}/scan/pending-count",
+            get(crate::media::scan::scan_handlers::pending_count_for_library_handler),
         )
+        //.route(
+        //    "/libraries/scan/pending-count",
+        //    get(crate::media::scan::scan_handlers::pending_count_all_libraries_handler),
+        //)
+        // Refresh metadata for a specific media item (by marking its folder pending)
+        //.route(
+        //    "/media/{media_type}/{id}/refresh",
+        //    post(crate::media::scan::scan_handlers::efresh_metadata_handler),
+        //)
         // Streaming endpoints
         //
         .route(
-            "/stream/{id}/progress",
+            "/stream/{media_type}/{id}/progress",
             post(stream_handlers::report_progress_handler),
         )
         // Sync session endpoints
-        //
-        .route(
-            "/sync/sessions",
-            post(sync_handlers::create_sync_session_handler),
-        )
-        .route(
-            "/sync/sessions/join/{code}",
-            get(sync_handlers::join_sync_session_handler),
-        )
-        .route(
-            "/sync/sessions/{id}",
-            axum::routing::delete(sync_handlers::leave_sync_session_handler),
-        )
-        .route(
-            "/sync/sessions/{id}/state",
-            get(sync_handlers::get_sync_session_state_handler),
-        )
-        .route(
-            "/sync/ws",
-            axum::routing::any(websocket::handler::websocket_handler),
-        )
+        // Unimplemented
+        //.route(
+        //    "/sync/sessions",
+        //    post(sync_handlers::create_sync_session_handler),
+        //)
+        //.route(
+        //    "/sync/sessions/join/{code}",
+        //    get(sync_handlers::join_sync_session_handler),
+        //)
+        //.route(
+        //    "/sync/sessions/{id}",
+        //    axum::routing::delete(sync_handlers::leave_sync_session_handler),
+        //)
+        //.route(
+        //    "/sync/sessions/{id}/state",
+        //    get(sync_handlers::get_sync_session_state_handler),
+        //)
+        .route("/sync/ws", axum::routing::any(websocket::handler::websocket_handler))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,
@@ -210,15 +243,13 @@ fn create_libraries_routes(state: AppState) -> Router<AppState> {
             get(get_libraries_with_media_handler).post(create_library_handler),
         )
         .route("/libraries/{id}", get(get_library_handler))
-        .route(
-            "/libraries/{id}",
-            axum::routing::put(update_library_handler),
-        )
+        .route("/libraries/{id}", axum::routing::put(update_library_handler))
         .route(
             "/libraries/{id}",
             axum::routing::delete(delete_library_handler),
         )
-        .route("/libraries/{id}/scan", post(scan_library_handler))
+        .route("/library/scan", post(scan_library_handler))
+        .route("/libraries/scan", post(scan_all_libraries_handler))
         .route("/libraries/{id}/media", get(get_library_media_handler))
     //.route_layer(middleware::from_fn_with_state(
     //    state.clone(),

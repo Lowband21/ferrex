@@ -10,7 +10,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     if let Some(scan_id) = &state.domains.library.state.active_scan_id {
         //log::info!("Creating scan progress subscription for scan ID: {}", scan_id);
         subscriptions.push(
-            super::scan_subscription::scan_progress(state.server_url.clone(), scan_id.clone())
+            super::scan_subscription::scan_progress(state.server_url.clone(), *scan_id)
                 .map(DomainMessage::Library),
         );
     } else {

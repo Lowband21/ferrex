@@ -7,17 +7,17 @@ use uuid::Uuid;
 use super::{ViewModel, VisibleItems};
 use crate::{
     domains::{
-        media::repository::accessor::{Accessor, ReadOnly},
-        //metadata::service::FetchPriority,
         ui::views::carousel::CarouselState,
     },
-    infrastructure::api_types::{MediaID, MovieReference, SeriesReference},
+    infrastructure::{
+        repository::accessor::{Accessor, ReadOnly},
+        api_types::{MediaID, MovieReference, SeriesReference},
+    },
 };
 
 /// ViewModel for the All view (shows movie and TV carousels)
 #[derive(Debug)]
 pub struct AllViewModel {
-    /// Reference to the media store
     accessor: Accessor<ReadOnly>,
 
     /// Current library filter (None = all libraries)

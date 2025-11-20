@@ -4,7 +4,7 @@
 //! movies, TV shows, seasons, and episodes with consistent styling, animations,
 //! and loading states.
 
-use crate::domains::media::repository::MaybeYoked;
+use crate::infrastructure::repository::MaybeYoked;
 use ferrex_core::{ImageSize, ImageType, MediaOps, MovieID, MovieLike, SeriesID};
 use iced::Length;
 use iced::widget::{button, container, mouse_area, text};
@@ -99,7 +99,7 @@ pub fn movie_reference_card_with_state<'a>(
 ) -> Element<'a, Message> {
     // Try from UI yoke cache first
     let uuid = movie_id.to_uuid();
-    let yoke_arc: Arc<crate::domains::media::repository::MovieYoke> =
+    let yoke_arc: Arc<crate::infrastructure::repository::MovieYoke> =
         match state.domains.ui.state.movie_yoke_cache.peek_ref(&uuid) {
             Some(arc) => arc.clone(),
             _ => {
@@ -289,7 +289,7 @@ pub fn series_reference_card_with_state<'a>(
 ) -> Element<'a, Message> {
     // Try from UI yoke cache first
     let uuid = series_id.to_uuid();
-    let yoke_arc: Arc<crate::domains::media::repository::SeriesYoke> =
+    let yoke_arc: Arc<crate::infrastructure::repository::SeriesYoke> =
         match state.domains.ui.state.series_yoke_cache.peek_ref(&uuid) {
             Some(arc) => arc.clone(),
             _ => {

@@ -59,17 +59,8 @@ pub use ferrex_core::api_types::{
     BatchMediaResponse,
     CreateLibraryRequest,
     FetchMediaRequest,
-    //LibraryFilters,
-    // API types
     LibraryMediaCache,
     LibraryMediaResponse,
-    //ManualMatchRequest,
-    //MediaEvent,
-    //MediaStats,
-    //MetadataRequest,
-    ScanProgress,
-    //ScanRequest,
-    ScanStatus,
     UpdateLibraryRequest,
 };
 

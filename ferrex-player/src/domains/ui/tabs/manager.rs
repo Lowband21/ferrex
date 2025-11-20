@@ -10,7 +10,7 @@ use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 use super::{AllTabState, LibraryTabState, TabId, TabState};
-use crate::domains::media::repository::accessor::{Accessor, ReadOnly};
+use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
 use crate::domains::ui::view_models::ViewModel;
 use crate::infrastructure::api_types::{Library, LibraryType};
 

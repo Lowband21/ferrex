@@ -1,14 +1,14 @@
 use crate::{
-    common::ui_utils::{Icon, icon_text},
-    domains::library::{messages::Message, types::LibraryFormData},
-    domains::ui::theme,
+    common::ui_utils::{icon_text, Icon},
+    domains::library::{types::LibraryFormData},
+    domains::ui::{theme, messages::Message},
     state_refactored::State,
 };
 use iced::{
-    Element, Length,
     widget::{
-        Space, button, checkbox, column, container, radio, row, scrollable, text, text_input,
+        button, checkbox, column, container, radio, row, scrollable, text, text_input, Space,
     },
+    Element, Length,
 };
 
 #[cfg_attr(

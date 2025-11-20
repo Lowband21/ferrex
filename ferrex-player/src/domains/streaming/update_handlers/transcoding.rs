@@ -133,10 +133,10 @@ pub fn handle_transcoding_status_update(
                     }
 
                     // Update player duration if video is already loaded but had no duration
-                    if state.domains.player.state.duration <= 0.0
+                    if state.domains.player.state.last_valid_duration <= 0.0
                         && state.domains.player.state.video_opt.is_some()
                     {
-                        state.domains.player.state.duration = dur;
+                        state.domains.player.state.last_valid_duration = dur;
                         log::info!("Updated player duration from transcoding job");
                     }
                 } else {

@@ -9,7 +9,7 @@
 use axum::{
     body::Body,
     extract::Request,
-    http::{Response, StatusCode, Uri, header},
+    http::{header, HeaderValue, Response, StatusCode, Uri},
 };
 use std::{
     future::Future,
@@ -107,20 +107,24 @@ where
             // Build redirect URL
             match self.build_https_url(&req) {
                 Ok(https_url) => {
-                    let response = Response::builder()
-                        .status(StatusCode::MOVED_PERMANENTLY)
-                        .header(header::LOCATION, https_url.to_string())
-                        .body(Body::empty())
-                        .unwrap();
-
-                    return Box::pin(async move { Ok(response) });
+                    let location = https_url.to_string();
+                    match HeaderValue::from_str(&location) {
+                        Ok(loc) => {
+                            let mut response = Response::new(Body::empty());
+                            *response.status_mut() = StatusCode::MOVED_PERMANENTLY;
+                            response.headers_mut().insert(header::LOCATION, loc);
+                            return Box::pin(async move { Ok(response) });
+                        }
+                        Err(_) => {
+                            let mut response = Response::new(Body::from("Invalid redirect location"));
+                            *response.status_mut() = StatusCode::BAD_REQUEST;
+                            return Box::pin(async move { Ok(response) });
+                        }
+                    }
                 }
                 Err(_) => {
-                    let response = Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .body(Body::from("Invalid request"))
-                        .unwrap();
-
+                    let mut response = Response::new(Body::from("Invalid request"));
+                    *response.status_mut() = StatusCode::BAD_REQUEST;
                     return Box::pin(async move { Ok(response) });
                 }
             }

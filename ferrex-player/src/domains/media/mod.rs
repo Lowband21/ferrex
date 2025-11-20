@@ -3,18 +3,16 @@
 //! Contains all media playback-related state and logic moved from the monolithic State
 
 pub mod messages;
-pub mod repository;
 pub mod update;
-pub mod update_handlers;
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::domains::media::messages::Message as MediaMessage;
+use crate::infrastructure::repository::{Accessor, ReadWrite};
 use crate::infrastructure::{
     adapters::api_client_adapter::ApiClientAdapter, api_types::UserWatchState,
 };
 use ferrex_core::{InProgressItem, MediaID, MediaIDLike, SeasonDetails};
 use iced::Task;
-use repository::accessor::{Accessor, ReadWrite};
 use std::sync::Arc;
 
 /// Media domain state - focused on media management, not playback
@@ -26,13 +24,7 @@ pub struct MediaDomainState {
     pub current_media_id: Option<ferrex_core::MediaID>,
     pub pending_resume_position: Option<f32>, // Resume position for next media to play
     pub last_ui_refresh_for_progress: Option<std::time::Instant>, // Track last UI refresh for debouncing
-    // REMOVED: current_show_seasons and current_season_episodes
-    // These are now accessed directly from MediaStore to maintain single source of truth
 
-    // Domain services
-    //pub query_service: Arc<MediaQueryService>,
-
-    // Shared references needed by media domain
     pub repo_accessor: Accessor<ReadWrite>,
     pub api_service: Option<Arc<ApiClientAdapter>>,
 }
@@ -164,14 +156,6 @@ impl MediaDomain {
 
     pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
         match event {
-            CrossDomainEvent::UserAuthenticated(_user, _permissions) => {
-                // Could load user watch state here
-                Task::none()
-            }
-            CrossDomainEvent::LibraryChanged(_library_id) => {
-                // Library domain handles current_library_id, media domain doesn't need to track it
-                Task::none()
-            }
             CrossDomainEvent::ClearCurrentShowData => {
                 // Clear current show data
                 // REMOVED: No longer clearing duplicate state fields

@@ -34,6 +34,7 @@ impl IncrementalScanner {
             cache_dir: None,
             max_error_retries: 3,
             folder_batch_limit: 50,
+            force_refresh: scan_options.force_refresh,
         };
 
         let scanner = Arc::new(StreamingScannerV2::with_config(
@@ -222,13 +223,8 @@ impl IncrementalScanner {
             warn!("Image caching for existing files not yet implemented");
         }
 
-        // Perform regular scan for new files
-        info!("Checking for new files in library {}", library.name);
-        self.scanner
-            .clone()
-            .scan_library(library, output_tx)
-            .await?;
-
+        // Skip full library sweep here; incremental scan processes deltas only
+        info!("Incremental scan completed for library {} (deltas only)", library.name);
         Ok(())
     }
 

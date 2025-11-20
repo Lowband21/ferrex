@@ -3,7 +3,6 @@ pub mod image_loading_subscription;
 pub mod subscription;
 pub mod subscriptions;
 
-use crate::domains::media::messages::MediaEvent;
 use crate::infrastructure::api_types::{Media, SeriesReference};
 use ferrex_core::{EpisodeID, MediaFile, MediaID, SeasonID, SeriesID};
 use std::collections::HashMap;
@@ -13,13 +12,6 @@ pub enum Message {
     // Metadata service
     InitializeService,
 
-    // Metadata fetching
-    //FetchMetadata(MediaID), // Fetch metadata for media_id
-    //MetadataFetched(MediaID, Result<(), String>), // media_id, result
-
-    // TV show metadata
-    //TvShowLoaded(String, Result<TvShowDetails, String>), // show_name, result
-    //SeasonLoaded(String, u32, Result<SeasonDetails, String>), // show_name, season_num, result
     RefreshShowMetadata(SeriesID), // Refresh metadata for all episodes in a show
     RefreshSeasonMetadata(SeasonID, u32), // Refresh metadata for all episodes in a season
     RefreshEpisodeMetadata(EpisodeID), // Refresh metadata for a single episode
@@ -28,26 +20,9 @@ pub enum Message {
 
     // Batch operations
     BatchMetadataComplete,
-    //MediaDetailsUpdated(Media), // Full details fetched for a media item
-    //MediaDetailsBatch(Vec<Media>), // Batch of media details for efficient processing
     CheckDetailsFetcherQueue, // Check if background fetcher has completed items
     MediaDetailsLoaded(Result<Vec<Media>, String>), // Full media details loaded
-    //MediaDetailsFetched(MediaID, Result<Media, String>), // Single media detail fetched
-    //MetadataUpdated(MediaID), // Generic metadata update notification
-    //FetchBatchMetadata(
-    //    Vec<(
-    //        uuid::Uuid,
-    //        Vec<crate::infrastructure::api_types::Media>,
-    //    )>,
-    //), // Trigger batch metadata fetching
-
-    // Background organization
-    //MediaOrganized(Vec<MediaFile>, HashMap<String, TvShow>), // Media organized by show
     SeriesSortingCompleted(Vec<SeriesReference>), // Series sorted in background
-
-    // Media events from server
-    MediaEventReceived(MediaEvent),
-    MediaEventsError(String),
 
     // Force rescan
     ForceRescan,
@@ -90,8 +65,6 @@ impl Message {
             Message::UnifiedImageLoadFailed(_, _) => "Metadata::UnifiedImageLoadFailed",
             //Message::MediaOrganized(_, _) => "Metadata::MediaOrganized",
             Message::SeriesSortingCompleted(_) => "Metadata::SeriesSortingCompleted",
-            Message::MediaEventReceived(_) => "Metadata::MediaEventReceived",
-            Message::MediaEventsError(_) => "Metadata::MediaEventsError",
             Message::ForceRescan => "Metadata::ForceRescan",
             //Message::FetchBatchMetadata(_) => "Metadata::FetchBatchMetadata",
             Message::NoOp => "Metadata::NoOp",
@@ -219,8 +192,6 @@ impl std::fmt::Debug for Message {
                 "Metadata::SeriesSortingCompleted({} series)",
                 series.len()
             ),
-            Self::MediaEventReceived(_) => write!(f, "Metadata::MediaEventReceived(<event>)"),
-            Self::MediaEventsError(err) => write!(f, "Metadata::MediaEventsError({})", err),
             Self::ForceRescan => write!(f, "Metadata::ForceRescan"),
             //Self::FetchBatchMetadata(libraries_data) => write!(
             //    f,

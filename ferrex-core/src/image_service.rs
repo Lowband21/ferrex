@@ -106,6 +106,15 @@ impl ImageService {
             .build()
             .expect("Failed to create HTTP client");
 
+        // Ensure cache_dir is absolute so stored file paths are stable
+        let cache_dir = if cache_dir.is_absolute() {
+            cache_dir
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(cache_dir)
+        };
+
         Self {
             db,
             cache_dir,

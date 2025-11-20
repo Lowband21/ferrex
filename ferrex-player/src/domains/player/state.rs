@@ -24,8 +24,6 @@ pub struct PlayerDomainState {
     pub pending_resume_position: Option<f32>, // Position to resume at when video loads
 
     // Playback state
-    pub position: f64,
-    pub duration: f64,
     pub buffered_percentage: f64, // Percentage of video buffered (0.0 to 1.0)
     pub dragging: bool,
     pub last_seek_position: Option<f64>,
@@ -79,15 +77,17 @@ pub struct PlayerDomainState {
     pub last_seek_time: Option<Instant>,
     pub pending_seek_position: Option<f64>,
 
+    // Robustness against transient 0 position/duration from backend
+    pub last_valid_position: f64,
+    pub last_valid_duration: f64,
+
     // HDR content detection (non-streaming related)
     pub is_hdr_content: bool,
     pub is_loading_video: bool, // Flag to prevent duplicate video loading
     pub source_duration: Option<f64>, // Original source video duration (never changes)
 
     // External MPV player support
-    #[cfg(feature = "external-mpv-player")]
     pub external_mpv_handle: Option<Box<super::external_mpv::ExternalMpvHandle>>,
-    #[cfg(feature = "external-mpv-player")]
     pub external_mpv_active: bool,
 }
 
@@ -107,8 +107,6 @@ impl Default for PlayerDomainState {
             last_progress_update: None,
             last_progress_sent: 0.0,
             pending_resume_position: None,
-            position: 0.0,
-            duration: 0.0,
             buffered_percentage: 0.0, // Start with no buffer
             dragging: false,
             last_seek_position: None,
@@ -139,12 +137,12 @@ impl Default for PlayerDomainState {
             current_quality_profile: None,
             last_seek_time: None,
             pending_seek_position: None,
+            last_valid_position: 0.0,
+            last_valid_duration: 0.0,
             is_hdr_content: false,
             is_loading_video: false,
             source_duration: None,
-            #[cfg(feature = "external-mpv-player")]
             external_mpv_handle: None,
-            #[cfg(feature = "external-mpv-player")]
             external_mpv_active: false,
         }
     }
@@ -167,8 +165,8 @@ impl PlayerDomainState {
         self.last_progress_update = None;
         self.last_progress_sent = 0.0;
         self.pending_resume_position = None;
-        self.position = 0.0;
-        self.duration = 0.0;
+        self.last_valid_position = 0.0;
+        self.last_valid_duration = 0.0;
         self.buffered_percentage = 0.0; // Start with no buffer
         self.dragging = false;
         self.last_seek_position = None;
@@ -224,5 +222,18 @@ impl PlayerDomainState {
                 self.track_notification = None;
             }
         }
+    }
+
+    /// Stop native/internal playback and release the video handle without resetting all state
+    pub fn stop_native_playback(&mut self) {
+        if let Some(mut video) = self.video_opt.take() {
+            video.set_paused(true);
+            drop(video);
+        }
+        self.seeking = false;
+        self.dragging = false;
+        self.last_seek_position = None;
+        self.pending_seek_position = None;
+        self.last_seek_time = None;
     }
 }

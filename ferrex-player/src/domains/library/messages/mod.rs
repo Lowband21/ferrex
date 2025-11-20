@@ -2,10 +2,9 @@ pub mod media_events_subscription;
 pub mod scan_subscription;
 pub mod subscriptions;
 
-use crate::infrastructure::api_types::{Library, Media, MediaID};
+use crate::infrastructure::{api_types::{Library, Media, MediaID}, repository::RepositoryError};
 use ferrex_core::{
-    LibraryID, MediaFile, MediaIDLike,
-    api_types::{LibraryMediaResponse, ScanProgress},
+    api_types::LibraryMediaResponse, LibraryID, MediaFile, MediaIDLike, ScanProgress, ScanResponse
 };
 use rkyv::util::AlignedVec;
 use uuid::Uuid;
@@ -40,9 +39,9 @@ pub enum Message {
     SubmitLibraryForm,
 
     // Scanning
-    ScanStarted(Result<String, String>),
+    ScanStarted(Uuid),
     ScanProgressUpdate(ScanProgress),
-    ScanCompleted(Result<String, String>),
+    ScanCompleted(Result<Uuid, String>),
     ClearScanProgress,
     ToggleScanProgress,
     CheckActiveScans,
@@ -201,10 +200,7 @@ impl std::fmt::Debug for Message {
 
             // Scanning
             Self::ScanLibrary(_) => write!(f, "Library::ScanLibrary"),
-            Self::ScanStarted(result) => match result {
-                Ok(scan_id) => write!(f, "Library::ScanStarted(Ok: {})", scan_id),
-                Err(e) => write!(f, "Library::ScanStarted(Err: {})", e),
-            },
+            Self::ScanStarted(scan_id) => write!(f, "Library::ScanStarted({})", scan_id),
             Self::ScanProgressUpdate(progress) => {
                 write!(f, "Library::ScanProgressUpdate({:?})", progress.status)
             }

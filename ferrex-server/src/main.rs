@@ -11,7 +11,6 @@
 //! - **Watch Progress**: Automatic progress tracking and "continue watching" features
 //! - **Synchronized Playback**: Real-time synchronized viewing sessions via WebSocket
 //! - **Library Management**: Automatic media scanning and metadata enrichment
-//! - **API Access**: RESTful API for all features
 //!
 //! ## Architecture
 //!
@@ -22,85 +21,51 @@
 //! - TMDB for metadata
 // ```
 
-/// Admin-only management handlers
-pub mod admin_handlers;
-/// API endpoint handlers organized by functionality
-pub mod api;
-/// Authentication and JWT token management
-pub mod auth;
-/// Server configuration and settings
-pub mod config;
-/// Development utilities (only available in debug builds)
-pub mod dev_handlers;
-/// Error types and handling
-pub mod errors;
-/// First-run setup and other handlers
-pub mod handlers;
-/// Image serving and caching handlers
-pub mod image_handlers;
-/// Library management API handlers
-pub mod library_handlers_v2;
-/// Unified media reference API handlers
-pub mod media_reference_handlers;
-/// External metadata provider integration (TMDB)
-pub mod metadata_service;
-/// Middleware implementations
-pub mod middleware;
-/// Movie specific API handlers
-pub mod movie_handlers;
-/// Media query API handlers
-pub mod query_handlers;
-/// Role and permission management handlers
-pub mod role_handlers;
 /// Versioned route organization
 pub mod routes;
-/// Media scanning API handlers
-pub mod scan_handlers;
-/// Media library scanning and indexing
-pub mod scan_manager;
-/// Centralized services for common operations
-pub mod services;
-/// Session management handlers
-pub mod session_handlers;
-/// Media streaming handlers
-pub mod stream_handlers;
-/// Synchronized playback session handlers
-pub mod sync_handlers;
-/// Development and testing endpoints
-pub mod test_endpoints;
-/// Thumbnail generation and caching
-pub mod thumbnail_service;
-/// TLS configuration and certificate management
-pub mod tls;
-/// Video transcoding and HLS streaming
-pub mod transcoding;
-/// TV show specific API handlers
-pub mod tv_handlers;
-/// User profile management handlers
-pub mod user_handlers;
-/// Watch progress tracking handlers
-pub mod watch_status_handlers;
+
+/// Media scanning, preprocessing, and serving
+pub mod media;
+
+/// User management, authentication, and user-specific data
+pub mod users;
+
+/// Media streaming and transcoding
+pub mod stream;
+
 /// WebSocket connection management
 pub mod websocket;
 
+/// Middleware implementations
+pub mod middleware;
+
+/// Server config
+pub mod config;
+
+/// Error types and handling
+pub mod errors;
+
+/// Dev handlers
+pub mod dev_handlers;
+
 use axum::{
-    Router,
     body::Body,
     extract::{Path, Request, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{header, HeaderMap, StatusCode},
     response::{Json, Response},
     routing::{get, post},
+    Router,
 };
 use clap::Parser;
-use config::Config;
+use config::Config as ExtConfig;
 use ferrex_core::{
-    MediaDatabase, ScanRequest,
-    auth::domain::services::{AuthenticationService, create_authentication_service},
+    auth::domain::services::{create_authentication_service, AuthenticationService},
     database::PostgresDatabase,
     scanner::FolderMonitor,
+    MediaDatabase, ScanRequest,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -111,6 +76,8 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
+
+use crate::{media::{metadata_service::MetadataService, prep::thumbnail_service::ThumbnailService, scan::scan_manager::ScanManager}, stream::transcoding::{config::TranscodingConfig, TranscodingService}, users::auth::tls::{create_tls_acceptor, TlsCertConfig}};
 
 /// Command line arguments for the Ferrex media server
 #[derive(Parser, Debug)]
@@ -139,11 +106,11 @@ struct Args {
 pub struct AppState {
     pub db: Arc<MediaDatabase>,
     pub database: Arc<MediaDatabase>, // Alias for compatibility
-    pub config: Arc<Config>,
-    pub metadata_service: Arc<metadata_service::MetadataService>,
-    pub thumbnail_service: Arc<thumbnail_service::ThumbnailService>,
-    pub scan_manager: Arc<scan_manager::ScanManager>,
-    pub transcoding_service: Arc<transcoding::TranscodingService>,
+    pub config: Arc<ExtConfig>,
+    pub metadata_service: Arc<MetadataService>,
+    pub thumbnail_service: Arc<ThumbnailService>,
+    pub scan_manager: Arc<ScanManager>,
+    pub transcoding_service: Arc<TranscodingService>,
     pub image_service: Arc<ferrex_core::ImageService>,
     pub websocket_manager: Arc<websocket::ConnectionManager>,
     pub auth_service: Arc<AuthenticationService>,
@@ -255,7 +222,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Load configuration from environment
-    let mut config = Config::from_env()?;
+    let mut config = ExtConfig::from_env()?;
 
     // Override config with CLI arguments if provided
     if let Some(port) = args.port {
@@ -270,7 +237,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "ferrex_server=debug,tower_http=debug".into()),
+                .unwrap_or_else(|_| "ferrex_server=debug,ferrex_core=debug,tower_http=debug".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -327,24 +294,24 @@ async fn main() -> anyhow::Result<()> {
         Some(key) => info!("TMDB API key configured (length: {})", key.len()),
         None => warn!("TMDB_API_KEY not set - metadata fetching will be limited"),
     }
-    let metadata_service = Arc::new(metadata_service::MetadataService::new(
+    let metadata_service = Arc::new(MetadataService::new(
         tmdb_api_key,
         config.cache_dir.clone(),
     ));
 
     let thumbnail_service = Arc::new(
-        thumbnail_service::ThumbnailService::new(config.cache_dir.clone(), db.clone())
+        ThumbnailService::new(config.cache_dir.clone(), db.clone())
             .expect("Failed to initialize thumbnail service"),
     );
 
-    let scan_manager = Arc::new(scan_manager::ScanManager::new(
+    let scan_manager = Arc::new(ScanManager::new(
         db.clone(),
         metadata_service.clone(),
         thumbnail_service.clone(),
     ));
 
     // Initialize transcoding service
-    let transcoding_config = transcoding::config::TranscodingConfig {
+    let transcoding_config = TranscodingConfig {
         ffmpeg_path: config.ffmpeg_path.clone(),
         ffprobe_path: config.ffprobe_path.clone(),
         transcode_cache_dir: config.transcode_cache_dir.clone(),
@@ -352,7 +319,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let transcoding_service = Arc::new(
-        transcoding::TranscodingService::new(transcoding_config, db.clone())
+        TranscodingService::new(transcoding_config, db.clone())
             .await
             .expect("Failed to initialize transcoding service"),
     );
@@ -412,14 +379,11 @@ async fn main() -> anyhow::Result<()> {
         ));
 
         // Start the folder monitor background task
-        match monitor.clone().start().await {
-            Err(e) => {
-                warn!("Failed to start FolderMonitor background task: {}", e);
-            }
-            _ => {
-                info!("FolderMonitor background task started with 60-second scan interval");
-            }
-        }
+        match monitor.clone().start().await { Err(e) => {
+            warn!("Failed to start FolderMonitor background task: {}", e);
+        } _ => {
+            info!("FolderMonitor background task started with 60-second scan interval");
+        }}
 
         monitor
     };
@@ -466,14 +430,14 @@ async fn main() -> anyhow::Result<()> {
             info!("Certificate path: {:?}", cert_path);
             info!("Private key path: {:?}", key_path);
 
-            let tls_config = crate::tls::TlsCertConfig {
+            let tls_config = TlsCertConfig {
                 cert_path,
                 key_path,
                 ..Default::default()
             };
 
             // Create TLS acceptor
-            let rustls_config = crate::tls::create_tls_acceptor(tls_config).await?;
+            let rustls_config = create_tls_acceptor(tls_config).await?;
 
             let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
             info!(
@@ -492,9 +456,7 @@ async fn main() -> anyhow::Result<()> {
                 "Starting Ferrex Media Server (HTTP) on {}:{}",
                 config.server_host, config.server_port
             );
-            warn!(
-                "TLS is not configured. For production use, set TLS_CERT_PATH and TLS_KEY_PATH environment variables."
-            );
+            warn!("TLS is not configured. For production use, set TLS_CERT_PATH and TLS_KEY_PATH environment variables.");
 
             let listener = tokio::net::TcpListener::bind(addr).await?;
 
@@ -521,264 +483,10 @@ pub fn create_app(state: AppState) -> Router {
     versioned_api =
         middleware::rate_limit_setup::apply_api_rate_limits(versioned_api, &rate_limit_config);
 
-    // Create backward compatibility layer for old API paths
-    // This will redirect old paths to v1 endpoints during migration period
-    let compatibility_routes = create_compatibility_routes(state.clone());
-
-    /*
-    // Routes that require authentication (legacy - to be removed)
-    let protected_routes = Router::new()
-        .route("/api/auth/logout", post(auth::handlers::logout))
-        .route("/api/users/me", get(auth::handlers::get_current_user))
-        // User management
-        .route(
-            "/api/user/password",
-            axum::routing::put(user_handlers::change_password_handler),
-        )
-        // Device authentication management (requires auth)
-        .route(
-            "/api/auth/device/pin/set",
-            post(auth::device_handlers::set_device_pin),
-        )
-        .route(
-            "/api/auth/device/pin/change",
-            post(auth::device_handlers::change_device_pin),
-        )
-        .route(
-            "/api/auth/device/list",
-            get(auth::device_handlers::list_user_devices),
-        )
-        .route(
-            "/api/auth/device/revoke",
-            post(auth::device_handlers::revoke_device),
-        )
-        // Watch status endpoints
-        .route(
-            "/api/watch/progress",
-            post(watch_status_handlers::update_progress_handler),
-        )
-        .route(
-            "/api/watch/state",
-            get(watch_status_handlers::get_watch_state_handler),
-        )
-        .route(
-            "/api/watch/continue",
-            get(watch_status_handlers::get_continue_watching_handler),
-        )
-        .route(
-            "/api/watch/progress/:media_id",
-            axum::routing::delete(watch_status_handlers::clear_progress_handler),
-        )
-        .route(
-            "/api/media/:id/progress",
-            get(watch_status_handlers::get_media_progress_handler),
-        )
-        .route(
-            "/api/media/:id/complete",
-            post(watch_status_handlers::mark_completed_handler),
-        )
-        .route(
-            "/api/media/:id/is-completed",
-            get(watch_status_handlers::is_completed_handler),
-        )
-        // Protected streaming endpoints with progress tracking
-        .route(
-            "/api/stream/:id",
-            get(stream_handlers::stream_with_progress_handler),
-        )
-        .route(
-            "/api/stream/:id/progress",
-            post(stream_handlers::report_progress_handler),
-        )
-        // Sync session endpoints
-        .route(
-            "/api/sync/sessions",
-            post(sync_handlers::create_sync_session_handler),
-        )
-        .route(
-            "/api/sync/sessions/join/:code",
-            get(sync_handlers::join_sync_session_handler),
-        )
-        .route(
-            "/api/sync/sessions/:id",
-            axum::routing::delete(sync_handlers::leave_sync_session_handler),
-        )
-        .route(
-            "/api/sync/sessions/:id/state",
-            get(sync_handlers::get_sync_session_state_handler),
-        )
-        // WebSocket endpoint for sync sessions
-        .route("/api/sync/ws", get(websocket::handler::websocket_handler))
-        // User profile management
-        .route("/api/users/:id", get(user_handlers::get_user_handler))
-        .route(
-            "/api/users/:id",
-            axum::routing::put(user_handlers::update_user_handler),
-        )
-        .route(
-            "/api/users/:id",
-            axum::routing::delete(user_handlers::delete_user_handler),
-        )
-        // Session management
-        .route(
-            "/api/users/sessions",
-            get(session_handlers::get_user_sessions_handler),
-        )
-        .route(
-            "/api/users/sessions/:id",
-            axum::routing::delete(session_handlers::delete_session_handler),
-        )
-        .route(
-            "/api/users/sessions",
-            axum::routing::delete(session_handlers::delete_all_sessions_handler),
-        )
-        // Folder inventory monitoring
-        .route(
-            "/api/folders/inventory/:library_id",
-            get(handlers::get_folder_inventory),
-        )
-        .route(
-            "/api/folders/progress/:library_id",
-            get(handlers::get_scan_progress),
-        )
-        .route(
-            "/api/folders/rescan/:folder_id",
-            post(handlers::trigger_folder_rescan),
-        )
-        // Query system
-        .route(
-            "/api/media/query",
-            post(query_handlers::query_media_handler),
-        )
-        // PIN authentication routes (require admin session on device)
-        .route(
-            "/api/auth/pin/authenticate",
-            post(auth::pin_handlers::authenticate_with_pin),
-        )
-        .route("/api/auth/pin/set", post(auth::pin_handlers::set_pin))
-        .route(
-            "/api/auth/pin/remove/:device_id",
-            axum::routing::delete(auth::pin_handlers::remove_pin),
-        )
-        .route(
-            "/api/auth/pin/available/:device_id",
-            get(auth::pin_handlers::check_pin_availability),
-        )
-        .layer(axum_middleware::from_fn_with_state(
-            state.clone(),
-            auth::middleware::auth_middleware,
-        )); */
-
     // Public routes
     Router::new()
         .route("/ping", get(ping_handler))
         .route("/health", get(health_handler))
-        //// Public user endpoints (for user selection screen)
-        //.route("/api/users", get(user_handlers::list_users_handler))
-        ////// Add protected routes
-        ////.merge(protected_routes)
-        //// Add admin routes with /api prefix
-        //.route("/scan", post(scan_handler))
-        //.route("/scan", get(scan_status_handler))
-        //// .route("/metadata", post(metadata_handler)) // Old endpoint - deprecated
-        //.route("/scan/start", post(start_scan_handler))
-        //.route("/scan/all", post(scan_all_libraries_handler))
-        //.route("/scan/progress/:id", get(scan_progress_handler))
-        //.route("/scan/progress/:id/sse", get(scan_progress_sse_handler))
-        //.route("/scan/active", get(active_scans_handler))
-        //.route("/scan/history", get(scan_history_handler))
-        //.route("/scan/cancel/:id", post(cancel_scan_handler))
-        //.route("/stream/:id", get(stream_handler))
-        //// HLS streaming endpoints
-        //.route("/stream/:id/hls/playlist.m3u8", get(hls_playlist_handler))
-        //.route("/stream/:id/hls/:segment", get(hls_segment_handler))
-        //.route("/stream/:id/transcode", get(stream_transcode_handler))
-        //.route("/transcode/:id", post(start_transcode_handler))
-        //.route("/transcode/status/:job_id", get(transcode_status_handler))
-        //// New production transcoding endpoints
-        //.route(
-        //    "/transcode/:id/adaptive",
-        //    post(start_adaptive_transcode_handler),
-        //)
-        //.route(
-        //    "/transcode/:id/segment/:segment_number",
-        //    get(get_segment_handler),
-        //)
-        //.route(
-        //    "/transcode/:id/master.m3u8",
-        //    get(get_master_playlist_handler),
-        //)
-        //.route(
-        //    "/transcode/:id/variant/:profile/playlist.m3u8",
-        //    get(get_variant_playlist_handler),
-        //)
-        //.route(
-        //    "/transcode/:id/variant/:profile/:segment",
-        //    get(get_variant_segment_handler),
-        //)
-        //.route("/transcode/cancel/:job_id", post(cancel_transcode_handler))
-        //.route("/transcode/profiles", get(list_transcode_profiles_handler))
-        //.route("/transcode/cache/stats", get(transcode_cache_stats_handler))
-        //.route(
-        //    "/transcode/:id/clear-cache",
-        //    post(clear_transcode_cache_handler),
-        //)
-        //.route("/library/status", get(library_status_handler))
-        //.route("/media/:id/availability", get(media_availability_handler))
-        //.route("/config", get(config_handler))
-        //// .route("/metadata/fetch/:id", post(fetch_metadata_handler)) // Old endpoint - deprecated
-        //// .route("/metadata/fetch-show/:show_name", post(fetch_show_metadata_handler)) // Old endpoint - deprecated
-        //.route("/poster/:id", get(poster_handler))
-        //.route("/thumbnail/:id", get(thumbnail_handler))
-        //// New unified media reference endpoint
-        //// Batch media fetch endpoint
-        //.route(
-        //    "/api/media/batch",
-        //    post(media_reference_handlers::get_media_batch_handler),
-        //)
-        //// Image serving endpoint (public but client sends auth headers)
-        //.route(
-        //    "/season-poster/:show_name/:season_num",
-        //    get(season_poster_handler),
-        //)
-        //.route(
-        //    "/libraries",
-        //    get(list_libraries_handler).post(create_library_handler),
-        //)
-        //.route("/libraries/:id", get(get_library_handler))
-        //.route("/libraries/:id", axum::routing::put(update_library_handler))
-        //.route(
-        //    "/libraries/:id",
-        //    axum::routing::delete(delete_library_handler),
-        //)
-        //.route("/libraries/:id/scan", post(scan_library_handler))
-        //.route("/libraries/:id/media", get(get_library_media_handler))
-        //.route("/media", post(fetch_media_handler))
-        //.route("/media/match", post(manual_match_media_handler))
-        //// Temporary maintenance endpoint
-        //.route(
-        //    "/maintenance/delete-by-title/:title",
-        //    axum::routing::delete(delete_by_title_handler),
-        //)
-        //.route("/metadata/fetch-batch", post(fetch_metadata_batch_handler))
-        //.route("/posters/batch", post(fetch_posters_batch_handler))
-        //.route("/maintenance/clear-database", post(clear_database_handler))
-        //// Test endpoints for metadata extraction and transcoding
-        //.route(
-        //    "/test/metadata/:path",
-        //    get(test_endpoints::test_metadata_extraction),
-        //)
-        //.route(
-        //    "/test/transcode/:path",
-        //    post(test_endpoints::test_transcoding),
-        //)
-        //.route(
-        //    "/test/transcode/status/:job_id",
-        //    get(test_endpoints::test_transcode_status),
-        //)
-        //.route("/test/hls/:path", post(test_endpoints::test_hls_streaming))
-        // Add compatibility routes (temporary)
-        .merge(compatibility_routes)
         // Add versioned API routes
         .merge(versioned_api)
         // Add middleware layers in correct order (outer to inner):
@@ -852,52 +560,6 @@ pub fn create_app(state: AppState) -> Router {
             },
         ))
         .with_state(state)
-}
-
-/// Create backward compatibility routes that redirect to v1 endpoints
-fn create_compatibility_routes(state: AppState) -> Router<AppState> {
-    Router::new()
-        // Auth redirects: /api/auth/* -> /api/v1/auth/*
-        .route("/api/library/events/sse", get(redirect_to_v1))
-        //
-        .route("/api/auth/register", post(redirect_to_v1))
-        .route("/api/auth/login", post(redirect_to_v1))
-        .route("/api/auth/refresh", post(redirect_to_v1))
-        .route("/api/auth/logout", post(redirect_to_v1))
-        .route("/api/auth/device/login", post(redirect_to_v1))
-        .route("/api/auth/device/pin", post(redirect_to_v1))
-        .route("/api/auth/device/status", get(redirect_to_v1))
-        // User redirects: /api/users/* -> /api/v1/users/*
-        .route("/api/users/me", get(redirect_to_v1))
-        .route("/api/users", get(redirect_to_v1))
-        .route("/api/users/{id}", get(redirect_to_v1))
-        // Media redirects: /api/media/* -> /api/v1/media/*
-        .route("/api/media/query", post(redirect_to_v1))
-        // Watch status redirects: /api/watch/* -> /api/v1/watch/*
-        .route("/api/watch/progress", post(redirect_to_v1))
-        .route("/api/watch/state", get(redirect_to_v1))
-        .route("/api/watch/continue", get(redirect_to_v1))
-        // Setup redirects: /api/setup/* -> /api/v1/setup/*
-        .route("/api/setup/status", get(redirect_to_v1))
-        .route("/api/setup/admin", post(redirect_to_v1))
-        .with_state(state)
-}
-
-// Add this redirect handler function to main.rs
-async fn redirect_to_v1(uri: axum::http::Uri) -> Response {
-    let new_path = uri.path().replace("/api/", "/api/v1/");
-    let new_uri = if let Some(query) = uri.query() {
-        format!("{}?{}", new_path, query)
-    } else {
-        new_path
-    };
-
-    Response::builder()
-        .status(StatusCode::MOVED_PERMANENTLY)
-        .header("Location", new_uri)
-        .header("X-API-Migration", "Redirected to v1")
-        .body(Body::empty())
-        .unwrap()
 }
 
 // These types are now in ferrex_core::api_types
@@ -1327,261 +989,6 @@ async fn fetch_show_metadata_handler(
     })))
 }
 
-// The rest of the original function has been removed as it relied on deprecated external_info fields
-
-/*
-async fn poster_handler(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Response, StatusCode> {
-    info!("Poster request for media ID: {}", id);
-
-    // Check if this is a TV show request
-    if id.starts_with("tvshow:") {
-        let show_name = id.strip_prefix("tvshow:").unwrap_or(&id);
-        info!("TV show poster request for: {}", show_name);
-
-        // Get the first episode of the show to find poster URL
-        let filters = MediaFilters {
-            media_type: Some("tv_show".to_string()),
-            show_name: Some(show_name.to_string()),
-            limit: Some(5), // Get more episodes to debug
-            ..Default::default()
-        };
-
-        info!(
-            "Querying for TV show '{}' with filters: media_type='tv_show', show_name='{}'",
-            show_name, show_name
-        );
-
-        match state.db.backend().list_media(filters).await {
-            Ok(episodes) => {
-                info!("Found {} episodes for show '{}'", episodes.len(), show_name);
-
-                // Debug: Log what show names we have in the database
-                if episodes.is_empty() {
-                    // Try to find what shows we DO have
-                    let all_tv_filters = MediaFilters {
-                        media_type: Some("tv_show".to_string()),
-                        limit: Some(100),
-                        ..Default::default()
-                    };
-
-                    if let Ok(all_episodes) = state.db.backend().list_media(all_tv_filters).await {
-                        let mut unique_shows = std::collections::HashSet::new();
-                        for ep in &all_episodes {
-                            if let Some(parsed) = ep
-                                .media_file_metadata
-                                .as_ref()
-                                .and_then(|m| m.parsed_info.as_ref())
-                            {
-                                if let ParsedMediaInfo::Episode(episode_info) = parsed {
-                                    unique_shows.insert(episode_info.show_name.clone());
-                                }
-                            }
-                        }
-                        info!("Available TV shows in database: {:?}", unique_shows);
-                        info!(
-                            "Requested show '{}' not found. Possible mismatch?",
-                            show_name
-                        );
-                    }
-                }
-
-                if let Some(_episode) = episodes.first() {
-                    // Since we no longer have external_info in MediaFileMetadata,
-                    // poster URLs should come from reference types in the database
-                    // Poster handling has been moved to reference types
-                } else {
-                    warn!("No poster URL found for any episode of TV show '{}'. Episodes found but no metadata.", show_name);
-
-                    // If we have episodes but no poster metadata, trigger a metadata fetch
-                    if !episodes.is_empty() {
-                        if let Some(first_episode) = episodes.first() {
-                            let media_id = first_episode.id.clone();
-                            info!(
-                                "Triggering metadata fetch for episode {} to get show poster",
-                                media_id
-                            );
-
-                            // Fire and forget metadata fetch
-                            let media_id_str = media_id.to_string();
-                            tokio::spawn(async move {
-                                let clean_id = if media_id_str.starts_with("media:") {
-                                    media_id_str.strip_prefix("media:").unwrap_or(&media_id_str)
-                                } else {
-                                    &media_id_str
-                                };
-                                if let Ok(response) = reqwest::Client::new()
-                                    .post(&format!(
-                                        "http://localhost:3000/metadata/fetch/{}",
-                                        clean_id
-                                    ))
-                                    .send()
-                                    .await
-                                {
-                                    info!(
-                                        "Metadata fetch triggered for {}: {:?}",
-                                        clean_id,
-                                        response.status()
-                                    );
-                                }
-                            });
-                        }
-                    }
-                }
-                warn!("No poster available for TV show '{}' yet", show_name);
-                Err(StatusCode::NOT_FOUND)
-            }
-            Err(e) => {
-                warn!("Failed to fetch TV show episodes: {}", e);
-                Err(StatusCode::INTERNAL_SERVER_ERROR)
-            }
-        }
-    } else {
-        // Regular media ID handling
-        // Extract just the UUID part (consistent with caching logic)
-        let media_id = id.split(':').last().unwrap_or(&id);
-
-        // Check for cached poster
-        if let Some(poster_path) = state.metadata_service.get_cached_poster(media_id) {
-            // Serve the cached poster file
-            match tokio::fs::read(&poster_path).await {
-                Ok(bytes) => {
-                    let mut response = Response::new(bytes.into());
-
-                    // Determine content type based on file extension
-                    let content_type = if poster_path
-                        .extension()
-                        .and_then(|ext| ext.to_str())
-                        .map(|ext| ext.eq_ignore_ascii_case("png"))
-                        .unwrap_or(false)
-                    {
-                        "image/png"
-                    } else {
-                        "image/jpeg"
-                    };
-
-                    response.headers_mut().insert(
-                        header::CONTENT_TYPE,
-                        header::HeaderValue::from_static(content_type),
-                    );
-                    Ok(response)
-                }
-                Err(e) => {
-                    warn!("Failed to read poster file: {}", e);
-                    Err(StatusCode::INTERNAL_SERVER_ERROR)
-                }
-            }
-        } else {
-            // No cached poster available - try to fetch and cache it
-            info!(
-                "Poster not cached for {}, attempting to fetch from TMDB",
-                media_id
-            );
-
-            // Try to get movie reference to find poster path
-            let movie_id = MovieID(media_id);
-                match state.db.backend().get_movie_reference(&movie_id).await {
-                    Ok(movie_ref) => {
-                        // Extract poster path from metadata
-                        if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) =
-                            &movie_ref.details
-                        {
-                            if let Some(poster_path) = &details.poster_path {
-                                // Cache the poster
-                                match state
-                                    .metadata_service
-                                    .cache_poster(poster_path, media_id)
-                                    .await
-                                {
-                                    Ok(cached_path) => {
-                                        // Read and serve the newly cached poster
-                                        match tokio::fs::read(&cached_path).await {
-                                            Ok(bytes) => {
-                                                let mut response = Response::new(bytes.into());
-                                                response.headers_mut().insert(
-                                                    header::CONTENT_TYPE,
-                                                    header::HeaderValue::from_static("image/png"),
-                                                );
-                                                return Ok(response);
-                                            }
-                                            Err(e) => {
-                                                warn!("Failed to read newly cached poster: {}", e);
-                                                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        warn!("Failed to cache poster for {}: {}", media_id, e);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        info!("Not a movie reference, trying series: {}", e);
-                        // Try as series
-                        let series_id = SeriesID(media_id);
-                            match state.db.backend().get_series_reference(&series_id).await {
-                                Ok(series_ref) => {
-                                    if let MediaDetailsOption::Details(TmdbDetails::Series(
-                                        details,
-                                    )) = &series_ref.details
-                                    {
-                                        if let Some(poster_path) = &details.poster_path {
-                                            // Cache the poster
-                                            match state
-                                                .metadata_service
-                                                .cache_poster(poster_path, media_id)
-                                                .await
-                                            {
-                                                Ok(cached_path) => {
-                                                    // Read and serve the newly cached poster
-                                                    match tokio::fs::read(&cached_path).await {
-                                                        Ok(bytes) => {
-                                                            let mut response =
-                                                                Response::new(bytes.into());
-                                                            response.headers_mut().insert(
-                                                                header::CONTENT_TYPE,
-                                                                header::HeaderValue::from_static(
-                                                                    "image/png",
-                                                                ),
-                                                            );
-                                                            return Ok(response);
-                                                        }
-                                                        Err(e) => {
-                                                            warn!("Failed to read newly cached poster: {}", e);
-                                                            return Err(
-                                                                StatusCode::INTERNAL_SERVER_ERROR,
-                                                            );
-                                                        }
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    warn!(
-                                                        "Failed to cache poster for {}: {}",
-                                                        media_id, e
-                                                    );
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!("Failed to get series reference for {}: {}", media_id, e);
-                                }
-                            }
-
-                    }
-                }
-
-            // If we get here, we couldn't fetch/cache the poster
-            Err(StatusCode::NOT_FOUND)
-        }
-    }
-}*/
-
 async fn season_poster_handler(
     State(state): State<AppState>,
     Path((show_name, season_num)): Path<(String, u32)>,
@@ -1682,32 +1089,29 @@ async fn delete_by_title_handler(
         if media.filename.to_lowercase().contains(&title_lower) {
             info!("Deleting media: {} (ID: {})", media.filename, media.id);
 
-            match state.db.backend().delete_media(&media.id.to_string()).await {
-                Err(e) => {
-                    errors.push(format!("Failed to delete {}: {}", media.filename, e));
-                }
-                _ => {
-                    deleted_count += 1;
+            match state.db.backend().delete_media(&media.id.to_string()).await { Err(e) => {
+                errors.push(format!("Failed to delete {}: {}", media.filename, e));
+            } _ => {
+                deleted_count += 1;
 
-                    // Clean up thumbnail
-                    let thumbnail_path = state
-                        .thumbnail_service
-                        .get_thumbnail_path(media.id.as_ref());
-                    if thumbnail_path.exists() {
-                        if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
-                            warn!("Failed to delete thumbnail: {}", e);
-                        }
-                    }
-
-                    // Clean up poster
-                    let poster_path = state.metadata_service.get_poster_path(media.id.as_ref());
-                    if poster_path.exists() {
-                        if let Err(e) = tokio::fs::remove_file(&poster_path).await {
-                            warn!("Failed to delete poster: {}", e);
-                        }
+                // Clean up thumbnail
+                let thumbnail_path = state
+                    .thumbnail_service
+                    .get_thumbnail_path(media.id.as_ref());
+                if thumbnail_path.exists() {
+                    if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
+                        warn!("Failed to delete thumbnail: {}", e);
                     }
                 }
-            }
+
+                // Clean up poster
+                let poster_path = state.metadata_service.get_poster_path(media.id.as_ref());
+                if poster_path.exists() {
+                    if let Err(e) = tokio::fs::remove_file(&poster_path).await {
+                        warn!("Failed to delete poster: {}", e);
+                    }
+                }
+            }}
         }
     }
 
@@ -1742,47 +1146,44 @@ async fn clear_database_handler(State(state): State<AppState>) -> Result<Json<Va
     for media in all_media {
         info!("Deleting media: {} (ID: {})", media.filename, media.id);
 
-        match state.db.backend().delete_media(&media.id.to_string()).await {
-            Err(e) => {
-                errors.push(format!("Failed to delete {}: {}", media.filename, e));
-            }
-            _ => {
-                deleted_count += 1;
+        match state.db.backend().delete_media(&media.id.to_string()).await { Err(e) => {
+            errors.push(format!("Failed to delete {}: {}", media.filename, e));
+        } _ => {
+            deleted_count += 1;
 
-                let media_id_str = media.id.to_string();
+            let media_id_str = media.id.to_string();
 
-                // Clean up thumbnail
-                let thumbnail_path = state.thumbnail_service.get_thumbnail_path(&media.id);
-                if thumbnail_path.exists() {
-                    if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
-                        warn!("Failed to delete thumbnail: {}", e);
-                    }
-                }
-
-                // Clean up poster (try both PNG and JPG)
-                let png_poster_path = state
-                    .config
-                    .cache_dir
-                    .join("posters")
-                    .join(format!("{}_poster.png", media_id_str));
-                if png_poster_path.exists() {
-                    if let Err(e) = tokio::fs::remove_file(&png_poster_path).await {
-                        warn!("Failed to delete PNG poster: {}", e);
-                    }
-                }
-
-                let jpg_poster_path = state
-                    .config
-                    .cache_dir
-                    .join("posters")
-                    .join(format!("{}_poster.jpg", media_id_str));
-                if jpg_poster_path.exists() {
-                    if let Err(e) = tokio::fs::remove_file(&jpg_poster_path).await {
-                        warn!("Failed to delete JPG poster: {}", e);
-                    }
+            // Clean up thumbnail
+            let thumbnail_path = state.thumbnail_service.get_thumbnail_path(&media.id);
+            if thumbnail_path.exists() {
+                if let Err(e) = tokio::fs::remove_file(&thumbnail_path).await {
+                    warn!("Failed to delete thumbnail: {}", e);
                 }
             }
-        }
+
+            // Clean up poster (try both PNG and JPG)
+            let png_poster_path = state
+                .config
+                .cache_dir
+                .join("posters")
+                .join(format!("{}_poster.png", media_id_str));
+            if png_poster_path.exists() {
+                if let Err(e) = tokio::fs::remove_file(&png_poster_path).await {
+                    warn!("Failed to delete PNG poster: {}", e);
+                }
+            }
+
+            let jpg_poster_path = state
+                .config
+                .cache_dir
+                .join("posters")
+                .join(format!("{}_poster.jpg", media_id_str));
+            if jpg_poster_path.exists() {
+                if let Err(e) = tokio::fs::remove_file(&jpg_poster_path).await {
+                    warn!("Failed to delete JPG poster: {}", e);
+                }
+            }
+        }}
     }
 
     // Clear the entire poster cache directory as a final cleanup

@@ -22,38 +22,34 @@ impl PlayerDomainState {
     pub fn view(&self) -> iced::Element<Message, Theme> {
         log::trace!(
             "PlayerState::view() called - position: {:.2}s, duration: {:.2}s, source_duration: {:?}, controls: {}",
-            self.position,
-            self.duration,
+            self.last_valid_position,
+            self.last_valid_duration,
             self.source_duration,
             self.controls
         );
 
-        // Check if external MPV is active
-        #[cfg(feature = "external-mpv-player")]
-        {
-            if self.external_mpv_active {
-                // Show a placeholder when external MPV is playing
-                return container(
-                    column![
-                        text("HDR Content Playing in External MPV").size(24),
-                        text(format!(
-                            "Position: {:.0}s / {:.0}s",
-                            self.position, self.duration
-                        ))
-                        .size(18),
-                        Space::with_height(Length::Fixed(20.0)),
-                        text("MPV is handling HDR playback externally").size(14),
-                        text("The window will restore when playback ends").size(14),
-                    ]
-                    .align_x(iced::Alignment::Center)
-                    .spacing(10),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill)
+        // If external player is active, show a dedicated placeholder view
+        if self.external_mpv_active {
+            return container(
+                column![
+                    text("Playing Externally").size(24),
+                    text(format!(
+                        "Position: {:.0}s / {:.0}s",
+                        self.last_valid_position, self.last_valid_duration
+                    ))
+                    .size(18),
+                    Space::with_height(Length::Fixed(20.0)),
+                    text("External player (MPV) is handling playback").size(14),
+                    text("The app will restore when playback ends").size(14),
+                ]
                 .align_x(iced::Alignment::Center)
-                .align_y(iced::Alignment::Center)
-                .into();
-            }
+                .spacing(10),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
+            .into();
         }
 
         if let Some(video) = &self.video_opt {

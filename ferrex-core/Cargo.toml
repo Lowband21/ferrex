@@ -80,6 +80,7 @@ ordered-float = "^5"
 
 # File watching
 notify = { version = "^7", optional = true }
+notify-debouncer-full = { version = "^0.4", package = "notify-debouncer-full", optional = true }
 
 # Image processing
 image = { workspace = true, optional = true }
@@ -91,11 +92,12 @@ ring.workspace = true
 zeroize.workspace = true
 base64.workspace = true
 password-hash = "^0.5"
+notify-debouncer-mini = "0.7.0"
 
 [features]
 default = ["ffmpeg", "database"]
 ffmpeg = ["dep:ffmpeg-next"]
-database = ["dep:sqlx", "dep:surrealdb", "dep:redis", "dep:image", "dep:notify"]
+database = ["dep:sqlx", "dep:surrealdb", "dep:redis", "dep:image", "dep:notify", "dep:notify-debouncer-full"]
 
 [dev-dependencies]
 tempfile.workspace = true

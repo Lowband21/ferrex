@@ -21,7 +21,6 @@ mod routing_tests {
         // Test that each domain message type converts to DomainMessage
         let _auth_msg: DomainMessage = auth::messages::Message::CheckAuthStatus.into();
         let _library_msg: DomainMessage = library::messages::Message::LoadLibraries.into();
-        let _media_msg: DomainMessage = media::messages::Message::Stop.into();
         let _player_msg: DomainMessage = player::messages::Message::NavigateBack.into();
         let _ui_msg: DomainMessage = ui::messages::Message::NavigateHome.into();
         let _metadata_msg: DomainMessage = metadata::messages::Message::InitializeService.into();

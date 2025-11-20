@@ -1,5 +1,5 @@
-use crate::{LibraryID, LibraryType, MediaID};
-use crate::{LibraryReference, types::media::*};
+use crate::{types::media::*, LibraryReference};
+use crate::{LibraryID, LibraryType, MediaID, ScanProgress};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -109,51 +109,6 @@ fn default_enabled() -> bool {
     true
 }
 
-// ===== Scan Types =====
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScanRequest {
-    pub path: Option<String>,
-    pub paths: Option<Vec<String>>,
-    pub library_id: Option<Uuid>,
-    pub library_type: Option<LibraryType>,
-    pub max_depth: Option<usize>,
-    pub follow_links: bool,
-    pub extract_metadata: bool,
-    pub force_rescan: bool,
-    pub use_streaming: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScanProgress {
-    pub scan_id: String,
-    pub status: ScanStatus,
-    pub path: String,
-    pub library_name: Option<String>,
-    pub library_id: Option<String>,
-    pub total_files: usize,
-    pub scanned_files: usize,
-    pub stored_files: usize,
-    pub metadata_fetched: usize,
-    pub skipped_samples: usize,
-    pub errors: Vec<String>,
-    pub current_file: Option<String>,
-    pub started_at: chrono::DateTime<chrono::Utc>,
-    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub estimated_time_remaining: Option<std::time::Duration>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ScanStatus {
-    Pending,
-    Scanning,
-    Processing,
-    Completed,
-    Failed,
-    Cancelled,
-}
-
 // ===== Media Event Types for SSE =====
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,17 +149,17 @@ pub enum MediaEvent {
 
     // Scan events
     ScanStarted {
-        scan_id: String,
+        scan_id: Uuid,
     },
     ScanProgress {
-        scan_id: String,
+        scan_id: Uuid,
         progress: ScanProgress,
     },
     ScanCompleted {
-        scan_id: String,
+        scan_id: Uuid,
     },
     ScanFailed {
-        scan_id: String,
+        scan_id: Uuid,
         error: String,
     },
 }

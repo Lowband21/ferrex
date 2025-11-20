@@ -14,7 +14,7 @@ use iced::Task;
 use std::sync::{Arc, RwLock as StdRwLock};
 use uuid::Uuid;
 
-use super::media::repository::accessor::{Accessor, ReadOnly};
+use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
 
 /// Streaming domain state
 pub struct StreamingDomainState {

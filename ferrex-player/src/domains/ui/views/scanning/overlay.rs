@@ -2,13 +2,13 @@ use crate::{
     common::{Icon, icon_text},
     domains::ui::theme,
 };
+use ferrex_core::{ScanProgress, ScanStatus};
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, text},
 };
 
 use crate::domains::ui::messages::Message;
-use crate::infrastructure::api_types::{ScanProgress, ScanStatus};
 
 #[cfg_attr(
     any(
@@ -31,11 +31,11 @@ pub fn create_scan_progress_overlay<'a>(
         log::info!(
             "Scan progress data available: status={:?}, files={}/{}",
             progress.status,
-            progress.scanned_files,
-            progress.total_files
+            progress.folders_scanned,
+            progress.folders_to_scan,
         );
-        let progress_percentage = if progress.total_files > 0 {
-            (progress.scanned_files as f32 / progress.total_files as f32) * 100.0
+        let progress_percentage = if progress.folders_to_scan > 0 {
+            (progress.folders_scanned as f32 / progress.folders_to_scan as f32) * 100.0
         } else {
             0.0
         };
@@ -53,7 +53,7 @@ pub fn create_scan_progress_overlay<'a>(
             "Calculating...".to_string()
         };
 
-        let current_file_text = if let Some(file) = &progress.current_file {
+        let current_file_text = if let Some(file) = &progress.current_media {
             let filename = std::path::Path::new(file)
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -66,25 +66,9 @@ pub fn create_scan_progress_overlay<'a>(
         let status_text = match progress.status {
             ScanStatus::Pending => "Preparing",
             ScanStatus::Scanning => "Scanning",
-            ScanStatus::Processing => "Processing",
             ScanStatus::Completed => "Completed",
             ScanStatus::Failed => "Failed",
             ScanStatus::Cancelled => "Cancelled",
-        };
-
-        // Calculate scan speed
-        let scan_speed = if progress.total_files > 0 && progress.scanned_files > 0 {
-            // Estimate based on scan time (this is a rough calculation)
-            // In a real implementation, you'd track actual scan start time
-            let estimated_scan_time =
-                progress.scanned_files as f32 / (progress.scanned_files as f32 / 60.0); // Rough estimate
-            if estimated_scan_time > 0.0 {
-                progress.scanned_files as f32 / estimated_scan_time
-            } else {
-                0.0
-            }
-        } else {
-            0.0
         };
 
         // Create overlay content
@@ -99,12 +83,12 @@ pub fn create_scan_progress_overlay<'a>(
                 ..Default::default()
             });
 
-        // Enhanced library info
-        let library_info = if let Some(library) = progress.path.split('/').last() {
-            format!("📁 {}", library)
-        } else {
-            format!("📁 {}", progress.path)
-        };
+        //// Enhanced library info
+        //let library_info = if let Some(library) = progress.path.split('/').last() {
+        //    format!("📁 {}", library)
+        //} else {
+        //    format!("📁 {}", progress.path)
+        //};
 
         let overlay_content = container(
             container(
@@ -122,9 +106,9 @@ pub fn create_scan_progress_overlay<'a>(
                                 .padding(5)
                         ]
                         .align_y(iced::Alignment::Center),
-                        text(library_info)
-                            .size(13)
-                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                        //text(library_info)
+                        //    .size(13)
+                        //    .color(theme::MediaServerTheme::TEXT_SECONDARY),
                     ]
                     .spacing(3),
                     Space::with_height(15),
@@ -161,7 +145,7 @@ pub fn create_scan_progress_overlay<'a>(
                                     .color(theme::MediaServerTheme::TEXT_DIMMED),
                                 text(format!(
                                     "{}/{}",
-                                    progress.scanned_files, progress.total_files
+                                    progress.folders_scanned, progress.folders_to_scan
                                 ))
                                 .size(13)
                                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
@@ -171,18 +155,9 @@ pub fn create_scan_progress_overlay<'a>(
                                 text("💾 Stored")
                                     .size(11)
                                     .color(theme::MediaServerTheme::TEXT_DIMMED),
-                                text(format!("{}", progress.stored_files))
+                                text(format!("Movies: {}, Series: {}, Seasons: {}, Episodes: {}", progress.movies_scanned, progress.series_scanned, progress.seasons_scanned, progress.episodes_scanned))
                                     .size(13)
                                     .color(iced::Color::from_rgb(0.0, 0.8, 0.0)),
-                            ],
-                            Space::with_width(25),
-                            column![
-                                text("🏷️ Metadata")
-                                    .size(11)
-                                    .color(theme::MediaServerTheme::TEXT_DIMMED),
-                                text(format!("{}", progress.metadata_fetched))
-                                    .size(13)
-                                    .color(iced::Color::from_rgb(0.0, 0.6, 1.0)),
                             ],
                             Space::with_width(25),
                             column![
@@ -197,37 +172,6 @@ pub fn create_scan_progress_overlay<'a>(
                         Space::with_height(8),
                         // Second row with additional stats
                         row![
-                            column![
-                                text("⚡ Speed")
-                                    .size(11)
-                                    .color(theme::MediaServerTheme::TEXT_DIMMED),
-                                text(if scan_speed > 0.0 {
-                                    format!("{:.1} files/min", scan_speed * 60.0)
-                                } else {
-                                    "Calculating...".to_string()
-                                })
-                                .size(13)
-                                .color(iced::Color::from_rgb(1.0, 0.6, 0.0)),
-                            ],
-                            Space::with_width(25),
-                            column![
-                                text("📊 Success Rate")
-                                    .size(11)
-                                    .color(theme::MediaServerTheme::TEXT_DIMMED),
-                                text(if progress.scanned_files > 0 {
-                                    format!(
-                                        "{:.1}%",
-                                        (progress.stored_files as f32
-                                            / progress.scanned_files as f32)
-                                            * 100.0
-                                    )
-                                } else {
-                                    "N/A".to_string()
-                                })
-                                .size(13)
-                                .color(iced::Color::from_rgb(0.0, 0.8, 0.0)),
-                            ],
-                            Space::with_width(25),
                             if !progress.errors.is_empty() {
                                 Element::from(column![
                                     text("❌ Errors")

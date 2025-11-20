@@ -86,15 +86,6 @@ pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResul
             // TODO: Update UI with sorted series
             DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
         }
-        Message::MediaEventReceived(event) => {
-            log::debug!("Media event received: {:?}", event);
-            // TODO: Process media event
-            DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
-        }
-        Message::MediaEventsError(error) => {
-            log::error!("Media events error: {}", error);
-            DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
-        }
         Message::ForceRescan => {
             log::info!("Force rescan requested");
             // TODO: Trigger forced rescan of media library

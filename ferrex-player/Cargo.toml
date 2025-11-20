@@ -131,7 +131,6 @@ yoke = "^0.8"
 [features]
 default = []
 testing = []
-external-mpv-player = []
 hot = ["iced/hot"]
 
 profile-with-puffin = [

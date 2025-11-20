@@ -314,7 +314,7 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn list_libraries(&self) -> Result<Vec<Library>>;
     async fn update_library(&self, id: &str, library: Library) -> Result<()>;
     async fn delete_library(&self, id: &str) -> Result<()>;
-    async fn update_library_last_scan(&self, id: &str) -> Result<()>;
+    async fn update_library_last_scan(&self, id: &LibraryID) -> Result<()>;
 
     // New reference type methods
     async fn store_movie_reference(&self, movie: &MovieReference) -> Result<()>;
@@ -355,6 +355,9 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn get_library_seasons(&self, library_id: &LibraryID) -> Result<Vec<SeasonReference>>;
     async fn get_library_episodes(&self, library_id: &LibraryID) -> Result<Vec<EpisodeReference>>;
     async fn get_movie_references_bulk(&self, ids: &[&MovieID]) -> Result<Vec<MovieReference>>;
+
+    /// Lookup a movie reference by its media file path
+    async fn get_movie_reference_by_path(&self, path: &str) -> Result<Option<MovieReference>>;
     async fn get_series_references_bulk(&self, ids: &[&SeriesID]) -> Result<Vec<SeriesReference>>;
     async fn get_season_references_bulk(&self, ids: &[&SeasonID]) -> Result<Vec<SeasonReference>>;
     async fn get_episode_references_bulk(

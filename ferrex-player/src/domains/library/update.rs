@@ -173,8 +173,8 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
 
         // Scanning - duplicate handler removed
         // Already handled above
-        Message::ScanStarted(result) => {
-            let task = super::update_handlers::scan_updates::handle_scan_started(state, result);
+        Message::ScanStarted(scan_id) => {
+            let task = super::update_handlers::scan_updates::handle_scan_started(state, scan_id);
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 

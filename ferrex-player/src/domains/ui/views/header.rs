@@ -163,7 +163,6 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                         };
                     element
                 },
-                // Profile placeholder
                 button(
                     container(icon_text(Icon::UserPen))
                         .center_x(Length::Fill)

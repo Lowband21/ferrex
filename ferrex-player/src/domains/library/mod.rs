@@ -11,11 +11,11 @@ pub mod update_handlers;
 use self::messages::Message as LibraryMessage;
 use self::types::LibraryFormData;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::domains::media::repository::accessor::{Accessor, ReadWrite};
+use crate::infrastructure::repository::accessor::{Accessor, ReadWrite};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
-use ferrex_core::api_types::{LibraryMediaCache, ScanProgress};
+use ferrex_core::api_types::LibraryMediaCache;
 use ferrex_core::types::library::Library;
-use ferrex_core::{ArchivedLibrary, LibraryID};
+use ferrex_core::{ArchivedLibrary, LibraryID, ScanProgress};
 use iced::Task;
 use rkyv::vec::ArchivedVec;
 use std::collections::HashMap;
@@ -31,7 +31,7 @@ pub struct LibraryDomainState {
     pub library_form_errors: Vec<String>,
     pub library_media_cache: HashMap<Uuid, LibraryMediaCache>,
     pub scanning: bool,
-    pub active_scan_id: Option<String>,
+    pub active_scan_id: Option<Uuid>,
     pub scan_progress: Option<ScanProgress>,
     pub show_scan_progress: bool,
     pub initial_library_fetch: bool,

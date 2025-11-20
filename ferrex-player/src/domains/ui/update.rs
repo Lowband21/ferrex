@@ -1111,7 +1111,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 library::messages::Message::HideLibraryForm,
             )))
         }
-        ui::Message::ScanLibrary_(library_id) => {
+        ui::Message::ScanLibrary(library_id) => {
             // Send direct message to library domain
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 library::messages::Message::ScanLibrary(library_id),

@@ -11,7 +11,6 @@ pub mod update;
 pub mod video;
 pub mod view;
 
-#[cfg(feature = "external-mpv-player")]
 pub mod external_mpv;
 
 use self::messages::Message;
@@ -60,13 +59,9 @@ impl PlayerDomain {
     /// Update function - delegates to player update logic
     /// Note: This method is not currently used as update_player is called directly from main update.rs
     /// If this method is needed, window_size should be passed as a parameter
-    pub fn update(&mut self, message: Message) -> Task<DomainMessage> {
-        // Using a default window size - this should be updated if this method is used
-        let default_window_size = iced::Size::new(1280.0, 720.0);
-        let result = update::update_player(&mut self.state, message, default_window_size);
-        // Return the task from the DomainUpdateResult
-        // Events are handled by the mediator at a higher level
-        result.task
+    pub fn update(&mut self, _message: Message) -> Task<DomainMessage> {
+        // Not used in current routing; player updates are handled at root with access to full State
+        Task::none()
     }
 
     /// Handle cross-domain events

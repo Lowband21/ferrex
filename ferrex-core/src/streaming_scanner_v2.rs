@@ -39,6 +39,8 @@ pub struct StreamingScannerConfig {
     pub max_error_retries: i32,
     /// Maximum number of folders to process in a single batch
     pub folder_batch_limit: usize,
+    /// If true, always refresh metadata/images even if already present
+    pub force_refresh: bool,
 }
 
 impl Default for StreamingScannerConfig {
@@ -51,6 +53,7 @@ impl Default for StreamingScannerConfig {
             cache_dir: None,
             max_error_retries: 3,   // 3 retry attempts
             folder_batch_limit: 50, // Process up to 50 folders per batch
+            force_refresh: false,
         }
     }
 }
@@ -303,7 +306,7 @@ impl StreamingScannerV2 {
         match self
             .db
             .backend()
-            .update_library_last_scan(&library.id.to_string())
+            .update_library_last_scan(&library.id)
             .await
         {
             Err(e) => {
@@ -485,7 +488,7 @@ impl StreamingScannerV2 {
         match self
             .db
             .backend()
-            .update_library_last_scan(&library.id.to_string())
+            .update_library_last_scan(&library.id)
             .await
         {
             Err(e) => {
@@ -526,7 +529,7 @@ impl StreamingScannerV2 {
         // Download images immediately for better quality control
         let theme_color = if category == "poster" && index == 0 {
             info!(
-                "Downloading poster for theme color extraction: {} {} {}",
+                "Downloading poster (w500) for theme color extraction: {} {} {}",
                 media_type, media_id, tmdb_path
             );
             // Download the poster variant to extract theme color

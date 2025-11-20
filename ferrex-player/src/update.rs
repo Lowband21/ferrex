@@ -106,9 +106,8 @@ pub fn update(state: &mut State, message: DomainMessage) -> Task<DomainMessage> 
 
         // Route player messages to the player domain handler
         DomainMessage::Player(player_msg) => update_player(
-            &mut state.domains.player.state,
+            state,
             player_msg,
-            state.window_size,
         ),
 
         // Route metadata messages to the metadata domain handler

@@ -17,25 +17,6 @@ pub mod constants;
 ))]
 pub mod profiling;
 
-#[cfg(any(
-    feature = "profile-with-puffin",
-    feature = "profile-with-tracy",
-    feature = "profile-with-tracing",
-    feature = "profiling-stats"
-))]
-pub mod profiling_iced_adapter;
-
-#[cfg(any(
-    feature = "profile-with-puffin",
-    feature = "profile-with-tracy",
-    feature = "profile-with-tracing",
-    feature = "profiling-stats"
-))]
-pub mod async_profiling;
-
-#[cfg(feature = "profile-with-tracy")]
-pub mod gpu_profiling;
-
 pub mod profiling_scopes;
 pub mod repository;
 pub mod service_registry;

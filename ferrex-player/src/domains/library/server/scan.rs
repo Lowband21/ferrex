@@ -1,87 +1,74 @@
-use crate::infrastructure::api_types::ScanProgress;
-use ferrex_core::LibraryID;
+use std::sync::Arc;
 
-pub async fn start_media_scan(
-    server_url: String,
+use anyhow::anyhow;
+use ferrex_core::{LibraryID, ScanProgress, ScanStatus};
+use uuid::Uuid;
+
+use crate::{infrastructure::{adapters::ApiClientAdapter, services::api::ApiService}, state_refactored::State};
+
+pub async fn start_scan_all_libraries(
+    client: Arc<ApiClientAdapter>,
     force_rescan: bool,
-    use_streaming: bool,
-) -> Result<String, anyhow::Error> {
-    log::info!(
-        "Starting scan for all libraries (force_rescan: {}, use_streaming: {})",
-        force_rescan,
-        use_streaming
-    );
-
-    // Use the new /scan/all endpoint that scans all enabled libraries
-    let client = reqwest::Client::new();
-    let mut url = format!("{}/scan/all", server_url);
-
-    // Add query parameters
-    let mut params = vec![];
-    if force_rescan {
-        params.push("force=true");
-    }
-    if !params.is_empty() {
-        url.push('?');
-        url.push_str(&params.join("&"));
-    }
-
-    let response = client.post(&url).send().await?;
-
-    if !response.status().is_success() {
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(anyhow::anyhow!("Server returned error: {}", error_text));
-    }
-
-    let json: serde_json::Value = response.json().await?;
-
-    // The /scan/all endpoint returns multiple scan IDs, so we'll return a summary
-    if json.get("status").and_then(|s| s.as_str()) == Some("success") {
-        if let Some(scans) = json.get("scans").and_then(|s| s.as_array()) {
-            if !scans.is_empty() {
-                // Return the first scan ID for tracking purposes
-                if let Some(first_scan) = scans.first() {
-                    if let Some(scan_id) = first_scan.get("scan_id").and_then(|id| id.as_str()) {
-                        log::info!(
-                            "Started {} scan(s), tracking scan ID: {}",
-                            scans.len(),
-                            scan_id
-                        );
-                        return Ok(scan_id.to_string());
-                    }
+) -> Result<Uuid, anyhow::Error> {
+    match client.scan_all_libraries(false).await {
+        Ok(scan_response) => {
+            match (scan_response.status, scan_response.scan_id) {
+                (ScanStatus::Scanning, Some(scan_id)) => {
+                    Ok(scan_id)
                 }
+                (ScanStatus::Pending, Some(scan_id)) => {
+                    Ok(scan_id)
+                }
+                (ScanStatus::Completed, _) => {
+                    Err(anyhow!("Scan already completed"))
+                }
+                (ScanStatus::Failed, _) => {
+                    Err(anyhow!("Scan failed"))
+                }
+                (ScanStatus::Cancelled, _) => {
+                    Err(anyhow!("Scan cancelled"))
+                }
+                (_, _) => Err(anyhow!("Scan ID not found for Scanning or Pending scan status"))
             }
         }
+        Err(e) => Err(anyhow!(e.to_string())),
     }
 
-    if let Some(error) = json.get("error").and_then(|e| e.as_str()) {
-        Err(anyhow::anyhow!("Scan error: {}", error))
-    } else if let Some(message) = json.get("message").and_then(|m| m.as_str()) {
-        log::info!("Scan response: {}", message);
-        // Return a placeholder scan ID since we're scanning multiple libraries
-        Ok("all-libraries-scan".to_string())
-    } else {
-        Err(anyhow::anyhow!("Invalid response from server"))
-    }
 }
 
 // Library-specific scan function
-pub async fn start_library_scan(
-    server_url: String,
+pub async fn start_scan_library(
+    client: Arc<ApiClientAdapter>,
     library_id: LibraryID,
-    streaming: bool,
-) -> Result<String, anyhow::Error> {
+    force_rescan: bool,
+) -> Result<Uuid, anyhow::Error> {
     log::info!(
-        "Starting library scan (library_id: {}, streaming: {})",
+        "Starting library scan library_id: {}",
         library_id,
-        streaming
     );
-
-    //crate::domains::media::library::scan_library(server_url, library_id, streaming).await
-    Err(anyhow::anyhow!("Not implemented"))
+    match client.scan_library(library_id, false).await {
+        Ok(scan_response) => {
+            match (scan_response.status, scan_response.scan_id) {
+                (ScanStatus::Scanning, Some(scan_id)) => {
+                    Ok(scan_id)
+                }
+                (ScanStatus::Pending, Some(scan_id)) => {
+                    Ok(scan_id)
+                }
+                (ScanStatus::Completed, _) => {
+                    Err(anyhow!("Scan already completed"))
+                }
+                (ScanStatus::Failed, _) => {
+                    Err(anyhow!("Scan failed"))
+                }
+                (ScanStatus::Cancelled, _) => {
+                    Err(anyhow!("Scan cancelled"))
+                }
+                (_, _) => Err(anyhow!("Scan ID not found for Scanning or Pending scan status"))
+            }
+        }
+        Err(e) => Err(anyhow!(e.to_string())),
+    }
 }
 
 pub async fn check_active_scans(server_url: String) -> Vec<ScanProgress> {

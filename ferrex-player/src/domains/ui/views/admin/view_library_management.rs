@@ -6,10 +6,12 @@ use crate::{
     domains::{
         auth::permissions::{self, StatePermissionExt},
         library::messages as library,
-        media::repository::accessor::{Accessor, ReadOnly, ReadWrite},
         ui::{messages::Message, theme, views::admin::view_library_form},
     },
-    infrastructure::api_types::LibraryType,
+    infrastructure::{
+        api_types::LibraryType,
+        repository::accessor::{Accessor, ReadOnly, ReadWrite},
+    },
     state_refactored::State,
 };
 use ferrex_core::{
@@ -75,20 +77,7 @@ pub fn view_library_management(state: &State) -> Element<Message> {
 
     // If form is open, show the form instead
     if let Some(form_data) = &state.domains.library.state.library_form_data {
-        return view_library_form(state, form_data).map(|msg| match msg {
-            library::Message::HideLibraryForm => Message::HideLibraryForm,
-            library::Message::UpdateLibraryFormName(name) => Message::UpdateLibraryFormName(name),
-            library::Message::UpdateLibraryFormType(t) => Message::UpdateLibraryFormType(t),
-            library::Message::UpdateLibraryFormPaths(paths) => {
-                Message::UpdateLibraryFormPaths(paths)
-            }
-            library::Message::UpdateLibraryFormScanInterval(interval) => {
-                Message::UpdateLibraryFormScanInterval(interval)
-            }
-            library::Message::ToggleLibraryFormEnabled => Message::ToggleLibraryFormEnabled,
-            library::Message::SubmitLibraryForm => Message::SubmitLibraryForm,
-            _ => Message::NoOp, // Other library messages not used in form
-        });
+        return view_library_form(state, form_data);
     }
 
     let mut content = column![].spacing(20).padding(20);
@@ -153,22 +142,6 @@ pub fn view_library_management(state: &State) -> Element<Message> {
             .center_y(Length::Fill),
         );
     } else {
-        /*
-        let libraries_list = scrollable(
-            column(
-                state
-                    .domains
-                    .library
-                    .state
-                    .repo_accessor
-                    .get_archived_libraries()
-                    .unwrap()
-                    .iter()
-                    .map(|library| create_library_card(library, &permissions))
-                    .collect::<Vec<_>>(),
-            )
-            .spacing(15),
-        ); */
         let libraries_list = scrollable(
             column(
                 state
@@ -232,7 +205,7 @@ fn create_library_card<'a>(
         if permissions.can_scan_libraries() && library.enabled {
             action_buttons = action_buttons.push(
                 button("Scan")
-                    .on_press(Message::ScanLibrary_(LibraryID(library.id.as_uuid())))
+                    .on_press(Message::ScanLibrary(LibraryID(library.id.as_uuid())))
                     .style(theme::Button::Secondary.style()),
             );
         }

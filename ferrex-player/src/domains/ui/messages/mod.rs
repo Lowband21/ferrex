@@ -128,9 +128,9 @@ pub enum Message {
     AggregateAllLibraries, // Signal to aggregate all libraries
 
     // Library management proxies
-    ShowLibraryForm(Option<ferrex_core::types::library::Library>), // Proxy for Library::ShowLibraryForm
+    ShowLibraryForm(Option<ferrex_core::types::library::Library>),// Proxy for Library::ShowLibraryForm
     HideLibraryForm,                       // Proxy for Library::HideLibraryForm
-    ScanLibrary_(LibraryID),               // Proxy for Library::ScanLibrary_
+    ScanLibrary(LibraryID),               // Proxy for Library::ScanLibrary_
     DeleteLibrary(LibraryID),              // Proxy for Library::DeleteLibrary
     UpdateLibraryFormName(String),         // Proxy for Library::UpdateLibraryFormName
     UpdateLibraryFormType(String),         // Proxy for Library::UpdateLibraryFormType
@@ -266,7 +266,7 @@ impl Message {
             // Library management proxies
             Self::ShowLibraryForm(_) => "UI::ShowLibraryForm",
             Self::HideLibraryForm => "UI::HideLibraryForm",
-            Self::ScanLibrary_(_) => "UI::ScanLibrary_",
+            Self::ScanLibrary(_) => "UI::ScanLibrary_",
             Self::DeleteLibrary(_) => "UI::DeleteLibrary",
             Self::UpdateLibraryFormName(_) => "UI::UpdateLibraryFormName",
             Self::UpdateLibraryFormType(_) => "UI::UpdateLibraryFormType",
@@ -318,7 +318,7 @@ impl std::fmt::Debug for Message {
                 }
             }
             Self::HideLibraryForm => write!(f, "UI::HideLibraryForm"),
-            Self::ScanLibrary_(id) => write!(f, "UI::ScanLibrary_({})", id),
+            Self::ScanLibrary(id) => write!(f, "UI::ScanLibrary_({})", id),
             Self::DeleteLibrary(id) => write!(f, "UI::DeleteLibrary({})", id),
             Self::UpdateLibraryFormName(name) => write!(f, "UI::UpdateLibraryFormName({})", name),
             Self::ShowClearDatabaseConfirm => write!(f, "UI::ShowClearDatabaseConfirm"),

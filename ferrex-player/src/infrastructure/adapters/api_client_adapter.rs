@@ -10,17 +10,17 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::infrastructure::ApiClient;
 use crate::infrastructure::api_client::SetupStatus;
 use crate::infrastructure::constants::routes;
 use crate::infrastructure::constants::routes::utils::replace_param;
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::api::ApiService;
-use ferrex_core::Media;
+use crate::infrastructure::ApiClient;
 use ferrex_core::auth::device::AuthenticatedDevice;
 use ferrex_core::types::library::Library;
 use ferrex_core::user::{AuthToken, User};
 use ferrex_core::watch_status::{UpdateProgressRequest, UserWatchState};
+use ferrex_core::{LibraryID, Media, ScanRequest, ScanResponse};
 
 /// Adapter that implements ApiService using the existing ApiClient
 #[derive(Debug, Clone)]
@@ -126,25 +126,26 @@ impl ApiService for ApiClientAdapter {
         Ok(response.media)
     }
 
-    async fn scan_library(&self, library_id: Uuid) -> RepositoryResult<()> {
-        #[derive(Serialize)]
-        struct ScanRequest {
-            library_id: Uuid,
-        }
-
-        #[derive(Deserialize)]
-        struct ScanResponse {
-            message: String,
-        }
-
-        let _response: ScanResponse = self
-            .post(
-                &format!("/libraries/{}/scan", library_id),
-                &ScanRequest { library_id },
+    async fn scan_all_libraries(&self, force_refresh: bool) -> RepositoryResult<ScanResponse> {
+        let response: ScanResponse = self
+            .put(
+                &"/libraries/scan",
+                &force_refresh,
             )
             .await?;
 
-        Ok(())
+        Ok(response)
+    }
+
+    async fn scan_library(&self, library_id: LibraryID, force_refresh: bool) -> RepositoryResult<ScanResponse> {
+        let response: ScanResponse = self
+            .post(
+                &"/library/scan",
+                &ScanRequest { library_id, force_refresh },
+            )
+            .await?;
+
+        Ok(response)
     }
 
     async fn health_check(&self) -> RepositoryResult<bool> {

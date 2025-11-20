@@ -21,8 +21,8 @@ pub fn close_video(state: &mut State) {
         video.set_paused(true);
         drop(video);
     }
-    state.domains.player.state.position = 0.0;
-    state.domains.player.state.duration = 0.0;
+    state.domains.player.state.last_valid_position = 0.0;
+    state.domains.player.state.last_valid_duration = 0.0;
     state.domains.player.state.dragging = false;
     state.domains.player.state.last_seek_position = None;
     state.domains.player.state.seeking = false;
@@ -37,7 +37,7 @@ pub fn close_video(state: &mut State) {
     profiling::function
 )]
 #[cfg(feature = "external-mpv-player")]
-pub fn load_external_video(state: &mut State) -> Task<crate::domains::media::messages::Message> {
+pub fn load_external_video(state: &mut State) -> Task<crate::domains::player::messages::Message> {
     use super::external_mpv;
     use iced::window;
 
@@ -114,7 +114,7 @@ pub fn load_external_video(state: &mut State) -> Task<crate::domains::media::mes
     }
 }
 
-pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Message> {
+pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::Message> {
     // Check if video is already loaded or loading
     if state.domains.player.state.video_opt.is_some() {
         log::warn!("Video already loaded, skipping duplicate load");
@@ -157,7 +157,7 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Me
         if let Some(current_media) = &state.domains.player.state.current_media {
             if let Some(metadata) = &current_media.media_file_metadata {
                 if let Some(duration) = metadata.duration {
-                    state.domains.player.state.duration = duration;
+                    state.domains.player.state.last_valid_duration = duration;
                 }
             }
             // Always log metadata for debugging
@@ -246,7 +246,8 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Me
             // Update duration if available
             let duration = video.duration().as_secs_f64();
             if duration > 0.0 {
-                state.domains.player.state.duration = duration;
+                state.domains.player.state.last_valid_duration = duration;
+                state.domains.player.state.last_valid_duration = duration;
             }
 
             // Resume position if any
@@ -263,7 +264,7 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Me
             state.domains.player.state.is_loading_video = false;
             state.domains.ui.state.view = ViewState::Player;
 
-            Task::done(crate::domains::media::messages::Message::VideoLoaded(true))
+            Task::done(crate::domains::player::messages::Message::VideoLoaded(true))
         }
         Err(e) => {
             log::error!("Failed to create video: {}", e);
@@ -271,7 +272,7 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Me
                 message: format!("{}", e),
             };
             state.domains.player.state.is_loading_video = false;
-            Task::done(crate::domains::media::messages::Message::VideoLoaded(false))
+            Task::done(crate::domains::player::messages::Message::VideoLoaded(false))
         }
     }
 }

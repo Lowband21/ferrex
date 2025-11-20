@@ -1,6 +1,9 @@
-use crate::domains::library::LibraryDomainState;
+use std::time::Duration;
+
 use crate::domains::library::messages::Message;
-use crate::domains::library::server::{start_library_scan, start_media_scan};
+use crate::domains::library::server::scan::{start_scan_all_libraries, start_scan_library};
+use crate::domains::library::LibraryDomainState;
+use crate::infrastructure::services::api::ApiService;
 use crate::state_refactored::State;
 use ferrex_core::{LibraryID, ScanProgress, ScanStatus};
 use iced::Task;
@@ -14,86 +17,71 @@ pub fn handle_scan_library(
     log::info!("Starting scan for library: {}", library_id);
     state.domains.library.state.scanning = true;
     state.domains.library.state.scan_progress = None;
+    let api_service = state.api_service.clone();
     Task::perform(
-        start_library_scan(server_url, library_id, true), // Enable streaming
-        |result| match result {
-            Ok(scan_id) => Message::ScanStarted(Ok(scan_id)),
-            Err(e) => Message::ScanStarted(Err(e.to_string())),
-        },
+        start_scan_library(api_service, library_id, false),
+        | result | match result {
+            Ok(scan_id) => Message::ScanStarted(scan_id),
+            Err(e) => Message::NoOp,//Message::ScanErrored(e.to_string()), // TODO: This is failing silently, we need to handle the error properly with a new message that indicates the failure
+        }
     )
 }
 
 pub fn handle_scan_all_libraries(state: &mut State) -> Task<Message> {
     state.domains.library.state.scanning = true;
     state.domains.library.state.scan_progress = None;
+    let api_service = state.api_service.clone();
 
     Task::perform(
-        start_media_scan(state.server_url.clone(), false, true),
-        |result| match result {
-            Ok(scan_id) => Message::ScanStarted(Ok(scan_id)),
-            Err(e) => Message::ScanStarted(Err(e.to_string())),
-        },
+        start_scan_all_libraries(api_service, false),
+        | result | match result {
+            Ok(scan_id) => Message::ScanStarted(scan_id),
+            Err(e) => Message::NoOp,//Message::ScanErrored(e.to_string()), // TODO: This is failing silently, we need to handle the error properly with a new message that indicates the failure
+        }
     )
 }
 
 pub fn handle_force_rescan(state: &mut State) -> Task<Message> {
     state.domains.library.state.scanning = true;
     state.domains.library.state.scan_progress = None;
+    let api_service = state.api_service.clone();
 
     Task::perform(
-        start_media_scan(state.server_url.clone(), true, true),
+        start_scan_all_libraries(api_service, false),
         |result| match result {
-            Ok(scan_id) => Message::ScanStarted(Ok(scan_id)),
-            Err(e) => Message::ScanStarted(Err(e.to_string())),
+            Ok(scan_id) => Message::ScanStarted(scan_id),
+            Err(e) => Message::NoOp,//Message::ScanErrored(e.to_string()), // TODO: This is failing silently, we need to handle the error properly with a new message that indicates the failure
         },
     )
 }
 
-pub fn handle_scan_started(state: &mut State, result: Result<String, String>) -> Task<Message> {
-    match result {
-        Ok(scan_id) => {
+pub fn handle_scan_started(state: &mut State, scan_id: Uuid) -> Task<Message> {
             log::info!("Scan started with ID: {}", scan_id);
             state.domains.library.state.active_scan_id = Some(scan_id);
             state.domains.library.state.show_scan_progress = true; // Auto-show progress overlay
 
-            // NEW: Enter batch mode in MediaStore to prevent sorting during scan
-            /*if let Ok(mut store) = state.domains.media.state.media_store.write() {
-                log::info!("Entering batch mode in MediaStore for scan");
-                store.begin_batch();
-            }*/
-
             Task::none()
-        }
-        Err(e) => {
-            log::error!("Failed to start scan: {}", e);
-            state.domains.library.state.scanning = false;
-            // Error handling moved to higher level
-            Task::none()
-        }
-    }
 }
 
 pub fn handle_scan_progress_update(state: &mut State, progress: ScanProgress) -> Task<Message> {
     log::info!(
-        "Received scan progress update: {} files scanned, {} stored, {} metadata fetched",
-        progress.scanned_files,
-        progress.stored_files,
-        progress.metadata_fetched
+        "Received scan progress update:\n\
+        folders scanned: {}/{}\n\
+        movies scanned: {}, series scanned: {}, seasons scanned: {}, episodes scanned: {}\n\
+        Estimated time remaining: {} seconds",
+        progress.folders_scanned,
+        progress.folders_to_scan,
+        progress.movies_scanned,
+        progress.series_scanned,
+        progress.seasons_scanned,
+        progress.episodes_scanned,
+        progress.estimated_time_remaining.unwrap_or(Duration::ZERO).as_secs()
     );
     log::info!(
         "Scan progress state - show_scan_progress: {}, active_scan_id: {:?}",
         state.domains.library.state.show_scan_progress,
         state.domains.library.state.active_scan_id
     );
-
-    let previous_stored = state
-        .domains
-        .library
-        .state
-        .scan_progress
-        .as_ref()
-        .map(|p| p.stored_files)
-        .unwrap_or(0);
 
     state.domains.library.state.scan_progress = Some(progress.clone());
     log::info!(
@@ -106,17 +94,6 @@ pub fn handle_scan_progress_update(state: &mut State, progress: ScanProgress) ->
         || progress.status == ScanStatus::Cancelled
     {
         state.domains.library.state.scanning = false;
-
-        /*
-        // NEW: Exit batch mode in MediaStore when scan completes
-        if let Ok(mut store) = state.domains.library.state.repo_access.write() {
-            log::info!(
-                "Exiting batch mode in MediaStore - scan complete with status: {:?}",
-                progress.status
-            );
-            store.end_batch();
-        } */
-        // Don't clear active_scan_id yet - keep it until we clear scan_progress
 
         if progress.status == ScanStatus::Completed {
             // Refresh library after successful scan
@@ -147,14 +124,8 @@ pub fn handle_scan_progress_update(state: &mut State, progress: ScanProgress) ->
             Task::none()
         }
     } else {
-        // If new files were stored, trigger an incremental update
-        if progress.stored_files > previous_stored {
-            // No longer triggering incremental updates - using SSE events instead
-            Task::none()
-        } else {
             Task::none()
         }
-    }
 }
 
 pub fn handle_clear_scan_progress(state: &mut State) -> Task<Message> {
@@ -178,7 +149,7 @@ pub fn handle_toggle_scan_progress(state: &mut State) -> Task<Message> {
 pub fn handle_active_scans_checked(state: &mut State, scans: Vec<ScanProgress>) -> Task<Message> {
     if let Some(active_scan) = scans
         .into_iter()
-        .find(|s| s.status == ScanStatus::Scanning || s.status == ScanStatus::Processing)
+        .find(|s| s.status == ScanStatus::Scanning || s.status == ScanStatus::Pending)
     {
         log::info!("Found active scan {}, reconnecting...", active_scan.scan_id);
         state.domains.library.state.active_scan_id = Some(active_scan.scan_id.clone());

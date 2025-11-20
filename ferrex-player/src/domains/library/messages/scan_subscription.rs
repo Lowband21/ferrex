@@ -2,17 +2,18 @@ use super::Message;
 use ferrex_core::ScanProgress;
 use iced::Subscription;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 /// Creates a subscription to monitor library scan progress via Server-Sent Events (SSE)
-pub fn scan_progress(server_url: String, scan_id: String) -> Subscription<Message> {
+pub fn scan_progress(server_url: String, scan_id: Uuid) -> Subscription<Message> {
     #[derive(Debug, Clone, Hash)]
-    struct ScanProgressId(String, String);
+    struct ScanProgressId(String, Uuid);
 
     Subscription::run_with(
-        ScanProgressId(server_url.clone(), scan_id.clone()),
+        ScanProgressId(server_url.clone(), scan_id),
         |ScanProgressId(server_url, scan_id)| {
             futures::stream::unfold(
-                ScanState::new(server_url.to_string(), scan_id.to_string()),
+                ScanState::new(server_url.to_string(), *scan_id),
                 |mut state| async move {
                     match state.next_event().await {
                         Some(message) => Some((message, state)),
@@ -39,7 +40,7 @@ enum ScanEvent {
 /// State machine for SSE scan progress subscription
 struct ScanState {
     server_url: String,
-    scan_id: String,
+    scan_id: Uuid,
     event_receiver: Option<mpsc::UnboundedReceiver<ScanEvent>>,
     task_handle: Option<tokio::task::JoinHandle<()>>,
     retry_count: u32,
@@ -47,7 +48,7 @@ struct ScanState {
 }
 
 impl ScanState {
-    fn new(server_url: String, scan_id: String) -> Self {
+    fn new(server_url: String, scan_id: Uuid) -> Self {
         Self {
             server_url,
             scan_id,
@@ -165,14 +166,14 @@ impl ScanState {
                 Ok(progress) => {
                     log::info!(
                         "Scan progress: {}/{} files, status: {:?}",
-                        progress.scanned_files,
-                        progress.total_files,
+                        progress.folders_scanned,
+                        progress.folders_to_scan,
                         progress.status
                     );
 
                     // Check if scan is complete
                     if matches!(progress.status, ferrex_core::ScanStatus::Completed) {
-                        Some(Message::ScanCompleted(Ok(self.scan_id.clone())))
+                        Some(Message::ScanCompleted(Ok(self.scan_id)))
                     } else if matches!(progress.status, ferrex_core::ScanStatus::Failed) {
                         Some(Message::ScanCompleted(Err(progress
                             .errors
@@ -229,10 +230,10 @@ impl ScanState {
         match self.fetch_scan_progress().await {
             Ok(progress) => {
                 log::info!(
-                    "Initial scan status: {:?}, files: {}/{}",
+                    "Initial scan status: {:?}, folders scanned: {}/{}",
                     progress.status,
-                    progress.scanned_files,
-                    progress.total_files
+                    progress.folders_scanned,
+                    progress.folders_to_scan
                 );
                 Some(Message::ScanProgressUpdate(progress))
             }
@@ -249,7 +250,7 @@ impl ScanState {
             Ok(progress) => {
                 // Check if scan is complete
                 if matches!(progress.status, ferrex_core::ScanStatus::Completed) {
-                    Some(Message::ScanCompleted(Ok(self.scan_id.clone())))
+                    Some(Message::ScanCompleted(Ok(self.scan_id)))
                 } else if matches!(progress.status, ferrex_core::ScanStatus::Failed) {
                     Some(Message::ScanCompleted(Err(progress
                         .errors

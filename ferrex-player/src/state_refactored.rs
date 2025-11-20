@@ -8,7 +8,7 @@ use crate::domains::auth::AuthDomainState;
 use crate::domains::auth::AuthManager;
 use crate::domains::library::LibraryDomainState;
 use crate::domains::media::MediaDomainState;
-use crate::domains::media::repository::{
+use crate::infrastructure::repository::{
     accessor::{Accessor, ReadOnly, ReadWrite},
     repository::MediaRepo,
 };

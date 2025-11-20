@@ -1,6 +1,6 @@
 //! Tab state definitions for independent tab management
 
-use crate::domains::media::repository::accessor::{Accessor, ReadOnly};
+use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
 use crate::domains::ui::view_models::AllViewModel;
 use crate::domains::ui::views::grid::VirtualGridState;
 use crate::infrastructure::api_types::{LibraryType, Media};

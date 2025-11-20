@@ -3,20 +3,30 @@ use crate::{
     database::traits::{FileWatchEvent, FileWatchEventType},
 };
 use chrono::Utc;
-use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, Event, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode, Watcher};
+use notify_debouncer_full::{new_debouncer, DebounceEventResult, DebouncedEvent, Debouncer, NoCache};
 use std::collections::HashMap;
-use std::path::Path;
+use std::fs;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
-use tracing::{debug, error, info};
+use std::time::Duration;
+use tokio::sync::{mpsc, RwLock};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 /// Watches filesystem changes for libraries
 pub struct FileWatcher {
     db: Arc<MediaDatabase>,
-    watchers: Arc<RwLock<HashMap<LibraryID, RecommendedWatcher>>>,
+    watchers: Arc<RwLock<HashMap<LibraryID, LibraryWatcher>>>,
     event_tx: mpsc::UnboundedSender<FileWatchEvent>,
     event_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<FileWatchEvent>>>,
+}
+
+/// Internal watcher variants per library
+enum LibraryWatcher {
+    Debounced(Debouncer<RecommendedWatcher, NoCache>),
+    Poll(PollWatcher),
 }
 
 impl FileWatcher {
@@ -40,56 +50,125 @@ impl FileWatcher {
             let library_id = library.id;
             let db = self.db.clone();
 
-            // Create a watcher for this library
-            let mut watcher = RecommendedWatcher::new(
-                move |res: std::result::Result<Event, notify::Error>| {
-                    match res {
-                        Ok(event) => {
-                            if let Some(watch_event) = Self::convert_notify_event(event, library_id)
-                            {
-                                debug!("File watch event: {:?}", watch_event);
+            // Determine if any path is on a network filesystem
+            let use_poll = library
+                .paths
+                .iter()
+                .any(|p| is_network_filesystem(p));
 
-                                // Send to channel for processing
-                                if let Err(e) = event_tx.send(watch_event.clone()) {
-                                    error!("Failed to send file watch event: {}", e);
-                                } else {
-                                    // Also persist to database
-                                    let db_clone = db.clone();
-                                    tokio::spawn(async move {
-                                        if let Err(e) = db_clone
-                                            .backend()
-                                            .create_file_watch_event(&watch_event)
-                                            .await
-                                        {
-                                            error!("Failed to persist file watch event: {}", e);
+            if use_poll {
+                warn!("Using polling watcher for library {} due to network filesystem", library.name);
+
+                let mut watcher = PollWatcher::new(
+                    {
+                        let event_tx = event_tx.clone();
+                        let db = db.clone();
+                        move |res: std::result::Result<Event, notify::Error>| {
+                            match res {
+                                Ok(event) => {
+                                    if let Some(watch_event) = Self::convert_notify_event(event, library_id)
+                                    {
+                                        debug!("[poll] File watch event: {:?}", watch_event);
+
+                                        if let Err(e) = event_tx.send(watch_event.clone()) {
+                                            error!("Failed to send file watch event: {}", e);
+                                        } else {
+                                            let db_clone = db.clone();
+                                            tokio::spawn(async move {
+                                                if let Err(e) = db_clone
+                                                    .backend()
+                                                    .create_file_watch_event(&watch_event)
+                                                    .await
+                                                {
+                                                    error!("Failed to persist file watch event: {}", e);
+                                                }
+                                            });
                                         }
-                                    });
+                                    }
                                 }
+                                Err(e) => error!("Poll watch error: {:?}", e),
                             }
                         }
-                        Err(e) => error!("Watch error: {:?}", e),
-                    }
-                },
-                Config::default(),
-            )
-            .map_err(|e| crate::MediaError::Internal(format!("Failed to create watcher: {}", e)))?;
+                    },
+                    Config::default().with_poll_interval(Duration::from_secs(600)),
+                )
+                .map_err(|e| crate::MediaError::Internal(format!("Failed to create poll watcher: {}", e)))?;
 
-            // Watch all paths in the library
-            for path in &library.paths {
-                match watcher.watch(path, RecursiveMode::Recursive) {
-                    Ok(_) => info!("Watching path: {}", path.display()),
-                    Err(e) => {
-                        error!("Failed to watch path {}: {}", path.display(), e);
-                        return Err(crate::MediaError::Internal(format!(
-                            "Failed to watch path: {}",
-                            e
-                        )));
+                for path in &library.paths {
+                    match watcher.watch(path, RecursiveMode::Recursive) {
+                        Ok(_) => info!("Polling path: {}", path.display()),
+                        Err(e) => {
+                            error!("Failed to watch path {}: {}", path.display(), e);
+                            return Err(crate::MediaError::Internal(format!(
+                                "Failed to watch path: {}",
+                                e
+                            )));
+                        }
                     }
                 }
-            }
 
-            // Store the watcher
-            self.watchers.write().await.insert(library.id, watcher);
+                self.watchers
+                    .write()
+                    .await
+                    .insert(library.id, LibraryWatcher::Poll(watcher));
+            } else {
+                // Debounced watcher for local filesystems (inotify/FSEvents/etc.)
+                let event_tx_cb = event_tx.clone();
+                let db_cb = db.clone();
+                let mut debouncer = new_debouncer(
+                    Duration::from_millis(200), // debounce window: 200ms
+                    None,
+                    move |result: DebounceEventResult| {
+                        match result {
+                            Ok(events) => {
+                                for de in events {
+                                    // Try to map debounced event to our model via the underlying notify::Event
+                                    if let Some(watch_event) = Self::convert_debounced_event(&de, library_id) {
+                                        debug!("[debounced] File watch event: {:?}", watch_event);
+
+                                        if let Err(e) = event_tx_cb.send(watch_event.clone()) {
+                                            error!("Failed to send file watch event: {}", e);
+                                        } else {
+                                            let db_clone = db_cb.clone();
+                                            tokio::spawn(async move {
+                                                if let Err(e) = db_clone
+                                                    .backend()
+                                                    .create_file_watch_event(&watch_event)
+                                                    .await
+                                                {
+                                                    error!("Failed to persist file watch event: {}", e);
+                                                }
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            Err(errors) => {
+                                for e in errors { error!("Debouncer error: {}", e); }
+                            }
+                        }
+                    },
+                )
+                .map_err(|e| crate::MediaError::Internal(format!("Failed to create debouncer: {}", e)))?;
+
+for path in &library.paths {
+                    match debouncer.watch(path, RecursiveMode::Recursive) {
+                        Ok(_) => info!("Watching path: {}", path.display()),
+                        Err(e) => {
+                            error!("Failed to watch path {}: {}", path.display(), e);
+                            return Err(crate::MediaError::Internal(format!(
+                                "Failed to watch path: {}",
+                                e
+                            )));
+                        }
+                    }
+                }
+
+                self.watchers
+                    .write()
+                    .await
+                    .insert(library.id, LibraryWatcher::Debounced(debouncer));
+            }
         }
 
         Ok(())
@@ -143,12 +222,17 @@ impl FileWatcher {
 
     /// Convert notify event to our FileWatchEvent
     fn convert_notify_event(event: Event, library_id: LibraryID) -> Option<FileWatchEvent> {
-        // Get the first path (most events only have one)
+        // Get the primary path
         let path = event.paths.first()?.clone();
-        let path_str = path.to_string_lossy().to_string();
 
-        // Determine event type
-        let event_type = match event.kind {
+        // Early path filtering
+        if should_ignore_path(&path) {
+            return None;
+        }
+
+        // Determine event type and handle renames if two paths are present
+        let mut old_path: Option<String> = None;
+        let mut event_type = match event.kind {
             EventKind::Create(_) => FileWatchEventType::Created,
             EventKind::Modify(_) => FileWatchEventType::Modified,
             EventKind::Remove(_) => FileWatchEventType::Deleted,
@@ -157,16 +241,23 @@ impl FileWatcher {
             EventKind::Other => return None,     // Skip other events
         };
 
-        // Check if it's a video file
-        if !Self::is_video_file(&path) && event_type != FileWatchEventType::Deleted {
+        if event.paths.len() == 2 {
+            // Likely a rename/move
+            event_type = FileWatchEventType::Moved;
+            old_path = event.paths.get(0).map(|p| p.to_string_lossy().to_string());
+        }
+
+        // Video file filtering (allow deletions regardless)
+        if event_type != FileWatchEventType::Deleted && !Self::is_video_file(&path) {
             return None;
         }
 
-        // Get file size if file exists
-        let file_size = if event_type != FileWatchEventType::Deleted {
-            std::fs::metadata(&path).ok().map(|m| m.len() as i64)
-        } else {
-            None
+        let path_str = path.to_string_lossy().to_string();
+
+        // Get file size if file exists for create/modify/move
+        let file_size = match event_type {
+            FileWatchEventType::Deleted => None,
+            _ => fs::metadata(&path).ok().map(|m| m.len() as i64),
         };
 
         Some(FileWatchEvent {
@@ -174,7 +265,7 @@ impl FileWatcher {
             library_id,
             event_type,
             file_path: path_str,
-            old_path: None, // Moves are complex in notify, would need to track separately
+            old_path,
             file_size,
             detected_at: Utc::now(),
             processed: false,
@@ -182,6 +273,14 @@ impl FileWatcher {
             processing_attempts: 0,
             last_error: None,
         })
+    }
+
+    /// Convert a debounced event (from notify-debouncer-full) to our FileWatchEvent
+    fn convert_debounced_event(event: &DebouncedEvent, library_id: LibraryID) -> Option<FileWatchEvent> {
+        // Prefer to use the underlying notify::Event when available
+        #[allow(deprecated)]
+        let notify_event = &event.event;
+        Self::convert_notify_event(notify_event.clone(), library_id)
     }
 
     /// Check if a file is a video file
@@ -198,8 +297,85 @@ impl FileWatcher {
         false
     }
 
+    /// Fast path filtering to exclude common noise
+    fn is_ignored_component(component: &str) -> bool {
+        matches!(
+            component,
+            "target" | "node_modules" | ".git" | ".hg" | ".svn" | ".DS_Store"
+        )
+    }
+
+    fn should_ignore_extension(path: &Path) -> bool {
+        matches!(
+            path.extension().and_then(|e| e.to_str()),
+            Some("tmp" | "swp" | "bak" | "part" | "crdownload")
+        )
+    }
+
+    fn path_contains_ignored_dir(path: &Path) -> bool {
+        path.components().any(|c| match c {
+            std::path::Component::Normal(os) => {
+                if let Some(s) = os.to_str() {
+                    Self::is_ignored_component(s)
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        })
+    }
+
     /// Cleanup old processed events
     pub async fn cleanup_old_events(&self, days_to_keep: i32) -> Result<u32> {
         self.db.backend().cleanup_old_events(days_to_keep).await
     }
+}
+
+/// Determine if a path resides on a network filesystem (Linux)
+fn is_network_filesystem(path: &Path) -> bool {
+    // Attempt to canonicalize to match mountpoints
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+    let file = match fs::File::open("/proc/mounts") {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let reader = BufReader::new(file);
+
+    let mut best_match: Option<(PathBuf, String)> = None; // (mountpoint, fstype)
+    for line in reader.lines().flatten() {
+        // /proc/mounts format: src mountpoint fstype options 0 0
+        let mut parts = line.split_whitespace();
+        let _src = parts.next();
+        let mountpoint = parts.next();
+        let fstype = parts.next();
+        if let (Some(mnt), Some(fs_type)) = (mountpoint, fstype) {
+            let mnt_path = PathBuf::from(mnt);
+            if canonical.starts_with(&mnt_path) {
+                let take = match &best_match {
+                    None => true,
+                    Some((best, _)) => mnt_path.as_os_str().len() > best.as_os_str().len(),
+                };
+                if take {
+                    best_match = Some((mnt_path, fs_type.to_string()));
+                }
+            }
+        }
+    }
+
+    if let Some((_mnt, fstype)) = best_match {
+        // Common network filesystems
+        let net_fs = [
+            "nfs", "nfs4", "cifs", "smbfs", "smb3", "smbfs", "afs", "sshfs", "fuse.sshfs",
+        ];
+        return net_fs.iter().any(|t| &fstype == t);
+    }
+    false
+}
+
+fn should_ignore_path(path: &Path) -> bool {
+    if FileWatcher::path_contains_ignored_dir(path) || FileWatcher::should_ignore_extension(path) {
+        return true;
+    }
+    false
 }

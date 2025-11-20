@@ -18,163 +18,13 @@ use iced::Task;
 )]
 pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
     match message {
-        // Media management messages
-        Message::PlayMedia(media_file) => {
-            super::update_handlers::play_media::handle_play_media(state, media_file)
-        }
-
-        Message::PlayMediaWithId(media, media_id) => {
-            // Log the incoming media file's metadata
-            log::info!(
-                "PlayMediaWithId: Received media file '{}' with duration = {:?}",
-                media.filename,
-                media.media_file_metadata.as_ref().and_then(|m| m.duration)
-            );
-
-            // Store the MediaID for watch status tracking
-            state.domains.media.state.current_media_id = Some(media_id.clone());
-            state.domains.player.state.current_media_id = Some(media_id.clone());
-
-            // Check if we have watch state and get resume position
-            let resume_position =
-                if let Some(watch_state) = &state.domains.media.state.user_watch_state {
-                    watch_state
-                        .get_by_media_id(media_id.as_uuid())
-                        .map(|item| item.position)
-                } else {
-                    None
-                };
-
-            // Store resume position for use when video loads
-            state.domains.media.state.pending_resume_position = resume_position;
-
-            if let Some(pos) = resume_position {
-                log::info!("Will resume playback at position: {:.1}s", pos);
-            }
-
-            super::update_handlers::play_media::handle_play_media(state, media)
-        }
-
-        Message::LoadMediaById(media_id) => {
-            log::info!("Loading media by ID: {:?}", media_id);
-
-            let media_result = state.domains.media.state.repo_accessor.get(&media_id);
-
-            if let Ok(media_ref) = media_result {
-                let mediafile_opt = match media_ref {
-                    ferrex_core::Media::Movie(movie_reference) => Some(movie_reference.file),
-                    ferrex_core::Media::Series(series_reference) => None,
-                    ferrex_core::Media::Season(season_reference) => None,
-                    ferrex_core::Media::Episode(episode_reference) => Some(episode_reference.file),
-                };
-                if let Some(mediafile) = mediafile_opt {
-                    // Log the core file's metadata
-                    log::info!(
-                        "Core MediaFile metadata: duration = {:?}",
-                        mediafile
-                            .media_file_metadata
-                            .as_ref()
-                            .and_then(|m| m.duration)
-                    );
-
-                    // Play the media with ID tracking
-                    update_media(state, Message::PlayMediaWithId(mediafile, media_id))
-                } else {
-                    log::error!(
-                        "MediaID does not reference a playable media: {:?}",
-                        media_id
-                    );
-                    // Return an error view
-                    state.domains.ui.state.view =
-                        crate::domains::ui::types::ViewState::VideoError {
-                            message: format!("Media not playable: {:?}", media_id),
-                        };
-                    DomainUpdateResult::task(Task::none())
-                }
-            } else {
-                log::error!("Media not found for ID: {:?}", media_id);
-                // Return an error view
-                state.domains.ui.state.view = crate::domains::ui::types::ViewState::VideoError {
-                    message: format!("Media not found: {:?}", media_id),
-                };
-                DomainUpdateResult::task(Task::none())
-            }
-        }
-
-        Message::VideoLoaded(success) => {
-            if success {
-                log::info!("Video loaded successfully");
-                state.domains.ui.state.view = crate::domains::ui::types::ViewState::Player;
-                DomainUpdateResult::task(Task::none())
-            } else {
-                log::error!("Video failed to load");
-                state.domains.ui.state.view = crate::domains::ui::types::ViewState::VideoError {
-                    message: "Failed to load video".to_string(),
-                };
-                DomainUpdateResult::task(Task::none())
-            }
-        }
-
-        Message::_LoadVideo => {
-            let load_video_task = DomainUpdateResult::task(
-                crate::domains::player::video::load_video(state).map(DomainMessage::Media),
-            );
-
-            #[cfg(feature = "external-mpv-player")]
-            let load_video_task = {
-                // Check if we should use external MPV for HDR content
-                if state.domains.player.state.is_hdr_content
-                    && !state.domains.player.state.external_mpv_active
-                {
-                    log::info!(
-                        "HDR content detected - using external MPV player for HDR passthrough"
-                    );
-
-                    let window_position_task =
-                        iced::window::get_latest().and_then(|id| iced::window::get_position(id));
-
-                    DomainUpdateResult::with_events(
-                        Task::chain(
-                            window_position_task
-                                .map(|position| {
-                                    log::info!("window position {:?}", position);
-                                    crate::domains::ui::messages::Message::WindowMoved(position)
-                                })
-                                .map(DomainMessage::Ui),
-                            crate::domains::player::video::load_external_video(state)
-                                .map(DomainMessage::Media),
-                        ),
-                        vec![crate::common::messages::CrossDomainEvent::HideWindow],
-                    )
-                } else {
-                    // SDR content or external MPV already active - use internal player
-                    if state.domains.player.state.is_hdr_content {
-                        log::info!("External MPV already active, skipping duplicate load");
-                    } else {
-                        log::info!("SDR content detected - using internal iced_video_player");
-                    }
-                    DomainUpdateResult::task(
-                        crate::domains::player::video::load_video(state).map(DomainMessage::Media),
-                    )
-                }
-            };
-
-            load_video_task
-        }
-
         Message::Noop => {
             // No-op message, used for task chaining
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::WatchProgressFetched(_media_id, _resume_position) => {
-            // This message is for future use when we fetch watch progress asynchronously
-            // Currently handled synchronously in PlayMediaWithId
-            DomainUpdateResult::task(Task::none())
-        }
-
+        /* TODO: Reimplement this in player domain
         Message::PlayNextEpisode => {
-            /* TODO: Reimplement this
             // Check if current media is an episode and play the next one
             if let Some(current_media_id) = &state.domains.media.state.current_media_id {
                 if let ferrex_core::MediaID::Episode(episode_id) = current_media_id {
@@ -213,35 +63,9 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                 }
             } else {
                 DomainUpdateResult::task(Task::none())
-            } */
-            DomainUpdateResult::task(Task::none())
-        }
-
-        Message::MediaAvailabilityChecked(media_file) => {
-            log::info!("Media availability confirmed for: {}", media_file.filename);
-            // Proceed with playing the media
-            DomainUpdateResult::task(Task::done(DomainMessage::Media(Message::PlayMedia(
-                media_file,
-            ))))
-        }
-
-        Message::MediaUnavailable(reason, message) => {
-            super::update_handlers::play_media::handle_media_unavailable(state, reason, message)
-        }
-
-        // Handle CheckControlsVisibility - bridge to player domain
-        Message::CheckControlsVisibility => {
-            use std::time::Duration;
-
-            // Check if controls should be hidden based on inactivity
-            if state.domains.player.state.controls
-                && state.domains.player.state.controls_time.elapsed() > Duration::from_secs(3)
-            {
-                state.domains.player.state.controls = false;
             }
-
             DomainUpdateResult::task(Task::none())
-        }
+        }*/
 
         // Handle watch progress tracking
         Message::ProgressUpdateSent(id, position, duration) => {
@@ -253,7 +77,7 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
             let should_refresh_ui = if let Some(media_id) =
                 &state.domains.media.state.current_media_id
             {
-                let duration = state.domains.player.state.duration;
+                let duration = state.domains.player.state.last_valid_duration;
 
                 // Only update watch state if we have a valid duration
                 if duration > 0.0 {

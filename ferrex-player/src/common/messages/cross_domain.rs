@@ -6,8 +6,9 @@
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::domains::ui::scroll_manager::ScrollStateExt;
-use crate::domains::{auth, library, media, ui};
+use crate::domains::{auth, library, media, player, ui};
 use crate::state_refactored::State;
+use ferrex_core::MediaIDLike;
 use iced::Task;
 
 #[cfg_attr(
@@ -184,8 +185,25 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         // Play media with ID
         CrossDomainEvent::MediaPlayWithId(media_file, media_id) => {
             log::info!("[CrossDomain] Play media with ID: {:?}", media_id);
-            Task::done(DomainMessage::Media(
-                media::messages::Message::PlayMediaWithId(media_file, media_id),
+
+            // Derive resume position from media domain watch state (resume-at-last-position by default)
+            let mut resume_opt: Option<f32> = None;
+            if let Some(watch_state) = &state.domains.media.state.user_watch_state {
+                if let Some(item) = watch_state.get_by_media_id(media_id.as_uuid()) {
+                    // Use the last known position from watch state
+                    if item.position > 0.0 && item.duration > 0.0 {
+                        resume_opt = Some(item.position);
+                    }
+                }
+            }
+
+            // Store resume position so the player picks it up during PlayMediaWithId
+            state.domains.media.state.pending_resume_position = resume_opt;
+            // Also prime the player domain for immediate seek during load
+            state.domains.player.state.pending_resume_position = resume_opt;
+
+            Task::done(DomainMessage::Player(
+                crate::domains::player::messages::Message::PlayMediaWithId(media_file, media_id),
             ))
         }
 
@@ -239,14 +257,16 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         // Media playback events
         CrossDomainEvent::MediaStartedPlaying(media_file) => {
             log::info!("[CrossDomain] Media started playing");
-            Task::done(DomainMessage::Media(media::messages::Message::PlayMedia(
+            Task::done(DomainMessage::Player(player::messages::Message::PlayMedia(
                 media_file,
             )))
         }
+
         CrossDomainEvent::MediaStopped => {
             log::info!("[CrossDomain] Media stopped");
             Task::none()
         }
+
         CrossDomainEvent::MediaPaused => {
             log::info!("[CrossDomain] Media paused");
             Task::none()
