@@ -74,7 +74,7 @@ impl MediaQueryBuilder {
 
     /// Filter by rating range
     pub fn rating_range(mut self, min: f32, max: f32) -> Self {
-        self.query.filters.rating_range = Some(ScalarRange::new(min, max));
+        self.query.filters.rating_range = Some(ScalarRange::new(min, max).to_rating_value());
         self
     }
 

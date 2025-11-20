@@ -73,16 +73,6 @@ pub enum Message {
     Retry,
     Back,
 
-    // First-run setup
-    FirstRunUpdateUsername(String),
-    FirstRunUpdateDisplayName(String),
-    FirstRunUpdatePassword(String),
-    FirstRunUpdateConfirmPassword(String),
-    FirstRunTogglePasswordVisibility,
-    FirstRunSubmit,
-    FirstRunSuccess,
-    FirstRunError(String),
-
     // Admin setup flow
     UpdateSetupField(SetupField),
     ToggleSetupPasswordVisibility,
@@ -165,22 +155,6 @@ impl std::fmt::Debug for Message {
             Self::Retry => write!(f, "Retry"),
             Self::Back => write!(f, "Back"),
 
-            // First-run setup - hide sensitive data
-            Self::FirstRunUpdateUsername(username) => {
-                write!(f, "FirstRunUpdateUsername({})", username)
-            }
-            Self::FirstRunUpdateDisplayName(display_name) => {
-                write!(f, "FirstRunUpdateDisplayName({})", display_name)
-            }
-            Self::FirstRunUpdatePassword(_) => write!(f, "FirstRunUpdatePassword(***)"),
-            Self::FirstRunUpdateConfirmPassword(_) => {
-                write!(f, "FirstRunUpdateConfirmPassword(***)")
-            }
-            Self::FirstRunTogglePasswordVisibility => write!(f, "FirstRunTogglePasswordVisibility"),
-            Self::FirstRunSubmit => write!(f, "FirstRunSubmit"),
-            Self::FirstRunSuccess => write!(f, "FirstRunSuccess"),
-            Self::FirstRunError(error) => write!(f, "FirstRunError({})", error),
-
             // Admin setup flow - hide sensitive data
             Self::UpdateSetupField(field) => match field {
                 SetupField::Username(u) => write!(f, "UpdateSetupField(Username({}))", u),
@@ -217,10 +191,6 @@ impl Message {
             Self::UpdatePin(_) => "UpdatePin(***)".to_string(),
             Self::UpdateConfirmPin(_) => "UpdateConfirmPin(***)".to_string(),
             Self::PasswordLoginUpdatePassword(_) => "PasswordLoginUpdatePassword(***)".to_string(),
-            Self::FirstRunUpdatePassword(_) => "FirstRunUpdatePassword(***)".to_string(),
-            Self::FirstRunUpdateConfirmPassword(_) => {
-                "FirstRunUpdateConfirmPassword(***)".to_string()
-            }
             Self::UpdateSetupField(SetupField::Password(_)) => {
                 "UpdateSetupField(Password(***)".to_string()
             }
@@ -286,16 +256,6 @@ impl Message {
             Self::PinSet(_) => "Auth::PinSet",
             Self::Retry => "Auth::Retry",
             Self::Back => "Auth::Back",
-
-            // First-run setup
-            Self::FirstRunUpdateUsername(_) => "Auth::FirstRunUpdateUsername",
-            Self::FirstRunUpdateDisplayName(_) => "Auth::FirstRunUpdateDisplayName",
-            Self::FirstRunUpdatePassword(_) => "Auth::FirstRunUpdatePassword",
-            Self::FirstRunUpdateConfirmPassword(_) => "Auth::FirstRunUpdateConfirmPassword",
-            Self::FirstRunTogglePasswordVisibility => "Auth::FirstRunTogglePasswordVisibility",
-            Self::FirstRunSubmit => "Auth::FirstRunSubmit",
-            Self::FirstRunSuccess => "Auth::FirstRunSuccess",
-            Self::FirstRunError(_) => "Auth::FirstRunError",
 
             // Admin setup flow
             Self::UpdateSetupField(_) => "Auth::UpdateSetupField",

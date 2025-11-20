@@ -6,6 +6,7 @@ use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::infrastructure::services::api::ApiService;
 use crate::infrastructure::services::auth::AuthService;
 use crate::state_refactored::State;
+use ferrex_core::api_routes::v1;
 use ferrex_core::rbac::UserPermissions;
 use ferrex_core::user::User;
 use iced::Task;
@@ -702,7 +703,6 @@ pub fn handle_auth_flow_auth_result(
             }
 
             state.domains.auth.state.auto_login_enabled = auto_login_enabled;
-            state.domains.settings.preferences.auto_login_enabled = auto_login_enabled;
 
             // Mark as authenticated (both top-level and domain state)
             state.is_authenticated = true;
@@ -880,7 +880,6 @@ pub fn handle_auth_flow_toggle_remember_device(state: &mut State) -> Task<auth::
     {
         *remember_device = !*remember_device;
         state.domains.auth.state.auto_login_enabled = *remember_device;
-        state.domains.settings.preferences.auto_login_enabled = *remember_device;
     }
     Task::none()
 }
@@ -889,7 +888,6 @@ pub fn handle_remember_device_synced(state: &mut State, enabled: bool) -> Task<a
     use crate::domains::auth::types::AuthenticationFlow;
 
     state.domains.auth.state.auto_login_enabled = enabled;
-    state.domains.settings.preferences.auto_login_enabled = enabled;
 
     if let AuthenticationFlow::EnteringCredentials {
         remember_device, ..
@@ -1029,11 +1027,18 @@ pub fn handle_submit_setup(state: &mut State) -> Task<auth::Message> {
         error,
         loading,
         ..
-    } = &mut state.domains.auth.state.auth_flow.clone()
+    } = &mut state.domains.auth.state.auth_flow
     {
+        *error = None;
+
         // Validate inputs
         if username.is_empty() {
             *error = Some("Username is required".to_string());
+            return Task::none();
+        }
+
+        if display_name.trim().is_empty() {
+            *error = Some("Display name is required".to_string());
             return Task::none();
         }
 
@@ -1048,22 +1053,18 @@ pub fn handle_submit_setup(state: &mut State) -> Task<auth::Message> {
         }
 
         // Set loading state
-        if let AuthenticationFlow::FirstRunSetup { loading: l, .. } =
-            &mut state.domains.auth.state.auth_flow
-        {
-            *l = true;
-        }
+        *loading = true;
 
         // Submit to server
         let api_service = state.domains.auth.state.api_service.clone();
         let username = username.clone();
         let password = password.as_str().to_string();
-        let display_name = if display_name.is_empty() {
+        let display_name = if display_name.trim().is_empty() {
             None
         } else {
             Some(display_name.clone())
         };
-        let setup_token = if setup_token.is_empty() {
+        let setup_token = if setup_token.trim().is_empty() {
             None
         } else {
             Some(setup_token.clone())
@@ -1071,28 +1072,15 @@ pub fn handle_submit_setup(state: &mut State) -> Task<auth::Message> {
 
         return Task::perform(
             async move {
-                // Create initial admin requires special handling
-                if let Some(pin) = display_name {
-                    api_service
-                        .create_initial_admin(username, password, Some(pin))
-                        .await
-                        .map_err(|e| e.to_string())
-                        .map(|(user, token)| ferrex_core::user::AuthToken {
-                            access_token: token.access_token,
-                            refresh_token: token.refresh_token,
-                            expires_in: 900,
-                        })
-                } else {
-                    api_service
-                        .create_initial_admin(username, password, None)
-                        .await
-                        .map_err(|e| e.to_string())
-                        .map(|(user, token)| ferrex_core::user::AuthToken {
-                            access_token: token.access_token,
-                            refresh_token: token.refresh_token,
-                            expires_in: 900,
-                        })
-                }
+                api_service
+                    .create_initial_admin(username, password, display_name, setup_token)
+                    .await
+                    .map_err(|e| e.to_string())
+                    .map(|(_user, token)| ferrex_core::user::AuthToken {
+                        access_token: token.access_token,
+                        refresh_token: token.refresh_token,
+                        expires_in: 900,
+                    })
             },
             |result| match result {
                 Ok(auth_token) => {
@@ -1135,14 +1123,14 @@ pub fn handle_setup_complete(
             api_service.set_token(Some(auth_token.clone())).await;
 
             // Now fetch the current user
-            let user: ferrex_core::user::User = match api_service.get("/users/me").await {
+            let user: ferrex_core::user::User = match api_service.get(v1::users::CURRENT).await {
                 Ok(user) => user,
                 Err(e) => return Err(format!("Failed to get user: {}", e)),
             };
 
             // Get user permissions
             let permissions: ferrex_core::rbac::UserPermissions =
-                match api_service.get("/users/me/permissions").await {
+                match api_service.get(v1::roles::MY_PERMISSIONS).await {
                     Ok(perms) => perms,
                     Err(e) => {
                         log::warn!(

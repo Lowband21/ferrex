@@ -280,61 +280,6 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
             wrap_task!(Task::none()) // TODO: Implement
         }
 
-        // First-run setup
-        auth::Message::FirstRunUpdateUsername(username) => {
-            wrap_task!(
-                super::update_handlers::first_run_updates::handle_update_username(state, username)
-            )
-        }
-
-        auth::Message::FirstRunUpdateDisplayName(display_name) => {
-            wrap_task!(
-                super::update_handlers::first_run_updates::handle_update_display_name(
-                    state,
-                    display_name,
-                )
-            )
-        }
-
-        auth::Message::FirstRunUpdatePassword(password) => {
-            wrap_task!(
-                super::update_handlers::first_run_updates::handle_update_password(state, password)
-            )
-        }
-
-        auth::Message::FirstRunUpdateConfirmPassword(confirm_password) => {
-            wrap_task!(
-                super::update_handlers::first_run_updates::handle_update_confirm_password(
-                    state,
-                    confirm_password,
-                )
-            )
-        }
-
-        auth::Message::FirstRunTogglePasswordVisibility => {
-            wrap_task!(
-                super::update_handlers::first_run_updates::handle_toggle_password_visibility(state)
-            )
-        }
-
-        auth::Message::FirstRunSubmit => {
-            wrap_task!(super::update_handlers::first_run_updates::handle_submit(
-                state
-            ))
-        }
-
-        auth::Message::FirstRunSuccess => {
-            wrap_task!(super::update_handlers::first_run_updates::handle_success(
-                state
-            ))
-        }
-
-        auth::Message::FirstRunError(error) => {
-            wrap_task!(super::update_handlers::first_run_updates::handle_error(
-                state, error
-            ))
-        }
-
         // Admin PIN unlock management
         auth::Message::EnableAdminPinUnlock => {
             wrap_task!(super::update_handlers::auth_updates::handle_enable_admin_pin_unlock(state))

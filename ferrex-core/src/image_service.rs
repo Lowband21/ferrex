@@ -6,11 +6,16 @@ use chrono::Utc;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+#[cfg(feature = "ffmpeg")]
+use ffmpeg_next as ffmpeg;
+#[cfg(feature = "ffmpeg")]
+use once_cell::sync::OnceCell;
 
 /// TMDB image size variants
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,8 +96,8 @@ impl TmdbImageSize {
             ],
             "backdrop" => vec![TmdbImageSize::BackdropW780, TmdbImageSize::BackdropW1280],
             "logo" => vec![TmdbImageSize::Original], // SVG logos should use original
-            "still" => vec![TmdbImageSize::StillW300, TmdbImageSize::StillW500],
-            "profile" => vec![TmdbImageSize::ProfileW185],
+            "still" | "thumbnail" => vec![TmdbImageSize::StillW300, TmdbImageSize::StillW500],
+            "profile" | "cast" => vec![TmdbImageSize::ProfileW185],
             _ => vec![TmdbImageSize::Original],
         }
     }
@@ -171,6 +176,10 @@ impl ImageService {
     ) -> Result<PathBuf> {
         let image_record = self.register_tmdb_image(tmdb_path).await?;
         let variant_name = size.as_str();
+        let image_folder = context
+            .as_ref()
+            .map(|key| image_type_folder(&key.image_type))
+            .unwrap_or("untyped");
 
         if let Some(existing) = self
             .db
@@ -179,7 +188,19 @@ impl ImageService {
             .await?
         {
             let path = PathBuf::from(&existing.file_path);
-            if path.exists() {
+            // Require the new folder structure; treat legacy paths as missing so we re-download.
+            let variant_dir_ok = path
+                .parent()
+                .map(|dir| dir.ends_with(variant_name))
+                .unwrap_or(false);
+            let type_dir_ok = path
+                .parent()
+                .and_then(|dir| dir.parent())
+                .map(|dir| dir.ends_with(image_folder))
+                .unwrap_or(false);
+            let in_expected_dir = variant_dir_ok && type_dir_ok;
+
+            if path.exists() && in_expected_dir {
                 let mut theme_color: Option<String> = None;
                 let mut content_hash: Option<String> = None;
 
@@ -241,12 +262,17 @@ impl ImageService {
             .await
             .map_err(|e| MediaError::Internal(format!("Failed to read image data: {}", e)))?;
 
-        let variant_dir = self.cache_dir.join("images").join(variant_name);
+        let variant_dir = self
+            .cache_dir
+            .join("images")
+            .join(image_folder)
+            .join(variant_name);
         tokio::fs::create_dir_all(&variant_dir)
             .await
             .map_err(MediaError::Io)?;
 
-        let filename = build_variant_filename(tmdb_path, variant_name, context.as_ref());
+        let filename =
+            build_variant_filename(tmdb_path, variant_name, image_folder, context.as_ref());
         let file_path = variant_dir.join(&filename);
 
         tokio::fs::write(&file_path, &bytes)
@@ -383,6 +409,178 @@ impl ImageService {
                     .await?;
             }
         }
+
+        Ok(file_path)
+    }
+
+    pub async fn generate_episode_thumbnail(
+        &self,
+        image_key: &str,
+        media_file_id: Uuid,
+        key: MediaImageVariantKey,
+    ) -> Result<PathBuf> {
+        self.ensure_ffmpeg_initialized()?;
+
+        let image_record = self.register_tmdb_image(image_key).await?;
+        let variant_name = key.variant.clone();
+        let image_folder = image_type_folder(&key.image_type);
+
+        if let Some(existing) = self
+            .db
+            .backend()
+            .get_image_variant(image_record.id, &variant_name)
+            .await?
+        {
+            let existing_path = PathBuf::from(&existing.file_path);
+            let variant_dir_ok = existing_path
+                .parent()
+                .map(|dir| dir.ends_with(&variant_name))
+                .unwrap_or(false);
+            let type_dir_ok = existing_path
+                .parent()
+                .and_then(|dir| dir.parent())
+                .map(|dir| dir.ends_with(image_folder))
+                .unwrap_or(false);
+
+            if existing_path.exists() && variant_dir_ok && type_dir_ok {
+                let mut width = existing.width;
+                let mut height = existing.height;
+                let mut content_hash: Option<String> = None;
+
+                if let Ok(bytes) = tokio::fs::read(&existing_path).await {
+                    content_hash = Some(self.calculate_hash(&bytes));
+                    if width.is_none() || height.is_none() {
+                        if let Ok((w, h)) = self.get_image_dimensions(&bytes) {
+                            width = Some(w as i32);
+                            height = Some(h as i32);
+                        }
+                    }
+                }
+
+                self.db
+                    .backend()
+                    .mark_media_image_variant_cached(
+                        &key,
+                        width,
+                        height,
+                        content_hash.as_deref(),
+                        None,
+                    )
+                    .await?;
+
+                return Ok(existing_path);
+            }
+        }
+
+        let media = self
+            .db
+            .backend()
+            .get_media(&media_file_id)
+            .await?
+            .ok_or_else(|| {
+                MediaError::NotFound("Media file missing for thumbnail generation".into())
+            })?;
+
+        let video_path = media.path.clone();
+
+        let variant_dir = self
+            .cache_dir
+            .join("images")
+            .join(image_folder)
+            .join(&variant_name);
+        tokio::fs::create_dir_all(&variant_dir)
+            .await
+            .map_err(MediaError::Io)?;
+
+        let filename = build_variant_filename(image_key, &variant_name, image_folder, Some(&key));
+        let file_path = variant_dir.join(&filename);
+
+        let output_path = file_path.clone();
+        let video_path_string = video_path.to_string_lossy().to_string();
+        tokio::task::spawn_blocking(move || {
+            extract_frame_at_percentage(&video_path_string, &output_path, 0.3)
+        })
+        .await
+        .map_err(|err| MediaError::Internal(format!("Failed to join ffmpeg task: {err}")))??;
+
+        let bytes = tokio::fs::read(&file_path).await.map_err(MediaError::Io)?;
+        let file_size_i32 = bytes.len() as i32;
+
+        let (width, height) = match self.get_image_dimensions(&bytes) {
+            Ok((w, h)) => (Some(w as i32), Some(h as i32)),
+            Err(e) => {
+                warn!("Failed to get thumbnail dimensions: {}", e);
+                (None, None)
+            }
+        };
+
+        let hash = self.calculate_hash(&bytes);
+        let format = self.detect_format(&bytes);
+
+        if image_record.file_hash.is_none() {
+            self.db
+                .backend()
+                .update_image_metadata(
+                    image_record.id,
+                    &hash,
+                    file_size_i32,
+                    width.unwrap_or(0),
+                    height.unwrap_or(0),
+                    &format,
+                )
+                .await?;
+        }
+
+        if let Some(existing_image) = self.db.backend().get_image_by_hash(&hash).await? {
+            if let Some(existing_variant) = self
+                .db
+                .backend()
+                .get_image_variant(existing_image.id, &variant_name)
+                .await?
+            {
+                self.db
+                    .backend()
+                    .mark_media_image_variant_cached(
+                        &key,
+                        existing_variant.width,
+                        existing_variant.height,
+                        Some(&hash),
+                        None,
+                    )
+                    .await?;
+
+                return Ok(PathBuf::from(&existing_variant.file_path));
+            }
+
+            self.db
+                .backend()
+                .create_image_variant(
+                    existing_image.id,
+                    &variant_name,
+                    file_path.to_string_lossy().as_ref(),
+                    file_size_i32,
+                    width,
+                    height,
+                )
+                .await?;
+        } else {
+            self.db
+                .backend()
+                .create_image_variant(
+                    image_record.id,
+                    &variant_name,
+                    file_path.to_string_lossy().as_ref(),
+                    file_size_i32,
+                    width,
+                    height,
+                )
+                .await?;
+        }
+
+        self.db
+            .backend()
+            .mark_media_image_variant_cached(&key, width, height, Some(&hash), None)
+            .await?;
 
         Ok(file_path)
     }
@@ -746,6 +944,23 @@ impl ImageService {
         hex_color
     }
 
+    #[cfg(feature = "ffmpeg")]
+    fn ensure_ffmpeg_initialized(&self) -> Result<()> {
+        static INIT: OnceCell<()> = OnceCell::new();
+        INIT.get_or_try_init(|| {
+            ffmpeg::init()
+                .map_err(|e| MediaError::Internal(format!("Failed to initialize ffmpeg: {e}")))
+        })
+        .map(|_| ())
+    }
+
+    #[cfg(not(feature = "ffmpeg"))]
+    fn ensure_ffmpeg_initialized(&self) -> Result<()> {
+        Err(MediaError::Internal(
+            "FFmpeg support is required for thumbnail generation".into(),
+        ))
+    }
+
     /// Clean up orphaned images
     pub async fn cleanup_orphaned(&self) -> Result<u32> {
         self.db.backend().cleanup_orphaned_images().await
@@ -771,15 +986,22 @@ fn tmdb_variant_to_width_hint(variant: &str) -> Option<u32> {
 fn build_variant_filename(
     tmdb_path: &str,
     variant: &str,
+    image_folder: &str,
     context: Option<&MediaImageVariantKey>,
 ) -> String {
     let sanitized = tmdb_path.trim_start_matches('/').replace('/', "_");
     match context {
         Some(key) => format!(
-            "{}__{}__{}__{}__{}",
-            key.media_type, key.image_type, key.order_index, variant, sanitized
+            "{}__{}__{}__{}__{}__{}__{}",
+            key.media_type,
+            key.media_id,
+            image_folder,
+            key.image_type,
+            key.order_index,
+            variant,
+            sanitized
         ),
-        None => format!("{}__{}", variant, sanitized),
+        None => format!("{}__{}__{}", image_folder, variant, sanitized),
     }
 }
 
@@ -799,4 +1021,118 @@ fn build_variant_key(params: &ImageLookupParams, variant: &str) -> Option<MediaI
         order_index: params.index as i32,
         variant: variant.to_string(),
     })
+}
+
+fn image_type_folder(image_type: &str) -> &str {
+    match image_type {
+        "poster" => "poster",
+        "backdrop" => "backdrop",
+        "profile" | "cast" => "cast",
+        "still" | "thumbnail" => "thumbnail",
+        "logo" => "logo",
+        other => other,
+    }
+}
+
+#[cfg(feature = "ffmpeg")]
+fn extract_frame_at_percentage(
+    input_path: &str,
+    output_path: &Path,
+    percentage: f64,
+) -> Result<()> {
+    use ffmpeg::codec::context::Context as CodecContext;
+
+    let mut input_ctx = ffmpeg::format::input(&input_path)
+        .map_err(|e| MediaError::Internal(format!("Failed to open video file: {e}")))?;
+
+    let video_stream = input_ctx
+        .streams()
+        .best(ffmpeg::media::Type::Video)
+        .ok_or_else(|| MediaError::InvalidMedia("No video stream found".into()))?;
+
+    let video_stream_index = video_stream.index();
+    let codec_params = video_stream.parameters();
+
+    let codec_ctx = CodecContext::from_parameters(codec_params)
+        .map_err(|e| MediaError::Internal(format!("Failed to create codec context: {e}")))?;
+    let mut decoder = codec_ctx
+        .decoder()
+        .video()
+        .map_err(|e| MediaError::Internal(format!("Failed to create video decoder: {e}")))?;
+
+    let duration = input_ctx.duration();
+    if duration > 0 && percentage > 0.0 {
+        let target_position = (duration as f64 * percentage) as i64;
+        input_ctx
+            .seek(target_position, ..)
+            .map_err(|e| MediaError::Internal(format!("Failed to seek: {e}")))?;
+    }
+
+    let mut received_frame = None;
+    for (stream, packet) in input_ctx.packets() {
+        if stream.index() != video_stream_index {
+            continue;
+        }
+
+        decoder
+            .send_packet(&packet)
+            .map_err(|e| MediaError::Internal(format!("Failed to send packet: {e}")))?;
+
+        let mut frame = ffmpeg::frame::Video::empty();
+        match decoder.receive_frame(&mut frame) {
+            Ok(_) => {
+                received_frame = Some(frame);
+                break;
+            }
+            Err(err) => {
+                debug!("Skipping packet during thumbnail extraction: {err}");
+                continue;
+            }
+        }
+    }
+
+    let frame = received_frame.ok_or_else(|| {
+        MediaError::InvalidMedia("Unable to decode frame for thumbnail generation".into())
+    })?;
+
+    let mut scaler = ffmpeg::software::scaling::Context::get(
+        decoder.format(),
+        decoder.width(),
+        decoder.height(),
+        ffmpeg::format::Pixel::RGB24,
+        decoder.width(),
+        decoder.height(),
+        ffmpeg::software::scaling::flag::Flags::BILINEAR,
+    )
+    .map_err(|e| MediaError::Internal(format!("Failed to create scaler: {e}")))?;
+
+    let mut rgb_frame = ffmpeg::frame::Video::empty();
+    scaler
+        .run(&frame, &mut rgb_frame)
+        .map_err(|e| MediaError::Internal(format!("Failed to scale frame: {e}")))?;
+
+    let width = rgb_frame.width();
+    let height = rgb_frame.height();
+    let data = rgb_frame.data(0);
+    let stride = rgb_frame.stride(0);
+
+    let buffer = image::ImageBuffer::<image::Rgb<u8>, Vec<u8>>::from_fn(width, height, |x, y| {
+        let offset = y as usize * stride + (x as usize * 3);
+        image::Rgb([data[offset], data[offset + 1], data[offset + 2]])
+    });
+
+    buffer
+        .save(output_path)
+        .map_err(|e| MediaError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))
+}
+
+#[cfg(not(feature = "ffmpeg"))]
+fn extract_frame_at_percentage(
+    _input_path: &str,
+    _output_path: &Path,
+    _percentage: f64,
+) -> Result<()> {
+    Err(MediaError::Internal(
+        "FFmpeg support is required for thumbnail generation".into(),
+    ))
 }

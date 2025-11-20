@@ -140,7 +140,7 @@ pub fn view_first_run_setup<'a>(
         .size(16)
         .style(theme::TextInput::style());
 
-    let display_name_input = text_input("Display Name (optional)", display_name)
+    let display_name_input = text_input("Display Name", display_name)
         .on_input(|s| auth::Message::UpdateSetupField(auth::SetupField::DisplayName(s)).into())
         .padding(12)
         .size(16)
@@ -171,15 +171,25 @@ pub fn view_first_run_setup<'a>(
         .size(16)
         .style(theme::TextInput::style());
 
+    let ready_to_submit = !loading
+        && !username.trim().is_empty()
+        && !display_name.trim().is_empty()
+        && !password.as_str().is_empty()
+        && password.as_str() == confirm_password.as_str();
+
     let mut create_button = button(if loading {
         text("Creating Admin...")
     } else {
         text("Create Admin Account")
     })
     .padding([12, 24])
-    .style(theme::Button::Primary.style());
+    .style(if ready_to_submit {
+        theme::Button::Primary.style()
+    } else {
+        theme::Button::Disabled.style()
+    });
 
-    if !loading && !username.is_empty() && !password.as_str().is_empty() {
+    if ready_to_submit {
         create_button = create_button.on_press(auth::Message::SubmitSetup.into());
     }
 

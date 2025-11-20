@@ -1,5 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use ferrex_core::api_routes::{utils, v1};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -26,11 +27,11 @@ impl UserAdminApiAdapter {
 impl UserAdminService for UserAdminApiAdapter {
     async fn list_users(&self) -> Result<Vec<ferrex_core::user::User>> {
         // Expect server to return Vec<User> at /api/admin/users
-        self.client.get("/admin/users").await
+        self.client.get(v1::admin::USERS).await
     }
 
     async fn delete_user(&self, user_id: Uuid) -> Result<()> {
-        let path = format!("/admin/users/{}", user_id);
+        let path = utils::replace_param(v1::admin::USER_ITEM, "{id}", user_id.to_string());
         let _: serde_json::Value = self.client.delete(&path).await?;
         Ok(())
     }

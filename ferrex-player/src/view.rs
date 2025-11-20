@@ -5,7 +5,6 @@ use crate::domains::ui::theme;
 use crate::domains::ui::types::ViewState;
 use crate::domains::ui::views::admin::{view_admin_dashboard, view_library_management};
 use crate::domains::ui::views::auth::view_auth;
-use crate::domains::ui::views::first_run::view_first_run;
 use crate::domains::ui::views::header::view_header;
 use crate::domains::ui::views::library::view_library;
 use crate::domains::ui::views::library_controls_bar::view_library_controls_bar;
@@ -31,12 +30,6 @@ use iced::{Element, Font, Length};
 pub fn view(state: &State) -> Element<DomainMessage> {
     let view = iced::debug::time("ferrex-player::view");
     // Check for first-run setup
-    if matches!(state.domains.ui.state.view, ViewState::FirstRunSetup) {
-        let first_run_content = view_first_run(state, &state.domains.auth.state.first_run_state)
-            .map(DomainMessage::from);
-        return first_run_content;
-    }
-
     // Check authentication state
     if !state.is_authenticated {
         log::debug!("[Auth] Not authenticated, showing auth view");
@@ -53,10 +46,6 @@ pub fn view(state: &State) -> Element<DomainMessage> {
         ViewState::Library => view_library(state).map(DomainMessage::from),
         ViewState::LibraryManagement => view_library_management(state).map(DomainMessage::from),
         ViewState::AdminDashboard => view_admin_dashboard(state).map(DomainMessage::from),
-        ViewState::FirstRunSetup => {
-            view_first_run(state, &state.domains.auth.state.first_run_state)
-                .map(DomainMessage::from)
-        }
         ViewState::Player => view_player(state).map(DomainMessage::Player),
         ViewState::LoadingVideo { url } => view_loading_video(state, &url).map(DomainMessage::from),
         ViewState::VideoError { message } => view_video_error(&message).map(DomainMessage::from),

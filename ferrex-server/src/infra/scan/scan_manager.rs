@@ -5,8 +5,8 @@ use ferrex_core::orchestration::actors::pipeline::{IndexingChange, IndexingOutco
 use ferrex_core::types::ids::{EpisodeID, MovieID, SeasonID, SeriesID};
 use ferrex_core::{
     JobEvent, LibraryActorCommand, LibraryID, Media, MediaDatabase, MediaError, MediaEvent,
-    PostgresCursorRepository, ScanEventMetadata, ScanProgressEvent, ScanStageLatencySummary,
-    StartMode,
+    PostgresCursorRepository, ScanEventMetadata, ScanProgressEvent, ScanSseEventType,
+    ScanStageLatencySummary, StartMode,
     database::traits::MediaDatabaseTrait,
     orchestration::{
         events::{DomainEvent, JobEventPayload},
@@ -327,6 +327,18 @@ pub enum ScanEventKind {
     Quiescing,
     Completed,
     Failed,
+}
+
+impl ScanEventKind {
+    pub fn as_sse_event_type(&self) -> ScanSseEventType {
+        match self {
+            ScanEventKind::Started => ScanSseEventType::Started,
+            ScanEventKind::Progress => ScanSseEventType::Progress,
+            ScanEventKind::Quiescing => ScanSseEventType::Quiescing,
+            ScanEventKind::Completed => ScanSseEventType::Completed,
+            ScanEventKind::Failed => ScanSseEventType::Failed,
+        }
+    }
 }
 
 struct ScanRun {

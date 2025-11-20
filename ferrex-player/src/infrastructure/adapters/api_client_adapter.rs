@@ -335,15 +335,17 @@ impl ApiService for ApiClientAdapter {
         &self,
         username: String,
         password: String,
-        pin: Option<String>,
+        display_name: Option<String>,
+        setup_token: Option<String>,
     ) -> RepositoryResult<(User, AuthToken)> {
-        // The ApiClient method has 4 parameters, we only have 3
-        // The fourth parameter is setup_token
         let token = self
             .client
-            .create_initial_admin(username, password, pin, None)
+            .create_initial_admin(username, password, display_name, setup_token)
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
+
+        // Ensure subsequent authenticated requests use the fresh token
+        self.client.set_token(Some(token.clone())).await;
 
         // Now get the user info
         let user: User = self.get(v1::users::CURRENT).await?;

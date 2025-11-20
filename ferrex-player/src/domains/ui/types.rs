@@ -9,7 +9,6 @@ pub enum ViewState {
     Library,
     LibraryManagement, // New view for library management
     AdminDashboard,    // New comprehensive admin dashboard
-    FirstRunSetup,     // First-run admin setup view
     Player,
     LoadingVideo {
         url: String,
@@ -59,15 +58,11 @@ impl ViewState {
                 | ViewState::SeasonDetail { .. }
                 | ViewState::EpisodeDetail { .. }
         )
-        // FirstRunSetup has no header
     }
 
     /// Returns true if this view should show the background shader
     pub fn has_background(&self) -> bool {
-        !matches!(
-            self,
-            ViewState::Player | ViewState::LoadingVideo { .. } | ViewState::FirstRunSetup
-        )
+        !matches!(self, ViewState::Player | ViewState::LoadingVideo { .. })
     }
 
     /// Returns header height in pixels if this view has a header

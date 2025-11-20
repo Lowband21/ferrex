@@ -2,7 +2,6 @@ pub mod admin;
 pub mod all;
 pub mod auth;
 pub mod error;
-pub mod first_run;
 pub mod grid;
 pub mod header;
 pub mod library;

@@ -144,9 +144,9 @@ fn image_loader_stream(
                             let category = match size {
                                 ImageSize::Poster => "poster",
                                 ImageSize::Backdrop => "backdrop",
-                                ImageSize::Thumbnail => "still",
+                                ImageSize::Thumbnail => "thumbnail",
                                 ImageSize::Full => "poster", // Use poster for full size too
-                                ImageSize::Profile => "profile", // Person profile images
+                                ImageSize::Profile => "cast", // Person profile images
                             };
 
                             // Server uses /images/{type}/{id}/{category}/{index}

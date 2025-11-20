@@ -214,8 +214,11 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
             }
 
             // Preload primary cast portraits for the carousel
-            for (idx, cast_member) in movie_details.cast.iter().take(12).enumerate() {
-                let order = cast_member.order.max((idx as u32).into());
+            for cast_member in movie_details.cast.iter().take(12) {
+                let slot = cast_member.image_slot.to_native();
+                if slot == u32::MAX {
+                    continue;
+                }
                 let person_uuid = Uuid::new_v5(
                     &Uuid::NAMESPACE_OID,
                     format!("person-{}", cast_member.id).as_bytes(),
@@ -223,7 +226,7 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
                 let cast_request =
                     ImageRequest::new(person_uuid, ImageSize::Profile, ImageType::Person)
                         .with_priority(Priority::Preload)
-                        .with_index(order.into());
+                        .with_index(slot.into());
 
                 if state.image_service.get(&cast_request).is_none() {
                     state.image_service.request_image(cast_request);
@@ -343,8 +346,11 @@ pub fn handle_view_series(state: &mut State, series_id: SeriesID) -> Task<Messag
             }
 
             // Prefetch lead cast portraits for the detail view carousel
-            for (idx, cast_member) in details.cast.iter().take(12).enumerate() {
-                let order = cast_member.order.max((idx as u32).into());
+            for cast_member in details.cast.iter().take(12) {
+                let slot = cast_member.image_slot.to_native();
+                if slot == u32::MAX {
+                    continue;
+                }
                 let person_uuid = Uuid::new_v5(
                     &Uuid::NAMESPACE_OID,
                     format!("person-{}", cast_member.id).as_bytes(),
@@ -352,7 +358,7 @@ pub fn handle_view_series(state: &mut State, series_id: SeriesID) -> Task<Messag
                 let cast_request =
                     ImageRequest::new(person_uuid, ImageSize::Profile, ImageType::Person)
                         .with_priority(Priority::Preload)
-                        .with_index(order.into());
+                        .with_index(slot.into());
 
                 if state.image_service.get(&cast_request).is_none() {
                     state.image_service.request_image(cast_request);

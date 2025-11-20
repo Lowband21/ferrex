@@ -1,6 +1,7 @@
 // Media module - organizes all media-related types and traits
 
 pub mod details;
+pub mod events;
 pub mod files;
 pub mod filter_types;
 pub mod ids;
@@ -18,6 +19,7 @@ pub mod util_types;
 
 // Re-export everything from submodules
 pub use details::*;
+pub use events::*;
 pub use files::*;
 pub use filter_types::*;
 pub use ids::*;

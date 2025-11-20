@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::domains::auth::manager::AuthManager;
+use crate::domains::auth::manager::{AuthManager, AutoLoginScope};
 use crate::domains::auth::storage::StoredAuth;
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::auth::AuthService;
@@ -201,9 +201,13 @@ impl AuthService for AuthManagerAdapter {
             .map_err(|e| RepositoryError::QueryFailed(format!("Save current auth failed: {}", e)))
     }
 
-    async fn set_auto_login(&self, enabled: bool) -> RepositoryResult<()> {
+    async fn set_auto_login_scope(
+        &self,
+        enabled: bool,
+        scope: AutoLoginScope,
+    ) -> RepositoryResult<()> {
         self.manager
-            .set_auto_login(enabled)
+            .set_auto_login_scope(enabled, scope)
             .await
             .map_err(|e| RepositoryError::QueryFailed(format!("Set auto login failed: {}", e)))
     }

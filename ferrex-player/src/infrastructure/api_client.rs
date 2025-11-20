@@ -1,5 +1,6 @@
 use anyhow::Result;
 use ferrex_core::MediaID;
+use ferrex_core::api_routes::v1;
 use ferrex_core::api_types::ApiResponse;
 use ferrex_core::user::AuthToken;
 use ferrex_core::watch_status::{UpdateProgressRequest, UserWatchState};
@@ -525,13 +526,14 @@ impl ApiClient {
 impl ApiClient {
     /// Get watch state for the current user
     pub async fn get_watch_state(&self) -> Result<UserWatchState> {
-        self.get("/watch/state").await
+        self.get(v1::watch::STATE).await
     }
 
     /// Update watch progress for a media item
     pub async fn update_progress(&self, request: &UpdateProgressRequest) -> Result<()> {
         // This endpoint returns 204 No Content, so we need special handling
-        self.post_no_content("/watch/progress", request).await
+        self.post_no_content(v1::watch::UPDATE_PROGRESS, request)
+            .await
     }
 
     /// Create initial admin user during setup
@@ -557,7 +559,7 @@ impl ApiClient {
             setup_token,
         };
 
-        self.post("/setup/admin", &request).await
+        self.post(v1::setup::CREATE_ADMIN, &request).await
     }
 
     /// Get auth header for the current session
@@ -573,13 +575,20 @@ impl ApiClient {
     pub async fn list_user_devices(
         &self,
     ) -> Result<Vec<ferrex_core::auth::device::AuthenticatedDevice>> {
-        self.get("/users/me/devices").await
+        self.get(v1::auth::device::LIST).await
     }
 
     /// Revoke a device
     pub async fn revoke_device(&self, device_id: uuid::Uuid) -> Result<()> {
-        let path = format!("/devices/{}/revoke", device_id);
-        let _: serde_json::Value = self.delete(&path).await?;
+        #[derive(Serialize)]
+        struct RevokeDeviceRequest {
+            device_id: uuid::Uuid,
+        }
+
+        let payload = RevokeDeviceRequest { device_id };
+
+        self.post::<_, ()>(v1::auth::device::REVOKE, &payload)
+            .await?;
         Ok(())
     }
 
@@ -589,7 +598,7 @@ impl ApiClient {
         query: ferrex_core::query::MediaQuery,
     ) -> Result<Vec<ferrex_core::query::MediaWithStatus>> {
         // Server endpoint is at /media/query, not /api/v1/media/query
-        self.post("/media/query", &query).await
+        self.post(v1::media::QUERY, &query).await
     }
 }
 

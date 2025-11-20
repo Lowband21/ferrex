@@ -455,6 +455,8 @@ pub struct CastMember {
     pub also_known_as: Vec<String>,
     #[serde(default)]
     pub external_ids: PersonExternalIds,
+    #[serde(default)]
+    pub image_slot: u32,
 }
 
 #[derive(

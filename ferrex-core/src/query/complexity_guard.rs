@@ -282,7 +282,7 @@ mod tests {
                     "Comedy".to_string(),
                 ],
                 year_range: Some(ScalarRange::new(2000, 2023)),
-                rating_range: Some(ScalarRange::new(7.0, 10.0)),
+                rating_range: Some(ScalarRange::new(7.0, 10.0).to_rating_value()),
                 watch_status: Some(crate::watch_status::WatchStatusFilter::InProgress),
                 ..Default::default()
             },

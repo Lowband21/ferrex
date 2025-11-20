@@ -21,7 +21,7 @@
 
 use crate::{
     UiDecade, UiResolution, UiWatchStatus,
-    api_types::{FilterIndicesRequest, ScalarRange},
+    api_types::{FilterIndicesRequest, RatingValue, ScalarRange},
     query::types::{MediaTypeFilter, SortBy, SortOrder},
     watch_status::WatchStatusFilter,
 };
@@ -35,7 +35,7 @@ pub struct FilterRequestParams<'a> {
     pub genres: &'a [String],
     pub decade: Option<UiDecade>,
     pub explicit_year_range: Option<ScalarRange<u16>>,
-    pub rating: Option<ScalarRange<f32>>,
+    pub rating: Option<ScalarRange<RatingValue>>,
     pub resolution: UiResolution,
     pub watch_status: UiWatchStatus,
     pub search: Option<&'a str>,

@@ -50,7 +50,7 @@ pub async fn serve_image_handler(
     }
 
     // Validate category
-    if !["poster", "backdrop", "logo", "still", "profile"].contains(&category.as_str()) {
+    if !["poster", "backdrop", "logo", "thumbnail", "cast"].contains(&category.as_str()) {
         warn!("Invalid image category: {}", category);
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -226,16 +226,7 @@ fn normalize_image_path(original: &FsPath, cache_root: &FsPath) -> PathBuf {
         return original.to_path_buf();
     }
 
-    let s = original.to_string_lossy();
-    if let Some(rest) = s.strip_prefix("./cache/") {
-        return cache_root.join(rest);
-    }
-    if let Some(rest) = s.strip_prefix("cache/") {
-        return cache_root.join(rest);
-    }
-
-    // Assume any other relative path is relative to the cache root
-    cache_root.join(s.as_ref())
+    cache_root.join(original)
 }
 
 /// Map desired width to a TMDB variant string for a given category
@@ -259,8 +250,8 @@ fn map_width_to_tmdb_variant(category: &str, w: u32) -> &'static str {
             781..=1280 => "w1280",
             _ => "original",
         },
-        // Stills: 92, 185, 300, 500, original
-        "still" => match w {
+        // Thumbnails: 92, 185, 300, 500, original
+        "thumbnail" => match w {
             0..=92 => "w92",
             93..=185 => "w185",
             186..=300 => "w300",
@@ -269,8 +260,8 @@ fn map_width_to_tmdb_variant(category: &str, w: u32) -> &'static str {
         },
         // Logos: prefer original to avoid artifacts
         "logo" => "original",
-        // Profiles: 45, 185, h632 (height), map width thresholds to 45 or 185 else original
-        "profile" => match w {
+        // Cast portraits: 45, 185, h632 (height), map width thresholds to 45 or 185 else original
+        "cast" => match w {
             0..=45 => "w45",
             46..=185 => "w185",
             _ => "original",

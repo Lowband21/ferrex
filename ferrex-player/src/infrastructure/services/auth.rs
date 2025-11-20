@@ -3,6 +3,7 @@
 //! Provides abstraction over authentication operations,
 //! replacing direct AuthManager access per RUS-136.
 
+use crate::domains::auth::manager::AutoLoginScope;
 use crate::domains::auth::storage::StoredAuth;
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use async_trait::async_trait;
@@ -104,8 +105,18 @@ pub trait AuthService: Send + Sync {
     /// Save current authentication to keychain for persistence
     async fn save_current_auth(&self) -> RepositoryResult<()>;
 
-    /// Set auto-login preference for the current user
-    async fn set_auto_login(&self, enabled: bool) -> RepositoryResult<()>;
+    /// Set auto-login preference for the current user with a specific scope.
+    async fn set_auto_login_scope(
+        &self,
+        enabled: bool,
+        scope: AutoLoginScope,
+    ) -> RepositoryResult<()>;
+
+    /// Backwards compatibility helper - calls into `set_auto_login_scope` with user scope.
+    async fn set_auto_login(&self, enabled: bool) -> RepositoryResult<()> {
+        self.set_auto_login_scope(enabled, AutoLoginScope::UserDefault)
+            .await
+    }
 }
 
 /// Mock implementation for testing
@@ -357,7 +368,11 @@ pub mod mock {
             Ok(())
         }
 
-        async fn set_auto_login(&self, _enabled: bool) -> RepositoryResult<()> {
+        async fn set_auto_login_scope(
+            &self,
+            _enabled: bool,
+            _scope: AutoLoginScope,
+        ) -> RepositoryResult<()> {
             Ok(())
         }
     }

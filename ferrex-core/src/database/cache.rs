@@ -179,10 +179,8 @@ impl CacheKeys {
         query.filters.year_range.hash(&mut hasher);
         query.filters.resolution_range.hash(&mut hasher);
 
-        // Hash rating range with normalized precision to avoid floating point issues
         if let Some(range) = query.filters.rating_range {
-            ((range.min * 10.0) as i32).hash(&mut hasher);
-            ((range.max * 10.0) as i32).hash(&mut hasher);
+            range.hash(&mut hasher);
         }
 
         if let Some(ref watch_status) = query.filters.watch_status {

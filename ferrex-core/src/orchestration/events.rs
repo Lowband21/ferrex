@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::{LibraryID, Result};
 
 use super::{
-    job::{JobHandle, JobId, JobKind, JobPayload, JobPriority},
+    job::{ImageFetchSource, JobHandle, JobId, JobKind, JobPayload, JobPriority},
     lease::LeaseId,
 };
 
@@ -175,6 +175,9 @@ pub fn stable_path_key(payload: &JobPayload) -> Option<String> {
         JobPayload::MediaAnalyze(job) => Some(job.fingerprint.hash_repr()),
         JobPayload::MetadataEnrich(job) => Some(job.logical_candidate_id.clone()),
         JobPayload::IndexUpsert(job) => Some(job.path_norm.clone()),
-        JobPayload::ImageFetch(job) => Some(job.tmdb_path.clone()),
+        JobPayload::ImageFetch(job) => match &job.source {
+            ImageFetchSource::Tmdb { tmdb_path } => Some(tmdb_path.clone()),
+            ImageFetchSource::EpisodeThumbnail { image_key, .. } => Some(image_key.clone()),
+        },
     }
 }

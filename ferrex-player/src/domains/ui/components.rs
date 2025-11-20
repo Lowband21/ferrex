@@ -73,17 +73,25 @@ fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, Message> {
         format!("person-{}", actor.id).as_bytes(),
     );
 
-    // Use image_for widget with rounded_image_shader
-    let order = actor.order.to_native();
-
-    let profile_image = image_for(person_uuid)
-        .size(ImageSize::Profile)
-        .image_type(ImageType::Person)
-        .width(Length::Fixed(card_width))
-        .height(Length::Fixed(image_height))
-        .radius(CORNER_RADIUS)
-        .image_index(order)
-        .placeholder(Icon::User);
+    let slot = actor.image_slot.to_native();
+    let profile_image: Element<'static, Message> = if slot == u32::MAX {
+        container(icon_text(Icon::User))
+            .width(Length::Fixed(card_width))
+            .height(Length::Fixed(image_height))
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
+            .into()
+    } else {
+        image_for(person_uuid)
+            .size(ImageSize::Profile)
+            .image_type(ImageType::Person)
+            .width(Length::Fixed(card_width))
+            .height(Length::Fixed(image_height))
+            .radius(CORNER_RADIUS)
+            .image_index(slot)
+            .placeholder(Icon::User)
+            .into()
+    };
 
     card_content = card_content.push(profile_image);
 

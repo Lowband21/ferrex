@@ -30,7 +30,7 @@ use ferrex_core::{
     EpisodeID, EpisodeReference, FileSystemEvent, FileSystemEventKind, JobEventPublisher, Library,
     LibraryActorCommand, LibraryActorConfig, LibraryID, LibraryReference, LibraryRootsId,
     LibraryType, Media, MediaDatabase, MediaError, MediaFile, MovieID, MovieReference, Result,
-    SeasonID, SeasonReference, SeriesID, SeriesReference,
+    ScanSseEventType, SeasonID, SeasonReference, SeriesID, SeriesReference,
 };
 use ferrex_server::infra::scan::scan_manager::{
     ScanBroadcastFrame, ScanControlPlane, ScanEventKind, ScanHistoryEntry, ScanLifecycleStatus,
@@ -930,13 +930,7 @@ fn job_event(
 }
 
 fn frame_label(frame: &ScanBroadcastFrame) -> &'static str {
-    match frame.event {
-        ScanEventKind::Started => "scan.started",
-        ScanEventKind::Progress => "scan.progress",
-        ScanEventKind::Quiescing => "scan.quiescing",
-        ScanEventKind::Completed => "scan.completed",
-        ScanEventKind::Failed => "scan.failed",
-    }
+    frame.event.as_sse_event_type().event_name()
 }
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR", fixtures("test_libraries"))]
@@ -1649,10 +1643,23 @@ async fn scan_progress_sse_streams_progress_until_completion(pool: PgPool) -> an
     }
 
     let event_names: Vec<&str> = frames.iter().map(frame_label).collect();
-    assert_eq!(event_names[0], "scan.started");
-    assert!(event_names.iter().any(|name| *name == "scan.progress"));
-    assert!(event_names.iter().any(|name| *name == "scan.quiescing"));
-    assert!(event_names.last().copied() == Some("scan.completed"));
+    assert_eq!(event_names[0], ScanSseEventType::Started.event_name());
+    assert!(
+        event_names
+            .iter()
+            .any(|name| *name == ScanSseEventType::Progress.event_name())
+    );
+    assert!(
+        event_names
+            .iter()
+            .any(|name| *name == ScanSseEventType::Quiescing.event_name())
+    );
+    assert!(
+        event_names
+            .last()
+            .copied()
+            == Some(ScanSseEventType::Completed.event_name())
+    );
     assert!(seen_quiescing, "expected quiescing frame before completion");
 
     let history: Vec<ScanHistoryEntry> = scan_control.history(1).await;

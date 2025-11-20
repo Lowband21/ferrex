@@ -236,13 +236,24 @@ impl fmt::Display for DedupeKey {
     }
 }
 
-/// Background image fetch task for TMDB assets.
+/// Background image fetch task for media imagery.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImageFetchJob {
     pub library_id: LibraryID,
-    pub tmdb_path: String,
+    pub source: ImageFetchSource,
     pub key: MediaImageVariantKey,
     pub priority_hint: ImageFetchPriority,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ImageFetchSource {
+    /// Remote TMDB asset identified by a path fragment.
+    Tmdb { tmdb_path: String },
+    /// Locally generated episode thumbnail sourced from a media file.
+    EpisodeThumbnail {
+        media_file_id: Uuid,
+        image_key: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]

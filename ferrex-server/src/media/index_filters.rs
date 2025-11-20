@@ -1,13 +1,10 @@
-use std::str::FromStr;
-
 use chrono::{Duration, Utc};
 use ferrex_core::{
     FilterIndicesRequest,
-    api_types::ScalarRange,
+    api_types::{RATING_DECIMAL_SCALE, RatingValue, ScalarRange},
     query::types::{MediaTypeFilter, SortBy, SortOrder},
     watch_status::WatchStatusFilter,
 };
-use num_traits::FromPrimitive;
 use sqlx::{Postgres, QueryBuilder, types::BigDecimal};
 use uuid::Uuid;
 
@@ -186,17 +183,14 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
         self.qb.push_bind(range.max as i32);
     }
 
-    fn push_rating_filter(&mut self, range: ScalarRange<f32>) -> Result<(), FilterQueryError> {
+    fn push_rating_filter(
+        &mut self,
+        range: ScalarRange<RatingValue>,
+    ) -> Result<(), FilterQueryError> {
         self.qb.push(" AND mm.vote_average BETWEEN ");
-        let min = BigDecimal::from_f32(range.min)
-            .or_else(|| BigDecimal::from_f64(f64::from(range.min)))
-            .ok_or(FilterQueryError::InvalidNumeric("rating_min"))?;
-        self.qb.push_bind(min);
+        self.qb.push_bind(rating_bound(range.min));
         self.qb.push(" AND ");
-        let max = BigDecimal::from_f32(range.max)
-            .or_else(|| BigDecimal::from_f64(f64::from(range.max)))
-            .ok_or(FilterQueryError::InvalidNumeric("rating_max"))?;
-        self.qb.push_bind(max);
+        self.qb.push_bind(rating_bound(range.max));
         Ok(())
     }
 
@@ -290,6 +284,10 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
 
         Ok(())
     }
+}
+
+fn rating_bound(value: RatingValue) -> BigDecimal {
+    BigDecimal::from(value).with_scale(RATING_DECIMAL_SCALE as i64)
 }
 
 pub fn build_filtered_movie_query(

@@ -147,7 +147,8 @@ pub trait ApiService: Send + Sync {
         &self,
         username: String,
         password: String,
-        pin: Option<String>,
+        display_name: Option<String>,
+        setup_token: Option<String>,
     ) -> RepositoryResult<(ferrex_core::user::User, AuthToken)>;
 
     /// Make a GET request to a public endpoint (no auth)

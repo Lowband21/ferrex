@@ -5,7 +5,7 @@ use crate::infrastructure::{
     services::api::ApiService,
 };
 use ferrex_core::api_routes::v1;
-use ferrex_core::{MediaEvent, MediaIDLike};
+use ferrex_core::{MediaEvent, MediaIDLike, MediaSseEventType};
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 use iced::Subscription;
@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use std::hash::{Hash, Hasher};
+use std::str::FromStr;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -208,30 +209,41 @@ impl MediaEventState {
 
     fn handle_sse_message(&mut self, msg: eventsource_stream::Event) -> Option<Message> {
         // Skip keepalive messages silently
-        if msg.data == "keepalive" || msg.data.is_empty() {
+        if matches!(msg.data.as_str(), "keepalive" | "keep-alive") || msg.data.is_empty() {
             log::debug!("Received media event keepalive");
             return None;
         }
 
-        if msg.event == "media_event" {
-            log::debug!("Received media event: {}", msg.data);
+        match MediaSseEventType::from_str(msg.event.as_str()) {
+            Ok(event_type) => {
+                log::debug!(
+                    "Received media event '{}' with data: {}",
+                    event_type.event_name(),
+                    msg.data
+                );
 
-            match serde_json::from_str::<MediaEvent>(&msg.data) {
-                Ok(event) => self.convert_media_event(event),
-                Err(e) => {
-                    log::error!("Failed to parse media event: {} - Data: {}", e, msg.data);
-                    // Continue listening for valid messages
-                    None
+                match serde_json::from_str::<MediaEvent>(&msg.data) {
+                    Ok(event) => self.convert_media_event(event),
+                    Err(e) => {
+                        log::error!(
+                            "Failed to parse media event: {} - Data: {}",
+                            e,
+                            msg.data
+                        );
+                        // Continue listening for valid messages
+                        None
+                    }
                 }
             }
-        } else {
-            // Unknown event type, log and continue
-            log::debug!(
-                "Unknown media event type: {} with data: {}",
-                msg.event,
-                msg.data
-            );
-            None
+            Err(err) => {
+                log::debug!(
+                    "Unknown media event type: {} with data: {} ({})",
+                    msg.event,
+                    msg.data,
+                    err
+                );
+                None
+            }
         }
     }
 

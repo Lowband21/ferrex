@@ -1151,7 +1151,7 @@ async fn sync_movie_people(
             member.credit_id.clone(),
             member.cast_id.map(|id| id as i64),
             &character,
-            member.order as i32,
+            member.image_slot as i32,
             profile_image_id
         )
         .execute(&mut **tx)
@@ -1528,7 +1528,7 @@ async fn sync_series_people(
             member.credit_id.clone(),
             &character,
             member.order as i32,
-            member.order as i32,
+            member.image_slot as i32,
             profile_image_id
         )
         .execute(&mut **tx)
@@ -1699,7 +1699,7 @@ async fn sync_episode_child_tables(
             member.id as i64,
             member.credit_id.clone(),
             member.character,
-            member.order as i32,
+            member.image_slot as i32,
             profile_image_id
         )
         .execute(&mut **tx)
@@ -1723,7 +1723,7 @@ async fn sync_episode_child_tables(
             member.id as i64,
             member.credit_id.clone(),
             member.character,
-            member.order as i32,
+            member.image_slot as i32,
             profile_image_id
         )
         .execute(&mut **tx)
@@ -3081,6 +3081,7 @@ async fn load_episode_details(
                 record.tiktok_id,
                 record.youtube_id,
             ),
+            image_slot: record.order_index.unwrap_or_default() as u32,
         };
         guest_map.insert(member.id, member);
     }
@@ -3145,12 +3146,13 @@ async fn load_episode_details(
                 record.tiktok_id,
                 record.youtube_id,
             ),
+            image_slot: record.order_index.unwrap_or_default() as u32,
         };
         guest_map.entry(member.id).or_insert(member);
     }
 
     let mut guest_stars: Vec<CastMember> = guest_map.into_values().collect();
-    guest_stars.sort_by_key(|member| member.order);
+    guest_stars.sort_by_key(|member| member.image_slot);
 
     let crew_rows = sqlx::query!(
         r#"SELECT
@@ -3401,6 +3403,7 @@ async fn load_cast(db: &PostgresDatabase, movie_id: Uuid) -> Result<Vec<CastMemb
                 record.tiktok_id,
                 record.youtube_id,
             ),
+            image_slot: record.order_index.unwrap_or_default() as u32,
         })
         .collect())
 }
@@ -3532,6 +3535,7 @@ async fn load_series_cast(db: &PostgresDatabase, series_id: Uuid) -> Result<Vec<
                 record.tiktok_id,
                 record.youtube_id,
             ),
+            image_slot: record.order_index.unwrap_or_default() as u32,
         })
         .collect())
 }

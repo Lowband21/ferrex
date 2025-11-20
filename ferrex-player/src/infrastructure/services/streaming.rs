@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use ferrex_core::api_routes::{utils, v1};
 use std::sync::Arc;
 
 use crate::infrastructure::api_client::ApiClient;
@@ -35,49 +36,22 @@ impl StreamingApiAdapter {
 #[async_trait]
 impl StreamingApiService for StreamingApiAdapter {
     async fn start_transcoding(&self, media_id: &str, profile: &str) -> Result<String> {
-        #[derive(serde::Serialize)]
-        struct StartReq<'a> {
-            media_id: &'a str,
-            profile: &'a str,
-        }
-        #[derive(serde::Deserialize)]
-        struct StartRes {
-            job_id: String,
-        }
-        let res: StartRes = self
-            .client
-            .post("/transcoding/start", &StartReq { media_id, profile })
-            .await?;
-        Ok(res.job_id)
+        // Transcoding pipeline is temporarily unavailable; signal cached job
+        let _ = profile; // profile selection is ignored for direct streaming
+        Ok(format!("cached_{}", media_id))
     }
 
     async fn check_transcoding_status(&self, job_id: &str) -> Result<TranscodingStatus> {
-        #[derive(serde::Deserialize)]
-        struct StatusRes {
-            job_id: String,
-            state: String,
-            progress: Option<f32>,
-            message: Option<String>,
-        }
-        let res: StatusRes = self
-            .client
-            .get(&format!("/transcoding/status/{}", job_id))
-            .await?;
         Ok(TranscodingStatus {
-            job_id: res.job_id,
-            state: res.state,
-            progress: res.progress,
-            message: res.message,
+            job_id: job_id.to_string(),
+            state: "completed".to_string(),
+            progress: Some(1.0),
+            message: Some("Direct streaming available".to_string()),
         })
     }
 
     async fn get_master_playlist(&self, media_id: &str) -> Result<String> {
-        // Some endpoints in the codebase use non-versioned paths; mirror existing behavior
-        // If server returns JSON-wrapped data, adjust accordingly later
-        let playlist: String = self
-            .client
-            .get(&format!("/hls/{}/master.m3u8", media_id))
-            .await?;
-        Ok(playlist)
+        let stream_path = utils::replace_param(v1::stream::PLAY, "{id}", media_id);
+        Ok(self.client.build_url(&stream_path, false))
     }
 }

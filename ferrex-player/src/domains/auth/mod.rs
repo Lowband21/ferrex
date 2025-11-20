@@ -17,7 +17,6 @@ pub mod update;
 pub mod update_handlers;
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::domains::ui::views::first_run::FirstRunState;
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use ferrex_core::rbac::UserPermissions;
 use iced::Task;
@@ -34,7 +33,6 @@ pub struct AuthDomainState {
     pub is_authenticated: bool,
     pub auth_flow: AuthenticationFlow,
     pub user_permissions: Option<UserPermissions>,
-    pub first_run_state: FirstRunState,
     pub auto_login_enabled: bool,
     pub auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
 }
@@ -57,7 +55,6 @@ impl AuthDomainState {
             is_authenticated: false,
             auth_flow: AuthenticationFlow::default(),
             user_permissions: None,
-            first_run_state: FirstRunState::default(),
             auto_login_enabled: false,
             auth_service,
         }
@@ -71,7 +68,6 @@ impl std::fmt::Debug for AuthDomainState {
             .field("is_authenticated", &self.is_authenticated)
             .field("auth_flow", &self.auth_flow)
             .field("user_permissions", &self.user_permissions)
-            .field("first_run_state", &self.first_run_state)
             .field("auto_login_enabled", &self.auto_login_enabled)
             .field("auth_service", &"AuthService(..)")
             .finish()

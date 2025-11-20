@@ -5,6 +5,7 @@ use crate::domains::auth::errors::{
 use crate::domains::auth::state_types::{AuthState, AuthStateStore};
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
+use ferrex_core::api_routes::v1;
 use ferrex_core::api_types::ApiResponse;
 use ferrex_core::auth::{AuthResult as ServerAuthResult, DeviceInfo, Platform};
 use ferrex_core::rbac::UserPermissions;
@@ -57,6 +58,14 @@ pub struct PlayerAuthResult {
     pub user: User,
     pub permissions: UserPermissions,
     pub device_has_pin: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoLoginScope {
+    /// Only update device-local state (trust record, cache).
+    DeviceOnly,
+    /// Update both device-local state and the user-wide server preference.
+    UserDefault,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -499,8 +508,8 @@ impl AuthManager {
     }
 
     async fn fetch_user_and_permissions(&self) -> AuthResult<(User, UserPermissions)> {
-        let user: User = self.fetch_api_data("/users/me").await?;
-        let permissions: UserPermissions = self.fetch_api_data("/users/me/permissions").await?;
+        let user: User = self.fetch_api_data(v1::users::CURRENT).await?;
+        let permissions: UserPermissions = self.fetch_api_data(v1::roles::MY_PERMISSIONS).await?;
         Ok((user, permissions))
     }
 
@@ -608,7 +617,7 @@ impl AuthManager {
                 .await;
 
             temp_client
-                .post("/auth/refresh", &RefreshTokenRequest { refresh_token })
+                .post(v1::auth::REFRESH, &RefreshTokenRequest { refresh_token })
                 .await
                 .map_err(|e| {
                     warn!("[AuthManager] Token refresh failed: {}", e);
@@ -716,7 +725,7 @@ impl AuthManager {
         // Call login endpoint
         let token: AuthToken = self
             .api_client
-            .post("/auth/login", &request)
+            .post(v1::auth::LOGIN, &request)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -732,14 +741,14 @@ impl AuthManager {
         // Get user profile
         let user: User = self
             .api_client
-            .get("/users/me")
+            .get(v1::users::CURRENT)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         // Get user permissions
         let permissions: UserPermissions = self
             .api_client
-            .get("/users/me/permissions")
+            .get(v1::roles::MY_PERMISSIONS)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -776,7 +785,7 @@ impl AuthManager {
         // Call register endpoint
         let token: AuthToken = self
             .api_client
-            .post("/auth/register", &request)
+            .post(v1::auth::REGISTER, &request)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -786,14 +795,14 @@ impl AuthManager {
         // Get user profile
         let user: User = self
             .api_client
-            .get("/users/me")
+            .get(v1::users::CURRENT)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         // Get user permissions
         let permissions: UserPermissions = self
             .api_client
-            .get("/users/me/permissions")
+            .get(v1::roles::MY_PERMISSIONS)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -826,7 +835,7 @@ impl AuthManager {
             let _ = tokio::time::timeout(
                 std::time::Duration::from_secs(2),
                 api_client
-                    .post::<EmptyRequest, serde_json::Value>("/auth/logout", &EmptyRequest {}),
+                    .post::<EmptyRequest, serde_json::Value>(v1::auth::LOGOUT, &EmptyRequest {}),
             )
             .await;
         });
@@ -858,7 +867,7 @@ impl AuthManager {
         let request = SetPinRequest { device_id, pin };
 
         self.api_client
-            .post::<_, serde_json::Value>("/auth/device/pin/set", &request)
+            .post::<_, serde_json::Value>(v1::auth::device::SET_PIN, &request)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -883,7 +892,7 @@ impl AuthManager {
         };
 
         self.api_client
-            .post::<_, serde_json::Value>("/auth/device/pin/change", &request)
+            .post::<_, serde_json::Value>(v1::auth::device::CHANGE_PIN, &request)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -912,12 +921,16 @@ impl AuthManager {
         );
 
         // Note: This endpoint doesn't require authentication - it's checking if a device can use PIN
+        let status_path = format!(
+            "{}?user_id={}&device_id={}",
+            v1::auth::device::STATUS,
+            user_id,
+            device_id
+        );
+
         let status: DeviceAuthStatus = self
             .api_client
-            .get(&format!(
-                "/auth/device/status?user_id={}&device_id={}",
-                user_id, device_id
-            ))
+            .get(&status_path)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -982,14 +995,14 @@ impl AuthManager {
         // Get user details
         let user: User = self
             .api_client
-            .get("/users/me")
+            .get(v1::users::CURRENT)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         // Get user permissions
         let permissions: UserPermissions = self
             .api_client
-            .get("/users/me/permissions")
+            .get(v1::roles::MY_PERMISSIONS)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -1094,8 +1107,12 @@ impl AuthManager {
         }
     }
 
-    /// Set auto-login preference for current user and device
-    pub async fn set_auto_login(&self, enabled: bool) -> AuthResult<()> {
+    /// Set auto-login preference scoped to either the device or the user default.
+    pub async fn set_auto_login_scope(
+        &self,
+        enabled: bool,
+        scope: AutoLoginScope,
+    ) -> AuthResult<()> {
         let user = self
             .get_current_user()
             .await
@@ -1112,34 +1129,36 @@ impl AuthManager {
                 )))
             })?;
 
-        // Update server-side preference so settings stay in sync across devices
-        let request = json!({ "auto_login_enabled": enabled });
-        self.api_client
-            .put::<_, serde_json::Value>("/users/me/preferences", &request)
-            .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
-
         if !enabled {
             let mut guard = self.device_trust_expires_at.lock().await;
             *guard = None;
         }
 
-        // Update in-memory auth state with the new preference so UI stays consistent
-        if let AuthState::Authenticated {
-            token,
-            permissions,
-            server_url,
-            ..
-        } = self.auth_state.current()
-        {
-            let mut updated_user = user.clone();
-            updated_user.preferences.auto_login_enabled = enabled;
-            self.auth_state.authenticate(
-                updated_user,
-                token.clone(),
-                permissions.clone(),
+        if matches!(scope, AutoLoginScope::UserDefault) {
+            // Update server-side preference so settings stay in sync across devices
+            let request = json!({ "auto_login_enabled": enabled });
+            self.api_client
+                .put::<_, serde_json::Value>(v1::users::CURRENT_PREFERENCES, &request)
+                .await
+                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+
+            // Update in-memory auth state with the new preference so UI stays consistent
+            if let AuthState::Authenticated {
+                token,
+                permissions,
                 server_url,
-            );
+                ..
+            } = self.auth_state.current()
+            {
+                let mut updated_user = user.clone();
+                updated_user.preferences.auto_login_enabled = enabled;
+                self.auth_state.authenticate(
+                    updated_user,
+                    token.clone(),
+                    permissions.clone(),
+                    server_url,
+                );
+            }
         }
 
         // Persist the updated preference to storage so auto-login reflects user intent
@@ -1148,6 +1167,12 @@ impl AuthManager {
         }
 
         Ok(())
+    }
+
+    /// Backwards-compatible helper that applies the user-default scope.
+    pub async fn set_auto_login(&self, enabled: bool) -> AuthResult<()> {
+        self.set_auto_login_scope(enabled, AutoLoginScope::UserDefault)
+            .await
     }
 
     /// Get all users (for user selection screen)
@@ -1171,7 +1196,7 @@ impl AuthManager {
         let users: Vec<UserListItemDto> = if has_auth {
             // Use authenticated endpoint for better information
             self.api_client
-                .get("/v1/users/list")
+                .get(v1::users::LIST_AUTH)
                 .await
                 .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?
         } else {
@@ -1224,7 +1249,7 @@ impl AuthManager {
 
         let status: SetupStatus = self
             .api_client
-            .get("/setup/status")
+            .get(v1::setup::STATUS)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
         Ok(status.needs_setup)
@@ -1263,11 +1288,11 @@ impl AuthManager {
             remember_device,
         };
 
-        let result: ServerAuthResult =
-            self.api_client
-                .post("/auth/device/login", &request)
-                .await
-                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let result: ServerAuthResult = self
+            .api_client
+            .post(v1::auth::device::LOGIN, &request)
+            .await
+            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         // Log the received token for debugging
         info!(
@@ -1280,18 +1305,18 @@ impl AuthManager {
         // Get user and permissions
         let mut user: User = self
             .api_client
-            .get("/users/me")
+            .get(v1::users::CURRENT)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
         let permissions: UserPermissions = self
             .api_client
-            .get("/users/me/permissions")
+            .get(v1::roles::MY_PERMISSIONS)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         // Synchronize auto-login preferences based on user selection
-        self.set_auto_login(remember_device).await?;
-        user.preferences.auto_login_enabled = remember_device;
+        self.set_auto_login_scope(remember_device, AutoLoginScope::DeviceOnly)
+            .await?;
 
         Ok(PlayerAuthResult {
             user,
@@ -1316,7 +1341,7 @@ impl AuthManager {
 
         let result: ServerAuthResult = self
             .api_client
-            .post("/auth/device/pin", &request)
+            .post(v1::auth::device::PIN_LOGIN, &request)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -1325,12 +1350,12 @@ impl AuthManager {
         // Get user and permissions
         let user: User = self
             .api_client
-            .get("/users/me")
+            .get(v1::users::CURRENT)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
         let permissions: UserPermissions = self
             .api_client
-            .get("/users/me/permissions")
+            .get(v1::roles::MY_PERMISSIONS)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 

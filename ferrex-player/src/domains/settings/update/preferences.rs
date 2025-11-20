@@ -1,6 +1,7 @@
 use super::super::messages::Message;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::auth::errors::{AuthError, NetworkError};
+use crate::domains::auth::manager::AutoLoginScope;
 use crate::infrastructure::services::api::ApiService;
 use crate::infrastructure::services::auth::AuthService;
 use crate::state_refactored::State;
@@ -22,7 +23,12 @@ pub fn handle_toggle_auto_login(state: &mut State, enabled: bool) -> DomainUpdat
         async move {
             // First update the device-specific setting
             auth_service
-                .set_auto_login(enabled)
+                .set_auto_login_scope(enabled, AutoLoginScope::UserDefault)
+                .await
+                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+
+            auth_service
+                .set_auto_login_scope(enabled, AutoLoginScope::DeviceOnly)
                 .await
                 .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 

@@ -87,9 +87,6 @@ impl BackgroundShaderState {
         );
 
         match view {
-            ViewState::FirstRunSetup => {
-                // No depth regions for first-run setup
-            }
             ViewState::Library => {
                 // Use consistent header height (errors will be toast notifications)
                 let header_height = crate::infrastructure::constants::layout::header::HEIGHT;

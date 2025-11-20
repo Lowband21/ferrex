@@ -394,6 +394,43 @@ impl<T> ScalarRange<T> {
     }
 }
 
+/// Ratings are stored as tenths to avoid floating point hashing/serialization issues.
+pub type RatingValue = u16;
+
+/// Scaling factor used when converting between float ratings and stored values.
+pub const RATING_SCALE_FACTOR: RatingValue = 10;
+
+/// BigDecimal scale that represents the `RATING_SCALE_FACTOR` when materializing for SQL.
+pub const RATING_DECIMAL_SCALE: u64 = 1;
+
+#[inline]
+pub fn rating_value_from_f32(value: f32) -> RatingValue {
+    let clamped = value.clamp(0.0, 10.0);
+    (clamped * RATING_SCALE_FACTOR as f32).round() as RatingValue
+}
+
+#[inline]
+pub fn rating_value_to_f32(value: RatingValue) -> f32 {
+    value as f32 / RATING_SCALE_FACTOR as f32
+}
+
+impl ScalarRange<f32> {
+    /// Convert a floating-point range into a scaled rating range (tenths of a point).
+    pub fn to_rating_value(self) -> ScalarRange<RatingValue> {
+        ScalarRange::new(
+            rating_value_from_f32(self.min),
+            rating_value_from_f32(self.max),
+        )
+    }
+}
+
+impl ScalarRange<RatingValue> {
+    /// Convert a scaled rating range back into floating-point representation.
+    pub fn to_f32(self) -> ScalarRange<f32> {
+        ScalarRange::new(rating_value_to_f32(self.min), rating_value_to_f32(self.max))
+    }
+}
+
 /// Request payload for index-based filtering
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilterIndicesRequest {
@@ -404,8 +441,8 @@ pub struct FilterIndicesRequest {
     pub genres: Vec<String>,
     /// Filter by inclusive year range (release year)
     pub year_range: Option<ScalarRange<u16>>,
-    /// Filter by inclusive rating range (vote_average, 0-10 scale)
-    pub rating_range: Option<ScalarRange<f32>>,
+    /// Filter by inclusive rating range in tenths of a point (0-100 => 0.0-10.0)
+    pub rating_range: Option<ScalarRange<RatingValue>>,
     /// Filter by inclusive resolution range (vertical pixels)
     pub resolution_range: Option<ScalarRange<u16>>,
     /// Optional watch status filter derived from authenticated user

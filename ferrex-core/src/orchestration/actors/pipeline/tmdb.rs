@@ -15,7 +15,7 @@ use crate::TvParser;
 use crate::image::records::MediaImageVariantKey;
 use crate::image_service::{ImageService, TmdbImageSize};
 use crate::orchestration::actors::messages::ParentDescriptors;
-use crate::orchestration::job::{ImageFetchJob, ImageFetchPriority};
+use crate::orchestration::job::{ImageFetchJob, ImageFetchPriority, ImageFetchSource};
 use crate::providers::TmdbApiProvider;
 use crate::types::details::{
     AlternativeTitle, CastMember, CollectionInfo, ContentRating, CrewMember, EnhancedMovieDetails,
@@ -274,7 +274,9 @@ impl TmdbMetadataActor {
         for size in TmdbImageSize::recommended_for_type(image_type) {
             jobs.push(ImageFetchJob {
                 library_id,
-                tmdb_path: tmdb_path.to_string(),
+                source: ImageFetchSource::Tmdb {
+                    tmdb_path: tmdb_path.to_string(),
+                },
                 key: MediaImageVariantKey {
                     media_type: media_type.to_string(),
                     media_id,
@@ -285,6 +287,37 @@ impl TmdbMetadataActor {
                 priority_hint,
             });
         }
+
+        Ok(())
+    }
+
+    async fn queue_local_episode_thumbnail(
+        &self,
+        library_id: LibraryID,
+        episode: &EpisodeReference,
+        jobs: &mut Vec<ImageFetchJob>,
+    ) -> Result<()> {
+        let image_key = format!("local/episode/{}/thumbnail.jpg", episode.file.id);
+
+        self.image_service
+            .link_to_media("episode", episode.id.0, &image_key, "thumbnail", 0, true)
+            .await?;
+
+        jobs.push(ImageFetchJob {
+            library_id,
+            source: ImageFetchSource::EpisodeThumbnail {
+                media_file_id: episode.file.id,
+                image_key,
+            },
+            key: MediaImageVariantKey {
+                media_type: "episode".to_string(),
+                media_id: episode.id.0,
+                image_type: "thumbnail".to_string(),
+                order_index: 0,
+                variant: "original".to_string(),
+            },
+            priority_hint: ImageFetchPriority::Backdrop,
+        });
 
         Ok(())
     }
@@ -303,9 +336,8 @@ impl TmdbMetadataActor {
         jobs: &mut Vec<ImageFetchJob>,
     ) -> Result<()> {
         let mut seen_people = HashSet::new();
-        let mut used_order_indices = HashSet::new();
 
-        for (idx, member) in cast.iter().enumerate() {
+        for member in cast {
             if !seen_people.insert(member.id) {
                 continue;
             }
@@ -319,30 +351,20 @@ impl TmdbMetadataActor {
                 continue;
             };
 
-            let person_uuid = Self::person_media_uuid(member.id);
-
-            // Prefer the TMDB-provided cast order so the player and server agree on indices.
-            let preferred_order = i32::try_from(member.order).ok();
-            let mut order_index = preferred_order.unwrap_or_else(|| idx as i32);
-
-            // Guard against duplicate order values by falling back to the iteration index.
-            if used_order_indices.contains(&order_index) {
-                order_index = idx as i32;
-                while used_order_indices.contains(&order_index) {
-                    order_index += 1;
-                }
+            if member.image_slot == u32::MAX {
+                continue;
             }
 
-            used_order_indices.insert(order_index);
+            let person_uuid = Self::person_media_uuid(member.id);
 
             self.queue_image_job(
                 library_id,
                 "person",
                 person_uuid,
-                "profile",
-                order_index,
+                "cast",
+                member.image_slot as i32,
                 Some(path),
-                idx == 0,
+                member.image_slot == 0,
                 ImageFetchPriority::Profile,
                 jobs,
             )
@@ -610,25 +632,37 @@ impl TmdbMetadataActor {
     }
 
     fn map_cast(credits: &MovieCreditsResult) -> Vec<CastMember> {
+        let mut next_slot: u32 = 0;
         credits
             .cast
             .iter()
             .take(20)
-            .map(|c| CastMember {
-                id: c.person.id as u64,
-                credit_id: Some(c.credit.credit_id.clone()),
-                cast_id: Some(c.cast_id as u64),
-                name: c.person.name.clone(),
-                original_name: Some(c.credit.original_name.clone()),
-                character: c.character.clone(),
-                profile_path: c.person.profile_path.clone(),
-                order: c.order as u32,
-                gender: c.person.gender.map(|g| g as u8),
-                known_for_department: c.credit.known_for_department.clone(),
-                adult: Some(c.credit.adult),
-                popularity: Some(c.credit.popularity as f32),
-                also_known_as: Vec::new(),
-                external_ids: PersonExternalIds::default(),
+            .map(|c| {
+                let slot = if c.person.profile_path.is_some() {
+                    let assigned = next_slot;
+                    next_slot = next_slot.saturating_add(1);
+                    assigned
+                } else {
+                    u32::MAX
+                };
+
+                CastMember {
+                    id: c.person.id as u64,
+                    credit_id: Some(c.credit.credit_id.clone()),
+                    cast_id: Some(c.cast_id as u64),
+                    name: c.person.name.clone(),
+                    original_name: Some(c.credit.original_name.clone()),
+                    character: c.character.clone(),
+                    profile_path: c.person.profile_path.clone(),
+                    order: c.order as u32,
+                    gender: c.person.gender.map(|g| g as u8),
+                    known_for_department: c.credit.known_for_department.clone(),
+                    adult: Some(c.credit.adult),
+                    popularity: Some(c.credit.popularity as f32),
+                    also_known_as: Vec::new(),
+                    external_ids: PersonExternalIds::default(),
+                    image_slot: slot,
+                }
             })
             .collect()
     }
@@ -828,38 +862,50 @@ impl TmdbMetadataActor {
     }
 
     fn map_series_cast(credits: &TVShowAggregateCreditsResult) -> Vec<CastMember> {
+        let mut next_slot: u32 = 0;
         credits
             .cast
             .iter()
             .take(20)
-            .map(|c| CastMember {
-                id: c.inner.id as u64,
-                credit_id: c.roles.first().map(|role| role.credit_id.clone()),
-                cast_id: None,
-                name: c.inner.name.clone(),
-                original_name: Some(c.inner.original_name.clone()),
-                character: c
-                    .roles
-                    .iter()
-                    .map(|role| role.character.clone())
-                    .find(|character| !character.is_empty())
-                    .unwrap_or_else(|| {
-                        c.roles
-                            .first()
-                            .map(|role| role.character.clone())
-                            .unwrap_or_default()
-                    }),
-                profile_path: c.inner.profile_path.clone(),
-                order: c.order as u32,
-                gender: match c.inner.gender {
-                    0 => None,
-                    value => Some(value as u8),
-                },
-                known_for_department: Some(c.inner.known_for_department.clone()),
-                adult: Some(c.inner.adult),
-                popularity: Some(c.inner.popularity as f32),
-                also_known_as: Vec::new(),
-                external_ids: PersonExternalIds::default(),
+            .map(|c| {
+                let slot = if c.inner.profile_path.is_some() {
+                    let assigned = next_slot;
+                    next_slot = next_slot.saturating_add(1);
+                    assigned
+                } else {
+                    u32::MAX
+                };
+
+                CastMember {
+                    id: c.inner.id as u64,
+                    credit_id: c.roles.first().map(|role| role.credit_id.clone()),
+                    cast_id: None,
+                    name: c.inner.name.clone(),
+                    original_name: Some(c.inner.original_name.clone()),
+                    character: c
+                        .roles
+                        .iter()
+                        .map(|role| role.character.clone())
+                        .find(|character| !character.is_empty())
+                        .unwrap_or_else(|| {
+                            c.roles
+                                .first()
+                                .map(|role| role.character.clone())
+                                .unwrap_or_default()
+                        }),
+                    profile_path: c.inner.profile_path.clone(),
+                    order: c.order as u32,
+                    gender: match c.inner.gender {
+                        0 => None,
+                        value => Some(value as u8),
+                    },
+                    known_for_department: Some(c.inner.known_for_department.clone()),
+                    adult: Some(c.inner.adult),
+                    popularity: Some(c.inner.popularity as f32),
+                    also_known_as: Vec::new(),
+                    external_ids: PersonExternalIds::default(),
+                    image_slot: slot,
+                }
             })
             .collect()
     }
@@ -1318,19 +1364,43 @@ impl TmdbMetadataActor {
             .create_episode_reference(&command, &series_ref, &season_ref, metadata.clone(), &info)
             .await?;
 
-        if let MediaDetailsOption::Details(TmdbDetails::Episode(details)) = &episode_ref.details {
-            self.queue_image_job(
-                command.job.library_id,
-                "episode",
-                episode_ref.id.0,
-                "still",
-                0,
-                details.still_path.as_deref(),
-                true,
-                ImageFetchPriority::Backdrop,
-                &mut image_jobs,
-            )
-            .await?;
+        match &episode_ref.details {
+            MediaDetailsOption::Details(TmdbDetails::Episode(details)) => {
+                if let Some(still) = details
+                    .still_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    self.queue_image_job(
+                        command.job.library_id,
+                        "episode",
+                        episode_ref.id.0,
+                        "thumbnail",
+                        0,
+                        Some(still),
+                        true,
+                        ImageFetchPriority::Backdrop,
+                        &mut image_jobs,
+                    )
+                    .await?;
+                } else {
+                    self.queue_local_episode_thumbnail(
+                        command.job.library_id,
+                        &episode_ref,
+                        &mut image_jobs,
+                    )
+                    .await?;
+                }
+            }
+            _ => {
+                self.queue_local_episode_thumbnail(
+                    command.job.library_id,
+                    &episode_ref,
+                    &mut image_jobs,
+                )
+                .await?;
+            }
         }
 
         Self::annotate_episode_context(

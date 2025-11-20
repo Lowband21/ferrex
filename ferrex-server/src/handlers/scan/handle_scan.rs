@@ -331,13 +331,7 @@ pub async fn media_events_sse_handler(
 }
 
 fn scan_frame_to_event(frame: ScanBroadcastFrame) -> Option<Event> {
-    let name = match frame.event {
-        ScanEventKind::Started => "scan.started",
-        ScanEventKind::Progress => "scan.progress",
-        ScanEventKind::Quiescing => "scan.quiescing",
-        ScanEventKind::Completed => "scan.completed",
-        ScanEventKind::Failed => "scan.failed",
-    };
+    let name = frame.event.as_sse_event_type().event_name();
 
     match serde_json::to_string(&frame.payload) {
         Ok(json) => {
@@ -353,21 +347,7 @@ fn scan_frame_to_event(frame: ScanBroadcastFrame) -> Option<Event> {
 }
 
 fn media_event_to_sse(event: MediaEvent) -> Option<Event> {
-    let name = match &event {
-        MediaEvent::MovieAdded { .. } => "media.movie_added",
-        MediaEvent::SeriesAdded { .. } => "media.series_added",
-        MediaEvent::SeasonAdded { .. } => "media.season_added",
-        MediaEvent::EpisodeAdded { .. } => "media.episode_added",
-        MediaEvent::MovieUpdated { .. } => "media.movie_updated",
-        MediaEvent::SeriesUpdated { .. } => "media.series_updated",
-        MediaEvent::SeasonUpdated { .. } => "media.season_updated",
-        MediaEvent::EpisodeUpdated { .. } => "media.episode_updated",
-        MediaEvent::MediaDeleted { .. } => "media.deleted",
-        MediaEvent::ScanStarted { .. } => "scan.started",
-        MediaEvent::ScanProgress { .. } => "scan.progress",
-        MediaEvent::ScanCompleted { .. } => "scan.completed",
-        MediaEvent::ScanFailed { .. } => "scan.failed",
-    };
+    let name = event.sse_event_type().event_name();
 
     match serde_json::to_string(&event) {
         Ok(json) => Some(Event::default().event(name).data(json)),

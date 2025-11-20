@@ -2,6 +2,7 @@ use crate::{
     EpisodeID, EpisodeNumber, EpisodeURL, LibraryID, MediaDetailsOption, MediaError, MediaFile,
     MediaID, MediaIDLike, MovieID, MovieTitle, MovieURL, Result, SeasonID, SeasonNumber, SeasonURL,
     SeriesID, SeriesTitle, SeriesURL, TmdbDetails, UrlLike,
+    api_types::{RATING_DECIMAL_SCALE, RatingValue},
     database::{postgres::PostgresDatabase, traits::MediaDatabaseTrait},
     query::*,
     types::media::{Media, *},
@@ -105,9 +106,9 @@ impl PostgresDatabase {
         // Add rating range filter
         if let Some(range) = &query.filters.rating_range {
             sql_builder.push(" AND mm.vote_average BETWEEN ");
-            sql_builder.push_bind(BigDecimal::from_str(&range.min.to_string()).unwrap());
+            sql_builder.push_bind(rating_bound(range.min));
             sql_builder.push(" AND ");
-            sql_builder.push_bind(BigDecimal::from_str(&range.max.to_string()).unwrap());
+            sql_builder.push_bind(rating_bound(range.max));
         }
 
         // Add search query if present
@@ -205,9 +206,9 @@ impl PostgresDatabase {
         // Add rating range filter
         if let Some(range) = &query.filters.rating_range {
             sql_builder.push(" AND sm.vote_average BETWEEN ");
-            sql_builder.push_bind(BigDecimal::from_str(&range.min.to_string()).unwrap());
+            sql_builder.push_bind(rating_bound(range.min));
             sql_builder.push(" AND ");
-            sql_builder.push_bind(BigDecimal::from_str(&range.max.to_string()).unwrap());
+            sql_builder.push_bind(rating_bound(range.max));
         }
 
         sql_builder.push(
@@ -1163,4 +1164,8 @@ impl PostgresDatabase {
 
         Ok((None, completed.is_some()))
     }
+}
+
+fn rating_bound(value: RatingValue) -> BigDecimal {
+    BigDecimal::from(value).with_scale(RATING_DECIMAL_SCALE as i64)
 }

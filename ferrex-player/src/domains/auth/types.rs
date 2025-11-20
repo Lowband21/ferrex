@@ -2,7 +2,6 @@
 
 use crate::domains::auth::dto::UserListItemDto;
 use crate::domains::auth::security::secure_credential::SecureCredential;
-use crate::domains::ui::views::first_run::FirstRunState;
 use ferrex_core::user::User;
 
 /// Authentication credential type

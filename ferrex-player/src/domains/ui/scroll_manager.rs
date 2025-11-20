@@ -113,9 +113,6 @@ impl ViewIdentifier for ViewState {
             ViewState::UserSettings => {
                 ScrollPositionManager::generate_key("user_settings", None, None)
             }
-            ViewState::FirstRunSetup => {
-                ScrollPositionManager::generate_key("first_run", None, None)
-            }
             ViewState::Player | ViewState::LoadingVideo { .. } | ViewState::VideoError { .. } => {
                 // These views don't need scroll persistence
                 ScrollPositionManager::generate_key("no_scroll", None, None)
