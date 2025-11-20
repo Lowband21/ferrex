@@ -162,8 +162,7 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                                     ImageSize::Poster,
                                 );
                                 let budget = crate::infra::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
-                                let preloader =
-                                    texture_preloader(handles, budget);
+                                //let preloader = texture_preloader(handles, budget);
 
                                 let grid = virtual_movie_references_grid(
                                     &lib_state.cached_index_ids,
@@ -173,7 +172,8 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                                     state,
                                 );
 
-                                column![preloader, grid].into()
+                                // column![preloader, grid].into()
+                                grid
                             }
                             LibraryType::Series => {
                                 let visible_range =
@@ -200,8 +200,7 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                                     ImageSize::Poster,
                                 );
                                 let budget = crate::infra::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
-                                let preloader =
-                                    texture_preloader(handles, budget);
+                                // let preloader = texture_preloader(handles, budget);
 
                                 let grid = virtual_series_references_grid(
                                     &lib_state.cached_index_ids,
@@ -211,7 +210,8 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                                     state,
                                 );
 
-                                column![preloader, grid].into()
+                                // column![preloader, grid].into()
+                                grid
                             }
                         },
                         TabState::All(_all_state) => {
