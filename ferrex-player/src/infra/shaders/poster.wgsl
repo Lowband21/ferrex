@@ -558,7 +558,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // For backface, use theme color with stronger dimming
     if input.is_backface > 0.5 {
-        linear_rgb = input.theme_color; // * 0.5;
+        linear_rgb = input.theme_color * 0.4;
     } else {
         // Front face: build cross-fade from dimmed placeholder to texture
         // Invalid UVs are now signaled by out-of-range coordinates (negative or > 1.0)

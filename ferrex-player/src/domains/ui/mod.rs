@@ -32,12 +32,9 @@ use crate::{
         scroll_manager::ScrollPositionManager,
         types::{DisplayMode, ViewState},
     },
-    infra::{
-        repository::{
-            EpisodeYoke, MovieYoke, SeasonYoke, SeriesYoke,
-            accessor::{Accessor, ReadOnly},
-        },
-        widgets::poster::poster_animation_types::PosterAnimationType,
+    infra::repository::{
+        EpisodeYoke, MovieYoke, SeasonYoke, SeriesYoke,
+        accessor::{Accessor, ReadOnly},
     },
 };
 use ferrex_core::player_prelude::{
@@ -51,12 +48,10 @@ use std::time::Instant;
 use uuid::Uuid;
 use yoke_cache::YokeCache;
 
-/// UI domain state - moved from monolithic State
+/// UI domain state
 #[derive(Debug)]
 pub struct UIDomainState {
     pub view: ViewState,
-
-    pub default_widget_animation: PosterAnimationType,
 
     pub repo_accessor: Accessor<ReadOnly>,
 

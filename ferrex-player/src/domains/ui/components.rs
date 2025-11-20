@@ -3,7 +3,9 @@ use crate::domains::ui::messages::UiMessage;
 use crate::domains::ui::widgets::image_for;
 use crate::infra::constants::layout::carousel::ITEM_SPACING;
 use crate::infra::constants::poster::CORNER_RADIUS;
-use crate::infra::widgets::poster::poster_animation_types::PosterAnimationType;
+use crate::infra::widgets::poster::poster_animation_types::{
+    AnimationBehavior, PosterAnimationType,
+};
 use crate::{domains::ui::theme, state::State};
 
 use ferrex_core::player_prelude::{ArchivedCastMember, ImageSize, ImageType};
@@ -101,7 +103,9 @@ fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, UiMessage> {
             image_for(uuid)
                 .size(ImageSize::Profile)
                 .image_type(ImageType::Person)
-                .animation(PosterAnimationType::flip())
+                .animation_behavior(AnimationBehavior::constant(
+                    PosterAnimationType::flip(),
+                ))
                 .width(Length::Fixed(card_width))
                 .height(Length::Fixed(image_height))
                 .radius(CORNER_RADIUS)

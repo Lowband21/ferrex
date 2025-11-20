@@ -129,6 +129,12 @@ pub struct AnimationBehavior {
     fresh_window: Duration,
 }
 
+impl Default for AnimationBehavior {
+    fn default() -> AnimationBehavior {
+        AnimationBehavior::fade_slow_then_quick()
+    }
+}
+
 impl AnimationBehavior {
     /// Always use the same animation for every render.
     pub fn constant(animation: PosterAnimationType) -> Self {
@@ -161,10 +167,26 @@ impl AnimationBehavior {
         }
     }
 
-    /// Convenience for highlighting newly added media: flip once, then fade as normal.
+    /// Convenience for highlighting media on first view: flip once, then fade as normal.
     pub fn flip_then_fade() -> Self {
         Self::first_then(
         PosterAnimationType::flip(),
+        PosterAnimationType::Fade {
+            duration: Duration::from_millis(
+                crate::infra::constants::layout::animation::TEXTURE_FADE_DURATION_MS,
+            ),
+        },
+    )
+    }
+
+    /// Slower on first view, then back to the normal quick fade.
+    pub fn fade_slow_then_quick() -> Self {
+        Self::first_then(
+        PosterAnimationType::Fade {
+            duration: Duration::from_millis(
+                crate::infra::constants::layout::animation::TEXTURE_FADE_INITIAL_DURATION_MS,
+            ),
+        },
         PosterAnimationType::Fade {
             duration: Duration::from_millis(
                 crate::infra::constants::layout::animation::TEXTURE_FADE_DURATION_MS,
@@ -179,7 +201,7 @@ impl AnimationBehavior {
     pub fn from_primary(animation: PosterAnimationType) -> Self {
         match animation {
             PosterAnimationType::Flip { .. }
-            | PosterAnimationType::Fade { .. } => Self::flip_then_fade(),
+            | PosterAnimationType::Fade { .. } => Self::fade_slow_then_quick(),
             _ => Self::constant(animation),
         }
     }

@@ -1,11 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use iced::Task;
-
 use crate::{
-    common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
-    domains::library::messages::LibraryMessage,
-    domains::ui::types::ViewState,
+    common::messages::CrossDomainEvent,
+    domains::{
+        metadata::image_service::FirstDisplayHint, ui::types::ViewState,
+    },
     infra::api_types::Media,
     state::State,
 };
@@ -50,15 +49,20 @@ pub fn apply_media_discovered(
                 .push(media.clone());
 
             // Revert to per-item image flip for Movies/Series while in Library view
-            if matches!(state.domains.ui.state.view, ViewState::Library) {
-                if let Some(request) = image_request_for_media(&media) {
-                    state
-                        .domains
-                        .metadata
-                        .state
-                        .image_service
-                        .flag_flip_once(&request);
-                }
+            let hint =
+                if matches!(state.domains.ui.state.view, ViewState::Library) {
+                    FirstDisplayHint::FastThenSlow
+                } else {
+                    FirstDisplayHint::FlipOnce
+                };
+
+            if let Some(request) = image_request_for_media(&media) {
+                state
+                    .domains
+                    .metadata
+                    .state
+                    .image_service
+                    .flag_first_display_hint(&request, hint);
             }
         }
 

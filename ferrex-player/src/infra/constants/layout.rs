@@ -53,18 +53,8 @@ pub mod animation {
 
     /// Duration of the texture opacity cross-fade (milliseconds)
     /// Quick fade for transitioning from placeholder to actual poster
-    pub const TEXTURE_FADE_DURATION_MS: u64 = 800;
-
-    /// Default poster animation selection
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum PosterAnimationKind {
-        None,
-        Fade,
-        Flip,
-    }
-
-    pub const DEFAULT_POSTER_ANIMATION: PosterAnimationKind =
-        PosterAnimationKind::Fade;
+    pub const TEXTURE_FADE_INITIAL_DURATION_MS: u64 = 1000;
+    pub const TEXTURE_FADE_DURATION_MS: u64 = 500;
 }
 
 /// Grid layout constants

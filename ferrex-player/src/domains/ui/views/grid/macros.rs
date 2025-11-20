@@ -355,6 +355,7 @@ macro_rules! media_card {
             $(hover_icon: $hover_icon:expr_2021,)?
             $(badge: $badge:expr_2021,)?
             $(animation: $animation:expr_2021,)?
+            $(animation_behavior: $animation_behavior:expr_2021,)?
             $(loading_text: $loading_text:expr_2021,)?
             $(is_hovered: $is_hovered:expr_2021,)?
             $(priority: $priority:expr_2021,)?
@@ -362,6 +363,7 @@ macro_rules! media_card {
     ) => {{
         use $crate::domains::ui::views::grid::types::*;
         use $crate::domains::ui::widgets::poster::poster_animation_types::PosterAnimationType;
+        use $crate::domains::ui::widgets::poster::poster_animation_types::AnimationBehavior;
         use $crate::domains::ui::theme;
         use iced::{
             widget::{button, column, container, text},
@@ -382,25 +384,6 @@ macro_rules! media_card {
             hovered
         };
 
-        // Get animation config
-        let animation_config = {
-            #[allow(unused_mut)]
-            let mut config = AnimationConfig::default();
-            $(config = $animation;)?
-            config
-        };
-
-        // Determine widget animation type early so it can be used for both image and overlay
-        let widget_anim = match animation_config.animation_type {
-            AnimationType::Flip => PosterAnimationType::flip(),
-            AnimationType::FadeIn | AnimationType::FadeScale => PosterAnimationType::Fade {
-                duration: animation_config.duration
-            },
-            // For unsupported poster-shader animations (SlideIn, ScaleIn, etc.),
-            // prefer opacity over none for the primary animation.
-            _ => PosterAnimationType::Fade { duration: animation_config.duration },
-        };
-
         // Create the main image/poster element using image_for
         let image_element: Element<'_, $crate::domains::ui::messages::UiMessage> = {
             use $crate::domains::ui::widgets::image_for;
@@ -413,6 +396,10 @@ macro_rules! media_card {
             let priority = ferrex_core::player_prelude::Priority::Preload;
             $(let priority = $priority;)?
 
+            //// Map animation behavior if provided
+            let animation_behavior = AnimationBehavior::default();
+            $(let animation_behavior = $animation_behavior;)?
+
             // Create the image widget
             let mut img = image_for($id)
                 .size(image_size)
@@ -420,7 +407,7 @@ macro_rules! media_card {
                 .radius(radius)
                 .width(Length::Fixed(width))
                 .height(Length::Fixed(height))
-                .animation(widget_anim)
+                .animation_behavior(animation_behavior)
                 .placeholder($fallback.chars().next().map(|c| {
                     // Convert emoji to appropriate icon
                     match c {

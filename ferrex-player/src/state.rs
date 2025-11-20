@@ -33,9 +33,7 @@ use crate::{
         ServiceBuilder,
         adapters::{ApiClientAdapter, AuthManagerAdapter},
         api_client::ApiClient,
-        constants::animation::{
-            DEFAULT_DURATION_MS, DEFAULT_POSTER_ANIMATION, PosterAnimationKind,
-        },
+        constants::animation::DEFAULT_DURATION_MS,
         repository::{
             accessor::{Accessor, ReadOnly, ReadWrite},
             repository::MediaRepo,
@@ -45,7 +43,6 @@ use crate::{
             streaming::StreamingApiAdapter,
             user_management::UserAdminApiAdapter,
         },
-        widgets::poster::poster_animation_types::PosterAnimationType,
     },
 };
 
@@ -148,69 +145,54 @@ impl State {
             image_service.clone(),
         );
 
-        let ui_state = UIDomainState {
-            view: crate::domains::ui::types::ViewState::Library,
-            // Resolve default widget animation from constants
-            default_widget_animation: {
-                match DEFAULT_POSTER_ANIMATION {
-                    PosterAnimationKind::None => PosterAnimationType::None,
-                    PosterAnimationKind::Fade => PosterAnimationType::Fade {
-                        duration: std::time::Duration::from_millis(
-                            DEFAULT_DURATION_MS,
-                        ),
-                    },
-                    PosterAnimationKind::Flip => PosterAnimationType::flip(),
-                }
-            },
-            repo_accessor: ui_accessor.clone(),
-            // New zero-copy fields
-            movie_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(
-                2048,
-            ),
-            series_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(
-                256,
-            ),
-            season_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(
-                512,
-            ),
-            episode_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(
-                2048,
-            ),
+        let ui_state =
+            UIDomainState {
+                view: crate::domains::ui::types::ViewState::Library,
+                repo_accessor: ui_accessor.clone(),
+                // New zero-copy fields
+                movie_yoke_cache:
+                    crate::domains::ui::yoke_cache::YokeCache::new(2048),
+                series_yoke_cache:
+                    crate::domains::ui::yoke_cache::YokeCache::new(256),
+                season_yoke_cache:
+                    crate::domains::ui::yoke_cache::YokeCache::new(512),
+                episode_yoke_cache:
+                    crate::domains::ui::yoke_cache::YokeCache::new(2048),
 
-            movies_carousel: CarouselState::new(0),
-            tv_carousel: CarouselState::new(0),
+                movies_carousel: CarouselState::new(0),
+                tv_carousel: CarouselState::new(0),
 
-            display_mode: DisplayMode::Curated,
-            sort_by: SortBy::Title,
-            sort_order: SortOrder::Ascending,
-            loading: false,
-            error_message: None,
-            window_size: iced::Size::new(1280.0, 720.0),
-            expanded_shows: HashSet::new(),
-            hovered_media_id: None,
-            theme_color_cache: RwLock::new(HashMap::new()),
-            current_library_id: None,
-            last_prefetch_tick: None,
-            scroll_manager: ScrollPositionManager::default(),
-            background_shader_state: BackgroundShaderState::default(),
-            search_query: String::new(),
-            show_library_menu: false,
-            library_menu_target: None,
-            is_fullscreen: false,
-            show_filter_panel: false,
-            selected_genres: Vec::new(),
-            selected_decade: None,
-            selected_resolution: UiResolution::Any,
-            selected_watch_status: UiWatchStatus::Any,
-            show_seasons_carousel: None,
-            season_episodes_carousel: None,
-            show_clear_database_confirm: false,
-            navigation_history: Vec::new(),
-            poster_anim_active_until: None,
-            motion_controller: MotionController::new(),
-            carousel_registry: CarouselRegistry::new(),
-            carousel_focus: CarouselFocus::new(),
-        };
+                display_mode: DisplayMode::Curated,
+                sort_by: SortBy::Title,
+                sort_order: SortOrder::Ascending,
+                loading: false,
+                error_message: None,
+                window_size: iced::Size::new(1280.0, 720.0),
+                expanded_shows: HashSet::new(),
+                hovered_media_id: None,
+                theme_color_cache: RwLock::new(HashMap::new()),
+                current_library_id: None,
+                last_prefetch_tick: None,
+                scroll_manager: ScrollPositionManager::default(),
+                background_shader_state: BackgroundShaderState::default(),
+                search_query: String::new(),
+                show_library_menu: false,
+                library_menu_target: None,
+                is_fullscreen: false,
+                show_filter_panel: false,
+                selected_genres: Vec::new(),
+                selected_decade: None,
+                selected_resolution: UiResolution::Any,
+                selected_watch_status: UiWatchStatus::Any,
+                show_seasons_carousel: None,
+                season_episodes_carousel: None,
+                show_clear_database_confirm: false,
+                navigation_history: Vec::new(),
+                poster_anim_active_until: None,
+                motion_controller: MotionController::new(),
+                carousel_registry: CarouselRegistry::new(),
+                carousel_focus: CarouselFocus::new(),
+            };
 
         // Create settings service adapter
         let api_arc = Arc::new(api_client.clone());

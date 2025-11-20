@@ -16,6 +16,7 @@ const MAX_RETRY_ATTEMPTS: u8 = 5;
 #[derive(Debug, Clone, Copy)]
 pub enum FirstDisplayHint {
     FlipOnce,
+    FastThenSlow,
 }
 
 #[derive(Debug, Clone)]
@@ -458,9 +459,13 @@ impl UnifiedImageService {
         self.clear_inflight_cancel(request);
     }
 
-    pub fn flag_flip_once(&self, request: &ImageRequest) {
+    pub fn flag_first_display_hint(
+        &self,
+        request: &ImageRequest,
+        hint: FirstDisplayHint,
+    ) {
         if let Some(mut entry) = self.cache.get_mut(request) {
-            entry.first_display_hint = Some(FirstDisplayHint::FlipOnce);
+            entry.first_display_hint = Some(hint);
             return;
         }
 
@@ -475,7 +480,7 @@ impl UnifiedImageService {
                 first_displayed_at: None,
                 retry_count: 0,
                 last_failure: None,
-                first_display_hint: Some(FirstDisplayHint::FlipOnce),
+                first_display_hint: Some(hint),
             },
         );
     }

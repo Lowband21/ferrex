@@ -441,14 +441,15 @@ pub fn update_player(
 
             // Capture position and duration for final progress update
             if let Some(media_id) = state.current_media_id {
-                let (position, duration) = if let Some(video) = &mut state.video_opt {
-                    (
-                        video.position().as_secs_f64(),
-                        video.duration().as_secs_f64(),
-                    )
-                } else {
-                    (state.last_valid_position, state.last_valid_duration)
-                };
+                let (position, duration) =
+                    if let Some(video) = &mut state.video_opt {
+                        (
+                            video.position().as_secs_f64(),
+                            video.duration().as_secs_f64(),
+                        )
+                    } else {
+                        (state.last_valid_position, state.last_valid_duration)
+                    };
 
                 // If current is an episode, attempt to play the next; else exit
                 if let MediaID::Episode(current_ep) = media_id {

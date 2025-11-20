@@ -3,12 +3,12 @@
 //! Centralizes logic for choosing the next episode to play so views and
 //! update handlers can stay simple and consistent.
 
-use crate::state::State;
-use crate::infra::repository::accessor::{Accessor, ReadOnly};
-use ferrex_core::player_prelude::{
-    EpisodeID, EpisodeLike, MediaIDLike, SeasonID, SeasonLike, SeriesID,
-    SeriesLike,
+use crate::{
+    infra::repository::accessor::{Accessor, ReadOnly},
+    state::State,
 };
+
+use ferrex_core::player_prelude::{EpisodeID, MediaIDLike, SeasonID, SeriesID};
 
 /// For a series: choose the first in-progress episode, else the first
 /// unwatched episode. If all are completed (or no watch state), fallback to

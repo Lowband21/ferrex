@@ -437,17 +437,17 @@ CRANELIFT := "CARGO_PROFILE_DEV_CODEGEN_BACKEND=cranelift"
 bench_linkers PROFILE="release":
     mkdir -p {{ RESULTS_DIR }}
     # Benchmarking linkers
-    @hyperfine --prepare "cargo clean" --runs 3 --export-json {{ RESULTS_DIR }}/linkers_{{ PROFILE }}.json \
+    @hyperfine --warmup 1 --prepare "cargo clean" --min-runs 3 --export-json {{ RESULTS_DIR }}/linkers_{{ PROFILE }}.json \
         --reference "{{ BASE }} cargo build --{{ PROFILE }}" \
         "{{ BASE }} {{ WILD }} cargo build --{{ PROFILE }}" \
         "{{ BASE }} mold -run cargo build --{{ PROFILE }}"
 
 [no-cd]
-bench_linkers_incr PROFILE="release" FILE=INCR_FILE JOBS="3":
+bench_linkers_incr PROFILE="release" FILE=INCR_FILE JOBS="0":
     mkdir -p {{ RESULTS_DIR }}
     # Benchmarking linkers with incremental changes
     @hyperfine \
-      --runs 3 --export-json {{ RESULTS_DIR }}/linkers_incr_{{ PROFILE }}.json \
+      --warmup 1 --min-runs 3 --export-json {{ RESULTS_DIR }}/linkers_incr_{{ PROFILE }}.json \
       --prepare "{{ BASE }} {{ INCR }} cargo build --profile {{ PROFILE }} && touch {{ FILE }}" \
         --reference "{{ BASE }} {{ INCR }} cargo build --profile {{ PROFILE }} -j{{ JOBS }}" \
       --prepare "{{ BASE }} {{ INCR }} {{ WILD }} cargo build --profile {{ PROFILE }} && touch {{ FILE }}" \

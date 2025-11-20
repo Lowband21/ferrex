@@ -278,6 +278,6 @@ iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "i
 # iced_aw = { path = "../../fxecodev/iced_aw" }
 
 # [patch."https://github.com/Lowband21/subwave.git"]
-# subwave_unified = { path = "../../fxecodev/subwave/subwave_unified" }
-# subwave_core = { path = "../../fxecodev/subwave/subwave_core" }
-# subwave_wayland = { path = "../../fxecodev/subwave/subwave_wayland" }
+# subwave_unified = { path = "../../fxeco/subwave/subwave_unified" }
+# subwave_core = { path = "../../fxeco/subwave/subwave_core" }
+# subwave_wayland = { path = "../../fxeco/subwave/subwave_wayland" }

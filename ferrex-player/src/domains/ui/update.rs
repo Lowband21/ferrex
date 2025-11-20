@@ -914,7 +914,14 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
                 .map(|id| id.to_uuid());
 
             match state.domains.ui.state.navigation_history.pop() {
-                Some(previous_view) => {
+                Some(ref previous_view) => {
+                    let _current_view = state.domains.ui.state.view.clone();
+                    if matches!(previous_view, _current_view) {
+                        log::warn!(
+                            "NavigateBack popped the same view as current: {:?}",
+                            previous_view
+                        );
+                    }
                     state.domains.ui.state.view = previous_view.clone();
 
                     // Restore scroll state when returning to views

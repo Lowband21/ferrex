@@ -29,7 +29,7 @@ use ferrex_core::player_prelude::{
     MediaRootBrowseResponse, MediaWithStatus, ScanCommandAcceptedResponse,
     ScanCommandRequest, ScanConfig, ScanMetrics, SortBy, SortOrder,
     StartScanRequest, UpdateLibraryRequest, UpdateProgressRequest, User,
-    UserPermissions, UserWatchState,
+    UserPermissions, UserWatchState, SeriesWatchStatus, SeasonWatchStatus, NextEpisode,
 };
 use ferrex_core::player_prelude::{MediaIDLike, hash_filter_spec};
 use parking_lot::RwLock;

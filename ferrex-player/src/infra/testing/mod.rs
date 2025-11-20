@@ -50,11 +50,10 @@ pub mod stubs;
 pub mod time;
 pub mod utils;
 
-// Re-export commonly used types
+// Re-export
 pub use domain::{
     DomainBoundary, DomainContextBuilder, DomainTestContext, EventBus,
-    GenericDomainContext, HarnessConfig, InMemoryEventBus, ServiceDependency,
-    TestHarness, TestResult,
+    GenericDomainContext, InMemoryEventBus, ServiceDependency,
 };
 pub use executor::{ExecutionMode, TaskTestExt, TestExecutor};
 pub use mocks::{

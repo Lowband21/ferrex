@@ -1,7 +1,9 @@
 use crate::common::ui_utils::{Icon, icon_text};
 use crate::domains::ui::views::grid::macros::parse_hex_color;
 use crate::infra::api_types::MediaDetailsOption;
-use crate::infra::widgets::poster::poster_animation_types::PosterAnimationType;
+use crate::infra::widgets::poster::poster_animation_types::{
+    AnimationBehavior, PosterAnimationType,
+};
 use crate::{
     domains::ui::components, domains::ui::messages::UiMessage,
     domains::ui::theme, domains::ui::widgets::image_for::image_for,
@@ -69,7 +71,7 @@ pub fn view_movie_detail<'a>(
                 .width(Length::Fixed(300.0))
                 .height(Length::Fixed(450.0))
                 .priority(Priority::Visible)
-                .animation(PosterAnimationType::flip());
+                .animation_behavior(AnimationBehavior::flip_then_fade());
 
             if let Some(hex) = theme_color
                 && let Ok(color) = parse_hex_color(&hex)

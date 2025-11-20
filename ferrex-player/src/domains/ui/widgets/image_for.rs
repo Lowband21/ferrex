@@ -33,6 +33,7 @@ struct CachedImageData {
 }
 
 /// A declarative image widget that integrates with UnifiedImageService
+#[derive(Debug, Clone)]
 pub struct ImageFor {
     media_id: Uuid,
     size: ImageSize,
@@ -81,7 +82,7 @@ impl ImageFor {
             priority: Priority::Preload,
             image_index: 0,
             // Default: flip on first display, fade on subsequent displays
-            animation: AnimationBehavior::flip_then_fade(),
+            animation: AnimationBehavior::fade_slow_then_quick(),
             theme_color: None,
             is_hovered: false,
             on_play: None,
@@ -164,13 +165,6 @@ impl ImageFor {
         } else {
             Priority::Preload
         };
-        self
-    }
-
-    /// Set the animation behavior using a single animation intent.
-    /// Flip animations automatically degrade to a fade once the image is cached.
-    pub fn animation(mut self, animation: PosterAnimationType) -> Self {
-        self.animation = AnimationBehavior::from_primary(animation);
         self
     }
 
@@ -333,6 +327,9 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                     let animation_behavior = match hint {
                         Some(FirstDisplayHint::FlipOnce) => {
                             AnimationBehavior::flip_then_fade()
+                        }
+                        Some(FirstDisplayHint::FastThenSlow) => {
+                            AnimationBehavior::fade_slow_then_quick()
                         }
                         None => image.animation,
                     };

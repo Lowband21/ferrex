@@ -4,25 +4,33 @@
 //! movies, TV shows, seasons, and episodes with consistent styling, animations,
 //! and loading states.
 
-use crate::infra::repository::MaybeYoked;
+use crate::common::text;
+use crate::{
+    domains::ui::{
+        messages::UiMessage, theme, views::grid::macros::parse_hex_color,
+        widgets::image_for,
+    },
+    infra::{
+        api_types::WatchProgress, constants::poster::CORNER_RADIUS,
+        repository::MaybeYoked,
+        widgets::poster::poster_animation_types::AnimationBehavior,
+    },
+    state::State,
+};
+
 use ferrex_core::player_prelude::{
     ImageSize, ImageType, MediaDetailsOptionLike, MediaID, MediaIDLike,
     MediaOps, MovieID, MovieLike, Priority, SeriesID, SeriesLike,
 };
-use iced::widget::text::Wrapping;
-use iced::widget::{button, container, mouse_area, text};
-use iced::{Alignment, Length};
-// Module organization
-use crate::domains::ui::messages::UiMessage;
-use crate::domains::ui::views::grid::macros::parse_hex_color;
-use crate::domains::ui::widgets::image_for;
-use crate::infra::api_types::WatchProgress;
-use crate::infra::constants::poster::CORNER_RADIUS;
-use iced::{Element, widget::column};
-use uuid::Uuid;
 
-use crate::{domains::ui::theme, state::State};
+use iced::widget::text::Wrapping;
+use iced::{
+    Alignment, Element, Length,
+    widget::{column, container, mouse_area},
+};
+
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[cfg_attr(
     any(
@@ -125,20 +133,23 @@ pub fn movie_reference_card_with_state<'a>(
                         // If this UUID actually belongs to a Series, gracefully fall back
                         // to the series card builder to avoid a dangling placeholder and
                         // to ensure images/types flow correctly without panics.
-                        if let Ok(_) = state
+                        match state
                             .domains
                             .ui
                             .state
                             .repo_accessor
                             .get_series_yoke(&MediaID::Series(SeriesID(uuid)))
                         {
-                            return series_reference_card_with_state(
-                                state,
-                                SeriesID(uuid),
-                                is_hovered,
-                                is_visible,
-                                watch_progress,
-                            );
+                            Ok(_) => {
+                                return series_reference_card_with_state(
+                                    state,
+                                    SeriesID(uuid),
+                                    is_hovered,
+                                    is_visible,
+                                    watch_progress,
+                                );
+                            }
+                            _ => (),
                         }
 
                         log::warn!(
@@ -147,34 +158,26 @@ pub fn movie_reference_card_with_state<'a>(
                             e
                         );
                         let placeholder_img: Element<'_, UiMessage> =
-                            image_for(movie_id.to_uuid())
-                                .size(ImageSize::Poster)
-                                .image_type(ImageType::Movie)
-                                .radius(CORNER_RADIUS)
-                                .width(Length::Fixed(200.0))
-                                .height(Length::Fixed(300.0))
-                                .animation(
-                                    state
-                                        .domains
-                                        .ui
-                                        .state
-                                        .default_widget_animation,
-                                )
-                                .placeholder(lucide_icons::Icon::Film)
-                                .priority(if is_hovered || is_visible {
-                                    Priority::Visible
-                                } else {
-                                    Priority::Preload
-                                })
-                                .is_hovered(is_hovered)
-                                .into();
+                        image_for(movie_id.to_uuid())
+                            .size(ImageSize::Poster)
+                            .image_type(ImageType::Movie)
+                            .radius(CORNER_RADIUS)
+                            .width(Length::Fixed(200.0))
+                            .height(Length::Fixed(300.0))
+                            .animation_behavior(AnimationBehavior::default())
+                            .placeholder(lucide_icons::Icon::Film)
+                            .priority(if is_hovered || is_visible {
+                                Priority::Visible
+                            } else {
+                                Priority::Preload
+                            })
+                            .is_hovered(is_hovered)
+                            .on_click(UiMessage::ViewMovieDetails(movie_id))
+                            .into();
                         let image_with_hover = mouse_area(placeholder_img)
                             .on_enter(UiMessage::MediaHovered(uuid))
                             .on_exit(UiMessage::MediaUnhovered(uuid));
-                        let poster_element = button(image_with_hover)
-                            .on_press(UiMessage::ViewMovieDetails(movie_id))
-                            .padding(0)
-                            .style(theme::Button::MediaCard.style());
+                        let poster_element = image_with_hover;
                         let text_content = column![
                             text("...").size(14),
                             text(" ")
@@ -217,13 +220,13 @@ pub fn movie_reference_card_with_state<'a>(
         .radius(CORNER_RADIUS)
         .width(Length::Fixed(200.0))
         .height(Length::Fixed(300.0))
-        .animation(state.domains.ui.state.default_widget_animation)
+        .animation_behavior(AnimationBehavior::default())
         .placeholder(lucide_icons::Icon::Film)
         .priority(priority)
         .skip_request(true)
         .is_hovered(is_hovered)
         .on_play(UiMessage::PlayMediaWithId(media_id))
-        .on_click(UiMessage::ViewDetails(media_id));
+        .on_click(UiMessage::ViewMovieDetails(movie_id));
 
     // Add theme color if available
     if let Some(theme_color_str) = theme_color {
@@ -269,14 +272,7 @@ pub fn movie_reference_card_with_state<'a>(
     let image_with_hover = mouse_area(image_element)
         .on_enter(UiMessage::MediaHovered(movie_id.to_uuid()))
         .on_exit(UiMessage::MediaUnhovered(movie_id.to_uuid()));
-
-    // Create poster button
-    let poster_element = button(image_with_hover)
-        .on_press(UiMessage::ViewMovieDetails(
-            movie_id, //deserialize::<MovieReference, Error>(movie).unwrap(),
-        ))
-        .padding(0)
-        .style(theme::Button::MediaCard.style());
+    let poster_element = image_with_hover;
 
     let title = truncate(&mut movie.title().to_string());
 
@@ -371,34 +367,26 @@ pub fn series_reference_card_with_state<'a>(
                         );
                         // Fallback placeholder card preserving mouse handlers
                         let placeholder_img: Element<'_, UiMessage> =
-                            image_for(series_id.to_uuid())
-                                .size(ImageSize::Poster)
-                                .image_type(ImageType::Series)
-                                .radius(CORNER_RADIUS)
-                                .width(Length::Fixed(200.0))
-                                .height(Length::Fixed(300.0))
-                                .animation(
-                                    state
-                                        .domains
-                                        .ui
-                                        .state
-                                        .default_widget_animation,
-                                )
-                                .placeholder(lucide_icons::Icon::Tv)
-                                .priority(if is_hovered || is_visible {
-                                    Priority::Visible
-                                } else {
-                                    Priority::Preload
-                                })
-                                .is_hovered(is_hovered)
-                                .into();
+                        image_for(series_id.to_uuid())
+                            .size(ImageSize::Poster)
+                            .image_type(ImageType::Series)
+                            .radius(CORNER_RADIUS)
+                            .width(Length::Fixed(200.0))
+                            .height(Length::Fixed(300.0))
+                            .animation_behavior(AnimationBehavior::default())
+                            .placeholder(lucide_icons::Icon::Tv)
+                            .priority(if is_hovered || is_visible {
+                                Priority::Visible
+                            } else {
+                                Priority::Preload
+                            })
+                            .is_hovered(is_hovered)
+                            .on_click(UiMessage::ViewTvShow(series_id))
+                            .into();
                         let image_with_hover = mouse_area(placeholder_img)
                             .on_enter(UiMessage::MediaHovered(uuid))
                             .on_exit(UiMessage::MediaUnhovered(uuid));
-                        let poster_element = button(image_with_hover)
-                            .on_press(UiMessage::ViewTvShow(series_id))
-                            .padding(0)
-                            .style(theme::Button::MediaCard.style());
+                        let poster_element = image_with_hover;
                         let text_content = column![
                             text("...").size(14),
                             text(" ")
@@ -435,10 +423,10 @@ pub fn series_reference_card_with_state<'a>(
     };
 
     // Determine if we have a poster_path; if absent, skip fetching and render placeholder
-    let has_poster_path = details_opt
-        .as_series()
-        .and_then(|d| d.poster_path.as_ref())
-        .is_some();
+    // let has_poster_path = details_opt
+    //     .as_series()
+    //     .and_then(|d| d.poster_path.as_ref())
+    //     .is_some();
 
     // Create image with scroll tier
     let mut img = image_for(series_id.to_uuid())
@@ -447,7 +435,7 @@ pub fn series_reference_card_with_state<'a>(
         .radius(CORNER_RADIUS)
         .width(Length::Fixed(200.0))
         .height(Length::Fixed(300.0))
-        .animation(state.domains.ui.state.default_widget_animation)
+        .animation_behavior(AnimationBehavior::default())
         .placeholder(lucide_icons::Icon::Tv)
         .priority(priority)
         .is_hovered(is_hovered)
@@ -490,11 +478,7 @@ pub fn series_reference_card_with_state<'a>(
     let image_with_hover = mouse_area(image_element)
         .on_enter(UiMessage::MediaHovered(series_id.to_uuid()))
         .on_exit(UiMessage::MediaUnhovered(series_id.to_uuid()));
-
-    let poster_element = button(image_with_hover)
-        .on_press(UiMessage::ViewTvShow(series_id))
-        .padding(0)
-        .style(theme::Button::MediaCard.style());
+    let poster_element = image_with_hover;
 
     let text_content = column![
         text(series.title().to_string())
