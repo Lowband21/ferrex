@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
-use ferrex_core::MetadataExtractor;
+use ferrex_core::{LibraryID, MetadataExtractor};
 use serde_json::json;
 use std::path::PathBuf;
 
@@ -97,7 +97,7 @@ pub async fn test_transcoding(
         size: std::fs::metadata(&path).ok().map(|m| m.len()).unwrap_or(0),
         created_at: chrono::Utc::now(),
         media_file_metadata: metadata,
-        library_id: uuid::Uuid::nil(),
+        library_id: LibraryID(uuid::Uuid::nil()),
     };
 
     // Store in database
@@ -211,7 +211,7 @@ pub async fn test_hls_streaming(
         size: std::fs::metadata(&path).ok().map(|m| m.len()).unwrap_or(0),
         created_at: chrono::Utc::now(),
         media_file_metadata: metadata,
-        library_id: uuid::Uuid::nil(),
+        library_id: LibraryID(uuid::Uuid::nil()),
     };
 
     // Store in database

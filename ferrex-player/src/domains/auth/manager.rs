@@ -9,8 +9,6 @@ use ferrex_core::auth::{AuthResult as ServerAuthResult, DeviceInfo, Platform};
 use ferrex_core::rbac::UserPermissions;
 use ferrex_core::user::{AuthToken, LoginRequest, RegisterRequest, User};
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
-#[cfg(feature = "keyring")]
-use keyring::Entry;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -22,9 +20,7 @@ use crate::domains::auth::hardware_fingerprint::generate_hardware_fingerprint;
 use crate::domains::auth::storage::{AuthStorage, StoredAuth};
 use crate::infrastructure::api_client::ApiClient;
 
-#[allow(dead_code)] // TODO: Evaluate keychain use
 const KEYCHAIN_SERVICE: &str = "ferrex-media-player";
-#[allow(dead_code)] // Evaluate keychain use
 const KEYCHAIN_ACCOUNT: &str = "auth-token";
 
 /// JWT Token expiry buffer - refresh tokens 1 minute before they expire
@@ -390,19 +386,6 @@ impl AuthManager {
             }
             Ok(None) => {
                 info!("No stored authentication found");
-
-                // Try to migrate from old keyring if available
-                #[cfg(feature = "keyring")]
-                {
-                    if let Ok(migrated) = self.try_migrate_from_keyring(&hardware_fingerprint).await
-                    {
-                        if migrated {
-                            // Try loading again after migration
-                            return self.load_from_keychain().await;
-                        }
-                    }
-                }
-
                 Ok(None)
             }
             Err(e) => {
@@ -515,7 +498,7 @@ impl AuthManager {
                 .await;
 
             temp_client
-                .post("/api/auth/refresh", &RefreshTokenRequest { refresh_token })
+                .post("/auth/refresh", &RefreshTokenRequest { refresh_token })
                 .await
                 .map_err(|e| {
                     warn!("[AuthManager] Token refresh failed: {}", e);
@@ -619,7 +602,7 @@ impl AuthManager {
         // Call login endpoint
         let token: AuthToken = self
             .api_client
-            .post("/api/auth/login", &request)
+            .post("/auth/login", &request)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -635,16 +618,16 @@ impl AuthManager {
         // Get user profile
         let user: User = self
             .api_client
-            .get("/api/users/me")
+            .get("/users/me")
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         // Get user permissions
-        let permissions: UserPermissions =
-            self.api_client
-                .get("/api/users/me/permissions")
-                .await
-                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let permissions: UserPermissions = self
+            .api_client
+            .get("/users/me/permissions")
+            .await
+            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         // Update auth state using AuthStateStore
         self.auth_state.authenticate(
@@ -679,7 +662,7 @@ impl AuthManager {
         // Call register endpoint
         let token: AuthToken = self
             .api_client
-            .post("/api/auth/register", &request)
+            .post("/auth/register", &request)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -689,16 +672,16 @@ impl AuthManager {
         // Get user profile
         let user: User = self
             .api_client
-            .get("/api/users/me")
+            .get("/users/me")
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         // Get user permissions
-        let permissions: UserPermissions =
-            self.api_client
-                .get("/api/users/me/permissions")
-                .await
-                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let permissions: UserPermissions = self
+            .api_client
+            .get("/users/me/permissions")
+            .await
+            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         // Update auth state using AuthStateStore
         self.auth_state.authenticate(
@@ -729,7 +712,7 @@ impl AuthManager {
             let _ = tokio::time::timeout(
                 std::time::Duration::from_secs(2),
                 api_client
-                    .post::<EmptyRequest, serde_json::Value>("/api/auth/logout", &EmptyRequest {}),
+                    .post::<EmptyRequest, serde_json::Value>("/auth/logout", &EmptyRequest {}),
             )
             .await;
         });
@@ -761,7 +744,7 @@ impl AuthManager {
         let request = SetPinRequest { device_id, pin };
 
         self.api_client
-            .post::<_, serde_json::Value>("/api/auth/device/pin/set", &request)
+            .post::<_, serde_json::Value>("/auth/device/pin/set", &request)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -786,7 +769,7 @@ impl AuthManager {
         };
 
         self.api_client
-            .post::<_, serde_json::Value>("/api/auth/device/pin/change", &request)
+            .post::<_, serde_json::Value>("/auth/device/pin/change", &request)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -818,7 +801,7 @@ impl AuthManager {
         let status: DeviceAuthStatus = self
             .api_client
             .get(&format!(
-                "/api/auth/device/status?user_id={}&device_id={}",
+                "/auth/device/status?user_id={}&device_id={}",
                 user_id, device_id
             ))
             .await
@@ -865,19 +848,19 @@ impl AuthManager {
         // Get user details
         let user: User = self
             .api_client
-            .get("/api/users/me")
+            .get("/users/me")
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         // Get user permissions
-        let permissions: UserPermissions =
-            self.api_client
-                .get("/api/users/me/permissions")
-                .await
-                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let permissions: UserPermissions = self
+            .api_client
+            .get("/users/me/permissions")
+            .await
+            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         // Get server URL
-        let server_url = self.api_client.build_url("");
+        let server_url = self.api_client.build_url("", false);
 
         // Update auth state using AuthStateStore
         self.auth_state.authenticate(
@@ -904,80 +887,6 @@ impl AuthManager {
     /// Cache device status (stub for now)
     async fn cache_device_status(&self, _user_id: Uuid, _status: &DeviceAuthStatus) {
         // TODO: Implement offline cache
-    }
-
-    /// Try to migrate from old keyring storage (if available)
-    #[cfg(feature = "keyring")]
-    async fn try_migrate_from_keyring(&self, device_fingerprint: &str) -> AuthResult<bool> {
-        use keyring::Entry;
-
-        match Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
-            Ok(entry) => {
-                match entry.get_password() {
-                    Ok(data) => {
-                        match serde_json::from_str::<StoredAuth>(&data) {
-                            Ok(mut stored_auth) => {
-                                info!("Found auth data in keyring, migrating to encrypted storage");
-
-                                // Add device trust expiry if not present (30 days from now)
-                                if stored_auth.device_trust_expires_at.is_none() {
-                                    stored_auth.device_trust_expires_at =
-                                        Some(Utc::now() + chrono::Duration::days(30));
-                                }
-
-                                // Save to new storage
-                                if let Err(e) = self
-                                    .auth_storage
-                                    .save_auth(&stored_auth, device_fingerprint)
-                                    .await
-                                {
-                                    warn!("Failed to migrate auth to encrypted storage: {}", e);
-                                    return Ok(false);
-                                }
-
-                                // Set token in API client
-                                self.api_client
-                                    .set_token(Some(stored_auth.token.clone()))
-                                    .await;
-
-                                // Update auth state with migrated data using AuthStateStore
-                                self.auth_state.authenticate(
-                                    stored_auth.user.clone(),
-                                    stored_auth.token.clone(),
-                                    stored_auth.permissions.unwrap_or_else(|| UserPermissions {
-                                        user_id: stored_auth.user.id,
-                                        roles: Vec::new(),
-                                        permissions: std::collections::HashMap::new(),
-                                        permission_details: None,
-                                    }),
-                                    stored_auth.server_url.clone(),
-                                );
-
-                                // Delete from keyring after successful migration
-                                let _ = entry.delete_credential();
-                                info!(
-                                    "Successfully migrated auth from keyring to encrypted storage"
-                                );
-
-                                Ok(true)
-                            }
-                            Err(e) => {
-                                error!("Failed to parse keyring auth data: {}", e);
-                                Ok(false)
-                            }
-                        }
-                    }
-                    Err(_) => Ok(false),
-                }
-            }
-            Err(_) => Ok(false),
-        }
-    }
-
-    /// Stub migration method when keyring feature is not enabled
-    #[cfg(not(feature = "keyring"))]
-    async fn try_migrate_from_keyring(&self, _device_fingerprint: &str) -> AuthResult<bool> {
-        Ok(false)
     }
 
     /// Get or create device ID
@@ -1088,10 +997,11 @@ impl AuthManager {
         let users: Vec<UserListItemDto> = if has_auth {
             // Use authenticated endpoint for better information
             self.api_client
-                .get("/api/v1/users/list")
+                .get("/v1/users/list")
                 .await
                 .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?
         } else {
+            // TODO: Use ApiClient trait instance
             // Use public endpoint with device fingerprint
             // Build request with custom header
             let client = reqwest::Client::new();
@@ -1140,7 +1050,7 @@ impl AuthManager {
 
         let status: SetupStatus = self
             .api_client
-            .get("/api/setup/status")
+            .get("/setup/status")
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
         Ok(status.needs_setup)
@@ -1179,11 +1089,11 @@ impl AuthManager {
             remember_device,
         };
 
-        let result: ServerAuthResult = self
-            .api_client
-            .post("/api/auth/device/login", &request)
-            .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let result: ServerAuthResult =
+            self.api_client
+                .post("/auth/device/login", &request)
+                .await
+                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         // Log the received token for debugging
         info!(
@@ -1196,14 +1106,14 @@ impl AuthManager {
         // Get user and permissions
         let user: User = self
             .api_client
-            .get("/api/users/me")
+            .get("/users/me")
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
-        let permissions: UserPermissions =
-            self.api_client
-                .get("/api/users/me/permissions")
-                .await
-                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let permissions: UserPermissions = self
+            .api_client
+            .get("/users/me/permissions")
+            .await
+            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         Ok(PlayerAuthResult {
             user,
@@ -1228,7 +1138,7 @@ impl AuthManager {
 
         let result: ServerAuthResult = self
             .api_client
-            .post("/api/auth/device/pin", &request)
+            .post("/auth/device/pin", &request)
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
@@ -1237,14 +1147,14 @@ impl AuthManager {
         // Get user and permissions
         let user: User = self
             .api_client
-            .get("/api/users/me")
+            .get("/users/me")
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
-        let permissions: UserPermissions =
-            self.api_client
-                .get("/api/users/me/permissions")
-                .await
-                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let permissions: UserPermissions = self
+            .api_client
+            .get("/users/me/permissions")
+            .await
+            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
         Ok(PlayerAuthResult {
             user,

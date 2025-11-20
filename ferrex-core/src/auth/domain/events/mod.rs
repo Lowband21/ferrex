@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Domain events for the authentication bounded context
-/// 
+///
 /// These events represent important state changes in the authentication
 /// domain and can be used for:
 /// - Event sourcing
@@ -20,34 +20,34 @@ pub enum DomainEvent {
         device_name: String,
         timestamp: DateTime<Utc>,
     },
-    
+
     /// A device was trusted (PIN set)
     DeviceTrusted {
         session_id: Uuid,
         user_id: Uuid,
         timestamp: DateTime<Utc>,
     },
-    
+
     /// A device was revoked
     DeviceRevoked {
         session_id: Uuid,
         user_id: Uuid,
         timestamp: DateTime<Utc>,
     },
-    
+
     /// All devices for a user were revoked
     AllDevicesRevoked {
         user_id: Uuid,
         timestamp: DateTime<Utc>,
     },
-    
+
     /// PIN was set or updated
     PinSet {
         session_id: Uuid,
         user_id: Uuid,
         timestamp: DateTime<Utc>,
     },
-    
+
     /// A new session was created
     SessionCreated {
         session_id: Uuid,
@@ -55,7 +55,7 @@ pub enum DomainEvent {
         expires_at: DateTime<Utc>,
         timestamp: DateTime<Utc>,
     },
-    
+
     /// A session was refreshed
     SessionRefreshed {
         session_id: Uuid,
@@ -63,7 +63,7 @@ pub enum DomainEvent {
         expires_at: DateTime<Utc>,
         timestamp: DateTime<Utc>,
     },
-    
+
     /// Authentication failed
     AuthenticationFailed {
         session_id: Uuid,
@@ -71,32 +71,32 @@ pub enum DomainEvent {
         reason: String,
         timestamp: DateTime<Utc>,
     },
-    
+
     /// User authenticated with password
     PasswordAuthenticated {
         user_id: Uuid,
         timestamp: DateTime<Utc>,
     },
-    
+
     /// User's password was changed
     PasswordChanged {
         user_id: Uuid,
         timestamp: DateTime<Utc>,
     },
-    
+
     /// Account was locked
     AccountLocked {
         user_id: Uuid,
         locked_until: DateTime<Utc>,
         timestamp: DateTime<Utc>,
     },
-    
+
     /// Account was unlocked
     AccountUnlocked {
         user_id: Uuid,
         timestamp: DateTime<Utc>,
     },
-    
+
     /// Account was deactivated
     AccountDeactivated {
         user_id: Uuid,
@@ -123,7 +123,7 @@ impl DomainEvent {
             Self::AccountDeactivated { timestamp, .. } => *timestamp,
         }
     }
-    
+
     /// Get the user ID associated with the event
     pub fn user_id(&self) -> Uuid {
         match self {
@@ -142,7 +142,7 @@ impl DomainEvent {
             Self::AccountDeactivated { user_id, .. } => *user_id,
         }
     }
-    
+
     /// Get the event type as a string
     pub fn event_type(&self) -> &'static str {
         match self {

@@ -19,10 +19,10 @@ pub enum RateLimitError {
         retry_after: Duration,
         violations: u32,
     },
-    
+
     #[error("Backend error: {0}")]
     BackendError(#[from] anyhow::Error),
-    
+
     #[error("Invalid configuration: {0}")]
     ConfigError(String),
 }
@@ -35,19 +35,19 @@ pub type RateLimitResult<T> = Result<T, RateLimitError>;
 pub struct RateLimitDecision {
     /// Whether the request is allowed
     pub allowed: bool,
-    
+
     /// Current request count in window
     pub current_count: u32,
-    
+
     /// Maximum allowed requests
     pub limit: u32,
-    
+
     /// Time until rate limit resets
     pub reset_after: Duration,
-    
+
     /// Number of consecutive violations
     pub violation_count: u32,
-    
+
     /// Additional metadata for monitoring
     pub metadata: HashMap<String, serde_json::Value>,
 }
@@ -57,13 +57,13 @@ pub struct RateLimitDecision {
 pub enum RateLimitAlgorithm {
     /// Sliding window log algorithm (most accurate)
     SlidingWindowLog,
-    
+
     /// Token bucket algorithm (allows bursts)
     TokenBucket,
-    
+
     /// Fixed window counter (simplest)
     FixedWindow,
-    
+
     /// Leaky bucket algorithm (smooth rate)
     LeakyBucket,
 }
@@ -73,20 +73,20 @@ pub enum RateLimitAlgorithm {
 pub enum RateLimitKey {
     /// IP address based limiting
     IpAddress(String),
-    
+
     /// User ID based limiting
     UserId(Uuid),
-    
+
     /// Device ID based limiting
     DeviceId(Uuid),
-    
+
     /// Combined key for more granular control
     Combined {
         ip: Option<String>,
         user_id: Option<Uuid>,
         device_id: Option<Uuid>,
     },
-    
+
     /// Custom key for flexibility
     Custom(String),
 }
@@ -98,7 +98,11 @@ impl RateLimitKey {
             Self::IpAddress(ip) => format!("{}:ip:{}", namespace, ip),
             Self::UserId(id) => format!("{}:user:{}", namespace, id),
             Self::DeviceId(id) => format!("{}:device:{}", namespace, id),
-            Self::Combined { ip, user_id, device_id } => {
+            Self::Combined {
+                ip,
+                user_id,
+                device_id,
+            } => {
                 let parts: Vec<String> = vec![
                     ip.as_ref().map(|i| format!("ip:{}", i)),
                     user_id.map(|u| format!("user:{}", u)),
@@ -119,25 +123,25 @@ impl RateLimitKey {
 pub struct RateLimitRule {
     /// Name of the rule for identification
     pub name: String,
-    
+
     /// Algorithm to use
     pub algorithm: RateLimitAlgorithm,
-    
+
     /// Maximum number of requests allowed
     pub limit: u32,
-    
+
     /// Time window for the limit
     pub window: Duration,
-    
+
     /// Whether to apply exponential backoff on violations
     pub exponential_backoff: bool,
-    
+
     /// Base duration for backoff calculation
     pub backoff_base: Duration,
-    
+
     /// Maximum backoff duration
     pub max_backoff: Duration,
-    
+
     /// Number of violations before applying stricter measures
     pub violation_threshold: u32,
 }
@@ -162,19 +166,19 @@ impl Default for RateLimitRule {
 pub struct EndpointLimits {
     /// Login endpoint limits
     pub login: RateLimitRule,
-    
+
     /// Registration endpoint limits
     pub register: RateLimitRule,
-    
+
     /// Password reset limits
     pub password_reset: RateLimitRule,
-    
+
     /// PIN authentication limits
     pub pin_auth: RateLimitRule,
-    
+
     /// Device registration limits
     pub device_register: RateLimitRule,
-    
+
     /// Token refresh limits
     pub token_refresh: RateLimitRule,
 }
@@ -237,23 +241,23 @@ pub trait RateLimiter: Send + Sync {
         key: &RateLimitKey,
         rule: &RateLimitRule,
     ) -> RateLimitResult<RateLimitDecision>;
-    
+
     /// Reset rate limit for a specific key
     async fn reset(&self, key: &RateLimitKey) -> RateLimitResult<()>;
-    
+
     /// Get current state without updating counters
     async fn get_current_state(
         &self,
         key: &RateLimitKey,
         rule: &RateLimitRule,
     ) -> RateLimitResult<RateLimitDecision>;
-    
+
     /// Batch check multiple keys (for efficiency)
     async fn batch_check(
         &self,
         requests: Vec<(&RateLimitKey, &RateLimitRule)>,
     ) -> RateLimitResult<Vec<RateLimitDecision>>;
-    
+
     /// Clean up expired entries (maintenance operation)
     async fn cleanup_expired(&self) -> RateLimitResult<u64>;
 }
@@ -274,10 +278,10 @@ pub struct ViolationMetadata {
 pub struct TrustedSources {
     /// Trusted IP addresses or CIDR blocks
     pub ip_addresses: Vec<String>,
-    
+
     /// Trusted user IDs
     pub user_ids: Vec<Uuid>,
-    
+
     /// Trusted device IDs
     pub device_ids: Vec<Uuid>,
 }
@@ -289,10 +293,18 @@ impl TrustedSources {
             RateLimitKey::IpAddress(ip) => self.ip_addresses.contains(ip),
             RateLimitKey::UserId(id) => self.user_ids.contains(id),
             RateLimitKey::DeviceId(id) => self.device_ids.contains(id),
-            RateLimitKey::Combined { ip, user_id, device_id } => {
-                ip.as_ref().map(|i| self.ip_addresses.contains(i)).unwrap_or(false) ||
-                user_id.map(|u| self.user_ids.contains(&u)).unwrap_or(false) ||
-                device_id.map(|d| self.device_ids.contains(&d)).unwrap_or(false)
+            RateLimitKey::Combined {
+                ip,
+                user_id,
+                device_id,
+            } => {
+                ip.as_ref()
+                    .map(|i| self.ip_addresses.contains(i))
+                    .unwrap_or(false)
+                    || user_id.map(|u| self.user_ids.contains(&u)).unwrap_or(false)
+                    || device_id
+                        .map(|d| self.device_ids.contains(&d))
+                        .unwrap_or(false)
             }
             RateLimitKey::Custom(_) => false,
         }
@@ -302,24 +314,16 @@ impl TrustedSources {
 /// Helper functions for calculating backoff durations
 pub mod backoff {
     use super::*;
-    
+
     /// Calculate exponential backoff duration
-    pub fn exponential(
-        base: Duration,
-        violations: u32,
-        max: Duration,
-    ) -> Duration {
+    pub fn exponential(base: Duration, violations: u32, max: Duration) -> Duration {
         let multiplier = 2_u32.saturating_pow(violations.saturating_sub(1));
         let backoff = base.saturating_mul(multiplier);
         backoff.min(max)
     }
-    
+
     /// Calculate linear backoff duration
-    pub fn linear(
-        base: Duration,
-        violations: u32,
-        max: Duration,
-    ) -> Duration {
+    pub fn linear(base: Duration, violations: u32, max: Duration) -> Duration {
         let backoff = base.saturating_mul(violations);
         backoff.min(max)
     }
@@ -328,24 +332,24 @@ pub mod backoff {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_rate_limit_key_cache_key() {
         let ip_key = RateLimitKey::IpAddress("192.168.1.1".to_string());
         assert_eq!(ip_key.to_cache_key("auth"), "auth:ip:192.168.1.1");
-        
+
         let user_key = RateLimitKey::UserId(Uuid::nil());
         assert_eq!(
             user_key.to_cache_key("auth"),
             format!("auth:user:{}", Uuid::nil())
         );
     }
-    
+
     #[test]
     fn test_exponential_backoff() {
         let base = Duration::from_secs(60);
         let max = Duration::from_secs(3600);
-        
+
         assert_eq!(backoff::exponential(base, 1, max), Duration::from_secs(60));
         assert_eq!(backoff::exponential(base, 2, max), Duration::from_secs(120));
         assert_eq!(backoff::exponential(base, 3, max), Duration::from_secs(240));

@@ -229,10 +229,7 @@ impl HardwareDetector {
 
         let mut supported_codecs = Vec::new();
 
-        let encoders = &[
-            ("h264_videotoolbox", "h264"),
-            ("hevc_videotoolbox", "h265"),
-        ];
+        let encoders = &[("h264_videotoolbox", "h264"), ("hevc_videotoolbox", "h265")];
 
         for (encoder, codec) in encoders {
             if self.check_encoder(encoder).await? {
@@ -339,11 +336,9 @@ impl HardwareSelector {
     /// Select the best hardware encoder for a codec
     pub fn select_encoder(&self, codec: &str) -> Option<&HardwareEncoder> {
         for pref in &self.preferences {
-            if let Some(encoder) = self
-                .available_encoders
-                .iter()
-                .find(|e| e.encoder_type == *pref && e.supported_codecs.contains(&codec.to_string()))
-            {
+            if let Some(encoder) = self.available_encoders.iter().find(|e| {
+                e.encoder_type == *pref && e.supported_codecs.contains(&codec.to_string())
+            }) {
                 return Some(encoder);
             }
         }
@@ -394,16 +389,10 @@ impl HardwareArgs {
                 ]);
             }
             HardwareEncoderType::VideoToolbox => {
-                args.extend_from_slice(&[
-                    "-hwaccel".to_string(),
-                    "videotoolbox".to_string(),
-                ]);
+                args.extend_from_slice(&["-hwaccel".to_string(), "videotoolbox".to_string()]);
             }
             HardwareEncoderType::Amf => {
-                args.extend_from_slice(&[
-                    "-hwaccel".to_string(),
-                    "d3d11va".to_string(),
-                ]);
+                args.extend_from_slice(&["-hwaccel".to_string(), "d3d11va".to_string()]);
             }
         }
 

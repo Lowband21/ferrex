@@ -1,5 +1,5 @@
 //! Minimal test helper for TDD tests
-//! 
+//!
 //! No heavy mocks - uses real AuthService with test configuration
 
 use ferrex_player::domains::auth::service::AuthService;
@@ -15,7 +15,7 @@ impl TestHelper {
             auth_service: AuthService::new(),
         }
     }
-    
+
     // TODO: Add test database support when needed
     // pub async fn new_with_test_db() -> Self {
     //     Self {

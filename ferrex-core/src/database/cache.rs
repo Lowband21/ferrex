@@ -1,9 +1,10 @@
-use crate::{MediaError, Result, query::MediaQuery};
+use crate::LibraryID;
+use crate::{query::MediaQuery, MediaError, Result};
 use redis::{aio::ConnectionManager, AsyncCommands};
 use serde::{de::DeserializeOwned, Serialize};
-use std::time::Duration;
-use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::time::Duration;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -16,9 +17,8 @@ impl RedisCache {
     pub async fn new(redis_url: &str) -> Result<Self> {
         info!("Connecting to Redis cache at {}", redis_url);
 
-        let client = redis::Client::open(redis_url).map_err(|e| {
-            MediaError::InvalidMedia(format!("Failed to create Redis client: {e}"))
-        })?;
+        let client = redis::Client::open(redis_url)
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to create Redis client: {e}")))?;
 
         let conn = ConnectionManager::new(client)
             .await
@@ -116,7 +116,7 @@ impl RedisCache {
         warn!("Flushing entire Redis cache");
 
         redis::cmd("FLUSHDB")
-            .query_async::<_, ()>(&mut self.conn)
+            .query_async::<()>(&mut self.conn)
             .await
             .map_err(|e| MediaError::InvalidMedia(format!("Redis FLUSHDB failed: {e}")))?;
 
@@ -159,7 +159,7 @@ impl CacheKeys {
     /// The key includes all fields that affect query results
     pub fn media_query(query: &MediaQuery, user_id: Option<Uuid>) -> String {
         let mut hasher = DefaultHasher::new();
-        
+
         // Hash all filter fields
         query.filters.library_ids.hash(&mut hasher);
         if let Some(ref media_type) = query.filters.media_type {
@@ -167,40 +167,45 @@ impl CacheKeys {
         }
         query.filters.genres.hash(&mut hasher);
         query.filters.year_range.hash(&mut hasher);
-        
+
         // Hash rating range with normalized precision to avoid floating point issues
         if let Some((min, max)) = query.filters.rating_range {
             ((min * 10.0) as i32).hash(&mut hasher);
             ((max * 10.0) as i32).hash(&mut hasher);
         }
-        
+
         if let Some(ref watch_status) = query.filters.watch_status {
             format!("{:?}", watch_status).hash(&mut hasher);
         }
-        
+
         // Hash sort criteria
         format!("{:?}", query.sort.primary).hash(&mut hasher);
         format!("{:?}", query.sort.order).hash(&mut hasher);
         if let Some(ref secondary) = query.sort.secondary {
             format!("{:?}", secondary).hash(&mut hasher);
         }
-        
+
         // Hash search if present
         if let Some(ref search) = query.search {
             search.text.to_lowercase().hash(&mut hasher);
-            search.fields.iter().map(|f| format!("{:?}", f)).collect::<Vec<_>>().hash(&mut hasher);
+            search
+                .fields
+                .iter()
+                .map(|f| format!("{:?}", f))
+                .collect::<Vec<_>>()
+                .hash(&mut hasher);
             search.fuzzy.hash(&mut hasher);
         }
-        
+
         // Hash pagination
         query.pagination.offset.hash(&mut hasher);
         query.pagination.limit.hash(&mut hasher);
-        
+
         // Include user context if present (for watch status queries)
         if let Some(user_id) = user_id.or(query.user_context) {
             user_id.hash(&mut hasher);
         }
-        
+
         let hash = hasher.finish();
         format!("query:media:v1:{:x}", hash)
     }
@@ -211,7 +216,7 @@ impl CacheKeys {
     }
 
     /// Generate cache keys for invalidation based on library
-    pub fn media_query_by_library_pattern(library_id: Uuid) -> String {
+    pub fn media_query_by_library_pattern(library_id: LibraryID) -> String {
         // Since we can't reverse engineer which queries include a library,
         // we need to invalidate all queries when a library is updated
         Self::media_query_pattern()

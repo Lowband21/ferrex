@@ -1,11 +1,11 @@
 use crate::{
     common::messages::{CrossDomainEvent, DomainUpdateResult},
-    domains::media::library::MediaFile,
     domains::media::messages::Message,
     domains::player::video::load_video,
     domains::ui::types::ViewState,
     state_refactored::State,
 };
+use ferrex_core::MediaFile;
 use iced::Task;
 
 /// Handle play media request
@@ -27,34 +27,28 @@ pub fn handle_play_media(state: &mut State, media: MediaFile) -> DomainUpdateRes
 
     state.domains.player.state.current_media = Some(media.clone());
 
-    // Set duration from media metadata if available
-    if let Some(metadata) = &media.metadata {
+    if let Some(metadata) = &media.media_file_metadata {
         if let Some(duration) = metadata.duration {
             log::info!("Setting duration from media metadata: {:.1}s", duration);
             state.domains.player.state.duration = duration;
-        } else {
-            log::warn!("Media metadata has no duration field");
-            state.domains.player.state.duration = 0.0;
         }
-    } else {
-        log::warn!("Media has no metadata, duration will be set when video loads");
-        state.domains.player.state.duration = 0.0;
     }
 
     // Reset watch progress tracking for new media
     state.domains.player.state.last_progress_update = None;
     state.domains.player.state.last_progress_sent = 0.0;
-    
+
     // Pass any pending resume position to player domain
-    state.domains.player.state.pending_resume_position = state.domains.media.state.pending_resume_position;
-    
+    state.domains.player.state.pending_resume_position =
+        state.domains.media.state.pending_resume_position;
+
     // Clear the pending resume position from media domain after transferring
     state.domains.media.state.pending_resume_position = None;
 
     // Note: current_media_id is set by PlayMediaWithId message handler if available
 
     // Check if this is HDR content
-    let is_hdr_content = if let Some(metadata) = &media.metadata {
+    let is_hdr_content = if let Some(metadata) = &media.media_file_metadata {
         // Check bit depth
         if let Some(bit_depth) = metadata.bit_depth {
             if bit_depth > 8 {
@@ -93,51 +87,12 @@ pub fn handle_play_media(state: &mut State, media: MediaFile) -> DomainUpdateRes
         filename_suggests_hdr
     };
 
-    // All content uses direct streaming
+    let media_id = media.id.to_string();
 
-    let video_url = if media.path.starts_with("http") {
-        media.path.clone()
-    } else {
-        // Fallback to direct streaming (old behavior)
-        let video_url = if is_hdr_content {
-            /*
-            let profile = if let Some(metadata) = &media.metadata {
-                if let Some(height) = metadata.height {
-                    if height >= 2160 {
-                        "hdr_to_sdr_4k"
-                    } else {
-                        "hdr_to_sdr_1080p"
-                    }
-                } else {
-                    "hdr_to_sdr_1080p"
-                }
-            } else {
-                "hdr_to_sdr_1080p"
-            }; */
+    let video_url = {
+        let encoded_media_id = urlencoding::encode(&media_id);
+        let video_url = format!("{}/stream/{}", state.server_url, encoded_media_id);
 
-            let encoded_media_id = urlencoding::encode(&media.id);
-            let transcode_url = format!("{}/stream/{}", state.server_url, encoded_media_id);
-            log::info!("Using direct transcode stream: {}", transcode_url);
-
-            state.domains.player.state.is_hdr_content = true;
-            // Direct play, no transcoding
-            state.domains.streaming.state.using_hls = false;
-            state.domains.streaming.state.transcoding_status = None;
-
-            transcode_url
-        } else {
-            let encoded_media_id = urlencoding::encode(&media.id);
-            let stream_url = format!("{}/stream/{}", state.server_url, encoded_media_id);
-            log::info!("Using direct stream: {}", stream_url);
-
-            state.domains.player.state.is_hdr_content = false;
-            state.domains.streaming.state.using_hls = false;
-            state.domains.streaming.state.transcoding_status = None;
-
-            stream_url
-        };
-
-        // For direct playback, we'll get duration from the video object itself
         video_url
     };
 

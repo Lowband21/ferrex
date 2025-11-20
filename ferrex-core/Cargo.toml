@@ -19,6 +19,7 @@ workspace = true
 # Serialization
 serde.workspace = true
 serde_json.workspace = true
+rkyv.workspace = true
 
 # Error handling
 anyhow.workspace = true
@@ -26,6 +27,7 @@ thiserror.workspace = true
 
 # Logging
 tracing.workspace = true
+log.workspace = true
 
 # Time handling
 chrono.workspace = true
@@ -55,7 +57,7 @@ async-trait.workspace = true
 
 # Async runtime
 tokio.workspace = true
-tokio-stream.workspace = true
+#tokio-stream.workspace = true
 futures.workspace = true
 
 # URL
@@ -71,13 +73,13 @@ rayon.workspace = true
 fuzzy-matcher = "0.3"
 
 # Random number generation
-rand = "0.8"
+rand.workspace = true
 
 # Ordered floating point for sorting
-ordered-float = "4.2"
+ordered-float = "^5"
 
 # File watching
-notify = { version = "6.1", optional = true }
+notify = { version = "^7", optional = true }
 
 # Image processing
 image = { workspace = true, optional = true }
@@ -85,10 +87,10 @@ image = { workspace = true, optional = true }
 # Cryptography
 sha2 = { workspace = true }
 argon2 = { workspace = true }
-password-hash = "0.5"
-ring = "0.17.14"
-zeroize = { version = "1.8", features = ["derive"] }
-base64 = "0.22.1"
+ring.workspace = true
+zeroize.workspace = true
+base64.workspace = true
+password-hash = "^0.5"
 
 [features]
 default = ["ffmpeg", "database"]

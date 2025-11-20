@@ -42,40 +42,32 @@
 //! }
 //! ```
 
+pub mod domain;
 pub mod executor;
-pub mod time;
 pub mod mocks;
 pub mod recorder;
-pub mod domain;
+pub mod time;
 pub mod utils;
 
 // Re-export commonly used types
-pub use executor::{TestExecutor, ExecutionMode, TaskTestExt};
-pub use time::{TimeProvider, SystemTimeProvider, VirtualTimeProvider, TimeContext};
-pub use mocks::{MockRegistry, MockService, MockBuilder, SimpleMock, MockHandle, DomainMock};
-pub use recorder::{TestRecorder, Operation, OperationType, StateSnapshot};
 pub use domain::{
-    DomainTestContext,
-    GenericDomainContext,
-    DomainContextBuilder,
-    TestHarness,
-    HarnessConfig,
-    TestResult,
-    DomainBoundary,
-    ServiceDependency,
-    EventBus,
-    InMemoryEventBus,
+    DomainBoundary, DomainContextBuilder, DomainTestContext, EventBus, GenericDomainContext,
+    HarnessConfig, InMemoryEventBus, ServiceDependency, TestHarness, TestResult,
 };
+pub use executor::{ExecutionMode, TaskTestExt, TestExecutor};
+pub use mocks::{DomainMock, MockBuilder, MockHandle, MockRegistry, MockService, SimpleMock};
+pub use recorder::{Operation, OperationType, StateSnapshot, TestRecorder};
+pub use time::{SystemTimeProvider, TimeContext, TimeProvider, VirtualTimeProvider};
 
 // The macros are already exported at the crate root via #[macro_export]
 // They don't need to be re-exported here
 
 /// Prelude for convenient imports
 pub mod prelude {
+    pub use super::domain::*;
     pub use super::executor::*;
-    pub use super::time::*;
     pub use super::mocks::*;
     pub use super::recorder::*;
-    pub use super::domain::*;
+    pub use super::time::*;
     pub use super::utils::*;
 }

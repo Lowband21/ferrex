@@ -44,17 +44,17 @@ impl DeviceSession {
             revoked_at: None,
         }
     }
-    
+
     /// Check if the session is still valid
     pub fn is_valid(&self) -> bool {
         !self.revoked && self.expires_at > Utc::now()
     }
-    
+
     /// Update last activity timestamp
     pub fn touch(&mut self) {
         self.last_activity = Utc::now();
     }
-    
+
     /// Revoke the session
     pub fn revoke(&mut self) {
         self.revoked = true;
@@ -91,9 +91,9 @@ impl Default for SessionConfig {
 
 /// Generate a cryptographically secure session token
 pub fn generate_session_token() -> String {
+    use rand::distr::Alphanumeric;
     use rand::{thread_rng, Rng};
-    use rand::distributions::Alphanumeric;
-    
+
     thread_rng()
         .sample_iter(&Alphanumeric)
         .take(64)
@@ -178,7 +178,7 @@ pub struct SessionSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_session_creation() {
         let session = DeviceSession::new(
@@ -188,11 +188,11 @@ mod tests {
             Some("Mozilla/5.0".to_string()),
             Duration::hours(24),
         );
-        
+
         assert!(session.is_valid());
         assert_eq!(session.session_token.len(), 64);
     }
-    
+
     #[test]
     fn test_session_expiration() {
         let mut session = DeviceSession::new(
@@ -202,12 +202,12 @@ mod tests {
             None,
             Duration::hours(24),
         );
-        
+
         // Manually set expiration to past
         session.expires_at = Utc::now() - Duration::hours(1);
         assert!(!session.is_valid());
     }
-    
+
     #[test]
     fn test_session_revocation() {
         let mut session = DeviceSession::new(
@@ -217,7 +217,7 @@ mod tests {
             None,
             Duration::hours(24),
         );
-        
+
         assert!(session.is_valid());
         session.revoke();
         assert!(!session.is_valid());

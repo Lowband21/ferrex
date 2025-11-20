@@ -10,10 +10,8 @@ use axum::{
     body::Body,
     extract::Request,
     http::{header, Response, StatusCode, Uri},
-    routing::Route,
 };
 use std::{
-    convert::Infallible,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
@@ -23,6 +21,12 @@ use tower::{Layer, Service};
 /// Layer for HTTPS redirect middleware
 #[derive(Clone, Debug)]
 pub struct HttpsRedirectLayer;
+
+impl Default for HttpsRedirectLayer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl HttpsRedirectLayer {
     /// Create a new HTTPS redirect layer
@@ -64,7 +68,10 @@ impl<S> HttpsRedirectMiddleware<S> {
     }
 
     /// Build HTTPS redirect URL preserving path and query
-    fn build_https_url(&self, req: &Request<Body>) -> Result<Uri, Box<dyn std::error::Error + Send + Sync>> {
+    fn build_https_url(
+        &self,
+        req: &Request<Body>,
+    ) -> Result<Uri, Box<dyn std::error::Error + Send + Sync>> {
         let uri = req.uri();
         let host = req
             .headers()
@@ -73,10 +80,7 @@ impl<S> HttpsRedirectMiddleware<S> {
             .ok_or("Missing Host header")?;
 
         // Build HTTPS URL preserving path and query
-        let path_and_query = uri
-            .path_and_query()
-            .map(|pq| pq.as_str())
-            .unwrap_or("/");
+        let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
 
         let https_url = format!("https://{}{}", host, path_and_query);
         Ok(https_url.parse()?)
@@ -108,7 +112,7 @@ where
                         .header(header::LOCATION, https_url.to_string())
                         .body(Body::empty())
                         .unwrap();
-                    
+
                     return Box::pin(async move { Ok(response) });
                 }
                 Err(_) => {
@@ -116,7 +120,7 @@ where
                         .status(StatusCode::BAD_REQUEST)
                         .body(Body::from("Invalid request"))
                         .unwrap();
-                    
+
                     return Box::pin(async move { Ok(response) });
                 }
             }
@@ -124,9 +128,7 @@ where
 
         // Pass through HTTPS requests
         let mut inner = self.inner.clone();
-        Box::pin(async move {
-            inner.call(req).await.map_err(Into::into)
-        })
+        Box::pin(async move { inner.call(req).await.map_err(Into::into) })
     }
 }
 
@@ -149,9 +151,9 @@ mod tests {
         let service = ServiceBuilder::new()
             .layer(HttpsRedirectLayer::new())
             .service_fn(|_req: Request<Body>| async {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                    Response::new(Body::from("Hello"))
-                )
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Response::new(Body::from(
+                    "Hello",
+                )))
             });
 
         let request = Request::builder()
@@ -161,7 +163,7 @@ mod tests {
             .unwrap();
 
         let response = service.oneshot(request).await.unwrap();
-        
+
         assert_eq!(response.status(), StatusCode::MOVED_PERMANENTLY);
         assert_eq!(
             response.headers().get("Location").unwrap(),
@@ -174,9 +176,9 @@ mod tests {
         let service = ServiceBuilder::new()
             .layer(HttpsRedirectLayer::new())
             .service_fn(|_req: Request<Body>| async {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                    Response::new(Body::from("Hello HTTPS"))
-                )
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Response::new(Body::from(
+                    "Hello HTTPS",
+                )))
             });
 
         let request = Request::builder()
@@ -186,7 +188,7 @@ mod tests {
             .unwrap();
 
         let response = service.oneshot(request).await.unwrap();
-        
+
         assert_eq!(response.status(), StatusCode::OK);
     }
 
@@ -195,9 +197,9 @@ mod tests {
         let service = ServiceBuilder::new()
             .layer(HttpsRedirectLayer::new())
             .service_fn(|_req: Request<Body>| async {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                    Response::new(Body::from("Hello"))
-                )
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Response::new(Body::from(
+                    "Hello",
+                )))
             });
 
         let request = Request::builder()
@@ -208,7 +210,7 @@ mod tests {
             .unwrap();
 
         let response = service.oneshot(request).await.unwrap();
-        
+
         // Should not redirect because X-Forwarded-Proto says it's HTTPS
         assert_eq!(response.status(), StatusCode::OK);
     }
@@ -218,9 +220,9 @@ mod tests {
         let service = ServiceBuilder::new()
             .layer(HttpsRedirectLayer::new())
             .service_fn(|_req: Request<Body>| async {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                    Response::new(Body::from("Hello"))
-                )
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Response::new(Body::from(
+                    "Hello",
+                )))
             });
 
         let request = Request::builder()
@@ -231,7 +233,7 @@ mod tests {
             .unwrap();
 
         let response = service.oneshot(request).await.unwrap();
-        
+
         // Should redirect because X-Forwarded-Proto says it's HTTP
         assert_eq!(response.status(), StatusCode::MOVED_PERMANENTLY);
         assert_eq!(
@@ -245,9 +247,9 @@ mod tests {
         let service = ServiceBuilder::new()
             .layer(HttpsRedirectLayer::new())
             .service_fn(|_req: Request<Body>| async {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                    Response::new(Body::from("Hello"))
-                )
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Response::new(Body::from(
+                    "Hello",
+                )))
             });
 
         let request = Request::builder()
@@ -257,7 +259,7 @@ mod tests {
             .unwrap();
 
         let response = service.oneshot(request).await.unwrap();
-        
+
         assert_eq!(response.status(), StatusCode::MOVED_PERMANENTLY);
         assert_eq!(
             response.headers().get("Location").unwrap(),
@@ -270,9 +272,9 @@ mod tests {
         let service = ServiceBuilder::new()
             .layer(HttpsRedirectLayer::new())
             .service_fn(|_req: Request<Body>| async {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                    Response::new(Body::from("Hello"))
-                )
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Response::new(Body::from(
+                    "Hello",
+                )))
             });
 
         let request = Request::builder()
@@ -282,7 +284,7 @@ mod tests {
             .unwrap();
 
         let response = service.oneshot(request).await.unwrap();
-        
+
         // Should return 400 Bad Request when Host header is missing
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }

@@ -7,13 +7,16 @@ use axum::{
 };
 use ferrex_core::{
     api_types::ApiResponse,
-    auth::pin::{PinAttemptTracker, PinPolicy, PinError, SetPinRequest, SetPinResponse},
+    auth::pin::{PinPolicy, SetPinRequest, SetPinResponse},
     user::User,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{AppState, errors::{AppError, AppResult}};
+use crate::{
+    errors::{AppError, AppResult},
+    AppState,
+};
 
 /// Request to authenticate using PIN
 #[derive(Debug, Deserialize)]
@@ -36,14 +39,19 @@ pub async fn authenticate_with_pin(
     Json(request): Json<PinAuthRequest>,
 ) -> AppResult<Json<ApiResponse<PinAuthResponse>>> {
     // CRITICAL: Check if admin is authenticated on this device
-    if !state.is_admin_authenticated_on_device(request.device_id).await {
+    if !state
+        .is_admin_authenticated_on_device(request.device_id)
+        .await
+    {
         return Err(AppError::forbidden(
-            "PIN authentication requires an admin to be logged in on this device"
+            "PIN authentication requires an admin to be logged in on this device",
         ));
     }
 
     // Get admin session info to identify which admin authorized this
-    let admin_session = state.get_admin_session(request.device_id).await
+    let admin_session = state
+        .get_admin_session(request.device_id)
+        .await
         .ok_or_else(|| AppError::forbidden("Admin session not found or expired"))?;
 
     // TODO: Implement actual PIN verification logic
@@ -73,14 +81,19 @@ pub async fn set_pin(
     Json(request): Json<SetPinRequest>,
 ) -> AppResult<Json<ApiResponse<SetPinResponse>>> {
     // CRITICAL: Check if admin is authenticated on this device
-    if !state.is_admin_authenticated_on_device(request.device_id).await {
+    if !state
+        .is_admin_authenticated_on_device(request.device_id)
+        .await
+    {
         return Err(AppError::forbidden(
-            "PIN setup requires an admin to be logged in on this device"
+            "PIN setup requires an admin to be logged in on this device",
         ));
     }
 
     // Get admin session info
-    let admin_session = state.get_admin_session(request.device_id).await
+    let admin_session = state
+        .get_admin_session(request.device_id)
+        .await
         .ok_or_else(|| AppError::forbidden("Admin session not found or expired"))?;
 
     // Validate PIN according to policy
@@ -119,12 +132,14 @@ pub async fn remove_pin(
     // CRITICAL: Check if admin is authenticated on this device
     if !state.is_admin_authenticated_on_device(device_id).await {
         return Err(AppError::forbidden(
-            "PIN removal requires an admin to be logged in on this device"
+            "PIN removal requires an admin to be logged in on this device",
         ));
     }
 
     // Get admin session info
-    let admin_session = state.get_admin_session(device_id).await
+    let admin_session = state
+        .get_admin_session(device_id)
+        .await
         .ok_or_else(|| AppError::forbidden("Admin session not found or expired"))?;
 
     // TODO: Implement actual PIN removal logic
@@ -149,7 +164,7 @@ pub async fn check_pin_availability(
 ) -> AppResult<Json<ApiResponse<bool>>> {
     // Check if admin is authenticated on this device
     let admin_authenticated = state.is_admin_authenticated_on_device(device_id).await;
-    
+
     // Only return true if admin is authenticated (PIN can only be used when admin is logged in)
     Ok(Json(ApiResponse::success(admin_authenticated)))
 }
@@ -162,8 +177,11 @@ pub async fn register_admin_session(
 ) -> AppResult<StatusCode> {
     // TODO: Add proper admin role verification
     // For now, assume the middleware has already verified admin status
-    
-    match state.register_admin_session(user.id, request.device_id, request.session_token).await {
+
+    match state
+        .register_admin_session(user.id, request.device_id, request.session_token)
+        .await
+    {
         Ok(_) => Ok(StatusCode::CREATED),
         Err(e) => {
             tracing::error!("Failed to register admin session: {}", e);
@@ -179,7 +197,7 @@ pub async fn remove_admin_session(
     Path(device_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     // TODO: Add proper admin role verification and ownership check
-    
+
     state.remove_admin_session(device_id).await;
     Ok(StatusCode::NO_CONTENT)
 }

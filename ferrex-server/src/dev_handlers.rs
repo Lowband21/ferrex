@@ -1,21 +1,15 @@
 //! Development utilities and handlers
-//! 
+//!
 //! This module provides endpoints for development and testing purposes,
 //! including database reset functionality. Reset functionality requires
 //! admin permissions to prevent accidental data loss.
 
-use axum::{
-    extract::State,
-    Extension,
-    Json,
-};
-use ferrex_core::{
-    api_types::ApiResponse,
-    user::User,
-};
-use std::path::PathBuf;
-use uuid::Uuid;
+use axum::{extract::State, Extension, Json};
+use ferrex_core::types::library::Library;
+use ferrex_core::{api_types::ApiResponse, user::User};
+use ferrex_core::{LibraryID, LibraryType};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tracing::{info, warn};
 
 use crate::{
@@ -77,27 +71,33 @@ pub async fn check_reset_status(
     Extension(user): Extension<User>,
 ) -> AppResult<Json<ApiResponse<ResetCheckResponse>>> {
     // Check if user has admin permissions
-    let perms = state.database.backend()
+    let perms = state
+        .database
+        .backend()
         .get_user_permissions(user.id)
         .await
         .map_err(|e| AppError::internal(format!("Failed to get permissions: {}", e)))?;
-    
+
     let can_reset = perms.has_permission("server:reset_database") || perms.has_role("admin");
-    
+
     // Get current counts
-    let users = state.database.backend()
+    let users = state
+        .database
+        .backend()
         .get_all_users()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
-    
-    let libraries = state.database.backend()
+
+    let libraries = state
+        .database
+        .backend()
         .list_libraries()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
-    
+
     // Get media count (this is a simplified count - you might want to add a dedicated method)
     let media_count = 0; // TODO: Implement actual media count
-    
+
     let response = ResetCheckResponse {
         is_development: cfg!(debug_assertions),
         can_reset,
@@ -105,7 +105,7 @@ pub async fn check_reset_status(
         library_count: libraries.len(),
         media_count,
     };
-    
+
     Ok(Json(ApiResponse::success(response)))
 }
 
@@ -119,76 +119,99 @@ pub async fn reset_database(
     Json(request): Json<ResetDatabaseRequest>,
 ) -> AppResult<Json<ApiResponse<ResetResult>>> {
     // Check permissions
-    let perms = state.database.backend()
+    let perms = state
+        .database
+        .backend()
         .get_user_permissions(user.id)
         .await
         .map_err(|e| AppError::internal(format!("Failed to get permissions: {}", e)))?;
-    
+
     if !perms.has_permission("server:reset_database") && !perms.has_role("admin") {
-        return Err(AppError::forbidden("Database reset requires admin permissions"));
+        return Err(AppError::forbidden(
+            "Database reset requires admin permissions",
+        ));
     }
-    
+
     // Verify confirmation
     if request.confirmation != "RESET_DATABASE" {
-        return Err(AppError::bad_request("Invalid confirmation. Must be 'RESET_DATABASE'"));
+        return Err(AppError::bad_request(
+            "Invalid confirmation. Must be 'RESET_DATABASE'",
+        ));
     }
-    
-    warn!("Database reset requested with options: users={}, libraries={}, media={}", 
-        request.reset_users, request.reset_libraries, request.reset_media);
-    
+
+    warn!(
+        "Database reset requested with options: users={}, libraries={}, media={}",
+        request.reset_users, request.reset_libraries, request.reset_media
+    );
+
     let mut result = ResetResult::default();
-    
+
     // Get backend reference
     let backend = state.database.backend();
-    
+
     if request.reset_users {
         info!("Resetting user data...");
-        
+
         // Get all users before deletion for count
-        let users = backend.get_all_users().await
+        let users = backend
+            .get_all_users()
+            .await
             .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
         result.users_deleted = users.len();
-        
+
         // Delete all users (this should cascade to related tables)
         for user in users {
-            backend.delete_user(user.id).await
-                .map_err(|e| AppError::internal(format!("Failed to delete user {}: {}", user.id, e)))?;
+            backend.delete_user(user.id).await.map_err(|e| {
+                AppError::internal(format!("Failed to delete user {}: {}", user.id, e))
+            })?;
         }
-        
+
         // Roles are system data and shouldn't be deleted, just reset to defaults
         // The migration scripts should handle ensuring default roles exist
         result.roles_reset = 3; // admin, user, guest
-        
-        info!("User data reset complete. {} users deleted", result.users_deleted);
+
+        info!(
+            "User data reset complete. {} users deleted",
+            result.users_deleted
+        );
     }
-    
+
     if request.reset_libraries {
         info!("Resetting library data...");
-        
+
         // Get all libraries
-        let libraries = backend.list_libraries().await
+        let libraries = backend
+            .list_libraries()
+            .await
             .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
         result.libraries_deleted = libraries.len();
-        
+
         // Delete all libraries
         for library in libraries {
-            backend.delete_library(&library.id.to_string()).await
-                .map_err(|e| AppError::internal(format!("Failed to delete library {}: {}", library.id, e)))?;
+            backend
+                .delete_library(&library.id.to_string())
+                .await
+                .map_err(|e| {
+                    AppError::internal(format!("Failed to delete library {}: {}", library.id, e))
+                })?;
         }
-        
-        info!("Library data reset complete. {} libraries deleted", result.libraries_deleted);
+
+        info!(
+            "Library data reset complete. {} libraries deleted",
+            result.libraries_deleted
+        );
     }
-    
+
     if request.reset_media {
         info!("Resetting media data...");
-        
+
         // This would require implementing media deletion methods
         // For now, deleting libraries should cascade to media entries
         warn!("Direct media deletion not yet implemented. Media will be deleted when libraries are deleted.");
     }
-    
+
     info!("Database reset completed successfully");
-    
+
     Ok(Json(ApiResponse::success(result)))
 }
 
@@ -220,70 +243,79 @@ pub async fn seed_database(
     Json(request): Json<SeedDatabaseRequest>,
 ) -> AppResult<Json<ApiResponse<SeedResult>>> {
     // Check permissions
-    let perms = state.database.backend()
+    let perms = state
+        .database
+        .backend()
         .get_user_permissions(user.id)
         .await
         .map_err(|e| AppError::internal(format!("Failed to get permissions: {}", e)))?;
-    
+
     if !perms.has_permission("server:seed_database") && !perms.has_role("admin") {
-        return Err(AppError::forbidden("Database seeding requires admin permissions"));
+        return Err(AppError::forbidden(
+            "Database seeding requires admin permissions",
+        ));
     }
-    
+
     let mut result = SeedResult {
         users_created: 0,
         libraries_created: 0,
     };
-    
+
     // Create test users
     if request.user_count > 0 {
-        use crate::services::{UserService, user_service::CreateUserParams};
+        use crate::services::{user_service::CreateUserParams, UserService};
         use uuid::Uuid;
-        
+
         let user_service = UserService::new(&state);
-        
+
         // Create a test admin first
-        let admin_id = match user_service.create_user(CreateUserParams {
-            username: "testadmin".to_string(),
-            display_name: "Test Admin".to_string(),
-            password: "AdminPass123".to_string(),
-            created_by: None,
-        }).await {
+        let admin_id = match user_service
+            .create_user(CreateUserParams {
+                username: "testadmin".to_string(),
+                display_name: "Test Admin".to_string(),
+                password: "AdminPass123".to_string(),
+                created_by: None,
+            })
+            .await
+        {
             Ok(admin) => {
                 // Assign admin role
                 let admin_role_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001")
                     .expect("Invalid admin role UUID");
-                user_service.assign_role(admin.id, admin_role_id, admin.id).await?;
+                user_service
+                    .assign_role(admin.id, admin_role_id, admin.id)
+                    .await?;
                 result.users_created += 1;
                 admin.id
-            },
+            }
             Err(e) => {
                 warn!("Failed to create test admin (may already exist): {}", e);
                 Uuid::nil()
             }
         };
-        
+
         // Create regular test users
         for i in 1..request.user_count {
-            match user_service.create_user(CreateUserParams {
-                username: format!("testuser{}", i),
-                display_name: format!("Test User {}", i),
-                password: format!("{:04}", i), // 4-digit PIN
-                created_by: Some(admin_id),
-            }).await {
+            match user_service
+                .create_user(CreateUserParams {
+                    username: format!("testuser{}", i),
+                    display_name: format!("Test User {}", i),
+                    password: format!("{:04}", i), // 4-digit PIN
+                    created_by: Some(admin_id),
+                })
+                .await
+            {
                 Ok(_) => result.users_created += 1,
                 Err(e) => warn!("Failed to create test user {}: {}", i, e),
             }
         }
     }
-    
+
     // Create test library
     if request.create_library {
         if let Some(path) = request.library_path {
-            use ferrex_core::Library;
-            use ferrex_core::library::LibraryType;
-            
             let library = Library {
-                id: Uuid::new_v4(),
+                id: LibraryID::new(),
                 name: "Test Library".to_string(),
                 library_type: LibraryType::Movies,
                 paths: vec![PathBuf::from(path.clone())],
@@ -298,24 +330,24 @@ pub async fn seed_database(
                 updated_at: chrono::Utc::now(),
                 media: None,
             };
-            
+
             match state.database.backend().create_library(library).await {
                 Ok(_) => {
                     result.libraries_created = 1;
                     info!("Created test library at path: {}", path);
-                },
+                }
                 Err(e) => warn!("Failed to create test library: {}", e),
             }
         }
     }
-    
+
     Ok(Json(ApiResponse::success(result)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_reset_request_validation() {
         let valid = ResetDatabaseRequest {
@@ -324,17 +356,17 @@ mod tests {
             reset_media: false,
             confirmation: "RESET_DATABASE".to_string(),
         };
-        
+
         // Should be valid
         assert_eq!(valid.confirmation, "RESET_DATABASE");
-        
+
         let invalid = ResetDatabaseRequest {
             reset_users: true,
             reset_libraries: true,
             reset_media: false,
             confirmation: "wrong".to_string(),
         };
-        
+
         // Should be invalid
         assert_ne!(invalid.confirmation, "RESET_DATABASE");
     }

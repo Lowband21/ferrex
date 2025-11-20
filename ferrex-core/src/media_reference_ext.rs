@@ -1,50 +1,40 @@
-use crate::media::{
-    MediaReference, MediaRef, Playable,
-    MediaDetailsOption, TmdbDetails,
-};
+use crate::{Media, MediaDetailsOption, MediaOps, MovieLike, Playable, SeriesLike, TmdbDetails};
 
-// ===== MediaReference Sorting and Filtering Methods =====
+// ===== Media Sorting and Filtering Methods =====
 //
 // These methods are kept for backward compatibility but now use
 // the trait system internally for cleaner implementation.
 
-impl MediaReference {
-    /// Get title regardless of media type
-    pub fn title(&self) -> &str {
-        // Now uses the trait method internally
-        self.as_ref().title()
-    }
-    
-    /// Get release year if available
-    pub fn year(&self) -> Option<u16> {
-        // Now uses the trait method internally
-        self.as_ref().year()
-    }
-    
+impl Media {
     /// Get rating (vote average) if available
     pub fn rating(&self) -> Option<f32> {
-        // Now uses the trait method internally
-        self.as_ref().rating()
-    }
-    
-    /// Get genres if available
-    pub fn genres(&self) -> Option<Vec<&str>> {
-        // Uses trait method, but returns Option for backward compatibility
-        let genres = self.as_ref().genres();
-        if genres.is_empty() {
-            None
-        } else {
-            Some(genres)
+        match &self {
+            Media::Movie(movie) => movie.rating(),
+            Media::Series(tv_show) => tv_show.rating(),
+            Media::Episode(episode) => episode.rating(),
+            Media::Season(_) => None,
         }
     }
-    
+
+    /// Get genres if available
+    pub fn genres(&self) -> Option<Vec<&str>> {
+        match &self {
+            Media::Movie(movie) => movie.genres(),
+            Media::Series(tv_show) => tv_show.genres(),
+            Media::Episode(episode) => episode.genres(),
+            Media::Season(season) => season.genres(),
+        }
+    }
+
+    /*
     /// Get file creation date for date_added sorting
     pub fn date_added(&self) -> Option<chrono::DateTime<chrono::Utc>> {
         // Use the Playable trait to access file information
         self.as_playable()
             .map(|playable| playable.file().created_at)
-    }
-    
+    } */
+
+    /*
     /// Sort a collection of media references by title
     pub fn sort_by_title(items: &mut [Self], ascending: bool) {
         items.sort_by(|a, b| {
@@ -57,7 +47,7 @@ impl MediaReference {
             }
         });
     }
-    
+
     /// Sort by year
     pub fn sort_by_year(items: &mut [Self], ascending: bool) {
         items.sort_by(|a, b| {
@@ -76,8 +66,8 @@ impl MediaReference {
                 (None, None) => std::cmp::Ordering::Equal,
             }
         });
-    }
-    
+    } */
+
     /// Sort by rating
     pub fn sort_by_rating(items: &mut [Self], ascending: bool) {
         items.sort_by(|a, b| {
@@ -97,7 +87,8 @@ impl MediaReference {
             }
         });
     }
-    
+
+    /*
     /// Sort by date added
     pub fn sort_by_date_added(items: &mut [Self], ascending: bool) {
         items.sort_by(|a, b| {
@@ -116,13 +107,13 @@ impl MediaReference {
                 (None, None) => std::cmp::Ordering::Equal,
             }
         });
-    }
-    
+    } */
+
     /// Filter by genre
     pub fn filter_by_genre<'a>(
-        items: &'a [Self], 
-        genre: &str
-    ) -> impl Iterator<Item = &'a Self> + 'a {
+        items: &'a [Self],
+        genre: &str,
+    ) -> impl Iterator<Item = &'a Self> + 'a + use<'a> {
         let genre = genre.to_string();
         items.iter().filter(move |item| {
             item.genres()
@@ -130,24 +121,7 @@ impl MediaReference {
                 .unwrap_or(false)
         })
     }
-    
-    /// Filter by year range
-    pub fn filter_by_year_range<'a>(
-        items: &'a [Self],
-        min_year: Option<u16>,
-        max_year: Option<u16>,
-    ) -> impl Iterator<Item = &'a Self> {
-        items.iter().filter(move |item| {
-            if let Some(year) = item.year() {
-                let above_min = min_year.map(|min| year >= min).unwrap_or(true);
-                let below_max = max_year.map(|max| year <= max).unwrap_or(true);
-                above_min && below_max
-            } else {
-                false
-            }
-        })
-    }
-    
+
     /// Filter by rating range
     pub fn filter_by_rating_range<'a>(
         items: &'a [Self],
@@ -164,85 +138,82 @@ impl MediaReference {
             }
         })
     }
-    
+
+    /*
     /// Text search across title and overview
-    pub fn search<'a>(
-        items: &'a [Self],
-        query: &str,
-    ) -> impl Iterator<Item = &'a Self> {
+    pub fn search<'a>(items: &'a [Self], query: &str) -> impl Iterator<Item = &'a Self> {
         let query_lower = query.to_lowercase();
         items.iter().filter(move |item| {
             // Search in title
             if item.title().to_lowercase().contains(&query_lower) {
                 return true;
             }
-            
+
             // Search in overview if available
             match item {
                 Self::Movie(m) => match &m.details {
-                    MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
-                        details.overview
-                            .as_ref()
-                            .map(|o| o.to_lowercase().contains(&query_lower))
-                            .unwrap_or(false)
-                    }
+                    MediaDetailsOption::Details(TmdbDetails::Movie(details)) => details
+                        .overview
+                        .as_ref()
+                        .map(|o| o.to_lowercase().contains(&query_lower))
+                        .unwrap_or(false),
                     _ => false,
                 },
                 Self::Series(s) => match &s.details {
-                    MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
-                        details.overview
-                            .as_ref()
-                            .map(|o| o.to_lowercase().contains(&query_lower))
-                            .unwrap_or(false)
-                    }
+                    MediaDetailsOption::Details(TmdbDetails::Series(details)) => details
+                        .overview
+                        .as_ref()
+                        .map(|o| o.to_lowercase().contains(&query_lower))
+                        .unwrap_or(false),
                     _ => false,
                 },
                 Self::Episode(e) => match &e.details {
-                    MediaDetailsOption::Details(TmdbDetails::Episode(details)) => {
-                        details.overview
-                            .as_ref()
-                            .map(|o| o.to_lowercase().contains(&query_lower))
-                            .unwrap_or(false)
-                    }
+                    MediaDetailsOption::Details(TmdbDetails::Episode(details)) => details
+                        .overview
+                        .as_ref()
+                        .map(|o| o.to_lowercase().contains(&query_lower))
+                        .unwrap_or(false),
                     _ => false,
                 },
                 Self::Season(s) => match &s.details {
-                    MediaDetailsOption::Details(TmdbDetails::Season(details)) => {
-                        details.overview
-                            .as_ref()
-                            .map(|o| o.to_lowercase().contains(&query_lower))
-                            .unwrap_or(false)
-                    }
+                    MediaDetailsOption::Details(TmdbDetails::Season(details)) => details
+                        .overview
+                        .as_ref()
+                        .map(|o| o.to_lowercase().contains(&query_lower))
+                        .unwrap_or(false),
                     _ => false,
                 },
             }
         })
-    }
+    }*/
 }
 
-/// Extension trait for collections of MediaReference
-pub trait MediaReferenceExt {
-    fn apply_sort(&mut self, sort_by: MediaSortBy, ascending: bool);
-    fn apply_filters(&self, filters: &MediaFilters) -> Vec<&MediaReference>;
-    fn search(&self, query: &str) -> Vec<&MediaReference>;
+/*
+/// Extension trait for collections of Media
+pub trait MediaExt {
+    //fn apply_sort(&mut self, sort_by: MediaSortBy, ascending: bool);
+    fn apply_filters(&self, filters: &MediaFilters) -> Vec<&Media>;
+    //fn search(&self, query: &str) -> Vec<&Media>;
 }
 
-impl MediaReferenceExt for [MediaReference] {
+impl MediaExt for [Media] {
+    /*
     fn apply_sort(&mut self, sort_by: MediaSortBy, ascending: bool) {
         match sort_by {
-            MediaSortBy::Title => MediaReference::sort_by_title(self, ascending),
-            MediaSortBy::Year => MediaReference::sort_by_year(self, ascending),
-            MediaSortBy::Rating => MediaReference::sort_by_rating(self, ascending),
-            MediaSortBy::DateAdded => MediaReference::sort_by_date_added(self, ascending),
+            MediaSortBy::Title => Media::sort_by_title(self, ascending),
+            MediaSortBy::Year => Media::sort_by_year(self, ascending),
+            MediaSortBy::Rating => Media::sort_by_rating(self, ascending),
+            MediaSortBy::DateAdded => Media::sort_by_date_added(self, ascending),
         }
-    }
-    
-    fn apply_filters(&self, filters: &MediaFilters) -> Vec<&MediaReference> {
-        let mut results: Vec<&MediaReference> = self.iter().collect();
-        
+    } */
+
+    fn apply_filters(&self, filters: &MediaFilters) -> Vec<&Media> {
+        let mut results: Vec<&Media> = self.iter().collect();
+
         // Apply genre filter
         if let Some(genre) = &filters.genre {
-            results = results.into_iter()
+            results = results
+                .into_iter()
                 .filter(|item| {
                     item.genres()
                         .map(|genres| genres.iter().any(|g| g.eq_ignore_ascii_case(genre)))
@@ -250,10 +221,11 @@ impl MediaReferenceExt for [MediaReference] {
                 })
                 .collect();
         }
-        
+
         // Apply year range filter
         if filters.min_year.is_some() || filters.max_year.is_some() {
-            results = results.into_iter()
+            results = results
+                .into_iter()
                 .filter(|item| {
                     if let Some(year) = item.year() {
                         let above_min = filters.min_year.map(|min| year >= min).unwrap_or(true);
@@ -265,10 +237,11 @@ impl MediaReferenceExt for [MediaReference] {
                 })
                 .collect();
         }
-        
+
         // Apply rating range filter
         if filters.min_rating.is_some() || filters.max_rating.is_some() {
-            results = results.into_iter()
+            results = results
+                .into_iter()
                 .filter(|item| {
                     if let Some(rating) = item.rating() {
                         let above_min = filters.min_rating.map(|min| rating >= min).unwrap_or(true);
@@ -280,14 +253,14 @@ impl MediaReferenceExt for [MediaReference] {
                 })
                 .collect();
         }
-        
+
         results
     }
-    
-    fn search(&self, query: &str) -> Vec<&MediaReference> {
-        MediaReference::search(self, query).collect()
-    }
-}
+
+    /*fn search(&self, query: &str) -> Vec<&Media> {
+        Media::search(self, query).collect()
+    }*/
+}*/
 
 /// Sort options for media references
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

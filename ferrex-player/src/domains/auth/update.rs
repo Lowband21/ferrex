@@ -6,7 +6,7 @@ use log::{error, info};
 
 // Helper macro to wrap task results
 macro_rules! wrap_task {
-    ($task:expr) => {
+    ($task:expr_2021) => {
         DomainUpdateResult::task($task.map(DomainMessage::Auth))
     };
 }

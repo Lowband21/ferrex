@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod sync_session_tests {
+    use ferrex_core::api_types::MediaID;
     use ferrex_core::sync_session::*;
-    use ferrex_core::api_types::MediaId;
-    use uuid::Uuid;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use uuid::Uuid;
 
     fn create_test_sync_session() -> SyncSession {
         let now = SystemTime::now()
@@ -15,7 +15,9 @@ mod sync_session_tests {
             id: Uuid::new_v4(),
             room_code: SyncSession::generate_room_code(),
             host_id: Uuid::new_v4(),
-            media_id: MediaId::Movie(ferrex_core::media::MovieID::new("test_movie".to_string()).unwrap()),
+            media_id: MediaID::Movie(
+                ferrex_core::media::MovieID::new("test_movie".to_string()).unwrap(),
+            ),
             state: PlaybackState {
                 position: 0.0,
                 is_playing: false,
@@ -63,7 +65,7 @@ mod sync_session_tests {
     #[test]
     fn test_session_expiry() {
         let mut session = create_test_sync_session();
-        
+
         // Not expired
         assert!(!session.is_expired());
 
@@ -71,8 +73,9 @@ mod sync_session_tests {
         session.expires_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs() as i64 - 100;
-        
+            .as_secs() as i64
+            - 100;
+
         assert!(session.is_expired());
     }
 
@@ -103,7 +106,7 @@ mod sync_session_tests {
         // Try to add 11th participant
         let extra_participant = create_test_participant(Uuid::new_v4(), "Extra User");
         let result = session.add_participant(extra_participant);
-        
+
         assert!(matches!(result, Err(SyncSessionError::SessionFull)));
         assert_eq!(session.participants.len(), 10);
     }
@@ -112,7 +115,7 @@ mod sync_session_tests {
     fn test_participant_replacement() {
         let mut session = create_test_sync_session();
         let user_id = Uuid::new_v4();
-        
+
         // Add participant
         let participant1 = create_test_participant(user_id, "User 1");
         session.add_participant(participant1).unwrap();
@@ -121,7 +124,7 @@ mod sync_session_tests {
         // Add same user with different name
         let participant2 = create_test_participant(user_id, "User 1 Updated");
         session.add_participant(participant2).unwrap();
-        
+
         // Should replace, not add
         assert_eq!(session.participants.len(), 1);
         assert_eq!(session.participants[0].display_name, "User 1 Updated");
@@ -133,8 +136,12 @@ mod sync_session_tests {
         let user1 = Uuid::new_v4();
         let user2 = Uuid::new_v4();
 
-        session.add_participant(create_test_participant(user1, "User 1")).unwrap();
-        session.add_participant(create_test_participant(user2, "User 2")).unwrap();
+        session
+            .add_participant(create_test_participant(user1, "User 1"))
+            .unwrap();
+        session
+            .add_participant(create_test_participant(user2, "User 2"))
+            .unwrap();
         assert_eq!(session.participants.len(), 2);
 
         // Remove user1
@@ -229,15 +236,9 @@ mod sync_session_tests {
                 position: 123.45,
                 timestamp: 1234567890,
             },
-            SyncMessage::Pause {
-                position: 234.56,
-            },
-            SyncMessage::Seek {
-                position: 345.67,
-            },
-            SyncMessage::SetRate {
-                rate: 1.5,
-            },
+            SyncMessage::Pause { position: 234.56 },
+            SyncMessage::Seek { position: 345.67 },
+            SyncMessage::SetRate { rate: 1.5 },
             SyncMessage::Ready {
                 user_id: Uuid::new_v4(),
             },
@@ -251,7 +252,7 @@ mod sync_session_tests {
             // Should serialize and deserialize correctly
             let json = serde_json::to_string(&msg).unwrap();
             let deserialized: SyncMessage = serde_json::from_str(&json).unwrap();
-            
+
             // Verify type field is present and snake_case
             assert!(json.contains("\"type\":"));
             match msg {
@@ -270,7 +271,9 @@ mod sync_session_tests {
     #[test]
     fn test_create_session_request_response() {
         let request = CreateSyncSessionRequest {
-            media_id: MediaId::Movie(ferrex_core::media::MovieID::new("test_movie".to_string()).unwrap()),
+            media_id: MediaID::Movie(
+                ferrex_core::media::MovieID::new("test_movie".to_string()).unwrap(),
+            ),
         };
 
         let response = CreateSyncSessionResponse {
@@ -296,7 +299,9 @@ mod sync_session_tests {
 
         let response = JoinSyncSessionResponse {
             session_id: Uuid::new_v4(),
-            media_id: MediaId::Episode(ferrex_core::media::EpisodeID::new("show123".to_string()).unwrap()),
+            media_id: MediaID::Episode(
+                ferrex_core::media::EpisodeID::new("show123".to_string()).unwrap(),
+            ),
             websocket_url: "ws://localhost:3000/sync/XYZ789".to_string(),
             current_state: PlaybackState {
                 position: 1234.5,

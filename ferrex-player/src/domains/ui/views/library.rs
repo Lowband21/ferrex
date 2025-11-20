@@ -1,18 +1,22 @@
 use crate::{
-    domains::ui::messages::Message,
-    domains::ui::theme,
-    domains::ui::views::{
-        grid::grid_view,
-        {all::view_all_content, scanning::overlay::create_scan_progress_overlay},
+    domains::ui::{
+        messages::Message,
+        theme,
+        views::{
+            all::view_all_content,
+            grid::{macro_gen, virtual_movie_references_grid, virtual_series_references_grid},
+            scanning::overlay::create_scan_progress_overlay,
+        },
+        widgets::{collect_cached_handles_for_media, texture_preloader},
+        DisplayMode,
     },
-    domains::ui::DisplayMode,
     state_refactored::State,
 };
+use ferrex_core::{ImageSize, ImageType};
 use iced::{
-    widget::{button, column, container, row, text, Row, Space},
+    widget::{button, column, container, row, text, Container, Row, Space},
     Element, Length,
 };
-use lucide_icons::Icon;
 
 #[cfg_attr(
     any(
@@ -82,10 +86,7 @@ pub fn view_library(state: &State) -> Element<Message> {
 
         let scan_progress_section: Element<Message> = container(Space::with_height(0)).into();
 
-        // Use MediaQueryService to check for media (clean architecture)
-        let has_media = state.domains.media.state.query_service.has_any_media();
-
-        if !has_media {
+        if !state.domains.ui.state.repo_accessor.is_initialized() {
             // Empty state
             container(
                 column![
@@ -130,45 +131,54 @@ pub fn view_library(state: &State) -> Element<Message> {
 
                     let active_tab = state.tab_manager.active_tab();
                     match active_tab {
-                        TabState::Library(lib_state) => {
-                            match lib_state.library_type {
-                                LibraryType::Movies => {
-                                    // Use movies from tab state
-                                    let movies = lib_state.movies().unwrap_or(&[]);
-                                    /*
-                                    log::debug!(
-                                        "[Library Movies View] Rendering {} movies for library {}",
-                                        movies.len(),
-                                        lib_state.library_id
-                                    ); */
-                                    grid_view::virtual_movie_references_grid(
-                                        movies,
-                                        &lib_state.grid_state,
-                                        &state.domains.ui.state.hovered_media_id,
-                                        Message::TabGridScrolled,
-                                        state,
-                                    )
-                                }
-                                LibraryType::TvShows => {
-                                    // Use TV shows from tab state
-                                    let shows = lib_state.tv_shows().unwrap_or(&[]);
-                                    /*
-                                    log::debug!(
-                                        "[Library TV View] Rendering {} series for library {}",
-                                        shows.len(),
-                                        lib_state.library_id
-                                    ); */
-                                    grid_view::virtual_series_references_grid(
-                                        shows,
-                                        &lib_state.grid_state,
-                                        &state.domains.ui.state.hovered_media_id,
-                                        Message::TabGridScrolled,
-                                        state,
-                                    )
-                                }
+                        TabState::Library(lib_state) => match lib_state.library_type {
+                            LibraryType::Movies => {
+                                // Compute a small prefetch set and preload their textures into the atlas
+                                let preload_range = lib_state.grid_state.get_preload_range(crate::infrastructure::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+                                let ids_slice =
+                                    lib_state.cached_index_ids.get(preload_range).unwrap_or(&[]);
+                                let handles = collect_cached_handles_for_media(
+                                    ids_slice.iter().copied(),
+                                    ImageType::Movie,
+                                    ImageSize::Poster,
+                                );
+                                let budget = crate::infrastructure::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
+                                let preloader = texture_preloader(handles, budget);
+
+                                let grid = virtual_movie_references_grid(
+                                    &lib_state.cached_index_ids,
+                                    &lib_state.grid_state,
+                                    &state.domains.ui.state.hovered_media_id,
+                                    Message::TabGridScrolled,
+                                    state,
+                                );
+
+                                column![preloader, grid].into()
                             }
-                        }
-                        TabState::All(all_state) => {
+                            LibraryType::Series => {
+                                let preload_range = lib_state.grid_state.get_preload_range(crate::infrastructure::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+                                let ids_slice =
+                                    lib_state.cached_index_ids.get(preload_range).unwrap_or(&[]);
+                                let handles = collect_cached_handles_for_media(
+                                    ids_slice.iter().copied(),
+                                    ImageType::Series,
+                                    ImageSize::Poster,
+                                );
+                                let budget = crate::infrastructure::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
+                                let preloader = texture_preloader(handles, budget);
+
+                                let grid = virtual_series_references_grid(
+                                    &lib_state.cached_index_ids,
+                                    &lib_state.grid_state,
+                                    &state.domains.ui.state.hovered_media_id,
+                                    Message::TabGridScrolled,
+                                    state,
+                                );
+
+                                column![preloader, grid].into()
+                            }
+                        },
+                        TabState::All(_all_state) => {
                             // Use the AllViewModel from all_state
                             view_all_content(state)
                         }

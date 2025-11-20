@@ -1,35 +1,46 @@
 use crate::AppState;
 use axum::{
+    body::Body,
     extract::{Path, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use ferrex_core::database::traits::ImageLookupParams;
+use httpdate::{fmt_http_date, parse_http_date};
 use serde::Deserialize;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Deserialize)]
 pub struct ImageQuery {
+    /// Legacy TMDB size (e.g., w185, w500, original)
     size: Option<String>,
+    w: Option<u32>,
+    max_width: Option<u32>,
+    /// Preferred output format (future use): avif|webp|jpeg
+    fmt: Option<String>,
+    /// Quality hint 0-100 (future use)
+    quality: Option<u8>,
 }
 
-/// Serve cached images with metadata
+/// Serve cached images as streamed bytes with proper HTTP caching
 /// Path format: /images/{type}/{id}/{category}/{index}
 /// Example: /images/movie/12345/poster/0
 pub async fn serve_image_handler(
     State(state): State<AppState>,
     Path((media_type, media_id, category, index)): Path<(String, String, String, u32)>,
     Query(query): Query<ImageQuery>,
-) -> Result<Response, StatusCode> {
+    headers: HeaderMap,
+) -> impl IntoResponse {
     info!(
-        "Image request: type={}, id={}, category={}, index={}, size={:?}",
-        media_type, media_id, category, index, query.size
+        "Image request: type={}, id={}, category={}, index={}, size={:?}, w={:?}, fmt={:?}",
+        media_type,
+        media_id,
+        category,
+        index,
+        query.size,
+        query.w.or(query.max_width),
+        query.fmt
     );
-    
-    // Enhanced logging to debug 500 errors
-    debug!("Raw media_id for image lookup: '{}'", media_id);
-    debug!("Media ID length: {}", media_id.len());
-    debug!("Media ID chars: {:?}", media_id.chars().collect::<Vec<_>>());
 
     // Validate media type
     if !["movie", "series", "season", "episode", "person"].contains(&media_type.as_str()) {
@@ -43,129 +54,204 @@ pub async fn serve_image_handler(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // Create lookup parameters
+    // Determine desired variant name (TMDB size) from w/maxWidth or legacy size
+    let requested_w = query.w.or(query.max_width);
+    let desired_variant = if let Some(w) = requested_w {
+        Some(map_width_to_tmdb_variant(&category, w).to_string())
+    } else {
+        query.size.clone().or_else(|| Some("w500".to_string()))
+    };
+
+    // Create lookup parameters (using desired variant string)
     let params = ImageLookupParams {
         media_type: media_type.clone(),
         media_id: media_id.clone(),
         image_type: category.clone(),
         index,
-        variant: query.size.clone().or_else(|| Some("w500".to_string())),
+        variant: desired_variant.clone(),
     };
 
-    // Look up image variant in database
-    let (image_path, image_metadata) =
-        match state.image_service.get_or_download_variant(&params).await {
-            Ok(Some(path)) => {
-                // Get metadata from database
-                let metadata = state
-                    .db
-                    .backend()
-                    .lookup_image_variant(&params)
-                    .await
-                    .ok()
-                    .flatten();
-                (path, metadata)
-            }
+    // Try to ensure the desired variant asynchronously
+    let ready_path = match state.image_service.ensure_variant_async(&params).await {
+        Ok(p) => p,
+        Err(e) => {
+            error!("ensure_variant_async failed: {}", e);
+            None
+        }
+    };
+
+    // If ready, stream it; else fall back to best available
+    let (image_path, served_variant) = if let Some(path) = ready_path {
+        (
+            path,
+            params.variant.clone().unwrap_or_else(|| "w500".to_string()),
+        )
+    } else {
+        match state.image_service.pick_best_available(&params).await {
+            Ok(Some((fallback_path, fallback_variant))) => (fallback_path, fallback_variant),
             Ok(None) => {
                 warn!(
-                    "Image not found: {}/{}/{}/{}",
+                    "No fallback available: {}/{}/{}/{}",
                     media_type, media_id, category, index
                 );
                 return Err(StatusCode::NOT_FOUND);
             }
             Err(e) => {
-                error!("Failed to get image: {}", e);
+                error!("Failed to select fallback: {}", e);
                 return Err(StatusCode::INTERNAL_SERVER_ERROR);
             }
-        };
-
-    // Read the image file
-    debug!("Attempting to read image from path: {:?}", image_path);
-    debug!("Current working directory: {:?}", std::env::current_dir());
-    debug!("Image path exists: {}", image_path.exists());
-    
-    let image_data = match tokio::fs::read(&image_path).await {
-        Ok(data) => data,
-        Err(e) => {
-            error!("Failed to read image file {:?}: {}", image_path, e);
-            error!("Absolute path: {:?}", image_path.canonicalize());
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
 
     // Determine content type based on file extension or metadata
-    let content_type = if let Some((image, _)) = &image_metadata {
-        match image.format.as_deref() {
-            Some("jpg") | Some("jpeg") => "image/jpeg",
-            Some("png") => "image/png",
-            Some("webp") => "image/webp",
-            _ => "image/jpeg",
-        }
-    } else {
-        match image_path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_lowercase())
-            .as_deref()
-        {
-            Some("jpg") | Some("jpeg") => "image/jpeg",
-            Some("png") => "image/png",
-            Some("webp") => "image/webp",
-            _ => "image/jpeg",
+    let content_type = match image_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_lowercase())
+        .as_deref()
+    {
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("webp") => "image/webp",
+        Some("avif") => "image/avif",
+        _ => "image/jpeg",
+    };
+
+    // Get file metadata for caching headers
+    let meta = match tokio::fs::metadata(&image_path).await {
+        Ok(m) => m,
+        Err(e) => {
+            error!("Failed to stat image file {:?}: {}", image_path, e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
 
-    // Build response with headers
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        header::HeaderValue::from_static(content_type),
-    );
-    headers.insert(
-        header::CACHE_CONTROL,
-        header::HeaderValue::from_static("public, max-age=31536000"), // Cache for 1 year
-    );
+    let file_size = meta.len();
+    let modified = match meta.modified() {
+        Ok(t) => t,
+        Err(e) => {
+            warn!("No modified time for {:?}: {}", image_path, e);
+            std::time::SystemTime::UNIX_EPOCH
+        }
+    };
+    let last_modified = fmt_http_date(modified);
 
-    // Add CORS headers for images
-    headers.insert(
-        header::ACCESS_CONTROL_ALLOW_ORIGIN,
-        header::HeaderValue::from_static("*"),
-    );
+    // Weak ETag based on size and mtime
+    let secs = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+        .as_secs();
+    let etag_value = format!("W/\"{}-{}\"", file_size, secs);
 
-    // Add image metadata headers if available
-    if let Some((image, variant)) = &image_metadata {
-        let width = variant
-            .as_ref()
-            .and_then(|v| v.width)
-            .or(image.width)
-            .unwrap_or(0);
-        let height = variant
-            .as_ref()
-            .and_then(|v| v.height)
-            .or(image.height)
-            .unwrap_or(0);
-        let aspect_ratio = if height > 0 {
-            width as f32 / height as f32
-        } else {
-            0.0
-        };
-
-        headers.insert(
-            "X-Image-Width",
-            header::HeaderValue::from_str(&width.to_string())
-                .unwrap_or_else(|_| header::HeaderValue::from_static("0")),
-        );
-        headers.insert(
-            "X-Image-Height",
-            header::HeaderValue::from_str(&height.to_string())
-                .unwrap_or_else(|_| header::HeaderValue::from_static("0")),
-        );
-        headers.insert(
-            "X-Image-Aspect-Ratio",
-            header::HeaderValue::from_str(&format!("{:.3}", aspect_ratio))
-                .unwrap_or_else(|_| header::HeaderValue::from_static("0")),
-        );
+    // Conditional requests: If-None-Match / If-Modified-Since
+    if let Some(if_none_match) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+    {
+        if if_none_match.split(',').any(|t| t.trim() == etag_value) {
+            return Ok::<_, StatusCode>(
+                Response::builder()
+                    .status(StatusCode::NOT_MODIFIED)
+                    .header(header::ETAG, etag_value)
+                    .header(header::LAST_MODIFIED, last_modified)
+                    .header(header::CACHE_CONTROL, "public, max-age=86400")
+                    .header(
+                        "X-Variant-Requested",
+                        desired_variant.unwrap_or_else(|| "w500".to_string()),
+                    )
+                    .header("X-Variant-Served", served_variant)
+                    .body(Body::empty())
+                    .unwrap(),
+            );
+        }
     }
 
-    Ok((headers, image_data).into_response())
+    if let Some(if_modified_since) = headers
+        .get(header::IF_MODIFIED_SINCE)
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Ok(since_time) = parse_http_date(if_modified_since) {
+            if modified <= since_time {
+                return Ok::<_, StatusCode>(
+                    Response::builder()
+                        .status(StatusCode::NOT_MODIFIED)
+                        .header(header::ETAG, etag_value)
+                        .header(header::LAST_MODIFIED, last_modified)
+                        .header(header::CACHE_CONTROL, "public, max-age=86400")
+                        .header(
+                            "X-Variant-Requested",
+                            desired_variant.unwrap_or_else(|| "w500".to_string()),
+                        )
+                        .header("X-Variant-Served", served_variant)
+                        .body(Body::empty())
+                        .unwrap(),
+                );
+            }
+        }
+    }
+
+    // Read entire file and send as single buffer (faster for small/medium images)
+    let data = match tokio::fs::read(&image_path).await {
+        Ok(d) => d,
+        Err(e) => {
+            error!("Failed to read image file {:?}: {}", image_path, e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    let mut resp = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_LENGTH, data.len().to_string())
+        .header(header::ETAG, etag_value)
+        .header(header::LAST_MODIFIED, last_modified)
+        .header(header::CACHE_CONTROL, "public, max-age=86400")
+        .header("X-Variant-Served", served_variant);
+
+    if let Some(req) = desired_variant {
+        resp = resp.header("X-Variant-Requested", req);
+    }
+
+    Ok::<_, StatusCode>(resp.body(Body::from(data)).unwrap())
+}
+
+/// Map desired width to a TMDB variant string for a given category
+fn map_width_to_tmdb_variant(category: &str, w: u32) -> &'static str {
+    // Choose nearest bucket >= requested; fall back to largest known or original
+    match category {
+        // Posters: 92, 154, 185, 342, 500, 780, original
+        "poster" => match w {
+            0..=92 => "w92",
+            93..=154 => "w154",
+            155..=185 => "w185",
+            186..=342 => "w342",
+            343..=500 => "w500",
+            501..=780 => "w780",
+            _ => "original",
+        },
+        // Backdrops: 300, 780, 1280, original
+        "backdrop" => match w {
+            0..=300 => "w300",
+            301..=780 => "w780",
+            781..=1280 => "w1280",
+            _ => "original",
+        },
+        // Stills: 92, 185, 300, 500, original
+        "still" => match w {
+            0..=92 => "w92",
+            93..=185 => "w185",
+            186..=300 => "w300",
+            301..=500 => "w500",
+            _ => "original",
+        },
+        // Logos: prefer original to avoid artifacts
+        "logo" => "original",
+        // Profiles: 45, 185, h632 (height), map width thresholds to 45 or 185 else original
+        "profile" => match w {
+            0..=45 => "w45",
+            46..=185 => "w185",
+            _ => "original",
+        },
+        _ => "w500",
+    }
 }

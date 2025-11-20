@@ -1,13 +1,17 @@
 use super::traits::*;
-use crate::media::{
-    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeID, EpisodeNumber,
-    EpisodeReference, EpisodeURL, LibraryReference, MediaDetailsOption, MovieID, MovieReference,
-    MovieTitle, MovieURL, SeasonDetails, SeasonID, SeasonNumber, SeasonReference, SeasonURL,
-    SeriesID, SeriesReference, SeriesTitle, SeriesURL, TmdbDetails,
+use crate::{
+    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeNumber, EpisodeReference,
+    EpisodeURL, LibraryReference, MediaDetailsOption, MediaIDLike, MovieReference, MovieTitle,
+    MovieURL, SeasonDetails, SeasonNumber, SeasonReference, SeasonURL, SeriesReference,
+    SeriesTitle, SeriesURL, TmdbDetails, UrlLike,
 };
-use crate::{Library, MediaError, MediaFile, MediaFileMetadata, Result};
+use crate::{
+    EpisodeID, Library, LibraryID, LibraryType, Media, MediaError, MediaFile, MediaFileMetadata,
+    MediaID, MovieID, Result, SeasonID, SeriesID,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use rayon::iter::{IntoParallelIterator, ParallelExtend, ParallelIterator};
 use serde_json::{self, json};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::collections::HashMap;
@@ -108,7 +112,7 @@ impl PostgresDatabase {
         // First verify the library exists within the transaction
         let library_check = sqlx::query!(
             "SELECT id FROM libraries WHERE id = $1",
-            media_file.library_id
+            media_file.library_id.as_uuid()
         )
         .fetch_optional(&mut **tx)
         .await
@@ -155,7 +159,7 @@ impl PostgresDatabase {
             RETURNING id
             "#,
             media_file.id,
-            media_file.library_id,
+            media_file.library_id.as_uuid(),
             file_path_str,
             media_file.filename,
             media_file.size as i64,
@@ -206,7 +210,7 @@ impl PostgresDatabase {
         actual_file_id: Uuid,
         metadata: Option<&EnhancedMovieDetails>,
     ) -> Result<()> {
-        let movie_uuid = movie.id.as_ref();
+        let movie_uuid = movie.id.as_uuid();
         let library_id = movie.file.library_id;
 
         // For movies without TMDB data (tmdb_id = 0), we need different handling
@@ -248,7 +252,7 @@ impl PostgresDatabase {
                     VALUES ($1, $2, $3, $4, $5, $6)
                     "#,
                     movie_uuid,
-                    library_id,
+                    library_id.as_uuid(),
                     actual_file_id,
                     0i64, // tmdb_id = 0 for movies without TMDB data
                     movie.title.as_str(),
@@ -271,7 +275,7 @@ impl PostgresDatabase {
                     updated_at = NOW()
                 "#,
                 movie_uuid,
-                library_id,
+                library_id.as_uuid(),
                 actual_file_id,
                 movie.tmdb_id as i64,
                 movie.title.as_str(),
@@ -330,7 +334,7 @@ impl PostgresDatabase {
             .await?;
 
         // Store the movie reference with the actual file ID
-        let movie_uuid = movie.id.as_ref();
+        let movie_uuid = movie.id.as_uuid();
         let library_id = movie.file.library_id;
 
         // For movies without TMDB data (tmdb_id = 0), we need different handling
@@ -372,7 +376,7 @@ impl PostgresDatabase {
                     VALUES ($1, $2, $3, $4, $5, $6)
                     "#,
                     movie_uuid,
-                    library_id,
+                    library_id.as_uuid(),
                     actual_file_id,
                     0i64, // tmdb_id = 0 for movies without TMDB data
                     movie.title.as_str(),
@@ -395,7 +399,7 @@ impl PostgresDatabase {
                     updated_at = NOW()
                 "#,
                 movie_uuid,
-                library_id,
+                library_id.as_uuid(),
                 actual_file_id,
                 movie.tmdb_id as i64,
                 movie.title.as_str(),
@@ -515,7 +519,7 @@ impl PostgresDatabase {
         id: &MovieID,
         include_metadata: bool,
     ) -> Result<Option<(MovieReference, Option<EnhancedMovieDetails>)>> {
-        let movie_uuid = id.as_ref();
+        let movie_uuid = id.as_uuid();
 
         let query = if include_metadata {
             r#"
@@ -553,6 +557,8 @@ impl PostgresDatabase {
             return Ok(None);
         };
 
+        let library_id = LibraryID(row.try_get("library_id")?);
+
         // Build MediaFile
         let technical_metadata: Option<serde_json::Value> = row.try_get("technical_metadata").ok();
         let media_file_metadata = technical_metadata
@@ -567,7 +573,7 @@ impl PostgresDatabase {
             size: row.try_get::<i64, _>("file_size")? as u64,
             created_at: row.try_get("file_created_at")?,
             media_file_metadata,
-            library_id: row.try_get("library_id")?,
+            library_id,
         };
 
         // Build metadata if requested and available
@@ -602,15 +608,16 @@ impl PostgresDatabase {
             MediaDetailsOption::Details(TmdbDetails::Movie(metadata_details.clone()))
         } else {
             // Otherwise, provide an endpoint to fetch it later
-            MediaDetailsOption::Endpoint(format!("/api/movie/{}", row.try_get::<Uuid, _>("id")?))
+            MediaDetailsOption::Endpoint(format!("/movie/{}", row.try_get::<Uuid, _>("id")?))
         };
 
         let movie_ref = MovieReference {
-            id: MovieID::new(row.try_get::<Uuid, _>("id")?.to_string())?,
+            id: MovieID(row.try_get::<Uuid, _>("id")?),
+            library_id,
             tmdb_id: row.try_get::<i64, _>("tmdb_id")? as u64,
             title: MovieTitle::new(row.try_get("title")?)?,
             details,
-            endpoint: MovieURL::from_string(format!("/api/stream/{}", media_file.id)),
+            endpoint: MovieURL::from_string(format!("/stream/{}", media_file.id)),
             file: media_file,
             theme_color: row
                 .try_get::<Option<String>, _>("theme_color")
@@ -719,7 +726,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             size: row.file_size as u64,
             created_at: row.created_at,
             media_file_metadata,
-            library_id: row.library_id,
+            library_id: LibraryID(row.library_id),
         }))
     }
 
@@ -753,7 +760,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             size: row.file_size as u64,
             created_at: row.created_at,
             media_file_metadata,
-            library_id: row.library_id,
+            library_id: LibraryID(row.library_id),
         }))
     }
 
@@ -781,7 +788,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let mut sql_query = sqlx::query(&query);
 
         if let Some(library_id) = filters.library_id {
-            sql_query = sql_query.bind(library_id);
+            sql_query = sql_query.bind(library_id.as_uuid());
         }
 
         if let Some(limit) = filters.limit {
@@ -811,7 +818,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 size: row.try_get::<i64, _>("file_size")? as u64,
                 created_at: row.try_get("created_at")?,
                 media_file_metadata,
-                library_id: row.try_get("library_id")?,
+                library_id: LibraryID(row.try_get("library_id")?),
             });
         }
 
@@ -945,7 +952,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let library_type = match library.library_type {
             crate::LibraryType::Movies => "movies",
-            crate::LibraryType::TvShows => "tvshows",
+            crate::LibraryType::Series => "tvshows",
         };
 
         sqlx::query!(
@@ -953,7 +960,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             INSERT INTO libraries (id, name, library_type, paths, scan_interval_minutes, enabled)
             VALUES ($1, $2, $3, $4, $5, $6)
             "#,
-            library.id,
+            library.id.as_uuid(),
             library.name,
             library_type,
             &paths,
@@ -967,13 +974,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
         Ok(library.id.to_string())
     }
 
-    async fn get_library(&self, id: &str) -> Result<Option<Library>> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {}", e)))?;
-
+    async fn get_library(&self, library_id: &LibraryID) -> Result<Option<Library>> {
         let row = sqlx::query!(
             "SELECT id, name, library_type, paths, scan_interval_minutes, last_scan, enabled, auto_scan, watch_for_changes, analyze_on_scan, max_retry_attempts, created_at, updated_at FROM libraries WHERE id = $1",
-            uuid
+            library_id.as_uuid()
         )
         .fetch_optional(&self.pool)
         .await
@@ -985,12 +989,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let library_type = match row.library_type.as_str() {
             "movies" => crate::LibraryType::Movies,
-            "tvshows" => crate::LibraryType::TvShows,
+            "tvshows" => crate::LibraryType::Series,
             _ => return Err(MediaError::InvalidMedia("Unknown library type".to_string())),
         };
 
         Ok(Some(Library {
-            id: row.id,
+            id: LibraryID(row.id),
             name: row.name,
             library_type,
             paths: row.paths.into_iter().map(PathBuf::from).collect(),
@@ -1019,12 +1023,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
         for row in rows {
             let library_type = match row.library_type.as_str() {
                 "movies" => crate::LibraryType::Movies,
-                "tvshows" => crate::LibraryType::TvShows,
+                "tvshows" => crate::LibraryType::Series,
                 _ => continue,
             };
 
             libraries.push(Library {
-                id: row.id,
+                id: LibraryID(row.id),
                 name: row.name,
                 library_type,
                 paths: row.paths.into_iter().map(PathBuf::from).collect(),
@@ -1056,7 +1060,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let library_type = match library.library_type {
             crate::LibraryType::Movies => "movies",
-            crate::LibraryType::TvShows => "tvshows",
+            crate::LibraryType::Series => "tvshows",
         };
 
         sqlx::query!(
@@ -1134,10 +1138,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn store_series_reference(&self, series: &SeriesReference) -> Result<()> {
+        let mut buff = Uuid::encode_buffer();
         info!(
             "store_series_reference called for series: {} (ID: {}, TMDB: {}, Library: {})",
             series.title.as_str(),
-            series.id.as_str(),
+            series.id.as_str(&mut buff),
             series.tmdb_id,
             series.library_id
         );
@@ -1183,8 +1188,8 @@ impl MediaDatabaseTrait for PostgresDatabase {
         };
 
         // Store the season reference
-        let season_uuid = season.id.as_ref();
-        let series_uuid = season.series_id.as_ref();
+        let season_uuid = season.id.as_uuid();
+        let series_uuid = season.series_id.as_uuid();
 
         // Use RETURNING to get the actual ID (either new or existing)
         let actual_season_id = sqlx::query_scalar!(
@@ -1200,7 +1205,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             season_uuid,
             season.season_number.value() as i32,
             series_uuid,
-            season.library_id,
+            season.library_id.as_uuid(),
             season.tmdb_series_id as i64,
             season.created_at
         )
@@ -1235,18 +1240,19 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn store_episode_reference(&self, episode: &EpisodeReference) -> Result<()> {
+        let mut buff = Uuid::encode_buffer();
         info!(
             "Storing episode reference: {} S{}E{}",
-            episode.id.as_str(),
+            episode.id.as_str(&mut buff),
             episode.season_number.value(),
             episode.episode_number.value()
         );
 
         // Parse IDs
         let episode_uuid = episode.id.as_uuid();
-        let series_uuid = episode.series_id.as_ref();
-        let season_uuid = episode.season_id.as_ref();
-        let file_uuid = episode.id.as_ref();
+        let series_uuid = episode.series_id.as_uuid();
+        let season_uuid = episode.season_id.as_uuid();
+        let file_uuid = episode.id.as_uuid();
 
         // Start transaction
         let mut tx = self
@@ -1323,11 +1329,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 MediaError::Internal(format!("Failed to insert episode reference: {}", e))
             })?;
 
-            episode_uuid
+            *episode_uuid
         };
 
         // Log if we're using a different ID than expected (conflict occurred)
-        if actual_episode_id != episode_uuid {
+        if &actual_episode_id != episode_uuid {
             info!(
                 "Episode already exists with ID {}, updating instead of creating new",
                 actual_episode_id
@@ -1365,9 +1371,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
             .await
             .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
 
+        let mut buff = Uuid::encode_buffer();
+
         info!(
             "Successfully stored episode reference: {} S{}E{} (actual ID: {})",
-            episode.id.as_str(),
+            episode.id.as_str(&mut buff),
             episode.season_number.value(),
             episode.episode_number.value(),
             actual_episode_id
@@ -1409,15 +1417,16 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 size: row.file_size as u64,
                 created_at: row.file_created_at,
                 media_file_metadata,
-                library_id: row.library_id,
+                library_id: LibraryID(row.library_id),
             };
 
             let movie_ref = MovieReference {
-                id: MovieID::new(row.id.to_string())?,
+                id: MovieID(row.id),
+                library_id: LibraryID(row.library_id),
                 tmdb_id: row.tmdb_id as u64,
                 title: MovieTitle::new(row.title)?,
-                details: MediaDetailsOption::Endpoint(format!("/api/movie/{}", row.id)),
-                endpoint: MovieURL::from_string(format!("/api/stream/{}", row.file_id)),
+                details: MediaDetailsOption::Endpoint(format!("/movie/{}", row.id)),
+                endpoint: MovieURL::from_string(format!("/stream/{}", row.file_id)),
                 file: media_file,
                 theme_color: row.theme_color,
             };
@@ -1434,9 +1443,9 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_series_seasons(&self, series_id: &SeriesID) -> Result<Vec<SeasonReference>> {
-        info!("Getting seasons for series: {}", series_id.as_ref());
+        let series_uuid = series_id.as_uuid();
 
-        let series_uuid = series_id.as_ref();
+        info!("Getting seasons for series: {}", series_uuid);
 
         let rows = sqlx::query!(
             r#"
@@ -1454,17 +1463,19 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get series seasons: {}", e)))?;
 
+        let mut buff = Uuid::encode_buffer();
+
         info!(
             "Found {} season rows for series {}",
             rows.len(),
-            series_id.as_str()
+            series_id.as_str(&mut buff)
         );
 
         let mut seasons = Vec::new();
         for row in rows {
             // Parse TMDB details if available
             let details = if row.tmdb_details.is_null() {
-                MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
+                MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
             } else {
                 match serde_json::from_value::<SeasonDetails>(row.tmdb_details) {
                     Ok(season_details) => {
@@ -1472,19 +1483,19 @@ impl MediaDatabaseTrait for PostgresDatabase {
                     }
                     Err(e) => {
                         warn!("Failed to parse season TMDB details: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
+                        MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
                     }
                 }
             };
 
             seasons.push(SeasonReference {
-                id: SeasonID::new(row.id.to_string())?,
+                id: SeasonID(row.id),
                 season_number: SeasonNumber::new(row.season_number as u8),
-                series_id: SeriesID::new(row.series_id.to_string())?,
-                library_id: row.library_id,
+                series_id: SeriesID(row.series_id),
+                library_id: LibraryID(row.library_id),
                 tmdb_series_id: row.tmdb_series_id as u64,
                 details,
-                endpoint: SeasonURL::from_string(format!("/api/media/{}", row.id)),
+                endpoint: SeasonURL::from_string(format!("/media/{}", row.id)),
                 created_at: row.created_at,
                 theme_color: None, // Seasons typically inherit theme color from the series
             });
@@ -1508,7 +1519,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             WHERE er.season_id = $1
             ORDER BY er.episode_number
             "#,
-            season_id.as_ref()
+            season_id.as_uuid()
         )
         .fetch_all(&self.pool)
         .await
@@ -1529,12 +1540,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 size: row.file_size as u64,
                 created_at: row.file_created_at,
                 media_file_metadata: parsed_metadata,
-                library_id: row.library_id,
+                library_id: LibraryID(row.library_id),
             };
 
             // Parse TMDB details if available
             let details = if row.tmdb_details.is_null() {
-                MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
+                MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
             } else {
                 match serde_json::from_value::<EpisodeDetails>(row.tmdb_details) {
                     Ok(episode_details) => {
@@ -1542,118 +1553,26 @@ impl MediaDatabaseTrait for PostgresDatabase {
                     }
                     Err(e) => {
                         warn!("Failed to parse episode TMDB details: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
+                        MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
                     }
                 }
             };
 
             episodes.push(EpisodeReference {
-                id: EpisodeID::new(row.id.to_string())?,
+                id: EpisodeID(row.id),
+                library_id: LibraryID(row.library_id),
                 episode_number: EpisodeNumber::new(row.episode_number as u8),
                 season_number: SeasonNumber::new(row.season_number as u8),
-                season_id: SeasonID::new(row.season_id.to_string())?,
-                series_id: SeriesID::new(row.series_id.to_string())?,
+                season_id: SeasonID(row.season_id),
+                series_id: SeriesID(row.series_id),
                 tmdb_series_id: row.tmdb_series_id as u64,
                 details,
-                endpoint: EpisodeURL::from_string(format!("/api/stream/{}", row.file_id)),
+                endpoint: EpisodeURL::from_string(format!("/stream/{}", row.file_id)),
                 file: media_file,
             });
         }
 
         Ok(episodes)
-    }
-
-    async fn get_library_movies(&self, library_id: Uuid) -> Result<Vec<MovieReference>> {
-        let rows = sqlx::query!(
-            r#"
-            SELECT
-                mr.id, mr.tmdb_id, mr.title, mr.theme_color,
-                mf.id as file_id, mf.file_path, mf.filename, mf.file_size,
-                mf.created_at as file_created_at, mf.technical_metadata, mf.library_id
-            FROM movie_references mr
-            JOIN media_files mf ON mr.file_id = mf.id
-            WHERE mr.library_id = $1
-            ORDER BY mr.title
-            "#,
-            library_id
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
-
-        let mut movies = Vec::new();
-        for row in rows {
-            let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
-            let media_file_metadata = technical_metadata
-                .map(|tm| serde_json::from_value(tm))
-                .transpose()
-                .map_err(|e| {
-                    MediaError::Internal(format!("Failed to deserialize metadata: {}", e))
-                })?;
-
-            let media_file = MediaFile {
-                id: row.file_id,
-                path: PathBuf::from(row.file_path),
-                filename: row.filename,
-                size: row.file_size as u64,
-                created_at: row.file_created_at,
-                media_file_metadata,
-                library_id: row.library_id,
-            };
-
-            let movie_ref = MovieReference {
-                id: MovieID::new(row.id.to_string())?,
-                tmdb_id: row.tmdb_id as u64,
-                title: MovieTitle::new(row.title)?,
-                details: MediaDetailsOption::Endpoint(format!("/api/movie/{}", row.id)),
-                endpoint: MovieURL::from_string(format!("/api/stream/{}", row.file_id)),
-                file: media_file,
-                theme_color: row.theme_color,
-            };
-
-            movies.push(movie_ref);
-        }
-
-        Ok(movies)
-    }
-
-    async fn get_library_series(&self, library_id: Uuid) -> Result<Vec<SeriesReference>> {
-        // Get all series in this library
-        let rows = sqlx::query!(
-            r#"
-            SELECT
-                sr.id, sr.library_id, sr.tmdb_id as "tmdb_id?", sr.title, sr.theme_color, sr.created_at
-            FROM series_references sr
-            WHERE sr.library_id = $1
-            ORDER BY sr.title
-            "#,
-            library_id
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
-
-        let mut series_list = Vec::new();
-        for row in rows {
-            // Handle nullable tmdb_id - use 0 if null (indicates no TMDB match)
-            let tmdb_id = row.tmdb_id.unwrap_or(0) as u64;
-
-            // For library listing, we don't include full metadata - just provide endpoint
-            let series_ref = SeriesReference {
-                id: SeriesID::new(row.id.to_string())?,
-                library_id: row.library_id,
-                tmdb_id,
-                title: SeriesTitle::new(row.title)?,
-                details: MediaDetailsOption::Endpoint(format!("/api/series/{}", row.id)),
-                endpoint: SeriesURL::from_string(format!("/api/series/{}", row.id)),
-                created_at: row.created_at,
-                theme_color: row.theme_color,
-            };
-
-            series_list.push(series_ref);
-        }
-
-        Ok(series_list)
     }
 
     async fn get_movie_reference(&self, id: &MovieID) -> Result<MovieReference> {
@@ -1666,7 +1585,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_series_reference(&self, id: &SeriesID) -> Result<SeriesReference> {
-        let series_uuid = id.as_ref();
+        let series_uuid = id.as_uuid();
 
         // First get the series reference
         let series_row = sqlx::query!(
@@ -1703,30 +1622,30 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 }
                 Err(e) => {
                     tracing::warn!("Failed to deserialize series metadata: {}", e);
-                    MediaDetailsOption::Endpoint(format!("/api/series/{}", series_uuid))
+                    MediaDetailsOption::Endpoint(format!("/series/{}", series_uuid))
                 }
             }
         } else {
-            MediaDetailsOption::Endpoint(format!("/api/series/{}", series_uuid))
+            MediaDetailsOption::Endpoint(format!("/series/{}", series_uuid))
         };
 
         // Handle nullable tmdb_id - use 0 if null (indicates no TMDB match)
         let tmdb_id = series_row.tmdb_id.unwrap_or(0) as u64;
 
         Ok(SeriesReference {
-            id: SeriesID::new(series_row.id.to_string())?,
-            library_id: series_row.library_id,
+            id: SeriesID(series_row.id),
+            library_id: LibraryID(series_row.library_id),
             tmdb_id,
             title: SeriesTitle::new(series_row.title)?,
             details,
-            endpoint: SeriesURL::from_string(format!("/api/series/{}", series_uuid)),
+            endpoint: SeriesURL::from_string(format!("/series/{}", series_uuid)),
             created_at: series_row.created_at,
             theme_color: series_row.theme_color,
         })
     }
 
     async fn get_season_reference(&self, id: &SeasonID) -> Result<SeasonReference> {
-        let season_uuid = id.as_ref();
+        let season_uuid = id.as_uuid();
 
         let row = sqlx::query!(
             r#"
@@ -1746,7 +1665,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         // Parse TMDB details if available
         let details = if row.tmdb_details.is_null() {
-            MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
+            MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
         } else {
             match serde_json::from_value::<SeasonDetails>(row.tmdb_details) {
                 Ok(season_details) => {
@@ -1754,26 +1673,26 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 }
                 Err(e) => {
                     warn!("Failed to parse season TMDB details: {}", e);
-                    MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
+                    MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
                 }
             }
         };
 
         Ok(SeasonReference {
-            id: SeasonID::new(row.id.to_string())?,
+            id: SeasonID(row.id),
             season_number: SeasonNumber::new(row.season_number as u8),
-            series_id: SeriesID::new(row.series_id.to_string())?,
-            library_id: row.library_id,
+            series_id: SeriesID(row.series_id),
+            library_id: LibraryID(row.library_id),
             tmdb_series_id: row.tmdb_series_id as u64,
             details,
-            endpoint: SeasonURL::from_string(format!("/api/media/{}", row.id)),
+            endpoint: SeasonURL::from_string(format!("/media/{}", row.id)),
             created_at: row.created_at,
             theme_color: None, // Seasons typically inherit theme color from the series
         })
     }
 
     async fn get_episode_reference(&self, id: &EpisodeID) -> Result<EpisodeReference> {
-        let episode_uuid = id.as_ref();
+        let episode_uuid = id.as_uuid();
 
         let row = sqlx::query!(
             r#"
@@ -1808,12 +1727,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
             size: row.file_size as u64,
             created_at: row.file_created_at,
             media_file_metadata: parsed_metadata,
-            library_id: row.library_id,
+            library_id: LibraryID(row.library_id),
         };
 
         // Parse TMDB details if available
         let details = if row.tmdb_details.is_null() {
-            MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
+            MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
         } else {
             match serde_json::from_value::<EpisodeDetails>(row.tmdb_details) {
                 Ok(episode_details) => {
@@ -1821,26 +1740,27 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 }
                 Err(e) => {
                     warn!("Failed to parse episode TMDB details: {}", e);
-                    MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
+                    MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
                 }
             }
         };
 
         Ok(EpisodeReference {
-            id: EpisodeID::new(row.id.to_string())?,
-            series_id: SeriesID::new(row.series_id.to_string())?,
-            season_id: SeasonID::new(row.season_id.to_string())?,
+            id: EpisodeID(row.id),
+            library_id: LibraryID(row.library_id),
+            series_id: SeriesID(row.series_id),
+            season_id: SeasonID(row.season_id),
             season_number: SeasonNumber::new(row.season_number as u8),
             episode_number: EpisodeNumber::new(row.episode_number as u8),
             tmdb_series_id: row.tmdb_series_id as u64,
             details,
-            endpoint: EpisodeURL::from_string(format!("/api/stream/{}", row.file_id)),
+            endpoint: EpisodeURL::from_string(format!("/stream/{}", row.file_id)),
             file: media_file,
         })
     }
 
     async fn update_movie_tmdb_id(&self, id: &MovieID, tmdb_id: u64) -> Result<()> {
-        let movie_uuid = id.as_ref();
+        let movie_uuid = id.as_uuid();
 
         sqlx::query!(
             "UPDATE movie_references SET tmdb_id = $1, updated_at = NOW() WHERE id = $2",
@@ -1855,7 +1775,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn update_series_tmdb_id(&self, id: &SeriesID, tmdb_id: u64) -> Result<()> {
-        let series_uuid = id.as_ref();
+        let series_uuid = id.as_uuid();
 
         sqlx::query!(
             "UPDATE series_references SET tmdb_id = $1, updated_at = NOW() WHERE id = $2",
@@ -1871,7 +1791,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     async fn get_series_by_tmdb_id(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         tmdb_id: u64,
     ) -> Result<Option<SeriesReference>> {
         let row = sqlx::query!(
@@ -1880,7 +1800,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             FROM series_references
             WHERE library_id = $1 AND tmdb_id = $2
             "#,
-            library_id,
+            library_id.as_uuid(),
             tmdb_id as i64
         )
         .fetch_optional(&self.pool)
@@ -1894,12 +1814,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
             })?;
 
             Ok(Some(SeriesReference {
-                id: SeriesID::new(row.id.to_string())?,
-                library_id: row.library_id,
+                id: SeriesID(row.id),
+                library_id: LibraryID(row.library_id),
                 tmdb_id: tmdb_id as u64,
                 title: SeriesTitle::new(row.title)?,
-                details: MediaDetailsOption::Endpoint(format!("/api/series/{}", row.id)),
-                endpoint: SeriesURL::from_string(format!("/api/series/{}", row.id)),
+                details: MediaDetailsOption::Endpoint(format!("/series/{}", row.id)),
+                endpoint: SeriesURL::from_string(format!("/series/{}", row.id)),
                 created_at: row.created_at,
                 theme_color: row.theme_color,
             }))
@@ -1910,7 +1830,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     async fn find_series_by_name(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         name: &str,
     ) -> Result<Option<SeriesReference>> {
         // Use ILIKE for case-insensitive search with fuzzy matching
@@ -1930,7 +1850,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 LENGTH(title)
             LIMIT 1
             "#,
-            library_id,
+            library_id.as_uuid(),
             search_pattern,
             name
         )
@@ -1943,12 +1863,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
             let tmdb_id = row.tmdb_id.unwrap_or(0) as u64;
 
             Ok(Some(SeriesReference {
-                id: SeriesID::new(row.id.to_string())?,
-                library_id: row.library_id,
+                id: SeriesID(row.id),
+                library_id: LibraryID(row.library_id),
                 tmdb_id,
                 title: SeriesTitle::new(row.title)?,
-                details: MediaDetailsOption::Endpoint(format!("/api/series/{}", row.id)),
-                endpoint: SeriesURL::from_string(format!("/api/series/{}", row.id)),
+                details: MediaDetailsOption::Endpoint(format!("/series/{}", row.id)),
+                endpoint: SeriesURL::from_string(format!("/series/{}", row.id)),
                 created_at: row.created_at,
                 theme_color: row.theme_color,
             }))
@@ -1969,12 +1889,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
         for row in rows {
             let library_type = match row.library_type.as_str() {
                 "movies" => crate::LibraryType::Movies,
-                "tvshows" => crate::LibraryType::TvShows,
+                "tvshows" => crate::LibraryType::Series,
                 _ => continue,
             };
 
             libraries.push(LibraryReference {
-                id: row.id,
+                id: LibraryID(row.id),
                 name: row.name,
                 library_type,
                 paths: row.paths.into_iter().map(PathBuf::from).collect(),
@@ -1997,12 +1917,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
             Some(row) => {
                 let library_type = match row.library_type.as_str() {
                     "movies" => crate::LibraryType::Movies,
-                    "tvshows" => crate::LibraryType::TvShows,
+                    "tvshows" => crate::LibraryType::Series,
                     _ => return Err(MediaError::InvalidMedia("Unknown library type".to_string())),
                 };
 
                 Ok(LibraryReference {
-                    id: row.id,
+                    id: LibraryID(row.id),
                     name: row.name,
                     library_type,
                     paths: row.paths.into_iter().map(PathBuf::from).collect(),
@@ -2501,7 +2421,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             "#,
             scan_state.id,
-            scan_state.library_id,
+            scan_state.library_id.as_uuid(),
             format!("{:?}", scan_state.scan_type).to_lowercase(),
             format!("{:?}", scan_state.status).to_lowercase(),
             scan_state.total_folders,
@@ -2612,7 +2532,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
             Ok(Some(ScanState {
                 id: row.id,
-                library_id: row.library_id,
+                library_id: LibraryID(row.library_id),
                 scan_type,
                 status,
                 total_folders: row.total_folders.unwrap_or(0),
@@ -2692,7 +2612,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
             scans.push(ScanState {
                 id: row.try_get("id")?,
-                library_id: row.try_get("library_id")?,
+                library_id: LibraryID(row.try_get("library_id")?),
                 scan_type,
                 status,
                 total_folders: row.try_get::<Option<i32>, _>("total_folders")?.unwrap_or(0),
@@ -2718,7 +2638,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     async fn get_latest_scan(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         scan_type: ScanType,
     ) -> Result<Option<ScanState>> {
         let scan_type_str = format!("{:?}", scan_type).to_lowercase();
@@ -2733,7 +2653,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             ORDER BY started_at DESC
             LIMIT 1
             "#,
-            library_id,
+            library_id.as_uuid(),
             scan_type_str
         )
         .fetch_optional(&self.pool)
@@ -2764,7 +2684,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
             Ok(Some(ScanState {
                 id: row.id,
-                library_id: row.library_id,
+                library_id: LibraryID(row.library_id),
                 scan_type,
                 status,
                 total_folders: row.total_folders.unwrap_or(0),
@@ -2889,7 +2809,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     async fn get_unprocessed_files(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         status_type: &str,
         limit: i32,
     ) -> Result<Vec<MediaFile>> {
@@ -2944,7 +2864,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         };
 
         let rows = sqlx::query(sql)
-            .bind(library_id)
+            .bind(library_id.as_uuid())
             .bind(limit as i64)
             .fetch_all(&self.pool)
             .await
@@ -2962,7 +2882,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
             files.push(MediaFile {
                 id: row.try_get("id")?,
-                library_id: row.try_get("library_id")?,
+                library_id: LibraryID(row.try_get("library_id")?),
                 path: PathBuf::from(row.try_get::<String, _>("file_path")?),
                 filename: row.try_get("filename")?,
                 size: row.try_get::<i64, _>("file_size")? as u64,
@@ -2974,7 +2894,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
         Ok(files)
     }
 
-    async fn get_failed_files(&self, library_id: Uuid, max_retries: i32) -> Result<Vec<MediaFile>> {
+    async fn get_failed_files(
+        &self,
+        library_id: LibraryID,
+        max_retries: i32,
+    ) -> Result<Vec<MediaFile>> {
         let rows = sqlx::query!(
             r#"
             SELECT f.id, f.library_id, f.file_path, f.filename, f.file_size,
@@ -2986,7 +2910,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
               AND p.retry_count <= $2
               AND (p.next_retry_at IS NULL OR p.next_retry_at <= NOW())
             "#,
-            library_id,
+            library_id.as_uuid(),
             max_retries
         )
         .fetch_all(&self.pool)
@@ -3003,7 +2927,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
             files.push(MediaFile {
                 id: row.id,
-                library_id: row.library_id,
+                library_id: LibraryID(row.library_id),
                 path: PathBuf::from(&row.file_path),
                 filename: row.filename,
                 size: row.file_size as u64,
@@ -3042,7 +2966,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             "#,
             event.id,
-            event.library_id,
+            event.library_id.as_uuid(),
             event_type_str,
             event.file_path,
             event.old_path,
@@ -3062,7 +2986,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     async fn get_unprocessed_events(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         limit: i32,
     ) -> Result<Vec<FileWatchEvent>> {
         let rows = sqlx::query!(
@@ -3074,7 +2998,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             ORDER BY detected_at ASC
             LIMIT $2
             "#,
-            library_id,
+            library_id.as_uuid(),
             limit as i64
         )
         .fetch_all(&self.pool)
@@ -3093,7 +3017,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
             events.push(FileWatchEvent {
                 id: row.id,
-                library_id: row.library_id,
+                library_id: LibraryID(row.library_id),
                 event_type,
                 file_path: row.file_path,
                 old_path: row.old_path,
@@ -3303,19 +3227,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
         self.get_continue_watching(user_id, limit).await
     }
 
-    async fn clear_watch_progress(
-        &self,
-        user_id: Uuid,
-        media_id: &crate::api_types::MediaId,
-    ) -> Result<()> {
+    async fn clear_watch_progress(&self, user_id: Uuid, media_id: &Uuid) -> Result<()> {
         self.clear_watch_progress(user_id, media_id).await
     }
 
-    async fn is_media_completed(
-        &self,
-        user_id: Uuid,
-        media_id: &crate::api_types::MediaId,
-    ) -> Result<bool> {
+    async fn is_media_completed(&self, user_id: Uuid, media_id: &Uuid) -> Result<bool> {
         self.is_media_completed(user_id, media_id).await
     }
 
@@ -3376,7 +3292,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     async fn query_media(
         &self,
         query: &crate::query::MediaQuery,
-    ) -> Result<Vec<crate::query::MediaReferenceWithStatus>> {
+    ) -> Result<Vec<crate::query::MediaWithStatus>> {
         self.query_media(query).await
     }
 
@@ -3861,6 +3777,115 @@ impl MediaDatabaseTrait for PostgresDatabase {
             .collect())
     }
 
+    async fn get_library_media_references(
+        &self,
+        library_id: LibraryID,
+        library_type: LibraryType,
+    ) -> Result<Vec<Media>> {
+        let mut media = Vec::new();
+        match library_type {
+            LibraryType::Movies => {
+                let rows = sqlx::query!(
+                    r#"
+                    SELECT
+                        mr.id, mr.tmdb_id, mr.title, mr.theme_color,
+                        mf.id as file_id, mf.file_path, mf.filename, mf.file_size, mf.created_at as file_created_at,
+                        mf.technical_metadata, mf.parsed_info,
+                        mm.tmdb_details as "tmdb_details?"
+                    FROM movie_references mr
+                    JOIN media_files mf ON mr.file_id = mf.id
+                    LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id
+                    WHERE mr.library_id = $1
+                    ORDER BY mr.title
+                    "#,
+                    library_id.as_uuid()
+                )
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
+
+                for row in rows {
+                    let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
+                    let media_file_metadata = technical_metadata
+                        .map(|tm| serde_json::from_value(tm))
+                        .transpose()
+                        .map_err(|e| {
+                            MediaError::Internal(format!("Failed to deserialize metadata: {}", e))
+                        })?;
+
+                    let media_file = MediaFile {
+                        id: row.file_id,
+                        path: PathBuf::from(row.file_path),
+                        filename: row.filename,
+                        size: row.file_size as u64,
+                        created_at: row.file_created_at,
+                        media_file_metadata,
+                        library_id: library_id,
+                    };
+
+                    // Build metadata if available
+                    let details = if let Some(tmdb_json) = row.tmdb_details {
+                        match serde_json::from_value::<EnhancedMovieDetails>(tmdb_json) {
+                            Ok(metadata_details) => {
+                                MediaDetailsOption::Details(TmdbDetails::Movie(metadata_details))
+                            }
+                            Err(e) => {
+                                warn!("Failed to deserialize movie metadata: {}", e);
+                                MediaDetailsOption::Endpoint(format!("/movie/{}", row.id))
+                            }
+                        }
+                    } else {
+                        MediaDetailsOption::Endpoint(format!("/movie/{}", row.id))
+                    };
+
+                    let movie_ref = Media::Movie(MovieReference {
+                        id: MovieID(row.id),
+                        library_id,
+                        tmdb_id: row.tmdb_id as u64,
+                        title: MovieTitle::new(row.title)?,
+                        details,
+                        endpoint: MovieURL::from_string(format!("/stream/{}", row.file_id)),
+                        file: media_file,
+                        theme_color: row.theme_color,
+                    });
+
+                    media.push(movie_ref);
+                }
+            }
+            LibraryType::Series => {
+                // Execute bulk queries in parallel using tokio::join!
+                let (series_result, seasons_result, episodes_result) = tokio::join!(
+                    self.get_library_series(&library_id),
+                    self.get_library_seasons(&library_id),
+                    self.get_library_episodes(&library_id)
+                );
+                if let Ok(series) = series_result {
+                    media.par_extend(
+                        series
+                            .into_par_iter()
+                            .map(|series_ref| Media::Series(series_ref)),
+                    );
+                }
+                if let Ok(seasons) = seasons_result {
+                    media.par_extend(
+                        seasons
+                            .into_par_iter()
+                            .map(|season_ref| Media::Season(season_ref)),
+                    );
+                }
+                if let Ok(episodes) = episodes_result {
+                    media.par_extend(
+                        episodes
+                            .into_par_iter()
+                            .map(|episode_ref| Media::Episode(episode_ref)),
+                    );
+                }
+            }
+        }
+
+        Ok(media)
+    }
+
     // Bulk reference retrieval methods for performance
     async fn get_movie_references_bulk(&self, ids: &[&MovieID]) -> Result<Vec<MovieReference>> {
         if ids.is_empty() {
@@ -3868,7 +3893,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         }
 
         // Convert IDs to UUIDs
-        let uuids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+        let uuids: Vec<Uuid> = ids.iter().map(|id| id.to_uuid()).collect();
         let uuids = uuids;
 
         // Build query with ANY clause
@@ -3878,7 +3903,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 mr.id, mr.tmdb_id, mr.title, mr.theme_color, mr.library_id,
                 mf.id as file_id, mf.file_path, mf.filename, mf.file_size, mf.created_at as file_created_at,
                 mf.technical_metadata, mf.parsed_info,
-                mm.tmdb_details
+                mm.tmdb_details as "tmdb_details?"
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id
@@ -3893,7 +3918,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let mut movies = Vec::new();
         for row in rows {
             // Build MediaFile
-            let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
+            let technical_metadata: Option<serde_json::Value> = row.technical_metadata; // TODO: See if we can optimize this with rkyv
             let media_file_metadata = technical_metadata
                 .map(|tm| serde_json::from_value(tm))
                 .transpose()
@@ -3908,7 +3933,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 size: row.file_size as u64,
                 created_at: row.file_created_at,
                 media_file_metadata,
-                library_id: row.library_id,
+                library_id: LibraryID(row.library_id),
             };
 
             // Build metadata if available
@@ -3919,19 +3944,20 @@ impl MediaDatabaseTrait for PostgresDatabase {
                     }
                     Err(e) => {
                         warn!("Failed to deserialize movie metadata: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/api/movie/{}", row.id))
+                        MediaDetailsOption::Endpoint(format!("/movie/{}", row.id))
                     }
                 }
             } else {
-                MediaDetailsOption::Endpoint(format!("/api/movie/{}", row.id))
+                MediaDetailsOption::Endpoint(format!("/movie/{}", row.id))
             };
 
             let movie_ref = MovieReference {
-                id: MovieID::new(row.id.to_string())?,
+                id: MovieID(row.id),
+                library_id: LibraryID(row.library_id),
                 tmdb_id: row.tmdb_id as u64,
                 title: MovieTitle::new(row.title)?,
                 details,
-                endpoint: MovieURL::from_string(format!("/api/stream/{}", row.file_id)),
+                endpoint: MovieURL::from_string(format!("/stream/{}", row.file_id)),
                 file: media_file,
                 theme_color: row.theme_color,
             };
@@ -3948,7 +3974,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         }
 
         // Convert IDs to UUIDs
-        let uuids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+        let uuids: Vec<Uuid> = ids.iter().map(|id| id.to_uuid()).collect();
 
         // Fetch series references with metadata
         let rows = sqlx::query!(
@@ -3983,22 +4009,81 @@ impl MediaDatabaseTrait for PostgresDatabase {
                         }
                         Err(e) => {
                             warn!("Failed to deserialize series metadata: {}", e);
-                            MediaDetailsOption::Endpoint(format!("/api/series/{}", row_id))
+                            MediaDetailsOption::Endpoint(format!("/series/{}", row_id))
                         }
                     }
                 }
-                _ => MediaDetailsOption::Endpoint(format!("/api/series/{}", row_id)),
+                _ => MediaDetailsOption::Endpoint(format!("/series/{}", row_id)),
             };
 
             let tmdb_id = row.tmdb_id.unwrap_or(0) as u64;
 
             series_list.push(SeriesReference {
-                id: SeriesID::new(row_id.to_string())?,
-                library_id,
+                id: SeriesID(row_id),
+                library_id: LibraryID(library_id),
                 tmdb_id,
                 title: SeriesTitle::new(title)?,
                 details,
-                endpoint: SeriesURL::from_string(format!("/api/series/{}", row_id)),
+                endpoint: SeriesURL::from_string(format!("/series/{}", row_id)),
+                created_at,
+                theme_color: row.theme_color,
+            });
+        }
+
+        Ok(series_list)
+    }
+
+    async fn get_library_series(&self, library_id: &LibraryID) -> Result<Vec<SeriesReference>> {
+        // Build query with ANY clause
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                sr.id, sr.library_id, sr.tmdb_id as "tmdb_id?", sr.title, sr.theme_color, sr.created_at,
+                sm.tmdb_details as "tmdb_details?"
+            FROM series_references sr
+            LEFT JOIN series_metadata sm ON sr.id = sm.series_id
+            WHERE sr.library_id = $1
+            ORDER BY sr.title
+            "#,
+            library_id.as_uuid()
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
+
+        let mut series_list = Vec::new();
+        for row in rows {
+            // Extract required fields - these are non-nullable in the query
+            let row_id = row.id;
+            let library_id = row.library_id;
+            let title = row.title;
+            let created_at = row.created_at;
+
+            // Build the details field
+            let details = match row.tmdb_details {
+                Some(metadata) if !metadata.is_null() => {
+                    match serde_json::from_value::<EnhancedSeriesDetails>(metadata) {
+                        Ok(series_details) => {
+                            MediaDetailsOption::Details(TmdbDetails::Series(series_details))
+                        }
+                        Err(e) => {
+                            warn!("Failed to deserialize series metadata: {}", e);
+                            MediaDetailsOption::Endpoint(format!("/series/{}", row_id))
+                        }
+                    }
+                }
+                _ => MediaDetailsOption::Endpoint(format!("/series/{}", row_id)),
+            };
+
+            let tmdb_id = row.tmdb_id.unwrap_or(0) as u64;
+
+            series_list.push(SeriesReference {
+                id: SeriesID(row_id),
+                library_id: LibraryID(library_id),
+                tmdb_id,
+                title: SeriesTitle::new(title)?,
+                details,
+                endpoint: SeriesURL::from_string(format!("/series/{}", row_id)),
                 created_at,
                 theme_color: row.theme_color,
             });
@@ -4013,7 +4098,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         }
 
         // Convert IDs to UUIDs
-        let uuids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+        let uuids: Vec<Uuid> = ids.iter().map(|id| id.to_uuid()).collect();
 
         let rows = sqlx::query!(
             r#"
@@ -4034,26 +4119,75 @@ impl MediaDatabaseTrait for PostgresDatabase {
         for row in rows {
             // Parse TMDB details if available
             let details = match row.tmdb_details {
-                None => MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id)),
+                None => MediaDetailsOption::Endpoint(format!("/media/{}", row.id)),
                 Some(tmdb_json) => match serde_json::from_value::<SeasonDetails>(tmdb_json) {
                     Ok(season_details) => {
                         MediaDetailsOption::Details(TmdbDetails::Season(season_details))
                     }
                     Err(e) => {
                         warn!("Failed to parse season TMDB details: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
+                        MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
                     }
                 },
             };
 
             seasons.push(SeasonReference {
-                id: SeasonID::new(row.id.to_string())?,
+                id: SeasonID(row.id),
                 season_number: SeasonNumber::new(row.season_number as u8),
-                series_id: SeriesID::new(row.series_id.to_string())?,
-                library_id: row.library_id,
+                series_id: SeriesID(row.series_id),
+                library_id: LibraryID(row.library_id),
                 tmdb_series_id: row.tmdb_series_id as u64,
                 details,
-                endpoint: SeasonURL::from_string(format!("/api/media/{}", row.id)),
+                endpoint: SeasonURL::from_string(format!("/media/{}", row.id)),
+                created_at: row.created_at,
+                theme_color: None,
+            });
+        }
+
+        Ok(seasons)
+    }
+
+    async fn get_library_seasons(&self, library_id: &LibraryID) -> Result<Vec<SeasonReference>> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                sr.id, sr.series_id, sr.season_number, sr.library_id, sr.tmdb_series_id, sr.created_at,
+                sm.tmdb_details as "tmdb_details?"
+            FROM season_references sr
+            LEFT JOIN season_metadata sm ON sr.id = sm.season_id
+            WHERE sr.library_id = $1
+            ORDER BY sr.series_id, sr.season_number
+            "#,
+            library_id.as_uuid()
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Failed to get seasons: {}", e)))?;
+
+        let mut seasons = Vec::new();
+        for row in rows {
+            // Parse TMDB details if available
+            let details = match row.tmdb_details {
+                None => MediaDetailsOption::Endpoint(format!("/media/{}", row.id)),
+                Some(tmdb_json) => match serde_json::from_value::<SeasonDetails>(tmdb_json) {
+                    Ok(season_details) => {
+                        MediaDetailsOption::Details(TmdbDetails::Season(season_details))
+                    }
+                    Err(e) => {
+                        warn!("Failed to parse season TMDB details: {}", e);
+                        MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
+                    }
+                },
+            };
+
+            seasons.push(SeasonReference {
+                id: SeasonID(row.id),
+                season_number: SeasonNumber::new(row.season_number as u8),
+                series_id: SeriesID(row.series_id),
+                library_id: LibraryID(row.library_id),
+                tmdb_series_id: row.tmdb_series_id as u64,
+                details,
+                endpoint: SeasonURL::from_string(format!("/media/{}", row.id)),
                 created_at: row.created_at,
                 theme_color: None,
             });
@@ -4071,7 +4205,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         }
 
         // Convert IDs to UUIDs
-        let uuids: Vec<Uuid> = ids.iter().map(|id| id.as_uuid()).collect();
+        let uuids: Vec<Uuid> = ids.iter().map(|id| id.to_uuid()).collect();
 
         let rows = sqlx::query!(
             r#"
@@ -4107,32 +4241,103 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 size: row.file_size as u64,
                 created_at: row.file_created_at,
                 media_file_metadata: parsed_metadata,
-                library_id: row.library_id,
+                library_id: LibraryID(row.library_id),
             };
 
             // Parse TMDB details if available
             let details = match row.tmdb_details {
-                None => MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id)),
+                None => MediaDetailsOption::Endpoint(format!("/media/{}", row.id)),
                 Some(tmdb_json) => match serde_json::from_value::<EpisodeDetails>(tmdb_json) {
                     Ok(episode_details) => {
                         MediaDetailsOption::Details(TmdbDetails::Episode(episode_details))
                     }
                     Err(e) => {
                         warn!("Failed to parse episode TMDB details: {}", e);
-                        MediaDetailsOption::Endpoint(format!("/api/media/{}", row.id))
+                        MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
                     }
                 },
             };
 
             episodes.push(EpisodeReference {
-                id: EpisodeID::new(row.id.to_string())?,
-                series_id: SeriesID::new(row.series_id.to_string())?,
-                season_id: SeasonID::new(row.season_id.to_string())?,
+                id: EpisodeID(row.id),
+                library_id: LibraryID(row.library_id),
+                series_id: SeriesID(row.series_id),
+                season_id: SeasonID(row.season_id),
                 season_number: SeasonNumber::new(row.season_number as u8),
                 episode_number: EpisodeNumber::new(row.episode_number as u8),
                 tmdb_series_id: row.tmdb_series_id as u64,
                 details,
-                endpoint: EpisodeURL::from_string(format!("/api/stream/{}", row.file_id)),
+                endpoint: EpisodeURL::from_string(format!("/stream/{}", row.file_id)),
+                file: media_file,
+            });
+        }
+
+        Ok(episodes)
+    }
+
+    async fn get_library_episodes(&self, library_id: &LibraryID) -> Result<Vec<EpisodeReference>> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                er.id, er.episode_number, er.season_number, er.season_id, er.series_id,
+                er.tmdb_series_id, er.file_id,
+                em.tmdb_details as "tmdb_details?",
+                mf.id as media_file_id, mf.file_path, mf.filename, mf.file_size,
+                mf.created_at as file_created_at, mf.technical_metadata, mf.library_id
+            FROM episode_references er
+            JOIN media_files mf ON er.file_id = mf.id
+            LEFT JOIN episode_metadata em ON er.id = em.episode_id
+            WHERE mf.library_id = $1
+            ORDER BY er.series_id ASC, er.season_number ASC, er.episode_number ASC
+            "#,
+            library_id.as_uuid()
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Failed to get episodes: {}", e)))?;
+
+        let mut episodes = Vec::new();
+        for row in rows {
+            // Parse technical metadata
+            let technical_metadata: Option<serde_json::Value> = row.technical_metadata;
+            let parsed_metadata = technical_metadata
+                .and_then(|tm| serde_json::from_value::<MediaFileMetadata>(tm).ok());
+
+            // Create media file
+            let media_file = MediaFile {
+                id: row.media_file_id,
+                path: PathBuf::from(&row.file_path),
+                filename: row.filename.clone(),
+                size: row.file_size as u64,
+                created_at: row.file_created_at,
+                media_file_metadata: parsed_metadata,
+                library_id: LibraryID(row.library_id),
+            };
+
+            // Parse TMDB details if available
+            let details = match row.tmdb_details {
+                None => MediaDetailsOption::Endpoint(format!("/media/{}", row.id)),
+                Some(tmdb_json) => match serde_json::from_value::<EpisodeDetails>(tmdb_json) {
+                    Ok(episode_details) => {
+                        MediaDetailsOption::Details(TmdbDetails::Episode(episode_details))
+                    }
+                    Err(e) => {
+                        warn!("Failed to parse episode TMDB details: {}", e);
+                        MediaDetailsOption::Endpoint(format!("/media/{}", row.id))
+                    }
+                },
+            };
+
+            episodes.push(EpisodeReference {
+                id: EpisodeID(row.id),
+                library_id: LibraryID(row.library_id),
+                series_id: SeriesID(row.series_id),
+                season_id: SeasonID(row.season_id),
+                season_number: SeasonNumber::new(row.season_number as u8),
+                episode_number: EpisodeNumber::new(row.episode_number as u8),
+                tmdb_series_id: row.tmdb_series_id as u64,
+                details,
+                endpoint: EpisodeURL::from_string(format!("/stream/{}", row.file_id)),
                 file: media_file,
             });
         }
@@ -4168,7 +4373,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             .await
     }
 
-    async fn get_folder_inventory(&self, library_id: Uuid) -> Result<Vec<FolderInventory>> {
+    async fn get_folder_inventory(&self, library_id: LibraryID) -> Result<Vec<FolderInventory>> {
         self.get_folder_inventory_impl(library_id).await
     }
 
@@ -4176,14 +4381,18 @@ impl MediaDatabaseTrait for PostgresDatabase {
         self.upsert_folder_impl(folder).await
     }
 
-    async fn cleanup_stale_folders(&self, library_id: Uuid, stale_after_hours: i32) -> Result<u32> {
+    async fn cleanup_stale_folders(
+        &self,
+        library_id: LibraryID,
+        stale_after_hours: i32,
+    ) -> Result<u32> {
         self.cleanup_stale_folders_impl(library_id, stale_after_hours)
             .await
     }
 
     async fn get_folder_by_path(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         path: &Path,
     ) -> Result<Option<FolderInventory>> {
         self.get_folder_by_path_impl(library_id, path).await
@@ -4227,7 +4436,7 @@ impl PostgresDatabase {
         series: &SeriesReference,
         metadata: Option<&EnhancedSeriesDetails>,
     ) -> Result<()> {
-        let series_uuid = series.id.as_ref();
+        let series_uuid = series.id.as_uuid();
 
         // Convert tmdb_id, treating 0 as None (no TMDB match)
         let tmdb_id = if series.tmdb_id > 0 {
@@ -4260,7 +4469,7 @@ impl PostgresDatabase {
                     updated_at = NOW()
                 "#,
                 series_uuid,
-                series.library_id,
+                series.library_id.as_uuid(),
                 tmdb_id,
                 series.title.as_str(),
                 series.theme_color.as_deref()
@@ -4289,7 +4498,7 @@ impl PostgresDatabase {
                 WHERE tmdb_id = $1 AND library_id = $2
                 "#,
                 tmdb_id,
-                series.library_id
+                series.library_id.as_uuid()
             )
             .fetch_optional(&mut *tx)
             .await
@@ -4318,7 +4527,7 @@ impl PostgresDatabase {
                             updated_at = NOW()
                         "#,
                         series_uuid,
-                        series.library_id,
+                        series.library_id.as_uuid(),
                         tmdb_id,
                         series.title.as_str(),
                         series.theme_color.as_deref()
@@ -4341,7 +4550,7 @@ impl PostgresDatabase {
                         updated_at = NOW()
                     "#,
                     series_uuid,
-                    series.library_id,
+                    series.library_id.as_uuid(),
                     tmdb_id,
                     series.title.as_str(),
                     series.theme_color.as_deref()

@@ -160,7 +160,7 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Me
     // Check if this is HDR content based on server metadata
     let (use_hdr_pipeline, needs_metadata_fetch) =
         if let Some(current_media) = &state.domains.player.state.current_media {
-            if let Some(metadata) = &current_media.metadata {
+            if let Some(metadata) = &current_media.media_file_metadata {
                 if let Some(duration) = metadata.duration {
                     state.domains.player.state.duration = duration;
                 }
@@ -168,7 +168,7 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Me
             // Always log metadata for debugging
             log::info!("Checking HDR status for: {}", current_media.filename);
 
-            let has_color_metadata = if let Some(metadata) = &current_media.metadata {
+            let has_color_metadata = if let Some(metadata) = &current_media.media_file_metadata {
                 log::info!("  Color transfer: {:?}", metadata.color_transfer);
                 log::info!("  Color space: {:?}", metadata.color_space);
                 log::info!("  Color primaries: {:?}", metadata.color_primaries);
@@ -196,15 +196,7 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::media::messages::Me
                 log::warn!("  No color metadata for potential HDR file, metadata fetch needed!");
             }
 
-            let is_hdr = current_media.is_hdr();
-            log::info!("  is_hdr() returned: {}", is_hdr);
-
-            if is_hdr {
-                log::info!("HDR content detected from metadata:");
-                log::info!("  Video info: {}", current_media.get_video_info());
-            }
-
-            (is_hdr, needs_fetch)
+            (false, needs_fetch)
         } else {
             (false, false)
         };

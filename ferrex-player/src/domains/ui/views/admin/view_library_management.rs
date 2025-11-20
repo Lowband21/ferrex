@@ -1,22 +1,29 @@
 //! Library management view with permission-based controls
 
+use std::sync::Arc;
+
 use crate::{
-    domains::ui::theme,
     domains::{
-        auth::permissions,
-        auth::permissions::StatePermissionExt,
+        auth::permissions::{self, StatePermissionExt},
         library::messages as library,
-        ui::{messages::Message, views::admin::view_library_form},
+        media::repository::accessor::{Accessor, ReadOnly, ReadWrite},
+        ui::{messages::Message, theme, views::admin::view_library_form},
     },
     infrastructure::api_types::LibraryType,
     state_refactored::State,
 };
-use ferrex_core::Library;
+use ferrex_core::{
+    types::library::{ArchivedLibrary, Library},
+    ArchivedLibraryType, LibraryID,
+};
 use iced::{
     widget::{button, column, container, row, scrollable, text, Space},
     Element, Length,
 };
 use lucide_icons::Icon;
+use rkyv::{deserialize, rancor::Error, util::AlignedVec};
+use uuid::Uuid;
+use yoke::Yoke;
 
 // Helper function to create icon text
 fn icon_text(icon: Icon) -> text::Text<'static> {
@@ -125,7 +132,7 @@ pub fn view_library_management(state: &State) -> Element<Message> {
     content = content.push(header_row);
 
     // Libraries list
-    if state.domains.library.state.libraries.is_empty() {
+    if !state.domains.library.state.repo_accessor.is_initialized() {
         content = content.push(
             container(
                 column![
@@ -146,15 +153,39 @@ pub fn view_library_management(state: &State) -> Element<Message> {
             .center_y(Length::Fill),
         );
     } else {
+        /*
         let libraries_list = scrollable(
             column(
                 state
                     .domains
                     .library
                     .state
-                    .libraries
+                    .repo_accessor
+                    .get_archived_libraries()
+                    .unwrap()
                     .iter()
                     .map(|library| create_library_card(library, &permissions))
+                    .collect::<Vec<_>>(),
+            )
+            .spacing(15),
+        ); */
+        let libraries_list = scrollable(
+            column(
+                state
+                    .domains
+                    .ui
+                    .state
+                    .repo_accessor
+                    .libraries_index()
+                    .expect("Failed to lock repository")
+                    .iter()
+                    .map(|library_id| {
+                        create_library_card(
+                            state.domains.ui.state.repo_accessor.clone(),
+                            library_id,
+                            &permissions,
+                        )
+                    })
                     .collect::<Vec<_>>(),
             )
             .spacing(15),
@@ -169,85 +200,120 @@ pub fn view_library_management(state: &State) -> Element<Message> {
         .into()
 }
 
+type LibraryYoke = Yoke<&'static ArchivedLibrary, Arc<AlignedVec>>;
+
 fn create_library_card<'a>(
-    library: &'a Library,
+    repo_accessor: Accessor<ReadOnly>,
+    library_id: &Uuid,
+    //library: &'a LibraryYoke,
     permissions: &permissions::PermissionChecker,
 ) -> Element<'a, Message> {
-    let library_type_icon = match library.library_type {
-        LibraryType::Movies => "🎬",
-        LibraryType::TvShows => "📺",
-    };
+    let library_opt = repo_accessor
+        .get_archived_library_yoke(&library_id)
+        .unwrap(); // This should be safe but I should handle it anyway
 
-    let status_text = if library.enabled {
-        text("Enabled").color(theme::MediaServerTheme::SUCCESS)
-    } else {
-        text("Disabled").color(theme::MediaServerTheme::TEXT_SUBDUED)
-    };
+    if let Some(library_yoke) = library_opt {
+        let library = *library_yoke.get();
 
-    let mut action_buttons = row![].spacing(10);
+        let library_type_icon = match library.library_type {
+            ArchivedLibraryType::Movies => "🎬",
+            ArchivedLibraryType::Series => "📺",
+        };
 
-    // Scan button (only if user has scan permission)
-    if permissions.can_scan_libraries() && library.enabled {
-        action_buttons = action_buttons.push(
-            button("Scan")
-                .on_press(Message::ScanLibrary_(library.id))
-                .style(theme::Button::Secondary.style()),
-        );
-    }
+        let status_text = if library.enabled {
+            text("Enabled").color(theme::MediaServerTheme::SUCCESS)
+        } else {
+            text("Disabled").color(theme::MediaServerTheme::TEXT_SUBDUED)
+        };
 
-    // Edit button (only if user has update permission)
-    if permissions.has_permission("libraries:update") {
-        action_buttons = action_buttons.push(
-            button("Edit")
-                .on_press(Message::ShowLibraryForm(Some(library.clone())))
-                .style(theme::Button::Secondary.style()),
-        );
-    }
+        let mut action_buttons = row![].spacing(10);
 
-    // Delete button (only if user has delete permission)
-    if permissions.has_permission("libraries:delete") {
-        action_buttons = action_buttons.push(
-            button("Delete")
-                .on_press(Message::DeleteLibrary(library.id))
-                .style(theme::Button::Destructive.style()),
-        );
-    }
+        // Scan button (only if user has scan permission)
+        if permissions.can_scan_libraries() && library.enabled {
+            action_buttons = action_buttons.push(
+                button("Scan")
+                    .on_press(Message::ScanLibrary_(LibraryID(library.id.as_uuid())))
+                    .style(theme::Button::Secondary.style()),
+            );
+        }
 
-    container(
-        row![
-            // Library icon and info
+        // Edit button (only if user has update permission)
+        if permissions.has_permission("libraries:update") {
+            action_buttons = action_buttons.push(
+                button("Edit")
+                    .on_press(Message::ShowLibraryForm(Some(
+                        deserialize::<Library, Error>(library)
+                            .expect("Failed to deserialize library"),
+                    )))
+                    .style(theme::Button::Secondary.style()),
+            );
+        }
+
+        // Delete button (only if user has delete permission)
+        if permissions.has_permission("libraries:delete") {
+            action_buttons = action_buttons.push(
+                button("Delete")
+                    .on_press(Message::DeleteLibrary(LibraryID(library.id.as_uuid())))
+                    .style(theme::Button::Destructive.style()),
+            );
+        }
+
+        container(
             row![
-                text(library_type_icon).size(24),
-                column![
-                    row![
-                        text(&library.name)
-                            .size(18)
-                            .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                        Space::with_width(10),
-                        status_text,
+                // Library icon and info
+                row![
+                    text(library_type_icon).size(24),
+                    column![
+                        row![
+                            text(library.name.to_string())
+                                .size(18)
+                                .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                            Space::with_width(10),
+                            status_text,
+                        ]
+                        .align_y(iced::Alignment::Center),
+                        text(
+                            library
+                                .paths
+                                .first()
+                                .expect("Invalid or non existant library path")
+                                .to_string()
+                        )
+                        .size(14)
+                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
                     ]
-                    .align_y(iced::Alignment::Center),
-                    text(
-                        library
-                            .paths
-                            .first()
-                            .map_or("No paths", |s| s.to_str().unwrap_or("<invalid path>"))
-                    )
-                    .size(14)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    .spacing(5),
                 ]
-                .spacing(5),
+                .spacing(15)
+                .align_y(iced::Alignment::Center)
+                .width(Length::Fill),
+                // Action buttons
+                action_buttons,
             ]
-            .spacing(15)
             .align_y(iced::Alignment::Center)
-            .width(Length::Fill),
-            // Action buttons
-            action_buttons,
-        ]
-        .align_y(iced::Alignment::Center)
-        .padding(20),
-    )
-    .style(theme::Container::Card.style())
-    .width(Length::Fill)
-    .into()
+            .padding(20),
+        )
+        .style(theme::Container::Card.style())
+        .width(Length::Fill)
+        .into()
+    } else {
+        container(
+            column![
+                text("No Libraries Configured")
+                    .size(24)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                Space::with_height(10),
+                text("Create a library to start managing your media collection.")
+                    .size(16)
+                    .color(theme::MediaServerTheme::TEXT_SUBDUED),
+            ]
+            .spacing(10)
+            .align_x(iced::Alignment::Center),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into()
+    }
 }

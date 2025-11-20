@@ -1,29 +1,26 @@
 //! Simplified device authentication handlers that work with existing database traits
-//! 
+//!
 //! This is a temporary implementation until the database traits are extended
 //! to support the full device authentication schema.
 
-use axum::{
-    extract::State,
-    Extension, Json,
+use argon2::{
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
 };
+use axum::{extract::State, Extension, Json};
 use chrono::{Duration, Utc};
 use ferrex_core::{
     api_types::ApiResponse,
-    auth::{AuthError, AuthResult, DeviceInfo, SetPinRequest, SetPinResponse},
-    user::{User, AuthToken},
+    auth::{AuthError, DeviceInfo, SetPinRequest, SetPinResponse},
+    user::{AuthToken, User},
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
-use sha2::{Sha256, Digest};
-use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-    Argon2,
-};
 
 use crate::{
-    AppState,
     errors::{AppError, AppResult},
+    AppState,
 };
 
 /// Enhanced login request with device info
@@ -83,12 +80,14 @@ pub async fn login_with_device(
     let refresh_token = generate_refresh_token();
 
     // Extract device info
-    let device_id = request.device_info
+    let device_id = request
+        .device_info
         .as_ref()
         .map(|d| d.device_id)
         .unwrap_or_else(Uuid::new_v4);
-    
-    let device_name = request.device_info
+
+    let device_name = request
+        .device_info
         .as_ref()
         .map(|d| d.device_name.clone())
         .or_else(|| Some("Unknown Device".to_string()));
@@ -113,7 +112,11 @@ pub async fn login_with_device(
         created_at: Utc::now().timestamp(),
     };
 
-    state.db.backend().create_session(&session).await
+    state
+        .db
+        .backend()
+        .create_session(&session)
+        .await
         .map_err(|_| AppError::internal("Failed to create session"))?;
 
     // For now, always indicate PIN setup is available
@@ -133,7 +136,7 @@ pub async fn login_with_device(
 }
 
 /// Simplified PIN setup endpoint
-/// 
+///
 /// This is a placeholder that demonstrates the API structure.
 /// The actual PIN storage would require extending the database traits.
 pub async fn set_pin_simple(
@@ -151,7 +154,7 @@ pub async fn set_pin_simple(
         requires_device_trust: true,
         allow_simple_pins: false,
     };
-    
+
     validate_pin(&request.new_pin, &policy)
         .map_err(|e| AppError::bad_request(format!("Invalid PIN: {}", e)))?;
 
@@ -159,11 +162,15 @@ pub async fn set_pin_simple(
     // 1. Verify the current password
     // 2. Hash the PIN with device-specific salt
     // 3. Store the PIN hash in the device_user_credentials table
-    // 
+    //
     // For now, we just return success
-    
-    tracing::info!("PIN setup requested for user {} on device {}", user.id, request.device_id);
-    
+
+    tracing::info!(
+        "PIN setup requested for user {} on device {}",
+        user.id,
+        request.device_id
+    );
+
     Ok(Json(ApiResponse::success(SetPinResponse {
         success: true,
         message: "PIN setup is not yet implemented. This is a placeholder endpoint.".to_string(),
@@ -192,9 +199,13 @@ pub async fn check_device_status(
     // 1. If the device is registered in authenticated_devices
     // 2. If the device has a PIN set for this user
     // 3. If the device trust hasn't expired
-    
-    tracing::debug!("Device status check for device {} and user {}", request.device_id, request.user_id);
-    
+
+    tracing::debug!(
+        "Device status check for device {} and user {}",
+        request.device_id,
+        request.user_id
+    );
+
     Ok(Json(ApiResponse::success(DeviceStatus {
         is_trusted: false,
         has_pin: false,
@@ -205,18 +216,18 @@ pub async fn check_device_status(
 /// Helper to hash a PIN (for future use)
 #[allow(dead_code)]
 fn hash_pin_with_device_salt(pin: &str, device_id: &Uuid) -> Result<String, ()> {
-    use base64::{Engine as _, engine::general_purpose};
-    
+    use base64::{engine::general_purpose, Engine as _};
+
     // Create device-specific salt
     let mut hasher = Sha256::new();
     hasher.update(device_id.to_string().as_bytes());
     hasher.update(b"ferrex-pin-salt-v1");
     let salt_bytes = hasher.finalize();
-    
+
     // Create SaltString from hash
     let salt_b64 = general_purpose::STANDARD.encode(&salt_bytes[..22]);
     let salt = SaltString::from_b64(&salt_b64).map_err(|_| ())?;
-    
+
     // Hash PIN
     let argon2 = Argon2::default();
     argon2

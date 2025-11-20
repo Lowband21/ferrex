@@ -1,7 +1,8 @@
 use crate::{
     database::traits::{FileWatchEvent, FileWatchEventType},
-    LibraryReference, MediaDatabase, Result,
+    LibraryID, LibraryReference, MediaDatabase, Result,
 };
+use chrono::Utc;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::path::Path;
@@ -9,12 +10,11 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info};
 use uuid::Uuid;
-use chrono::Utc;
 
 /// Watches filesystem changes for libraries
 pub struct FileWatcher {
     db: Arc<MediaDatabase>,
-    watchers: Arc<RwLock<HashMap<Uuid, RecommendedWatcher>>>,
+    watchers: Arc<RwLock<HashMap<LibraryID, RecommendedWatcher>>>,
     event_tx: mpsc::UnboundedSender<FileWatchEvent>,
     event_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<FileWatchEvent>>>,
 }
@@ -45,9 +45,10 @@ impl FileWatcher {
                 move |res: std::result::Result<Event, notify::Error>| {
                     match res {
                         Ok(event) => {
-                            if let Some(watch_event) = Self::convert_notify_event(event, library_id) {
+                            if let Some(watch_event) = Self::convert_notify_event(event, library_id)
+                            {
                                 debug!("File watch event: {:?}", watch_event);
-                                
+
                                 // Send to channel for processing
                                 if let Err(e) = event_tx.send(watch_event.clone()) {
                                     error!("Failed to send file watch event: {}", e);
@@ -55,7 +56,11 @@ impl FileWatcher {
                                     // Also persist to database
                                     let db_clone = db.clone();
                                     tokio::spawn(async move {
-                                        if let Err(e) = db_clone.backend().create_file_watch_event(&watch_event).await {
+                                        if let Err(e) = db_clone
+                                            .backend()
+                                            .create_file_watch_event(&watch_event)
+                                            .await
+                                        {
                                             error!("Failed to persist file watch event: {}", e);
                                         }
                                     });
@@ -66,7 +71,8 @@ impl FileWatcher {
                     }
                 },
                 Config::default(),
-            ).map_err(|e| crate::MediaError::Internal(format!("Failed to create watcher: {}", e)))?;
+            )
+            .map_err(|e| crate::MediaError::Internal(format!("Failed to create watcher: {}", e)))?;
 
             // Watch all paths in the library
             for path in &library.paths {
@@ -90,7 +96,7 @@ impl FileWatcher {
     }
 
     /// Stop watching a library
-    pub async fn unwatch_library(&self, library_id: Uuid) -> Result<()> {
+    pub async fn unwatch_library(&self, library_id: LibraryID) -> Result<()> {
         if self.watchers.write().await.remove(&library_id).is_some() {
             info!("Stopped watching library: {}", library_id);
         }
@@ -121,7 +127,7 @@ impl FileWatcher {
     /// Get unprocessed events from database
     pub async fn get_unprocessed_events(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         limit: i32,
     ) -> Result<Vec<FileWatchEvent>> {
         self.db
@@ -136,7 +142,7 @@ impl FileWatcher {
     }
 
     /// Convert notify event to our FileWatchEvent
-    fn convert_notify_event(event: Event, library_id: Uuid) -> Option<FileWatchEvent> {
+    fn convert_notify_event(event: Event, library_id: LibraryID) -> Option<FileWatchEvent> {
         // Get the first path (most events only have one)
         let path = event.paths.first()?.clone();
         let path_str = path.to_string_lossy().to_string();
@@ -146,9 +152,9 @@ impl FileWatcher {
             EventKind::Create(_) => FileWatchEventType::Created,
             EventKind::Modify(_) => FileWatchEventType::Modified,
             EventKind::Remove(_) => FileWatchEventType::Deleted,
-            EventKind::Any => return None, // Skip generic events
+            EventKind::Any => return None,       // Skip generic events
             EventKind::Access(_) => return None, // Skip access events
-            EventKind::Other => return None, // Skip other events
+            EventKind::Other => return None,     // Skip other events
         };
 
         // Check if it's a video file

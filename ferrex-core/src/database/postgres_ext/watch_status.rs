@@ -1,11 +1,19 @@
 use crate::database::PostgresDatabase;
-use crate::{
-    api_types::MediaId, InProgressItem, MediaError, Result, UpdateProgressRequest, UserWatchState,
-};
-use serde_json;
+use crate::{InProgressItem, MediaError, MediaType, Result, UpdateProgressRequest, UserWatchState};
 use std::collections::{HashMap, HashSet};
 use tracing::info;
 use uuid::Uuid;
+
+/// Helper function to convert MediaType to u8 encoding used in DB (SMALLINT)
+#[inline]
+fn media_type_to_u8(media_type: &MediaType) -> i16 {
+    match media_type {
+        MediaType::Movie => 0,
+        MediaType::Series => 1,
+        MediaType::Season => 2,
+        MediaType::Episode => 3,
+    }
+}
 
 /// Watch status tracking extensions for PostgresDatabase
 impl PostgresDatabase {
@@ -14,9 +22,6 @@ impl PostgresDatabase {
         user_id: Uuid,
         progress: &UpdateProgressRequest,
     ) -> Result<()> {
-        let media_id_json = serde_json::to_value(&progress.media_id)
-            .map_err(|e| MediaError::Internal(format!("Failed to serialize MediaId: {}", e)))?;
-
         let now = chrono::Utc::now().timestamp_millis();
 
         let mut tx = self
@@ -29,17 +34,19 @@ impl PostgresDatabase {
         sqlx::query!(
             r#"
             INSERT INTO user_watch_progress (
-                user_id, media_id_json, position, duration, last_watched, updated_at
+                user_id, media_uuid, media_type, position, duration, last_watched, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $5)
-            ON CONFLICT (user_id, media_id_json) DO UPDATE SET
+            VALUES ($1, $2, $3, $4, $5, $6, $6)
+            ON CONFLICT (user_id, media_uuid) DO UPDATE SET
+                media_type = EXCLUDED.media_type,
                 position = EXCLUDED.position,
                 duration = EXCLUDED.duration,
                 last_watched = EXCLUDED.last_watched,
                 updated_at = EXCLUDED.updated_at
             "#,
             user_id,
-            media_id_json,
+            progress.media_id,
+            progress.media_type as i16,
             progress.position,
             progress.duration,
             now
@@ -52,19 +59,21 @@ impl PostgresDatabase {
         let completion_ratio = progress.position / progress.duration;
         if completion_ratio > 0.95 {
             info!(
-                "Media {} is {}% complete, marking as completed",
-                serde_json::to_string(&progress.media_id).unwrap_or_default(),
+                "Media {} ({}) is {}% complete, marking as completed",
+                progress.media_id,
+                progress.media_type,
                 (completion_ratio * 100.0) as i32
             );
 
             sqlx::query!(
                 r#"
-                INSERT INTO user_completed_media (user_id, media_id_json, completed_at)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (user_id, media_id_json) DO NOTHING
+                INSERT INTO user_completed_media (user_id, media_uuid, media_type, completed_at)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (user_id, media_uuid) DO NOTHING
                 "#,
                 user_id,
-                media_id_json,
+                progress.media_id,
+                progress.media_type as i16,
                 now
             )
             .execute(&mut *tx)
@@ -75,10 +84,10 @@ impl PostgresDatabase {
             sqlx::query!(
                 r#"
                 DELETE FROM user_watch_progress
-                WHERE user_id = $1 AND media_id_json = $2
+                WHERE user_id = $1 AND media_uuid = $2
                 "#,
                 user_id,
-                media_id_json
+                progress.media_id
             )
             .execute(&mut *tx)
             .await
@@ -98,7 +107,7 @@ impl PostgresDatabase {
         // Get in-progress items
         let progress_rows = sqlx::query!(
             r#"
-            SELECT media_id_json, position, duration, last_watched
+            SELECT media_uuid, position, duration, last_watched
             FROM user_watch_progress
             WHERE user_id = $1
             ORDER BY last_watched DESC
@@ -111,14 +120,10 @@ impl PostgresDatabase {
 
         let mut in_progress = HashMap::new();
         for row in progress_rows {
-            let media_id: MediaId = serde_json::from_value(row.media_id_json).map_err(|e| {
-                MediaError::Internal(format!("Failed to deserialize MediaId: {}", e))
-            })?;
-
             in_progress.insert(
-                media_id,
+                row.media_uuid,
                 InProgressItem {
-                    media_id,
+                    media_id: row.media_uuid,
                     position: row.position,
                     duration: row.duration,
                     last_watched: row.last_watched,
@@ -129,7 +134,7 @@ impl PostgresDatabase {
         // Get completed items
         let completed_rows = sqlx::query!(
             r#"
-            SELECT media_id_json
+            SELECT media_uuid
             FROM user_completed_media
             WHERE user_id = $1
             "#,
@@ -141,10 +146,7 @@ impl PostgresDatabase {
 
         let mut completed = HashSet::new();
         for row in completed_rows {
-            let media_id: MediaId = serde_json::from_value(row.media_id_json).map_err(|e| {
-                MediaError::Internal(format!("Failed to deserialize MediaId: {}", e))
-            })?;
-            completed.insert(media_id);
+            completed.insert(row.media_uuid);
         }
 
         info!(
@@ -167,7 +169,7 @@ impl PostgresDatabase {
     ) -> Result<Vec<InProgressItem>> {
         let rows = sqlx::query!(
             r#"
-            SELECT media_id_json, position, duration, last_watched
+            SELECT media_uuid, position, duration, last_watched
             FROM user_watch_progress
             WHERE user_id = $1
             ORDER BY last_watched DESC
@@ -182,12 +184,8 @@ impl PostgresDatabase {
 
         let mut items = Vec::new();
         for row in rows {
-            let media_id: MediaId = serde_json::from_value(row.media_id_json).map_err(|e| {
-                MediaError::Internal(format!("Failed to deserialize MediaId: {}", e))
-            })?;
-
             items.push(InProgressItem {
-                media_id,
+                media_id: row.media_uuid,
                 position: row.position,
                 duration: row.duration,
                 last_watched: row.last_watched,
@@ -197,10 +195,7 @@ impl PostgresDatabase {
         Ok(items)
     }
 
-    pub async fn clear_watch_progress(&self, user_id: Uuid, media_id: &MediaId) -> Result<()> {
-        let media_id_json = serde_json::to_value(media_id)
-            .map_err(|e| MediaError::Internal(format!("Failed to serialize MediaId: {}", e)))?;
-
+    pub async fn clear_watch_progress(&self, user_id: Uuid, media_id: &Uuid) -> Result<()> {
         let mut tx = self
             .pool()
             .begin()
@@ -211,10 +206,10 @@ impl PostgresDatabase {
         let progress_result = sqlx::query!(
             r#"
             DELETE FROM user_watch_progress
-            WHERE user_id = $1 AND media_id_json = $2
+            WHERE user_id = $1 AND media_uuid = $2
             "#,
             user_id,
-            media_id_json
+            media_id
         )
         .execute(&mut *tx)
         .await
@@ -224,10 +219,10 @@ impl PostgresDatabase {
         let completed_result = sqlx::query!(
             r#"
             DELETE FROM user_completed_media
-            WHERE user_id = $1 AND media_id_json = $2
+            WHERE user_id = $1 AND media_uuid = $2
             "#,
             user_id,
-            media_id_json
+            media_id
         )
         .execute(&mut *tx)
         .await
@@ -240,7 +235,7 @@ impl PostgresDatabase {
         info!(
             "Cleared watch progress for user {} media {}: {} progress, {} completed removed",
             user_id,
-            serde_json::to_string(media_id).unwrap_or_default(),
+            media_id,
             progress_result.rows_affected(),
             completed_result.rows_affected()
         );
@@ -248,19 +243,16 @@ impl PostgresDatabase {
         Ok(())
     }
 
-    pub async fn is_media_completed(&self, user_id: Uuid, media_id: &MediaId) -> Result<bool> {
-        let media_id_json = serde_json::to_value(media_id)
-            .map_err(|e| MediaError::Internal(format!("Failed to serialize MediaId: {}", e)))?;
-
+    pub async fn is_media_completed(&self, user_id: Uuid, media_id: &Uuid) -> Result<bool> {
         let exists = sqlx::query!(
             r#"
             SELECT EXISTS(
                 SELECT 1 FROM user_completed_media
-                WHERE user_id = $1 AND media_id_json = $2
+                WHERE user_id = $1 AND media_uuid = $2
             ) as "exists!"
             "#,
             user_id,
-            media_id_json
+            media_id
         )
         .fetch_one(self.pool())
         .await

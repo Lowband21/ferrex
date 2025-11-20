@@ -1,7 +1,6 @@
 //! Common UI types moved from monolithic state
 
-use crate::infrastructure::api_types::MovieReference;
-use ferrex_core::{EpisodeID, SeasonID, SeriesID};
+use ferrex_core::{EpisodeID, MovieID, SeasonID, SeriesID};
 
 /// View state representing which screen/page is currently shown
 #[derive(Debug, Clone, Default)]
@@ -19,7 +18,7 @@ pub enum ViewState {
         message: String,
     },
     MovieDetail {
-        movie: MovieReference, // Store full reference for efficient access
+        movie_id: MovieID, // Store full reference for efficient access
         backdrop_handle: Option<iced::widget::image::Handle>, // Cached backdrop handle
     },
     TvShowDetail {

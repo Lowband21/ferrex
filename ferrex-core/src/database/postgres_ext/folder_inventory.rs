@@ -4,7 +4,7 @@ use crate::database::traits::{
     FolderDiscoverySource, FolderInventory, FolderProcessingStatus, FolderScanFilters, FolderType,
 };
 use crate::database::PostgresDatabase;
-use crate::{MediaError, Result};
+use crate::{LibraryID, MediaError, Result};
 use chrono::{DateTime, Utc};
 use tracing::{error, info};
 use uuid::Uuid;
@@ -173,7 +173,7 @@ impl PostgresDatabase {
     /// Get complete folder inventory for a library
     pub async fn get_folder_inventory_impl(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
     ) -> Result<Vec<FolderInventory>> {
         let rows = sqlx::query_as::<_, FolderInventoryRow>(
             r#"
@@ -190,7 +190,7 @@ impl PostgresDatabase {
             ORDER BY folder_path
             "#,
         )
-        .bind(library_id)
+        .bind(library_id.as_uuid())
         .fetch_all(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get folder inventory: {}", e)))?;
@@ -248,7 +248,7 @@ impl PostgresDatabase {
             RETURNING id
             "#,
             folder.id,
-            folder.library_id,
+            folder.library_id.as_uuid(),
             folder.folder_path,
             folder_type_str,
             folder.parent_folder_id,
@@ -277,7 +277,7 @@ impl PostgresDatabase {
     /// Cleanup stale folders that haven't been seen in the specified time
     pub async fn cleanup_stale_folders_impl(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         stale_after_hours: i32,
     ) -> Result<u32> {
         let result = sqlx::query!(
@@ -286,7 +286,7 @@ impl PostgresDatabase {
             WHERE library_id = $1
             AND last_seen_at < NOW() - INTERVAL '1 hour' * $2
             "#,
-            library_id,
+            library_id.as_uuid(),
             stale_after_hours as f64
         )
         .execute(self.pool())
@@ -308,7 +308,7 @@ impl PostgresDatabase {
     /// Get folder by path
     pub async fn get_folder_by_path_impl(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         path: &Path,
     ) -> Result<Option<FolderInventory>> {
         let row = sqlx::query_as::<_, FolderInventoryRow>(
@@ -325,7 +325,7 @@ impl PostgresDatabase {
             WHERE library_id = $1 AND folder_path = $2
             "#,
         )
-        .bind(library_id)
+        .bind(library_id.as_uuid())
         .bind(path.to_string_lossy().to_string())
         .fetch_optional(self.pool())
         .await
@@ -513,7 +513,7 @@ impl From<FolderInventoryRow> for FolderInventory {
 
         FolderInventory {
             id: row.id,
-            library_id: row.library_id,
+            library_id: LibraryID(row.library_id),
             folder_path: row.folder_path,
             folder_type,
             parent_folder_id: row.parent_folder_id,

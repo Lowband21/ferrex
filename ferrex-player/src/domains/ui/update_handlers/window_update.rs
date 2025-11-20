@@ -29,18 +29,20 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<Message> {
         }
     }
 
+    // TODO: This is cumbersome, fix it
+    let uuid = if let Some(library_id) = state.domains.library.state.current_library_id {
+        Some(library_id.as_uuid())
+    } else {
+        None
+    };
+
     // Update depth regions for the current view with new window size
     state
         .domains
         .ui
         .state
         .background_shader_state
-        .update_depth_lines(
-            &state.domains.ui.state.view,
-            size.width,
-            size.height,
-            state.domains.library.state.current_library_id,
-        );
+        .update_depth_lines(&state.domains.ui.state.view, size.width, size.height, uuid);
 
     Task::none()
 }

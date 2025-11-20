@@ -232,7 +232,7 @@ impl TranscodingService {
         // Check if we already have this version cached
         if self
             .cache_manager
-            .has_cached_version(&media_id, &profile.name)
+            .has_cached_version(media_id, &profile.name)
             .await
         {
             info!(
@@ -920,7 +920,7 @@ impl TranscodingService {
             // Only include variants that are actually cached
             if self
                 .cache_manager
-                .has_cached_version(&media_id, &profile_name)
+                .has_cached_version(media_id, &profile_name)
                 .await
             {
                 let (width, height) = {

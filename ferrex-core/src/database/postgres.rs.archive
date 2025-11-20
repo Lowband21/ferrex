@@ -140,15 +140,15 @@ impl PostgresDatabase {
         if parts.len() < 2 {
             return Err(MediaError::InvalidMedia("Invalid connection string".to_string()));
         }
-        
+
         let db_name = parts.last().unwrap().split('?').next().unwrap();
         let base_url = parts[..parts.len()-1].join("/");
-        
+
         // Connect to postgres database to create our database
         let maintenance_url = format!("{}/postgres", base_url);
-        
+
         debug!("Connecting to postgres database to ensure {} exists", db_name);
-        
+
         match sqlx::postgres::PgConnection::connect(&maintenance_url).await {
             Ok(mut conn) => {
                 // Check if database exists
@@ -159,7 +159,7 @@ impl PostgresDatabase {
                 .fetch_one(&mut conn)
                 .await
                 .unwrap_or(false);
-                
+
                 if !exists {
                     info!("Creating database: {}", db_name);
                     sqlx::query(&format!("CREATE DATABASE \"{}\"", db_name))
@@ -234,9 +234,9 @@ impl PostgresDatabase {
         // Add library_id column if it doesn't exist (for migration from older schema)
         sqlx::query(
             r#"
-            DO $$ 
+            DO $$
             BEGIN
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                               WHERE table_name='media_files' AND column_name='library_id') THEN
                     ALTER TABLE media_files ADD COLUMN library_id UUID REFERENCES libraries(id) ON DELETE CASCADE;
                 END IF;
@@ -252,9 +252,9 @@ impl PostgresDatabase {
         // Add parent_media_id column if it doesn't exist (for extras support)
         sqlx::query(
             r#"
-            DO $$ 
+            DO $$
             BEGIN
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                               WHERE table_name='media_files' AND column_name='parent_media_id') THEN
                     ALTER TABLE media_files ADD COLUMN parent_media_id UUID REFERENCES media_files(id) ON DELETE CASCADE;
                 END IF;
@@ -342,21 +342,21 @@ impl PostgresDatabase {
             DO $$
             BEGIN
                 -- Add source column if it doesn't exist
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                               WHERE table_name='external_metadata' AND column_name='source') THEN
                     ALTER TABLE external_metadata ADD COLUMN source TEXT NOT NULL DEFAULT 'tmdb';
                 END IF;
-                
+
                 -- Drop old unique constraint if it exists
-                IF EXISTS (SELECT 1 FROM pg_constraint 
+                IF EXISTS (SELECT 1 FROM pg_constraint
                           WHERE conname = 'external_metadata_media_file_id_key') THEN
                     ALTER TABLE external_metadata DROP CONSTRAINT external_metadata_media_file_id_key;
                 END IF;
-                
+
                 -- Add new composite unique constraint if it doesn't exist
-                IF NOT EXISTS (SELECT 1 FROM pg_constraint 
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint
                               WHERE conname = 'external_metadata_media_file_id_source_key') THEN
-                    ALTER TABLE external_metadata ADD CONSTRAINT external_metadata_media_file_id_source_key 
+                    ALTER TABLE external_metadata ADD CONSTRAINT external_metadata_media_file_id_source_key
                         UNIQUE(media_file_id, source);
                 END IF;
             END $$
@@ -369,7 +369,7 @@ impl PostgresDatabase {
         // Add HDR metadata columns if they don't exist (for existing installations)
         sqlx::query(
             r#"
-            ALTER TABLE media_metadata 
+            ALTER TABLE media_metadata
             ADD COLUMN IF NOT EXISTS bit_depth INTEGER,
             ADD COLUMN IF NOT EXISTS color_transfer TEXT,
             ADD COLUMN IF NOT EXISTS color_space TEXT,
@@ -503,14 +503,14 @@ impl MediaDatabaseTrait for PostgresDatabase {
         }
 
         debug!("Storing batch of {} media files", media_files.len());
-        
+
         // Start a transaction for batch operation
         let mut tx = self.pool.begin().await
             .map_err(|e| MediaError::InvalidMedia(format!("Failed to start transaction: {e}")))?;
-            
+
         let mut stored_ids = Vec::new();
         let mut tv_shows_to_create = std::collections::HashMap::new();
-        
+
         // Process files in the batch
         for media_file in media_files {
             let media_type = media_file
@@ -667,7 +667,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                     .map_err(|e| {
                         MediaError::InvalidMedia(format!("Failed to store external metadata in batch: {e}"))
                     })?;
-                    
+
                     // Collect TV shows to create (deduplication)
                     if let Some(parsed) = &metadata.parsed_info {
                         if parsed.media_type == crate::MediaType::TvEpisode {
@@ -680,10 +680,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
                     }
                 }
             }
-            
+
             stored_ids.push(id.0.to_string());
         }
-        
+
         // Create TV shows in batch (deduplicated)
         for (tmdb_id, (show_name, external)) in tv_shows_to_create {
             // Check if show already exists
@@ -696,7 +696,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             .map_err(|e| MediaError::InvalidMedia(format!("Failed to check TV show existence: {e}")))?
             .exists
             .unwrap_or(false);
-            
+
             if !exists {
                 sqlx::query!(
                     r#"
@@ -716,11 +716,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 .map_err(|e| MediaError::InvalidMedia(format!("Failed to create TV show in batch: {e}")))?;
             }
         }
-        
+
         // Commit transaction
         tx.commit().await
             .map_err(|e| MediaError::InvalidMedia(format!("Failed to commit batch transaction: {e}")))?;
-        
+
         debug!("Successfully stored batch of {} media files", stored_ids.len());
         Ok(stored_ids)
     }
@@ -730,7 +730,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let row = sqlx::query(
             r#"
-            SELECT 
+            SELECT
                 mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at, mf.library_id, mf.parent_media_id,
                 mm.duration_seconds, mm.width, mm.height, mm.video_codec, mm.audio_codec,
                 mm.parsed_info, mm.bit_depth, mm.color_transfer, mm.color_space, mm.color_primaries,
@@ -769,7 +769,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let row = sqlx::query(
             r#"
-            SELECT 
+            SELECT
                 mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at, mf.library_id, mf.parent_media_id,
                 mm.duration_seconds, mm.width, mm.height, mm.video_codec, mm.audio_codec,
                 mm.parsed_info, mm.bit_depth, mm.color_transfer, mm.color_space, mm.color_primaries,
@@ -795,7 +795,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let mut query = String::from(
             r#"
-            SELECT 
+            SELECT
                 mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at, mf.media_type, mf.library_id, mf.parent_media_id,
                 mm.duration_seconds, mm.width, mm.height, mm.video_codec, mm.audio_codec,
                 mm.parsed_info, mm.bit_depth, mm.color_transfer, mm.color_space, mm.color_primaries,
@@ -1147,7 +1147,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     async fn get_tv_show(&self, tmdb_id: &str) -> Result<Option<TvShowInfo>> {
         let tmdb_id_int = tmdb_id.parse::<i32>()
             .map_err(|_| MediaError::InvalidMedia(format!("Invalid TMDB ID: {}", tmdb_id)))?;
-        
+
         let show_row = sqlx::query!(
             "SELECT id, tmdb_id, name, overview, poster_path, backdrop_path FROM tv_shows WHERE tmdb_id = $1",
             tmdb_id_int
@@ -1206,7 +1206,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let file_uuid = Uuid::parse_str(uuid_str)
             .map_err(|e| MediaError::InvalidMedia(format!("Invalid file UUID: {e}")))?;
-        
+
         let tmdb_id_int = show_tmdb_id.parse::<i32>()
             .map_err(|_| MediaError::InvalidMedia(format!("Invalid TMDB ID: {}", show_tmdb_id)))?;
 
@@ -1252,7 +1252,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     async fn get_all_media(&self) -> Result<Vec<MediaFile>> {
         let rows = sqlx::query(
             r#"
-            SELECT 
+            SELECT
                 mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at, mf.library_id, mf.parent_media_id,
                 mm.duration_seconds, mm.width, mm.height, mm.video_codec, mm.audio_codec,
                 mm.parsed_info, mm.bit_depth, mm.color_transfer, mm.color_space, mm.color_primaries,
@@ -1466,16 +1466,16 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         Ok(())
     }
-    
+
     // New reference type methods
     async fn store_movie_reference(&self, movie: &MovieReference) -> Result<()> {
         // First store the media file
         self.store_media(movie.file.clone()).await?;
-        
+
         // Then store the movie reference
         let library_id = movie.file.library_id
             .ok_or_else(|| MediaError::InvalidMedia("Movie file must have library_id".to_string()))?;
-        
+
         sqlx::query!(
             r#"
             INSERT INTO movie_references (id, tmdb_id, title, file_id, library_id)
@@ -1496,10 +1496,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .execute(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to store movie reference: {}", e)))?;
-        
+
         Ok(())
     }
-    
+
     async fn store_series_reference(&self, series: &SeriesReference) -> Result<()> {
         // Get library_id from the first episode that references this series
         let library_id = sqlx::query!(
@@ -1517,7 +1517,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to get library_id for series: {}", e)))?
         .and_then(|row| row.library_id)
         .ok_or_else(|| MediaError::InvalidMedia("Series must be associated with a library".to_string()))?;
-        
+
         sqlx::query!(
             r#"
             INSERT INTO series_references (id, tmdb_id, title, library_id)
@@ -1536,10 +1536,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .execute(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to store series reference: {}", e)))?;
-        
+
         Ok(())
     }
-    
+
     async fn store_season_reference(&self, season: &SeasonReference) -> Result<()> {
         sqlx::query!(
             r#"
@@ -1559,22 +1559,22 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .execute(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to store season reference: {}", e)))?;
-        
+
         Ok(())
     }
-    
+
     async fn store_episode_reference(&self, episode: &EpisodeReference) -> Result<()> {
         // First store the media file
         self.store_media(episode.file.clone()).await?;
-        
+
         let library_id = episode.file.library_id
             .ok_or_else(|| MediaError::InvalidMedia("Episode file must have library_id".to_string()))?;
-        
+
         // Then store the episode reference
         sqlx::query!(
             r#"
             INSERT INTO episode_references (
-                id, episode_number, season_number, season_id, series_id, 
+                id, episode_number, season_number, season_id, series_id,
                 tmdb_series_id, file_id, library_id
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -1600,10 +1600,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .execute(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to store episode reference: {}", e)))?;
-        
+
         Ok(())
     }
-    
+
     async fn get_all_movie_references(&self) -> Result<Vec<MovieReference>> {
         let rows = sqlx::query!(
             r#"
@@ -1616,7 +1616,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to get all movie references: {}", e)))?;
-        
+
         let mut movies = Vec::new();
         for row in rows {
             if let Some(media_file) = self.get_media(&row.file_id.to_string()).await? {
@@ -1636,10 +1636,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 });
             }
         }
-        
+
         Ok(movies)
     }
-    
+
     async fn get_series_references(&self) -> Result<Vec<SeriesReference>> {
         let rows = sqlx::query!(
             r#"
@@ -1651,7 +1651,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to get series references: {}", e)))?;
-        
+
         let mut series_list = Vec::new();
         for row in rows {
             series_list.push(SeriesReference {
@@ -1668,10 +1668,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 ),
             });
         }
-        
+
         Ok(series_list)
     }
-    
+
     async fn get_series_seasons(&self, series_id: &SeriesID) -> Result<Vec<SeasonReference>> {
         let rows = sqlx::query!(
             r#"
@@ -1685,7 +1685,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to get series seasons: {}", e)))?;
-        
+
         let mut seasons = Vec::new();
         for row in rows {
             seasons.push(SeasonReference {
@@ -1703,10 +1703,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 ),
             });
         }
-        
+
         Ok(seasons)
     }
-    
+
     async fn get_season_episodes(&self, season_id: &SeasonID) -> Result<Vec<EpisodeReference>> {
         let rows = sqlx::query!(
             r#"
@@ -1721,7 +1721,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to get season episodes: {}", e)))?;
-        
+
         let mut episodes = Vec::new();
         for row in rows {
             if let Some(media_file) = self.get_media(&row.file_id.to_string()).await? {
@@ -1744,11 +1744,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 });
             }
         }
-        
+
         Ok(episodes)
     }
-    
-    async fn get_library_movies(&self, library_id: Uuid) -> Result<Vec<MovieReference>> {
+
+    async fn get_library_movies(&self, library_id: LibraryID) -> Result<Vec<MovieReference>> {
         let rows = sqlx::query!(
             r#"
             SELECT mr.*, mf.id as file_id
@@ -1762,7 +1762,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to get library movies: {}", e)))?;
-        
+
         let mut movies = Vec::new();
         for row in rows {
             if let Some(media_file) = self.get_media(&row.file_id.to_string()).await? {
@@ -1782,11 +1782,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 });
             }
         }
-        
+
         Ok(movies)
     }
-    
-    async fn get_library_series(&self, library_id: Uuid) -> Result<Vec<SeriesReference>> {
+
+    async fn get_library_series(&self, library_id: LibraryID) -> Result<Vec<SeriesReference>> {
         let rows = sqlx::query!(
             r#"
             SELECT DISTINCT sr.*
@@ -1799,7 +1799,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to get library series: {}", e)))?;
-        
+
         let mut series_list = Vec::new();
         for row in rows {
             series_list.push(SeriesReference {
@@ -1816,10 +1816,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 ),
             });
         }
-        
+
         Ok(series_list)
     }
-    
+
     async fn get_movie_reference(&self, id: &MovieID) -> Result<MovieReference> {
         let row = sqlx::query!(
             r#"
@@ -1834,10 +1834,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to get movie reference: {}", e)))?
         .ok_or_else(|| MediaError::NotFound("Movie reference not found".to_string()))?;
-        
+
         let media_file = self.get_media(&row.file_id.to_string()).await?
             .ok_or_else(|| MediaError::NotFound("Media file not found".to_string()))?;
-        
+
         Ok(MovieReference {
             id: MovieID::new(row.id.to_string())?,
             tmdb_id: row.tmdb_id as u64,
@@ -1853,7 +1853,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             file: media_file,
         })
     }
-    
+
     async fn get_series_reference(&self, id: &SeriesID) -> Result<SeriesReference> {
         let row = sqlx::query!(
             r#"
@@ -1867,7 +1867,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to get series reference: {}", e)))?
         .ok_or_else(|| MediaError::NotFound("Series reference not found".to_string()))?;
-        
+
         Ok(SeriesReference {
             id: SeriesID::new(row.id.to_string())?,
             tmdb_id: row.tmdb_id as u64,
@@ -1882,7 +1882,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             ),
         })
     }
-    
+
     async fn get_season_reference(&self, id: &SeasonID) -> Result<SeasonReference> {
         let row = sqlx::query!(
             r#"
@@ -1896,7 +1896,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to get season reference: {}", e)))?
         .ok_or_else(|| MediaError::NotFound("Season reference not found".to_string()))?;
-        
+
         Ok(SeasonReference {
             id: SeasonID::new(row.id.to_string())?,
             season_number: SeasonNumber::new(row.season_number as u8),
@@ -1912,7 +1912,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             ),
         })
     }
-    
+
     async fn get_episode_reference(&self, id: &EpisodeID) -> Result<EpisodeReference> {
         let row = sqlx::query!(
             r#"
@@ -1927,10 +1927,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to get episode reference: {}", e)))?
         .ok_or_else(|| MediaError::NotFound("Episode reference not found".to_string()))?;
-        
+
         let media_file = self.get_media(&row.file_id.to_string()).await?
             .ok_or_else(|| MediaError::NotFound("Media file not found".to_string()))?;
-        
+
         Ok(EpisodeReference {
             id: EpisodeID::new(row.id.to_string())?,
             episode_number: EpisodeNumber::new(row.episode_number as u8),
@@ -1949,7 +1949,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             file: media_file,
         })
     }
-    
+
     async fn update_movie_tmdb_id(&self, id: &MovieID, tmdb_id: u64) -> Result<()> {
         sqlx::query!(
             r#"
@@ -1963,10 +1963,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .execute(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to update movie TMDB ID: {}", e)))?;
-        
+
         Ok(())
     }
-    
+
     async fn update_series_tmdb_id(&self, id: &SeriesID, tmdb_id: u64) -> Result<()> {
         // Update series
         sqlx::query!(
@@ -1981,7 +1981,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .execute(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to update series TMDB ID: {}", e)))?;
-        
+
         // Update related seasons and episodes
         sqlx::query!(
             r#"
@@ -1995,7 +1995,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .execute(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to update season TMDB IDs: {}", e)))?;
-        
+
         sqlx::query!(
             r#"
             UPDATE episode_references
@@ -2008,10 +2008,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .execute(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to update episode TMDB IDs: {}", e)))?;
-        
+
         Ok(())
     }
-    
+
     async fn list_library_references(&self) -> Result<Vec<LibraryReference>> {
         let rows = sqlx::query!(
             r#"
@@ -2023,12 +2023,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to list libraries: {}", e)))?;
-        
+
         let mut libraries = Vec::new();
         for row in rows {
             let paths = serde_json::from_value::<Vec<PathBuf>>(row.paths)
                 .unwrap_or_else(|_| vec![]);
-            
+
             libraries.push(LibraryReference {
                 id: row.id,
                 name: row.name,
@@ -2040,10 +2040,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 paths,
             });
         }
-        
+
         Ok(libraries)
     }
-    
+
     async fn get_library_reference(&self, id: Uuid) -> Result<LibraryReference> {
         let row = sqlx::query!(
             r#"
@@ -2056,10 +2056,10 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .fetch_one(&self.pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to get library: {}", e)))?;
-        
+
         let paths = serde_json::from_value::<Vec<PathBuf>>(row.paths)
             .unwrap_or_else(|_| vec![]);
-        
+
         Ok(LibraryReference {
             id: row.id,
             name: row.name,

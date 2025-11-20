@@ -9,10 +9,10 @@ use axum::{
 };
 use ferrex_core::{
     api_types::ApiResponse,
-    rbac::{Role, Permission, AssignRolesRequest, OverridePermissionRequest},
+    rbac::{OverridePermissionRequest, Permission, Role},
     user::User,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{errors::AppResult, AppState};
@@ -32,23 +32,23 @@ pub struct RoleWithPermissions {
 }
 
 /// Get all roles in the system
-/// 
+///
 /// Requires: users:manage_roles permission
 pub async fn list_roles_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> AppResult<Json<ApiResponse<RolesResponse>>> {
     // Permission check is handled by middleware
-    
-    let roles = state.database.backend()
-        .get_all_roles()
-        .await?;
-    
+
+    let roles = state.database.backend().get_all_roles().await?;
+
     // For each role, get its permissions
     let mut roles_with_perms = Vec::new();
     for role in roles {
         // This is a simplified version - in production you'd want a more efficient query
-        let permissions = state.database.backend()
+        let permissions = state
+            .database
+            .backend()
             .get_all_permissions()
             .await?
             .into_iter()
@@ -59,34 +59,29 @@ pub async fn list_roles_handler(
             })
             .map(|p| p.name)
             .collect();
-        
-        roles_with_perms.push(RoleWithPermissions {
-            role,
-            permissions,
-        });
+
+        roles_with_perms.push(RoleWithPermissions { role, permissions });
     }
-    
+
     Ok(Json(ApiResponse::success(RolesResponse {
         roles: roles_with_perms,
     })))
 }
 
 /// Get all available permissions
-/// 
+///
 /// Requires: users:manage_roles permission
 pub async fn list_permissions_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> AppResult<Json<ApiResponse<Vec<Permission>>>> {
-    let permissions = state.database.backend()
-        .get_all_permissions()
-        .await?;
-    
+    let permissions = state.database.backend().get_all_permissions().await?;
+
     Ok(Json(ApiResponse::success(permissions)))
 }
 
 /// Get a user's effective permissions
-/// 
+///
 /// Requires: users:read permission (or requesting own permissions)
 pub async fn get_user_permissions_handler(
     State(state): State<AppState>,
@@ -98,16 +93,18 @@ pub async fn get_user_permissions_handler(
     if current_user.id != user_id {
         // Permission check is handled by middleware
     }
-    
-    let permissions = state.database.backend()
+
+    let permissions = state
+        .database
+        .backend()
         .get_user_permissions(user_id)
         .await?;
-    
+
     Ok(Json(ApiResponse::success(permissions)))
 }
 
 /// Assign roles to a user
-/// 
+///
 /// Requires: users:manage_roles permission
 pub async fn assign_user_roles_handler(
     State(state): State<AppState>,
@@ -116,29 +113,35 @@ pub async fn assign_user_roles_handler(
     Json(request): Json<Vec<Uuid>>,
 ) -> AppResult<Json<ApiResponse<()>>> {
     // First, remove all existing roles
-    let current_roles = state.database.backend()
+    let current_roles = state
+        .database
+        .backend()
         .get_user_permissions(user_id)
         .await?
         .roles;
-    
+
     for role in current_roles {
-        state.database.backend()
+        state
+            .database
+            .backend()
             .remove_user_role(user_id, role.id)
             .await?;
     }
-    
+
     // Then assign the new roles
     for role_id in request {
-        state.database.backend()
+        state
+            .database
+            .backend()
             .assign_user_role(user_id, role_id, admin.id)
             .await?;
     }
-    
+
     Ok(Json(ApiResponse::success(())))
 }
 
 /// Override a specific permission for a user
-/// 
+///
 /// Requires: users:manage_roles permission
 pub async fn override_user_permission_handler(
     State(state): State<AppState>,
@@ -146,7 +149,9 @@ pub async fn override_user_permission_handler(
     Extension(admin): Extension<User>,
     Json(request): Json<OverridePermissionRequest>,
 ) -> AppResult<Json<ApiResponse<()>>> {
-    state.database.backend()
+    state
+        .database
+        .backend()
         .override_user_permission(
             user_id,
             &request.permission,
@@ -155,20 +160,22 @@ pub async fn override_user_permission_handler(
             request.reason,
         )
         .await?;
-    
+
     Ok(Json(ApiResponse::success(())))
 }
 
 /// Get current user's permissions (convenience endpoint)
-/// 
+///
 /// No additional permissions required - users can always check their own
 pub async fn get_my_permissions_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> AppResult<Json<ApiResponse<ferrex_core::rbac::UserPermissions>>> {
-    let permissions = state.database.backend()
+    let permissions = state
+        .database
+        .backend()
         .get_user_permissions(user.id)
         .await?;
-    
+
     Ok(Json(ApiResponse::success(permissions)))
 }

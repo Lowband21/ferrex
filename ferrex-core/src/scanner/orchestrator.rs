@@ -1,6 +1,6 @@
 use crate::{
     database::traits::{ScanState, ScanStatus, ScanType},
-    LibraryReference, MediaDatabase, Result,
+    LibraryID, LibraryReference, MediaDatabase, Result,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -275,7 +275,7 @@ impl ScanOrchestrator {
     /// Get the latest scan of a specific type
     pub async fn get_latest_scan(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         scan_type: ScanType,
     ) -> Result<Option<ScanState>> {
         self.db

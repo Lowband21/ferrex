@@ -94,6 +94,7 @@ impl BackgroundShaderState {
                 // Use consistent header height (errors will be toast notifications)
                 let header_height = crate::infrastructure::constants::layout::header::HEIGHT;
 
+                /*
                 // Header region (sunken)
                 self.depth_layout.regions.push(DepthRegion {
                     bounds: iced::Rectangle {
@@ -143,18 +144,22 @@ impl BackgroundShaderState {
                     header_height + controls_height
                 } else {
                     header_height
-                };
+                };*/
+
+                let content_start = header_height * 2.0;
 
                 // Content region (flat)
                 self.depth_layout.regions.push(DepthRegion {
                     bounds: iced::Rectangle {
                         x: 0.0,
                         y: content_start,
+                        //y: 0.0,
                         width: window_width,
                         height: window_height - content_start,
+                        //height: window_height,
                     },
-                    depth: 0.0, // Content is flat
-                    edge_transition: EdgeTransition::Sharp,
+                    depth: -10.0, // Content is flat
+                    edge_transition: EdgeTransition::Soft { width: 5.0 },
                     edge_overrides: Default::default(),
                     shadow_enabled: true,
                     shadow_intensity: 1.0,

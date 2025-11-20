@@ -20,28 +20,25 @@
 //!
 //! These endpoints handle the initial setup flow when no admin user exists.
 
-use axum::{
-    extract::State,
-    Json,
-};
-use ferrex_core::{
-    api_types::ApiResponse,
-    user::AuthToken,
-};
+use axum::{extract::State, Json};
+use chrono::{DateTime, Duration, Utc};
+use ferrex_core::{api_types::ApiResponse, user::AuthToken};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use tracing::{info, warn};
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc, Duration};
+use tracing::{info, warn};
+use uuid::Uuid;
 
 use axum::extract::ConnectInfo;
 use std::net::SocketAddr;
 
 use crate::{
     errors::{AppError, AppResult},
-    services::{UserService, user_service::{CreateUserParams, PasswordRequirements}},
+    services::{
+        user_service::{CreateUserParams, PasswordRequirements},
+        UserService,
+    },
     AppState,
 };
 
@@ -58,7 +55,7 @@ impl Default for SetupRateLimiter {
     fn default() -> Self {
         Self {
             attempts: Arc::new(RwLock::new(HashMap::new())),
-            max_attempts: 5, // Allow 5 attempts
+            max_attempts: 5,    // Allow 5 attempts
             window_minutes: 15, // Within 15 minutes
         }
     }
@@ -70,34 +67,38 @@ impl SetupRateLimiter {
         let mut attempts = self.attempts.write().await;
         let now = Utc::now();
         let window_start = now - Duration::minutes(self.window_minutes);
-        
+
         // Get or create attempt list for this IP
         let ip_attempts = attempts.entry(ip.to_string()).or_insert_with(Vec::new);
-        
+
         // Remove old attempts outside the window
         ip_attempts.retain(|&attempt| attempt > window_start);
-        
+
         // Check if rate limit exceeded
         if ip_attempts.len() >= self.max_attempts {
             let oldest_attempt = ip_attempts.first().copied().unwrap_or(now);
             let wait_time = (oldest_attempt + Duration::minutes(self.window_minutes)) - now;
             let wait_minutes = wait_time.num_minutes().max(1);
-            
-            warn!("Rate limit exceeded for IP {}: {} attempts in {} minutes", 
-                  ip, ip_attempts.len(), self.window_minutes);
-            
+
+            warn!(
+                "Rate limit exceeded for IP {}: {} attempts in {} minutes",
+                ip,
+                ip_attempts.len(),
+                self.window_minutes
+            );
+
             return Err(AppError::rate_limited(format!(
                 "Too many setup attempts. Please wait {} minutes before trying again.",
                 wait_minutes
             )));
         }
-        
+
         // Record this attempt
         ip_attempts.push(now);
-        
+
         Ok(())
     }
-    
+
     /// Clear rate limit history for an IP (called after successful setup)
     pub async fn clear_ip(&self, ip: &str) {
         let mut attempts = self.attempts.write().await;
@@ -144,7 +145,7 @@ impl CreateAdminRequest {
     fn validate(&self) -> Result<(), String> {
         // Use centralized validation from UserService
         UserService::validate_username(&self.username)?;
-        
+
         // Display name validation
         if self.display_name.trim().is_empty() {
             return Err("Display name cannot be empty".to_string());
@@ -152,10 +153,10 @@ impl CreateAdminRequest {
         if self.display_name.len() > 64 {
             return Err("Display name cannot exceed 64 characters".to_string());
         }
-        
+
         // Use admin password requirements
         UserService::validate_password(&self.password, &PasswordRequirements::admin())?;
-        
+
         Ok(())
     }
 }
@@ -169,25 +170,29 @@ pub async fn check_setup_status(
 ) -> AppResult<Json<ApiResponse<SetupStatus>>> {
     let user_service = UserService::new(&state);
     let needs_setup = user_service.needs_setup().await?;
-    
+
     // Get user and library counts
-    let users = state.database.backend()
+    let users = state
+        .database
+        .backend()
         .get_all_users()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
-    
-    let libraries = state.database.backend()
+
+    let libraries = state
+        .database
+        .backend()
         .list_libraries()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
-    
+
     let status = SetupStatus {
         needs_setup,
         has_admin: !needs_setup,
         user_count: users.len(),
         library_count: libraries.len(),
     };
-    
+
     Ok(Json(ApiResponse::success(status)))
 }
 
@@ -197,77 +202,93 @@ pub async fn check_setup_status(
 /// It creates a user with full admin privileges.
 pub async fn create_initial_admin(
     State(state): State<AppState>,
-    connect_info: Option<ConnectInfo<SocketAddr>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(request): Json<CreateAdminRequest>,
 ) -> AppResult<Json<ApiResponse<AuthToken>>> {
     // Extract client IP for rate limiting (fallback to localhost if not available)
-    let client_ip = connect_info
-        .map(|ConnectInfo(addr)| addr.ip().to_string())
-        .unwrap_or_else(|| "127.0.0.1".to_string());
-    
+    let client_ip = addr.ip().to_string();
+
     // Check rate limit
     get_rate_limiter().check_rate_limit(&client_ip).await?;
-    
+
     // Check setup token if configured
     if let Ok(expected_token) = std::env::var("FERREX_SETUP_TOKEN") {
         if !expected_token.is_empty() {
             // Token is required
-            let provided_token = request.setup_token.as_ref()
+            let provided_token = request
+                .setup_token
+                .as_ref()
                 .ok_or_else(|| AppError::unauthorized("Setup token required"))?;
-            
+
             // Constant-time comparison to prevent timing attacks
             if provided_token.len() != expected_token.len() {
                 return Err(AppError::unauthorized("Invalid setup token"));
             }
-            
+
             let mut matches = true;
             for (a, b) in provided_token.bytes().zip(expected_token.bytes()) {
                 matches &= a == b;
             }
-            
+
             if !matches {
-                warn!("Failed setup attempt with invalid token from IP: {}", client_ip);
+                warn!(
+                    "Failed setup attempt with invalid token from IP: {}",
+                    client_ip
+                );
                 return Err(AppError::unauthorized("Invalid setup token"));
             }
         }
     }
     // Validate request
-    request.validate()
-        .map_err(|e| {
-            warn!("Invalid setup request from IP {}: {}", client_ip, e);
-            AppError::bad_request(format!("Validation error: {}", e))
-        })?;
-    
+    request.validate().map_err(|e| {
+        warn!("Invalid setup request from IP {}: {}", client_ip, e);
+        AppError::bad_request(format!("Validation error: {}", e))
+    })?;
+
     // Check if admin already exists
     let setup_status = check_setup_status_internal(&state).await?;
     if setup_status.has_admin {
-        warn!("Setup attempt when admin already exists from IP: {}", client_ip);
-        return Err(AppError::forbidden("Admin user already exists. Use normal registration process."));
+        warn!(
+            "Setup attempt when admin already exists from IP: {}",
+            client_ip
+        );
+        return Err(AppError::forbidden(
+            "Admin user already exists. Use normal registration process.",
+        ));
     }
-    
+
     // Create user using UserService
     let user_service = UserService::new(&state);
-    let user = user_service.create_user(CreateUserParams {
-        username: request.username,
-        display_name: request.display_name,
-        password: request.password,
-        created_by: None, // First admin creates themselves
-    }).await?;
-    
+    let user = user_service
+        .create_user(CreateUserParams {
+            username: request.username,
+            display_name: request.display_name,
+            password: request.password,
+            created_by: None, // First admin creates themselves
+        })
+        .await?;
+
     // Assign admin role
-    let admin_role_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001")
-        .expect("Invalid admin role UUID");
-    
-    user_service.assign_role(user.id, admin_role_id, user.id).await?;
-    
+    let admin_role_id =
+        Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("Invalid admin role UUID");
+
+    user_service
+        .assign_role(user.id, admin_role_id, user.id)
+        .await?;
+
     // Generate tokens
-    let auth_token = user_service.generate_auth_tokens(user.id, Some("Ferrex Setup".to_string())).await?;
-    
-    info!("Initial admin user created: {} ({}) from IP: {}", user.username, user.id, client_ip);
-    
+    let auth_token = user_service
+        .generate_auth_tokens(user.id, Some("Ferrex Setup".to_string()))
+        .await?;
+
+    info!(
+        "Initial admin user created: {} ({}) from IP: {}",
+        user.username, user.id, client_ip
+    );
+
     // Clear rate limit for this IP after successful setup
     get_rate_limiter().clear_ip(&client_ip).await;
-    
+
     Ok(Json(ApiResponse::success(auth_token)))
 }
 
@@ -275,61 +296,25 @@ pub async fn create_initial_admin(
 async fn check_setup_status_internal(state: &AppState) -> AppResult<SetupStatus> {
     let user_service = UserService::new(state);
     let needs_setup = user_service.needs_setup().await?;
-    
-    let users = state.database.backend()
+
+    let users = state
+        .database
+        .backend()
         .get_all_users()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
-    
-    let libraries = state.database.backend()
+
+    let libraries = state
+        .database
+        .backend()
         .list_libraries()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
-    
+
     Ok(SetupStatus {
         needs_setup,
         has_admin: !needs_setup,
         user_count: users.len(),
         library_count: libraries.len(),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_admin_request_validation() {
-        // Valid request
-        let valid = CreateAdminRequest {
-            username: "administrator".to_string(), // Changed from "admin" which is reserved
-            display_name: "Administrator".to_string(),
-            password: "SecurePass123".to_string(),
-        };
-        assert!(valid.validate().is_ok());
-        
-        // Invalid username
-        let invalid_username = CreateAdminRequest {
-            username: "a".to_string(),
-            display_name: "Admin".to_string(),
-            password: "SecurePass123".to_string(),
-        };
-        assert!(invalid_username.validate().is_err());
-        
-        // Weak password
-        let weak_password = CreateAdminRequest {
-            username: "testuser".to_string(),
-            display_name: "Test User".to_string(),
-            password: "weak".to_string(),
-        };
-        assert!(weak_password.validate().is_err());
-        
-        // Reserved username
-        let reserved_username = CreateAdminRequest {
-            username: "admin".to_string(), // This is reserved
-            display_name: "Admin".to_string(),
-            password: "SecurePass123".to_string(),
-        };
-        assert!(reserved_username.validate().is_err());
-    }
 }

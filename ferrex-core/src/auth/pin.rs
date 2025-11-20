@@ -24,7 +24,7 @@ pub struct PinPolicy {
 impl Default for PinPolicy {
     fn default() -> Self {
         Self {
-            min_length: 6,  // 6 digits for better security than 4
+            min_length: 6, // 6 digits for better security than 4
             max_length: 8,
             max_attempts: 5,
             lockout_duration_minutes: 30,
@@ -54,7 +54,7 @@ impl PinAttemptTracker {
             locked_until: None,
         }
     }
-    
+
     /// Check if the account is currently locked
     pub fn is_locked(&self) -> bool {
         if let Some(locked_until) = self.locked_until {
@@ -63,19 +63,18 @@ impl PinAttemptTracker {
             false
         }
     }
-    
+
     /// Record a failed attempt
     pub fn record_failure(&mut self, policy: &PinPolicy) {
         self.failed_attempts += 1;
         self.last_attempt = Utc::now();
-        
+
         if self.failed_attempts >= policy.max_attempts {
-            self.locked_until = Some(
-                Utc::now() + Duration::minutes(policy.lockout_duration_minutes as i64)
-            );
+            self.locked_until =
+                Some(Utc::now() + Duration::minutes(policy.lockout_duration_minutes as i64));
         }
     }
-    
+
     /// Reset tracker after successful authentication
     pub fn reset(&mut self) {
         self.failed_attempts = 0;
@@ -89,22 +88,22 @@ impl PinAttemptTracker {
 pub enum PinError {
     #[error("PIN is too short (minimum {min} characters)")]
     TooShort { min: usize },
-    
+
     #[error("PIN is too long (maximum {max} characters)")]
     TooLong { max: usize },
-    
+
     #[error("PIN must contain only digits")]
     InvalidCharacters,
-    
+
     #[error("PIN is too simple (avoid sequences like 1234 or repeated digits)")]
     TooSimple,
-    
+
     #[error("Account is locked until {until}")]
     LockedOut { until: DateTime<Utc> },
-    
+
     #[error("Invalid PIN ({attempts_remaining} attempts remaining)")]
     Invalid { attempts_remaining: u8 },
-    
+
     #[error("PIN verification failed")]
     VerificationFailed,
 }
@@ -113,56 +112,61 @@ pub enum PinError {
 pub fn validate_pin(pin: &str, policy: &PinPolicy) -> Result<(), PinError> {
     // Length check
     if pin.len() < policy.min_length {
-        return Err(PinError::TooShort { min: policy.min_length });
+        return Err(PinError::TooShort {
+            min: policy.min_length,
+        });
     }
     if pin.len() > policy.max_length {
-        return Err(PinError::TooLong { max: policy.max_length });
+        return Err(PinError::TooLong {
+            max: policy.max_length,
+        });
     }
-    
+
     // Must be all digits
     if !pin.chars().all(|c| c.is_numeric()) {
         return Err(PinError::InvalidCharacters);
     }
-    
+
     // Check for simple patterns if policy disallows them
     if !policy.allow_simple_pins && is_simple_pin(pin) {
         return Err(PinError::TooSimple);
     }
-    
+
     Ok(())
 }
 
 /// Check if a PIN is too simple (sequential or repeated digits)
 fn is_simple_pin(pin: &str) -> bool {
-    let digits: Vec<u8> = pin.chars()
+    let digits: Vec<u8> = pin
+        .chars()
         .filter_map(|c| c.to_digit(10).map(|d| d as u8))
         .collect();
-    
+
     if digits.is_empty() {
         return false;
     }
-    
+
     // Check for all same digit (0000, 1111, etc)
     if digits.windows(2).all(|w| w[0] == w[1]) {
         return true;
     }
-    
+
     // Check for sequential ascending (1234, 2345, etc)
     if digits.windows(2).all(|w| w[1] == w[0] + 1) {
         return true;
     }
-    
+
     // Check for sequential descending (4321, 9876, etc)
     if digits.windows(2).all(|w| w[0] > 0 && w[1] == w[0] - 1) {
         return true;
     }
-    
+
     // Common patterns
     let common_patterns = [
-        "123456", "654321", "111111", "000000", "123123",
-        "121212", "123321", "696969", "112233", "159753",
+        "123456", "654321", "111111", "000000", "123123", "121212", "123321", "696969", "112233",
+        "159753",
     ];
-    
+
     common_patterns.contains(&pin)
 }
 
@@ -188,7 +192,7 @@ pub struct SetPinResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_simple_pin_detection() {
         assert!(is_simple_pin("1234"));
@@ -196,21 +200,21 @@ mod tests {
         assert!(is_simple_pin("1111"));
         assert!(is_simple_pin("9876"));
         assert!(is_simple_pin("123456"));
-        
+
         assert!(!is_simple_pin("1357"));
         assert!(!is_simple_pin("2468"));
         assert!(!is_simple_pin("9183"));
     }
-    
+
     #[test]
     fn test_pin_validation() {
         let policy = PinPolicy::default();
-        
+
         assert!(validate_pin("123456", &policy).is_err()); // Too simple
-        assert!(validate_pin("12345", &policy).is_err());  // Too short
+        assert!(validate_pin("12345", &policy).is_err()); // Too short
         assert!(validate_pin("123456789", &policy).is_err()); // Too long
         assert!(validate_pin("12345a", &policy).is_err()); // Invalid chars
-        
+
         assert!(validate_pin("182736", &policy).is_ok());
         assert!(validate_pin("924681", &policy).is_ok());
     }

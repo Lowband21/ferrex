@@ -1,11 +1,11 @@
-use async_trait::async_trait;
-use uuid::Uuid;
 use anyhow::Result;
-use std::sync::Arc;
+use async_trait::async_trait;
 use sqlx::PgPool;
+use std::sync::Arc;
+use uuid::Uuid;
 
-use crate::auth::domain::repositories::UserAuthenticationRepository;
 use crate::auth::domain::aggregates::UserAuthentication;
+use crate::auth::domain::repositories::UserAuthenticationRepository;
 
 pub struct PostgresUserAuthRepository {
     pool: Arc<PgPool>,
@@ -31,7 +31,7 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
         )
         .fetch_optional(&*self.pool)
         .await?;
-        
+
         match user {
             Some(row) => {
                 let user_auth = UserAuthentication::new(
@@ -58,7 +58,7 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
         )
         .fetch_optional(&*self.pool)
         .await?;
-        
+
         match user {
             Some(row) => {
                 let user_auth = UserAuthentication::new(
@@ -76,7 +76,7 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
     async fn save(&self, user_auth: &UserAuthentication) -> Result<()> {
         // For now, we only update the password hash if it has changed
         // Full implementation would handle all fields and device sessions
-        
+
         sqlx::query!(
             r#"
             UPDATE user_credentials
@@ -88,7 +88,7 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
         )
         .execute(&*self.pool)
         .await?;
-        
+
         Ok(())
     }
 }

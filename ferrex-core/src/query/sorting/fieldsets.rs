@@ -3,8 +3,8 @@
 //! These types define which sort fields are available for each media type,
 //! providing compile-time verification of field validity.
 
-use super::traits::{SortFieldSet, HasField};
 use super::fields::*;
+use super::traits::{HasField, SortFieldSet};
 
 /// Field set for movies with full metadata
 pub struct MovieFieldSet;
@@ -63,7 +63,7 @@ impl HasField<LastWatchedField> for SeasonFieldSet {}
 impl HasField<WatchProgressField> for SeasonFieldSet {} // Season completion
 
 /// Basic field set for media without TMDB metadata
-/// 
+///
 /// This is used when metadata hasn't been fetched yet or isn't available.
 /// Only supports fields that can be derived from file information.
 pub struct BasicMediaFieldSet;
@@ -73,10 +73,10 @@ impl SortFieldSet for BasicMediaFieldSet {}
 // Only fields available from file system
 impl HasField<TitleField> for BasicMediaFieldSet {} // From filename
 impl HasField<DateAddedField> for BasicMediaFieldSet {} // File creation/scan time
-// Note: Does NOT implement HasField for TMDB-dependent fields like Rating, Popularity, etc.
+                                                        // Note: Does NOT implement HasField for TMDB-dependent fields like Rating, Popularity, etc.
 
 /// Field set for mixed media collections
-/// 
+///
 /// Used when sorting heterogeneous collections (movies + series + episodes).
 /// Only supports fields common to all media types.
 pub struct MixedMediaFieldSet;

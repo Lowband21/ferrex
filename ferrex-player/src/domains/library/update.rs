@@ -1,8 +1,9 @@
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
-    domains::media::library,
-    domains::ui::types::ViewState,
-    domains::ui::view_models::ViewModel,
+    domains::{
+        library::update_handlers::fetch_libraries,
+        ui::{types::ViewState, view_models::ViewModel},
+    },
     state_refactored::State,
 };
 
@@ -37,10 +38,16 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
         }
 
         Message::LoadLibraries => {
-            log::info!("[Library] LoadLibraries message received - loading libraries from server");
-            let task = super::update_handlers::library_loaded::handle_load_libraries(
-                state.server_url.clone(),
-            );
+            let task = if !state.domains.library.state.initial_library_fetch {
+                state.domains.library.state.initial_library_fetch = true;
+                Task::perform(fetch_libraries(state.api_service.clone()), |result| {
+                    Message::LibrariesLoaded(result.map_err(|e| e.to_string()))
+                })
+            } else {
+                log::warn!("The libraries are already loaded, why is another attempt being made?");
+                Task::none()
+            };
+            log::info!("LoadLibraries message received - loading libraries from server");
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
@@ -181,11 +188,12 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
             // Inline handler from update.rs
             state.domains.library.state.scanning = false;
 
+            /*
             // NEW: Exit batch mode in MediaStore when scan completes
             if let Ok(mut store) = state.domains.media.state.media_store.write() {
                 log::info!("Exiting batch mode in MediaStore - scan completed");
                 store.end_batch();
-            }
+            } */
             match result {
                 Ok(msg) => {
                     log::info!("Scan completed: {}", msg);
@@ -225,10 +233,11 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
         }
 
         // Media references - inline handlers from update.rs
-        Message::LibraryMediaReferencesLoaded(result) => match result {
+        Message::LibraryMediasLoaded(result) => match result {
             Ok(response) => {
                 log::info!("Loaded {} media references", response.media.len());
 
+                /*
                 // Check if any media needs metadata fetching
                 let library_id = response.library.id;
                 let needs_metadata: Vec<_> = response
@@ -237,14 +246,14 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
                     .filter(|m| {
                         // Check if media needs metadata - typically if it lacks details or has no TMDB ID
                         match m {
-                            crate::infrastructure::api_types::MediaReference::Movie(movie) => {
+                            crate::infrastructure::api_types::Media::Movie(movie) => {
                                 movie.tmdb_id == 0
                                     || matches!(
                                         movie.details,
                                         ferrex_core::MediaDetailsOption::Endpoint(_)
                                     )
                             }
-                            crate::infrastructure::api_types::MediaReference::Series(series) => {
+                            crate::infrastructure::api_types::Media::Series(series) => {
                                 series.tmdb_id == 0
                                     || matches!(
                                         series.details,
@@ -255,17 +264,18 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
                         }
                     })
                     .cloned()
-                    .collect();
+                    .collect(); */
 
                 // Process the media references (populates MediaStore)
-                let tasks = state.process_media_references(response);
+                //let tasks = state.process_media_references(response);
 
                 // Refresh the All tab after MediaStore is populated
                 // This ensures content is visible on startup with poster placeholders
                 state.tab_manager.refresh_active_tab();
-                state.all_view_model.refresh_from_store();
+                //state.all_view_model.refresh_from_store();
                 log::info!("Refreshed All tab after loading media references - UI should display immediately");
 
+                /*
                 // If items need metadata, emit batch metadata fetch event
                 // This will fetch metadata in the background without blocking UI
                 if !needs_metadata.is_empty() {
@@ -280,7 +290,9 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
                     )
                 } else {
                     DomainUpdateResult::task(Task::batch(tasks).map(DomainMessage::Library))
-                }
+                } */
+                //DomainUpdateResult::task(Task::batch(tasks).map(DomainMessage::Library))
+                DomainUpdateResult::task(Task::none())
             }
             Err(e) => {
                 log::error!("Failed to load media references: {}", e);
@@ -313,26 +325,32 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
 
         // Media events from server
         Message::MediaDiscovered(references) => {
+            /*
             let task = crate::domains::media::update_handlers::media_events_library::handle_media_discovered(
                 state, references,
             );
-            DomainUpdateResult::task(task.map(DomainMessage::Library))
+            DomainUpdateResult::task(task.map(DomainMessage::Library))*/
+            DomainUpdateResult::task(Task::none())
         }
 
         Message::MediaUpdated(reference) => {
+            /*
             let task =
                 crate::domains::media::update_handlers::media_events_library::handle_media_updated(
                     state, reference,
                 );
-            DomainUpdateResult::task(task.map(DomainMessage::Library))
+            DomainUpdateResult::task(task.map(DomainMessage::Library)) */
+            DomainUpdateResult::task(Task::none())
         }
 
         Message::MediaDeleted(id) => {
+            /*
             let task =
                 crate::domains::media::update_handlers::media_events_library::handle_media_deleted(
                     state, id,
                 );
-            DomainUpdateResult::task(task.map(DomainMessage::Library))
+            DomainUpdateResult::task(task.map(DomainMessage::Library))*/
+            DomainUpdateResult::task(Task::none())
         }
 
         // Note: _EmitCrossDomainEvent variant has been removed
@@ -362,12 +380,10 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
             // The UI domain handles RefreshViewModels to update its own ViewModels
             log::debug!("Library: RefreshViewModels is now handled by UI domain");
             DomainUpdateResult::task(Task::none())
-        }
-
-        // TV Shows loading
-        Message::TvShowsLoaded(result) => {
-            log::info!("TV shows loaded: {:?}", result.as_ref().map(|v| v.len()));
-            DomainUpdateResult::task(Task::none())
-        }
+        } // TV Shows loading
+          //Message::TvShowsLoaded(result) => {
+          //    log::info!("TV shows loaded: {:?}", result.as_ref().map(|v| v.len()));
+          //    DomainUpdateResult::task(Task::none())
+          //}
     }
 }

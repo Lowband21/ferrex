@@ -201,7 +201,7 @@ impl UnifiedImageService {
         // Check if this is a 404 error (image doesn't exist on server)
         let is_404 = error.contains("404");
 
-        let retry_count = if let Some(mut entry) = self.cache.get_mut(request) {
+        let retry_count = match self.cache.get_mut(request) { Some(mut entry) => {
             entry.state = LoadState::Failed(error.clone());
             // For 404 errors, immediately set to max retries to prevent further attempts
             if is_404 {
@@ -210,7 +210,7 @@ impl UnifiedImageService {
                 entry.retry_count += 1;
             }
             entry.retry_count
-        } else {
+        } _ => {
             let retry_count = if is_404 { MAX_RETRY_ATTEMPTS } else { 1 };
             self.cache.insert(
                 request.clone(),
@@ -222,7 +222,7 @@ impl UnifiedImageService {
                 },
             );
             retry_count
-        };
+        }};
 
         // Log permanent failures for metadata aggregation
         if retry_count >= MAX_RETRY_ATTEMPTS {

@@ -9,18 +9,16 @@ pub enum AuthCommand {
         old_password: SecureCredential,
         new_password: SecureCredential,
     },
-    
+
     /// Set a new PIN for the current user
-    SetUserPin {
-        pin: SecureCredential,
-    },
-    
+    SetUserPin { pin: SecureCredential },
+
     /// Remove PIN from current user (requires password authentication)
     RemoveUserPin,
-    
+
     /// Enable admin PIN unlock feature (requires admin permissions)
     EnableAdminPinUnlock,
-    
+
     /// Change existing user PIN
     ChangeUserPin {
         current_pin: SecureCredential,
@@ -32,11 +30,15 @@ impl AuthCommand {
     /// Returns a sanitized display string that hides sensitive credential data
     pub fn sanitized_display(&self) -> String {
         match self {
-            Self::ChangePassword { .. } => "AuthCommand::ChangePassword { old_password: ***, new_password: *** }".to_string(),
+            Self::ChangePassword { .. } => {
+                "AuthCommand::ChangePassword { old_password: ***, new_password: *** }".to_string()
+            }
             Self::SetUserPin { .. } => "AuthCommand::SetUserPin { pin: *** }".to_string(),
             Self::RemoveUserPin => "AuthCommand::RemoveUserPin".to_string(),
             Self::EnableAdminPinUnlock => "AuthCommand::EnableAdminPinUnlock".to_string(),
-            Self::ChangeUserPin { .. } => "AuthCommand::ChangeUserPin { current_pin: ***, new_pin: *** }".to_string(),
+            Self::ChangeUserPin { .. } => {
+                "AuthCommand::ChangeUserPin { current_pin: ***, new_pin: *** }".to_string()
+            }
         }
     }
 
@@ -65,7 +67,7 @@ impl AuthCommandResult {
     pub fn is_success(&self) -> bool {
         matches!(self, Self::Success)
     }
-    
+
     pub fn error_message(&self) -> Option<&str> {
         match self {
             Self::Error(msg) => Some(msg),

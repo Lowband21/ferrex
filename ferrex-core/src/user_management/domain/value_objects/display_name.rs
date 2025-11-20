@@ -14,22 +14,25 @@ impl DisplayName {
     /// Create a new display name with validation
     pub fn new(display_name: impl AsRef<str>) -> Result<Self, DisplayNameError> {
         let display_name = display_name.as_ref().trim().to_string();
-        
+
         // Check for empty or whitespace-only names
         if display_name.is_empty() {
             return Err(DisplayNameError::Empty);
         }
-        
+
         // Check length constraints
         if display_name.len() > 100 {
             return Err(DisplayNameError::TooLong);
         }
-        
+
         // Check for control characters (except tab and newline which get trimmed)
-        if display_name.chars().any(|c| c.is_control() && c != '\t' && c != '\n' && c != '\r') {
+        if display_name
+            .chars()
+            .any(|c| c.is_control() && c != '\t' && c != '\n' && c != '\r')
+        {
             return Err(DisplayNameError::InvalidCharacters);
         }
-        
+
         Ok(Self(display_name))
     }
 
@@ -61,10 +64,10 @@ impl AsRef<str> for DisplayName {
 pub enum DisplayNameError {
     #[error("Display name cannot be empty")]
     Empty,
-    
+
     #[error("Display name too long: maximum 100 characters allowed")]
     TooLong,
-    
+
     #[error("Display name contains invalid control characters")]
     InvalidCharacters,
 }

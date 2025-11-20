@@ -1,5 +1,5 @@
 //! Domain modules for the Ferrex player
-//! 
+//!
 //! This module organizes the application into domain-driven modules,
 //! breaking up the monolithic state and update logic into focused,
 //! testable domains.
@@ -9,11 +9,11 @@ pub mod library;
 pub mod media;
 pub mod metadata;
 pub mod player;
+pub mod search;
 pub mod settings;
 pub mod streaming;
 pub mod ui;
 pub mod user_management;
-pub mod search;
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage, DomainUpdate, DomainUpdateResult};
 use iced::Task;
@@ -23,11 +23,11 @@ use iced::Task;
 pub trait Domain {
     /// The message type for this domain
     type Message;
-    
+
     /// Update the domain state based on a message
     /// Returns a DomainUpdateResult containing a task and events to emit
     fn update(&mut self, message: Self::Message) -> DomainUpdateResult;
-    
+
     /// Handle a cross-domain event
     /// Returns a Task that will produce domain messages
     fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage>;
@@ -64,7 +64,7 @@ impl DomainRegistry {
             self.user_management.handle_event(&event),
             self.search.handle_event(&event),
         ];
-        
+
         Task::batch(tasks)
     }
 }

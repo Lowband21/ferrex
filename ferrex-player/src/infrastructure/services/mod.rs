@@ -6,8 +6,8 @@ use std::sync::Arc;
 pub mod api;
 pub mod auth;
 pub mod metadata;
-pub mod streaming;
 pub mod settings;
+pub mod streaming;
 pub mod user_management;
 
 /// A reference to either a concrete service instance or a trait object.
@@ -43,7 +43,9 @@ pub struct CompatToggles {
 
 impl Default for CompatToggles {
     fn default() -> Self {
-        Self { prefer_trait_services: true }
+        Self {
+            prefer_trait_services: true,
+        }
     }
 }
 
@@ -55,12 +57,15 @@ pub struct ServiceBuilder {
 
 impl ServiceBuilder {
     pub fn new() -> Self {
-        Self { toggles: CompatToggles::default() }
+        Self {
+            toggles: CompatToggles::default(),
+        }
     }
     pub fn with_toggles(mut self, toggles: CompatToggles) -> Self {
         self.toggles = toggles;
         self
     }
-    pub fn toggles(&self) -> CompatToggles { self.toggles }
+    pub fn toggles(&self) -> CompatToggles {
+        self.toggles
+    }
 }
-

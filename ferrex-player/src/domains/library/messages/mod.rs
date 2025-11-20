@@ -2,29 +2,32 @@ pub mod media_events_subscription;
 pub mod scan_subscription;
 pub mod subscriptions;
 
-use crate::domains::media::library::MediaFile;
-use crate::infrastructure::api_types::{Library, MediaId, MediaReference};
-use ferrex_core::api_types::{LibraryMediaResponse, ScanProgress};
+use crate::infrastructure::api_types::{Library, Media, MediaID};
+use ferrex_core::{
+    api_types::{LibraryMediaResponse, ScanProgress},
+    LibraryID, MediaFile, MediaIDLike,
+};
+use rkyv::util::AlignedVec;
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub enum Message {
     // Core library loading
-    TvShowsLoaded(Result<Vec<crate::domains::media::models::TvShowDetails>, String>),
+    //TvShowsLoaded(Result<Vec<crate::domains::media::models::TvShowDetails>, String>),
     RefreshLibrary,
 
     // Library management
-    LibrariesLoaded(Result<Vec<Library>, String>),
+    LibrariesLoaded(Result<AlignedVec, String>),
     LoadLibraries,
     CreateLibrary(Library),
     LibraryCreated(Result<Library, String>),
     UpdateLibrary(Library),
     LibraryUpdated(Result<Library, String>),
-    DeleteLibrary(Uuid),
-    LibraryDeleted(Result<Uuid, String>),
-    SelectLibrary(Option<Uuid>),
+    DeleteLibrary(LibraryID),
+    LibraryDeleted(Result<LibraryID, String>),
+    SelectLibrary(Option<LibraryID>),
     LibrarySelected(Uuid, Result<Vec<MediaFile>, String>),
-    ScanLibrary(Uuid),
+    ScanLibrary(LibraryID),
 
     // Library form management
     ShowLibraryForm(Option<Library>),
@@ -46,22 +49,22 @@ pub enum Message {
     ActiveScansChecked(Vec<ScanProgress>),
 
     // Media references
-    LibraryMediaReferencesLoaded(Result<LibraryMediaResponse, String>),
+    LibraryMediasLoaded(Result<LibraryMediaResponse, String>),
 
     // Library operations
     RefreshCurrentLibrary,
     ScanCurrentLibrary,
 
     // Media events from server
-    MediaDiscovered(Vec<MediaReference>),
-    MediaUpdated(MediaReference),
-    MediaDeleted(MediaId),
+    MediaDiscovered(Vec<Media>),
+    MediaUpdated(Media),
+    MediaDeleted(MediaID),
 
     // No-operation message
     NoOp,
 
     // Batch metadata handling
-    MediaDetailsBatch(Vec<MediaReference>),
+    MediaDetailsBatch(Vec<Media>),
     BatchMetadataComplete,
 
     // View model updates
@@ -72,7 +75,7 @@ impl Message {
     pub fn name(&self) -> &'static str {
         match self {
             // Core library loading
-            Self::TvShowsLoaded(_) => "Library::TvShowsLoaded",
+            //Self::TvShowsLoaded(_) => "Library::TvShowsLoaded",
             Self::RefreshLibrary => "Library::RefreshLibrary",
 
             // Library management
@@ -98,7 +101,7 @@ impl Message {
             Self::SubmitLibraryForm => "Library::SubmitLibraryForm",
 
             // Scanning
-            Self::ScanLibrary(uuid) => "Library::ScanLibrary",
+            Self::ScanLibrary(_) => "Library::ScanLibrary",
             Self::ScanStarted(_) => "Library::ScanStarted",
             Self::ScanProgressUpdate(_) => "Library::ScanProgressUpdate",
             Self::ScanCompleted(_) => "Library::ScanCompleted",
@@ -108,7 +111,7 @@ impl Message {
             Self::ActiveScansChecked(_) => "Library::ActiveScansChecked",
 
             // Media references
-            Self::LibraryMediaReferencesLoaded(_) => "Library::LibraryMediaReferencesLoaded",
+            Self::LibraryMediasLoaded(_) => "Library::LibraryMediasLoaded",
 
             // Library operations
             Self::RefreshCurrentLibrary => "Library::RefreshCurrentLibrary",
@@ -136,10 +139,10 @@ impl std::fmt::Debug for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             // Core library loading
-            Self::TvShowsLoaded(result) => match result {
-                Ok(shows) => write!(f, "Library::TvShowsLoaded(Ok: {} shows)", shows.len()),
-                Err(e) => write!(f, "Library::TvShowsLoaded(Err: {})", e),
-            },
+            //Self::TvShowsLoaded(result) => match result {
+            //    Ok(shows) => write!(f, "Library::TvShowsLoaded(Ok: {} shows)", shows.len()),
+            //    Err(e) => write!(f, "Library::TvShowsLoaded(Err: {})", e),
+            //},
             Self::RefreshLibrary => write!(f, "Library::RefreshLibrary"),
 
             // Library management
@@ -197,7 +200,7 @@ impl std::fmt::Debug for Message {
             Self::SubmitLibraryForm => write!(f, "Library::SubmitLibraryForm"),
 
             // Scanning
-            Self::ScanLibrary(uuid) => write!(f, "Library::ScanLibrary"),
+            Self::ScanLibrary(_) => write!(f, "Library::ScanLibrary"),
             Self::ScanStarted(result) => match result {
                 Ok(scan_id) => write!(f, "Library::ScanStarted(Ok: {})", scan_id),
                 Err(e) => write!(f, "Library::ScanStarted(Err: {})", e),
@@ -217,13 +220,13 @@ impl std::fmt::Debug for Message {
             }
 
             // Media references
-            Self::LibraryMediaReferencesLoaded(result) => match result {
+            Self::LibraryMediasLoaded(result) => match result {
                 Ok(response) => write!(
                     f,
-                    "Library::LibraryMediaReferencesLoaded(Ok: {:?})",
+                    "Library::LibraryMediasLoaded(Ok: {:?})",
                     response.library.name
                 ),
-                Err(e) => write!(f, "Library::LibraryMediaReferencesLoaded(Err: {})", e),
+                Err(e) => write!(f, "Library::LibraryMediasLoaded(Err: {})", e),
             },
 
             // Library operations
@@ -235,16 +238,21 @@ impl std::fmt::Debug for Message {
                 write!(f, "Library::MediaDiscovered({} items)", refs.len())
             }
             Self::MediaUpdated(media) => match media {
-                MediaReference::Movie(m) => {
+                Media::Movie(m) => {
                     write!(f, "Library::MediaUpdated(Movie: {})", m.title.as_str())
                 }
-                MediaReference::Series(s) => {
+                Media::Series(s) => {
                     write!(f, "Library::MediaUpdated(Series: {})", s.title.as_str())
                 }
-                MediaReference::Season(s) => {
-                    write!(f, "Library::MediaUpdated(Season: {})", s.id.as_str())
+                Media::Season(s) => {
+                    let mut buf = Uuid::encode_buffer();
+                    write!(
+                        f,
+                        "Library::MediaUpdated(Season: {})",
+                        s.id.as_str(&mut buf)
+                    )
                 }
-                MediaReference::Episode(e) => {
+                Media::Episode(e) => {
                     write!(
                         f,
                         "Library::MediaUpdated(Series ID: {}, Episode: S{:02}E{:02})",

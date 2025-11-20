@@ -11,28 +11,21 @@ pub mod update_handlers;
 use self::messages::Message as LibraryMessage;
 use self::types::LibraryFormData;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::domains::media::store::MediaStore;
+use crate::domains::media::repository::accessor::{Accessor, ReadWrite};
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use ferrex_core::api_types::{LibraryMediaCache, ScanProgress};
-use ferrex_core::library::Library;
+use ferrex_core::types::library::Library;
+use ferrex_core::{ArchivedLibrary, LibraryID};
 use iced::Task;
+use rkyv::vec::ArchivedVec;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock as StdRwLock};
 use uuid::Uuid;
 
-/// Cache for library media to enable instant switching
-//#[derive(Debug)]
-//pub struct LibraryMediaCache {
-//    pub media_files: Vec<crate::infrastructure::api_types::MediaFile>,
-//    pub last_updated: std::time::Instant,
-//}
-
-/// Library domain state - moved from monolithic State
 #[derive(Debug)]
 pub struct LibraryDomainState {
     // From State struct:
-    pub libraries: Vec<Library>,
-    pub current_library_id: Option<Uuid>,
+    pub current_library_id: Option<LibraryID>,
     pub show_library_management: bool,
     pub library_form_data: Option<LibraryFormData>,
     pub library_form_errors: Vec<String>,
@@ -41,19 +34,19 @@ pub struct LibraryDomainState {
     pub active_scan_id: Option<String>,
     pub scan_progress: Option<ScanProgress>,
     pub show_scan_progress: bool,
+    pub initial_library_fetch: bool,
 
-    // Shared references needed by library domain
-    pub media_store: Arc<StdRwLock<MediaStore>>,
     pub api_service: Option<Arc<ApiClientAdapter>>,
+
+    pub repo_accessor: Accessor<ReadWrite>,
 }
 
 impl LibraryDomainState {
     pub fn new(
-        media_store: Arc<StdRwLock<MediaStore>>,
         api_service: Option<Arc<ApiClientAdapter>>,
+        repo_accessor: Accessor<ReadWrite>,
     ) -> Self {
         Self {
-            libraries: Vec::new(),
             current_library_id: None,
             show_library_management: false,
             library_form_data: None,
@@ -63,8 +56,9 @@ impl LibraryDomainState {
             active_scan_id: None,
             scan_progress: None,
             show_scan_progress: false,
-            media_store,
+            initial_library_fetch: false,
             api_service,
+            repo_accessor,
         }
     }
 }
@@ -87,12 +81,11 @@ impl LibraryDomain {
         Self { state }
     }
 
-    /// Update function - delegates to existing update_library logic
-    pub fn update(&mut self, message: LibraryMessage) -> Task<DomainMessage> {
-        // This is a stub - the actual update_library function is called from the main update loop
-        // We don't call it here to avoid circular dependencies
-        Task::none()
-    }
+    //pub fn update(&mut self, message: LibraryMessage) -> Task<DomainMessage> {
+    //    // This is a stub - the actual update_library function is called from the main update loop
+    //    // We don't call it here to avoid circular dependencies
+    //    Task::none()
+    //}
 
     pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
         match event {
@@ -106,9 +99,9 @@ impl LibraryDomain {
                 self.state.current_library_id = None;
                 Task::none()
             }
+            // Should probably be depricated in favor of repo centric handling
             CrossDomainEvent::ClearLibraries => {
                 // Clear libraries and current_library_id
-                self.state.libraries.clear();
                 self.state.current_library_id = None;
                 self.state.library_media_cache.clear();
                 Task::none()

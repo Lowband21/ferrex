@@ -1,11 +1,16 @@
 //! Tab manager for coordinating multiple independent tab states
 
+use ferrex_core::rkyv_wrappers::UuidWrapper;
+use ferrex_core::{ArchivedLibraryType, LibraryID};
+use ferrex_core::{ArchivedMedia, ArchivedMediaID};
+use rkyv::deserialize;
+use rkyv::rancor::Error;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 use super::{AllTabState, LibraryTabState, TabId, TabState};
-use crate::domains::media::store::MediaStore;
+use crate::domains::media::repository::accessor::{Accessor, ReadOnly};
 use crate::domains::ui::view_models::ViewModel;
 use crate::infrastructure::api_types::{Library, LibraryType};
 
@@ -18,12 +23,12 @@ pub struct TabManager {
     /// The currently active tab
     active_tab: TabId,
 
-    /// Reference to the media store for creating new tabs
-    store: Arc<RwLock<MediaStore>>,
+    /// Reference to the media repo accessor for creating new tabs
+    repo_accessor: Accessor<ReadOnly>,
 
     /// Library information for creating new tabs
     /// This is cached to avoid needing to query library domain
-    library_info: HashMap<Uuid, LibraryType>,
+    library_info: HashMap<LibraryID, LibraryType>,
 }
 
 #[cfg_attr(
@@ -36,31 +41,37 @@ pub struct TabManager {
 )]
 impl TabManager {
     /// Create a new tab manager
-    pub fn new(store: Arc<RwLock<MediaStore>>) -> Self {
+    pub fn new(repo_accessor: Accessor<ReadOnly>) -> Self {
         let mut tabs = HashMap::new();
 
-        // Always start with the All tab
-        tabs.insert(TabId::All, TabState::new_all(store.clone()));
+        // Always start with the All tab (without repo accessor initially)
+        tabs.insert(TabId::All, TabState::new_all(repo_accessor.clone()));
 
         Self {
             tabs,
             active_tab: TabId::All,
-            store,
+            repo_accessor,
             library_info: HashMap::new(),
         }
     }
 
     /// Register library information for tab creation
-    pub fn register_library(&mut self, library_id: Uuid, library_type: LibraryType) {
+    pub fn register_library(&mut self, library_id: LibraryID, library_type: LibraryType) {
         self.library_info.insert(library_id, library_type);
     }
 
-    /// Update library information from a list of libraries
-    pub fn update_libraries(&mut self, libraries: &[Library]) {
-        self.library_info.clear();
-        for library in libraries {
-            if library.enabled {
-                self.library_info.insert(library.id, library.library_type);
+    /// Update library information from the repo accessor
+    pub fn update_libraries(&mut self) {
+        self.library_info.clear(); // Clear BEFORE populating, not after
+
+        if self.repo_accessor.is_initialized() {
+            if let Ok(libraries) = self.repo_accessor.get_libraries() {
+                for library in libraries {
+                    if library.enabled {
+                        self.library_info.insert(library.id, library.library_type);
+                        self.register_library(library.id, library.library_type);
+                    }
+                }
             }
         }
 
@@ -70,7 +81,7 @@ impl TabManager {
             .keys()
             .filter(|tab_id| match tab_id {
                 TabId::All => true,
-                TabId::Library(id) => self.library_info.contains_key(id),
+                TabId::Library(id) => self.library_info.contains_key(&id),
             })
             .cloned()
             .collect();
@@ -90,15 +101,19 @@ impl TabManager {
             match tab_id {
                 TabId::All => {
                     // All tab should always exist, but create if needed
-                    self.tabs
-                        .insert(tab_id, TabState::new_all(self.store.clone()));
+                    //self.tabs
+                    //    .insert(tab_id, TabState::new_all(self.repo_accessor.as_ref()));
                 }
                 TabId::Library(library_id) => {
                     // Create library tab if we have the library info
                     if let Some(&library_type) = self.library_info.get(&library_id) {
                         self.tabs.insert(
                             tab_id,
-                            TabState::new_library(library_id, library_type, self.store.clone()),
+                            TabState::new_library(
+                                library_id,
+                                library_type,
+                                self.repo_accessor.clone(),
+                            ),
                         );
                     } else {
                         // Library not registered, log warning and return All tab
@@ -218,7 +233,7 @@ impl TabManager {
                 if let Some(grid_state) = tab.grid_state_mut() {
                     // Update columns based on current window width
                     grid_state.resize(window_width);
-                    
+
                     // Restore the tab's scroll position from ScrollPositionManager
                     if let Some(scroll_state) = scroll_manager.get_tab_scroll(&tab_id) {
                         grid_state.scroll_position = scroll_state.position;
@@ -272,10 +287,10 @@ impl TabManager {
     /// Refresh content for the active tab
     pub fn refresh_active_tab(&mut self) {
         match self.get_active_tab() {
-            TabState::Library(state) => state.refresh_from_store(),
+            TabState::Library(state) => state.refresh_from_repo(),
             TabState::All(state) => {
                 // Refresh All view model
-                state.view_model.refresh_from_store();
+                //state.view_model.refresh_from_repo();
             }
         }
     }
@@ -284,8 +299,8 @@ impl TabManager {
     pub fn refresh_all_tabs(&mut self) {
         for (_, tab) in self.tabs.iter_mut() {
             match tab {
-                TabState::Library(state) => state.refresh_from_store(),
-                TabState::All(state) => state.view_model.refresh_from_store(),
+                TabState::Library(state) => state.refresh_from_repo(),
+                TabState::All(state) => {} //state.view_model.refresh_from_repo(),
             }
         }
     }
@@ -305,8 +320,13 @@ impl TabManager {
         self.tabs.keys().cloned().collect()
     }
 
+    /// Get all tab info
+    pub fn library_info(&self) -> &HashMap<LibraryID, LibraryType> {
+        &self.library_info
+    }
+
     /// Get the currently visible media items from the active tab
-    pub fn get_active_tab_visible_items(&self) -> Vec<crate::infrastructure::api_types::MediaReference> {
+    pub fn get_active_tab_visible_items(&self) -> Vec<ArchivedMediaID> {
         self.tabs
             .get(&self.active_tab)
             .map(|tab| tab.get_visible_items())

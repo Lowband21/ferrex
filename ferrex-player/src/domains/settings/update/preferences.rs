@@ -34,7 +34,7 @@ pub fn handle_toggle_auto_login(state: &mut State, enabled: bool) -> DomainUpdat
             });
 
             api_service
-                .put::<serde_json::Value, serde_json::Value>("/api/users/me/preferences", &request)
+                .put::<serde_json::Value, serde_json::Value>("/users/me/preferences", &request)
                 .await
                 .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 

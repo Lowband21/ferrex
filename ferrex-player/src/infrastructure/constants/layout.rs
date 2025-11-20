@@ -12,6 +12,9 @@ pub mod poster {
     /// Base height of a poster/media card in pixels
     pub const BASE_HEIGHT: f32 = 300.0;
 
+    /// Corner radius for poster/media card corners in pixels
+    pub const CORNER_RADIUS: f32 = 6.0;
+
     /// Text area height below poster
     pub const TEXT_AREA_HEIGHT: f32 = 60.0;
 
@@ -46,7 +49,21 @@ pub mod animation {
     }
 
     /// Default animation duration in milliseconds
-    pub const DEFAULT_DURATION_MS: u64 = 1000;
+    pub const DEFAULT_DURATION_MS: u64 = 600;
+
+    /// Duration of the texture opacity cross-fade (milliseconds)
+    /// Quick fade for transitioning from placeholder to actual poster
+    pub const TEXTURE_FADE_DURATION_MS: u64 = 300;
+
+    /// Default poster animation selection
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum PosterAnimationKind {
+        None,
+        Fade,
+        Flip,
+    }
+
+    pub const DEFAULT_POSTER_ANIMATION: PosterAnimationKind = PosterAnimationKind::Fade;
 }
 
 /// Grid layout constants
@@ -89,33 +106,43 @@ pub mod virtual_grid {
         + 2.0
             * (poster::BASE_HEIGHT * (animation::HOVER_SCALE - 1.0) / 2.0
                 + animation::EFFECT_PADDING);
+
+    /// Number of rows above the viewport to include in the visible/preload window
+    pub const PREFETCH_ROWS_ABOVE: usize = 2;
+    // Number of rows below the viewport to include in the visible/preload window
+    pub const PREFETCH_ROWS_BELOW: usize = 2;
+
+    /// Keep-alive duration after scroll (ms) to allow placeholder->texture swaps to complete
+    pub const KEEP_ALIVE_AFTER_SCROLL_MS: u64 = 200;
 }
 
 /// Player controls layout constants
 pub mod player_controls {
     /// Padding around control buttons container (all sides)
     pub const CONTROL_BUTTONS_PADDING: f32 = 40.0;
-    
+
     /// Height of the control buttons row (based on volume slider container height)
     pub const CONTROL_BUTTONS_HEIGHT: f32 = 36.0;
-    
+
     /// Seek bar hit zone height (clickable area)
     pub const SEEK_BAR_HIT_ZONE_HEIGHT: f32 = 30.0;
-    
+
     /// Total height of the control buttons container including padding
     /// Bottom padding (40) + control buttons (36) + top padding (40) = 116px
-    pub const CONTROL_CONTAINER_TOTAL_HEIGHT: f32 = CONTROL_BUTTONS_PADDING * 2.0 + CONTROL_BUTTONS_HEIGHT;
-    
+    pub const CONTROL_CONTAINER_TOTAL_HEIGHT: f32 =
+        CONTROL_BUTTONS_PADDING * 2.0 + CONTROL_BUTTONS_HEIGHT;
+
     /// Distance from bottom of screen to the visual center of the seek bar
     /// The seek bar sits directly above the control container
     /// Calculation: CONTROL_CONTAINER_TOTAL_HEIGHT + SEEK_BAR_HIT_ZONE_HEIGHT/2
     /// = 116 + 15 = 131px
-    pub const SEEK_BAR_CENTER_FROM_BOTTOM: f32 = CONTROL_CONTAINER_TOTAL_HEIGHT + SEEK_BAR_HIT_ZONE_HEIGHT / 2.0;
-    
+    pub const SEEK_BAR_CENTER_FROM_BOTTOM: f32 =
+        CONTROL_CONTAINER_TOTAL_HEIGHT + SEEK_BAR_HIT_ZONE_HEIGHT / 2.0;
+
     /// Distance from bottom of screen to the bottom edge of the seek bar hit zone
     /// This is where the seek bar's clickable area begins
     pub const SEEK_BAR_BOTTOM_EDGE: f32 = CONTROL_CONTAINER_TOTAL_HEIGHT;
-    
+
     /// Padding around the top bar (title and navigation)
     pub const TOP_BAR_PADDING: f32 = 15.0;
 }

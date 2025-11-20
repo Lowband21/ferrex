@@ -47,7 +47,7 @@ fn auth_state_subscription(auth_state: &AuthStateStore) -> Subscription<DomainMe
 /// Stream function for auth state subscription
 fn auth_state_stream(
     subscription: &AuthStateSubscription,
-) -> impl futures::Stream<Item = DomainMessage> {
+) -> impl futures::Stream<Item = DomainMessage> + use<> {
     stream::unfold(
         AuthStateTracker::new(subscription.auth_state.clone()),
         |mut tracker| async move {

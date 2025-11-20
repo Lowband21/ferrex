@@ -15,7 +15,7 @@ impl StringKey {
     pub fn new(value: Option<String>) -> Self {
         StringKey(value)
     }
-    
+
     pub fn from_str(s: &str) -> Self {
         StringKey(Some(s.to_string()))
     }
@@ -25,7 +25,7 @@ impl Ord for StringKey {
     fn cmp(&self, other: &Self) -> Ordering {
         match (&self.0, &other.0) {
             (Some(a), Some(b)) => a.cmp(b),
-            (Some(_), None) => Ordering::Less,  // Items with values come first
+            (Some(_), None) => Ordering::Less, // Items with values come first
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
         }
@@ -42,7 +42,7 @@ impl SortKey for StringKey {
     fn missing() -> Self {
         StringKey(None)
     }
-    
+
     fn is_missing(&self) -> bool {
         self.0.is_none()
     }
@@ -62,7 +62,7 @@ impl Ord for OptionalDateKey {
     fn cmp(&self, other: &Self) -> Ordering {
         match (&self.0, &other.0) {
             (Some(a), Some(b)) => a.cmp(b),
-            (Some(_), None) => Ordering::Less,  // Items with dates come first
+            (Some(_), None) => Ordering::Less, // Items with dates come first
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
         }
@@ -79,7 +79,7 @@ impl SortKey for OptionalDateKey {
     fn missing() -> Self {
         OptionalDateKey(None)
     }
-    
+
     fn is_missing(&self) -> bool {
         self.0.is_none()
     }
@@ -101,7 +101,7 @@ impl Ord for OptionalFloatKey {
     fn cmp(&self, other: &Self) -> Ordering {
         match (&self.0, &other.0) {
             (Some(a), Some(b)) => a.cmp(b),
-            (Some(_), None) => Ordering::Less,  // Items with values come first
+            (Some(_), None) => Ordering::Less, // Items with values come first
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
         }
@@ -118,7 +118,7 @@ impl SortKey for OptionalFloatKey {
     fn missing() -> Self {
         OptionalFloatKey(None)
     }
-    
+
     fn is_missing(&self) -> bool {
         self.0.is_none()
     }
@@ -138,7 +138,7 @@ impl Ord for OptionalU32Key {
     fn cmp(&self, other: &Self) -> Ordering {
         match (&self.0, &other.0) {
             (Some(a), Some(b)) => a.cmp(b),
-            (Some(_), None) => Ordering::Less,  // Items with values come first
+            (Some(_), None) => Ordering::Less, // Items with values come first
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
         }
@@ -155,7 +155,7 @@ impl SortKey for OptionalU32Key {
     fn missing() -> Self {
         OptionalU32Key(None)
     }
-    
+
     fn is_missing(&self) -> bool {
         self.0.is_none()
     }
@@ -164,37 +164,37 @@ impl SortKey for OptionalU32Key {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_missing_values_sort_last() {
         // String keys
         let present = StringKey::from_str("test");
         let missing = StringKey::missing();
         assert!(present < missing);
-        
+
         // Date keys
         let date_present = OptionalDateKey::new(Some(chrono::Utc::now()));
         let date_missing = OptionalDateKey::missing();
         assert!(date_present < date_missing);
-        
+
         // Float keys
         let float_present = OptionalFloatKey::new(Some(5.0));
         let float_missing = OptionalFloatKey::missing();
         assert!(float_present < float_missing);
-        
+
         // U32 keys
         let u32_present = OptionalU32Key::new(Some(42));
         let u32_missing = OptionalU32Key::missing();
         assert!(u32_present < u32_missing);
     }
-    
+
     #[test]
     fn test_key_ordering() {
         // Test string ordering
         let a = StringKey::from_str("apple");
         let b = StringKey::from_str("banana");
         assert!(a < b);
-        
+
         // Test float ordering
         let low = OptionalFloatKey::new(Some(1.0));
         let high = OptionalFloatKey::new(Some(10.0));

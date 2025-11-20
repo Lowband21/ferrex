@@ -1,7 +1,7 @@
+use crate::{watch_status::WatchStatusFilter, LibraryID};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use crate::watch_status::WatchStatusFilter;
 
 /// Main query structure that works everywhere
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -59,8 +59,8 @@ pub enum SortField {
     Title,
     DateAdded,
     ReleaseDate,
-    LastWatched,    // Requires user context
-    WatchProgress,  // Requires user context
+    LastWatched,   // Requires user context
+    WatchProgress, // Requires user context
     Rating,
     Runtime,
 }
@@ -120,7 +120,7 @@ pub enum QueryResult<T> {
     Partial {
         local: Vec<T>,
         remote: Option<QueryEndpoint>,
-    }
+    },
 }
 
 /// Remote query endpoint specification
@@ -132,8 +132,8 @@ pub struct QueryEndpoint {
 
 /// Combined media reference with user watch status
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MediaReferenceWithStatus {
-    pub media: crate::MediaReference,
+pub struct MediaWithStatus {
+    pub media: crate::Media,
     pub watch_status: Option<crate::watch_status::InProgressItem>,
     pub is_completed: bool,
 }
@@ -143,13 +143,13 @@ pub struct MediaReferenceWithStatus {
 pub enum QueryError {
     #[error("Invalid query parameters")]
     InvalidQuery(String),
-    
+
     #[error("Network error")]
     NetworkError,
-    
+
     #[error("Server error")]
     ServerError(String),
-    
+
     #[error("Deserialization error")]
     DeserializationError,
 }

@@ -32,17 +32,47 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     if matches!(&state.domains.ui.state.view, ViewState::Player)
         && state.domains.player.state.video_opt.is_some()
     {
-        // Timer for checking controls visibility
-        subscriptions.push(
-            iced::time::every(std::time::Duration::from_millis(500))
-                .map(|_| DomainMessage::Media(Message::CheckControlsVisibility)),
-        );
+        // Only run the controls visibility timer when the overlay is visible
+        if state.domains.player.state.controls {
+            subscriptions.push(
+                iced::time::every(std::time::Duration::from_millis(500))
+                    .map(|_| DomainMessage::Media(Message::CheckControlsVisibility)),
+            );
+        }
+
+        // For Wayland video, avoid per-frame wakeups unless overlay is visible.
+        // When overlay is hidden, keep a light 10s heartbeat to refresh state minimally.
+        let is_playing = state.domains.player.state.is_playing();
+        let is_wayland = state
+            .domains
+            .player
+            .state
+            .video_opt
+            .as_ref()
+            .map(|v| v.is_wayland_video())
+            .unwrap_or(false);
+        let overlay_active = {
+            let ps = &state.domains.player.state;
+            ps.controls
+                || ps.show_settings
+                || ps.show_subtitle_menu
+                || ps.show_quality_menu
+                || ps.track_notification.is_some()
+        };
+        if is_wayland && is_playing && !overlay_active {
+            subscriptions.push(
+                iced::time::every(std::time::Duration::from_secs(10)).map(|_| {
+                    DomainMessage::Player(crate::domains::player::messages::Message::NewFrame)
+                }),
+            );
+        }
 
         // Subscribe to keyboard shortcuts
         subscriptions.push(keyboard_shortcuts());
 
+        // Causes panic during playback only in debug builds
         // Subscribe to watch progress updates
-        subscriptions.push(watch_progress_subscription(state));
+        //subscriptions.push(watch_progress_subscription(state));
     }
 
     Subscription::batch(subscriptions)

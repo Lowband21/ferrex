@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::fs;
 use tracing::{info, warn};
-use uuid::Uuid;
 
 /// Cache manager for transcoded content
 pub struct CacheManager {
@@ -140,12 +139,12 @@ impl CacheManager {
         for entry in &entries {
             if let Ok(age) = now.duration_since(entry.modified) {
                 if age > max_age {
-                    if let Err(e) = self.remove_entry(&entry.path).await {
+                    match self.remove_entry(&entry.path).await { Err(e) => {
                         warn!("Failed to remove old cache entry: {}", e);
-                    } else {
+                    } _ => {
                         removed_count += 1;
                         removed_size += entry.size;
-                    }
+                    }}
                 }
             }
         }
@@ -167,13 +166,13 @@ impl CacheManager {
                     continue;
                 }
 
-                if let Err(e) = self.remove_entry(&entry.path).await {
+                match self.remove_entry(&entry.path).await { Err(e) => {
                     warn!("Failed to remove cache entry: {}", e);
-                } else {
+                } _ => {
                     removed_count += 1;
                     removed_size += entry.size;
                     current_size -= entry.size;
-                }
+                }}
             }
         }
 
@@ -274,7 +273,7 @@ impl CacheManager {
 
     /// Get cache path for a specific media and profile
     pub fn get_cache_path(&self, media_id: &str, profile_name: &str) -> PathBuf {
-        self.cache_dir.join(media_id.to_string()).join(profile_name)
+        self.cache_dir.join(media_id).join(profile_name)
     }
 
     /// Check if cached version exists

@@ -19,7 +19,7 @@ pub enum SetupField {
     SetupToken(String),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Message {
     // Core auth flow
     CheckAuthStatus,
@@ -97,6 +97,111 @@ pub enum Message {
     // Command execution
     ExecuteCommand(AuthCommand),
     CommandResult(AuthCommand, AuthCommandResult),
+}
+
+impl std::fmt::Debug for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // Core auth flow
+            Self::CheckAuthStatus => write!(f, "CheckAuthStatus"),
+            Self::AuthStatusConfirmedWithPin => write!(f, "AuthStatusConfirmedWithPin"),
+            Self::CheckSetupStatus => write!(f, "CheckSetupStatus"),
+            Self::SetupStatusChecked(needs_setup) => {
+                write!(f, "SetupStatusChecked({})", needs_setup)
+            }
+            Self::AutoLoginCheckComplete => write!(f, "AutoLoginCheckComplete"),
+            Self::AutoLoginSuccessful(_) => write!(f, "AutoLoginSuccessful(...)"),
+
+            // User management
+            Self::LoadUsers => write!(f, "LoadUsers"),
+            Self::UsersLoaded(result) => write!(
+                f,
+                "UsersLoaded({:?})",
+                result.as_ref().map(|v| v.len()).map_err(|e| e)
+            ),
+            Self::SelectUser(uuid) => write!(f, "SelectUser({})", uuid),
+            Self::ShowCreateUser => write!(f, "ShowCreateUser"),
+            Self::BackToUserSelection => write!(f, "BackToUserSelection"),
+
+            // PIN authentication
+            Self::ShowPinEntry(_) => write!(f, "ShowPinEntry(...)"),
+            Self::PinDigitPressed(digit) => write!(f, "PinDigitPressed({})", digit),
+            Self::PinBackspace => write!(f, "PinBackspace"),
+            Self::PinClear => write!(f, "PinClear"),
+            Self::PinSubmit => write!(f, "PinSubmit"),
+
+            // Login results
+            Self::LoginSuccess(_, _) => write!(f, "LoginSuccess(...)"),
+            Self::WatchStatusLoaded(_) => write!(f, "WatchStatusLoaded(...)"),
+            Self::Logout => write!(f, "Logout"),
+            Self::LogoutComplete => write!(f, "LogoutComplete"),
+
+            // Password login - hide sensitive data
+            Self::ShowPasswordLogin(username) => write!(f, "ShowPasswordLogin({})", username),
+            Self::PasswordLoginUpdateUsername(username) => {
+                write!(f, "PasswordLoginUpdateUsername({})", username)
+            }
+            Self::PasswordLoginUpdatePassword(_) => write!(f, "PasswordLoginUpdatePassword(***)"),
+            Self::PasswordLoginToggleVisibility => write!(f, "PasswordLoginToggleVisibility"),
+            Self::PasswordLoginToggleRemember => write!(f, "PasswordLoginToggleRemember"),
+            Self::PasswordLoginSubmit => write!(f, "PasswordLoginSubmit"),
+
+            // Device auth flow - hide sensitive data
+            Self::DeviceStatusChecked(_, _) => write!(f, "DeviceStatusChecked(...)"),
+            Self::UpdateCredential(_) => write!(f, "UpdateCredential(***)"),
+            Self::SubmitCredential => write!(f, "SubmitCredential"),
+            Self::TogglePasswordVisibility => write!(f, "TogglePasswordVisibility"),
+            Self::ToggleRememberDevice => write!(f, "ToggleRememberDevice"),
+            Self::AuthResult(_) => write!(f, "AuthResult(...)"),
+            Self::SetupPin => write!(f, "SetupPin"),
+            Self::UpdatePin(_) => write!(f, "UpdatePin(***)"),
+            Self::UpdateConfirmPin(_) => write!(f, "UpdateConfirmPin(***)"),
+            Self::SubmitPin => write!(f, "SubmitPin"),
+            Self::PinSet(result) => write!(f, "PinSet({:?})", result),
+            Self::Retry => write!(f, "Retry"),
+            Self::Back => write!(f, "Back"),
+
+            // First-run setup - hide sensitive data
+            Self::FirstRunUpdateUsername(username) => {
+                write!(f, "FirstRunUpdateUsername({})", username)
+            }
+            Self::FirstRunUpdateDisplayName(display_name) => {
+                write!(f, "FirstRunUpdateDisplayName({})", display_name)
+            }
+            Self::FirstRunUpdatePassword(_) => write!(f, "FirstRunUpdatePassword(***)"),
+            Self::FirstRunUpdateConfirmPassword(_) => {
+                write!(f, "FirstRunUpdateConfirmPassword(***)")
+            }
+            Self::FirstRunTogglePasswordVisibility => write!(f, "FirstRunTogglePasswordVisibility"),
+            Self::FirstRunSubmit => write!(f, "FirstRunSubmit"),
+            Self::FirstRunSuccess => write!(f, "FirstRunSuccess"),
+            Self::FirstRunError(error) => write!(f, "FirstRunError({})", error),
+
+            // Admin setup flow - hide sensitive data
+            Self::UpdateSetupField(field) => match field {
+                SetupField::Username(u) => write!(f, "UpdateSetupField(Username({}))", u),
+                SetupField::DisplayName(d) => write!(f, "UpdateSetupField(DisplayName({}))", d),
+                SetupField::Password(_) => write!(f, "UpdateSetupField(Password(***)"),
+                SetupField::ConfirmPassword(_) => {
+                    write!(f, "UpdateSetupField(ConfirmPassword(***)")
+                }
+                SetupField::SetupToken(t) => write!(f, "UpdateSetupField(SetupToken({}))", t),
+            },
+            Self::ToggleSetupPasswordVisibility => write!(f, "ToggleSetupPasswordVisibility"),
+            Self::SubmitSetup => write!(f, "SubmitSetup"),
+            Self::SetupComplete(_, _) => write!(f, "SetupComplete(***, ***)"),
+            Self::SetupError(error) => write!(f, "SetupError({})", error),
+
+            // Admin PIN unlock management
+            Self::EnableAdminPinUnlock => write!(f, "EnableAdminPinUnlock"),
+            Self::DisableAdminPinUnlock => write!(f, "DisableAdminPinUnlock"),
+            Self::AdminPinUnlockToggled(result) => write!(f, "AdminPinUnlockToggled({:?})", result),
+
+            // Command execution
+            Self::ExecuteCommand(cmd) => write!(f, "ExecuteCommand({:?})", cmd),
+            Self::CommandResult(cmd, result) => write!(f, "CommandResult({:?}, {:?})", cmd, result),
+        }
+    }
 }
 
 impl Message {

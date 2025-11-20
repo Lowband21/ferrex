@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                DELETE FROM user_watch_progress\n                WHERE user_id = $1 AND media_id_json = $2\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c7bb29f17909cc676cb1b0a6d2f010b8901024734f7a7decef88a2b5a4fb1171"
+}

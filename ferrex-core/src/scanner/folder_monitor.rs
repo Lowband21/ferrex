@@ -2,7 +2,7 @@ use crate::database::traits::{
     FolderDiscoverySource, FolderInventory, FolderProcessingStatus, FolderScanFilters, FolderType,
     MediaDatabaseTrait,
 };
-use crate::{Library, LibraryType, MediaError, Result};
+use crate::{Library, LibraryID, LibraryType, MediaError, Result};
 use chrono::Utc;
 use std::collections::HashSet;
 use std::future::Future;
@@ -109,7 +109,7 @@ impl FolderMonitor {
 
     /// Discover folders for a specific library immediately
     /// This is useful when a library is created to populate inventory without waiting for next cycle
-    pub async fn discover_library_folders_immediate(&self, library_id: &Uuid) -> Result<()> {
+    pub async fn discover_library_folders_immediate(&self, library_id: &LibraryID) -> Result<()> {
         info!(
             "Starting immediate folder discovery for library: {}",
             library_id
@@ -157,17 +157,17 @@ impl FolderMonitor {
                 library.name, library.id, library.library_type
             );
 
-            if let Err(e) = self.update_library_inventory(&library).await {
+            match self.update_library_inventory(&library).await { Err(e) => {
                 error!(
                     "Failed to update inventory for library {} (ID: {}): {}",
                     library.name, library.id, e
                 );
-            } else {
+            } _ => {
                 info!(
                     "Successfully updated inventory for library: {} (ID: {})",
                     library.name, library.id
                 );
-            }
+            }}
 
             // Process folders needing scan
             if let Err(e) = self.process_pending_folders(&library).await {
@@ -192,8 +192,7 @@ impl FolderMonitor {
     /// Update folder inventory for a specific library
     async fn update_library_inventory(&self, library: &Library) -> Result<()> {
         // First, ensure the library exists in the database
-        let library_id_str = library.id.to_string();
-        match self.database.get_library(&library_id_str).await {
+        match self.database.get_library(&library.id).await {
             Ok(Some(_)) => {
                 // Library exists, proceed with inventory
                 debug!(
@@ -230,7 +229,7 @@ impl FolderMonitor {
         // Now proceed with inventory update
         match library.library_type {
             LibraryType::Movies => self.inventory_movie_folders(library).await,
-            LibraryType::TvShows => self.inventory_tv_folders(library).await,
+            LibraryType::Series => self.inventory_tv_folders(library).await,
         }
     }
 
@@ -242,9 +241,8 @@ impl FolderMonitor {
                 continue;
             }
 
-            let traverse_folder = if let Ok(Some(mut folder)) =
-                self.database.get_folder_by_path(library.id, path).await
-            {
+            let traverse_folder = match self.database.get_folder_by_path(library.id, path).await
+            { Ok(Some(mut folder)) => {
                 folder.last_seen_at = Utc::now();
 
                 if let Some(_next_retry_at) = folder.next_retry_at {
@@ -253,9 +251,9 @@ impl FolderMonitor {
                     self.database.upsert_folder(&folder).await?;
                     false
                 }
-            } else {
+            } _ => {
                 true
-            };
+            }};
 
             if traverse_folder {
                 // Traverse and inventory movie folders (root folder will be created by traverse)
@@ -270,7 +268,7 @@ impl FolderMonitor {
     /// Traverse a directory and inventory movie folders
     fn traverse_movie_directory<'a>(
         &'a self,
-        library_id: Uuid,
+        library_id: LibraryID,
         dir: &'a Path,
         parent_id: Option<Uuid>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
@@ -386,7 +384,7 @@ impl FolderMonitor {
     /// Traverse a directory and inventory TV show folders
     fn traverse_tv_directory<'a>(
         &'a self,
-        library_id: Uuid,
+        library_id: LibraryID,
         dir: &'a Path,
         parent_id: Option<Uuid>,
         depth: usize,

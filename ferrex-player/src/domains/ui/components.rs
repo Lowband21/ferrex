@@ -1,19 +1,17 @@
 use crate::common::ui_utils::icon_text;
-use crate::domains::metadata::image_types;
 use crate::domains::ui::messages::Message;
-use crate::infrastructure::api_types;
-use crate::infrastructure::api_types::{
-    MediaDetailsOption, SeriesReference, TmdbDetails, WatchProgress,
-};
-use crate::{domains::ui::theme, media_card, state_refactored::State};
+use crate::domains::ui::widgets::image_for;
+use crate::infrastructure::constants::poster::CORNER_RADIUS;
+use crate::{domains::ui::theme, state_refactored::State};
 
-use ferrex_core::CastMember;
-use iced::Font;
+use ferrex_core::{ArchivedCastMember, ImageSize, ImageType};
 use iced::{
     widget::{button, column, container, row, scrollable, text, Space},
     Element, Length,
 };
 use lucide_icons::Icon;
+use rkyv::deserialize;
+use rkyv::rancor::Error;
 
 #[cfg_attr(
     any(
@@ -23,462 +21,7 @@ use lucide_icons::Icon;
     ),
     profiling::function
 )]
-pub fn movie_reference_card_with_state<'a>(
-    movie: &'a crate::infrastructure::api_types::MovieReference,
-    is_hovered: bool,
-    is_visible: bool,
-    watch_progress: Option<WatchProgress>,
-) -> Element<'a, Message> {
-    use crate::infrastructure::api_types::{MediaDetailsOption, TmdbDetails};
-
-    let title = movie.title.as_str();
-    let movie_id = movie.id.as_uuid();
-
-    // Extract year and other info from details if available
-    let info = match &movie.details {
-        MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
-            if let Some(release_date) = &details.release_date {
-                if let Some(year) = release_date.split('-').next() {
-                    year.to_string()
-                } else {
-                    "Unknown Year".to_string()
-                }
-            } else {
-                "Unknown Year".to_string()
-            }
-        }
-        _ => String::new(), // Empty string to reserve space without visual noise
-    };
-
-    // Determine priority based on visibility and hover state
-    let priority = if is_hovered || is_visible {
-        image_types::Priority::Visible
-    } else {
-        image_types::Priority::Preload
-    };
-
-    // Create the image element with progress indicator
-    use crate::domains::ui::widgets::image_for;
-    use iced::widget::{button, column, container, mouse_area, text};
-    use iced::Length;
-
-    let media_id = ferrex_core::api_types::MediaId::Movie(movie.id.clone());
-
-    // Create image with watch progress and scroll tier
-    let mut img = image_for(media_id.clone())
-        .size(image_types::ImageSize::Poster)
-        .rounded(4.0)
-        .width(Length::Fixed(200.0))
-        .height(Length::Fixed(300.0))
-        .animation(crate::domains::ui::widgets::AnimationType::enhanced_flip())
-        .placeholder(lucide_icons::Icon::Film)
-        .priority(priority)
-        .is_hovered(is_hovered)
-        .on_play(Message::PlayMediaWithId(
-            api_types::to_legacy_media_file(&movie.file),
-            ferrex_core::api_types::MediaId::Movie(movie.id.clone()),
-        ))
-        .on_click(Message::ViewMovieDetails(movie.clone()));
-
-    // Add theme color if available
-    if let Some(theme_color_str) = &movie.theme_color {
-        if let Ok(color) = crate::domains::ui::views::macros::parse_hex_color(theme_color_str) {
-            img = img.theme_color(color);
-        }
-    }
-
-    if let Some(progress) = watch_progress {
-        img = img.progress(progress.as_percentage());
-    }
-    //log::debug!("Movie {:?} watch progress: {:?} -> {}", movie.id, watch_progress, progress);
-
-    // Use theme color for progress indicator if available
-    if let Some(theme_color_str) = &movie.theme_color {
-        if let Ok(color) = crate::domains::ui::views::macros::parse_hex_color(theme_color_str) {
-            img = img.progress_color(color);
-        }
-    }
-
-    // Create the full card manually to match media_card! structure
-    let image_element: Element<'_, Message> = img.into();
-
-    // Wrap with hover detection
-    let image_with_hover = mouse_area(image_element)
-        .on_enter(Message::MediaHovered(movie_id))
-        .on_exit(Message::MediaUnhovered(movie_id));
-
-    // Create poster button
-    let poster_element = button(image_with_hover)
-        .on_press(Message::ViewMovieDetails(movie.clone()))
-        .padding(0)
-        .style(theme::Button::MediaCard.style());
-
-    // Create text content
-    let text_content = column![
-        text(title).size(14),
-        text(info)
-            .size(12)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-    ]
-    .spacing(2);
-
-    // Final card layout - no need for Stack since shader handles progress
-    column![
-        poster_element,
-        container(text_content)
-            .padding(5)
-            .width(Length::Fixed(200.0))
-            .height(Length::Fixed(60.0))
-    ]
-    .spacing(5)
-    .into()
-}
-
-#[cfg_attr(
-    any(
-        feature = "profile-with-puffin",
-        feature = "profile-with-tracy",
-        feature = "profile-with-tracing"
-    ),
-    profiling::function
-)]
-pub fn series_reference_card_with_state<'a>(
-    series: &'a SeriesReference,
-    is_hovered: bool,
-    is_visible: bool,
-    _watch_status: Option<WatchProgress>, // Number of remaining episodes equal to integer from watch_status, individual episode watch progress can be passed with the decimal part
-) -> Element<'a, Message> {
-    let title = series.title.as_str();
-    let series_id = series.id.as_uuid();
-
-    // Extract info from details if available
-    let info = match &series.details {
-        MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
-            format!("{} seasons", details.number_of_seasons.unwrap_or(0))
-        }
-        _ => String::new(), // Empty string to reserve space without visual noise
-    };
-
-    // Determine priority based on visibility and hover state
-    let priority = if is_hovered || is_visible {
-        image_types::Priority::Visible
-    } else {
-        image_types::Priority::Preload
-    };
-
-    use crate::domains::ui::widgets::image_for;
-    use iced::widget::{button, column, container, mouse_area, text};
-    use iced::Length;
-
-    let media_id = ferrex_core::api_types::MediaId::Series(series.id.clone());
-
-    // Create image with scroll tier
-    let mut img = image_for(media_id.clone())
-        .size(image_types::ImageSize::Poster)
-        .rounded(4.0)
-        .width(Length::Fixed(200.0))
-        .height(Length::Fixed(300.0))
-        .animation(crate::domains::ui::widgets::AnimationType::enhanced_flip())
-        .placeholder(lucide_icons::Icon::Tv)
-        .priority(priority)
-        .is_hovered(is_hovered)
-        .on_play(Message::PlaySeriesNextEpisode(series.id.clone()))
-        .on_click(Message::ViewTvShow(series.id.clone()));
-
-    // Add theme color if available
-    if let Some(theme_color_str) = &series.theme_color {
-        if let Ok(color) = crate::domains::ui::views::macros::parse_hex_color(theme_color_str) {
-            img = img.theme_color(color);
-        }
-    }
-
-    // Create the full card manually to match media_card! structure
-    let image_element: Element<'_, Message> = img.into();
-
-    // Wrap with hover detection
-    let image_with_hover = mouse_area(image_element)
-        .on_enter(Message::MediaHovered(series_id))
-        .on_exit(Message::MediaUnhovered(series_id));
-
-    // Create poster button
-    let poster_element = button(image_with_hover)
-        .on_press(Message::ViewTvShow(series.id.clone()))
-        .padding(0)
-        .style(theme::Button::MediaCard.style());
-
-    // Create text content
-    let text_content = column![
-        text(title).size(14),
-        text(info)
-            .size(12)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-    ]
-    .spacing(2);
-
-    // Final card layout
-    column![
-        poster_element,
-        container(text_content)
-            .padding(5)
-            .width(Length::Fixed(200.0))
-            .height(Length::Fixed(60.0))
-    ]
-    .spacing(5)
-    .into()
-}
-
-#[cfg_attr(
-    any(
-        feature = "profile-with-puffin",
-        feature = "profile-with-tracy",
-        feature = "profile-with-tracing"
-    ),
-    profiling::function
-)]
-pub fn season_reference_card_with_state<'a>(
-    season: crate::infrastructure::api_types::SeasonReference,
-    is_hovered: bool,
-    state: Option<&'a crate::state_refactored::State>,
-    _watch_status: Option<WatchProgress>, // Number of remaining episodes equal to integer from watch_status, individual episode watch progress can be passed with the decimal part
-) -> Element<'a, Message> {
-    use crate::infrastructure::api_types::{MediaDetailsOption, TmdbDetails};
-
-    let season_id = season.id.as_uuid();
-
-    // Extract season name from details if available
-    let season_name = match &season.details {
-        MediaDetailsOption::Details(TmdbDetails::Season(details)) => {
-            if details.name.is_empty() {
-                if season.season_number.value() == 0 {
-                    "Specials"
-                } else {
-                    "Season"
-                }
-            } else {
-                details.name.as_str()
-            }
-        }
-        _ => {
-            if season.season_number.value() == 0 {
-                "Specials"
-            } else {
-                "Season"
-            }
-        }
-    };
-
-    // Get episode count from state if available, otherwise show loading
-    let episode_count = state
-        .map(|s| s.domains.media.state.get_season_episode_count(&season_id))
-        .unwrap_or(0);
-
-    let subtitle = if episode_count > 0 {
-        if season.season_number.value() == 0 {
-            format!("{} episodes", episode_count)
-        } else {
-            format!(
-                "Season {} • {} episodes",
-                season.season_number.value(),
-                episode_count
-            )
-        }
-    } else {
-        // No episode count available yet
-        if season.season_number.value() == 0 {
-            "Specials".to_string()
-        } else {
-            format!("Season {}", season.season_number.value())
-        }
-    };
-
-    // Use the media_card! macro for consistent card creation
-    media_card! {
-        type: Season,
-        data: season,
-        {
-            id: ferrex_core::api_types::MediaId::Season(season.id.clone()),
-            title: season_name,
-            subtitle: &subtitle,
-            image: {
-                key: season_id,
-                type: Poster,
-                fallback: "📺",
-            },
-            size: Medium,
-            on_click: Message::ViewSeason(season.series_id.clone(), season.id.clone()),
-            on_play: Message::ViewSeason(season.series_id.clone(), season.id.clone()),
-            hover_icon: lucide_icons::Icon::List,
-            is_hovered: is_hovered,
-        }
-    }
-}
-
-#[cfg_attr(
-    any(
-        feature = "profile-with-puffin",
-        feature = "profile-with-tracy",
-        feature = "profile-with-tracing"
-    ),
-    profiling::function
-)]
-pub fn episode_reference_card_with_state<'a>(
-    episode: &'a crate::infrastructure::api_types::EpisodeReference,
-    is_hovered: bool,
-    state: Option<&'a State>,
-    _watch_status: Option<WatchProgress>, // Number of remaining episodes equal to integer from watch_status, individual episode watch progress can be passed with the decimal part
-) -> Element<'a, Message> {
-    use crate::domains::metadata::image_types::{ImageSize, Priority};
-    use crate::domains::ui::views::macros::truncate_text;
-    use crate::domains::ui::widgets::image_for;
-    use crate::infrastructure::api_types::{MediaDetailsOption, TmdbDetails};
-    use iced::{
-        widget::{button, column, container, mouse_area, text, Stack},
-        Length,
-    };
-
-    let episode_id = episode.id.as_uuid();
-
-    // Extract episode name from details if available
-    let (episode_name, has_details) = match &episode.details {
-        MediaDetailsOption::Details(TmdbDetails::Episode(details)) => (details.name.as_str(), true),
-        _ => ("", false),
-    };
-
-    // Format season and episode numbers
-    let season_episode = format!(
-        "S{:02}E{:02}",
-        episode.season_number.value(),
-        episode.episode_number.value()
-    );
-
-    // Episode cards are typically wider (thumbnail format)
-    let width = 240.0;
-    let height = 135.0; // 16:9 aspect ratio
-    let radius = 4.0;
-
-    // Get watch progress for this episode
-    let watch_progress = state.and_then(|s| {
-        s.domains
-            .media
-            .state
-            .get_media_progress(&ferrex_core::api_types::MediaId::Episode(
-                episode.id.clone(),
-            ))
-    });
-
-    // Create image element
-    let mut image_element = image_for(ferrex_core::api_types::MediaId::Episode(episode.id.clone()))
-        .size(ImageSize::Thumbnail)
-        .rounded(radius)
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(height))
-        .placeholder(lucide_icons::Icon::Play)
-        .priority(if is_hovered {
-            Priority::Visible
-        } else {
-            Priority::Preload
-        });
-
-    // Add watch progress - default to unwatched (0.0) if no watch state
-    let progress = watch_progress.unwrap_or(0.0);
-    image_element = image_element.progress(progress);
-
-    // Create the poster button
-    let poster_button = button(image_element)
-        .on_press(Message::PlayMediaWithId(
-            crate::infrastructure::api_types::to_legacy_media_file(&episode.file),
-            ferrex_core::api_types::MediaId::Episode(episode.id.clone()),
-        ))
-        .padding(0)
-        .style(theme::Button::MediaCard.style());
-
-    // Add hover overlay if needed
-    let poster_with_overlay: Element<'_, Message> = if is_hovered {
-        use crate::hover_overlay;
-        let overlay = hover_overlay!(
-            width,
-            height,
-            radius,
-            {
-                center: (lucide_icons::Icon::Play, Message::PlayMediaWithId(
-                    crate::infrastructure::api_types::to_legacy_media_file(&episode.file),
-                    ferrex_core::api_types::MediaId::Episode(episode.id.clone())
-                )),
-                top_left: (lucide_icons::Icon::Circle, Message::NoOp),
-                bottom_left: (lucide_icons::Icon::Pencil, Message::NoOp),
-                bottom_right: (lucide_icons::Icon::EllipsisVertical, Message::NoOp),
-            }
-        );
-
-        Stack::new().push(poster_button).push(overlay).into()
-    } else {
-        poster_button.into()
-    };
-
-    // Truncate episode name if too long
-    let truncated_name = if episode_name.is_empty() {
-        String::new()
-    } else {
-        truncate_text(episode_name, 30)
-    };
-
-    // Create text content with three lines
-    let text_content = column![
-        // Line 1: Episode title (always visible)
-        text(format!("Episode {}", episode.episode_number.value()))
-            .size(14)
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        // Line 2: Episode name (with fade animation)
-        container(text(truncated_name).size(12).color(if has_details {
-            theme::MediaServerTheme::TEXT_SECONDARY
-        } else {
-            // Start with transparent color for fade-in effect
-            iced::Color::from_rgba(
-                theme::MediaServerTheme::TEXT_SECONDARY.r,
-                theme::MediaServerTheme::TEXT_SECONDARY.g,
-                theme::MediaServerTheme::TEXT_SECONDARY.b,
-                0.0,
-            )
-        }))
-        .height(Length::Fixed(16.0)), // Reserve space even when empty
-        // Line 3: Season/Episode format
-        text(season_episode)
-            .size(11)
-            .color(theme::MediaServerTheme::TEXT_DIMMED)
-    ]
-    .spacing(2);
-
-    // Complete card
-    let card_content = column![
-        poster_with_overlay,
-        container(text_content)
-            .padding(5)
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(65.0)) // Slightly taller for 3 lines
-            .clip(true)
-    ]
-    .spacing(5);
-
-    // Wrap in mouse area
-    mouse_area(
-        container(card_content)
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(height + 70.0)),
-    )
-    .on_enter(Message::MediaHovered(episode_id))
-    .on_exit(Message::MediaUnhovered(episode_id))
-    .into()
-}
-
-#[cfg_attr(
-    any(
-        feature = "profile-with-puffin",
-        feature = "profile-with-tracy",
-        feature = "profile-with-tracing"
-    ),
-    profiling::function
-)]
-pub fn create_cast_scrollable<'a>(cast: &'a [CastMember]) -> Element<'a, Message> {
+pub fn create_cast_scrollable(cast: &[ArchivedCastMember]) -> Element<'static, Message> {
     if cast.is_empty() {
         return Space::new(0, 0).into();
     }
@@ -514,7 +57,7 @@ pub fn create_cast_scrollable<'a>(cast: &'a [CastMember]) -> Element<'a, Message
     ),
     profiling::function
 )]
-fn create_cast_card<'a>(actor: &'a CastMember) -> Element<'a, Message> {
+fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, Message> {
     let card_width = 120.0;
     let image_height = 180.0;
 
@@ -529,22 +72,21 @@ fn create_cast_card<'a>(actor: &'a CastMember) -> Element<'a, Message> {
         &uuid::Uuid::NAMESPACE_OID,
         format!("person-{}", actor.id).as_bytes(),
     );
-    let person_id = ferrex_core::media::PersonID::new(person_uuid.to_string()).unwrap();
 
     // Use image_for widget with rounded_image_shader
-    let profile_image =
-        crate::domains::ui::widgets::image_for(ferrex_core::api_types::MediaId::Person(person_id))
-            .size(crate::domains::metadata::image_types::ImageSize::Profile)
-            .width(Length::Fixed(card_width))
-            .height(Length::Fixed(image_height))
-            .rounded(8.0)
-            .placeholder(Icon::User);
+    let profile_image = image_for(person_uuid)
+        .size(ImageSize::Profile)
+        .image_type(ImageType::Person)
+        .width(Length::Fixed(card_width))
+        .height(Length::Fixed(image_height))
+        .radius(CORNER_RADIUS)
+        .placeholder(Icon::User);
 
     card_content = card_content.push(profile_image);
 
     // Actor name
     card_content = card_content.push(
-        text(&actor.name)
+        text(deserialize::<String, Error>(&actor.name).unwrap())
             .size(12)
             .color(theme::MediaServerTheme::TEXT_PRIMARY)
             .width(Length::Fixed(card_width))
@@ -553,7 +95,7 @@ fn create_cast_card<'a>(actor: &'a CastMember) -> Element<'a, Message> {
 
     // Character name
     card_content = card_content.push(
-        text(&actor.character)
+        text(deserialize::<String, Error>(&actor.character).unwrap())
             .size(10)
             .color(theme::MediaServerTheme::TEXT_SECONDARY)
             .width(Length::Fixed(card_width))

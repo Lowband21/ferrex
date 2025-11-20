@@ -19,6 +19,14 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
             .map(|(_id, size)| DomainMessage::Ui(Message::WindowResized(size))),
     );
 
+    let poster_anim_active = state
+        .domains
+        .ui
+        .state
+        .poster_anim_active_until
+        .map(|until| until > std::time::Instant::now())
+        .unwrap_or(false);
+
     if state
         .domains
         .ui
@@ -40,6 +48,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
             .background_shader_state
             .gradient_transitions
             .is_transitioning()
+        || poster_anim_active
     {
         subscriptions.push(
             iced::time::every(std::time::Duration::from_nanos(8333333)) // ~120 FPS

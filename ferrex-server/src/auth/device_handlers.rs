@@ -4,32 +4,26 @@ use argon2::{
     password_hash::{rand_core::OsRng, SaltString},
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
 };
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    Extension, Json,
-};
+use axum::{extract::State, http::HeaderMap, Extension, Json};
 use chrono::{Duration, Utc};
 use ferrex_core::{
     api_types::ApiResponse,
     auth::{
-        AuthContext, AuthError, AuthEvent, AuthEventType, AuthResult, AuthState,
-        AuthenticatedDevice, DeviceAuthRequest, DeviceCheckResult, DeviceInfo,
-        DeviceRegistration, SessionDeviceSession, DeviceUserCredential, Platform,
-        RegisterDeviceRequest, RegisterDeviceResponse, generate_trust_token,
+        generate_trust_token, AuthError, AuthEvent, AuthEventType, AuthResult, AuthenticatedDevice,
+        DeviceInfo, DeviceRegistration, DeviceUserCredential, Platform, SessionDeviceSession,
     },
-    error::MediaError,
-    user::{LoginRequest, User},
+    user::User,
 };
+use ring::constant_time;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
+use tracing::{error, info};
 use uuid::Uuid;
-use tracing::{info, error};
-use ring::constant_time;
 
-use super::jwt::{generate_access_token, generate_refresh_token};
-use crate::{AppState, errors::{AppError, AppResult}};
+use crate::{
+    errors::{AppError, AppResult},
+    AppState,
+};
 
 /// Device fingerprint from user agent and other factors
 fn generate_device_fingerprint(
@@ -52,7 +46,7 @@ fn extract_device_info(headers: &HeaderMap, body_device_info: Option<DeviceInfo>
         .get("user-agent")
         .and_then(|h| h.to_str().ok())
         .unwrap_or("Unknown");
-    
+
     if let Some(device_info) = body_device_info {
         device_info
     } else {
@@ -102,13 +96,13 @@ pub async fn device_login(
         .get("user-agent")
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
-    
+
     let ip_address = headers
         .get("x-forwarded-for")
         .or_else(|| headers.get("x-real-ip"))
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
-    
+
     // Get user
     let user = state
         .db
@@ -117,7 +111,7 @@ pub async fn device_login(
         .await
         .map_err(|_| AppError::internal("Database error"))?
         .ok_or_else(|| AppError::unauthorized(AuthError::InvalidCredentials.to_string()))?;
-    
+
     // Get password hash from credentials table
     let password_hash = state
         .db
@@ -126,16 +120,16 @@ pub async fn device_login(
         .await
         .map_err(|_| AppError::internal("Failed to get password hash"))?
         .ok_or_else(|| AppError::unauthorized(AuthError::InvalidCredentials.to_string()))?;
-    
+
     // Verify password
     let parsed_hash = PasswordHash::new(&password_hash)
         .map_err(|_| AppError::internal("Invalid password hash"))?;
-    
+
     let argon2 = Argon2::default();
     let password_valid = argon2
         .verify_password(request.password.as_bytes(), &parsed_hash)
         .is_ok();
-    
+
     // Log auth event
     let event = AuthEvent {
         id: Uuid::new_v4(),
@@ -157,23 +151,25 @@ pub async fn device_login(
         metadata: serde_json::json!({}),
         created_at: Utc::now(),
     };
-    
+
     let _ = state.db.backend().log_auth_event(&event).await;
-    
+
     if !password_valid {
-        return Err(AppError::unauthorized(AuthError::InvalidCredentials.to_string()));
+        return Err(AppError::unauthorized(
+            AuthError::InvalidCredentials.to_string(),
+        ));
     }
-    
+
     // Extract device info
     let device_info = extract_device_info(&headers, request.device_info);
-    
+
     // Generate device fingerprint
     let fingerprint = generate_device_fingerprint(
         user_agent.as_deref().unwrap_or("Unknown"),
         &device_info.platform,
         device_info.hardware_id.as_deref(),
     );
-    
+
     // Check if device is already registered
     let existing_device = state
         .db
@@ -181,30 +177,22 @@ pub async fn device_login(
         .get_device_by_fingerprint(&fingerprint)
         .await
         .map_err(|_| AppError::internal("Database error"))?;
-    
+
     let (device_id, needs_registration) = if let Some(device) = existing_device {
         // Check if this device has existing sessions for other users
         // If so, disable auto-login for those users (user switching scenario)
-        if let Ok(device_sessions) = state
-            .db
-            .backend()
-            .get_device_sessions(device.id)
-            .await
-        {
+        if let Ok(device_sessions) = state.db.backend().get_device_sessions(device.id).await {
             for session in device_sessions {
                 if session.user_id != user.id {
                     // Get the other user and disable their auto-login
-                    if let Ok(Some(mut other_user)) = state
-                        .db
-                        .backend()
-                        .get_user_by_id(session.user_id)
-                        .await
+                    if let Ok(Some(mut other_user)) =
+                        state.db.backend().get_user_by_id(session.user_id).await
                     {
                         if other_user.preferences.auto_login_enabled {
                             other_user.preferences.auto_login_enabled = false;
                             other_user.updated_at = Utc::now();
                             let _ = state.db.backend().update_user(&other_user).await;
-                            
+
                             // Also check and update device credential if it exists
                             if let Ok(Some(mut credential)) = state
                                 .db
@@ -214,17 +202,23 @@ pub async fn device_login(
                             {
                                 credential.auto_login_enabled = false;
                                 credential.updated_at = Utc::now();
-                                let _ = state.db.backend().upsert_device_credential(&credential).await;
+                                let _ = state
+                                    .db
+                                    .backend()
+                                    .upsert_device_credential(&credential)
+                                    .await;
                             }
-                            
-                            info!("Disabled auto-login for user {} due to user switch on device {}", 
-                                  other_user.username, device.id);
+
+                            info!(
+                                "Disabled auto-login for user {} due to user switch on device {}",
+                                other_user.username, device.id
+                            );
                         }
                     }
                 }
             }
         }
-        
+
         (device.id, false)
     } else {
         // Register new device
@@ -233,7 +227,7 @@ pub async fn device_login(
         } else {
             Duration::days(30)
         };
-        
+
         let device = AuthenticatedDevice {
             id: Uuid::new_v4(),
             fingerprint: fingerprint.clone(),
@@ -251,14 +245,14 @@ pub async fn device_login(
                 "hardware_id": device_info.hardware_id,
             }),
         };
-        
+
         state
             .db
             .backend()
             .register_device(&device)
             .await
             .map_err(|_| AppError::internal("Failed to register device"))?;
-        
+
         // Log device registration
         let event = AuthEvent {
             id: Uuid::new_v4(),
@@ -275,12 +269,12 @@ pub async fn device_login(
             }),
             created_at: Utc::now(),
         };
-        
+
         let _ = state.db.backend().log_auth_event(&event).await;
-        
+
         (device.id, true)
     };
-    
+
     // Create device session
     let session = SessionDeviceSession::new(
         user.id,
@@ -293,19 +287,19 @@ pub async fn device_login(
             Duration::hours(24)
         },
     );
-    
+
     // Store session (token will be hashed in the database layer)
     let token_hash = hash_token(&session.session_token);
     let mut session_to_store = session.clone();
     session_to_store.session_token = token_hash;
-    
+
     state
         .db
         .backend()
         .create_device_session(&session_to_store)
         .await
         .map_err(|_| AppError::internal("Failed to create session"))?;
-    
+
     // Check if device has PIN set
     let credential = state
         .db
@@ -313,12 +307,13 @@ pub async fn device_login(
         .get_device_credential(user.id, device_id)
         .await
         .map_err(|_| AppError::internal("Database error"))?;
-    
-    let requires_pin_setup = credential.is_none() || credential.as_ref().unwrap().pin_hash.is_none();
-    
+
+    let requires_pin_setup =
+        credential.is_none() || credential.as_ref().unwrap().pin_hash.is_none();
+
     Ok(Json(ApiResponse::success(AuthResult {
         user_id: user.id,
-        session_token: session.session_token,  // Return the actual session token
+        session_token: session.session_token, // Return the actual session token
         device_registration: Some(DeviceRegistration {
             id: device_id,
             user_id: user.id,
@@ -330,7 +325,9 @@ pub async fn device_login(
             pin_hash: credential.and_then(|c| c.pin_hash),
             registered_at: Utc::now(),
             last_used_at: Utc::now(),
-            expires_at: Some(Utc::now() + Duration::days(if request.remember_device { 90 } else { 30 })),
+            expires_at: Some(
+                Utc::now() + Duration::days(if request.remember_device { 90 } else { 30 }),
+            ),
             revoked: false,
             revoked_by: None,
             revoked_at: None,
@@ -349,13 +346,13 @@ pub async fn pin_login(
         .get("user-agent")
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
-    
+
     let ip_address = headers
         .get("x-forwarded-for")
         .or_else(|| headers.get("x-real-ip"))
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
-    
+
     // Get device credential
     let credential = state
         .db
@@ -364,30 +361,26 @@ pub async fn pin_login(
         .await
         .map_err(|_| AppError::internal("Database error"))?
         .ok_or_else(|| AppError::unauthorized("Device not registered for this user"))?;
-    
+
     // Check if locked
     if let Some(locked_until) = credential.locked_until {
         if locked_until > Utc::now() {
             return Err(AppError::unauthorized(
-                AuthError::TooManyAttempts { 
-                    locked_until: locked_until.timestamp() 
-                }.to_string()
+                AuthError::TooManyAttempts {
+                    locked_until: locked_until.timestamp(),
+                }
+                .to_string(),
             ));
         }
     }
-    
+
     // Verify PIN
     let pin_valid = if let Some(pin_hash) = &credential.pin_hash {
-        verify_pin_with_device_salt(
-            &request.pin,
-            pin_hash,
-            request.user_id,
-            request.device_id,
-        )
+        verify_pin_with_device_salt(&request.pin, pin_hash, request.user_id, request.device_id)
     } else {
         false
     };
-    
+
     // Update failed attempts
     if !pin_valid {
         let new_attempts = credential.failed_attempts + 1;
@@ -396,7 +389,7 @@ pub async fn pin_login(
         } else {
             None
         };
-        
+
         state
             .db
             .backend()
@@ -413,16 +406,11 @@ pub async fn pin_login(
         state
             .db
             .backend()
-            .update_device_failed_attempts(
-                request.user_id,
-                request.device_id,
-                0,
-                None,
-            )
+            .update_device_failed_attempts(request.user_id, request.device_id, 0, None)
             .await
             .map_err(|_| AppError::internal("Database error"))?;
     }
-    
+
     // Log auth event
     let event = AuthEvent {
         id: Uuid::new_v4(),
@@ -446,16 +434,19 @@ pub async fn pin_login(
         }),
         created_at: Utc::now(),
     };
-    
+
     let _ = state.db.backend().log_auth_event(&event).await;
-    
+
     if !pin_valid {
         let attempts_remaining = 5 - (credential.failed_attempts + 1);
         return Err(AppError::unauthorized(
-            AuthError::InvalidPin { attempts_remaining: attempts_remaining as u8 }.to_string()
+            AuthError::InvalidPin {
+                attempts_remaining: attempts_remaining as u8,
+            }
+            .to_string(),
         ));
     }
-    
+
     // Create session
     let session = SessionDeviceSession::new(
         request.user_id,
@@ -464,22 +455,22 @@ pub async fn pin_login(
         user_agent,
         Duration::hours(24),
     );
-    
+
     // Store session
     let token_hash = hash_token(&session.session_token);
     let mut session_to_store = session.clone();
     session_to_store.session_token = token_hash;
-    
+
     state
         .db
         .backend()
         .create_device_session(&session_to_store)
         .await
         .map_err(|_| AppError::internal("Failed to create session"))?;
-    
+
     Ok(Json(ApiResponse::success(AuthResult {
         user_id: request.user_id,
-        session_token: session.session_token,  // Return the actual session token
+        session_token: session.session_token, // Return the actual session token
         device_registration: None,
         requires_pin_setup: false,
     })))
@@ -498,17 +489,17 @@ pub async fn set_device_pin(
     Json(request): Json<SetPinRequest>,
 ) -> AppResult<Json<ApiResponse<()>>> {
     // Validate PIN
-    use ferrex_core::auth::{PinPolicy, validate_pin};
+    use ferrex_core::auth::{validate_pin, PinPolicy};
     let mut policy = PinPolicy::default();
     policy.min_length = 4; // Allow 4-digit PINs
-    
+
     if let Err(e) = validate_pin(&request.pin, &policy) {
         return Err(AppError::bad_request(format!("Invalid PIN: {}", e)));
     }
-    
+
     // Hash PIN with device-specific salt
     let pin_hash = hash_pin_with_device_salt(&request.pin, user.id, request.device_id);
-    
+
     // Update or create device credential
     // Enable auto-login if the user has it enabled in their preferences
     let credential = DeviceUserCredential {
@@ -523,14 +514,14 @@ pub async fn set_device_pin(
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
-    
+
     state
         .db
         .backend()
         .upsert_device_credential(&credential)
         .await
         .map_err(|_| AppError::internal("Failed to update PIN"))?;
-    
+
     // Log event
     let event = AuthEvent {
         id: Uuid::new_v4(),
@@ -544,9 +535,9 @@ pub async fn set_device_pin(
         metadata: serde_json::json!({}),
         created_at: Utc::now(),
     };
-    
+
     let _ = state.db.backend().log_auth_event(&event).await;
-    
+
     Ok(Json(ApiResponse::success(())))
 }
 
@@ -561,12 +552,15 @@ pub async fn check_device_status(
     State(state): State<AppState>,
     axum::extract::Query(query): axum::extract::Query<DeviceStatusQuery>,
 ) -> AppResult<Json<ApiResponse<DeviceAuthStatus>>> {
-    info!("[DeviceStatus] Checking device status for user_id: {}, device_id: {}", query.user_id, query.device_id);
-    
+    info!(
+        "[DeviceStatus] Checking device status for user_id: {}, device_id: {}",
+        query.user_id, query.device_id
+    );
+
     // For now, since we don't have device tracking fully implemented,
     // we'll just check if the user has a PIN set in the credentials table
     // This is a simplified implementation until full device management is in place
-    
+
     // Check if user has any device credentials
     let credential = state
         .db
@@ -574,10 +568,13 @@ pub async fn check_device_status(
         .get_device_credential(query.user_id, query.device_id)
         .await
         .map_err(|e| {
-            error!("[DeviceStatus] Database error getting device credential: {}", e);
+            error!(
+                "[DeviceStatus] Database error getting device credential: {}",
+                e
+            );
             AppError::internal("Database error")
         })?;
-    
+
     let (device_registered, has_pin, remaining_attempts) = if let Some(cred) = credential {
         let has_pin = cred.pin_hash.is_some();
         let remaining = if cred.failed_attempts >= 5 {
@@ -590,10 +587,12 @@ pub async fn check_device_status(
         // No credential record, so device not registered for this user
         (false, false, Some(5))
     };
-    
-    info!("[DeviceStatus] Result - registered: {}, has_pin: {}, remaining_attempts: {:?}", 
-        device_registered, has_pin, remaining_attempts);
-    
+
+    info!(
+        "[DeviceStatus] Result - registered: {}, has_pin: {}, remaining_attempts: {:?}",
+        device_registered, has_pin, remaining_attempts
+    );
+
     Ok(Json(ApiResponse::success(DeviceAuthStatus {
         device_registered,
         has_pin,
@@ -610,14 +609,13 @@ fn hash_token(token: &str) -> String {
 
 /// Hash PIN with device-specific salt
 fn hash_pin_with_device_salt(pin: &str, user_id: Uuid, device_id: Uuid) -> String {
-    
     // Create device-specific salt
     let salt_input = format!("{}-{}", user_id, device_id);
     let mut hasher = Sha256::new();
     hasher.update(salt_input.as_bytes());
     let salt_bytes = hasher.finalize();
     let salt_b64 = base64::encode(&salt_bytes[..16]); // Use first 16 bytes
-    
+
     // Hash PIN
     let argon2 = Argon2::default();
     let salt = SaltString::from_b64(&salt_b64).unwrap();
@@ -628,34 +626,30 @@ fn hash_pin_with_device_salt(pin: &str, user_id: Uuid, device_id: Uuid) -> Strin
 }
 
 /// Verify PIN with device-specific salt using constant-time comparison
-/// 
+///
 /// This function prevents timing attacks by ensuring that PIN verification
 /// takes the same amount of time regardless of whether the PIN is correct
 /// or how many characters match.
-fn verify_pin_with_device_salt(
-    pin: &str,
-    hash: &str,
-    user_id: Uuid,
-    device_id: Uuid,
-) -> bool {
+fn verify_pin_with_device_salt(pin: &str, hash: &str, user_id: Uuid, device_id: Uuid) -> bool {
     let parsed_hash = match PasswordHash::new(hash) {
         Ok(h) => h,
         Err(_) => return false,
     };
-    
+
     let argon2 = Argon2::default();
-    
+
     // Perform Argon2 verification (already constant-time internally)
     let argon2_result = argon2.verify_password(pin.as_bytes(), &parsed_hash);
-    
+
     // Convert result to bytes for constant-time comparison
     // This ensures we don't leak timing information through early returns
     let verification_passed = if argon2_result.is_ok() { 1u8 } else { 0u8 };
     let expected_success = 1u8;
-    
+
     // Use constant-time comparison to prevent timing attacks
-    let is_equal = constant_time::verify_slices_are_equal(&[verification_passed], &[expected_success]);
-    
+    let is_equal =
+        constant_time::verify_slices_are_equal(&[verification_passed], &[expected_success]);
+
     is_equal.is_ok()
 }
 
@@ -691,7 +685,7 @@ pub async fn revoke_device(
         .revoke_device(request.device_id, user.id)
         .await
         .map_err(|_| AppError::internal("Failed to revoke device"))?;
-    
+
     // Revoke all sessions for this device
     state
         .db
@@ -699,7 +693,7 @@ pub async fn revoke_device(
         .revoke_device_sessions(request.device_id)
         .await
         .map_err(|_| AppError::internal("Failed to revoke sessions"))?;
-    
+
     // Log event
     let event = AuthEvent {
         id: Uuid::new_v4(),
@@ -713,11 +707,12 @@ pub async fn revoke_device(
         metadata: serde_json::json!({}),
         created_at: Utc::now(),
     };
-    
+
     let _ = state.db.backend().log_auth_event(&event).await;
-    
+
     Ok(Json(ApiResponse::success(())))
-}/// Change PIN request
+}
+/// Change PIN request
 #[derive(Debug, Deserialize)]
 pub struct ChangePinRequest {
     pub device_id: String,
@@ -734,12 +729,12 @@ pub async fn change_device_pin(
     // Parse device ID
     let device_id = Uuid::parse_str(&request.device_id)
         .map_err(|_| AppError::bad_request("Invalid device ID"))?;
-    
+
     // Validate PIN format
     if request.new_pin.len() != 4 || !request.new_pin.chars().all(|c| c.is_numeric()) {
         return Err(AppError::bad_request("PIN must be 4 digits"));
     }
-    
+
     // Get current device credential
     let credential = state
         .db
@@ -748,22 +743,19 @@ pub async fn change_device_pin(
         .await
         .map_err(|_| AppError::internal("Failed to retrieve device credentials"))?
         .ok_or_else(|| AppError::not_found("Device PIN not set"))?;
-    
+
     // Verify current PIN using constant-time comparison
-    let pin_hash = credential.pin_hash
+    let pin_hash = credential
+        .pin_hash
         .ok_or_else(|| AppError::not_found("Device PIN not set"))?;
-    
-    let current_pin_valid = verify_pin_with_device_salt(
-        &request.current_pin,
-        &pin_hash,
-        user.id,
-        device_id,
-    );
-    
+
+    let current_pin_valid =
+        verify_pin_with_device_salt(&request.current_pin, &pin_hash, user.id, device_id);
+
     if !current_pin_valid {
         return Err(AppError::unauthorized("Current PIN is incorrect"));
     }
-    
+
     // Hash new PIN
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
@@ -771,7 +763,7 @@ pub async fn change_device_pin(
         .hash_password(request.new_pin.as_bytes(), &salt)
         .map_err(|_| AppError::internal("Failed to hash PIN"))?
         .to_string();
-    
+
     // Update PIN
     state
         .db
@@ -779,7 +771,7 @@ pub async fn change_device_pin(
         .update_device_pin(user.id, device_id, &new_pin_hash)
         .await
         .map_err(|_| AppError::internal("Failed to update PIN"))?;
-    
+
     // Log event
     let event = AuthEvent {
         id: Uuid::new_v4(),
@@ -793,8 +785,8 @@ pub async fn change_device_pin(
         metadata: serde_json::json!({}),
         created_at: Utc::now(),
     };
-    
+
     let _ = state.db.backend().log_auth_event(&event).await;
-    
+
     Ok(Json(ApiResponse::success(())))
 }

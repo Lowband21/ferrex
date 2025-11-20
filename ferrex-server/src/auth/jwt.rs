@@ -1,17 +1,22 @@
+use anyhow::Result;
 use chrono::{Duration, Utc};
 use ferrex_core::user::Claims;
-use ferrex_core::database::postgres::PostgresDatabase;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use sqlx::PgPool;
 use std::env;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
-use anyhow::Result;
 
 /// JWT key manager for handling multiple keys during rotation
 #[derive(Clone)]
 pub struct JwtKeyManager {
     keys: Arc<RwLock<Vec<String>>>,
+}
+
+impl Default for JwtKeyManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl JwtKeyManager {
@@ -40,7 +45,7 @@ impl JwtKeyManager {
     pub fn rotate_key(&self, new_key: String) {
         let mut keys = self.keys.write().unwrap();
         keys.insert(0, new_key);
-        
+
         // Keep only the last 5 keys to prevent unlimited growth
         if keys.len() > 5 {
             keys.truncate(5);
@@ -57,7 +62,8 @@ impl JwtKeyManager {
 }
 
 /// Global key manager instance
-static KEY_MANAGER: std::sync::LazyLock<JwtKeyManager> = std::sync::LazyLock::new(|| JwtKeyManager::new());
+static KEY_MANAGER: std::sync::LazyLock<JwtKeyManager> =
+    std::sync::LazyLock::new(JwtKeyManager::new);
 
 /// Get the global key manager instance
 pub fn get_key_manager() -> &'static JwtKeyManager {
@@ -99,7 +105,7 @@ pub async fn validate_token(
 ) -> Result<Claims, jsonwebtoken::errors::Error> {
     let keys = get_key_manager().get_all_keys();
     let validation = Validation::new(Algorithm::HS256);
-    
+
     // Try to decode with each key until one succeeds
     let mut last_error = None;
     for secret in keys {
@@ -110,16 +116,16 @@ pub async fn validate_token(
         ) {
             Ok(token_data) => {
                 let claims = token_data.claims;
-                
+
                 // Check if token is blacklisted
                 let jti = &claims.jti;
-                
+
                 if is_token_revoked(db, jti).await? {
                     return Err(jsonwebtoken::errors::Error::from(
-                        jsonwebtoken::errors::ErrorKind::InvalidToken
+                        jsonwebtoken::errors::ErrorKind::InvalidToken,
                     ));
                 }
-                
+
                 return Ok(claims);
             }
             Err(e) => {
@@ -128,7 +134,7 @@ pub async fn validate_token(
             }
         }
     }
-    
+
     // If we get here, none of the keys worked
     Err(last_error.unwrap_or_else(|| {
         jsonwebtoken::errors::Error::from(jsonwebtoken::errors::ErrorKind::InvalidToken)
@@ -139,7 +145,7 @@ pub async fn validate_token(
 pub fn validate_token_sync(token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
     let keys = get_key_manager().get_all_keys();
     let validation = Validation::new(Algorithm::HS256);
-    
+
     // Try to decode with each key until one succeeds
     let mut last_error = None;
     for secret in keys {
@@ -155,7 +161,7 @@ pub fn validate_token_sync(token: &str) -> Result<Claims, jsonwebtoken::errors::
             }
         }
     }
-    
+
     // If we get here, none of the keys worked
     Err(last_error.unwrap_or_else(|| {
         jsonwebtoken::errors::Error::from(jsonwebtoken::errors::ErrorKind::InvalidToken)
@@ -169,8 +175,10 @@ async fn is_token_revoked(db: &PgPool, jti: &str) -> Result<bool, jsonwebtoken::
     )
     .fetch_one(db)
     .await
-    .map_err(|_| jsonwebtoken::errors::Error::from(jsonwebtoken::errors::ErrorKind::InvalidToken))?;
-    
+    .map_err(|_| {
+        jsonwebtoken::errors::Error::from(jsonwebtoken::errors::ErrorKind::InvalidToken)
+    })?;
+
     Ok(result.unwrap_or(false))
 }
 
@@ -182,7 +190,7 @@ mod tests {
     fn test_generate_and_validate_token() {
         let user_id = Uuid::new_v4();
         let token = generate_access_token(user_id).expect("Failed to generate token");
-        
+
         let claims = validate_token_sync(&token).expect("Failed to validate token");
         assert_eq!(claims.sub, user_id);
     }
@@ -191,7 +199,7 @@ mod tests {
     fn test_expired_token() {
         let user_id = Uuid::new_v4();
         let now = Utc::now();
-        
+
         let claims = Claims {
             sub: user_id,
             exp: (now - Duration::seconds(100)).timestamp(), // Expired
@@ -215,14 +223,14 @@ mod tests {
     fn test_key_manager_rotation() {
         let manager = JwtKeyManager::new();
         let original_key = manager.get_current_key();
-        
+
         // Rotate to a new key
         let new_key = "new-secret-key".to_string();
         manager.rotate_key(new_key.clone());
-        
+
         // Current key should be the new one
         assert_eq!(manager.get_current_key(), new_key);
-        
+
         // All keys should include both old and new
         let all_keys = manager.get_all_keys();
         assert_eq!(all_keys.len(), 2);
@@ -234,21 +242,22 @@ mod tests {
     fn test_multi_key_token_validation() {
         let user_id = Uuid::new_v4();
         let manager = JwtKeyManager::new();
-        
+
         // Generate token with original key
         let token = generate_access_token(user_id).expect("Failed to generate token");
-        
+
         // Should validate with original key
         let claims = validate_token_sync(&token).expect("Failed to validate with original key");
         assert_eq!(claims.sub, user_id);
-        
+
         // Rotate key
         manager.rotate_key("new-secret-key".to_string());
-        
+
         // Old token should still validate (using old key)
-        let claims = validate_token_sync(&token).expect("Failed to validate with old key after rotation");
+        let claims =
+            validate_token_sync(&token).expect("Failed to validate with old key after rotation");
         assert_eq!(claims.sub, user_id);
-        
+
         // New token should be generated with new key
         let new_token = generate_access_token(user_id).expect("Failed to generate new token");
         let new_claims = validate_token_sync(&new_token).expect("Failed to validate new token");
@@ -258,15 +267,15 @@ mod tests {
     #[test]
     fn test_key_cleanup() {
         let manager = JwtKeyManager::new();
-        
+
         // Add multiple keys
         for i in 1..=10 {
             manager.rotate_key(format!("key-{}", i));
         }
-        
+
         // Should have maximum of 5 keys
         assert_eq!(manager.get_all_keys().len(), 5);
-        
+
         // Clean up to keep only 2 keys
         manager.cleanup_old_keys(2);
         assert_eq!(manager.get_all_keys().len(), 2);

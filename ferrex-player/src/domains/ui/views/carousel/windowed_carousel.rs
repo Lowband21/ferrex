@@ -93,13 +93,13 @@ where
 
     // Only create cards for visible items
     for idx in state.visible_start..state.visible_end {
-        if let Some(card) = create_card(idx) {
+        match create_card(idx) { Some(card) => {
             item_row = item_row.push(card);
-        } else {
+        } _ => {
             // Add placeholder for missing items
             item_row = item_row
                 .push(container(Space::new(200.0, 370.0)).style(theme::Container::Default.style()));
-        }
+        }}
     }
 
     // Add spacer for items after visible range

@@ -4,9 +4,9 @@ use axum::{
     Extension, Json,
 };
 use ferrex_core::{
-    api_types::{ApiResponse, MediaId},
+    api_types::ApiResponse,
     watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
-    User,
+    MediaType, User,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -25,7 +25,7 @@ fn default_limit() -> usize {
 
 #[derive(Debug, Serialize)]
 pub struct ProgressResponse {
-    pub media_id: MediaId,
+    pub media_id: Uuid,
     pub position: f32,
     pub duration: f32,
     pub percentage: f32,
@@ -162,11 +162,8 @@ pub async fn get_continue_watching_handler(
 pub async fn clear_progress_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(media_id): Path<String>,
+    Path(media_id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // Parse media_id into MediaId enum
-    let media_id = parse_media_id(&media_id)?;
-
     state
         .db
         .backend()
@@ -186,11 +183,8 @@ pub async fn clear_progress_handler(
 pub async fn get_media_progress_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(media_id): Path<String>,
+    Path(media_id): Path<Uuid>,
 ) -> Result<Json<ApiResponse<Option<ProgressResponse>>>, (StatusCode, String)> {
-    // Parse media_id into MediaId enum
-    let media_id = parse_media_id(&media_id)?;
-
     // Get user's watch state
     let watch_state = state
         .db
@@ -213,7 +207,7 @@ pub async fn get_media_progress_handler(
         .iter()
         .find(|(id, _)| *id == &media_id)
         .map(|(_, item)| ProgressResponse {
-            media_id: item.media_id.clone(),
+            media_id,
             position: item.position,
             duration: item.duration,
             percentage: (item.position / item.duration) * 100.0,
@@ -221,7 +215,7 @@ pub async fn get_media_progress_handler(
         });
 
     // If not in progress but is completed, return full progress
-    let progress = progress.or_else(|| {
+    let progress = progress.or({
         if is_completed {
             Some(ProgressResponse {
                 media_id,
@@ -242,14 +236,13 @@ pub async fn get_media_progress_handler(
 pub async fn mark_completed_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(media_id): Path<String>,
+    Path(media_id): Path<Uuid>,
+    Path(media_type): Path<MediaType>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // Parse media_id into MediaId enum
-    let media_id = parse_media_id(&media_id)?;
-
     // Create a progress update request with 100% completion
     let request = UpdateProgressRequest {
-        media_id: media_id.clone(),
+        media_id,
+        media_type,
         position: 1.0, // Dummy position
         duration: 1.0, // Dummy duration to ensure 100% completion
     };
@@ -274,11 +267,8 @@ pub async fn mark_completed_handler(
 pub async fn is_completed_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(media_id): Path<String>,
+    Path(media_id): Path<Uuid>,
 ) -> Result<Json<bool>, (StatusCode, String)> {
-    // Parse media_id into MediaId enum
-    let media_id = parse_media_id(&media_id)?;
-
     let is_completed = state
         .db
         .backend()
@@ -292,45 +282,4 @@ pub async fn is_completed_handler(
         })?;
 
     Ok(Json(is_completed))
-}
-
-/// Helper function to parse media ID from string
-fn parse_media_id(media_id_str: &str) -> Result<MediaId, (StatusCode, String)> {
-    // Try to parse as UUID first
-    if let Ok(uuid) = Uuid::parse_str(media_id_str) {
-        // For now, assume it's a movie ID
-        // In a real implementation, you'd need to determine the type
-        return Ok(MediaId::Movie(
-            ferrex_core::media::MovieID::new(uuid.to_string()).unwrap(),
-        ));
-    }
-
-    // Try to parse as "type:id" format
-    let parts: Vec<&str> = media_id_str.split(':').collect();
-    if parts.len() != 2 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Invalid media ID format. Expected UUID or 'type:id'".to_string(),
-        ));
-    }
-
-    let id = Uuid::parse_str(parts[1]).map_err(|_| {
-        (
-            StatusCode::BAD_REQUEST,
-            "Invalid UUID in media ID".to_string(),
-        )
-    })?;
-
-    match parts[0] {
-        "movie" => Ok(MediaId::Movie(
-            ferrex_core::media::MovieID::new(id.to_string()).unwrap(),
-        )),
-        "episode" => Ok(MediaId::Episode(
-            ferrex_core::media::EpisodeID::new(id.to_string()).unwrap(),
-        )),
-        _ => Err((
-            StatusCode::BAD_REQUEST,
-            format!("Unknown media type: {}", parts[0]),
-        )),
-    }
 }

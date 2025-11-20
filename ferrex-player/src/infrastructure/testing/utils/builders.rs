@@ -18,7 +18,7 @@ impl RequiredField for Set {}
 /// Generic builder trait
 pub trait Builder {
     type Output;
-    
+
     /// Build the final object
     fn build(self) -> Self::Output;
 }
@@ -62,7 +62,7 @@ impl<Name, Email> UserBuilder<Name, Email> {
             _phantom: PhantomData,
         }
     }
-    
+
     /// Set the user's email (required)
     pub fn with_email(self, email: impl Into<String>) -> UserBuilder<Name, Set> {
         UserBuilder {
@@ -73,13 +73,13 @@ impl<Name, Email> UserBuilder<Name, Email> {
             _phantom: PhantomData,
         }
     }
-    
+
     /// Set the user's age (optional)
     pub fn with_age(mut self, age: u32) -> Self {
         self.age = Some(age);
         self
     }
-    
+
     /// Set admin status (optional)
     pub fn as_admin(mut self) -> Self {
         self.is_admin = true;
@@ -97,7 +97,7 @@ pub struct User {
 
 impl Builder for UserBuilder<Set, Set> {
     type Output = User;
-    
+
     fn build(self) -> User {
         User {
             name: self.name.expect("Name should be set"),
@@ -117,7 +117,7 @@ macro_rules! builder {
                 $($req_field:ident: $req_type:ty),* $(,)?
             }
             optional {
-                $($opt_field:ident: $opt_type:ty = $opt_default:expr),* $(,)?
+                $($opt_field:ident: $opt_type:ty = $opt_default:expr_2021),* $(,)?
             }
         }
     ) => {
@@ -126,21 +126,21 @@ macro_rules! builder {
             #[allow(non_camel_case_types)]
             type $req_field = ();
         )*
-        
+
         // Generate the builder struct
         pub struct $builder_name<$($req_field = NotSet),*> {
             $($req_field: Option<$req_type>,)*
             $($opt_field: $opt_type,)*
             _phantom: PhantomData<($($req_field),*)>,
         }
-        
+
         // Default implementation for new builder
         impl Default for $builder_name<$(NotSet),*> {
             fn default() -> Self {
                 Self::new()
             }
         }
-        
+
         impl $builder_name<$(NotSet),*> {
             pub fn new() -> Self {
                 Self {
@@ -150,7 +150,7 @@ macro_rules! builder {
                 }
             }
         }
-        
+
         // Methods for setting required fields
         impl<$($req_field),*> $builder_name<$($req_field),*> {
             $(
@@ -164,7 +164,7 @@ macro_rules! builder {
                     }
                 }
             )*
-            
+
             // Methods for setting optional fields
             $(
                 paste::paste! {
@@ -175,11 +175,11 @@ macro_rules! builder {
                 }
             )*
         }
-        
+
         // Build implementation when all required fields are set
         impl Builder for $builder_name<$(Set),*> {
             type Output = $output;
-            
+
             fn build(self) -> $output {
                 $output {
                     $($req_field: self.$req_field.expect(concat!(stringify!($req_field), " should be set")),)*
@@ -199,19 +199,19 @@ impl<T> CollectionBuilder<T> {
     pub fn new() -> Self {
         Self { items: Vec::new() }
     }
-    
+
     /// Add an item to the collection
     pub fn add(mut self, item: T) -> Self {
         self.items.push(item);
         self
     }
-    
+
     /// Add multiple items
     pub fn add_many(mut self, items: impl IntoIterator<Item = T>) -> Self {
         self.items.extend(items);
         self
     }
-    
+
     /// Map over items
     pub fn map<F, U>(self, f: F) -> CollectionBuilder<U>
     where
@@ -221,7 +221,7 @@ impl<T> CollectionBuilder<T> {
             items: self.items.into_iter().map(f).collect(),
         }
     }
-    
+
     /// Filter items
     pub fn filter<F>(self, f: F) -> Self
     where
@@ -231,7 +231,7 @@ impl<T> CollectionBuilder<T> {
             items: self.items.into_iter().filter(f).collect(),
         }
     }
-    
+
     /// Build the collection
     pub fn build(self) -> Vec<T> {
         self.items
@@ -247,20 +247,20 @@ impl<T> Default for CollectionBuilder<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_user_builder_required_fields() {
         let user = UserBuilder::new()
             .with_name("Alice")
             .with_email("alice@example.com")
             .build();
-        
+
         assert_eq!(user.name, "Alice");
         assert_eq!(user.email, "alice@example.com");
         assert_eq!(user.age, None);
         assert!(!user.is_admin);
     }
-    
+
     #[test]
     fn test_user_builder_all_fields() {
         let user = UserBuilder::new()
@@ -269,13 +269,13 @@ mod tests {
             .with_age(30)
             .as_admin()
             .build();
-        
+
         assert_eq!(user.name, "Bob");
         assert_eq!(user.email, "bob@example.com");
         assert_eq!(user.age, Some(30));
         assert!(user.is_admin);
     }
-    
+
     // This would fail to compile (demonstrating compile-time validation):
     // #[test]
     // fn test_missing_required_field() {
@@ -283,7 +283,7 @@ mod tests {
     //         .with_name("Alice")
     //         .build(); // Error: UserBuilder<Set, NotSet> doesn't implement Builder
     // }
-    
+
     #[test]
     fn test_collection_builder() {
         let users = CollectionBuilder::new()
@@ -301,7 +301,7 @@ mod tests {
             })
             .filter(|u| u.is_admin)
             .build();
-        
+
         assert_eq!(users.len(), 1);
         assert_eq!(users[0].name, "Bob");
     }

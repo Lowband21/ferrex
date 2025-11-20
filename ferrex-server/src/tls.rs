@@ -23,35 +23,35 @@ use tokio::{
     sync::RwLock,
     time::{interval, MissedTickBehavior},
 };
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// TLS-related errors
 #[derive(Debug, thiserror::Error)]
 pub enum TlsError {
     #[error("Certificate file not found: {0}")]
     CertificateNotFound(PathBuf),
-    
+
     #[error("Private key file not found: {0}")]
     PrivateKeyNotFound(PathBuf),
-    
+
     #[error("Failed to parse certificate: {0}")]
     CertificateParseFailed(String),
-    
+
     #[error("Failed to parse private key: {0}")]
     PrivateKeyParseFailed(String),
-    
+
     #[error("Certificate chain validation failed: {0}")]
     CertificateValidationFailed(String),
-    
+
     #[error("No private keys found in file")]
     NoPrivateKeysFound,
-    
+
     #[error("Multiple private keys found, expected one")]
     MultiplePrivateKeysFound,
-    
+
     #[error("TLS configuration error: {0}")]
     ConfigurationError(String),
-    
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 }
@@ -94,7 +94,7 @@ impl TlsConfigManager {
     /// Create a new TLS configuration manager
     pub async fn new(config: TlsCertConfig) -> Result<Self, TlsError> {
         let rustls_config = Self::load_rustls_config(&config).await?;
-        
+
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
             rustls_config: Arc::new(RwLock::new(Arc::new(rustls_config))),
@@ -107,10 +107,10 @@ impl TlsConfigManager {
         tokio::spawn(async move {
             let mut interval = interval(self.reload_interval);
             interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-            
+
             loop {
                 interval.tick().await;
-                
+
                 if let Err(e) = self.reload_certificates().await {
                     error!("Failed to reload TLS certificates: {}", e);
                 }
@@ -134,33 +134,33 @@ impl TlsConfigManager {
     /// Reload certificates from disk
     async fn reload_certificates(&self) -> Result<(), TlsError> {
         let config = self.config.read().await.clone();
-        
+
         // Check if files have been modified
         let cert_modified = Self::check_file_modified(&config.cert_path).await;
         let key_modified = Self::check_file_modified(&config.key_path).await;
-        
+
         if cert_modified || key_modified {
             info!("TLS certificate change detected, reloading...");
-            
+
             match Self::load_rustls_config(&config).await {
                 Ok(new_config) => {
                     *self.rustls_config.write().await = Arc::new(new_config);
                     info!("TLS certificates reloaded successfully");
-                    
+
                     // TODO: Export metrics for successful reload
                     // metrics::counter!("tls_cert_reload_success").increment(1);
                 }
                 Err(e) => {
                     error!("Failed to reload TLS certificates: {}", e);
-                    
+
                     // TODO: Export metrics for failed reload
                     // metrics::counter!("tls_cert_reload_failure").increment(1);
-                    
+
                     return Err(e);
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -168,22 +168,22 @@ impl TlsConfigManager {
     async fn load_rustls_config(config: &TlsCertConfig) -> Result<ServerConfig, TlsError> {
         // Load certificate chain
         let cert_chain = Self::load_certificates(&config.cert_path).await?;
-        
+
         // Load private key
         let private_key = Self::load_private_key(&config.key_path).await?;
-        
+
         // Create rustls config
         let mut rustls_config = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(cert_chain, private_key)
             .map_err(|e| TlsError::ConfigurationError(e.to_string()))?;
-        
+
         // Note: TLS version configuration in rustls 0.23+ is handled during ServerConfig::builder()
         // The min_tls_version configuration would need to be applied at builder level
-        
+
         // Configure ALPN for HTTP/2
         rustls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-        
+
         Ok(rustls_config)
     }
 
@@ -192,21 +192,23 @@ impl TlsConfigManager {
         if !path.exists() {
             return Err(TlsError::CertificateNotFound(path.to_path_buf()));
         }
-        
+
         let mut file = File::open(path).await?;
         let mut pem_data = Vec::new();
         file.read_to_end(&mut pem_data).await?;
-        
+
         let mut reader = BufReader::new(&pem_data[..]);
         let certs = rustls_pemfile::certs(&mut reader)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| TlsError::CertificateParseFailed(e.to_string()))?;
-        
+
         if certs.is_empty() {
-            return Err(TlsError::CertificateParseFailed("No certificates found in file".to_string()));
+            return Err(TlsError::CertificateParseFailed(
+                "No certificates found in file".to_string(),
+            ));
         }
-        
-        Ok(certs.into_iter().map(CertificateDer::from).collect())
+
+        Ok(certs.into_iter().collect())
     }
 
     /// Load private key from PEM file
@@ -214,39 +216,39 @@ impl TlsConfigManager {
         if !path.exists() {
             return Err(TlsError::PrivateKeyNotFound(path.to_path_buf()));
         }
-        
+
         let mut file = File::open(path).await?;
         let mut pem_data = Vec::new();
         file.read_to_end(&mut pem_data).await?;
-        
+
         let mut reader = BufReader::new(&pem_data[..]);
-        
+
         // Try to read PKCS#8 private key first
         let keys = rustls_pemfile::pkcs8_private_keys(&mut reader)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| TlsError::PrivateKeyParseFailed(e.to_string()))?;
-        
+
         if !keys.is_empty() {
             if keys.len() > 1 {
                 return Err(TlsError::MultiplePrivateKeysFound);
             }
             return Ok(PrivateKeyDer::from(keys.into_iter().next().unwrap()));
         }
-        
+
         // Try RSA private key format
         let mut reader = BufReader::new(&pem_data[..]);
         let keys = rustls_pemfile::rsa_private_keys(&mut reader)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| TlsError::PrivateKeyParseFailed(e.to_string()))?;
-        
+
         if keys.is_empty() {
             return Err(TlsError::NoPrivateKeysFound);
         }
-        
+
         if keys.len() > 1 {
             return Err(TlsError::MultiplePrivateKeysFound);
         }
-        
+
         Ok(PrivateKeyDer::from(keys.into_iter().next().unwrap()))
     }
 
@@ -281,13 +283,13 @@ mod tests {
 
     async fn create_test_cert_files() -> Result<TempDir> {
         let temp_dir = TempDir::new()?;
-        
+
         let cert_path = temp_dir.path().join("cert.pem");
         let key_path = temp_dir.path().join("key.pem");
-        
+
         fs::write(&cert_path, TEST_CERT).await?;
         fs::write(&key_path, TEST_KEY).await?;
-        
+
         Ok(temp_dir)
     }
 
@@ -295,10 +297,10 @@ mod tests {
     async fn test_load_certificates() -> Result<()> {
         let temp_dir = create_test_cert_files().await?;
         let cert_path = temp_dir.path().join("cert.pem");
-        
+
         let certs = TlsConfigManager::load_certificates(&cert_path).await?;
         assert_eq!(certs.len(), 1);
-        
+
         Ok(())
     }
 
@@ -306,10 +308,10 @@ mod tests {
     async fn test_load_private_key() -> Result<()> {
         let temp_dir = create_test_cert_files().await?;
         let key_path = temp_dir.path().join("key.pem");
-        
+
         let key = TlsConfigManager::load_private_key(&key_path).await?;
         assert!(!key.secret_der().is_empty());
-        
+
         Ok(())
     }
 

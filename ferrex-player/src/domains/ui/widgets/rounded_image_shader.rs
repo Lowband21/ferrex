@@ -7,6 +7,7 @@ pub mod rounded_image_batch_state;
 
 use crate::domains::ui::messages::Message;
 
+use crate::infrastructure::constants::animation;
 use bytemuck::{Pod, Zeroable};
 use iced::advanced::graphics::Viewport;
 use iced::wgpu;
@@ -93,10 +94,8 @@ pub enum AnimationType {
     Fade {
         duration: Duration,
     },
+    /// The enhanced flip is now the default and only flip variant
     Flip {
-        duration: Duration,
-    },
-    EnhancedFlip {
         total_duration: Duration,
         rise_end: f32,   // Phase end: 0.0-0.25
         emerge_end: f32, // Phase end: 0.25-0.5
@@ -113,16 +112,15 @@ impl AnimationType {
             AnimationType::None => 0,
             AnimationType::Fade { .. } => 1,
             AnimationType::Flip { .. } => 2,
-            AnimationType::EnhancedFlip { .. } => 3,
-            AnimationType::PlaceholderSunken => 4,
+            AnimationType::PlaceholderSunken => 3,
         }
     }
 
-    /// Create default enhanced flip animation with standard timings
-    pub fn enhanced_flip() -> Self {
+    /// Create default flip animation with standard timings
+    pub fn flip() -> Self {
         use crate::infrastructure::constants::animation;
 
-        AnimationType::EnhancedFlip {
+        AnimationType::Flip {
             total_duration: Duration::from_millis(animation::DEFAULT_DURATION_MS),
             rise_end: 0.10,
             emerge_end: 0.20,
@@ -351,8 +349,7 @@ impl Program<Message> for RoundedImageProgram {
                                     Point::new(position.x - bounds.x, position.y - bounds.y);
                                 state.mouse_position = Some(relative_pos);
                                 state.is_hovered = true;
-                                log::debug!("Cursor entered widget at: {:?}", relative_pos);
-                                //return Some(iced::widget::Action::request_redraw());
+                                //log::debug!("Cursor entered widget at: {:?}", relative_pos);
                             }
                         }
                     }
@@ -361,7 +358,6 @@ impl Program<Message> for RoundedImageProgram {
                         state.mouse_position = None;
                         state.is_hovered = false;
                         log::debug!("Cursor left widget");
-                        //return Some(iced::widget::Action::request_redraw());
                     }
                     _ => {}
                 }
@@ -475,12 +471,6 @@ impl Default for State {
             globals_buffer: None,
             globals_bind_group: None,
             primitive_data: HashMap::new(),
-            /*
-            batch: BatchedData {
-                instance_buffer: None,
-                instances: Vec::new(),
-            },
-            prepared_primitives: HashSet::new(), */
         }
     }
 }
@@ -495,11 +485,7 @@ impl Pipeline {
         profiling::function
     )]
     fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        log::info!("Creating rounded image shader pipeline");
-
-        // Initialize GPU profiler on first pipeline creation
-        // Note: We can't get the queue here, so GPU profiling initialization
-        // will need to happen elsewhere
+        log::debug!("Creating rounded image shader pipeline");
 
         // Load shader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -508,7 +494,7 @@ impl Pipeline {
         });
 
         // Create globals bind group layout (includes sampler)
-        log::info!("Creating globals bind group layout");
+        log::debug!("Creating globals bind group layout");
         let globals_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Rounded Image Globals"),
@@ -746,7 +732,7 @@ fn create_instance(
     ) = if let Some(load_time) = load_time {
         let elapsed = std::time::Instant::now().duration_since(load_time);
         let animation = match animation {
-            AnimationType::EnhancedFlip {
+            AnimationType::Flip {
                 total_duration,
                 emerge_end,
                 flip_end,
@@ -755,7 +741,7 @@ fn create_instance(
                 if elapsed > total_duration {
                     AnimationType::None
                 } else {
-                    AnimationType::EnhancedFlip {
+                    AnimationType::Flip {
                         total_duration,
                         emerge_end,
                         flip_end,
@@ -941,7 +927,7 @@ fn create_batch_instance(
     ) = if let Some(load_time) = load_time {
         let elapsed = load_time.elapsed();
         let animation = match animation {
-            AnimationType::EnhancedFlip {
+            AnimationType::Flip {
                 total_duration,
                 emerge_end,
                 flip_end,
@@ -950,7 +936,7 @@ fn create_batch_instance(
                 if elapsed > total_duration {
                     AnimationType::None
                 } else {
-                    AnimationType::EnhancedFlip {
+                    AnimationType::Flip {
                         total_duration,
                         emerge_end,
                         flip_end,
@@ -1162,12 +1148,7 @@ fn calculate_animation_state(
             let progress = (elapsed.as_secs_f32() / duration.as_secs_f32()).min(1.0);
             (opacity * progress, 0.0, progress, 0.0, 1.0, 0.0, 0.0)
         }
-        AnimationType::Flip { duration } => {
-            let progress = (elapsed.as_secs_f32() / duration.as_secs_f32()).min(1.0);
-            let rotation = std::f32::consts::PI * (1.0 - progress);
-            (opacity, rotation, progress, 0.0, 1.0, 0.0, 0.0)
-        }
-        AnimationType::EnhancedFlip {
+        AnimationType::Flip {
             total_duration,
             rise_end,
             emerge_end,
@@ -1263,7 +1244,7 @@ impl Primitive for RoundedImagePrimitive {
             let batch_state =
                 rounded_image_batch_state::RoundedImageBatchState::new(device, format);
             storage.store_batch_state(type_id, Box::new(batch_state));
-            log::info!("Registered RoundedImagePrimitive for batched rendering");
+            log::debug!("Registered RoundedImagePrimitive for batched rendering");
         }
 
         if has_batch {
@@ -1381,15 +1362,15 @@ impl Primitive for RoundedImagePrimitive {
             _padding: [0.0; 7], // 7 floats = 28 bytes padding to reach 96 bytes total
         };
         // Use write_buffer_with to avoid intermediate copy
-        if let Some(mut view) = queue.write_buffer_with(
+        match queue.write_buffer_with(
             state.globals_buffer.as_ref().unwrap(),
             0,
             wgpu::BufferSize::new(std::mem::size_of::<Globals>() as u64).unwrap(),
-        ) {
+        ) { Some(mut view) => {
             view.copy_from_slice(bytemuck::cast_slice(&[globals]));
-        } else {
+        } _ => {
             log::error!("Failed to map globals buffer for writing");
-        }
+        }}
 
         // Profile texture upload to atlas
         #[cfg(feature = "profile-with-tracy")]
@@ -1438,15 +1419,15 @@ impl Primitive for RoundedImagePrimitive {
         ))]
         profiling::scope!("UI::RoundedImageShader::BufferWrite");
         // Write instance data to the buffer using write_buffer_with to avoid intermediate copy
-        if let Some(mut view) = queue.write_buffer_with(
+        match queue.write_buffer_with(
             &instance_buffer,
             0,
             wgpu::BufferSize::new(std::mem::size_of::<Instance>() as u64).unwrap(),
-        ) {
+        ) { Some(mut view) => {
             view.copy_from_slice(bytemuck::cast_slice(&[instance]));
-        } else {
+        } _ => {
             log::error!("Failed to map instance buffer for writing");
-        }
+        }}
 
         let key = self as *const _ as usize;
         state
@@ -1598,7 +1579,7 @@ impl RoundedImage {
         Self {
             id: id.unwrap_or(0),
             handle,
-            radius: 8.0,
+            radius: crate::infrastructure::constants::layout::poster::CORNER_RADIUS,
             width: Length::Fixed(200.0),
             height: Length::Fixed(300.0),
             animation: AnimationType::None,

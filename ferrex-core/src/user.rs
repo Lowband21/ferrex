@@ -182,10 +182,10 @@ impl Default for PlaybackPreferences {
 pub enum PlaybackQuality {
     Auto,
     Original,
-    High4K,    // 4K
-    High1080p, // 1080p
+    High4K,     // 4K
+    High1080p,  // 1080p
     Medium720p, // 720p
-    Low480p,   // 480p
+    Low480p,    // 480p
 }
 
 impl std::fmt::Display for PlaybackQuality {
@@ -204,9 +204,9 @@ impl std::fmt::Display for PlaybackQuality {
 /// Resume playback behavior
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ResumeBehavior {
-    Always,    // Always resume from last position
-    Ask,       // Ask user whether to resume
-    Never,     // Always start from beginning
+    Always, // Always resume from last position
+    Ask,    // Ask user whether to resume
+    Never,  // Always start from beginning
 }
 
 impl std::fmt::Display for ResumeBehavior {
@@ -361,10 +361,10 @@ pub struct RegisterRequest {
 /// JWT Claims for access tokens
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: Uuid,      // User ID
-    pub exp: i64,       // Expiration time
-    pub iat: i64,       // Issued at
-    pub jti: String,    // JWT ID for revocation
+    pub sub: Uuid,   // User ID
+    pub exp: i64,    // Expiration time
+    pub iat: i64,    // Issued at
+    pub jti: String, // JWT ID for revocation
 }
 
 /// Authentication errors
@@ -372,19 +372,19 @@ pub struct Claims {
 pub enum AuthError {
     #[error("Invalid credentials")]
     InvalidCredentials,
-    
+
     #[error("Username already taken")]
     UsernameTaken,
-    
+
     #[error("Token expired")]
     TokenExpired,
-    
+
     #[error("Invalid token")]
     TokenInvalid,
-    
+
     #[error("Rate limit exceeded")]
     RateLimitExceeded,
-    
+
     #[error("Internal error")]
     InternalError,
 }
@@ -394,10 +394,10 @@ pub enum AuthError {
 pub enum ValidationError {
     #[error("Invalid username: must be 3-30 characters, alphanumeric or underscore")]
     InvalidUsername,
-    
+
     #[error("Password too short: minimum 8 characters required")]
     PasswordTooShort,
-    
+
     #[error("Invalid display name: must be 1-100 characters")]
     InvalidDisplayName,
 }
@@ -409,17 +409,20 @@ impl RegisterRequest {
         if self.username.len() < 3 || self.username.len() > 30 {
             return Err(ValidationError::InvalidUsername);
         }
-        
-        if !self.username.chars()
-            .all(|c| c.is_alphanumeric() || c == '_') {
+
+        if !self
+            .username
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_')
+        {
             return Err(ValidationError::InvalidUsername);
         }
-        
+
         // Display name: 1-100 chars
         if self.display_name.is_empty() || self.display_name.len() > 100 {
             return Err(ValidationError::InvalidDisplayName);
         }
-        
+
         Ok(())
     }
 }
@@ -443,7 +446,7 @@ impl UserUpdateRequest {
                 return Err(ValidationError::InvalidDisplayName);
             }
         }
-        
+
         Ok(())
     }
 }

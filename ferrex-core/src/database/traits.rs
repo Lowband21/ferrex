@@ -1,10 +1,11 @@
-use crate::media::{
-    EpisodeID, EpisodeReference, LibraryReference, MovieID, MovieReference, SeasonID,
-    SeasonReference, SeriesID, SeriesReference,
+use crate::{
+    EpisodeID, EpisodeReference, Library, LibraryID, LibraryReference, LibraryType, Media,
+    MediaFile, MediaFileMetadata, MediaID, MovieID, MovieReference, Result, SeasonID,
+    SeasonReference, SeriesID, SeriesReference, User, UserSession,
 };
-use crate::{Library, MediaFile, MediaFileMetadata, Result, User, UserSession};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -34,7 +35,7 @@ pub enum ScanStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanState {
     pub id: Uuid,
-    pub library_id: Uuid,
+    pub library_id: LibraryID,
     pub scan_type: ScanType,
     pub status: ScanStatus,
     pub total_folders: i32,
@@ -81,7 +82,7 @@ pub enum FileWatchEventType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileWatchEvent {
     pub id: Uuid,
-    pub library_id: Uuid,
+    pub library_id: LibraryID,
     pub event_type: FileWatchEventType,
     pub file_path: String,
     pub old_path: Option<String>,
@@ -100,7 +101,7 @@ pub struct MediaFilters {
     pub season: Option<u32>,
     pub order_by: Option<String>,
     pub limit: Option<u64>,
-    pub library_id: Option<Uuid>,
+    pub library_id: Option<LibraryID>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -141,8 +142,9 @@ pub struct EpisodeInfo {
     pub media_file_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ImageRecord {
+    #[rkyv(with = crate::rkyv_wrappers::UuidWrapper)]
     pub id: Uuid,
     pub tmdb_path: String,
     pub file_hash: Option<String>,
@@ -150,18 +152,22 @@ pub struct ImageRecord {
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub format: Option<String>,
+    #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ImageVariant {
+    #[rkyv(with = crate::rkyv_wrappers::UuidWrapper)]
     pub id: Uuid,
+    #[rkyv(with = crate::rkyv_wrappers::UuidWrapper)]
     pub image_id: Uuid,
     pub variant: String,
     pub file_path: String,
     pub file_size: i32,
     pub width: Option<i32>,
     pub height: Option<i32>,
+    #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -175,7 +181,7 @@ pub struct MediaImage {
     pub is_primary: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ImageLookupParams {
     pub media_type: String,
     pub media_id: String,
@@ -227,7 +233,7 @@ pub enum ScanPriority {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FolderInventory {
     pub id: Uuid,
-    pub library_id: Uuid,
+    pub library_id: LibraryID,
     pub folder_path: String,
     pub folder_type: FolderType,
     pub parent_folder_id: Option<Uuid>,
@@ -260,7 +266,7 @@ pub struct FolderInventory {
 
 #[derive(Debug, Clone, Default)]
 pub struct FolderScanFilters {
-    pub library_id: Option<Uuid>,
+    pub library_id: Option<LibraryID>,
     pub processing_status: Option<FolderProcessingStatus>,
     pub folder_type: Option<FolderType>,
     pub max_attempts: Option<i32>,
@@ -304,7 +310,7 @@ pub trait MediaDatabaseTrait: Send + Sync {
 
     // Library management methods
     async fn create_library(&self, library: Library) -> Result<String>;
-    async fn get_library(&self, id: &str) -> Result<Option<Library>>;
+    async fn get_library(&self, id: &LibraryID) -> Result<Option<Library>>;
     async fn list_libraries(&self) -> Result<Vec<Library>>;
     async fn update_library(&self, id: &str, library: Library) -> Result<()>;
     async fn delete_library(&self, id: &str) -> Result<()>;
@@ -318,12 +324,12 @@ pub trait MediaDatabaseTrait: Send + Sync {
     // Series lookup methods
     async fn get_series_by_tmdb_id(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         tmdb_id: u64,
     ) -> Result<Option<SeriesReference>>;
     async fn find_series_by_name(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         name: &str,
     ) -> Result<Option<SeriesReference>>;
     async fn store_episode_reference(&self, episode: &EpisodeReference) -> Result<()>;
@@ -333,10 +339,6 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn get_series_seasons(&self, series_id: &SeriesID) -> Result<Vec<SeasonReference>>;
     async fn get_season_episodes(&self, season_id: &SeasonID) -> Result<Vec<EpisodeReference>>;
 
-    // Library-centric queries
-    async fn get_library_movies(&self, library_id: Uuid) -> Result<Vec<MovieReference>>;
-    async fn get_library_series(&self, library_id: Uuid) -> Result<Vec<SeriesReference>>;
-
     // Individual reference retrieval
     async fn get_movie_reference(&self, id: &MovieID) -> Result<MovieReference>;
     async fn get_series_reference(&self, id: &SeriesID) -> Result<SeriesReference>;
@@ -344,6 +346,14 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn get_episode_reference(&self, id: &EpisodeID) -> Result<EpisodeReference>;
 
     // Bulk reference retrieval methods for performance
+    async fn get_library_media_references(
+        &self,
+        library_id: LibraryID,
+        library_type: LibraryType,
+    ) -> Result<Vec<Media>>;
+    async fn get_library_series(&self, library_id: &LibraryID) -> Result<Vec<SeriesReference>>;
+    async fn get_library_seasons(&self, library_id: &LibraryID) -> Result<Vec<SeasonReference>>;
+    async fn get_library_episodes(&self, library_id: &LibraryID) -> Result<Vec<EpisodeReference>>;
     async fn get_movie_references_bulk(&self, ids: &[&MovieID]) -> Result<Vec<MovieReference>>;
     async fn get_series_references_bulk(&self, ids: &[&SeriesID]) -> Result<Vec<SeriesReference>>;
     async fn get_season_references_bulk(&self, ids: &[&SeasonID]) -> Result<Vec<SeasonReference>>;
@@ -426,7 +436,7 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn get_active_scans(&self, library_id: Option<Uuid>) -> Result<Vec<ScanState>>;
     async fn get_latest_scan(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         scan_type: ScanType,
     ) -> Result<Option<ScanState>>;
 
@@ -441,18 +451,22 @@ pub trait MediaDatabaseTrait: Send + Sync {
     ) -> Result<Option<MediaProcessingStatus>>;
     async fn get_unprocessed_files(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         status_type: &str,
         limit: i32,
     ) -> Result<Vec<MediaFile>>;
-    async fn get_failed_files(&self, library_id: Uuid, max_retries: i32) -> Result<Vec<MediaFile>>;
+    async fn get_failed_files(
+        &self,
+        library_id: LibraryID,
+        max_retries: i32,
+    ) -> Result<Vec<MediaFile>>;
     async fn reset_processing_status(&self, media_file_id: Uuid) -> Result<()>;
 
     // File watch events
     async fn create_file_watch_event(&self, event: &FileWatchEvent) -> Result<()>;
     async fn get_unprocessed_events(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         limit: i32,
     ) -> Result<Vec<FileWatchEvent>>;
     async fn mark_event_processed(&self, event_id: Uuid) -> Result<()>;
@@ -531,16 +545,8 @@ pub trait MediaDatabaseTrait: Send + Sync {
         user_id: Uuid,
         limit: usize,
     ) -> Result<Vec<crate::InProgressItem>>;
-    async fn clear_watch_progress(
-        &self,
-        user_id: Uuid,
-        media_id: &crate::api_types::MediaId,
-    ) -> Result<()>;
-    async fn is_media_completed(
-        &self,
-        user_id: Uuid,
-        media_id: &crate::api_types::MediaId,
-    ) -> Result<bool>;
+    async fn clear_watch_progress(&self, user_id: Uuid, media_id: &Uuid) -> Result<()>;
+    async fn is_media_completed(&self, user_id: Uuid, media_id: &Uuid) -> Result<bool>;
 
     // Sync session methods
     async fn create_sync_session(&self, session: &crate::SyncSession) -> Result<()>;
@@ -564,7 +570,7 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn query_media(
         &self,
         query: &crate::query::MediaQuery,
-    ) -> Result<Vec<crate::query::MediaReferenceWithStatus>>;
+    ) -> Result<Vec<crate::query::MediaWithStatus>>;
 
     // Device authentication methods
     /// Register a new authenticated device
@@ -674,18 +680,22 @@ pub trait MediaDatabaseTrait: Send + Sync {
     ) -> Result<()>;
 
     /// Get complete folder inventory for a library
-    async fn get_folder_inventory(&self, library_id: Uuid) -> Result<Vec<FolderInventory>>;
+    async fn get_folder_inventory(&self, library_id: LibraryID) -> Result<Vec<FolderInventory>>;
 
     /// Upsert a folder (insert or update if exists)
     async fn upsert_folder(&self, folder: &FolderInventory) -> Result<Uuid>;
 
     /// Cleanup stale folders that haven't been seen in the specified time
-    async fn cleanup_stale_folders(&self, library_id: Uuid, stale_after_hours: i32) -> Result<u32>;
+    async fn cleanup_stale_folders(
+        &self,
+        library_id: LibraryID,
+        stale_after_hours: i32,
+    ) -> Result<u32>;
 
     /// Get folder by path
     async fn get_folder_by_path(
         &self,
-        library_id: Uuid,
+        library_id: LibraryID,
         path: &Path,
     ) -> Result<Option<FolderInventory>>;
 

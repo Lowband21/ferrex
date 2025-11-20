@@ -1,7 +1,7 @@
 //! Authentication domain types
 
-use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::auth::dto::UserListItemDto;
+use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::ui::views::first_run::FirstRunState;
 use ferrex_core::user::User;
 
@@ -16,8 +16,8 @@ pub enum CredentialType {
 #[derive(Debug, Clone)]
 pub enum AuthenticationMode {
     Online,
-    Cached,  // Offline with cached credentials
-    Limited, // Read-only mode when auth fails
+    Cached,    // Offline with cached credentials
+    Limited,   // Read-only mode when auth fails
     AutoLogin, // Automatic login with saved credentials
 }
 

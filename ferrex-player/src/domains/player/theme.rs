@@ -131,7 +131,7 @@ pub fn container_seek_bar_background(_theme: &iced::Theme, hovered: bool) -> con
         // Dark grey when not hovered
         Color::from_rgba(0.3, 0.3, 0.3, 0.5)
     };
-    
+
     container::Style {
         background: Some(Background::Color(background_color)),
         ..Default::default()

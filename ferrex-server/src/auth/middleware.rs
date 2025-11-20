@@ -3,16 +3,15 @@ use axum::{
     http::{header, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
-    Extension,
 };
-use ferrex_core::user::User;
-use ferrex_core::rbac::UserPermissions;
 use ferrex_core::api_types::ApiResponse;
+use ferrex_core::rbac::UserPermissions;
+use ferrex_core::user::User;
 use uuid::Uuid;
 
 use super::jwt::validate_token;
-use ferrex_core::database::postgres::PostgresDatabase;
 use crate::AppState;
+use ferrex_core::database::postgres::PostgresDatabase;
 
 pub async fn auth_middleware(
     State(state): State<AppState>,
@@ -21,13 +20,15 @@ pub async fn auth_middleware(
 ) -> Result<Response, StatusCode> {
     let token = extract_bearer_token(&request)?;
     let (user, device_id) = validate_and_get_user(&state, &token).await?;
-    
+
     // Load user permissions
-    let permissions = state.database.backend()
+    let permissions = state
+        .database
+        .backend()
         .get_user_permissions(user.id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
+
     request.extensions_mut().insert(user);
     request.extensions_mut().insert(permissions);
     request.extensions_mut().insert(device_id); // Add device_id as Option<Uuid>
@@ -42,63 +43,68 @@ pub async fn optional_auth_middleware(
     if let Ok(token) = extract_bearer_token(&request) {
         if let Ok((user, device_id)) = validate_and_get_user(&state, &token).await {
             // Also load permissions when user is authenticated
-            if let Ok(permissions) = state.database.backend()
-                .get_user_permissions(user.id)
-                .await {
+            if let Ok(permissions) = state.database.backend().get_user_permissions(user.id).await {
                 request.extensions_mut().insert(permissions);
             }
             request.extensions_mut().insert(user);
             request.extensions_mut().insert(device_id); // Add device_id as Option<Uuid>
         }
     }
-    
+
     next.run(request).await
 }
 
 /// Middleware that ensures the user is authenticated and has admin privileges
 /// This middleware must be run AFTER auth_middleware in the layer stack
 /// DEPRECATED: Use require_permission from permission_middleware instead
-pub async fn admin_middleware(
-    request: Request,
-    next: Next,
-) -> Response {
+pub async fn admin_middleware(request: Request, next: Next) -> Response {
     // Extract the user from extensions (set by auth_middleware)
     let user = match request.extensions().get::<User>() {
         Some(user) => user,
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                axum::Json(ApiResponse::<()>::error("Authentication required".to_string())),
-            ).into_response();
+                axum::Json(ApiResponse::<()>::error(
+                    "Authentication required".to_string(),
+                )),
+            )
+                .into_response();
         }
     };
-    
+
     // Extract permissions from extensions (set by auth_middleware)
     let permissions = match request.extensions().get::<UserPermissions>() {
         Some(perms) => perms,
         None => {
             return (
                 StatusCode::FORBIDDEN,
-                axum::Json(ApiResponse::<()>::error("Permission system not initialized".to_string())),
-            ).into_response();
+                axum::Json(ApiResponse::<()>::error(
+                    "Permission system not initialized".to_string(),
+                )),
+            )
+                .into_response();
         }
     };
-    
+
     // Check if user has admin role or all user management permissions
-    if !permissions.has_role("admin") && 
-       !permissions.has_all_permissions(&[
-           "users:read",
-           "users:create", 
-           "users:update",
-           "users:delete",
-           "users:manage_roles"
-       ]) {
+    if !permissions.has_role("admin")
+        && !permissions.has_all_permissions(&[
+            "users:read",
+            "users:create",
+            "users:update",
+            "users:delete",
+            "users:manage_roles",
+        ])
+    {
         return (
             StatusCode::FORBIDDEN,
-            axum::Json(ApiResponse::<()>::error("Admin access required".to_string())),
-        ).into_response();
+            axum::Json(ApiResponse::<()>::error(
+                "Admin access required".to_string(),
+            )),
+        )
+            .into_response();
     }
-    
+
     next.run(request).await
 }
 
@@ -124,18 +130,18 @@ async fn validate_and_get_user(
     if let Ok((user, device_id)) = validate_session_token(state, token).await {
         return Ok((user, device_id));
     }
-    
+
     // Fall back to JWT validation with revocation check (no device_id for JWT)
     let pool = if let Some(pg_db) = state.db.as_any().downcast_ref::<PostgresDatabase>() {
         pg_db.pool()
     } else {
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     };
-    
+
     let claims = validate_token(token, pool)
         .await
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
-    
+
     let user = state
         .db
         .backend()
@@ -143,7 +149,7 @@ async fn validate_and_get_user(
         .await
         .map_err(|_| StatusCode::UNAUTHORIZED)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    
+
     Ok((user, None)) // JWT tokens don't have device_id
 }
 
@@ -151,22 +157,22 @@ async fn validate_session_token(
     state: &AppState,
     token: &str,
 ) -> Result<(User, Option<Uuid>), StatusCode> {
-    use sha2::{Sha256, Digest};
     use chrono::Utc;
-    
+    use sha2::{Digest, Sha256};
+
     // Hash the token
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
     let token_hash = format!("{:x}", hasher.finalize());
-    
-    // Access the PostgresDatabase pool directly 
+
+    // Access the PostgresDatabase pool directly
     use ferrex_core::database::postgres::PostgresDatabase;
     let pool = if let Some(pg_db) = state.db.as_any().downcast_ref::<PostgresDatabase>() {
         pg_db.pool()
     } else {
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     };
-    
+
     // Query the sessions table including device_id
     let session_row = sqlx::query!(
         r#"
@@ -183,17 +189,17 @@ async fn validate_session_token(
         StatusCode::INTERNAL_SERVER_ERROR
     })?
     .ok_or(StatusCode::UNAUTHORIZED)?;
-    
+
     // Check if session is revoked
     if session_row.revoked {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    
+
     // Check if session is expired
     if session_row.expires_at < Utc::now() {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    
+
     // Get the user
     let user = state
         .db
@@ -202,7 +208,7 @@ async fn validate_session_token(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    
+
     // Update last activity (fire-and-forget)
     let pool_clone = pool.clone();
     let token_hash_clone = token_hash.clone();
@@ -214,6 +220,6 @@ async fn validate_session_token(
         .execute(&pool_clone)
         .await;
     });
-    
+
     Ok((user, Some(session_row.device_id)))
 }

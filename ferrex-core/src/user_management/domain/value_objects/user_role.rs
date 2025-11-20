@@ -11,13 +11,13 @@ pub enum UserRole {
     /// - Can manage own watch status
     /// - Can update own profile
     User,
-    
+
     /// Moderator with enhanced permissions
     /// - All User permissions
     /// - Can manage media library
     /// - Can view user activity logs
     Moderator,
-    
+
     /// Administrator with full system access
     /// - All Moderator permissions
     /// - Can manage users and roles
@@ -105,11 +105,11 @@ mod tests {
         assert!(UserRole::Admin.has_permission_level(UserRole::User));
         assert!(UserRole::Admin.has_permission_level(UserRole::Moderator));
         assert!(UserRole::Admin.has_permission_level(UserRole::Admin));
-        
+
         assert!(UserRole::Moderator.has_permission_level(UserRole::User));
         assert!(UserRole::Moderator.has_permission_level(UserRole::Moderator));
         assert!(!UserRole::Moderator.has_permission_level(UserRole::Admin));
-        
+
         assert!(UserRole::User.has_permission_level(UserRole::User));
         assert!(!UserRole::User.has_permission_level(UserRole::Moderator));
         assert!(!UserRole::User.has_permission_level(UserRole::Admin));
@@ -120,11 +120,11 @@ mod tests {
         assert!(UserRole::Admin.can_manage_users());
         assert!(UserRole::Admin.can_access_admin());
         assert!(UserRole::Admin.can_manage_library());
-        
+
         assert!(UserRole::Moderator.can_manage_users());
         assert!(!UserRole::Moderator.can_access_admin());
         assert!(UserRole::Moderator.can_manage_library());
-        
+
         assert!(!UserRole::User.can_manage_users());
         assert!(!UserRole::User.can_access_admin());
         assert!(!UserRole::User.can_manage_library());
@@ -135,10 +135,16 @@ mod tests {
         assert_eq!(UserRole::User.as_str(), "user");
         assert_eq!(UserRole::Moderator.as_str(), "moderator");
         assert_eq!(UserRole::Admin.as_str(), "admin");
-        
+
         assert_eq!("user".parse::<UserRole>().unwrap(), UserRole::User);
-        assert_eq!("moderator".parse::<UserRole>().unwrap(), UserRole::Moderator);
+        assert_eq!(
+            "moderator".parse::<UserRole>().unwrap(),
+            UserRole::Moderator
+        );
         assert_eq!("admin".parse::<UserRole>().unwrap(), UserRole::Admin);
-        assert_eq!("administrator".parse::<UserRole>().unwrap(), UserRole::Admin);
+        assert_eq!(
+            "administrator".parse::<UserRole>().unwrap(),
+            UserRole::Admin
+        );
     }
 }

@@ -152,56 +152,56 @@ impl SegmentGenerator {
 
         // Build FFmpeg command for single segment
         let mut cmd = Command::new(&self.ffmpeg_path);
-        
+
         // Seek to start time
         cmd.arg("-ss").arg(format!("{:.2}", start_time));
-        
+
         // Input file
         cmd.arg("-i").arg(media_path);
-        
+
         // Duration
         cmd.arg("-t").arg(format!("{:.2}", duration));
-        
+
         // Video codec and settings
         cmd.arg("-c:v").arg(&profile.video_codec);
         cmd.arg("-b:v").arg(&profile.video_bitrate);
         cmd.arg("-preset").arg(&profile.preset);
-        
+
         // Audio codec and settings
         cmd.arg("-c:a").arg(&profile.audio_codec);
         cmd.arg("-b:a").arg(&profile.audio_bitrate);
-        
+
         // Resolution if specified
         if let Some(resolution) = &profile.resolution {
             cmd.arg("-s").arg(resolution);
         }
-        
+
         // Force keyframe at start
         cmd.arg("-force_key_frames").arg("expr:gte(t,0)");
-        
+
         // Output format
         cmd.arg("-f").arg("mpegts");
-        
+
         // Output file
         let segment_path = output_dir.join(format!("segment_{:03}.ts", segment_number));
         cmd.arg(&segment_path);
-        
+
         // Execute command
         let output = cmd.output().await.context("Failed to execute FFmpeg")?;
-        
+
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
             error!("FFmpeg failed for segment {}: {}", segment_key, error);
-            
+
             // Mark as failed
             let mut tasks = self.generation_tasks.write().await;
             if let Some(task) = tasks.get_mut(&segment_key) {
                 task.status = GenerationStatus::Failed(error.to_string());
             }
-            
+
             return Err(anyhow::anyhow!("FFmpeg failed: {}", error));
         }
-        
+
         // Mark as completed
         {
             let mut tasks = self.generation_tasks.write().await;
@@ -209,14 +209,14 @@ impl SegmentGenerator {
                 task.status = GenerationStatus::Completed;
             }
         }
-        
+
         // Add to cache
         if let Ok(metadata) = fs::metadata(&segment_path).await {
             self.cache
                 .put(segment_key.clone(), segment_path.clone(), metadata.len())
                 .await?;
         }
-        
+
         info!("Generated segment {} successfully", segment_key);
         Ok(segment_path)
     }

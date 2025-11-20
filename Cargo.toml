@@ -1,61 +1,63 @@
 [workspace]
 members = ["ferrex-server", "ferrex-core", "ferrex-player"]
-exclude = [
-    "lucide_icons_iced_0.14",
-    "iced_fork",
-    "iced_video_player",
-    "iced_video_player_wayland",
-]
-resolver = "2"
+resolver = "3"
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
-authors = ["Ferrex Contributors"]
+edition = "2024"
+authors = ["Grayson Hieb"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Lowband21/rusty-media-server"
 documentation = "https://docs.rs/ferrex"
 homepage = "https://github.com/Lowband21/ferrex_media_server"
 readme = "README.md"
-keywords = ["media-server", "streaming", "rust", "video", "transcoding"]
+keywords = ["media-server", "streaming", "rust", "video", "hdr", "iced", "shader"]
 categories = ["multimedia", "web-programming::http-server"]
 
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "1.40", features = ["full"] }
-tokio-util = { version = "0.7", features = ["io"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
-futures = "0.3"
+tokio = { version = "^1.47", default-features = false, features = ["full"] }
+tokio-util = { version = "^0.7", default-features = false, features = ["io"] }
+tokio-stream = { version = "^0.1", default-features = false, features = ["sync"] }
+
+# Futures
+futures = "^0.3"
+futures-util = "^0.3"
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { version = "^1.0", default-features = false, features = ["std", "derive"] }
+serde_json = "^1.0"
+rkyv = { version = "^0.8.11", default-features = false, features = ["std", "alloc", "bytecheck", "little_endian", "aligned", "pointer_width_32"] }
 
 # Error handling
-anyhow = "1.0"
-thiserror = "1.0"
+anyhow = "^1.0"
+thiserror = "^2.0"
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = "^0.1"
+tracing-subscriber = { version = "^0.3", features = ["env-filter"] }
+log = "^0.4"
 
 # Time handling
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "^0.4", default-features = false, features = ["alloc", "std", "clock", "now", "serde", "rkyv-32", "rkyv-validation"] }
 
 # HTTP/Web
-axum = { version = "0.7", features = ["ws"] }
-axum-extra = { version = "0.9", features = ["typed-header"] }
-tower = { version = "0.4", features = ["util"] }
-tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
-reqwest = { version = "0.11", features = ["json"] }
+# 0.7 is out of date and 0.8 has breaking changes
+axum = { version = "^0.8", features = ["ws", "macros"] }
+axum-server = { version = "^0.7", features = ["tls-rustls"] }
+axum-extra = { version = "^0.10", features = ["typed-header"] }
+tower = { version = "^0.5", features = ["util"] }
+tower-http = { version = "^0.6", features = ["fs", "cors", "trace"] }
+reqwest = { version = "^0.12", features = ["json", "stream"] }
 
 # Async traits
-async-trait = "0.1"
+async-stream = "^0.3.6"
+async-trait = "^0.1"
 
 # Database
-surrealdb = { version = "1.5", features = ["kv-mem"] }
-sqlx = { version = "0.7", features = [
-    "runtime-tokio-rustls",
+surrealdb = { version = "^2.3", features = ["kv-mem"] }
+sqlx = { version = "^0.7", features = [
+    "runtime-tokio",
     "postgres",
     "chrono",
     "uuid",
@@ -63,52 +65,71 @@ sqlx = { version = "0.7", features = [
     "bigdecimal",
     "ipnetwork",
 ] }
-redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+redis = { version = "^0.32", features = ["tokio-comp", "connection-manager", "aio"] }
 
 # Media processing
-ffmpeg-next = "7.0"
+ffmpeg-next = "^8.0"
 
 # File system
-walkdir = "2.5"
+walkdir = "^2.5"
 
 # Image processing
-image = "0.25"
+image = "^0.25"
 
 # Cryptography
-sha2 = "0.10"
+sha2 = "^0.10"
+aes-gcm = "^0.10"
+base64 = "^0.22"
+rustls = "^0.23"
+rustls-pemfile = "^2.2"
+rustls-pki-types = "^1.12"
+rand = "^0.9"
+ring = "^0.17.14"
+
+# Memory zeroization for secure credentials
+zeroize = { version = "^1.8.1", features = ["zeroize_derive"] }
+
+# Temp file handling
+tempfile = "^3.21"
 
 # Regex
-regex = "1.10"
+regex = "^1.11"
 
 # UUID generation
-uuid = { version = "1.10", features = ["v4", "v5", "v7", "serde", "std"] }
+uuid = { version = "^1.18", features = ["v4", "v5", "v7", "serde", "std"] }
 
 # Configuration
-config = "0.14"
+config = "^0.15"
 
 # URL
-url = "2.5.4"
+url = "^2.5.7"
 
 # tmdb
-tmdb-api = "0.9.1"
+tmdb-api = "^0.9.1"
 
 # Testing
-mockall = "0.13"
-tempfile = "3.12"
+mockall = "^0.13"
 
 # Concurrency
-rayon = "1.10.0"
+rayon = "^1.11"
+dashmap = "^6.1"
 
 # Fuzzy matching
-fuzzy-matcher = "0.3"
+fuzzy-matcher = "^0.3"
 
 # Authentication
-jsonwebtoken = "9.3"
-argon2 = "0.5.3"
+jsonwebtoken = "^9.3"
+argon2 = "^0.5.3"
 
 [profile.release]
 lto = "thin"
-codegen-units = 1
+codegen-units = 256
+opt-level = 3
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
 opt-level = 3
 
 [profile.dev.package.ferrex-player]
@@ -124,14 +145,15 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 # Define documentation lints
 [workspace.lints.rustdoc]
-broken_intra_doc_links = "warn"
-private_intra_doc_links = "warn"
-missing_crate_level_docs = "warn"
-private_doc_tests = "warn"
-invalid_codeblock_attributes = "warn"
-invalid_rust_codeblocks = "warn"
-bare_urls = "warn"
+#broken_intra_doc_links = "warn"
+#private_intra_doc_links = "warn"
+#missing_crate_level_docs = "warn"
+#private_doc_tests = "warn"
+#invalid_codeblock_attributes = "warn"
+#invalid_rust_codeblocks = "warn"
+#bare_urls = "warn"
 
 [workspace.lints.rust]
-missing_docs = "warn"
+# Still need to add docs
+missing_docs = "allow"
 missing_debug_implementations = "warn"

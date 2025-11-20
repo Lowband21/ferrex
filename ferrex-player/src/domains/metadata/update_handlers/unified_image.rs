@@ -1,5 +1,6 @@
 use crate::domains::metadata::{image_types::ImageRequest, messages::Message};
 use crate::state_refactored::State;
+use ferrex_core::ImageSize;
 use iced::{widget::image::Handle, Task};
 
 /// Handle successful image load from the unified image service
@@ -18,12 +19,24 @@ pub fn handle_unified_image_loaded(
         .image_service
         .mark_loaded(&request, handle.clone());
 
+    // Keep UI alive briefly to allow poster animations to play smoothly
+    if matches!(request.size, ImageSize::Poster) || matches!(request.size, ImageSize::Thumbnail) {
+        use std::time::{Duration, Instant};
+        let until = Instant::now()
+            + Duration::from_millis(
+                (crate::infrastructure::constants::layout::animation::DEFAULT_DURATION_MS as f64
+                    * 1.25) as u64,
+            );
+        let ui_until = &mut state.domains.ui.state.poster_anim_active_until;
+        *ui_until = Some(ui_until.map(|u| u.max(until)).unwrap_or(until));
+    }
+
     /*
     // Check if this is a backdrop for the current detail view
     let should_refresh = match (&state.domains.ui.state.view, &request.media_id, &request.size) {
         (
             crate::domains::ui::types::ViewState::MovieDetail { movie, .. },
-            ferrex_core::api_types::MediaId::Movie(id),
+            ferrex_core::MediaID::Movie(id),
             crate::domains::metadata::image_types::ImageSize::Backdrop,
         ) if &movie.id == id => {
             log::info!("Loaded backdrop for current movie detail view");
@@ -31,7 +44,7 @@ pub fn handle_unified_image_loaded(
         }
         (
             crate::domains::ui::types::ViewState::TvShowDetail { series_id, .. },
-            ferrex_core::api_types::MediaId::Series(id),
+            ferrex_core::MediaID::Series(id),
             crate::domains::metadata::image_types::ImageSize::Backdrop,
         ) if series_id == id => {
             log::info!("Loaded backdrop for current TV show detail view");
@@ -39,7 +52,7 @@ pub fn handle_unified_image_loaded(
         }
         (
             crate::domains::ui::types::ViewState::SeasonDetail { season_id, .. },
-            ferrex_core::api_types::MediaId::Season(id),
+            ferrex_core::MediaID::Season(id),
             crate::domains::metadata::image_types::ImageSize::Backdrop,
         ) if season_id == id => {
             log::info!("Loaded backdrop for current season detail view");

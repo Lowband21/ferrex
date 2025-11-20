@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use crate::domains::auth::manager::DeviceAuthStatus;
 use crate::domains::auth::messages as auth;
 use crate::domains::auth::security::secure_credential::SecureCredential;
-use crate::domains::metadata::batch_fetcher;
 use crate::infrastructure::services::api::ApiService;
+use crate::infrastructure::services::auth::AuthService;
 use crate::state_refactored::State;
 use ferrex_core::rbac::UserPermissions;
 use ferrex_core::user::User;
@@ -19,7 +21,7 @@ pub fn handle_load_users(state: &mut State) -> Task<auth::Message> {
 
     // Directly load users - we'll check setup status only if no users exist
     let auth_service = &state.domains.auth.state.auth_service;
-    let svc = std::sync::Arc::clone(auth_service);
+    let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
     Task::perform(
         async move {
             log::info!("[Auth] Fetching all users from server via AuthService");
@@ -122,7 +124,7 @@ pub fn handle_select_user(state: &mut State, user_id: uuid::Uuid) -> Task<auth::
 
         // Check device authentication status
         let auth_service = &state.domains.auth.state.auth_service;
-        let svc = std::sync::Arc::clone(auth_service);
+        let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
         let user_id = user.id;
         let user_clone = user.clone();
 
@@ -214,7 +216,7 @@ pub fn handle_device_status_checked(
 /// Handle enable admin PIN unlock
 pub fn handle_enable_admin_pin_unlock(state: &mut State) -> Task<auth::Message> {
     let auth_service = &state.domains.auth.state.auth_service;
-    let svc = std::sync::Arc::clone(auth_service);
+    let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
     Task::future(async move {
         match svc.enable_admin_pin_unlock().await {
             Ok(_) => auth::Message::AdminPinUnlockToggled(Ok(true)),
@@ -226,7 +228,7 @@ pub fn handle_enable_admin_pin_unlock(state: &mut State) -> Task<auth::Message> 
 /// Handle disable admin PIN unlock
 pub fn handle_disable_admin_pin_unlock(state: &mut State) -> Task<auth::Message> {
     let auth_service = &state.domains.auth.state.auth_service;
-    let svc = std::sync::Arc::clone(auth_service);
+    let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
     Task::future(async move {
         match svc.disable_admin_pin_unlock().await {
             Ok(_) => auth::Message::AdminPinUnlockToggled(Ok(false)),
@@ -336,7 +338,7 @@ pub fn handle_back_to_user_selection(state: &mut State) -> Task<auth::Message> {
 pub fn handle_logout(state: &mut State) -> Task<auth::Message> {
     // Use trait-based auth service
     let auth_service = &state.domains.auth.state.auth_service;
-    let svc = std::sync::Arc::clone(auth_service);
+    let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
     Task::perform(
         async move {
             let _ = svc.logout().await;
@@ -379,7 +381,7 @@ pub fn handle_check_auth_status(state: &mut State) -> Task<auth::Message> {
 
     // Get user and permissions from auth state
     let auth_service = &state.domains.auth.state.auth_service;
-    let svc = std::sync::Arc::clone(auth_service);
+    let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
 
     let (user, permissions) = tokio::task::block_in_place(move || {
         tokio::runtime::Handle::current().block_on(async move {
@@ -414,7 +416,7 @@ pub fn handle_auth_status_confirmed_with_pin(state: &mut State) -> Task<auth::Me
 
     // Load permissions from stored auth
     let auth_service = &state.domains.auth.state.auth_service;
-    let svc = std::sync::Arc::clone(auth_service);
+    let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
     // Block to obtain permissions synchronously for immediate use
     state.domains.auth.state.user_permissions = tokio::task::block_in_place(move || {
         tokio::runtime::Handle::current()
@@ -439,7 +441,7 @@ pub fn handle_check_setup_status(state: &mut State) -> Task<auth::Message> {
 
     // Use trait-based auth service
     let auth_service = &state.domains.auth.state.auth_service;
-    let svc = std::sync::Arc::clone(auth_service);
+    let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
 
     Task::perform(
         async move {
@@ -495,13 +497,13 @@ pub fn handle_setup_status_checked(state: &mut State, needs_setup: bool) -> Task
 
         // Check if we have cached auth and auto-login is enabled
         let auth_service = &state.domains.auth.state.auth_service;
-        let svc = std::sync::Arc::clone(auth_service);
+        let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
         Task::perform(
             async move {
                 log::info!("[Auth] Checking for cached auth and auto-login");
 
                 // Check if we have cached auth
-                if let Ok(Some(stored_auth)) = svc.load_from_keychain().await {
+                match svc.load_from_keychain().await { Ok(Some(stored_auth)) => {
                     // Check if auto-login is enabled for this user
                     let device_auto_login = svc
                         .is_auto_login_enabled(&stored_auth.user.id)
@@ -532,9 +534,9 @@ pub fn handle_setup_status_checked(state: &mut State, needs_setup: bool) -> Task
                     } else {
                         log::info!("[Auth] Auto-login disabled, proceeding to user selection");
                     }
-                } else {
+                } _ => {
                     log::info!("[Auth] No cached auth found");
-                }
+                }}
 
                 // If we get here, auto-login didn't work, load users
                 auth::Message::AutoLoginCheckComplete
@@ -550,7 +552,7 @@ pub fn handle_auto_login_check_complete(state: &mut State) -> Task<auth::Message
 
     // Load users for normal flow
     let auth_service = &state.domains.auth.state.auth_service;
-    let svc = std::sync::Arc::clone(auth_service);
+    let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
     Task::perform(
         async move {
             log::info!("[Auth] Fetching all users from server");
@@ -575,7 +577,7 @@ pub fn handle_auto_login_successful(state: &mut State, user: User) -> Task<auth:
 
     // Query permissions from auth service
     let auth_service = &state.domains.auth.state.auth_service;
-    let svc = std::sync::Arc::clone(auth_service);
+    let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
     let user_clone = user.clone();
     return Task::perform(
         async move {
@@ -619,29 +621,8 @@ pub fn handle_watch_status_loaded(
         }
         Err(e) => {
             log::error!("Failed to load watch status: {}", e);
-            // Don't show error to user - watch status is not critical
         }
     }
-
-    // Initialize batch metadata fetcher now that authentication is fully complete
-    // This ensures it's only initialized once after the entire auth flow
-    if state.batch_metadata_fetcher.is_none() {
-        let api_service = &state.domains.auth.state.api_service;
-        // BatchMetadataFetcher now uses ApiClientAdapter
-        let batch_fetcher = std::sync::Arc::new(batch_fetcher::BatchMetadataFetcher::new(
-            api_service.clone(),
-            std::sync::Arc::clone(&state.domains.media.state.media_store),
-        ));
-        state.batch_metadata_fetcher = Some(batch_fetcher);
-        log::info!("[BatchMetadataFetcher] Initialized ONCE after auth flow completed");
-    } else {
-        log::warn!(
-            "[BatchMetadataFetcher] Already initialized - preventing duplicate initialization"
-        );
-    }
-
-    // Authentication flow is complete
-    // BatchMetadataFetcher has been initialized, authentication is ready
     Task::none()
 }
 
@@ -683,7 +664,7 @@ pub fn handle_auth_flow_submit_credential(state: &mut State) -> Task<auth::Messa
     } = &mut state.domains.auth.state.auth_flow.clone()
     {
         let auth_service = &state.domains.auth.state.auth_service;
-        let svc = std::sync::Arc::clone(auth_service);
+        let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
         let user_clone = user.clone();
         let input_clone = input.clone();
         let remember = *remember_device;
@@ -774,12 +755,13 @@ pub fn handle_auth_flow_auth_result(
             )
         }
         Err(error) => {
+            let mut auth_flow = state.domains.auth.state.auth_flow.clone();
             if let AuthenticationFlow::EnteringCredentials {
-                error: view_error,
-                loading,
-                attempts_remaining,
+                error: ref mut view_error,
+                ref mut loading,
+                ref mut attempts_remaining,
                 ..
-            } = &mut state.domains.auth.state.auth_flow
+            } = auth_flow
             {
                 // Check if error indicates lockout before moving error
                 let is_lockout = error.contains("locked") || error.contains("attempts");
@@ -793,6 +775,7 @@ pub fn handle_auth_flow_auth_result(
                         *remaining = remaining.saturating_sub(1);
                     }
                 }
+                state.domains.auth.state.auth_flow = auth_flow;
             }
             Task::none()
         }
@@ -1054,7 +1037,7 @@ pub fn handle_submit_setup(state: &mut State) -> Task<auth::Message> {
 
         // Set loading state
         if let AuthenticationFlow::FirstRunSetup {
-            loading: ref mut l, ..
+            loading: l, ..
         } = &mut state.domains.auth.state.auth_flow
         {
             *l = true;
@@ -1141,14 +1124,14 @@ pub fn handle_setup_complete(
             api_service.set_token(Some(auth_token.clone())).await;
 
             // Now fetch the current user
-            let user: ferrex_core::user::User = match api_service.get("/api/users/me").await {
+            let user: ferrex_core::user::User = match api_service.get("/users/me").await {
                 Ok(user) => user,
                 Err(e) => return Err(format!("Failed to get user: {}", e)),
             };
 
             // Get user permissions
             let permissions: ferrex_core::rbac::UserPermissions =
-                match api_service.get("/api/users/me/permissions").await {
+                match api_service.get("/users/me/permissions").await {
                     Ok(perms) => perms,
                     Err(e) => {
                         log::warn!(
@@ -1199,8 +1182,8 @@ pub fn handle_setup_error(state: &mut State, error: String) -> Task<auth::Messag
     use crate::domains::auth::types::AuthenticationFlow;
 
     if let AuthenticationFlow::FirstRunSetup {
-        error: ref mut err,
-        loading: ref mut l,
+        error: err,
+        loading: l,
         ..
     } = &mut state.domains.auth.state.auth_flow
     {

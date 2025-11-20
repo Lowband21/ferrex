@@ -1,5 +1,5 @@
-use crate::domains::media::library::MediaFile;
 use crate::domains::player::video_backend::{AudioTrack, SubtitleTrack, ToneMappingConfig, Video};
+use ferrex_core::MediaFile;
 use iced::ContentFit;
 use iced_video_player as standard_video;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ pub const SEEK_BAR_CLICK_TOLERANCE_MULTIPLIER: f32 = 7.0; // Allow clicks within
 pub struct PlayerDomainState {
     // Current media
     pub current_media: Option<MediaFile>,
-    pub current_media_id: Option<ferrex_core::api_types::MediaId>,
+    pub current_media_id: Option<ferrex_core::MediaID>,
     pub current_url: Option<url::Url>,
 
     // Video instance
@@ -34,7 +34,7 @@ pub struct PlayerDomainState {
     pub dragging: bool,
     pub last_seek_position: Option<f64>,
     pub last_mouse_y: Option<f32>, // Track vertical mouse position for seek bar validation
-    pub seek_bar_hovered: bool, // Track if mouse is hovering over the seek bar
+    pub seek_bar_hovered: bool,    // Track if mouse is hovering over the seek bar
     pub seeking: bool,
     pub seek_started_time: Option<Instant>,
 

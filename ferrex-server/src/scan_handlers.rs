@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     response::{Json, Sse},
 };
-use ferrex_core::ScanRequest;
+use ferrex_core::{LibraryID, ScanRequest};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,14 +14,19 @@ use uuid::Uuid;
 // Library scan handler
 pub async fn scan_library_handler(
     State(state): State<AppState>,
-    Path(library_id): Path<String>,
+    Path(library_id): Path<String>, // TODO: Use LibraryID directly
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("Scan request for library: {}", library_id);
 
     // Get the library details
     info!("Fetching library with ID: {}", library_id);
-    let library = match state.db.backend().get_library(&library_id).await {
+    let library = match state
+        .db
+        .backend()
+        .get_library(&LibraryID(Uuid::parse_str(&library_id).unwrap()))
+        .await
+    {
         Ok(Some(lib)) => {
             info!(
                 "Found library: {} (ID: {}, Type: {:?})",
@@ -67,9 +72,8 @@ pub async fn scan_library_handler(
 
     let library_name = library.name.clone();
 
-    // Start the scan
+    // TODO: We shouldn't have two options here, our scanner should always stream updates
     let scan_result = if use_streaming {
-        // Use new streaming scanner for better performance
         state
             .scan_manager
             .start_library_scan(Arc::new(library), force_rescan)
@@ -77,7 +81,7 @@ pub async fn scan_library_handler(
     } else {
         // Convert to library scan
         let temp_library = Arc::new(ferrex_core::Library {
-            id: Uuid::new_v4(),
+            id: LibraryID::new(),
             name: format!(
                 "Temporary scan for {}",
                 library
@@ -86,7 +90,7 @@ pub async fn scan_library_handler(
                     .map(|p| p.display().to_string())
                     .unwrap_or_default()
             ),
-            library_type: library.library_type.clone(),
+            library_type: library.library_type,
             paths: library.paths.clone(),
             scan_interval_minutes: 0,
             enabled: true,
@@ -137,7 +141,8 @@ pub async fn start_scan_handler(
     Json(request): Json<ScanRequest>,
 ) -> Result<Json<Value>, StatusCode> {
     // Convert ScanRequest to library scan
-    let library_id = request.library_id.unwrap_or_else(Uuid::new_v4);
+    let library_id = request.library_id.unwrap_or(Uuid::now_v7());
+
     let paths = if let Some(paths) = request.paths {
         paths.into_iter().map(std::path::PathBuf::from).collect()
     } else if let Some(path) = request.path {
@@ -147,7 +152,7 @@ pub async fn start_scan_handler(
     };
 
     let temp_library = Arc::new(ferrex_core::Library {
-        id: library_id,
+        id: LibraryID(library_id),
         name: format!("Scan {}", library_id),
         library_type: request
             .library_type

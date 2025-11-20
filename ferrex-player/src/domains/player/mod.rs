@@ -18,8 +18,8 @@ pub mod external_mpv;
 use self::messages::Message;
 use self::state::PlayerDomainState;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::domains::media::store::MediaStore;
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
+use ferrex_core::LibraryID;
 use iced::Task;
 use std::sync::{Arc, RwLock as StdRwLock};
 use uuid::Uuid;
@@ -32,9 +32,9 @@ pub use state::TrackNotification;
 pub struct PlayerDomain {
     pub state: PlayerDomainState,
     // Cross-domain dependencies
-    pub media_store: Arc<StdRwLock<MediaStore>>,
+    //pub media_store: Arc<StdRwLock<MediaStore>>,
     pub api_service: Option<Arc<ApiClientAdapter>>,
-    pub current_library_id: Option<Uuid>,
+    pub current_library_id: Option<LibraryID>,
 }
 
 #[cfg_attr(
@@ -47,12 +47,12 @@ pub struct PlayerDomain {
 )]
 impl PlayerDomain {
     pub fn new(
-        media_store: Arc<StdRwLock<MediaStore>>,
+        //media_store: Arc<StdRwLock<MediaStore>>,
         api_service: Option<Arc<ApiClientAdapter>>,
     ) -> Self {
         Self {
             state: PlayerDomainState::default(),
-            media_store,
+            //media_store,
             api_service,
             current_library_id: None,
         }

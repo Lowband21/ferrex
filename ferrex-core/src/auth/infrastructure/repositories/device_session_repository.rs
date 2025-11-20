@@ -1,11 +1,11 @@
-use async_trait::async_trait;
-use uuid::Uuid;
 use anyhow::Result;
-use std::sync::Arc;
+use async_trait::async_trait;
 use sqlx::PgPool;
+use std::sync::Arc;
+use uuid::Uuid;
 
-use crate::auth::domain::repositories::DeviceSessionRepository;
 use crate::auth::domain::aggregates::DeviceSession;
+use crate::auth::domain::repositories::DeviceSessionRepository;
 use crate::auth::domain::value_objects::DeviceFingerprint;
 
 pub struct PostgresDeviceSessionRepository {
@@ -24,12 +24,16 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
         todo!("Implement find_by_id")
     }
 
-    async fn find_by_user_and_fingerprint(&self, user_id: Uuid, fingerprint: &DeviceFingerprint) -> Result<Option<DeviceSession>> {
+    async fn find_by_user_and_fingerprint(
+        &self,
+        user_id: Uuid,
+        fingerprint: &DeviceFingerprint,
+    ) -> Result<Option<DeviceSession>> {
         // TODO: TEMPORARY IN-MEMORY IMPLEMENTATION
         // Schema mismatch: DeviceSession domain model doesn't align with current database schema.
         // The DeviceSession domain object expects a direct session with device fingerprint,
         // but the database schema separates authenticated_devices and sessions tables.
-        // 
+        //
         // SOLUTIONS NEEDED:
         // 1. Create auth_device_sessions table that matches the domain model
         // 2. OR refactor domain model to match existing schema

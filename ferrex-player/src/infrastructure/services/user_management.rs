@@ -17,18 +17,20 @@ pub struct UserAdminApiAdapter {
 }
 
 impl UserAdminApiAdapter {
-    pub fn new(client: Arc<ApiClient>) -> Self { Self { client } }
+    pub fn new(client: Arc<ApiClient>) -> Self {
+        Self { client }
+    }
 }
 
 #[async_trait]
 impl UserAdminService for UserAdminApiAdapter {
     async fn list_users(&self) -> Result<Vec<ferrex_core::user::User>> {
         // Expect server to return Vec<User> at /api/admin/users
-        self.client.get("/api/admin/users").await
+        self.client.get("/admin/users").await
     }
 
     async fn delete_user(&self, user_id: Uuid) -> Result<()> {
-        let path = format!("/api/admin/users/{}", user_id);
+        let path = format!("/admin/users/{}", user_id);
         let _: serde_json::Value = self.client.delete(&path).await?;
         Ok(())
     }

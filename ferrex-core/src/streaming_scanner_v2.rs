@@ -1,8 +1,15 @@
-use crate::media::*;
 use crate::providers::TmdbApiProvider;
+use crate::types::media::*;
 use crate::{
-    media, ImageService, LibraryType, MediaDatabase, MediaError, MediaFile, MetadataExtractor,
-    Result, TvParser,
+    types::media, ImageService, LibraryType, MediaDatabase, MediaError, MediaFile,
+    MetadataExtractor, Result, TvParser,
+};
+use crate::{
+    CastMember, CrewMember, EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeID,
+    EpisodeNumber, EpisodeURL, ExternalIds, ImageMetadata, ImageWithMetadata, LibraryID,
+    LibraryReference, MediaDetailsOption, MediaIDLike, MediaImages, MovieID, MovieTitle, MovieURL,
+    ParsedMovieInfo, SeasonDetails, SeasonID, SeasonNumber, SeasonURL, SeriesID, SeriesTitle,
+    SeriesURL, TmdbDetails, UrlLike,
 };
 use fuzzy_matcher::skim::SkimMatcherV2;
 use regex::Regex;
@@ -136,7 +143,7 @@ impl StreamingScannerV2 {
                 self.scan_movie_library(library, output_tx.clone(), scan_id)
                     .await?
             }
-            LibraryType::TvShows => {
+            LibraryType::Series => {
                 self.scan_tv_library(library, output_tx.clone(), scan_id)
                     .await?
             }
@@ -291,16 +298,16 @@ impl StreamingScannerV2 {
         }
 
         // Update library's last_scan timestamp after successful scan
-        if let Err(e) = self
+        match self
             .db
             .backend()
             .update_library_last_scan(&library.id.to_string())
             .await
-        {
+        { Err(e) => {
             error!("Failed to update library last_scan timestamp: {}", e);
-        } else {
+        } _ => {
             info!("Updated last_scan timestamp for library: {}", library.name);
-        }
+        }}
 
         Ok(())
     }
@@ -468,16 +475,16 @@ impl StreamingScannerV2 {
         }
 
         // Update library's last_scan timestamp after successful scan
-        if let Err(e) = self
+        match self
             .db
             .backend()
             .update_library_last_scan(&library.id.to_string())
             .await
-        {
+        { Err(e) => {
             error!("Failed to update library last_scan timestamp: {}", e);
-        } else {
+        } _ => {
             info!("Updated last_scan timestamp for library: {}", library.name);
-        }
+        }}
 
         Ok(())
     }
@@ -651,7 +658,7 @@ impl StreamingScannerV2 {
         worker_id: usize,
         folder_rx: Arc<Mutex<mpsc::Receiver<PathBuf>>>,
         output_tx: mpsc::Sender<ScanOutput>,
-        library_id: Uuid,
+        library_id: LibraryID,
         _scan_id: Uuid,
     ) -> JoinHandle<Result<()>> {
         tokio::spawn(async move {
@@ -702,7 +709,7 @@ impl StreamingScannerV2 {
         worker_id: usize,
         folder_rx: Arc<Mutex<mpsc::Receiver<(Uuid, PathBuf)>>>,
         output_tx: mpsc::Sender<ScanOutput>,
-        library_id: Uuid,
+        library_id: LibraryID,
         _scan_id: Uuid,
     ) -> JoinHandle<Result<()>> {
         tokio::spawn(async move {
@@ -792,7 +799,7 @@ impl StreamingScannerV2 {
     pub async fn process_movie_folder(
         &self,
         folder: PathBuf,
-        library_id: Uuid,
+        library_id: LibraryID,
     ) -> Result<MovieReference> {
         debug!("Processing movie folder: {:?}", folder);
 
@@ -973,8 +980,10 @@ impl StreamingScannerV2 {
         };
 
         // Generate movie ID early for image caching
-        let movie_id = MovieID::new(Uuid::new_v4().to_string())?;
-        let movie_id_str = movie_id.as_str();
+
+        let mut buff = Uuid::encode_buffer();
+        let movie_id = MovieID::new();
+        let movie_id_str = movie_id.as_str(&mut buff);
 
         // Cache images and build MediaImages with metadata
         let mut cached_posters = vec![];
@@ -997,9 +1006,9 @@ impl StreamingScannerV2 {
                     "Movie {} - Poster cached with endpoint: {}, theme_color: {:?}",
                     movie_id_str, endpoint, theme_color
                 );
-                cached_posters.push(media::ImageWithMetadata {
+                cached_posters.push(ImageWithMetadata {
                     endpoint,
-                    metadata: media::ImageMetadata {
+                    metadata: ImageMetadata {
                         file_path: poster_path.clone(),
                         width: 500,  // Default width for main poster
                         height: 750, // Default height for main poster
@@ -1018,9 +1027,9 @@ impl StreamingScannerV2 {
                 .cache_image("movie", &movie_id_str, "backdrop", 0, backdrop_path)
                 .await
             {
-                cached_backdrops.push(media::ImageWithMetadata {
+                cached_backdrops.push(ImageWithMetadata {
                     endpoint,
-                    metadata: media::ImageMetadata {
+                    metadata: ImageMetadata {
                         file_path: backdrop_path.clone(),
                         width: 1920,  // Default width for backdrop
                         height: 1080, // Default height for backdrop
@@ -1053,9 +1062,9 @@ impl StreamingScannerV2 {
                         if theme_color.is_none() && start_idx + idx == 0 {
                             theme_color = extracted_color;
                         }
-                        cached_posters.push(media::ImageWithMetadata {
+                        cached_posters.push(ImageWithMetadata {
                             endpoint,
-                            metadata: media::ImageMetadata {
+                            metadata: ImageMetadata {
                                 file_path: poster.file_path.clone(),
                                 width: poster.width,
                                 height: poster.height,
@@ -1083,9 +1092,9 @@ impl StreamingScannerV2 {
                         )
                         .await
                     {
-                        cached_backdrops.push(media::ImageWithMetadata {
+                        cached_backdrops.push(ImageWithMetadata {
                             endpoint,
-                            metadata: media::ImageMetadata {
+                            metadata: ImageMetadata {
                                 file_path: backdrop.file_path.clone(),
                                 width: backdrop.width,
                                 height: backdrop.height,
@@ -1106,9 +1115,9 @@ impl StreamingScannerV2 {
                         .cache_image("movie", &movie_id_str, "logo", idx, &logo.file_path)
                         .await
                     {
-                        cached_logos.push(media::ImageWithMetadata {
+                        cached_logos.push(ImageWithMetadata {
                             endpoint,
-                            metadata: media::ImageMetadata {
+                            metadata: ImageMetadata {
                                 file_path: logo.file_path.clone(),
                                 width: logo.width,
                                 height: logo.height,
@@ -1269,7 +1278,7 @@ impl StreamingScannerV2 {
             .collect::<Vec<String>>();
 
         // Create enhanced movie details
-        let enhanced_details = media::EnhancedMovieDetails {
+        let enhanced_details = EnhancedMovieDetails {
             id: tmdb_details.inner.id as u64,
             title: tmdb_details.inner.title.clone(),
             overview: Some(tmdb_details.inner.overview.clone()),
@@ -1303,10 +1312,11 @@ impl StreamingScannerV2 {
         // Create MovieReference with all data (using pre-generated ID)
         let movie_ref = MovieReference {
             id: movie_id,
+            library_id,
             tmdb_id: tmdb_match.tmdb_id,
             title: MovieTitle::new(tmdb_details.inner.title.clone())?,
             details: MediaDetailsOption::Details(TmdbDetails::Movie(enhanced_details)),
-            endpoint: MovieURL::from_string(format!("/api/stream/{}", media_file.id)),
+            endpoint: MovieURL::from_string(format!("/stream/{}", media_file.id)),
             file: media_file,
             theme_color, // Extracted from poster
         };
@@ -1345,7 +1355,7 @@ impl StreamingScannerV2 {
     pub async fn process_series_folder(
         &self,
         series_folder: PathBuf,
-        library_id: Uuid,
+        library_id: LibraryID,
         output_tx: &mpsc::Sender<ScanOutput>,
     ) -> Result<()> {
         let series_name = series_folder
@@ -1491,7 +1501,7 @@ impl StreamingScannerV2 {
     pub async fn find_or_create_series(
         &self,
         series_name: &str,
-        library_id: Uuid,
+        library_id: LibraryID,
         series_folder: &Path,
     ) -> Result<SeriesReference> {
         info!(
@@ -1507,10 +1517,11 @@ impl StreamingScannerV2 {
             .await
         {
             Ok(Some(existing_series)) => {
+                let mut buff = Uuid::encode_buffer();
                 info!(
                     "SCAN: Found existing series '{}' (ID: {}) in library {} with TMDB ID: {}, returning it",
                     existing_series.title.as_str(),
-                    existing_series.id.as_str(),
+                    existing_series.id.as_str(&mut buff),
                     library_id,
                     existing_series.tmdb_id
                 );
@@ -1590,10 +1601,11 @@ impl StreamingScannerV2 {
                 .await
             {
                 Ok(Some(existing_series)) => {
+                    let mut buff = Uuid::encode_buffer();
                     info!(
                         "SCAN: Found existing series by TMDB ID {} (ID: {}) in library {}: '{}', returning it",
                         matched.tmdb_id,
-                        existing_series.id.as_str(),
+                        existing_series.id.as_str(&mut buff),
                         library_id,
                         existing_series.title.as_str()
                     );
@@ -1615,10 +1627,11 @@ impl StreamingScannerV2 {
 
         // Only generate a new series ID if we're actually creating a new series
         // This is critical - we should NEVER regenerate IDs for existing series
-        let series_id = SeriesID::new(Uuid::new_v4().to_string())?;
+        let series_id = SeriesID::new();
+        let mut buff = Uuid::encode_buffer();
         info!(
             "SCAN: Creating NEW series for '{}' with generated ID: {} (confirmed: no existing series found)",
-            series_name, series_id.as_str()
+            series_name, series_id.as_str(&mut buff)
         );
 
         // Use match or create placeholder
@@ -1663,7 +1676,8 @@ impl StreamingScannerV2 {
             };
 
             // Use the pre-generated series ID for image caching
-            let series_id_str = series_id.as_str();
+            let mut buff = Uuid::encode_buffer();
+            let series_id_str = series_id.as_str(&mut buff);
 
             // Cache images and build MediaImages with metadata
             let mut cached_posters = vec![];
@@ -1678,9 +1692,9 @@ impl StreamingScannerV2 {
                     .await
                 {
                     theme_color = extracted_color;
-                    cached_posters.push(media::ImageWithMetadata {
+                    cached_posters.push(ImageWithMetadata {
                         endpoint,
-                        metadata: media::ImageMetadata {
+                        metadata: ImageMetadata {
                             file_path: poster_path.clone(),
                             width: 500,  // Default width for main poster
                             height: 750, // Default height for main poster
@@ -1699,9 +1713,9 @@ impl StreamingScannerV2 {
                     .cache_image("series", &series_id_str, "backdrop", 0, backdrop_path)
                     .await
                 {
-                    cached_backdrops.push(media::ImageWithMetadata {
+                    cached_backdrops.push(ImageWithMetadata {
                         endpoint,
-                        metadata: media::ImageMetadata {
+                        metadata: ImageMetadata {
                             file_path: backdrop_path.clone(),
                             width: 1920,  // Default width for backdrop
                             height: 1080, // Default height for backdrop
@@ -1734,9 +1748,9 @@ impl StreamingScannerV2 {
                             if theme_color.is_none() && start_idx + idx == 0 {
                                 theme_color = extracted_color;
                             }
-                            cached_posters.push(media::ImageWithMetadata {
+                            cached_posters.push(ImageWithMetadata {
                                 endpoint,
-                                metadata: media::ImageMetadata {
+                                metadata: ImageMetadata {
                                     file_path: poster.file_path.clone(),
                                     width: poster.width,
                                     height: poster.height,
@@ -1764,9 +1778,9 @@ impl StreamingScannerV2 {
                             )
                             .await
                         {
-                            cached_backdrops.push(media::ImageWithMetadata {
+                            cached_backdrops.push(ImageWithMetadata {
                                 endpoint,
-                                metadata: media::ImageMetadata {
+                                metadata: ImageMetadata {
                                     file_path: backdrop.file_path.clone(),
                                     width: backdrop.width,
                                     height: backdrop.height,
@@ -1787,9 +1801,9 @@ impl StreamingScannerV2 {
                             .cache_image("series", &series_id_str, "logo", idx, &logo.file_path)
                             .await
                         {
-                            cached_logos.push(media::ImageWithMetadata {
+                            cached_logos.push(ImageWithMetadata {
                                 endpoint,
-                                metadata: media::ImageMetadata {
+                                metadata: ImageMetadata {
                                     file_path: logo.file_path.clone(),
                                     width: logo.width,
                                     height: logo.height,
@@ -2026,12 +2040,12 @@ impl StreamingScannerV2 {
                 MediaDetailsOption::Details(TmdbDetails::Series(details))
             } else {
                 MediaDetailsOption::Endpoint(format!(
-                    "/api/series/lookup/{}",
+                    "/series/lookup/{}",
                     series_name.replace(' ', "%20")
                 ))
             },
             endpoint: SeriesURL::from_string(format!(
-                "/api/series/{}",
+                "/series/{}",
                 if tmdb_id > 0 {
                     tmdb_id.to_string()
                 } else {
@@ -2063,10 +2077,11 @@ impl StreamingScannerV2 {
                 MediaError::Internal(format!("Failed to store series reference: {}", e))
             })?;
 
+        let mut buff = Uuid::encode_buffer();
         info!(
             "Successfully stored series reference: {} (ID: {}, TMDB: {})",
             series_ref.title.as_str(),
-            series_ref.id.as_str(),
+            series_ref.id.as_str(&mut buff),
             series_ref.tmdb_id
         );
 
@@ -2078,17 +2093,18 @@ impl StreamingScannerV2 {
         &self,
         season_folder: &Path,
         series_ref: &SeriesReference,
-        library_id: Uuid,
+        library_id: LibraryID,
         output_tx: &mpsc::Sender<ScanOutput>,
     ) -> Result<SeasonReference> {
         // Extract season number
         let season_num = self.extract_season_number(season_folder)?;
 
+        let mut buff = Uuid::encode_buffer();
         info!(
             "Processing season {} of {} (series_id: {})",
             season_num,
             series_ref.title.as_str(),
-            series_ref.id.as_str()
+            series_ref.id.as_str(&mut buff)
         );
 
         // Get season folder creation time
@@ -2141,8 +2157,10 @@ impl StreamingScannerV2 {
         };
 
         // Generate season ID early for image caching
-        let season_id = SeasonID::new(Uuid::new_v4().to_string())?;
-        let season_id_str = season_id.as_str().to_string();
+        let season_id = SeasonID::new();
+
+        let mut buff = Uuid::encode_buffer();
+        let season_id_str = season_id.as_str(&mut buff).to_string();
 
         // Process season details and cache poster
         let (enhanced_season, cached_poster_endpoint) =
@@ -2196,22 +2214,25 @@ impl StreamingScannerV2 {
                 MediaDetailsOption::Details(TmdbDetails::Season(details))
             } else {
                 MediaDetailsOption::Endpoint(format!(
-                    "/api/series/{}/season/{}",
+                    "/series/{}/season/{}",
                     series_ref.tmdb_id, season_num
                 ))
             },
-            endpoint: SeasonURL::from_string(format!("/api/season/{}", season_id_str)),
+            endpoint: SeasonURL::from_string(format!("/season/{}", season_id_str)),
             created_at: folder_created_at,
             theme_color: None, // Seasons don't have theme colors
         };
 
         // Store season in database BEFORE processing episodes to avoid foreign key constraint violation
+        let mut buff1 = Uuid::encode_buffer();
+        let mut buff2 = Uuid::encode_buffer();
+        let mut buff3 = Uuid::encode_buffer();
         info!(
             "SCAN: Storing season reference: ID={} S{} for series '{}' (series_id={})",
-            season_ref.id.as_str(),
+            season_ref.id.as_str(&mut buff1),
             season_num,
             series_ref.title.as_str(),
-            season_ref.series_id.as_str()
+            season_ref.series_id.as_str(&mut buff2)
         );
 
         let actual_season_uuid = self
@@ -2223,7 +2244,7 @@ impl StreamingScannerV2 {
                 error!(
                     "Failed to store season reference: {}. Season: {} S{}",
                     e,
-                    season_ref.id.as_str(),
+                    season_ref.id.as_str(&mut buff3),
                     season_num
                 );
                 MediaError::Internal(format!("Failed to store season reference: {}", e))
@@ -2231,7 +2252,7 @@ impl StreamingScannerV2 {
 
         // Update season_ref with the actual ID from the database (in case it already existed)
         let mut season_ref = season_ref;
-        season_ref.id = SeasonID::new(actual_season_uuid.to_string())?;
+        season_ref.id = SeasonID(actual_season_uuid);
 
         // Send season found event AFTER storing it
         output_tx
@@ -2272,7 +2293,7 @@ impl StreamingScannerV2 {
         file_path: PathBuf,
         series_ref: &SeriesReference,
         season_ref: &SeasonReference,
-        library_id: Uuid,
+        library_id: LibraryID,
     ) -> Result<EpisodeReference> {
         debug!("Processing episode file: {:?}", file_path);
 
@@ -2282,7 +2303,7 @@ impl StreamingScannerV2 {
         // Extract metadata
         {
             let mut extractor = self.metadata_extractor.lock().await;
-            extractor.set_library_type(Some(LibraryType::TvShows));
+            extractor.set_library_type(Some(LibraryType::Series));
             match extractor.extract_metadata(&media_file.path) {
                 Ok(metadata) => {
                     media_file.media_file_metadata = Some(metadata);
@@ -2314,8 +2335,9 @@ impl StreamingScannerV2 {
         };
 
         // Generate episode ID early for image caching
-        let episode_id = EpisodeID::new(Uuid::new_v4().to_string())?;
-        let episode_id_str = episode_id.as_str().to_string();
+        let mut buff = Uuid::encode_buffer();
+        let episode_id = EpisodeID::new();
+        let episode_id_str = episode_id.to_string_buf(&mut buff);
 
         // Process episode details and cache still
         let enhanced_episode = if let Some(details) = episode_details.as_ref() {
@@ -2357,6 +2379,7 @@ impl StreamingScannerV2 {
 
         let episode_ref = EpisodeReference {
             id: episode_id,
+            library_id,
             episode_number: EpisodeNumber::new(episode_info.episode as u8),
             season_number: season_ref.season_number,
             season_id: season_ref.id.clone(), // Link to parent season
@@ -2365,9 +2388,9 @@ impl StreamingScannerV2 {
             details: if let Some(details) = enhanced_episode {
                 MediaDetailsOption::Details(TmdbDetails::Episode(details))
             } else {
-                MediaDetailsOption::Endpoint(format!("/api/episode/lookup/{}", media_file.id))
+                MediaDetailsOption::Endpoint(format!("/episode/lookup/{}", media_file.id))
             },
-            endpoint: EpisodeURL::from_string(format!("/api/stream/{}", media_file.id)),
+            endpoint: EpisodeURL::from_string(format!("/stream/{}", media_file.id)),
             file: media_file,
         };
 
@@ -2573,11 +2596,12 @@ impl StreamingScannerV2 {
 
         // Create a basic movie reference without TMDB data
         let movie_ref = MovieReference {
-            id: MovieID::new(Uuid::new_v4().to_string())?,
+            id: MovieID::new(),
+            library_id: media_file.library_id,
             tmdb_id: 0, // No TMDB ID
             title: MovieTitle::new(parsed_info.title.clone())?,
-            details: MediaDetailsOption::Endpoint(format!("/api/movie/local/{}", media_file.id)),
-            endpoint: MovieURL::from_string(format!("/api/stream/{}", media_file.id)),
+            details: MediaDetailsOption::Endpoint(format!("/movie/local/{}", media_file.id)),
+            endpoint: MovieURL::from_string(format!("/stream/{}", media_file.id)),
             file: media_file,
             theme_color: None, // No theme color without poster
         };

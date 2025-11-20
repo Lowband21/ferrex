@@ -111,16 +111,16 @@ impl DeviceRegistration {
         if self.revoked {
             return false;
         }
-        
+
         if let Some(expires_at) = self.expires_at {
             if expires_at < Utc::now() {
                 return false;
             }
         }
-        
+
         true
     }
-    
+
     /// Check if PIN is required for this device
     pub fn requires_pin(&self) -> bool {
         self.pin_hash.is_some()
@@ -166,9 +166,9 @@ pub enum DeviceCheckResult {
 
 /// Generate a cryptographically secure trust token
 pub fn generate_trust_token() -> String {
+    use rand::distr::Alphanumeric;
     use rand::{thread_rng, Rng};
-    use rand::distributions::Alphanumeric;
-    
+
     thread_rng()
         .sample_iter(&Alphanumeric)
         .take(64)

@@ -1,8 +1,8 @@
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
-use crate::domains::ui;
 use crate::domains::auth::security::SecureCredential;
 use crate::domains::settings::messages::Message;
 use crate::domains::settings::state::SettingsView as SettingsSubview;
+use crate::domains::ui;
 use crate::state_refactored::State;
 use iced::Task;
 
@@ -90,7 +90,7 @@ pub fn handle_back_to_home(state: &mut State) -> DomainUpdateResult {
     state.domains.settings.security.pin_error = None;
 
     // Send direct UI domain message to navigate home
-    DomainUpdateResult::task(
-        Task::done(DomainMessage::Ui(ui::messages::Message::NavigateHome))
-    )
+    DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+        ui::messages::Message::NavigateHome,
+    )))
 }

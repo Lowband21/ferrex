@@ -55,11 +55,11 @@ pub fn view_library_controls_bar<'a>(
     .padding([0, 20])
     .align_y(iced::Alignment::Center);
 
-    // Just return the controls - background shader will handle the depth region
     Some(
         container(controls)
             .width(Length::Fill)
             .height(HEIGHT)
+            .style(super::super::theme::Container::HeaderAccent.style())
             .align_y(iced::alignment::Vertical::Center)
             .into(),
     )

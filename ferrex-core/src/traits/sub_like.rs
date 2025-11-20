@@ -1,0 +1,249 @@
+use rkyv::{deserialize, option::ArchivedOption, rancor::Error};
+
+use crate::{
+    ArchivedEnhancedMovieDetails, ArchivedEnhancedSeriesDetails, ArchivedEpisodeDetails,
+    ArchivedEpisodeReference, ArchivedMediaDetailsOption, ArchivedMediaFile,
+    ArchivedMovieReference, ArchivedSeasonDetails, ArchivedSeasonReference,
+    ArchivedSeriesReference, ArchivedTmdbDetails, EnhancedMovieDetails, EnhancedSeriesDetails,
+    EpisodeDetails, EpisodeReference, MediaDetails, MediaDetailsOption, MediaFile, MediaOps,
+    MovieReference, SeasonDetails, SeasonDetailsLike, SeasonReference, SeriesDetailsLike,
+    SeriesReference, TmdbDetails,
+};
+
+pub trait MovieLike: MediaOps {
+    type Movie: MediaOps;
+    type Details;
+
+    fn title(&self) -> &str;
+
+    fn file(self) -> MediaFile;
+
+    fn details(&self) -> Option<&Self::Details>;
+
+    fn release_year(&self) -> Option<&str>;
+}
+
+impl MovieLike for MovieReference {
+    type Movie = MovieReference;
+    type Details = EnhancedMovieDetails;
+
+    fn title(&self) -> &str {
+        self.title.as_ref()
+    }
+
+    fn file(self) -> MediaFile {
+        self.file
+    }
+
+    fn release_year(&self) -> Option<&str> {
+        if let Some(details) = self.details() {
+            if let Option::Some(release_date) = &details.release_date {
+                release_date.split('-').next()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    fn details(&self) -> Option<&EnhancedMovieDetails> {
+        if let MediaDetailsOption::Details(details) = &self.details {
+            match details {
+                TmdbDetails::Movie(enhanced_movie_details) => Some(&enhanced_movie_details),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl MovieLike for ArchivedMovieReference {
+    type Movie = ArchivedMovieReference;
+    type Details = ArchivedEnhancedMovieDetails;
+
+    fn title(&self) -> &str {
+        self.title.as_ref()
+    }
+
+    fn file(self) -> MediaFile {
+        deserialize::<MediaFile, Error>(&self.file).unwrap()
+    }
+
+    fn release_year(&self) -> Option<&str> {
+        if let Some(details) = self.details() {
+            if let ArchivedOption::Some(release_date) = &details.release_date {
+                release_date.split('-').next()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    fn details(&self) -> Option<&ArchivedEnhancedMovieDetails> {
+        if let ArchivedMediaDetailsOption::Details(details) = &self.details {
+            match details {
+                ArchivedTmdbDetails::Movie(enhanced_movie_details) => Some(&enhanced_movie_details),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+}
+pub trait SeriesLike: MediaOps {
+    type Series: MediaOps;
+    type Details: SeriesDetailsLike;
+
+    fn title(&self) -> &str;
+
+    fn details(&self) -> Option<&Self::Details>;
+
+    fn num_seasons(&self) -> u32 {
+        let details_opt = self.details();
+        if let Some(details) = details_opt {
+            if let Some(num_seasons) = details.num_seasons() {
+                num_seasons
+            } else {
+                0
+            }
+        } else {
+            0
+        }
+    }
+}
+
+impl SeriesLike for SeriesReference {
+    type Series = SeriesReference;
+    type Details = EnhancedSeriesDetails;
+
+    fn title(&self) -> &str {
+        self.title.as_ref()
+    }
+    fn details(&self) -> Option<&EnhancedSeriesDetails> {
+        if let MediaDetailsOption::Details(details) = &self.details {
+            details.to_series_details()
+        } else {
+            None
+        }
+    }
+}
+
+impl SeriesLike for ArchivedSeriesReference {
+    type Series = ArchivedSeriesReference;
+    type Details = ArchivedEnhancedSeriesDetails;
+
+    fn title(&self) -> &str {
+        self.title.as_ref()
+    }
+
+    fn details(&self) -> Option<&ArchivedEnhancedSeriesDetails> {
+        if let ArchivedMediaDetailsOption::Details(details) = &self.details {
+            match details {
+                ArchivedTmdbDetails::Series(series_details) => Some(&series_details),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+}
+pub trait SeasonLike: MediaOps {
+    type Season: MediaOps;
+    type Details: SeasonDetailsLike;
+
+    fn details(&self) -> Option<&Self::Details>;
+
+    fn num_episodes(&self) -> u32 {
+        let details_opt = self.details();
+        if let Some(details) = details_opt {
+            details.num_episodes()
+        } else {
+            0
+        }
+    }
+}
+
+impl SeasonLike for SeasonReference {
+    type Season = SeasonReference;
+    type Details = SeasonDetails;
+
+    fn details(&self) -> Option<&SeasonDetails> {
+        if let MediaDetailsOption::Details(details) = &self.details {
+            match details {
+                TmdbDetails::Season(season_details) => Some(&season_details),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl SeasonLike for ArchivedSeasonReference {
+    type Season = ArchivedSeasonReference;
+    type Details = ArchivedSeasonDetails;
+
+    fn details(&self) -> Option<&ArchivedSeasonDetails> {
+        if let ArchivedMediaDetailsOption::Details(details) = &self.details {
+            match details {
+                ArchivedTmdbDetails::Season(season_details) => Some(&season_details),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+}
+
+pub trait EpisodeLike: MediaOps {
+    type Episode: MediaOps;
+    type Details;
+
+    fn details(&self) -> Option<&Self::Details>;
+
+    fn file(self) -> MediaFile;
+}
+
+impl EpisodeLike for EpisodeReference {
+    type Episode = EpisodeReference;
+    type Details = EpisodeDetails;
+
+    fn file(self) -> MediaFile {
+        self.file
+    }
+
+    fn details(&self) -> Option<&EpisodeDetails> {
+        if let MediaDetailsOption::Details(details) = &self.details {
+            match details {
+                TmdbDetails::Episode(episode_details) => Some(&episode_details),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl EpisodeLike for ArchivedEpisodeReference {
+    type Episode = ArchivedEpisodeReference;
+    type Details = ArchivedEpisodeDetails;
+
+    fn file(self) -> MediaFile {
+        deserialize::<MediaFile, Error>(&self.file).unwrap()
+    }
+
+    fn details(&self) -> Option<&ArchivedEpisodeDetails> {
+        if let ArchivedMediaDetailsOption::Details(details) = &self.details {
+            match details {
+                ArchivedTmdbDetails::Episode(episode_details) => Some(&episode_details),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+}

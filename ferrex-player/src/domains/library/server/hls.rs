@@ -2,6 +2,7 @@ use reqwest::Client;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct MasterPlaylist {
@@ -185,7 +186,7 @@ impl HlsClient {
     /// Fetch and parse the master playlist with retry logic
     pub async fn fetch_master_playlist_with_retry(
         &self,
-        media_id: &str,
+        media_id: &Uuid,
         max_retries: u32,
     ) -> Result<MasterPlaylist, String> {
         let mut retries = 0;
@@ -218,7 +219,8 @@ impl HlsClient {
     }
 
     /// Fetch and parse the master playlist
-    pub async fn fetch_master_playlist(&self, media_id: &str) -> Result<MasterPlaylist, String> {
+    pub async fn fetch_master_playlist(&self, media_id: &Uuid) -> Result<MasterPlaylist, String> {
+        let media_id = media_id.to_string();
         let url = format!("{}/transcode/{}/master.m3u8", self.server_url, media_id);
 
         log::info!("Fetching master playlist: {}", url);
@@ -240,7 +242,7 @@ impl HlsClient {
             .await
             .map_err(|e| format!("Failed to read playlist: {}", e))?;
 
-        self.parse_master_playlist(&content, media_id)
+        self.parse_master_playlist(&content, media_id.as_str())
     }
 
     /// Parse master playlist content

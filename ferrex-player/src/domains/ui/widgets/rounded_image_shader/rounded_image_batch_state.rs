@@ -3,9 +3,7 @@
 //! This module implements the PrimitiveBatchState trait for batched rendering
 //! of rounded images, reducing draw calls from O(n) to O(1).
 
-use crate::infrastructure::performance_config::texture_upload::{
-    DEFERRED_QUEUE_MAX_SIZE, MAX_UPLOADS_PER_FRAME,
-};
+use crate::infrastructure::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME;
 use bytemuck::{Pod, Zeroable};
 use iced::widget::image::Handle;
 use iced_wgpu::primitive::{buffer_manager::InstanceBufferManager, PrimitiveBatchState};
@@ -14,8 +12,6 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 use wgpu::util::StagingBelt;
-
-use super::create_batch_instance;
 
 /// Instance data for each rounded image - must match shader layout exactly
 #[repr(C)]
@@ -62,7 +58,6 @@ pub struct RoundedImageBatchState {
     globals_bind_group: Option<wgpu::BindGroup>,
     /// Bind group layouts
     globals_bind_group_layout: Arc<wgpu::BindGroupLayout>,
-    atlas_bind_group_layout: Arc<wgpu::BindGroupLayout>,
     /// Sampler for texture filtering
     sampler: Arc<wgpu::Sampler>,
     /// Number of texture uploads in current frame
@@ -107,7 +102,7 @@ impl RoundedImageBatchState {
             self.uploads_this_frame += 1;
         }
 
-        if self.uploads_this_frame > MAX_UPLOADS_PER_FRAME && !cached {
+        if self.uploads_this_frame >= MAX_UPLOADS_PER_FRAME && !cached {
             self.pending_instances.push(instance);
             return;
         }
@@ -372,7 +367,6 @@ impl PrimitiveBatchState for RoundedImageBatchState {
             globals_buffer: None,
             globals_bind_group: None,
             globals_bind_group_layout,
-            atlas_bind_group_layout,
             sampler,
             uploads_this_frame: 0,
             deferred_queue: VecDeque::new(),

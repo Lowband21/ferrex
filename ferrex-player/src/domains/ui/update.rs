@@ -5,15 +5,15 @@ use crate::{
         ui::{
             messages as ui,
             types::{DisplayMode, ViewState},
-            view_models::ViewModel,
             views::carousel::CarouselMessage,
         },
     },
-    infrastructure::api_types::{MediaId, MediaReference},
     state_refactored::State,
 };
+use ferrex_core::{
+    EpisodeLike, ImageSize, ImageType, Media, MediaIDLike, MediaLike, MediaType, MovieLike,
+};
 use iced::Task;
-use std::sync::Arc;
 
 /// Check if user has PIN - returns a task that sends a Settings message
 fn check_user_has_pin() -> DomainUpdateResult {
@@ -45,7 +45,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                     state.domains.ui.state.current_library_id = None;
 
                     // Update AllViewModel for curated view
-                    state.all_view_model.set_library_filter(None);
+                    //state.all_view_model.set_library_filter(None);
                 }
                 DisplayMode::Library => {
                     // Show current library
@@ -62,7 +62,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                     }
 
                     // Update AllViewModel with library filter
-                    state.all_view_model.set_library_filter(library_id);
+                    //state.all_view_model.set_library_filter(library_id);
                 }
                 _ => {
                     // Other modes not implemented yet
@@ -71,7 +71,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             }
 
             // Refresh views
-            state.all_view_model.refresh_from_store();
+            //state.all_view_model.refresh_from_store();
 
             // NEW ARCHITECTURE: Also refresh the active tab
             state.tab_manager.refresh_active_tab();
@@ -156,9 +156,10 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             state.domains.ui.state.sort_by = sort_by;
 
             // Use SortingService for optimized parallel sorting on background threads
-            let media_store = Arc::clone(&state.domains.media.state.media_store);
+            //let media_store = Arc::clone(&state.domains.media.state.media_store);
             let sort_order = state.domains.ui.state.sort_order;
 
+            /* TODO: Reimplement sorting logic
             DomainUpdateResult::task(
                 Task::perform(
                     async move {
@@ -173,7 +174,8 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                     |_| ui::Message::RefreshViewModels,
                 )
                 .map(DomainMessage::Ui),
-            )
+            ) */
+            DomainUpdateResult::task(Task::none())
         }
         ui::Message::ToggleSortOrder => {
             state.domains.ui.state.sort_order = match state.domains.ui.state.sort_order {
@@ -186,10 +188,11 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             };
 
             // Use SortingService for optimized parallel sorting on background threads
-            let media_store = Arc::clone(&state.domains.media.state.media_store);
+            //let media_store = Arc::clone(&state.domains.media.state.media_store);
             let sort_order = state.domains.ui.state.sort_order;
             let sort_by = state.domains.ui.state.sort_by;
 
+            /*
             DomainUpdateResult::task(
                 Task::perform(
                     async move {
@@ -204,7 +207,8 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                     |_| ui::Message::RefreshViewModels,
                 )
                 .map(DomainMessage::Ui),
-            )
+            ) */
+            DomainUpdateResult::task(Task::none())
         }
         ui::Message::ShowAdminDashboard => {
             state.domains.ui.state.view = ViewState::AdminDashboard;
@@ -227,7 +231,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             state.domains.library.state.show_library_management = true;
 
             // Request library refresh if needed
-            if state.domains.library.state.libraries.is_empty() {
+            if !state.domains.ui.state.repo_accessor.is_initialized() {
                 DomainUpdateResult::with_events(
                     Task::none(),
                     vec![CrossDomainEvent::RequestLibraryRefresh],
@@ -268,14 +272,14 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
         ui::Message::CheckScrollStopped => {
-            use crate::domains::metadata::image_types::{ImageRequest, ImageSize, Priority};
+            use crate::domains::metadata::image_types::{ImageRequest, Priority};
             // Check if scrolling has actually stopped
             if let Some(last_time) = state.domains.ui.state.last_scroll_time {
                 let elapsed = last_time.elapsed();
 
                 // Only process if enough time has passed since last scroll event
                 let priority = if elapsed >= std::time::Duration::from_millis(
-                    crate::infrastructure::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS
+                    crate::infrastructure::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS
                 ) {
                     state.domains.ui.state.scroll_stopped_time = Some(std::time::Instant::now());
                     log::info!("Scroll STOPPED after {:.0}ms", elapsed.as_millis());
@@ -292,39 +296,28 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                     let visible_items = state.tab_manager.get_active_tab_visible_items();
 
                     // Count for logging
-                    let mut movie_count = 0;
-                    let mut series_count = 0;
+                    let mut count = 0;
 
                     // Process each visible item and request its image with high priority
-                    for media_ref in visible_items {
-                        let media_id = match &media_ref {
-                            MediaReference::Movie(movie) => {
-                                movie_count += 1;
-                                MediaId::Movie(movie.id.clone())
-                            }
-                            MediaReference::Series(series) => {
-                                series_count += 1;
-                                MediaId::Series(series.id.clone())
-                            }
-                            MediaReference::Season(_) | MediaReference::Episode(_) => {
-                                // For now, skip seasons and episodes as they're not shown in grids
-                                continue;
-                            }
-                        };
+                    for id in visible_items {
+                        count += 1;
+                        let media_type = id.media_type();
+                        let uuid = id.to_uuid();
 
                         let request = ImageRequest {
-                            media_id,
+                            media_id: uuid,
                             size: ImageSize::Poster,
+                            image_type: match media_type {
+                                MediaType::Movie => ImageType::Movie,
+                                MediaType::Series => ImageType::Series,
+                                _ => ImageType::Movie,
+                            },
                             priority,
                         };
                         image_service.get().request_image(request);
                     }
 
-                    log::info!(
-                        "Re-requested {} movies and {} series with VISIBLE priority",
-                        movie_count,
-                        series_count
-                    );
+                    log::info!("Re-requested {} items with {:?} priority", count, priority,);
                 }
                 DomainUpdateResult::task(Task::none())
             } else {
@@ -356,6 +349,11 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             DomainUpdateResult::task(Task::none())
         }
         ui::Message::NavigateHome => {
+            let library_id = if let Some(id) = state.domains.library.state.current_library_id {
+                Some(id.as_uuid())
+            } else {
+                None
+            };
             state.domains.ui.state.view = ViewState::Library;
             state.domains.ui.state.display_mode = DisplayMode::Curated;
 
@@ -392,14 +390,19 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                     &state.domains.ui.state.view,
                     state.window_size.width,
                     state.window_size.height,
-                    state.domains.library.state.current_library_id,
+                    library_id,
                 );
 
             DomainUpdateResult::task(Task::none())
         }
         ui::Message::NavigateBack => {
             // Navigate to the previous view in history
-            if let Some(previous_view) = state.domains.ui.state.navigation_history.pop() {
+            let library_id = if let Some(id) = state.domains.library.state.current_library_id {
+                Some(id.as_uuid())
+            } else {
+                None
+            };
+            match state.domains.ui.state.navigation_history.pop() { Some(previous_view) => {
                 state.domains.ui.state.view = previous_view.clone();
 
                 // Restore scroll state when returning to views
@@ -465,6 +468,13 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                             .background_shader_state
                             .reset_to_view_colors(&previous_view);
 
+                        let library_id =
+                            if let Some(id) = state.domains.library.state.current_library_id {
+                                Some(id.as_uuid())
+                            } else {
+                                None
+                            };
+
                         state
                             .domains
                             .ui
@@ -474,7 +484,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                                 &state.domains.ui.state.view,
                                 state.window_size.width,
                                 state.window_size.height,
-                                state.domains.library.state.current_library_id,
+                                library_id,
                             );
 
                         return DomainUpdateResult::task(scroll_task);
@@ -503,11 +513,11 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                         &state.domains.ui.state.view,
                         state.window_size.width,
                         state.window_size.height,
-                        state.domains.library.state.current_library_id,
+                        library_id,
                     );
 
                 DomainUpdateResult::task(Task::none())
-            } else {
+            } _ => {
                 // No history - return to library view preserving current display mode
                 // This handles the case where a user plays a video directly from a library grid
                 // and then exits - we want to return to that library grid, not the home carousel
@@ -533,6 +543,12 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                     .background_shader_state
                     .reset_to_library_colors();
 
+                let library_id = if let Some(id) = library_id {
+                    Some(id.as_uuid())
+                } else {
+                    None
+                };
+
                 state
                     .domains
                     .ui
@@ -546,7 +562,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                     );
 
                 DomainUpdateResult::task(Task::none())
-            }
+            }}
         }
         ui::Message::UpdateSearchQuery(query) => {
             // Update local UI state so the text input shows the current value
@@ -885,6 +901,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         }
         ui::Message::CheckMediaStoreRefresh => {
             // Check if MediaStore notifier indicates a refresh is needed
+            /*
             if state.media_store_notifier.should_refresh() {
                 log::debug!(
                     "[MediaStoreNotifier] ViewModels refresh needed - triggering RefreshViewModels"
@@ -892,9 +909,9 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 DomainUpdateResult::task(
                     Task::done(ui::Message::RefreshViewModels).map(DomainMessage::Ui),
                 )
-            } else {
-                DomainUpdateResult::task(Task::none())
-            }
+            } else { */
+            DomainUpdateResult::task(Task::none())
+            //}
         }
         ui::Message::RefreshViewModels => {
             // Refresh view models - pull latest data from MediaStore
@@ -922,11 +939,11 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             }
 
             // The view models now have the latest sorted data
-            log::info!(
-                "UI: View models refreshed with {} movies, {} series in AllViewModel",
-                state.all_view_model.all_movies().len(),
-                state.all_view_model.all_series().len()
-            );
+            //log::info!(
+            //    "UI: View models refreshed with {} movies, {} series in AllViewModel",
+            //    state.all_view_model.all_movies().len(),
+            //    state.all_view_model.all_series().len()
+            //);
 
             // NEW ARCHITECTURE: Refresh TabManager tabs with sorted data
             // This ensures the tab-based views show the newly sorted content
@@ -950,14 +967,14 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             log::info!("UI: UpdateViewModelFilters called - library_filter = {:?}, display_mode = {:?}, ui.current_library_id = {:?}, library.current_library_id = {:?}",
                 library_filter, state.domains.ui.state.display_mode, state.domains.ui.state.current_library_id, state.domains.library.state.current_library_id);
 
-            // Always update AllViewModel as it handles both types
-            state.all_view_model.set_library_filter(library_filter);
+            //// Always update AllViewModel as it handles both types
+            //state.all_view_model.set_library_filter(library_filter);
 
-            log::info!(
-                "UI: Filter updated - All: {} movies + {} series",
-                state.all_view_model.all_movies().len(),
-                state.all_view_model.all_series().len()
-            );
+            //log::info!(
+            //    "UI: Filter updated - All: {} movies + {} series",
+            //    state.all_view_model.all_movies().len(),
+            //    state.all_view_model.all_series().len()
+            //);
 
             DomainUpdateResult::task(Task::none()) // View will update on next frame
         }
@@ -1001,14 +1018,35 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 )
             }
         }
-        ui::Message::PlayMediaWithId(media_file, media_id) => {
-            // Forward to media domain
-            DomainUpdateResult::with_events(
-                Task::none(),
-                vec![CrossDomainEvent::MediaPlayWithId(media_file, media_id)],
-            )
+        ui::Message::PlayMediaWithId(media_id) => {
+            match state.domains.ui.state.repo_accessor.get(&media_id) {
+                Ok(media) => match media {
+                    Media::Movie(movie) => {
+                        return DomainUpdateResult::with_events(
+                            Task::none(),
+                            vec![CrossDomainEvent::MediaPlayWithId(movie.file(), media_id)],
+                        );
+                    }
+                    Media::Episode(episode) => {
+                        return DomainUpdateResult::with_events(
+                            Task::none(),
+                            vec![CrossDomainEvent::MediaPlayWithId(episode.file(), media_id)],
+                        );
+                    }
+                    _ => {
+                        log::error!("Media not playable type {}", media_id);
+                        return DomainUpdateResult::task(Task::none());
+                    }
+                },
+                Err(_) => {
+                    log::error!("Failed to get media with id {}", media_id);
+                    return DomainUpdateResult::task(Task::none());
+                }
+            }
+            DomainUpdateResult::task(Task::none())
         }
         ui::Message::PlaySeriesNextEpisode(series_id) => {
+            /*
             // Use series progress service to find next episode
             use crate::domains::media::services::SeriesProgressService;
 
@@ -1024,7 +1062,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 // Convert episode to MediaFile
                 let media_file =
                     crate::domains::media::library::MediaFile::from(episode.file.clone());
-                let media_id = ferrex_core::api_types::MediaId::Episode(episode.id.clone());
+                let media_id = ferrex_core::MediaID::Episode(episode.id.clone());
 
                 // Store resume position if available
                 if let Some(resume_pos) = resume_position {
@@ -1044,7 +1082,8 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 );
                 // Could show a message or navigate to series details
                 DomainUpdateResult::task(Task::none())
-            }
+            }*/
+            DomainUpdateResult::task(Task::none())
         }
 
         // Library management proxies
@@ -1110,21 +1149,21 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         }
 
         // TV show loaded
-        ui::Message::TvShowLoaded(series_id, result) => {
-            match result {
-                Ok(details) => {
-                    log::info!("TV show details loaded for series: {}", series_id);
-                    // TV show details are already stored in state by the library domain
-                    DomainUpdateResult::task(Task::none())
-                }
-                Err(e) => {
-                    log::error!("Failed to load TV show details for {}: {}", series_id, e);
-                    state.domains.ui.state.error_message =
-                        Some(format!("Failed to load TV show: {}", e));
-                    DomainUpdateResult::task(Task::none())
-                }
-            }
-        }
+        //ui::Message::TvShowLoaded(series_id, result) => {
+        //    match result {
+        //        Ok(details) => {
+        //            log::info!("TV show details loaded for series: {}", series_id);
+        //            // TV show details are already stored in state by the library domain
+        //            DomainUpdateResult::task(Task::none())
+        //        }
+        //        Err(e) => {
+        //            log::error!("Failed to load TV show details for {}: {}", series_id, e);
+        //            state.domains.ui.state.error_message =
+        //                Some(format!("Failed to load TV show: {}", e));
+        //            DomainUpdateResult::task(Task::none())
+        //        }
+        //    }
+        //}
 
         // Aggregate all libraries
         ui::Message::AggregateAllLibraries => {

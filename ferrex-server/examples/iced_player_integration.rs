@@ -1,8 +1,8 @@
 // Example integration for Iced player with Ferrex transcoding service
 
-use std::time::{Duration, Instant};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub struct FerrexStreamingSource {
@@ -52,8 +52,12 @@ impl FerrexStreamingSource {
     /// Initialize adaptive streaming
     pub async fn initialize(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // Start adaptive transcoding
-        let response: TranscodeResponse = self.client
-            .post(&format!("{}/transcode/{}/adaptive", self.server_url, self.media_id))
+        let response: TranscodeResponse = self
+            .client
+            .post(&format!(
+                "{}/transcode/{}/adaptive",
+                self.server_url, self.media_id
+            ))
             .send()
             .await?
             .json()
@@ -61,10 +65,10 @@ impl FerrexStreamingSource {
 
         if response.status == "success" {
             self.master_job_id = response.master_job_id;
-            
+
             // Wait a moment for initial segments to be ready
             tokio::time::sleep(Duration::from_secs(2)).await;
-            
+
             Ok(())
         } else {
             Err("Failed to start transcoding".into())
@@ -72,17 +76,25 @@ impl FerrexStreamingSource {
     }
 
     /// Get a specific segment
-    pub async fn get_segment(&mut self, segment_number: u32) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    pub async fn get_segment(
+        &mut self,
+        segment_number: u32,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         // Check cache first
-        if let Some((_, data)) = self.segment_cache.iter().find(|(num, _)| *num == segment_number) {
+        if let Some((_, data)) = self
+            .segment_cache
+            .iter()
+            .find(|(num, _)| *num == segment_number)
+        {
             return Ok(data.clone());
         }
 
         // Fetch from server
         let start = Instant::now();
-        let url = format!("{}/transcode/{}/segment/{}", 
-            self.server_url, 
-            self.master_job_id.as_ref().unwrap_or(&self.media_id), 
+        let url = format!(
+            "{}/transcode/{}/segment/{}",
+            self.server_url,
+            self.master_job_id.as_ref().unwrap_or(&self.media_id),
             segment_number
         );
 
@@ -91,13 +103,15 @@ impl FerrexStreamingSource {
         let download_time = start.elapsed();
 
         // Simple bandwidth calculation
-        let bandwidth_mbps = (segment_data.len() as f64 * 8.0) / download_time.as_secs_f64() / 1_000_000.0;
-        
+        let bandwidth_mbps =
+            (segment_data.len() as f64 * 8.0) / download_time.as_secs_f64() / 1_000_000.0;
+
         // Adjust quality based on bandwidth
         self.adapt_quality(bandwidth_mbps);
 
         // Cache the segment
-        self.segment_cache.push((segment_number, segment_data.clone()));
+        self.segment_cache
+            .push((segment_number, segment_data.clone()));
         if self.segment_cache.len() > 10 {
             self.segment_cache.remove(0);
         }
@@ -110,28 +124,35 @@ impl FerrexStreamingSource {
 
     /// Get variant playlist URL
     pub fn get_playlist_url(&self) -> String {
-        format!("{}/transcode/{}/variant/{}/playlist.m3u8", 
-            self.server_url, self.media_id, self.current_variant)
+        format!(
+            "{}/transcode/{}/variant/{}/playlist.m3u8",
+            self.server_url, self.media_id, self.current_variant
+        )
     }
 
     /// Get master playlist URL
     pub fn get_master_playlist_url(&self) -> String {
-        format!("{}/transcode/{}/master.m3u8", self.server_url, self.media_id)
+        format!(
+            "{}/transcode/{}/master.m3u8",
+            self.server_url, self.media_id
+        )
     }
 
     /// Adapt quality based on bandwidth
     fn adapt_quality(&mut self, bandwidth_mbps: f64) {
         let new_variant = match bandwidth_mbps {
             b if b < 1.0 => "360p",
-            b if b < 3.0 => "480p", 
+            b if b < 3.0 => "480p",
             b if b < 6.0 => "720p",
             b if b < 12.0 => "1080p",
             _ => "4k",
         };
 
         if new_variant != self.current_variant {
-            println!("Switching quality from {} to {} (bandwidth: {:.2} Mbps)", 
-                self.current_variant, new_variant, bandwidth_mbps);
+            println!(
+                "Switching quality from {} to {} (bandwidth: {:.2} Mbps)",
+                self.current_variant, new_variant, bandwidth_mbps
+            );
             self.current_variant = new_variant.to_string();
         }
     }
@@ -145,9 +166,12 @@ impl FerrexStreamingSource {
         // Prefetch next 2 segments in background
         for i in 1..=2 {
             let segment_num = current_segment + i;
-            let url = format!("{}/transcode/{}/segment/{}", server_url, job_id, segment_num);
+            let url = format!(
+                "{}/transcode/{}/segment/{}",
+                server_url, job_id, segment_num
+            );
             let client = client.clone();
-            
+
             tokio::spawn(async move {
                 let _ = client.get(&url).send().await;
             });
@@ -157,7 +181,8 @@ impl FerrexStreamingSource {
     /// Check transcoding status
     pub async fn check_status(&self) -> Result<Option<f32>, Box<dyn std::error::Error>> {
         if let Some(job_id) = &self.master_job_id {
-            let response: JobStatus = self.client
+            let response: JobStatus = self
+                .client
                 .get(&format!("{}/transcode/status/{}", self.server_url, job_id))
                 .send()
                 .await?
@@ -188,7 +213,7 @@ impl FerrexStreamingSource {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut source = FerrexStreamingSource::new(
         "http://localhost:8080".to_string(),
-        "media-uuid-here".to_string()
+        "media-uuid-here".to_string(),
     );
 
     // Initialize streaming
@@ -198,8 +223,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for segment_num in 0..10 {
         println!("Requesting segment {}", segment_num);
         let segment_data = source.get_segment(segment_num).await?;
-        println!("Received segment {} ({} bytes)", segment_num, segment_data.len());
-        
+        println!(
+            "Received segment {} ({} bytes)",
+            segment_num,
+            segment_data.len()
+        );
+
         // Simulate playback time
         tokio::time::sleep(Duration::from_secs(4)).await;
     }

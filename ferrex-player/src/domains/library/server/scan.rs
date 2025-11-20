@@ -1,5 +1,5 @@
 use crate::infrastructure::api_types::ScanProgress;
-use uuid::Uuid;
+use ferrex_core::LibraryID;
 
 pub async fn start_media_scan(
     server_url: String,
@@ -71,7 +71,7 @@ pub async fn start_media_scan(
 // Library-specific scan function
 pub async fn start_library_scan(
     server_url: String,
-    library_id: Uuid,
+    library_id: LibraryID,
     streaming: bool,
 ) -> Result<String, anyhow::Error> {
     log::info!(
@@ -80,7 +80,8 @@ pub async fn start_library_scan(
         streaming
     );
 
-    crate::domains::media::library::scan_library(server_url, library_id, streaming).await
+    //crate::domains::media::library::scan_library(server_url, library_id, streaming).await
+    Err(anyhow::anyhow!("Not implemented"))
 }
 
 pub async fn check_active_scans(server_url: String) -> Vec<ScanProgress> {

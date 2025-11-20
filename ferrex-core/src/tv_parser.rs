@@ -1,7 +1,7 @@
+use chrono::NaiveDate;
 use regex::Regex;
 use std::path::Path;
 use tracing::debug;
-use chrono::NaiveDate;
 
 /// TV show parsing utilities for Jellyfin-compatible patterns
 pub struct TvParser;
@@ -12,11 +12,11 @@ pub struct EpisodeInfo {
     pub season: u32,
     pub episode: u32,
     pub end_episode: Option<u32>, // For multi-episode files
-    pub year: Option<u32>, // For date-based episodes
+    pub year: Option<u32>,        // For date-based episodes
     pub month: Option<u32>,
     pub day: Option<u32>,
     pub absolute_episode: Option<u32>, // For anime
-    pub is_special: bool, // Season 0 episodes
+    pub is_special: bool,              // Season 0 episodes
 }
 
 impl TvParser {
@@ -25,43 +25,93 @@ impl TvParser {
     pub fn episode_patterns() -> Vec<(&'static str, Regex)> {
         vec![
             // Multi-episode patterns (must check before single episode)
-            ("multi_episode_dash", Regex::new(r"[Ss](\d{1,3})[Ee](\d{1,3})(?:-[Ee]?(\d{1,3}))").unwrap()),
-            ("multi_episode_concat", Regex::new(r"[Ss](\d{1,3})[Ee](\d{1,3})[Ee](\d{1,3})").unwrap()),
-            ("multi_episode_x", Regex::new(r"(\d{1,2})[xX](\d{1,3})(?:-[xX]?(\d{1,3}))").unwrap()),
-            
+            (
+                "multi_episode_dash",
+                Regex::new(r"[Ss](\d{1,3})[Ee](\d{1,3})(?:-[Ee]?(\d{1,3}))").unwrap(),
+            ),
+            (
+                "multi_episode_concat",
+                Regex::new(r"[Ss](\d{1,3})[Ee](\d{1,3})[Ee](\d{1,3})").unwrap(),
+            ),
+            (
+                "multi_episode_x",
+                Regex::new(r"(\d{1,2})[xX](\d{1,3})(?:-[xX]?(\d{1,3}))").unwrap(),
+            ),
             // Standard patterns with boundary checks
-            ("s00e00", Regex::new(r"(?i)(?:^|[^a-z])s(\d{1,3})e(\d{1,3})(?:[^0-9]|$)").unwrap()),
-            ("s00e00_dots", Regex::new(r"(?i)s(\d{1,3})\.e(\d{1,3})").unwrap()),
-            ("season_episode", Regex::new(r"(?i)season\s*(\d{1,3})\s*episode\s*(\d{1,3})").unwrap()),
-            ("s00_e00", Regex::new(r"(?i)s(\d{1,3})\s+e(\d{1,3})").unwrap()),
-            ("0x00", Regex::new(r"(?:^|[^0-9])(\d{1,2})x(\d{1,3})(?:[^0-9]|$)").unwrap()),
-            
+            (
+                "s00e00",
+                Regex::new(r"(?i)(?:^|[^a-z])s(\d{1,3})e(\d{1,3})(?:[^0-9]|$)").unwrap(),
+            ),
+            (
+                "s00e00_dots",
+                Regex::new(r"(?i)s(\d{1,3})\.e(\d{1,3})").unwrap(),
+            ),
+            (
+                "season_episode",
+                Regex::new(r"(?i)season\s*(\d{1,3})\s*episode\s*(\d{1,3})").unwrap(),
+            ),
+            (
+                "s00_e00",
+                Regex::new(r"(?i)s(\d{1,3})\s+e(\d{1,3})").unwrap(),
+            ),
+            (
+                "0x00",
+                Regex::new(r"(?:^|[^0-9])(\d{1,2})x(\d{1,3})(?:[^0-9]|$)").unwrap(),
+            ),
             // Episode patterns with word boundaries
-            ("ep000", Regex::new(r"(?i)(?:^|[^a-z])(?:ep|episode)(?:\s|\.)*(\d{1,3})(?:[^0-9]|$)").unwrap()),
-            ("e00", Regex::new(r"(?i)(?:^|[^a-z])e(\d{1,3})(?:[^0-9]|$)").unwrap()),
-            
+            (
+                "ep000",
+                Regex::new(r"(?i)(?:^|[^a-z])(?:ep|episode)(?:\s|\.)*(\d{1,3})(?:[^0-9]|$)")
+                    .unwrap(),
+            ),
+            (
+                "e00",
+                Regex::new(r"(?i)(?:^|[^a-z])e(\d{1,3})(?:[^0-9]|$)").unwrap(),
+            ),
             // Season folder with episode number only
-            ("folder_episode", Regex::new(r"(?:^|[^0-9])(\d{1,3})(?:\s*-|\.|\s|_|$)").unwrap()),
-            
+            (
+                "folder_episode",
+                Regex::new(r"(?:^|[^0-9])(\d{1,3})(?:\s*-|\.|\s|_|$)").unwrap(),
+            ),
             // Part/Chapter patterns
-            ("part", Regex::new(r"(?i)(?:part|pt)\.?\s*(\d{1,3})").unwrap()),
-            ("chapter", Regex::new(r"(?i)(?:chapter|ch)\.?\s*(\d{1,3})").unwrap()),
-            
+            (
+                "part",
+                Regex::new(r"(?i)(?:part|pt)\.?\s*(\d{1,3})").unwrap(),
+            ),
+            (
+                "chapter",
+                Regex::new(r"(?i)(?:chapter|ch)\.?\s*(\d{1,3})").unwrap(),
+            ),
             // Absolute episode number (common in anime)
-            ("absolute_3digit", Regex::new(r"(?:^|[^0-9])(\d{3})(?:[^0-9]|$)").unwrap()),
-            ("absolute_2digit", Regex::new(r"(?:^|[^0-9])(\d{2})(?:[^0-9]|$)").unwrap()),
+            (
+                "absolute_3digit",
+                Regex::new(r"(?:^|[^0-9])(\d{3})(?:[^0-9]|$)").unwrap(),
+            ),
+            (
+                "absolute_2digit",
+                Regex::new(r"(?:^|[^0-9])(\d{2})(?:[^0-9]|$)").unwrap(),
+            ),
         ]
     }
-    
+
     /// Date-based episode patterns
     pub fn date_patterns() -> Vec<(&'static str, Regex)> {
         vec![
             // YYYY-MM-DD or YYYY.MM.DD
-            ("date_ymd", Regex::new(r"(\d{4})[\-\.](\d{1,2})[\-\.](\d{1,2})").unwrap()),
+            (
+                "date_ymd",
+                Regex::new(r"(\d{4})[\-\.](\d{1,2})[\-\.](\d{1,2})").unwrap(),
+            ),
             // DD-MM-YYYY or DD.MM.YYYY
-            ("date_dmy", Regex::new(r"(\d{1,2})[\-\.](\d{1,2})[\-\.](\d{4})").unwrap()),
+            (
+                "date_dmy",
+                Regex::new(r"(\d{1,2})[\-\.](\d{1,2})[\-\.](\d{4})").unwrap(),
+            ),
             // YYYYMMDD
-            ("date_compact", Regex::new(r"(\d{4})(\d{2})(\d{2})").unwrap()),
+            (
+                "date_compact",
+                Regex::new(r"(\d{4})(\d{2})(\d{2})").unwrap(),
+            ),
         ]
     }
 
@@ -84,7 +134,7 @@ impl TvParser {
     /// Extract detailed episode information from a file path
     pub fn parse_episode_info(path: &Path) -> Option<EpisodeInfo> {
         let filename = path.file_stem()?.to_str()?;
-        
+
         // First, try date-based patterns (common for daily shows)
         for (pattern_name, pattern) in Self::date_patterns() {
             if let Some(captures) = pattern.captures(filename) {
@@ -101,10 +151,13 @@ impl TvParser {
                     ),
                     _ => continue,
                 };
-                
+
                 // Validate date
                 if NaiveDate::from_ymd_opt(year as i32, month, day).is_some() {
-                    debug!("Parsed date-based episode: {}-{:02}-{:02} from {}", year, month, day, filename);
+                    debug!(
+                        "Parsed date-based episode: {}-{:02}-{:02} from {}",
+                        year, month, day, filename
+                    );
                     return Some(EpisodeInfo {
                         season: year,
                         episode: (month * 100 + day), // Encode as MMDD
@@ -118,7 +171,7 @@ impl TvParser {
                 }
             }
         }
-        
+
         // Try standard episode patterns
         for (pattern_name, pattern) in Self::episode_patterns() {
             if let Some(captures) = pattern.captures(filename) {
@@ -128,7 +181,10 @@ impl TvParser {
                             let season: u32 = captures[1].parse().ok()?;
                             let start_ep: u32 = captures[2].parse().ok()?;
                             let end_ep: u32 = captures[3].parse().ok()?;
-                            debug!("Parsed multi-episode: S{:02}E{:02}-E{:02} from {}", season, start_ep, end_ep, filename);
+                            debug!(
+                                "Parsed multi-episode: S{:02}E{:02}-E{:02} from {}",
+                                season, start_ep, end_ep, filename
+                            );
                             return Some(EpisodeInfo {
                                 season,
                                 episode: start_ep,
@@ -146,7 +202,10 @@ impl TvParser {
                             let season: u32 = captures[1].parse().ok()?;
                             let start_ep: u32 = captures[2].parse().ok()?;
                             let end_ep: u32 = captures[3].parse().ok()?;
-                            debug!("Parsed concat episodes: S{:02}E{:02}E{:02} from {}", season, start_ep, end_ep, filename);
+                            debug!(
+                                "Parsed concat episodes: S{:02}E{:02}E{:02} from {}",
+                                season, start_ep, end_ep, filename
+                            );
                             return Some(EpisodeInfo {
                                 season,
                                 episode: start_ep,
@@ -197,8 +256,11 @@ impl TvParser {
                                 } else {
                                     1
                                 };
-                                
-                                debug!("Parsed episode: S{:02}E{:02} from {}", season, episode, filename);
+
+                                debug!(
+                                    "Parsed episode: S{:02}E{:02} from {}",
+                                    season, episode, filename
+                                );
                                 return Some(EpisodeInfo {
                                     season,
                                     episode,
@@ -229,8 +291,11 @@ impl TvParser {
                                 } else {
                                     1
                                 };
-                                
-                                debug!("Parsed part/chapter as episode: S{:02}E{:02} from {}", season, episode, filename);
+
+                                debug!(
+                                    "Parsed part/chapter as episode: S{:02}E{:02} from {}",
+                                    season, episode, filename
+                                );
                                 return Some(EpisodeInfo {
                                     season,
                                     episode,
@@ -248,7 +313,10 @@ impl TvParser {
                         if captures.len() >= 3 {
                             let season: u32 = captures[1].parse().ok()?;
                             let episode: u32 = captures[2].parse().ok()?;
-                            debug!("Parsed episode: S{:02}E{:02} from {}", season, episode, filename);
+                            debug!(
+                                "Parsed episode: S{:02}E{:02} from {}",
+                                season, episode, filename
+                            );
                             return Some(EpisodeInfo {
                                 season,
                                 episode,
@@ -264,20 +332,20 @@ impl TvParser {
                 }
             }
         }
-        
+
         // Fallback to folder-based parsing
         Self::parse_from_folder_structure(path)
     }
-    
+
     /// Extract season and episode numbers from a file path (simplified version)
     pub fn parse_episode(path: &Path) -> Option<(u32, u32)> {
         Self::parse_episode_info(path).map(|info| (info.season, info.episode))
     }
-    
+
     /// Parse episode info from folder structure
     fn parse_from_folder_structure(path: &Path) -> Option<EpisodeInfo> {
         let filename = path.file_stem()?.to_str()?;
-        
+
         if let Some(parent) = path.parent() {
             if let Some(parent_name) = parent.file_name() {
                 if let Some(season) = Self::parse_season_folder(parent_name.to_str()?) {
@@ -287,15 +355,18 @@ impl TvParser {
                         Regex::new(r"(?i)(?:e|ep|episode)(?:\s|\.)*(\d{1,3})").unwrap(),
                         Regex::new(r"^\s*(\d{1,3})\s*[-_.]").unwrap(),
                         Regex::new(r"^(\d{1,3})\s").unwrap(), // "01 Title"
-                        Regex::new(r"^(\d{1,3})$").unwrap(), // Just "01" or "05"
+                        Regex::new(r"^(\d{1,3})$").unwrap(),  // Just "01" or "05"
                         // Extract from common naming patterns
                         Regex::new(r"^(?:[^0-9]*?)(\d{1,3})(?:[^0-9]|$)").unwrap(),
                     ];
-                    
+
                     for pattern in ep_patterns {
                         if let Some(captures) = pattern.captures(filename) {
                             if let Ok(episode) = captures[1].parse::<u32>() {
-                                debug!("Parsed episode: S{:02}E{:02} from folder+filename", season, episode);
+                                debug!(
+                                    "Parsed episode: S{:02}E{:02} from folder+filename",
+                                    season, episode
+                                );
                                 return Some(EpisodeInfo {
                                     season,
                                     episode,
@@ -312,7 +383,7 @@ impl TvParser {
                 }
             }
         }
-        
+
         None
     }
 
@@ -322,7 +393,7 @@ impl TvParser {
         if folder_name.to_lowercase() == "specials" || folder_name.to_lowercase() == "special" {
             return Some(0);
         }
-        
+
         for pattern in Self::season_folder_patterns() {
             if let Some(captures) = pattern.captures(folder_name) {
                 if captures.len() >= 2 {
@@ -359,7 +430,6 @@ impl TvParser {
         None
     }
 
-
     /// Check if a path is within a TV show folder structure
     pub fn is_in_tv_structure(path: &Path) -> bool {
         // Check parent for season folder
@@ -392,9 +462,13 @@ impl TvParser {
             if let Some(name_str) = filename.to_str() {
                 // Quick check for common episode indicators
                 let lower = name_str.to_lowercase();
-                if lower.contains("s0") || lower.contains("s1") || 
-                   lower.contains("e0") || lower.contains("e1") ||
-                   lower.contains("x0") || lower.contains("x1") {
+                if lower.contains("s0")
+                    || lower.contains("s1")
+                    || lower.contains("e0")
+                    || lower.contains("e1")
+                    || lower.contains("x0")
+                    || lower.contains("x1")
+                {
                     return true;
                 }
             }
@@ -402,23 +476,23 @@ impl TvParser {
 
         false
     }
-    
+
     /// Check if path likely contains anime based on common patterns
     pub fn is_likely_anime(path: &Path) -> bool {
         let path_str = path.to_string_lossy().to_lowercase();
-        
+
         // Common anime folder indicators
         let anime_indicators = vec![
-            "anime", "[subbed]", "[dubbed]", "[bd]", "[dvd]",
-            "[720p]", "[1080p]", "[hevc]", "[x264]", "[x265]",
+            "anime", "[subbed]", "[dubbed]", "[bd]", "[dvd]", "[720p]", "[1080p]", "[hevc]",
+            "[x264]", "[x265]",
         ];
-        
+
         for indicator in anime_indicators {
             if path_str.contains(indicator) {
                 return true;
             }
         }
-        
+
         // Check for fansub group tags [GroupName]
         if let Some(filename) = path.file_stem() {
             if let Some(name) = filename.to_str() {
@@ -427,42 +501,43 @@ impl TvParser {
                 }
             }
         }
-        
+
         false
     }
-    
+
     /// Extract episode title from filename
     pub fn extract_episode_title(path: &Path) -> Option<String> {
         let filename = path.file_stem()?.to_str()?;
-        
+
         // Remove common patterns to get to the title
         let title_patterns = vec![
             // S01E01 - Title
             Regex::new(r"^.*?[Ss]\d+[Ee]\d+(?:[Ee]\d+)?\s*-\s*(.+)$").unwrap(),
-            // 1x01 - Title  
+            // 1x01 - Title
             Regex::new(r"^.*?\d+[xX]\d+\s*-\s*(.+)$").unwrap(),
             // 01 - Title
             Regex::new(r"^\d+\s*-\s*(.+)$").unwrap(),
             // S01E01.Title format (dot separator)
             Regex::new(r"^.*?[Ss]\d+[Ee]\d+\.(.+)$").unwrap(),
         ];
-        
+
         for pattern in title_patterns {
             if let Some(captures) = pattern.captures(filename) {
                 if let Some(title) = captures.get(1) {
-                    let cleaned = title.as_str()
+                    let cleaned = title
+                        .as_str()
                         .trim()
                         .trim_end_matches(|c: char| c == '.' || c == '_' || c == '-')
                         .replace('_', " ")
                         .replace('.', " ");
-                    
+
                     if !cleaned.is_empty() {
                         return Some(cleaned);
                     }
                 }
             }
         }
-        
+
         None
     }
 }
@@ -489,7 +564,7 @@ mod tests {
         let path = PathBuf::from("/media/Show Name/Season 2/03 - Episode Name.mkv");
         assert_eq!(TvParser::parse_episode(&path), Some((2, 3)));
     }
-    
+
     #[test]
     fn test_parse_multi_episode() {
         let path1 = PathBuf::from("/media/Show/S01E01-E02.mkv");
@@ -497,14 +572,14 @@ mod tests {
         assert_eq!(info1.season, 1);
         assert_eq!(info1.episode, 1);
         assert_eq!(info1.end_episode, Some(2));
-        
+
         let path2 = PathBuf::from("/media/Show/S01E01E02.mkv");
         let info2 = TvParser::parse_episode_info(&path2).unwrap();
         assert_eq!(info2.season, 1);
         assert_eq!(info2.episode, 1);
         assert_eq!(info2.end_episode, Some(2));
     }
-    
+
     #[test]
     fn test_parse_date_episode() {
         let path1 = PathBuf::from("/media/Daily Show/2024-01-15.mkv");
@@ -512,14 +587,14 @@ mod tests {
         assert_eq!(info1.year, Some(2024));
         assert_eq!(info1.month, Some(1));
         assert_eq!(info1.day, Some(15));
-        
+
         let path2 = PathBuf::from("/media/Daily Show/2024.01.15.mkv");
         let info2 = TvParser::parse_episode_info(&path2).unwrap();
         assert_eq!(info2.year, Some(2024));
         assert_eq!(info2.month, Some(1));
         assert_eq!(info2.day, Some(15));
     }
-    
+
     #[test]
     fn test_parse_special_episode() {
         let path = PathBuf::from("/media/Show/Specials/S00E01 - Christmas Special.mkv");
@@ -532,7 +607,10 @@ mod tests {
     #[test]
     fn test_extract_series_name() {
         let path = PathBuf::from("/media/Breaking Bad/Season 1/S01E01.mkv");
-        assert_eq!(TvParser::extract_series_name(&path), Some("Breaking Bad".to_string()));
+        assert_eq!(
+            TvParser::extract_series_name(&path),
+            Some("Breaking Bad".to_string())
+        );
     }
 
     #[test]
@@ -553,27 +631,37 @@ mod tests {
         let movie_path = PathBuf::from("/media/Movies/The Matrix (1999).mkv");
         assert!(!TvParser::is_in_tv_structure(&movie_path));
     }
-    
+
     #[test]
     fn test_extract_episode_title() {
         let path1 = PathBuf::from("/media/Show/S01E01 - Pilot Episode.mkv");
-        assert_eq!(TvParser::extract_episode_title(&path1), Some("Pilot Episode".to_string()));
-        
+        assert_eq!(
+            TvParser::extract_episode_title(&path1),
+            Some("Pilot Episode".to_string())
+        );
+
         let path2 = PathBuf::from("/media/Show/1x01 - The Beginning.mkv");
-        assert_eq!(TvParser::extract_episode_title(&path2), Some("The Beginning".to_string()));
-        
+        assert_eq!(
+            TvParser::extract_episode_title(&path2),
+            Some("The Beginning".to_string())
+        );
+
         let path3 = PathBuf::from("/media/Show/01 - First Episode.mkv");
-        assert_eq!(TvParser::extract_episode_title(&path3), Some("First Episode".to_string()));
+        assert_eq!(
+            TvParser::extract_episode_title(&path3),
+            Some("First Episode".to_string())
+        );
     }
-    
+
     #[test]
     fn test_is_likely_anime() {
-        let anime_path1 = PathBuf::from("/media/Anime/Attack on Titan/[HorribleSubs] AOT - 01 [720p].mkv");
+        let anime_path1 =
+            PathBuf::from("/media/Anime/Attack on Titan/[HorribleSubs] AOT - 01 [720p].mkv");
         assert!(TvParser::is_likely_anime(&anime_path1));
-        
+
         let anime_path2 = PathBuf::from("/media/Shows/Naruto [Dubbed]/Episode 001.mkv");
         assert!(TvParser::is_likely_anime(&anime_path2));
-        
+
         let regular_path = PathBuf::from("/media/Shows/Breaking Bad/S01E01.mkv");
         assert!(!TvParser::is_likely_anime(&regular_path));
     }

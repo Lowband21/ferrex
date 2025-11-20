@@ -12,6 +12,9 @@ impl MediaServerTheme {
     // Core colors
     pub const BLACK: Color = Color::from_rgb(0.0, 0.0, 0.0); // #000000
     pub const BACKGROUND_DARK: Color = Color::from_rgb(0.1, 0.1, 0.10);
+    //pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.31, 0.094, 0.333);
+    //pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.20, 0.05, 0.30);
+    pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.12, 0.05, 0.16);
     pub const ACCENT_BLUE: Color = Color::from_rgb(0.0, 0.5, 1.0); // #0080FF
     pub const ACCENT_BLUE_HOVER: Color = Color::from_rgb(0.0, 0.6, 1.0); // #0099FF
     pub const ACCENT_BLUE_GLOW: Color = Color::from_rgba(0.0, 0.5, 1.0, 0.3); // Blue glow
@@ -56,7 +59,7 @@ impl MediaServerTheme {
         palette.success = Self::SUCCESS;
         palette.danger = Self::ERROR;
 
-        Theme::custom("MediaServer", palette)
+        Theme::custom("Ferrex Dark", palette)
     }
 }
 
@@ -68,6 +71,7 @@ pub enum Container {
     ProgressBar,
     ProgressBarBackground,
     Header,
+    HeaderAccent,
     ErrorBox,
     Modal,
     ModalOverlay,
@@ -139,6 +143,17 @@ impl Container {
             Container::Header => |_| container::Style {
                 text_color: Some(MediaServerTheme::TEXT_PRIMARY),
                 background: Some(Background::Color(MediaServerTheme::BACKGROUND_DARK)),
+                border: Border {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
+                shadow: Shadow::default(),
+                snap: false,
+            },
+            Container::HeaderAccent => |_| container::Style {
+                text_color: Some(MediaServerTheme::TEXT_PRIMARY),
+                background: Some(Background::Color(MediaServerTheme::BACKGROUND_ACCENT)),
                 border: Border {
                     color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
                     width: 0.0,

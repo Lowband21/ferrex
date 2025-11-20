@@ -1,4 +1,4 @@
-use crate::user_management::domain::value_objects::{Username, DisplayName, UserRole};
+use crate::user_management::domain::value_objects::{DisplayName, UserRole, Username};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -34,13 +34,9 @@ pub struct UserAggregate {
 
 impl UserAggregate {
     /// Create a new user with validated inputs
-    pub fn new(
-        username: Username,
-        display_name: DisplayName,
-        role: UserRole,
-    ) -> Self {
+    pub fn new(username: Username, display_name: DisplayName, role: UserRole) -> Self {
         let now = Utc::now();
-        
+
         Self {
             id: Uuid::new_v4(),
             username,
@@ -56,11 +52,14 @@ impl UserAggregate {
     }
 
     /// Update the user's display name
-    pub fn update_display_name(&mut self, display_name: DisplayName) -> Result<(), UserAggregateError> {
+    pub fn update_display_name(
+        &mut self,
+        display_name: DisplayName,
+    ) -> Result<(), UserAggregateError> {
         if !self.is_active {
             return Err(UserAggregateError::UserInactive);
         }
-        
+
         self.display_name = display_name;
         self.updated_at = Utc::now();
         Ok(())
@@ -71,7 +70,7 @@ impl UserAggregate {
         if !self.is_active {
             return Err(UserAggregateError::UserInactive);
         }
-        
+
         self.role = role;
         self.updated_at = Utc::now();
         Ok(())
@@ -82,25 +81,28 @@ impl UserAggregate {
         if !self.is_active {
             return Err(UserAggregateError::UserInactive);
         }
-        
+
         // Basic email validation if provided
         if let Some(ref email_str) = email {
             if !email_str.contains('@') || email_str.len() > 254 {
                 return Err(UserAggregateError::InvalidEmail);
             }
         }
-        
+
         self.email = email;
         self.updated_at = Utc::now();
         Ok(())
     }
 
     /// Update the user's avatar URL
-    pub fn update_avatar_url(&mut self, avatar_url: Option<String>) -> Result<(), UserAggregateError> {
+    pub fn update_avatar_url(
+        &mut self,
+        avatar_url: Option<String>,
+    ) -> Result<(), UserAggregateError> {
         if !self.is_active {
             return Err(UserAggregateError::UserInactive);
         }
-        
+
         self.avatar_url = avatar_url;
         self.updated_at = Utc::now();
         Ok(())
@@ -111,7 +113,7 @@ impl UserAggregate {
         if !self.is_active {
             return Err(UserAggregateError::UserAlreadyInactive);
         }
-        
+
         self.is_active = false;
         self.updated_at = Utc::now();
         Ok(())
@@ -122,7 +124,7 @@ impl UserAggregate {
         if self.is_active {
             return Err(UserAggregateError::UserAlreadyActive);
         }
-        
+
         self.is_active = true;
         self.updated_at = Utc::now();
         Ok(())
@@ -154,16 +156,16 @@ impl UserAggregate {
 pub enum UserAggregateError {
     #[error("User is inactive")]
     UserInactive,
-    
+
     #[error("User is already inactive")]
     UserAlreadyInactive,
-    
+
     #[error("User is already active")]
     UserAlreadyActive,
-    
+
     #[error("Invalid email address")]
     InvalidEmail,
-    
+
     #[error("Operation not permitted")]
     OperationNotPermitted,
 }

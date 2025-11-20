@@ -105,7 +105,7 @@ impl TestExecutor {
         // Move scheduled tasks that are ready to the pending queue
         let mut scheduled = self.scheduled_tasks.lock().unwrap();
         let mut pending = self.pending_tasks.lock().unwrap();
-        
+
         let ready_tasks: Vec<_> = scheduled
             .iter()
             .enumerate()
@@ -128,12 +128,12 @@ impl TestExecutor {
     /// Execute a single pending task
     pub fn execute_one(&mut self) -> bool {
         let task = self.pending_tasks.lock().unwrap().pop_front();
-        
+
         if let Some(mut task) = task {
             // Create a simple waker that re-enqueues the task if not complete
             let waker = create_test_waker(Arc::clone(&self.pending_tasks));
             let mut context = Context::from_waker(&waker);
-            
+
             match task.as_mut().poll(&mut context) {
                 Poll::Ready(()) => {
                     self.executed_count += 1;
@@ -153,18 +153,21 @@ impl TestExecutor {
     pub fn execute_all(&mut self) -> usize {
         let mut count = 0;
         let mut iterations = 0;
-        
+
         while self.has_pending_tasks() && iterations < self.max_iterations {
             if self.execute_one() {
                 count += 1;
             }
             iterations += 1;
         }
-        
+
         if iterations >= self.max_iterations {
-            panic!("TestExecutor exceeded maximum iterations ({}). Possible infinite loop?", self.max_iterations);
+            panic!(
+                "TestExecutor exceeded maximum iterations ({}). Possible infinite loop?",
+                self.max_iterations
+            );
         }
-        
+
         count
     }
 
@@ -175,7 +178,7 @@ impl TestExecutor {
     {
         let mut count = 0;
         let mut iterations = 0;
-        
+
         while !condition() && iterations < self.max_iterations {
             if self.has_pending_tasks() {
                 if self.execute_one() {
@@ -186,11 +189,11 @@ impl TestExecutor {
             }
             iterations += 1;
         }
-        
+
         if iterations >= self.max_iterations {
             panic!("TestExecutor exceeded maximum iterations in execute_until");
         }
-        
+
         count
     }
 
@@ -245,14 +248,14 @@ fn create_test_waker(pending_tasks: Arc<Mutex<VecDeque<BoxedFuture>>>) -> Waker 
     struct TestWake {
         pending_tasks: Arc<Mutex<VecDeque<BoxedFuture>>>,
     }
-    
+
     impl Wake for TestWake {
         fn wake(self: Arc<Self>) {
             // Task will be re-enqueued when polled again
             // This is handled by the executor's polling logic
         }
     }
-    
+
     let wake = Arc::new(TestWake { pending_tasks });
     Waker::from(wake)
 }
@@ -287,17 +290,17 @@ mod tests {
     fn test_immediate_execution() {
         let mut executor = TestExecutor::new();
         let counter = Arc::new(AtomicUsize::new(0));
-        
+
         let counter_clone = Arc::clone(&counter);
         executor.spawn(async move {
             counter_clone.fetch_add(1, Ordering::SeqCst);
         });
-        
+
         let counter_clone = Arc::clone(&counter);
         executor.spawn(async move {
             counter_clone.fetch_add(10, Ordering::SeqCst);
         });
-        
+
         executor.execute_all();
         assert_eq!(counter.load(Ordering::SeqCst), 11);
     }
@@ -306,17 +309,17 @@ mod tests {
     fn test_scheduled_execution() {
         let mut executor = TestExecutor::new();
         let counter = Arc::new(AtomicUsize::new(0));
-        
+
         // Schedule task for 1 second in the future
         let counter_clone = Arc::clone(&counter);
         executor.schedule_after(Duration::from_secs(1), async move {
             counter_clone.fetch_add(1, Ordering::SeqCst);
         });
-        
+
         // Task shouldn't execute yet
         executor.execute_all();
         assert_eq!(counter.load(Ordering::SeqCst), 0);
-        
+
         // Advance time and execute
         executor.advance_time(Duration::from_secs(2));
         executor.execute_all();
@@ -327,24 +330,24 @@ mod tests {
     fn test_step_by_step_execution() {
         let mut executor = TestExecutor::new();
         executor.set_mode(ExecutionMode::StepByStep);
-        
+
         let counter = Arc::new(AtomicUsize::new(0));
-        
+
         for i in 0..3 {
             let counter_clone = Arc::clone(&counter);
             executor.spawn(async move {
                 counter_clone.fetch_add(i, Ordering::SeqCst);
             });
         }
-        
+
         assert_eq!(executor.pending_count(), 3);
-        
+
         executor.execute_one();
         assert_eq!(counter.load(Ordering::SeqCst), 0);
-        
+
         executor.execute_one();
         assert_eq!(counter.load(Ordering::SeqCst), 1);
-        
+
         executor.execute_one();
         assert_eq!(counter.load(Ordering::SeqCst), 3);
     }
@@ -353,17 +356,17 @@ mod tests {
     fn test_execute_until_condition() {
         let mut executor = TestExecutor::new();
         let counter = Arc::new(AtomicUsize::new(0));
-        
+
         for _ in 0..10 {
             let counter_clone = Arc::clone(&counter);
             executor.spawn(async move {
                 counter_clone.fetch_add(1, Ordering::SeqCst);
             });
         }
-        
+
         let counter_clone = Arc::clone(&counter);
         let executed = executor.execute_until(|| counter_clone.load(Ordering::SeqCst) >= 5);
-        
+
         assert!(executed >= 5);
         assert!(counter.load(Ordering::SeqCst) >= 5);
     }
@@ -373,7 +376,7 @@ mod tests {
     fn test_infinite_loop_protection() {
         let mut executor = TestExecutor::new();
         executor.set_max_iterations(10);
-        
+
         // Create a task that keeps spawning itself
         fn spawn_recursive(executor: &TestExecutor) {
             executor.spawn(async {
@@ -381,12 +384,12 @@ mod tests {
             });
             spawn_recursive(executor);
         }
-        
+
         // Start the infinite spawning
         for _ in 0..20 {
             executor.spawn(async {});
         }
-        
+
         executor.execute_all(); // Should panic due to max iterations
     }
 }

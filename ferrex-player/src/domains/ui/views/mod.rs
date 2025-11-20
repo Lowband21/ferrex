@@ -23,10 +23,5 @@ pub use password_login::*;
 pub use pin_entry::*;
 pub use user_selection::*;
 
-pub mod cards;
 pub mod carousel;
 pub mod components;
-
-// Include macros at module level so they can be used throughout the crate
-#[macro_use]
-pub mod macros;

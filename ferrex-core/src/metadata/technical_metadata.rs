@@ -12,7 +12,7 @@ pub struct TechnicalMetadata {
     pub audio_codec: Option<String>,
     pub bitrate: Option<u64>,
     pub framerate: Option<f64>,
-    
+
     // HDR metadata
     pub color_primaries: Option<String>,
     pub color_transfer: Option<String>,

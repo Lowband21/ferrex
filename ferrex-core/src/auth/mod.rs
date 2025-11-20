@@ -23,9 +23,8 @@ pub use infrastructure::*;
 pub use pin::*;
 // Re-export session types with explicit naming to avoid conflicts
 pub use session::{
-    SessionConfig, SessionValidationResult, SessionActivity,
-    RevokeSessionRequest, ListSessionsRequest, SessionSummary,
-    CreateSessionRequest, CreateSessionResponse, generate_session_token
+    generate_session_token, CreateSessionRequest, CreateSessionResponse, ListSessionsRequest,
+    RevokeSessionRequest, SessionActivity, SessionConfig, SessionSummary, SessionValidationResult,
 };
 // Export session DeviceSession with alias to avoid conflict with domain DeviceSession
 pub use session::DeviceSession as SessionDeviceSession;
@@ -62,25 +61,25 @@ pub trait AuthenticationMethod {
 pub enum AuthError {
     #[error("Invalid credentials")]
     InvalidCredentials,
-    
+
     #[error("Device not trusted")]
     DeviceNotTrusted,
-    
+
     #[error("Too many failed attempts")]
     TooManyAttempts { locked_until: i64 },
-    
+
     #[error("PIN required but not set")]
     PinNotSet,
-    
+
     #[error("Invalid PIN")]
     InvalidPin { attempts_remaining: u8 },
-    
+
     #[error("Device revoked")]
     DeviceRevoked,
-    
+
     #[error("Session expired")]
     SessionExpired,
-    
+
     #[error("Internal error")]
     InternalError,
 }
@@ -129,7 +128,7 @@ impl AuthEventType {
             Self::AutoLogin => "auto_login",
         }
     }
-    
+
     /// Parse from database string
     pub fn from_str(s: &str) -> Option<Self> {
         match s {

@@ -1,8 +1,8 @@
 use crate::domains::player::video_backend::{ToneMappingAlgorithm, ToneMappingPreset};
 
-use crate::infrastructure::api_types::MediaId;
+use crate::infrastructure::MediaID;
+use ferrex_core::MediaFile;
 
-use super::library::MediaFile;
 pub mod subscriptions;
 
 #[derive(Clone)]
@@ -13,8 +13,8 @@ pub enum Message {
     PlayPause,
     Stop,
     PlayMedia(MediaFile),
-    PlayMediaWithId(MediaFile, ferrex_core::api_types::MediaId), // includes MediaId for watch tracking
-    LoadMediaById(ferrex_core::api_types::MediaId), // Load track by ID (NEW - for Phase 2 direct commands)
+    PlayMediaWithId(MediaFile, ferrex_core::MediaID), // includes MediaID for watch tracking
+    LoadMediaById(ferrex_core::MediaID), // Load track by ID (NEW - for Phase 2 direct commands)
 
     // Seeking
     Seek(f64),
@@ -37,10 +37,10 @@ pub enum Message {
     CheckControlsVisibility, // Check if controls should be hidden based on inactivity
 
     // Watch progress tracking
-    ProgressUpdateSent(MediaId, f64, f64), // Position that was successfully sent to server
+    ProgressUpdateSent(MediaID, f64, f64), // Position that was successfully sent to server
     ProgressUpdateFailed,                  // Failed to send progress update
-    SendProgressUpdateWithData(MediaId, f64, f64), // position, duration - captures data at message creation time
-    WatchProgressFetched(MediaId, Option<f32>),    // Media ID and resume position
+    SendProgressUpdateWithData(MediaID, f64, f64), // position, duration - captures data at message creation time
+    WatchProgressFetched(MediaID, Option<f32>),    // Media ID and resume position
 
     // Video state
     VideoLoaded(bool), // Success flag
@@ -340,7 +340,7 @@ impl Message {
 /// Media domain events
 #[derive(Clone, Debug)]
 pub enum MediaEvent {
-    PlaybackStarted(MediaFile, ferrex_core::api_types::MediaId),
+    PlaybackStarted(MediaFile, ferrex_core::MediaID),
     PlaybackPaused,
     PlaybackStopped,
     PlaybackPositionChanged(f64),

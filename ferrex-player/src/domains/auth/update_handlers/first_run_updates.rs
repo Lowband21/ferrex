@@ -152,7 +152,7 @@ pub fn handle_submit(state: &mut State) -> Task<Message> {
             };
 
             api_service
-                .post::<ferrex_core::user::AuthToken, _>("/api/setup/admin", &request)
+                .post::<ferrex_core::user::AuthToken, _>("/setup/admin", &request)
                 .await
         },
         |result| match result {

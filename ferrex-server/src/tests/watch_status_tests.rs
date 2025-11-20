@@ -1,12 +1,12 @@
 #[cfg(test)]
 mod watch_status_tests {
+    use ferrex_core::api_types::MediaID;
+    use ferrex_core::media::{EpisodeID, MovieID};
     use ferrex_core::watch_status::*;
-    use ferrex_core::api_types::MediaId;
-    use ferrex_core::media::{MovieID, EpisodeID};
     use std::collections::HashSet;
 
-    fn create_test_media_id(id: &str) -> MediaId {
-        MediaId::Movie(ferrex_core::media::MovieID::new(id.to_string()).unwrap())
+    fn create_test_media_id(id: &str) -> MediaID {
+        MediaID::Movie(ferrex_core::media::MovieID::new(id.to_string()).unwrap())
     }
 
     #[test]
@@ -115,9 +115,18 @@ mod watch_status_tests {
         assert_eq!(continue_watching.len(), 3);
 
         // Most recent should be first
-        assert_eq!(continue_watching[0].media_id, create_test_media_id("movie4"));
-        assert_eq!(continue_watching[1].media_id, create_test_media_id("movie3"));
-        assert_eq!(continue_watching[2].media_id, create_test_media_id("movie2"));
+        assert_eq!(
+            continue_watching[0].media_id,
+            create_test_media_id("movie4")
+        );
+        assert_eq!(
+            continue_watching[1].media_id,
+            create_test_media_id("movie3")
+        );
+        assert_eq!(
+            continue_watching[2].media_id,
+            create_test_media_id("movie2")
+        );
     }
 
     #[test]
@@ -134,8 +143,14 @@ mod watch_status_tests {
         assert_eq!(state.in_progress.len(), 50);
 
         // Most recent 50 should be kept
-        assert_eq!(state.in_progress[0].media_id, create_test_media_id("movie59"));
-        assert_eq!(state.in_progress[49].media_id, create_test_media_id("movie10"));
+        assert_eq!(
+            state.in_progress[0].media_id,
+            create_test_media_id("movie59")
+        );
+        assert_eq!(
+            state.in_progress[49].media_id,
+            create_test_media_id("movie10")
+        );
     }
 
     #[test]
@@ -150,7 +165,10 @@ mod watch_status_tests {
         // Clear progress
         state.clear_progress(&media_id);
         assert!(state.get_progress(&media_id).is_none());
-        assert!(!state.in_progress.iter().any(|item| item.media_id == media_id));
+        assert!(!state
+            .in_progress
+            .iter()
+            .any(|item| item.media_id == media_id));
 
         // Add to completed
         state.update_progress(media_id.clone(), 7000.0, 7200.0);
@@ -198,10 +216,11 @@ mod watch_status_tests {
     #[test]
     fn test_multiple_media_tracking() {
         let mut state = UserWatchState::new();
-        
+
         let movie1 = create_test_media_id("movie1");
         let movie2 = create_test_media_id("movie2");
-        let show1 = MediaId::Episode(ferrex_core::media::EpisodeID::new("show1".to_string()).unwrap());
+        let show1 =
+            MediaID::Episode(ferrex_core::media::EpisodeID::new("show1".to_string()).unwrap());
 
         // Track multiple items
         state.update_progress(movie1.clone(), 1000.0, 7200.0);
@@ -209,10 +228,10 @@ mod watch_status_tests {
         state.update_progress(show1.clone(), 1200.0, 2400.0);
 
         assert_eq!(state.in_progress.len(), 3);
-        
+
         // Complete one
         state.update_progress(show1.clone(), 2300.0, 2400.0);
-        
+
         assert_eq!(state.in_progress.len(), 2);
         assert!(state.is_completed(&show1));
         assert!(!state.is_completed(&movie1));

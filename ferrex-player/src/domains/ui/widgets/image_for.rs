@@ -5,7 +5,7 @@
 
 use crate::domains::ui::widgets::rounded_image_shader::AnimatedPosterBounds;
 use crate::{
-    domains::metadata::image_types::{ImageRequest, ImageSize, Priority},
+    domains::metadata::image_types::{ImageRequest, Priority},
     domains::ui::messages::Message,
     domains::ui::widgets::{rounded_image_shader, AnimationType},
     infrastructure::api_types::{
@@ -13,12 +13,11 @@ use crate::{
     },
     infrastructure::service_registry,
 };
-use ferrex_core::api_types::MediaId;
+use ferrex_core::{ImageSize, ImageType, MediaIDLike};
 use iced::{widget::image::Handle, Color, Element, Length};
 use lucide_icons::Icon;
-use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::time::Duration;
+use uuid::Uuid;
 
 /// Cached image data to avoid repeated lookups
 #[derive(Debug, Clone)]
@@ -30,8 +29,9 @@ struct CachedImageData {
 
 /// A declarative image widget that integrates with UnifiedImageService
 pub struct ImageFor {
-    media_id: MediaId,
+    media_id: Uuid,
     size: ImageSize,
+    image_type: ImageType,
     radius: f32,
     width: Length,
     height: Length,
@@ -59,26 +59,20 @@ impl ImageFor {
         ),
         profiling::function
     )]
-    pub fn new(media_id: MediaId) -> Self {
-        // Determine default size based on media type
-        let (default_size, default_icon) = match &media_id {
-            MediaId::Movie(_) => (ImageSize::Poster, Icon::Film),
-            MediaId::Series(_) => (ImageSize::Poster, Icon::Tv),
-            MediaId::Season(_) => (ImageSize::Poster, Icon::Tv),
-            MediaId::Episode(_) => (ImageSize::Thumbnail, Icon::Play),
-            MediaId::Person(_) => (ImageSize::Profile, Icon::User),
-        };
-
+    pub fn new(media_id: Uuid) -> Self {
         Self {
             media_id,
-            size: default_size,
-            radius: 8.0,
+            size: ImageSize::Poster,
+            image_type: ImageType::Movie,
+            radius: crate::infrastructure::constants::layout::poster::CORNER_RADIUS,
             width: Length::Fixed(200.0),
             height: Length::Fixed(300.0),
-            placeholder_icon: default_icon,
+            // Might want to use a different default icon
+            placeholder_icon: Icon::FileArchive,
             placeholder_text: None,
             priority: Priority::Preload,
-            animation: AnimationType::enhanced_flip(),
+            // Default; callers (views) should set from UI state
+            animation: AnimationType::None,
             theme_color: None,
             is_hovered: false,
             on_play: None,
@@ -105,8 +99,14 @@ impl ImageFor {
         self
     }
 
+    /// Set the image type to load
+    pub fn image_type(mut self, image_type: ImageType) -> Self {
+        self.image_type = image_type;
+        self
+    }
+
     /// Set the corner radius
-    pub fn rounded(mut self, radius: f32) -> Self {
+    pub fn radius(mut self, radius: f32) -> Self {
         self.radius = radius;
         self
     }
@@ -201,11 +201,11 @@ impl ImageFor {
 }
 
 /// Helper function to create an image widget
-pub fn image_for(media_id: impl Into<MediaId>) -> ImageFor {
-    ImageFor::new(media_id.into())
+pub fn image_for(media_id: Uuid) -> ImageFor {
+    ImageFor::new(media_id)
 }
 
-// Note: From implementations for MediaId types are handled in api_types module
+// Note: From implementations for MediaID types are handled in api_types module
 
 // Thread-local cache for the image service to avoid repeated lookups
 thread_local! {
@@ -229,8 +229,9 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
 
         // Create the image request
         let request = ImageRequest {
-            media_id: image.media_id.clone(),
+            media_id: image.media_id,
             size: image.size,
+            image_type: image.image_type,
             priority: image.priority,
         };
 
@@ -277,7 +278,7 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
         // Check if we have access to the image service
         if let Some(image_service) = image_service {
             // Check the cache first
-            if let Some((handle, loaded_at)) = image_service.get().get_with_load_time(&request) {
+            match image_service.get().get_with_load_time(&request) { Some((handle, loaded_at)) => {
                 #[cfg(any(
                     feature = "profile-with-puffin",
                     feature = "profile-with-tracy",
@@ -353,7 +354,7 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                 }
 
                 shader.into()
-            } else {
+            } _ => {
                 // Profile image request for loading
                 #[cfg(any(
                     feature = "profile-with-puffin",
@@ -365,7 +366,7 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                 image_service.get().request_image(request);
 
                 create_loading_placeholder(bounds, image.radius, image.theme_color)
-            }
+            }}
         } else {
             // Service not initialized, show loading state
             create_loading_placeholder(bounds, image.radius, image.theme_color)
@@ -487,24 +488,32 @@ pub trait ImageForExt {
 
 impl ImageForExt for MovieReference {
     fn image_for(&self) -> ImageFor {
-        image_for(MediaId::Movie(self.id.clone()))
+        image_for(self.id.to_uuid())
+            .placeholder(Icon::Film)
+            .image_type(ImageType::Movie)
     }
 }
 
 impl ImageForExt for SeriesReference {
     fn image_for(&self) -> ImageFor {
-        image_for(MediaId::Series(self.id.clone()))
+        image_for(self.id.to_uuid())
+            .placeholder(Icon::Tv)
+            .image_type(ImageType::Series)
     }
 }
 
 impl ImageForExt for SeasonReference {
     fn image_for(&self) -> ImageFor {
-        image_for(MediaId::Season(self.id.clone()))
+        image_for(self.id.to_uuid())
+            .placeholder(Icon::Tv)
+            .image_type(ImageType::Season)
     }
 }
 
 impl ImageForExt for EpisodeReference {
     fn image_for(&self) -> ImageFor {
-        image_for(MediaId::Episode(self.id.clone())).size(ImageSize::Thumbnail)
+        image_for(self.id.to_uuid())
+            .placeholder(Icon::FileImage)
+            .image_type(ImageType::Episode)
     }
 }

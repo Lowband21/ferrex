@@ -34,14 +34,14 @@ impl SearchDomain {
         profiling::function
     )]
     pub fn new(
-        media_store: Arc<StdRwLock<crate::domains::media::store::MediaStore>>,
+        //media_store: Arc<StdRwLock<crate::domains::media::store::MediaStore>>,
         api_service: Option<
             Arc<crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter>,
         >,
     ) -> Self {
         Self {
             state: SearchState::default(),
-            service: Arc::new(SearchService::new(media_store, api_service)),
+            service: Arc::new(SearchService::new(api_service)),
         }
     }
 
@@ -54,7 +54,7 @@ impl SearchDomain {
         profiling::function
     )]
     pub fn new_with_metrics(
-        media_store: Arc<StdRwLock<crate::domains::media::store::MediaStore>>,
+        //media_store: Arc<StdRwLock<crate::domains::media::store::MediaStore>>,
         api_service: Option<
             Arc<crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter>,
         >,
@@ -65,7 +65,7 @@ impl SearchDomain {
 
         Self {
             state,
-            service: Arc::new(SearchService::new(media_store, api_service)),
+            service: Arc::new(SearchService::new(api_service)),
         }
     }
 

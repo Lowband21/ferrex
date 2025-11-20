@@ -1,6 +1,5 @@
 use super::Message;
 use ferrex_core::ScanProgress;
-use futures::stream;
 use iced::Subscription;
 use tokio::sync::mpsc;
 

@@ -53,11 +53,11 @@ impl ServiceRegistry {
 pub fn init_registry(image_service: UnifiedImageService) {
     let registry = ServiceRegistry::new(image_service);
 
-    if let Ok(mut guard) = SERVICE_REGISTRY.write() {
+    match SERVICE_REGISTRY.write() { Ok(mut guard) => {
         *guard = Some(registry);
-    } else {
+    } _ => {
         log::error!("Failed to initialize service registry");
-    }
+    }}
 }
 
 /// Get the global image service handle

@@ -3,8 +3,6 @@ use axum::{
     extract::{Path, Query, State},
     http::{header, StatusCode},
     response::{Json, Response},
-    routing::{get, post},
-    Router,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};

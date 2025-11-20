@@ -5,6 +5,7 @@ use crate::infrastructure::api_types::Library;
 use crate::state_refactored::State;
 
 use chrono::Utc;
+use ferrex_core::{LibraryID, LibraryType};
 use iced::Task;
 use uuid::Uuid;
 
@@ -13,25 +14,31 @@ pub fn handle_create_library(
     library: Library,
     server_url: String,
 ) -> Task<Message> {
+    /*
     Task::perform(
         crate::domains::media::library::create_library(server_url, library),
         |result| match result {
             Ok(created_library) => Message::LibraryCreated(Ok(created_library)),
             Err(e) => Message::LibraryCreated(Err(e.to_string())),
         },
-    )
+    ) */
+    Task::none()
 }
 
 pub fn handle_library_created(state: &mut State, result: Result<Library, String>) -> Task<Message> {
     match result {
         Ok(library) => {
             log::info!("Created library: {}", library.name);
+
+            // TODO: Update library in ArchivedLibraryStore
+            /*
             state.domains.library.state.libraries.push(library);
-            
+            */
+
             // Update TabManager with new library
             state.update_tab_manager_libraries();
             log::info!("Updated TabManager after creating library");
-            
+
             state.domains.library.state.library_form_data = None; // Close form on success
             state.domains.library.state.library_form_errors.clear();
         }
@@ -54,19 +61,23 @@ pub fn handle_update_library(
     library: Library,
     server_url: String,
 ) -> Task<Message> {
+    /*
     Task::perform(
         crate::domains::media::library::update_library(server_url, library),
         |result| match result {
             Ok(updated_library) => Message::LibraryUpdated(Ok(updated_library)),
             Err(e) => Message::LibraryUpdated(Err(e.to_string())),
         },
-    )
+    ) */
+    Task::none()
 }
 
 pub fn handle_library_updated(state: &mut State, result: Result<Library, String>) -> Task<Message> {
     match result {
         Ok(library) => {
             log::info!("Updated library: {}", library.name);
+
+            /* TODO: Update library in ArchivedLibraryStore
             if let Some(index) = state
                 .domains
                 .library
@@ -76,12 +87,12 @@ pub fn handle_library_updated(state: &mut State, result: Result<Library, String>
                 .position(|l| l.id == library.id)
             {
                 state.domains.library.state.libraries[index] = library;
-            }
-            
+            } */
+
             // Update TabManager with updated library
             state.update_tab_manager_libraries();
             log::info!("Updated TabManager after updating library");
-            
+
             state.domains.library.state.library_form_data = None; // Close form on success
             state.domains.library.state.library_form_errors.clear();
         }
@@ -101,30 +112,32 @@ pub fn handle_library_updated(state: &mut State, result: Result<Library, String>
 
 pub fn handle_delete_library(
     state: &mut State,
-    library_id: Uuid,
+    library_id: LibraryID,
     server_url: String,
 ) -> Task<Message> {
     let id_for_response = library_id.clone();
+    /*
     Task::perform(
         crate::domains::media::library::delete_library(server_url, library_id),
         move |result| match result {
             Ok(()) => Message::LibraryDeleted(Ok(id_for_response)),
             Err(e) => Message::LibraryDeleted(Err(e.to_string())),
         },
-    )
+    ) */
+    Task::none()
 }
 
-pub fn handle_library_deleted(state: &mut State, result: Result<Uuid, String>) -> Task<Message> {
+pub fn handle_library_deleted(
+    state: &mut State,
+    result: Result<LibraryID, String>,
+) -> Task<Message> {
     match result {
         Ok(library_id) => {
             log::info!("Deleted library: {}", library_id);
-            state
-                .domains
-                .library
-                .state
-                .libraries
-                .retain(|l| l.id != library_id);
-            
+
+            // TODO: Implement library deletion in ArchivedLibraryStore
+            //state.domains.library.state.libraries.delete(library_id);
+
             // Update TabManager to remove deleted library
             state.update_tab_manager_libraries();
             log::info!("Updated TabManager after deleting library");
@@ -133,21 +146,23 @@ pub fn handle_library_deleted(state: &mut State, result: Result<Uuid, String>) -
             if state.domains.library.state.current_library_id.as_ref() == Some(&library_id) {
                 state.domains.library.state.current_library_id = None;
 
-                // Clear the library from MediaStore
-                if let Ok(mut store) = state.domains.media.state.media_store.write() {
-                    // Note: Direct cross-domain state access - MediaStore is shared between domains
-                    // This is necessary to maintain data consistency when deleting a library
-                    store.clear_library(library_id);
-                }
+                // TODO: Properly communicate with the server about library deletion
+                /*
+                state
+                    .domains
+                    .library
+                    .state
+                    .repo_accessor
+                    .clear_library(library_id); */
             }
 
             // Remove from cache
-            state
-                .domains
-                .library
-                .state
-                .library_media_cache
-                .remove(&library_id);
+            //state
+            //    .domains
+            //    .library
+            //    .state
+            //    .library_media_cache
+            //    .remove(&library_id);
         }
         Err(e) => {
             log::error!("Failed to delete library: {}", e);
@@ -167,8 +182,8 @@ pub fn handle_show_library_form(state: &mut State, library: Option<Library>) -> 
                 id: lib.id,
                 name: lib.name,
                 library_type: match lib.library_type {
-                    crate::infrastructure::api_types::LibraryType::Movies => "Movies".to_string(),
-                    crate::infrastructure::api_types::LibraryType::TvShows => "TvShows".to_string(),
+                    LibraryType::Movies => "Movies".to_string(),
+                    LibraryType::Series => "TvShows".to_string(),
                 },
                 paths: lib
                     .paths
@@ -183,7 +198,7 @@ pub fn handle_show_library_form(state: &mut State, library: Option<Library>) -> 
         None => {
             // Creating new library
             crate::domains::library::types::LibraryFormData {
-                id: Uuid::now_v7(),
+                id: LibraryID::new(),
                 name: String::new(),
                 library_type: "Movies".to_string(),
                 paths: String::new(),
@@ -280,7 +295,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
         // Convert string library type to enum
         let library_type = match form_data.library_type.as_str() {
             "Movies" => crate::infrastructure::api_types::LibraryType::Movies,
-            "TvShows" => crate::infrastructure::api_types::LibraryType::TvShows,
+            "TvShows" => crate::infrastructure::api_types::LibraryType::Series,
             _ => {
                 state
                     .domains
@@ -296,7 +311,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
             id: if form_data.editing {
                 form_data.id.clone()
             } else {
-                Uuid::now_v7()
+                LibraryID::new()
             },
             name: form_data.name.trim().to_string(),
             library_type,
@@ -319,6 +334,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
             updated_at: Utc::now(),
         };
 
+        /*
         if form_data.editing {
             // Update existing library
             Task::perform(
@@ -337,7 +353,8 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
                     Err(e) => Message::LibraryCreated(Err(e.to_string())),
                 },
             )
-        }
+        } */
+        Task::none()
     } else {
         Task::none()
     }

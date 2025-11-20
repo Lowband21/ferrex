@@ -1,30 +1,33 @@
 //! ViewModel for the "All" view that shows carousels
 
+use ferrex_core::{Media, MovieID, SeriesID};
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
-use super::{MetadataNeeds, ViewModel, VisibleItems};
+use super::{ViewModel, VisibleItems};
 use crate::{
-    domains::media::store::{MediaChangeEvent, MediaStore, MediaStoreSubscriber},
-    domains::metadata::service::FetchPriority,
-    domains::ui::views::carousel::CarouselState,
-    infrastructure::api_types::{MediaId, MovieReference, SeriesReference},
+    domains::{
+        media::repository::accessor::{Accessor, ReadOnly},
+        //metadata::service::FetchPriority,
+        ui::views::carousel::CarouselState,
+    },
+    infrastructure::api_types::{MediaID, MovieReference, SeriesReference},
 };
 
 /// ViewModel for the All view (shows movie and TV carousels)
 #[derive(Debug)]
 pub struct AllViewModel {
     /// Reference to the media store
-    store: Arc<RwLock<MediaStore>>,
+    accessor: Accessor<ReadOnly>,
 
     /// Current library filter (None = all libraries)
     library_id: Option<Uuid>,
 
     /// Movie IDs in sorted order (lightweight indices, not cloned data)
-    sorted_movie_ids: Vec<MediaId>,
+    sorted_movie_ids: Vec<Uuid>,
 
     /// Series IDs in sorted order (lightweight indices, not cloned data)
-    sorted_series_ids: Vec<MediaId>,
+    sorted_series_ids: Vec<Uuid>,
 
     /// Cached movies and series for rendering (only cloned when IDs change)
     cached_movies: Vec<MovieReference>,
@@ -47,9 +50,9 @@ pub struct AllViewModel {
 )]
 impl AllViewModel {
     /// Create a new AllViewModel
-    pub fn new(store: Arc<RwLock<MediaStore>>) -> Self {
+    pub fn new(accessor: Accessor<ReadOnly>) -> Self {
         let mut vm = Self {
-            store,
+            accessor,
             library_id: None,
             sorted_movie_ids: Vec::new(),
             sorted_series_ids: Vec::new(),
@@ -60,7 +63,7 @@ impl AllViewModel {
         };
 
         // Initial load from store
-        vm.refresh_from_store();
+        //vm.refresh_from_repo();
 
         vm
     }
@@ -69,7 +72,7 @@ impl AllViewModel {
     pub fn set_library_filter(&mut self, library_id: Option<Uuid>) {
         if self.library_id != library_id {
             self.library_id = library_id;
-            self.refresh_from_store(); // AllViewModel doesn't use needs_refresh flag
+            //self.refresh_from_repo(); // AllViewModel doesn't use needs_refresh flag
         }
     }
 
@@ -112,42 +115,114 @@ impl AllViewModel {
 }
 
 impl ViewModel for AllViewModel {
-    fn refresh_from_store(&mut self) {
+    /*
+    fn refresh_from_repo(&mut self) {
         log::info!(
             "AllViewModel::refresh_from_store called, library_id={:?}",
             self.library_id
         );
 
+        if self.accessor.is_initialized() {
+            // Get media for this library from the repo
+            if let Ok(libraries) = self.accessor.get_libraries() {
+                for library in libraries {
+                    match library.library_type {
+                    LibraryType::Movies => {
+                        if let Some(media) = library.media {
+                            let num_movies = media.len();
+                            let library_id = library.id.as_uuid();
+                            if self.sorted_movie_ids.len() != num_movies {
+                                self.sorted_movie_ids = self.accessor.get_sorted_index_by_library(&library.id)
+
+                            }
+                            // Filter to only movies
+                            let movies: Vec<Media> = media_items
+                                .into_iter()
+                                .filter(|m| matches!(m, Media::Movie(_)))
+                                .collect();
+
+                            // Update grid state
+                            self.= num_movies;
+
+                            // For now, convert to empty cached media since we're not using archived refs
+                            // This will be updated when we fully integrate the repo
+                            self.cached_media = CachedMedia::Movies(Vec::new());
+
+                        }
+                    }
+                    LibraryType::Series => {
+                        // Filter to only series
+                        let shows: Vec<Media> = media_items
+                            .into_iter()
+                            .filter(|m| matches!(m, Media::Series(_)))
+                            .collect();
+
+                        // Update grid state
+                        self.grid_state.total_items = shows.len();
+
+                        // For now, convert to empty cached media since we're not using archived refs
+                        // This will be updated when we fully integrate the repo
+                        self.cached_media = CachedMedia::TvShows(Vec::new());
+                    }
+                        Library
+                    }
+                }
+            }
+        }
+
+        self.needs_refresh = false;
+
         // Get data from store - only store IDs, not cloned data
         if let Ok(store) = self.store.read() {
             log::info!("AllViewModel: MediaStore has {} total items", store.len());
+            log::info!(
+                "AllViewModel: MediaStore has {} archived items",
+                store.archived_media.len()
+            );
 
-            // Get movies and extract just their IDs (lightweight operation)
-            let movies_refs = store.get_movies(self.library_id);
+            // Try to get from archived media first (rkyv data), fallback to owned collections
+            let movies_refs = if !store.archived_media.is_empty() {
+                store.get_archived_movies(self.library_id)
+            } else {
+                store
+                    .get_movies(self.library_id)
+                    .into_iter()
+                    .cloned()
+                    .collect()
+            };
 
             // Store only IDs - no cloning of full MovieReference objects
-            let new_movie_ids: Vec<MediaId> = movies_refs
+            let new_movie_ids: Vec<MediaID> = movies_refs
                 .iter()
-                .map(|movie| MediaId::Movie(movie.id.clone()))
+                .map(|movie| MediaID::Movie(movie.id.clone()))
                 .collect();
 
-            // Get series and extract just their IDs
-            let series_refs = store.get_series(self.library_id);
-            let new_series_ids: Vec<MediaId> = series_refs
+            // Get series from archived or owned collections
+            let series_refs = if !store.archived_media.is_empty() {
+                store.get_archived_series(self.library_id)
+            } else {
+                store
+                    .get_series(self.library_id)
+                    .into_iter()
+                    .cloned()
+                    .collect()
+            };
+
+            let new_series_ids: Vec<MediaID> = series_refs
                 .iter()
-                .map(|series| MediaId::Series(series.id.clone()))
+                .map(|series| MediaID::Series(series.id.clone()))
                 .collect();
 
             // Only update cached data if IDs changed
             if new_movie_ids != self.sorted_movie_ids {
                 log::trace!("AllViewModel: Movie IDs changed, updating cached movies");
-                self.cached_movies = movies_refs.into_iter().cloned().collect();
+                self.cached_movies = movies_refs;
                 self.sorted_movie_ids = new_movie_ids;
             }
 
             if new_series_ids != self.sorted_series_ids {
                 log::trace!("AllViewModel: Series IDs changed, updating cached series");
-                self.cached_series = series_refs.into_iter().cloned().collect();
+                self.cached_series = series_refs;
                 self.sorted_series_ids = new_series_ids;
             }
 
@@ -164,7 +239,7 @@ impl ViewModel for AllViewModel {
             self.tv_carousel
                 .set_total_items(self.sorted_series_ids.len());
         }
-    }
+    } */
 
     fn get_visible_items(&self) -> VisibleItems {
         // Get visible range from carousels
@@ -172,27 +247,27 @@ impl ViewModel for AllViewModel {
         let series_range = self.tv_carousel.get_visible_range();
 
         // Extract visible items
-        let visible_movies: Vec<MovieReference> = movie_range
-            .filter_map(|idx| self.sorted_movie_ids.get(idx))
-            .filter_map(|id| {
-                if let Ok(store) = self.store.read() {
-                    store.get(id).and_then(|media| media.as_movie()).cloned()
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let visible_movies: Vec<Media> = match self.accessor.get_batch(
+            movie_range
+                .filter_map(|idx| self.sorted_movie_ids.get(idx))
+                .map(|id| MediaID::Movie(MovieID(*id)))
+                .collect::<Vec<_>>()
+                .as_slice(),
+        ) {
+            Ok(items) => items,
+            Err(_) => Vec::new(),
+        };
 
-        let visible_series: Vec<SeriesReference> = series_range
-            .filter_map(|idx| self.sorted_series_ids.get(idx))
-            .filter_map(|id| {
-                if let Ok(store) = self.store.read() {
-                    store.get(id).and_then(|media| media.as_series()).cloned()
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let visible_series: Vec<Media> = match self.accessor.get_batch(
+            series_range
+                .filter_map(|idx| self.sorted_series_ids.get(idx))
+                .map(|id| MediaID::Series(SeriesID(*id)))
+                .collect::<Vec<_>>()
+                .as_slice(),
+        ) {
+            Ok(items) => items,
+            Err(_) => Vec::new(),
+        };
 
         VisibleItems {
             movies: visible_movies,
@@ -200,6 +275,7 @@ impl ViewModel for AllViewModel {
         }
     }
 
+    /*
     fn get_metadata_needs(&self) -> MetadataNeeds {
         let mut items = Vec::new();
 
@@ -278,10 +354,5 @@ impl ViewModel for AllViewModel {
         }
 
         MetadataNeeds { items }
-    }
-
-    fn update_visibility(&mut self) {
-        // Visibility is updated when carousel states change
-        // This is called after scroll events
-    }
+    }*/
 }

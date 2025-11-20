@@ -4,7 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
     Extension, Json,
 };
-use ferrex_core::{api_types::MediaId, watch_status::UpdateProgressRequest, User};
+use ferrex_core::{watch_status::UpdateProgressRequest, MediaType, User};
 use serde::Deserialize;
 use tokio::fs::File;
 use tokio_util::io::ReaderStream;
@@ -22,11 +22,8 @@ pub struct ProgressReport {
 pub async fn stream_with_progress_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(media_id): Path<String>,
+    Path(media_id): Path<Uuid>,
 ) -> Result<Response, (StatusCode, String)> {
-    // Parse media_id
-    let media_id = parse_media_id(&media_id)?;
-
     // Get the media file path from database
     let media_path = get_media_file_path(&state, &media_id).await?;
 
@@ -70,15 +67,14 @@ pub async fn stream_with_progress_handler(
 pub async fn report_progress_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(media_id): Path<String>,
+    Path(media_id): Path<Uuid>,
+    Path(media_type): Path<MediaType>,
     Json(progress): Json<ProgressReport>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // Parse media_id
-    let media_id = parse_media_id(&media_id)?;
-
     // Create update request
     let request = UpdateProgressRequest {
         media_id,
+        media_type,
         position: progress.position,
         duration: progress.duration,
     };
@@ -102,25 +98,13 @@ pub async fn report_progress_handler(
 /// Helper function to get media file path from database
 async fn get_media_file_path(
     state: &AppState,
-    media_id: &MediaId,
+    media_id: &Uuid,
 ) -> Result<String, (StatusCode, String)> {
-    // Extract the ID string from the MediaId
-    let id_str = match media_id {
-        MediaId::Movie(movie_id) => movie_id.as_ref(),
-        MediaId::Episode(episode_id) => episode_id.as_ref(),
-        _ => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "Unsupported media type".to_string(),
-            ))
-        }
-    };
-
     // Get media file from database
     let media_file = state
         .db
         .backend()
-        .get_media(id_str)
+        .get_media(media_id)
         .await
         .map_err(|e| {
             (
@@ -131,44 +115,4 @@ async fn get_media_file_path(
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Media not found".to_string()))?;
 
     Ok(media_file.path.to_string_lossy().to_string())
-}
-
-/// Helper function to parse media ID from string
-fn parse_media_id(media_id_str: &str) -> Result<MediaId, (StatusCode, String)> {
-    // Try to parse as UUID first
-    if let Ok(uuid) = Uuid::parse_str(media_id_str) {
-        // For now, assume it's a movie ID
-        return Ok(MediaId::Movie(
-            ferrex_core::media::MovieID::new(uuid.to_string()).unwrap(),
-        ));
-    }
-
-    // Try to parse as "type:id" format
-    let parts: Vec<&str> = media_id_str.split(':').collect();
-    if parts.len() != 2 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Invalid media ID format. Expected UUID or 'type:id'".to_string(),
-        ));
-    }
-
-    let id = Uuid::parse_str(parts[1]).map_err(|_| {
-        (
-            StatusCode::BAD_REQUEST,
-            "Invalid UUID in media ID".to_string(),
-        )
-    })?;
-
-    match parts[0] {
-        "movie" => Ok(MediaId::Movie(
-            ferrex_core::media::MovieID::new(id.to_string()).unwrap(),
-        )),
-        "episode" => Ok(MediaId::Episode(
-            ferrex_core::media::EpisodeID::new(id.to_string()).unwrap(),
-        )),
-        _ => Err((
-            StatusCode::BAD_REQUEST,
-            format!("Unknown media type: {}", parts[0]),
-        )),
-    }
 }

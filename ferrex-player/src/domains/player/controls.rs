@@ -56,10 +56,11 @@ impl PlayerDomainState {
                     // Center - Title with HDR indicator
                     container(
                         row![
+                            // TODO: Get real title and fix the clone
                             text(
                                 self.current_media
                                     .as_ref()
-                                    .map(|m| m.display_title())
+                                    .map(|m| m.filename.clone())
                                     .unwrap_or_else(|| "Unknown".to_string())
                             )
                             .size(18)
@@ -164,7 +165,10 @@ impl PlayerDomainState {
             //    .style(theme::container_seek_bar_buffered),
             container(Space::with_height(bar_height))
                 .width(Length::FillPortion(unplayed_portion))
-                .style(move |theme| theme::container_seek_bar_background(theme, self.seek_bar_hovered)),
+                .style(move |theme| theme::container_seek_bar_background(
+                    theme,
+                    self.seek_bar_hovered
+                )),
         ])
         .width(Length::Fill)
         .height(bar_height);
@@ -406,7 +410,7 @@ impl PlayerDomainState {
                                 .size(11)
                                 .style(theme::text_bright),
                             if let Some(media) = &self.current_media {
-                                if let Some(metadata) = &media.metadata {
+                                if let Some(metadata) = &media.media_file_metadata {
                                     let mut metadata_column = column![].spacing(2);
 
                                     if let Some(bit_depth) = metadata.bit_depth {

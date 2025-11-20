@@ -6,11 +6,11 @@ use axum::{
     response::Json,
 };
 use chrono::{DateTime, Utc};
-use ferrex_core::database::traits::{
-    FolderInventory, FolderProcessingStatus, MediaDatabaseTrait, ScanStatus,
-};
-use ferrex_core::database::MediaDatabase;
 use ferrex_core::User;
+use ferrex_core::{
+    database::traits::{FolderInventory, FolderProcessingStatus, MediaDatabaseTrait},
+    LibraryID,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -129,7 +129,7 @@ pub struct RescanResponse {
 /// List folders in a library with their scanning status
 pub async fn get_folder_inventory(
     State(state): State<AppState>,
-    Path(library_id): Path<Uuid>,
+    Path(library_id): Path<Uuid>, // TODO: Pass LibraryID all the way through
     Query(params): Query<FolderInventoryQuery>,
     Extension(_user): Extension<User>,
 ) -> Result<Json<FolderInventoryResponse>, StatusCode> {
@@ -137,7 +137,7 @@ pub async fn get_folder_inventory(
     let all_folders = state
         .database
         .backend()
-        .get_folder_inventory(library_id)
+        .get_folder_inventory(LibraryID(library_id))
         .await
         .map_err(|e| {
             tracing::error!("Failed to get folder inventory: {:?}", e);
@@ -199,7 +199,7 @@ pub async fn get_scan_progress(
     let folders = state
         .database
         .backend()
-        .get_folder_inventory(library_id)
+        .get_folder_inventory(LibraryID(library_id))
         .await
         .map_err(|e| {
             tracing::error!("Failed to get folder inventory: {:?}", e);
@@ -287,7 +287,7 @@ pub async fn trigger_folder_rescan(
     let folders = state
         .database
         .backend()
-        .get_folder_inventory(request.library_id)
+        .get_folder_inventory(LibraryID(request.library_id))
         .await
         .map_err(|e| {
             tracing::error!("Failed to get folder inventory: {:?}", e);
@@ -322,7 +322,7 @@ pub async fn trigger_folder_rescan(
     if let Ok(Some(library)) = state
         .database
         .backend()
-        .get_library(&request.library_id.to_string())
+        .get_library(&LibraryID(request.library_id))
         .await
     {
         match state

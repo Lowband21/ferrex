@@ -1,11 +1,11 @@
 pub mod aggregates;
-pub mod value_objects;
-pub mod services;
 pub mod events;
 pub mod repositories;
+pub mod services;
+pub mod value_objects;
 
-pub use aggregates::{UserAuthentication, DeviceSession};
-pub use value_objects::{SessionToken, DeviceFingerprint, PinCode};
-pub use repositories::{UserAuthenticationRepository, DeviceSessionRepository};
-pub use services::*;
+pub use aggregates::{DeviceSession, UserAuthentication};
 pub use events::*;
+pub use repositories::{DeviceSessionRepository, UserAuthenticationRepository};
+pub use services::*;
+pub use value_objects::{DeviceFingerprint, PinCode, SessionToken};

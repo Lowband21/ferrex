@@ -7,7 +7,7 @@ use super::strategy::{SortCost, SortStrategy};
 use std::sync::Arc;
 
 /// Smart fallback sort with rule-based strategy selection
-/// 
+///
 /// This allows defining multiple strategies with conditions,
 /// automatically selecting the best one based on the data.
 pub struct SmartFallbackSort<T> {
@@ -29,7 +29,7 @@ impl<T> SmartFallbackSort<T> {
     pub fn new() -> Self {
         Self { rules: Vec::new() }
     }
-    
+
     /// Add a fallback rule
     pub fn with_rule(
         mut self,
@@ -46,12 +46,9 @@ impl<T> SmartFallbackSort<T> {
         self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
         self
     }
-    
+
     /// Add a default fallback strategy (lowest priority)
-    pub fn with_default(
-        mut self,
-        strategy: impl SortStrategy<T> + 'static,
-    ) -> Self {
+    pub fn with_default(mut self, strategy: impl SortStrategy<T> + 'static) -> Self {
         self.rules.push(FallbackRule {
             condition: Arc::new(|_| true), // Always matches
             strategy: Box::new(strategy),
@@ -72,18 +69,18 @@ impl<T: Clone> SortStrategy<T> for SmartFallbackSort<T> {
                 }
             }
         }
-        
+
         // No rules matched, items remain unsorted
         // In production, we might want to log a warning here
     }
-    
+
     fn can_apply(&self, sample: &T) -> bool {
         // Can apply if any rule matches
-        self.rules.iter().any(|rule| {
-            (rule.condition)(sample) && rule.strategy.can_apply(sample)
-        })
+        self.rules
+            .iter()
+            .any(|rule| (rule.condition)(sample) && rule.strategy.can_apply(sample))
     }
-    
+
     fn cost_estimate(&self) -> SortCost {
         // Return the cost of the highest priority applicable rule
         // This is an estimate since we don't know which rule will actually be used
@@ -106,7 +103,7 @@ impl<T> FallbackSortBuilder<T> {
             fallback: SmartFallbackSort::new(),
         }
     }
-    
+
     /// Add a rule that checks for data availability
     pub fn when_available<F>(
         self,
@@ -117,7 +114,7 @@ impl<T> FallbackSortBuilder<T> {
             fallback: self.fallback.with_rule(check, strategy, 100),
         }
     }
-    
+
     /// Add a rule for partial data
     pub fn when_partial<F>(
         self,
@@ -128,12 +125,12 @@ impl<T> FallbackSortBuilder<T> {
             fallback: self.fallback.with_rule(check, strategy, 50),
         }
     }
-    
+
     /// Set the default fallback strategy
     pub fn otherwise(self, strategy: impl SortStrategy<T> + 'static) -> SmartFallbackSort<T> {
         self.fallback.with_default(strategy)
     }
-    
+
     /// Build the fallback sort
     pub fn build(self) -> SmartFallbackSort<T> {
         self.fallback
@@ -141,7 +138,7 @@ impl<T> FallbackSortBuilder<T> {
 }
 
 /// Specialized fallback for handling missing metadata
-/// 
+///
 /// This provides a pre-configured fallback system optimized for
 /// the common case where TMDB metadata might be missing.
 pub struct MetadataFallbackSort<T> {
@@ -178,7 +175,7 @@ impl<T: Clone> SortStrategy<T> for MetadataFallbackSort<T> {
             }
         }
     }
-    
+
     fn can_apply(&self, sample: &T) -> bool {
         // Can apply with either strategy
         if (self.has_metadata)(sample) {
@@ -187,11 +184,10 @@ impl<T: Clone> SortStrategy<T> for MetadataFallbackSort<T> {
             self.without_metadata.can_apply(sample)
         }
     }
-    
+
     fn cost_estimate(&self) -> SortCost {
         // Estimate based on likely path
         // Could be made smarter with statistics
         self.with_metadata.cost_estimate()
     }
 }
-

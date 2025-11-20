@@ -1,7 +1,7 @@
 //! Root-level view composition
 
 use crate::common::messages::DomainMessage;
-use crate::domains::metadata::image_types::{ImageRequest, ImageSize};
+use crate::domains::metadata::image_types::ImageRequest;
 use crate::domains::ui::theme;
 use crate::domains::ui::types::ViewState;
 use crate::domains::ui::views::admin::{view_admin_dashboard, view_library_management};
@@ -17,8 +17,8 @@ use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::{background_shader, BackgroundEffect};
 use crate::domains::{player, ui};
 use crate::state_refactored::State;
-use ferrex_core::api_types::MediaId;
-use iced::widget::{column, container, scrollable, Stack};
+use ferrex_core::{ImageSize, ImageType, MediaIDLike};
+use iced::widget::{column, container, scrollable, Space, Stack};
 use iced::{Element, Font, Length};
 
 #[cfg_attr(
@@ -59,21 +59,21 @@ pub fn view(state: &State) -> Element<DomainMessage> {
                 .map(DomainMessage::from)
         }
         ViewState::Player => view_player(state).map(DomainMessage::Player),
-        ViewState::LoadingVideo { url } => view_loading_video(state, url).map(DomainMessage::from),
-        ViewState::VideoError { message } => view_video_error(message).map(DomainMessage::from),
-        ViewState::MovieDetail { movie, .. } => {
-            view_movie_detail(state, movie).map(DomainMessage::from)
+        ViewState::LoadingVideo { url } => view_loading_video(state, &url).map(DomainMessage::from),
+        ViewState::VideoError { message } => view_video_error(&message).map(DomainMessage::from),
+        ViewState::MovieDetail { movie_id, .. } => {
+            view_movie_detail(state, *movie_id).map(DomainMessage::from)
         }
         ViewState::TvShowDetail { series_id, .. } => {
-            view_tv_show_detail(state, series_id).map(DomainMessage::from)
+            view_tv_show_detail(state, *series_id).map(DomainMessage::from)
         }
         ViewState::SeasonDetail {
             series_id,
             season_id,
             ..
-        } => view_season_detail(state, series_id, season_id).map(DomainMessage::from),
+        } => view_season_detail(state, &series_id, &season_id).map(DomainMessage::from),
         ViewState::EpisodeDetail { episode_id, .. } => {
-            view_episode_detail(state, episode_id).map(DomainMessage::from)
+            view_episode_detail(state, &episode_id).map(DomainMessage::from)
         }
         ViewState::UserSettings => view_user_settings(state).map(DomainMessage::from),
     };
@@ -88,7 +88,13 @@ pub fn view(state: &State) -> Element<DomainMessage> {
             .style(theme::Container::Header.style());
 
         // Check if we need library controls bar
-        let selected_library = state.domains.library.state.current_library_id;
+        let selected_library = state
+            .domains
+            .library
+            .state
+            .current_library_id
+            .as_ref()
+            .map(|id| id.as_uuid());
         let controls_bar = match &state.domains.ui.state.view {
             ViewState::Library => view_library_controls_bar(state, selected_library)
                 .map(|bar| bar.map(DomainMessage::from)),
@@ -116,14 +122,33 @@ pub fn view(state: &State) -> Element<DomainMessage> {
             }
         };
 
-        // Build the column with optional controls bar
-        let mut col = column![header_container];
+        // Build a Stack so header (and optional controls bar) always renders on top of content
+        let has_controls = controls_bar.is_some();
+        let mut top_bars = column![header_container];
         if let Some(controls) = controls_bar {
-            col = col.push(controls);
+            top_bars = top_bars.push(controls);
         }
-        col = col.push(scrollable_content);
 
-        col.width(Length::Fill).height(Length::Fill).into()
+        // Offset content downward by the height of the header + optional controls bar
+        let top_padding: f32 =
+            crate::domains::ui::views::library_controls_bar::calculate_top_bars_height(
+                has_controls,
+            );
+        let content_with_offset = column![
+            Space::with_height(Length::Fixed(top_padding)),
+            scrollable_content,
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+        Stack::new()
+            // Base layer: main content (offset and effectively shrunk by top bars height)
+            .push(content_with_offset)
+            // Top layer: header + optional controls bar; overlay ensures it draws last
+            .push(top_bars)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     } else {
         content
     };
@@ -168,19 +193,25 @@ pub fn view(state: &State) -> Element<DomainMessage> {
 
         // Get backdrop from image service based on current view (reactive approach)
         let backdrop_handle = match &state.domains.ui.state.view {
-            ViewState::MovieDetail { movie, .. } => {
+            ViewState::MovieDetail { movie_id, .. } => {
                 let request =
-                    ImageRequest::new(MediaId::Movie(movie.id.clone()), ImageSize::Backdrop);
+                    ImageRequest::new(movie_id.to_uuid(), ImageSize::Backdrop, ImageType::Backdrop);
                 state.image_service.get(&request)
             }
             ViewState::TvShowDetail { series_id, .. } => {
-                let request =
-                    ImageRequest::new(MediaId::Series(series_id.clone()), ImageSize::Backdrop);
+                let request = ImageRequest::new(
+                    series_id.to_uuid(),
+                    ImageSize::Backdrop,
+                    ImageType::Backdrop,
+                );
                 state.image_service.get(&request)
             }
             ViewState::SeasonDetail { season_id, .. } => {
-                let request =
-                    ImageRequest::new(MediaId::Season(season_id.clone()), ImageSize::Backdrop);
+                let request = ImageRequest::new(
+                    season_id.to_uuid(),
+                    ImageSize::Backdrop,
+                    ImageType::Backdrop,
+                );
                 state.image_service.get(&request)
             }
             _ => None,
@@ -246,9 +277,8 @@ pub fn view(state: &State) -> Element<DomainMessage> {
     if state.domains.search.state.mode == crate::domains::search::types::SearchMode::FullScreen {
         // Show full-screen search view
         crate::domains::ui::views::components::view_search_fullscreen(state)
-    } else if let Some(search_dropdown) =
-        crate::domains::ui::views::components::view_search_dropdown(state)
-    {
+    } else { match crate::domains::ui::views::components::view_search_dropdown(state)
+    { Some(search_dropdown) => {
         // Wrap the main content in a stack with the search dropdown overlay
         Stack::new()
             .push(result)
@@ -256,9 +286,9 @@ pub fn view(state: &State) -> Element<DomainMessage> {
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
-    } else {
+    } _ => {
         result
-    }
+    }}}
 }
 
 #[cfg_attr(

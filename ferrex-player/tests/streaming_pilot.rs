@@ -4,7 +4,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use ferrex_player::infrastructure::api_client::ApiClient;
-use ferrex_player::infrastructure::services::streaming::{StreamingApiAdapter, StreamingApiService, TranscodingStatus as PilotStatus};
+use ferrex_player::infrastructure::services::streaming::{
+    StreamingApiAdapter, StreamingApiService, TranscodingStatus as PilotStatus,
+};
 
 #[async_trait]
 trait Dummy: Send + Sync {}
@@ -17,7 +19,12 @@ impl StreamingApiService for MockStreamingService {
         Ok("job123".to_string())
     }
     async fn check_transcoding_status(&self, _job_id: &str) -> Result<PilotStatus> {
-        Ok(PilotStatus { job_id: "job123".into(), state: "processing".into(), progress: Some(0.5), message: None })
+        Ok(PilotStatus {
+            job_id: "job123".into(),
+            state: "processing".into(),
+            progress: Some(0.5),
+            message: None,
+        })
     }
     async fn get_master_playlist(&self, _media_id: &str) -> Result<String> {
         Ok("#EXTM3U".to_string())

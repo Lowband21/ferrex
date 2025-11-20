@@ -35,36 +35,36 @@ impl TranscodingProfile {
             audio_codec: "copy".to_string(), // Pass through original audio
             video_bitrate: "20M".to_string(),
             audio_bitrate: "0".to_string(), // Not used with copy codec
-            resolution: None, // Keep original resolution
+            resolution: None,               // Keep original resolution
             preset: "veryfast".to_string(),
             apply_tone_mapping: true,
         }
     }
-    
+
     /// HDR to SDR profile that preserves original resolution and quality
     pub fn hdr_to_sdr_original() -> Self {
         Self {
             name: "hdr_to_sdr_original".to_string(),
             video_codec: "libx265".to_string(),
-            audio_codec: "copy".to_string(), // Passthrough audio
+            audio_codec: "copy".to_string(),  // Passthrough audio
             video_bitrate: "30M".to_string(), // High bitrate for quality preservation
-            audio_bitrate: "0".to_string(), // Not used with copy codec
-            resolution: None, // Keep original resolution
-            preset: "fast".to_string(), // Better quality than veryfast
+            audio_bitrate: "0".to_string(),   // Not used with copy codec
+            resolution: None,                 // Keep original resolution
+            preset: "fast".to_string(),       // Better quality than veryfast
             apply_tone_mapping: true,
         }
     }
-    
+
     /// Minimal transcoding profile for SDR content (passthrough where possible)
     pub fn minimal_transcode() -> Self {
         Self {
             name: "minimal_transcode".to_string(),
             video_codec: "copy".to_string(), // Try to passthrough video
             audio_codec: "copy".to_string(), // Passthrough audio
-            video_bitrate: "0".to_string(), // Not used with copy codec
-            audio_bitrate: "0".to_string(), // Not used with copy codec
-            resolution: None, // Keep original
-            preset: "".to_string(), // Not used with copy codec
+            video_bitrate: "0".to_string(),  // Not used with copy codec
+            audio_bitrate: "0".to_string(),  // Not used with copy codec
+            resolution: None,                // Keep original
+            preset: "".to_string(),          // Not used with copy codec
             apply_tone_mapping: false,
         }
     }
@@ -93,16 +93,16 @@ impl AdaptiveBitrateProfile {
     /// Generate adaptive bitrate profiles for a given source resolution
     pub fn generate_for_resolution(width: u32, height: u32) -> Self {
         let mut variants = Vec::new();
-        
+
         // Original quality variant - always include the source resolution
         // This ensures we preserve quality, especially important for HDR tone mapping
         let original_bitrate = match (width, height) {
             (w, h) if w >= 3840 && h >= 2160 => "30M", // 4K
             (w, h) if w >= 2560 && h >= 1440 => "20M", // 1440p
             (w, h) if w >= 1920 && h >= 1080 => "15M", // 1080p
-            _ => "10M", // 720p and below
+            _ => "10M",                                // 720p and below
         };
-        
+
         variants.push(ProfileVariant {
             name: "original".to_string(),
             resolution: format!("{}x{}", width, height),
@@ -110,7 +110,7 @@ impl AdaptiveBitrateProfile {
             audio_bitrate: "0".to_string(), // Not used with copy codec
             video_codec: "libx265".to_string(),
             audio_codec: "copy".to_string(), // Pass through original audio
-            preset: "fast".to_string(), // Better quality than veryfast
+            preset: "fast".to_string(),      // Better quality than veryfast
             bandwidth: match original_bitrate {
                 "30M" => 30_400_000,
                 "20M" => 20_400_000,

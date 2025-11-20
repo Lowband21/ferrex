@@ -1,16 +1,20 @@
 use crate::domains::auth::permissions::StatePermissionExt;
-use crate::infrastructure::api_types::MediaId;
+use crate::infrastructure::MediaID;
 use crate::{
     domains::ui::messages::Message, domains::ui::theme, domains::ui::types::ViewState,
-    infrastructure::api_types::MediaReference, infrastructure::constants::layout::header::HEIGHT,
+    infrastructure::api_types::Media, infrastructure::constants::layout::header::HEIGHT,
     state_refactored::State,
 };
+use ferrex_core::LibraryID;
 use iced::widget::text_input::Id;
 use iced::{
     widget::{button, container, row, text, text_input, Space, Stack},
     Element, Length,
 };
 use lucide_icons::Icon;
+use rkyv::deserialize;
+use rkyv::rancor::Error;
+use uuid::Uuid;
 
 #[cfg_attr(
     any(
@@ -445,7 +449,7 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
     use crate::domains::ui::tabs::TabId;
     use crate::domains::ui::types::DisplayMode;
 
-    if state.domains.library.state.libraries.is_empty() {
+    if !state.domains.ui.state.repo_accessor.is_initialized() {
         // No libraries configured - show only curated view
         row![
             button(container(text("All").size(14)).center_y(Length::Fill))
@@ -480,14 +484,19 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
         // Add individual library tabs
         for library in state
             .domains
-            .library
+            .ui
             .state
-            .libraries
+            .repo_accessor
+            .get_archived_libraries()
+            .unwrap()
             .iter()
+            .map(|l| l.get())
             .filter(|l| l.enabled)
         {
+            let name: String = deserialize::<String, Error>(&library.name).unwrap();
+            let id = deserialize::<LibraryID, Error>(&library.id).unwrap();
             // Check if this library tab is active
-            let is_active = state.tab_manager.active_tab_id() == TabId::Library(library.id);
+            let is_active = state.tab_manager.active_tab_id() == TabId::Library(id);
             let button_style = if is_active {
                 theme::Button::Primary.style()
             } else {
@@ -495,8 +504,8 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
             };
 
             tabs_vec.push(
-                button(container(text(&library.name).size(14)).center_y(Length::Fill))
-                    .on_press(Message::SelectLibraryAndMode(library.id.clone()))
+                button(container(text(name).size(14)).center_y(Length::Fill))
+                    .on_press(Message::SelectLibraryAndMode(id))
                     .style(button_style)
                     .padding([0, 16])
                     .height(HEIGHT)
@@ -516,25 +525,30 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
     profiling::function
 )]
 fn get_detail_title(state: &State) -> String {
+    let mut buff = Uuid::encode_buffer();
     match &state.domains.ui.state.view {
-        ViewState::MovieDetail { movie, .. } => movie.title.as_str().to_string(),
+        ViewState::MovieDetail { movie_id, .. } => "Placeholder".to_string(), //movie,
         ViewState::TvShowDetail { series_id, .. } => {
+            /*
             // Use MediaQueryService (clean architecture)
             state
                 .domains
                 .media
                 .state
                 .query_service
-                .get_series_title(series_id)
+                .get_series_title(series_id) */
+            "Null".to_string()
         }
         ViewState::SeasonDetail { series_id, .. } => {
+            /*
             // Use MediaQueryService (clean architecture)
             state
                 .domains
                 .media
                 .state
                 .query_service
-                .get_series_title(series_id)
+                .get_series_title(series_id) */
+            "Null".to_string()
         }
         ViewState::EpisodeDetail { .. } => "Episode".to_string(),
         _ => String::new(),

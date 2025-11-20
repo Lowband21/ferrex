@@ -322,7 +322,7 @@ pub fn update_player(
                 // Check if we should play next episode
                 let next_episode_task = if let Some(media_id) = &state.current_media_id {
                     // Only auto-play next episode if this is an episode
-                    if let ferrex_core::api_types::MediaId::Episode(_) = media_id {
+                    if let ferrex_core::MediaID::Episode(_) = media_id {
                         log::info!("Current media is an episode, checking for next episode");
                         Task::done(crate::common::messages::DomainMessage::Media(
                             crate::domains::media::messages::Message::PlayNextEpisode,
@@ -663,7 +663,7 @@ pub fn update_player(
 
         Message::SetToneMappingWhitePoint(value) => {
             if let iced_video_player::AlgorithmParams::ReinhardExtended {
-                ref mut white_point,
+                white_point,
                 ..
             } = &mut state.tone_mapping_config.algorithm_params
             {
@@ -679,7 +679,7 @@ pub fn update_player(
 
         Message::SetToneMappingExposure(value) => {
             if let iced_video_player::AlgorithmParams::ReinhardExtended {
-                ref mut exposure, ..
+                exposure, ..
             } = &mut state.tone_mapping_config.algorithm_params
             {
                 *exposure = value;
@@ -705,7 +705,7 @@ pub fn update_player(
 
         Message::SetToneMappingSaturationBoost(value) => {
             if let iced_video_player::AlgorithmParams::ReinhardExtended {
-                ref mut saturation_boost,
+                saturation_boost,
                 ..
             } = &mut state.tone_mapping_config.algorithm_params
             {
@@ -721,7 +721,7 @@ pub fn update_player(
 
         Message::SetHableShoulderStrength(value) => {
             if let iced_video_player::AlgorithmParams::Hable {
-                ref mut shoulder_strength,
+                shoulder_strength,
                 ..
             } = &mut state.tone_mapping_config.algorithm_params
             {
@@ -737,7 +737,7 @@ pub fn update_player(
 
         Message::SetHableLinearStrength(value) => {
             if let iced_video_player::AlgorithmParams::Hable {
-                ref mut linear_strength,
+                linear_strength,
                 ..
             } = &mut state.tone_mapping_config.algorithm_params
             {
@@ -753,7 +753,7 @@ pub fn update_player(
 
         Message::SetHableLinearAngle(value) => {
             if let iced_video_player::AlgorithmParams::Hable {
-                ref mut linear_angle,
+                linear_angle,
                 ..
             } = &mut state.tone_mapping_config.algorithm_params
             {
@@ -769,7 +769,7 @@ pub fn update_player(
 
         Message::SetHableToeStrength(value) => {
             if let iced_video_player::AlgorithmParams::Hable {
-                ref mut toe_strength,
+                toe_strength,
                 ..
             } = &mut state.tone_mapping_config.algorithm_params
             {
@@ -833,7 +833,7 @@ pub fn update_player(
         }
 
         Message::LoadTrack(media_id) => {
-            // Load a specific track by MediaId
+            // Load a specific track by MediaID
             log::info!("Loading track with ID: {:?}", media_id);
             // This will be connected to the media store in Task 2.7
             // For now, just acknowledge the command
@@ -904,9 +904,8 @@ pub fn update_player(
         Message::PollExternalMpv => {
             use iced::window;
 
-            if let (Some(mut handle), Some(media_id)) =
-                (state.external_mpv_handle.take(), state.current_media_id)
-            {
+            match (state.external_mpv_handle.take(), state.current_media_id)
+            { (Some(mut handle), Some(media_id)) => {
                 // Check if MPV is still alive
                 if !handle.is_alive() {
                     log::info!("External MPV process has ended");
@@ -963,9 +962,9 @@ pub fn update_player(
                         DomainUpdateResult::task(Task::none())
                     }
                 }
-            } else {
+            } _ => {
                 DomainUpdateResult::task(Task::none())
-            }
+            }}
         }
     }
 }

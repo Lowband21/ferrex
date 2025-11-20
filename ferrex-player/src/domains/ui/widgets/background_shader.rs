@@ -148,7 +148,7 @@ impl Default for QualitySettings {
         Self {
             resolution_scale: 1.0,
             effect_complexity: 3,
-            animation_fps: 60,
+            animation_fps: 120,
         }
     }
 }

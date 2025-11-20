@@ -10,9 +10,11 @@ use crate::domains::settings;
 use crate::domains::streaming;
 use crate::domains::ui;
 
-use crate::domains::user_management;
 use crate::domains::search;
+use crate::domains::user_management;
 
+use ferrex_core::LibraryID;
+use ferrex_core::MediaFile;
 use iced::Task;
 
 /// Result of a domain update operation
@@ -262,33 +264,30 @@ pub enum CrossDomainEvent {
     // Library events
     LibraryUpdated,
     MediaListChanged,
-    LibrarySelected(uuid::Uuid),
-    LibrarySelectAll,          // Select all libraries (show all content)
-    RequestLibraryRefresh,     // Request to refresh library list
+    LibrarySelected(LibraryID),
+    LibrarySelectAll,      // Select all libraries (show all content)
+    RequestLibraryRefresh, // Request to refresh library list
     // NOTE: Library management events moved to direct messages in Task 2.5
 
     // Media events
-    MediaStartedPlaying(crate::domains::media::library::MediaFile),
+    MediaStartedPlaying(MediaFile),
     MediaStopped,
     MediaPaused,
-    MediaToggleFullscreen, // Toggle fullscreen mode
-    MediaPlayWithId(
-        crate::domains::media::library::MediaFile,
-        ferrex_core::api_types::MediaId,
-    ), // Play media with tracking ID
+    MediaToggleFullscreen,                            // Toggle fullscreen mode
+    MediaPlayWithId(MediaFile, ferrex_core::MediaID), // Play media with tracking ID
 
     // Player coordination events
-    MediaStarted(ferrex_core::api_types::MediaId), // Player notifies media domain of started playback
+    MediaStarted(ferrex_core::MediaID), // Player notifies media domain of started playback
     #[deprecated(note = "Transcoding is now handled within streaming domain")]
-    RequestTranscoding(crate::domains::media::library::MediaFile), // Legacy: Player requests streaming to transcode
+    RequestTranscoding(MediaFile),
     #[deprecated(note = "Transcoding is now handled within streaming domain")]
     TranscodingReady(url::Url), // Legacy: Streaming notifies player that stream is ready
 
     // UI events
-    
+
     // Window management events
-    HideWindow,           // Hide the application window (e.g., for external MPV)
-    RestoreWindow(bool),  // Restore window with fullscreen state
+    HideWindow,          // Hide the application window (e.g., for external MPV)
+    RestoreWindow(bool), // Restore window with fullscreen state
     SetWindowMode(iced::window::Mode), // Set specific window mode
 
     WindowResized(iced::Size),
@@ -296,13 +295,13 @@ pub enum CrossDomainEvent {
     // NOTE: Navigation events moved to direct UI messages in Task 2.3
 
     // Metadata events
-    MetadataUpdated(ferrex_core::MediaId),
-    BatchMetadataReady(Vec<crate::infrastructure::api_types::MediaReference>),
-    RequestBatchMetadataFetch(Vec<(uuid::Uuid, Vec<crate::infrastructure::api_types::MediaReference>)>), // Request batch metadata fetching
+    MetadataUpdated(ferrex_core::MediaID),
+    BatchMetadataReady(Vec<crate::infrastructure::api_types::Media>),
+    RequestBatchMetadataFetch(Vec<(uuid::Uuid, Vec<crate::infrastructure::api_types::Media>)>), // Request batch metadata fetching
     MediaLoaded, // Media has been loaded and is ready
 
     // Additional library events
-    LibraryChanged(uuid::Uuid), // Library selection changed
+    LibraryChanged(LibraryID), // Library selection changed
 
     // NOTE: Device management events moved to direct Settings messages in Task 2.9
 
@@ -310,16 +309,16 @@ pub enum CrossDomainEvent {
     ClearMediaStore,      // Clear media store data
     ClearLibraries,       // Clear libraries and current_library_id
     ClearCurrentShowData, // Clear current show UI state (season_details, carousels)
-    
+
     // ViewModels update events
     RequestViewModelRefresh, // Request UI domain to refresh all ViewModels
-    
+
     // Search events
     SearchInProgress(bool), // Search is in progress (multi-consumer: UI loading state)
     // NOTE: Search command events moved to direct Search messages in Task 2.10
-    NavigateToMedia(crate::infrastructure::api_types::MediaReference), // Navigate to selected media (UI event)
-    RequestMediaDetails(crate::infrastructure::api_types::MediaReference), // Request details for media
-    
+    NavigateToMedia(crate::infrastructure::api_types::Media), // Navigate to selected media (UI event)
+    RequestMediaDetails(crate::infrastructure::api_types::Media), // Request details for media
+
     // Generic no-op event
     NoOp,
 }

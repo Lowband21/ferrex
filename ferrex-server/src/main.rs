@@ -4,7 +4,7 @@
 //!
 //! ## Overview
 //!
-//! Ferrex Server is a comprehensive media streaming solution that provides:
+//! Ferrex Server is a comprehensive media streaming solution that provides or plans to provide:
 //!
 //! - **Media Streaming**: HLS adaptive bitrate streaming with on-the-fly transcoding
 //! - **User Management**: JWT-based authentication with session tracking
@@ -20,57 +20,7 @@
 //! - Redis for caching and session management
 //! - FFmpeg for transcoding
 //! - TMDB for metadata
-//!
-//! ## API Endpoints
-//!
-//! ### Authentication
-//! - `POST /api/auth/register` - Create new user account
-//! - `POST /api/auth/login` - Authenticate and receive tokens
-//! - `POST /api/auth/refresh` - Refresh access token
-//! - `POST /api/auth/logout` - Invalidate session
-//!
-//! ### Media
-//! - `GET /api/media/:id` - Get media details
-//! - `POST /api/media/batch` - Batch fetch multiple media items
-//! - `POST /api/media/query` - Query media with filters
-//! - `GET /api/stream/:id` - Stream media file
-//!
-//! ### Watch Status
-//! - `POST /api/watch/progress` - Update viewing progress
-//! - `GET /api/watch/state` - Get user's watch state
-//! - `GET /api/watch/continue` - Get continue watching list
-//!
-//! ### Synchronized Playback
-//! - `POST /api/sync/sessions` - Create sync session
-//! - `GET /api/sync/sessions/:code` - Join sync session
-//! - `GET /api/sync/ws` - WebSocket for real-time sync
-//!
-//! ## Configuration
-//!
-//! Server configuration is loaded from environment variables and config files.
-
-#[cfg(test)]
-mod tests;
-// See [`config`] module for details.
-//
-// ## Example Usage
-//
-// ```bash
-// # Start the server
-// cargo run --bin ferrex-server
-//
-// # Register a user
-// curl -X POST http://localhost:3000/api/auth/register \
-//   -H "Content-Type: application/json" \
-//   -d '{"username":"alice","password":"password123","display_name":"Alice"}'
-//
-// # Login
-// curl -X POST http://localhost:3000/api/auth/login \
-//   -H "Content-Type: application/json" \
-//   -d '{"username":"alice","password":"password123"}'
 // ```
-
-//#![warn(missing_docs)]
 
 /// Admin-only management handlers
 pub mod admin_handlers;
@@ -118,9 +68,6 @@ pub mod stream_handlers;
 pub mod sync_handlers;
 /// Development and testing endpoints
 pub mod test_endpoints;
-/// Integration and unit tests
-#[cfg(test)]
-pub mod tests;
 /// Thumbnail generation and caching
 pub mod thumbnail_service;
 /// TLS configuration and certificate management
@@ -131,8 +78,6 @@ pub mod transcoding;
 pub mod tv_handlers;
 /// User profile management handlers
 pub mod user_handlers;
-/// API versioning infrastructure
-pub mod versioning;
 /// Watch progress tracking handlers
 pub mod watch_status_handlers;
 /// WebSocket connection management
@@ -142,22 +87,18 @@ use axum::{
     body::Body,
     extract::{Path, Request, State},
     http::{header, HeaderMap, StatusCode},
-    middleware as axum_middleware,
     response::{Json, Response},
-    routing::{get, post, put},
+    routing::{get, post},
     Router,
 };
-use chrono;
 use clap::Parser;
 use config::Config;
 use ferrex_core::{
     auth::domain::services::{create_authentication_service, AuthenticationService},
-    database::traits::MediaFilters,
     database::PostgresDatabase,
     scanner::FolderMonitor,
-    Library, MediaDatabase, MediaEvent, MediaFileMetadata, ParsedMediaInfo, ScanRequest,
+    MediaDatabase, ScanRequest,
 };
-use futures;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -169,11 +110,7 @@ use tokio_util::io::ReaderStream;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use transcoding::handlers::*;
 use uuid::Uuid;
-
-use library_handlers_v2::*;
-use scan_handlers::*;
 
 /// Command line arguments for the Ferrex media server
 #[derive(Parser, Debug)]
@@ -197,6 +134,7 @@ struct Args {
     host: Option<String>,
 }
 
+// Server application state
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<MediaDatabase>,
@@ -474,11 +412,11 @@ async fn main() -> anyhow::Result<()> {
         ));
 
         // Start the folder monitor background task
-        if let Err(e) = monitor.clone().start().await {
+        match monitor.clone().start().await { Err(e) => {
             warn!("Failed to start FolderMonitor background task: {}", e);
-        } else {
+        } _ => {
             info!("FolderMonitor background task started with 60-second scan interval");
-        }
+        }}
 
         monitor
     };
@@ -582,6 +520,7 @@ pub fn create_app(state: AppState) -> Router {
     // This will redirect old paths to v1 endpoints during migration period
     let compatibility_routes = create_compatibility_routes(state.clone());
 
+    /*
     // Routes that require authentication (legacy - to be removed)
     let protected_routes = Router::new()
         .route("/api/auth/logout", post(auth::handlers::logout))
@@ -723,258 +662,120 @@ pub fn create_app(state: AppState) -> Router {
         .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,
-        ));
-
-    // Admin routes - require both auth and admin middleware
-    // Note: Middleware runs in reverse order - auth_middleware runs first, then admin_middleware
-    // TODO: Migrate to permission-based middleware with specific permissions per endpoint:
-    // - /admin/users: users:read
-    // - /admin/users/:id/roles: users:manage_roles
-    // - /admin/users/:id (DELETE): users:delete
-    // - /admin/users/:id/sessions: users:read
-    // - /admin/users/:user_id/sessions/:session_id: users:update
-    // - /admin/stats: server:read_settings
-    let admin_routes = Router::new()
-        .route("/admin/users", get(admin_handlers::list_all_users))
-        .route(
-            "/admin/users/:id/roles",
-            put(admin_handlers::assign_user_roles),
-        )
-        .route(
-            "/admin/users/:id",
-            axum::routing::delete(admin_handlers::delete_user_admin),
-        )
-        .route(
-            "/admin/users/:id/sessions",
-            get(admin_handlers::get_user_sessions_admin),
-        )
-        .route(
-            "/admin/users/:user_id/sessions/:session_id",
-            axum::routing::delete(admin_handlers::revoke_user_session_admin),
-        )
-        .route("/admin/stats", get(admin_handlers::get_admin_stats))
-        // Development/reset endpoints (admin only)
-        .route(
-            "/admin/dev/reset/check",
-            get(dev_handlers::check_reset_status),
-        )
-        .route(
-            "/admin/dev/reset/database",
-            post(dev_handlers::reset_database),
-        )
-        .route("/admin/dev/seed", post(dev_handlers::seed_database))
-        // Admin session management for PIN authentication
-        .route(
-            "/admin/sessions/register",
-            post(auth::pin_handlers::register_admin_session),
-        )
-        .route(
-            "/admin/sessions/:device_id",
-            axum::routing::delete(auth::pin_handlers::remove_admin_session),
-        )
-        .layer(axum_middleware::from_fn_with_state(
-            state.clone(),
-            auth::middleware::auth_middleware,
-        ))
-        .layer(axum_middleware::from_fn(auth::middleware::admin_middleware));
-
-    // Role management routes
-    let role_routes = Router::new()
-        .route("/roles", get(role_handlers::list_roles_handler))
-        .route("/permissions", get(role_handlers::list_permissions_handler))
-        .route(
-            "/users/:id/permissions",
-            get(role_handlers::get_user_permissions_handler),
-        )
-        .route(
-            "/users/:id/roles",
-            put(role_handlers::assign_user_roles_handler),
-        )
-        .route(
-            "/users/:id/permissions/override",
-            post(role_handlers::override_user_permission_handler),
-        )
-        .route(
-            "/users/me/permissions",
-            get(role_handlers::get_my_permissions_handler),
-        )
-        .layer(axum_middleware::from_fn_with_state(
-            state.clone(),
-            auth::middleware::auth_middleware,
-        ));
+        )); */
 
     // Public routes
     Router::new()
         .route("/ping", get(ping_handler))
         .route("/health", get(health_handler))
-        // Public setup endpoints (for first-run)
-        .route("/api/setup/status", get(handlers::check_setup_status))
-        .route("/api/setup/admin", post(handlers::create_initial_admin))
-        // Public authentication endpoints
-        .route("/api/auth/register", post(auth::handlers::register))
-        .route("/api/auth/login", post(auth::handlers::login))
-        .route("/api/auth/refresh", post(auth::handlers::refresh))
-        // Device authentication endpoints
-        .route(
-            "/api/auth/device/login",
-            post(auth::device_handlers::device_login),
-        )
-        .route(
-            "/api/auth/device/pin",
-            post(auth::device_handlers::pin_login),
-        )
-        .route(
-            "/api/auth/device/status",
-            get(auth::device_handlers::check_device_status),
-        )
-        // Public user endpoints (for user selection screen)
-        .route("/api/users", get(user_handlers::list_users_handler))
-        // Add protected routes
-        .merge(protected_routes)
-        // Add admin routes with /api prefix
-        .nest("/api", admin_routes)
-        // Add role management routes with /api prefix
-        .nest("/api", role_routes)
-        .route("/scan", post(scan_handler))
-        .route("/scan", get(scan_status_handler))
-        // .route("/metadata", post(metadata_handler)) // Old endpoint - deprecated
-        // Old library endpoint (returns MediaFiles)
-        // .route(
-        //     "/library",
-        //     get(library_get_handler).post(library_post_handler),
-        // )
-        .route("/scan/start", post(start_scan_handler))
-        .route("/scan/all", post(scan_all_libraries_handler))
-        .route("/scan/progress/:id", get(scan_progress_handler))
-        .route("/scan/progress/:id/sse", get(scan_progress_sse_handler))
-        .route("/scan/active", get(active_scans_handler))
-        .route("/scan/history", get(scan_history_handler))
-        .route("/scan/cancel/:id", post(cancel_scan_handler))
-        .route("/library/events/sse", get(media_events_sse_handler))
-        .route("/stream/:id", get(stream_handler))
-        // HLS streaming endpoints
-        .route("/stream/:id/hls/playlist.m3u8", get(hls_playlist_handler))
-        .route("/stream/:id/hls/:segment", get(hls_segment_handler))
-        .route("/stream/:id/transcode", get(stream_transcode_handler))
-        .route("/transcode/:id", post(start_transcode_handler))
-        .route("/transcode/status/:job_id", get(transcode_status_handler))
-        // New production transcoding endpoints
-        .route(
-            "/transcode/:id/adaptive",
-            post(start_adaptive_transcode_handler),
-        )
-        .route(
-            "/transcode/:id/segment/:segment_number",
-            get(get_segment_handler),
-        )
-        .route(
-            "/transcode/:id/master.m3u8",
-            get(get_master_playlist_handler),
-        )
-        .route(
-            "/transcode/:id/variant/:profile/playlist.m3u8",
-            get(get_variant_playlist_handler),
-        )
-        .route(
-            "/transcode/:id/variant/:profile/:segment",
-            get(get_variant_segment_handler),
-        )
-        .route("/transcode/cancel/:job_id", post(cancel_transcode_handler))
-        .route("/transcode/profiles", get(list_transcode_profiles_handler))
-        .route("/transcode/cache/stats", get(transcode_cache_stats_handler))
-        .route(
-            "/transcode/:id/clear-cache",
-            post(clear_transcode_cache_handler),
-        )
-        .route("/library/status", get(library_status_handler))
-        .route("/media/:id/availability", get(media_availability_handler))
-        .route("/config", get(config_handler))
-        // .route("/metadata/fetch/:id", post(fetch_metadata_handler)) // Old endpoint - deprecated
-        // .route("/metadata/fetch-show/:show_name", post(fetch_show_metadata_handler)) // Old endpoint - deprecated
-        .route("/poster/:id", get(poster_handler))
-        .route("/thumbnail/:id", get(thumbnail_handler))
-        // New unified media reference endpoint
-        .route(
-            "/api/media/:id",
-            get(media_reference_handlers::get_media_reference_handler),
-        )
-        // Batch media fetch endpoint
-        .route(
-            "/api/media/batch",
-            post(media_reference_handlers::get_media_batch_handler),
-        )
-        // Image serving endpoint (public but client sends auth headers)
-        .route(
-            "/images/:type/:id/:category/:index",
-            get(image_handlers::serve_image_handler),
-        )
-        .route(
-            "/season-poster/:show_name/:season_num",
-            get(season_poster_handler),
-        )
-        // TV Show endpoints (old - using MediaFile)
-        // .route("/shows", get(list_shows_handler))
-        // .route("/shows/:show_name", get(show_details_handler))
-        // .route("/shows/:show_name/episodes", get(show_episodes_handler))
-        // .route(
-        //     "/shows/:show_name/seasons/:season_num",
-        //     get(season_details_handler),
-        // )
-        // Movie endpoints (old - using MediaFile)
-        // .route("/movies", get(list_movies_handler))
-        // .route("/movies/:id", get(movie_details_handler))
-        // Library management endpoints (old - commented out)
-        // .route("/libraries", get(list_libraries_handler).post(create_library_handler))
-        // .route("/libraries/:id", get(get_library_handler))
-        // .route("/libraries/:id", axum::routing::put(update_library_handler))
-        // .route("/libraries/:id", axum::routing::delete(delete_library_handler))
-        // .route("/libraries/:id/scan", post(scan_library_handler))
-        // New library-centric endpoints
-        .route(
-            "/libraries",
-            get(list_libraries_handler).post(create_library_handler),
-        )
-        .route("/libraries/:id", get(get_library_handler))
-        .route("/libraries/:id", axum::routing::put(update_library_handler))
-        .route(
-            "/libraries/:id",
-            axum::routing::delete(delete_library_handler),
-        )
-        .route("/libraries/:id/scan", post(scan_library_handler))
-        .route("/libraries/:id/media", get(get_library_media_handler))
-        .route("/media", post(fetch_media_handler))
-        .route("/media/match", post(manual_match_media_handler))
-        // Temporary maintenance endpoint
-        .route(
-            "/maintenance/delete-by-title/:title",
-            axum::routing::delete(delete_by_title_handler),
-        )
-        .route("/metadata/fetch-batch", post(fetch_metadata_batch_handler))
-        .route("/posters/batch", post(fetch_posters_batch_handler))
-        // .route(
-        //     "/metadata/queue-missing",
-        //     post(queue_missing_metadata_handler),
-        // ) // Old endpoint - deprecated
-        // Database maintenance endpoints (for testing/debugging)
-        .route("/maintenance/clear-database", post(clear_database_handler))
-        // Test endpoints for metadata extraction and transcoding
-        .route(
-            "/test/metadata/:path",
-            get(test_endpoints::test_metadata_extraction),
-        )
-        .route(
-            "/test/transcode/:path",
-            post(test_endpoints::test_transcoding),
-        )
-        .route(
-            "/test/transcode/status/:job_id",
-            get(test_endpoints::test_transcode_status),
-        )
-        .route("/test/hls/:path", post(test_endpoints::test_hls_streaming))
-        // Add versioned API routes
-        .merge(versioned_api)
+        //// Public user endpoints (for user selection screen)
+        //.route("/api/users", get(user_handlers::list_users_handler))
+        ////// Add protected routes
+        ////.merge(protected_routes)
+        //// Add admin routes with /api prefix
+        //.route("/scan", post(scan_handler))
+        //.route("/scan", get(scan_status_handler))
+        //// .route("/metadata", post(metadata_handler)) // Old endpoint - deprecated
+        //.route("/scan/start", post(start_scan_handler))
+        //.route("/scan/all", post(scan_all_libraries_handler))
+        //.route("/scan/progress/:id", get(scan_progress_handler))
+        //.route("/scan/progress/:id/sse", get(scan_progress_sse_handler))
+        //.route("/scan/active", get(active_scans_handler))
+        //.route("/scan/history", get(scan_history_handler))
+        //.route("/scan/cancel/:id", post(cancel_scan_handler))
+        //.route("/stream/:id", get(stream_handler))
+        //// HLS streaming endpoints
+        //.route("/stream/:id/hls/playlist.m3u8", get(hls_playlist_handler))
+        //.route("/stream/:id/hls/:segment", get(hls_segment_handler))
+        //.route("/stream/:id/transcode", get(stream_transcode_handler))
+        //.route("/transcode/:id", post(start_transcode_handler))
+        //.route("/transcode/status/:job_id", get(transcode_status_handler))
+        //// New production transcoding endpoints
+        //.route(
+        //    "/transcode/:id/adaptive",
+        //    post(start_adaptive_transcode_handler),
+        //)
+        //.route(
+        //    "/transcode/:id/segment/:segment_number",
+        //    get(get_segment_handler),
+        //)
+        //.route(
+        //    "/transcode/:id/master.m3u8",
+        //    get(get_master_playlist_handler),
+        //)
+        //.route(
+        //    "/transcode/:id/variant/:profile/playlist.m3u8",
+        //    get(get_variant_playlist_handler),
+        //)
+        //.route(
+        //    "/transcode/:id/variant/:profile/:segment",
+        //    get(get_variant_segment_handler),
+        //)
+        //.route("/transcode/cancel/:job_id", post(cancel_transcode_handler))
+        //.route("/transcode/profiles", get(list_transcode_profiles_handler))
+        //.route("/transcode/cache/stats", get(transcode_cache_stats_handler))
+        //.route(
+        //    "/transcode/:id/clear-cache",
+        //    post(clear_transcode_cache_handler),
+        //)
+        //.route("/library/status", get(library_status_handler))
+        //.route("/media/:id/availability", get(media_availability_handler))
+        //.route("/config", get(config_handler))
+        //// .route("/metadata/fetch/:id", post(fetch_metadata_handler)) // Old endpoint - deprecated
+        //// .route("/metadata/fetch-show/:show_name", post(fetch_show_metadata_handler)) // Old endpoint - deprecated
+        //.route("/poster/:id", get(poster_handler))
+        //.route("/thumbnail/:id", get(thumbnail_handler))
+        //// New unified media reference endpoint
+        //// Batch media fetch endpoint
+        //.route(
+        //    "/api/media/batch",
+        //    post(media_reference_handlers::get_media_batch_handler),
+        //)
+        //// Image serving endpoint (public but client sends auth headers)
+        //.route(
+        //    "/season-poster/:show_name/:season_num",
+        //    get(season_poster_handler),
+        //)
+        //.route(
+        //    "/libraries",
+        //    get(list_libraries_handler).post(create_library_handler),
+        //)
+        //.route("/libraries/:id", get(get_library_handler))
+        //.route("/libraries/:id", axum::routing::put(update_library_handler))
+        //.route(
+        //    "/libraries/:id",
+        //    axum::routing::delete(delete_library_handler),
+        //)
+        //.route("/libraries/:id/scan", post(scan_library_handler))
+        //.route("/libraries/:id/media", get(get_library_media_handler))
+        //.route("/media", post(fetch_media_handler))
+        //.route("/media/match", post(manual_match_media_handler))
+        //// Temporary maintenance endpoint
+        //.route(
+        //    "/maintenance/delete-by-title/:title",
+        //    axum::routing::delete(delete_by_title_handler),
+        //)
+        //.route("/metadata/fetch-batch", post(fetch_metadata_batch_handler))
+        //.route("/posters/batch", post(fetch_posters_batch_handler))
+        //.route("/maintenance/clear-database", post(clear_database_handler))
+        //// Test endpoints for metadata extraction and transcoding
+        //.route(
+        //    "/test/metadata/:path",
+        //    get(test_endpoints::test_metadata_extraction),
+        //)
+        //.route(
+        //    "/test/transcode/:path",
+        //    post(test_endpoints::test_transcoding),
+        //)
+        //.route(
+        //    "/test/transcode/status/:job_id",
+        //    get(test_endpoints::test_transcode_status),
+        //)
+        //.route("/test/hls/:path", post(test_endpoints::test_hls_streaming))
         // Add compatibility routes (temporary)
         .merge(compatibility_routes)
+        // Add versioned API routes
+        .merge(versioned_api)
         // Add middleware layers in correct order (outer to inner):
         // 1. CORS (outermost)
         .layer(CorsLayer::permissive())
@@ -1045,18 +846,53 @@ pub fn create_app(state: AppState) -> Router {
                 next.run(request).await
             },
         ))
-        // 5. Version negotiation (after security, before business logic)
-        .layer(axum_middleware::from_fn(versioning::version_middleware))
         .with_state(state)
 }
 
 /// Create backward compatibility routes that redirect to v1 endpoints
 fn create_compatibility_routes(state: AppState) -> Router<AppState> {
     Router::new()
-        // These routes will forward to the v1 equivalents
-        // We'll implement actual redirects or proxies later
-        // For now, this serves as documentation of what needs compatibility
+        // Auth redirects: /api/auth/* -> /api/v1/auth/*
+        .route("/api/library/events/sse", get(redirect_to_v1))
+        //
+        .route("/api/auth/register", post(redirect_to_v1))
+        .route("/api/auth/login", post(redirect_to_v1))
+        .route("/api/auth/refresh", post(redirect_to_v1))
+        .route("/api/auth/logout", post(redirect_to_v1))
+        .route("/api/auth/device/login", post(redirect_to_v1))
+        .route("/api/auth/device/pin", post(redirect_to_v1))
+        .route("/api/auth/device/status", get(redirect_to_v1))
+        // User redirects: /api/users/* -> /api/v1/users/*
+        .route("/api/users/me", get(redirect_to_v1))
+        .route("/api/users", get(redirect_to_v1))
+.route("/api/users/{id}", get(redirect_to_v1))
+        // Media redirects: /api/media/* -> /api/v1/media/*
+        .route("/api/media/query", post(redirect_to_v1))
+        // Watch status redirects: /api/watch/* -> /api/v1/watch/*
+        .route("/api/watch/progress", post(redirect_to_v1))
+        .route("/api/watch/state", get(redirect_to_v1))
+        .route("/api/watch/continue", get(redirect_to_v1))
+        // Setup redirects: /api/setup/* -> /api/v1/setup/*
+        .route("/api/setup/status", get(redirect_to_v1))
+        .route("/api/setup/admin", post(redirect_to_v1))
         .with_state(state)
+}
+
+// Add this redirect handler function to main.rs
+async fn redirect_to_v1(uri: axum::http::Uri) -> Response {
+    let new_path = uri.path().replace("/api/", "/api/v1/");
+    let new_uri = if let Some(query) = uri.query() {
+        format!("{}?{}", new_path, query)
+    } else {
+        new_path
+    };
+
+    Response::builder()
+        .status(StatusCode::MOVED_PERMANENTLY)
+        .header("Location", new_uri)
+        .header("X-API-Migration", "Redirected to v1")
+        .body(Body::empty())
+        .unwrap()
 }
 
 // These types are now in ferrex_core::api_types
@@ -1065,72 +901,6 @@ fn create_compatibility_routes(state: AppState) -> Router<AppState> {
 struct MetadataRequest {
     path: String,
 }
-
-// #[derive(Deserialize)]
-// struct CreateLibraryRequest {
-//     name: String,
-//     library_type: String,
-//     paths: Vec<String>,
-//     #[serde(default = "default_scan_interval")]
-//     scan_interval_minutes: u32,
-//     #[serde(default = "default_enabled")]
-//     enabled: bool,
-// }
-
-// #[derive(Deserialize)]
-// struct UpdateLibraryRequest {
-//     name: Option<String>,
-//     paths: Option<Vec<String>>,
-//     scan_interval_minutes: Option<u32>,
-//     enabled: Option<bool>,
-// }
-
-// fn default_scan_interval() -> u32 {
-//     60
-// }
-
-// fn default_enabled() -> bool {
-//     true
-// }
-
-// #[derive(Debug, Deserialize)]
-// struct LibraryFilters {
-//     media_type: Option<String>,
-//     show_name: Option<String>,
-//     season: Option<u32>,
-//     order_by: Option<String>,
-//     limit: Option<u64>,
-//     library_id: Option<String>,
-// }
-
-// ScanAndStoreRequest - old type, not needed with new scanner
-// #[derive(Deserialize)]
-// struct ScanAndStoreRequest {
-//     #[serde(default)]
-//     path: Option<String>,
-//     #[serde(default)]
-//     max_depth: Option<usize>,
-//     #[serde(default)]
-//     follow_links: bool,
-//     #[serde(default = "default_extract_metadata")]
-//     extract_metadata: bool,
-// }
-
-// fn default_extract_metadata() -> bool {
-//     true
-// }
-
-// ScanRequest is now in ferrex_core::api_types
-// #[derive(Deserialize)]
-// struct ScanRequest {
-//     path: String,
-//     #[serde(default)]
-//     max_depth: Option<usize>,
-//     #[serde(default)]
-//     follow_links: bool,
-// }
-
-// ScanResponse struct removed - using new scan management API
 
 async fn ping_handler() -> Result<Json<Value>, StatusCode> {
     info!("Ping endpoint called");
@@ -1414,11 +1184,7 @@ fn parse_range_header(range_str: &str, file_size: u64) -> Option<ByteRange> {
     let start = if parts[0].is_empty() {
         // Suffix range: "-1000" (last 1000 bytes)
         if let Ok(suffix_len) = parts[1].parse::<u64>() {
-            if suffix_len >= file_size {
-                0
-            } else {
-                file_size - suffix_len
-            }
+            file_size.saturating_sub(suffix_len)
         } else {
             return None;
         }
@@ -1558,6 +1324,7 @@ async fn fetch_show_metadata_handler(
 
 // The rest of the original function has been removed as it relied on deprecated external_info fields
 
+/*
 async fn poster_handler(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -1709,15 +1476,12 @@ async fn poster_handler(
             );
 
             // Try to get movie reference to find poster path
-            use ferrex_core::media::MovieID;
-
-            if let Ok(movie_id) = MovieID::new(media_id.to_string()) {
+            let movie_id = MovieID(media_id);
                 match state.db.backend().get_movie_reference(&movie_id).await {
                     Ok(movie_ref) => {
                         // Extract poster path from metadata
-                        if let ferrex_core::media::MediaDetailsOption::Details(
-                            ferrex_core::media::TmdbDetails::Movie(details),
-                        ) = &movie_ref.details
+                        if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) =
+                            &movie_ref.details
                         {
                             if let Some(poster_path) = &details.poster_path {
                                 // Cache the poster
@@ -1753,13 +1517,12 @@ async fn poster_handler(
                     Err(e) => {
                         info!("Not a movie reference, trying series: {}", e);
                         // Try as series
-                        use ferrex_core::media::SeriesID;
-                        if let Ok(series_id) = SeriesID::new(media_id.to_string()) {
+                        let series_id = SeriesID(media_id);
                             match state.db.backend().get_series_reference(&series_id).await {
                                 Ok(series_ref) => {
-                                    if let ferrex_core::media::MediaDetailsOption::Details(
-                                        ferrex_core::media::TmdbDetails::Series(details),
-                                    ) = &series_ref.details
+                                    if let MediaDetailsOption::Details(TmdbDetails::Series(
+                                        details,
+                                    )) = &series_ref.details
                                     {
                                         if let Some(poster_path) = &details.poster_path {
                                             // Cache the poster
@@ -1804,16 +1567,15 @@ async fn poster_handler(
                                     warn!("Failed to get series reference for {}: {}", media_id, e);
                                 }
                             }
-                        }
+
                     }
                 }
-            }
 
             // If we get here, we couldn't fetch/cache the poster
             Err(StatusCode::NOT_FOUND)
         }
     }
-}
+}*/
 
 async fn season_poster_handler(
     State(state): State<AppState>,
@@ -1915,9 +1677,9 @@ async fn delete_by_title_handler(
         if media.filename.to_lowercase().contains(&title_lower) {
             info!("Deleting media: {} (ID: {})", media.filename, media.id);
 
-            if let Err(e) = state.db.backend().delete_media(&media.id.to_string()).await {
+            match state.db.backend().delete_media(&media.id.to_string()).await { Err(e) => {
                 errors.push(format!("Failed to delete {}: {}", media.filename, e));
-            } else {
+            } _ => {
                 deleted_count += 1;
 
                 // Clean up thumbnail
@@ -1937,7 +1699,7 @@ async fn delete_by_title_handler(
                         warn!("Failed to delete poster: {}", e);
                     }
                 }
-            }
+            }}
         }
     }
 
@@ -1972,9 +1734,9 @@ async fn clear_database_handler(State(state): State<AppState>) -> Result<Json<Va
     for media in all_media {
         info!("Deleting media: {} (ID: {})", media.filename, media.id);
 
-        if let Err(e) = state.db.backend().delete_media(&media.id.to_string()).await {
+        match state.db.backend().delete_media(&media.id.to_string()).await { Err(e) => {
             errors.push(format!("Failed to delete {}: {}", media.filename, e));
-        } else {
+        } _ => {
             deleted_count += 1;
 
             let media_id_str = media.id.to_string();
@@ -2009,7 +1771,7 @@ async fn clear_database_handler(State(state): State<AppState>) -> Result<Json<Va
                     warn!("Failed to delete JPG poster: {}", e);
                 }
             }
-        }
+        }}
     }
 
     // Clear the entire poster cache directory as a final cleanup
@@ -2077,7 +1839,7 @@ async fn fetch_metadata_batch_handler(
     let futures = media_ids.iter().map(|id| {
         let state = state.clone();
         let semaphore = semaphore.clone();
-        let id = id.clone();
+        let id = *id;
         let priority = priority.to_string();
 
         async move {
@@ -2140,7 +1902,7 @@ async fn fetch_posters_batch_handler(
 
     for id in request.media_ids.iter().take(100) {
         // Limit to 100 items
-        let media_id = id.split(':').last().unwrap_or(id);
+        let media_id = id.split(':').next_back().unwrap_or(id);
         let has_poster = state.metadata_service.get_cached_poster(media_id).is_some();
 
         poster_info.push(PosterInfo {

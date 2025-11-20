@@ -99,7 +99,7 @@ pub fn handle_submit_password_change(state: &mut State) -> DomainUpdateResult {
     // Emit cross-domain event to execute auth command
     DomainUpdateResult::with_events(
         Task::none(),
-        vec![CrossDomainEvent::AuthCommandRequested(command)]
+        vec![CrossDomainEvent::AuthCommandRequested(command)],
     )
 }
 
@@ -269,7 +269,7 @@ pub fn handle_submit_pin_change(state: &mut State) -> DomainUpdateResult {
     // Emit cross-domain event to execute auth command
     DomainUpdateResult::with_events(
         Task::none(),
-        vec![CrossDomainEvent::AuthCommandRequested(command)]
+        vec![CrossDomainEvent::AuthCommandRequested(command)],
     )
 }
 

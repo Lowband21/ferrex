@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use rayon::prelude::*;
 
 /// Parallel sorting for large datasets
-/// 
+///
 /// This strategy uses Rayon to parallelize sorting operations
 /// when the dataset exceeds a configurable threshold.
 pub struct ParallelSort<T: Send + Sync, S> {
@@ -32,7 +32,7 @@ impl<T: Send + Sync, S> ParallelSort<T, S> {
             _phantom: PhantomData,
         }
     }
-    
+
     /// Create a parallel sort with custom threshold
     pub fn with_threshold(strategy: S, threshold: usize) -> Self {
         Self {
@@ -60,11 +60,11 @@ where
             self.strategy.sort(items);
         }
     }
-    
+
     fn can_apply(&self, sample: &T) -> bool {
         self.strategy.can_apply(sample)
     }
-    
+
     fn cost_estimate(&self) -> SortCost {
         // Parallel sorting can reduce the effective cost for large datasets
         match self.strategy.cost_estimate() {
@@ -84,18 +84,18 @@ where
         // Fallback to sequential sorting when parallel feature is disabled
         self.strategy.sort(items);
     }
-    
+
     fn can_apply(&self, sample: &T) -> bool {
         self.strategy.can_apply(sample)
     }
-    
+
     fn cost_estimate(&self) -> SortCost {
         self.strategy.cost_estimate()
     }
 }
 
 /// Cached sorting for repeated operations
-/// 
+///
 /// This strategy caches the sorted order of items and reuses it
 /// when the same items are sorted again within the TTL period.
 pub struct CachedSort<T: Send + Sync, S> {
@@ -131,7 +131,7 @@ impl<T: Send + Sync, S> CachedSort<T, S> {
             cache: Arc::new(RwLock::new(SortCache::default())),
         }
     }
-    
+
     /// Create a cached sort with custom cache
     pub fn with_cache(strategy: S, cache: Arc<RwLock<SortCache<T>>>) -> Self {
         Self { strategy, cache }
@@ -145,10 +145,10 @@ where
 {
     fn sort(&self, items: &mut [T]) {
         let items_hash = calculate_items_hash(items);
-        
+
         // Check if we have a valid cached result
         let use_cache = {
-            if let Ok(cache) = self.cache.read() {
+            match self.cache.read() { Ok(cache) => {
                 if let Some(ref cached_state) = cache.last_sort {
                     cached_state.items_hash == items_hash
                         && cached_state.timestamp.elapsed() < cached_state.ttl
@@ -156,11 +156,11 @@ where
                 } else {
                     false
                 }
-            } else {
+            } _ => {
                 false
-            }
+            }}
         };
-        
+
         if use_cache {
             // Use cached sorting order
             if let Ok(cache) = self.cache.read() {
@@ -173,7 +173,7 @@ where
                 }
             }
         }
-        
+
         // No valid cache, perform actual sorting
         // First, create a mapping of original indices
         let original_indices: Vec<usize> = (0..items.len()).collect();
@@ -181,11 +181,11 @@ where
             .into_iter()
             .zip(items.iter().cloned())
             .collect();
-        
+
         // Sort using the strategy (we sort a copy to track indices)
         let mut items_copy = items.to_vec();
         self.strategy.sort(&mut items_copy);
-        
+
         // Find the new order of indices
         let mut sorted_indices = Vec::with_capacity(items.len());
         for sorted_item in &items_copy {
@@ -199,16 +199,16 @@ where
                 }
             }
         }
-        
+
         // If we couldn't track indices properly, fall back to direct sorting
         if sorted_indices.len() != items.len() {
             self.strategy.sort(items);
             return;
         }
-        
+
         // Apply the sorting
         items.clone_from_slice(&items_copy);
-        
+
         // Update cache
         if let Ok(mut cache) = self.cache.write() {
             cache.last_sort = Some(CachedSortState {
@@ -220,11 +220,11 @@ where
             });
         }
     }
-    
+
     fn can_apply(&self, sample: &T) -> bool {
         self.strategy.can_apply(sample)
     }
-    
+
     fn cost_estimate(&self) -> SortCost {
         // If likely to hit cache, cost is trivial
         // Otherwise, same as underlying strategy
@@ -233,7 +233,7 @@ where
 }
 
 /// Lazy sorting that defers sorting until actually needed
-/// 
+///
 /// This is useful when you might not need all sorted items,
 /// or when sorting can be combined with other operations.
 pub struct LazySort<T: Send + Sync, S> {
@@ -262,17 +262,17 @@ where
         if items.len() <= 1 {
             return;
         }
-        
+
         // For now, just delegate to the underlying strategy
         // In a real implementation, this might defer sorting
         // until iteration or might sort only a prefix
         self.strategy.sort(items);
     }
-    
+
     fn can_apply(&self, sample: &T) -> bool {
         self.strategy.can_apply(sample)
     }
-    
+
     fn cost_estimate(&self) -> SortCost {
         self.strategy.cost_estimate()
     }

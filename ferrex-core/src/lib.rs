@@ -1,5 +1,5 @@
 //! # Ferrex Core
-//! 
+//!
 //! Core library for the Ferrex Media Server, providing fundamental types, database abstractions,
 //! and business logic for media management, user authentication, and playback synchronization.
 //!
@@ -36,14 +36,14 @@
 //!
 //! ```no_run
 //! use ferrex_core::{MediaDatabase, user::RegisterRequest};
-//! 
+//!
 //! async fn register_user(db: &MediaDatabase) -> Result<(), Box<dyn std::error::Error>> {
 //!     let request = RegisterRequest {
 //!         username: "alice".to_string(),
 //!         password: "secure_password".to_string(),
 //!         display_name: Some("Alice".to_string()),
 //!     };
-//!     
+//!
 //!     let user = db.backend().create_user(request).await?;
 //!     println!("Created user: {}", user.username);
 //!     Ok(())
@@ -72,11 +72,8 @@ pub mod extras_parser;
 #[cfg_attr(docsrs, doc(cfg(feature = "database")))]
 pub mod image_service;
 
-/// Media library management and organization
-pub mod library;
-
-/// Core media types (Movie, Series, Episode) and references
-pub mod media;
+/// rkyv wrapper types for external dependencies
+pub mod rkyv_wrappers;
 
 /// Media reference sorting and filtering extensions
 pub mod media_reference_ext;
@@ -111,8 +108,11 @@ pub mod sync_session;
 /// TV show filename parser for extracting episode information
 pub mod tv_parser;
 
-/// Common types used throughout the crate
+/// Common types used by both server and client
 pub mod types;
+
+/// Traits for core types
+pub mod traits;
 
 /// User authentication and session management
 pub mod user;
@@ -126,31 +126,32 @@ pub mod user_management;
 /// Media watch status and progress tracking
 pub mod watch_status;
 
+pub use api_types::*;
+pub use auth::*;
 #[cfg(feature = "database")]
 pub use database::*;
 pub use error::*;
+pub use extras_parser::ExtrasParser;
 #[cfg(feature = "database")]
 pub use image_service::{ImageService, TmdbImageSize};
-pub use extras_parser::ExtrasParser;
-pub use library::*;
-pub use media::*;
-pub use media_reference_ext::{MediaReferenceExt, MediaSortBy, MediaFilters};
+pub use media_reference_ext::{MediaFilters, MediaSortBy};
 #[cfg(feature = "ffmpeg")]
 pub use metadata::*;
 pub use providers::{ProviderError, TmdbApiProvider};
-// #[cfg(feature = "database")]
-// pub use scanner::*;  // Archived - using streaming_scanner_v2
-// #[cfg(feature = "database")]
-// pub use streaming_scanner::*;  // Archived - using streaming_scanner_v2
-#[cfg(feature = "database")]
-pub use streaming_scanner_v2::*;
-pub use tv_parser::{TvParser, EpisodeInfo};
-pub use types::{TranscodingJobResponse, TranscodingStatus, TranscodingProgressDetails};
-pub use api_types::*;
-pub use user::*;
-pub use watch_status::*;
-pub use sync_session::*;
 pub use query::*;
 pub use rbac::*;
-pub use auth::*;
+#[cfg(feature = "database")]
+pub use streaming_scanner_v2::*;
+pub use sync_session::*;
+pub use tv_parser::{EpisodeInfo, TvParser};
+pub use types::library::*;
+pub use types::transcoding::{
+    TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,
+};
+
+// Core exports
+pub use traits::*;
+pub use types::*;
+pub use user::*;
+pub use watch_status::*;
 // user_management is available as a module but not re-exported to avoid conflicts

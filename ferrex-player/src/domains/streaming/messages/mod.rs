@@ -1,6 +1,6 @@
 use ferrex_core::TranscodingStatus;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Message {
     // Transcoding
     TranscodingStarted(Result<String, String>), // job_id or error
@@ -17,6 +17,39 @@ pub enum Message {
 
     // Bandwidth adaptation
     BandwidthMeasured(u64), // bits per second
+}
+
+impl std::fmt::Debug for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // Transcoding
+            Self::TranscodingStarted(result) => write!(f, "TranscodingStarted({:?})", result),
+            Self::TranscodingStatusUpdate(result) => {
+                write!(f, "TranscodingStatusUpdate({:?})", result)
+            }
+            Self::CheckTranscodingStatus => write!(f, "CheckTranscodingStatus"),
+
+            // HLS Streaming
+            Self::MasterPlaylistLoaded(playlist) => {
+                write!(f, "MasterPlaylistLoaded({:?})", playlist.is_some())
+            }
+            Self::MasterPlaylistReady(playlist) => {
+                write!(f, "MasterPlaylistReady({:?})", playlist.is_some())
+            }
+
+            // Segment management
+            Self::StartSegmentPrefetch(index) => write!(f, "StartSegmentPrefetch({})", index),
+            Self::SegmentPrefetched(index, result) => write!(
+                f,
+                "SegmentPrefetched({}, {:?})",
+                index,
+                result.as_ref().map(|v| v.len()).map_err(|e| e)
+            ),
+
+            // Bandwidth adaptation
+            Self::BandwidthMeasured(bandwidth) => write!(f, "BandwidthMeasured({})", bandwidth),
+        }
+    }
 }
 
 impl Message {

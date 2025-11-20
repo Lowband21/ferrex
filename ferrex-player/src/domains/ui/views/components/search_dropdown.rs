@@ -6,7 +6,7 @@ use iced::{alignment, Alignment, Color, Element, Length, Padding, Theme};
 use crate::common::messages::DomainMessage;
 use crate::domains::search::types::{SearchMode, SearchResult, SearchState};
 use crate::domains::ui::theme::{self as app_theme, Button as ButtonStyle};
-use crate::infrastructure::api_types::MediaReference;
+use crate::infrastructure::api_types::Media;
 use crate::state_refactored::State;
 
 type Message = DomainMessage;
@@ -241,12 +241,12 @@ fn view_search_result(result: &SearchResult, is_selected: bool) -> Element<Messa
 }
 
 /// Get an icon for the media type
-fn get_media_icon(media_ref: &MediaReference) -> &'static str {
+fn get_media_icon(media_ref: &Media) -> &'static str {
     match media_ref {
-        MediaReference::Movie(_) => "🎬",
-        MediaReference::Series(_) => "📺",
-        MediaReference::Season(_) => "📅",
-        MediaReference::Episode(_) => "📹",
+        Media::Movie(_) => "🎬",
+        Media::Series(_) => "📺",
+        Media::Season(_) => "📅",
+        Media::Episode(_) => "📹",
     }
 }
 

@@ -1,5 +1,5 @@
 //! Mediator Integration Tests
-//! 
+//!
 //! Tests for the cross-domain event routing mediator
 
 mod integration {

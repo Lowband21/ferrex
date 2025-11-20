@@ -38,7 +38,7 @@ impl FilenameParser {
 
         // Based on library type, try to parse appropriately
         match self.library_type {
-            Some(LibraryType::TvShows) => {
+            Some(LibraryType::Series) => {
                 // Try to parse as TV episode
                 if let Some(episode_info) = TvParser::parse_episode_info(file_path) {
                     let show_name = TvParser::extract_series_name(file_path)

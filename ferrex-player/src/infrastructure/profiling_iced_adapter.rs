@@ -189,7 +189,7 @@ impl ProfilingOverlay {
 
         #[cfg(feature = "profile-with-tracy")]
         status_items.push(text("✓ Tracy").size(12).into());
-        
+
         #[cfg(feature = "profile-with-tracing")]
         status_items.push(text("✓ Tracing").size(12).into());
 
@@ -245,10 +245,10 @@ pub mod chrome_export {
     pub fn export_trace(path: &Path) -> Result<(), std::io::Error> {
         // With the profiling crate, trace data is handled by the backend
         log::info!("Trace export requested to: {:?}", path);
-        
+
         #[cfg(feature = "profile-with-tracy")]
         log::info!("Tracy data can be viewed using the Tracy profiler GUI");
-        
+
         #[cfg(feature = "profile-with-puffin")]
         log::info!("Puffin data can be viewed at http://localhost:8585");
 

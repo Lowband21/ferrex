@@ -1,8 +1,8 @@
-use zeroize::{Zeroize, ZeroizeOnDrop};
 use std::fmt;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A secure credential type that automatically zeros memory on drop
-/// 
+///
 /// This type is designed to hold sensitive data like passwords, tokens, and other
 /// credentials. The memory is automatically zeroed when the value is dropped,
 /// helping to prevent sensitive data from lingering in memory.
@@ -25,7 +25,7 @@ impl SecureCredential {
     }
 
     /// Get a reference to the credential data as a string slice
-    /// 
+    ///
     /// # Security Note
     /// Be careful when using this method. The returned reference points to the
     /// same memory that will be zeroed on drop. Avoid storing this reference
@@ -45,7 +45,7 @@ impl SecureCredential {
     }
 
     /// Expose the internal data for operations that require owned String
-    /// 
+    ///
     /// # Security Note
     /// This method should be used sparingly and only when necessary for API
     /// compatibility. The returned String will not be automatically zeroed.
@@ -56,7 +56,7 @@ impl SecureCredential {
 
 impl Clone for SecureCredential {
     /// Clone implementation that maintains security properties
-    /// 
+    ///
     /// Creates a new SecureCredential with a copy of the data.
     /// Both the original and cloned values will be properly zeroed on drop.
     fn clone(&self) -> Self {
@@ -141,7 +141,7 @@ mod tests {
     fn test_clone() {
         let original = SecureCredential::new("test_password".to_string());
         let cloned = original.clone();
-        
+
         assert_eq!(original.as_str(), cloned.as_str());
         assert_eq!(original.len(), cloned.len());
     }
@@ -150,7 +150,7 @@ mod tests {
     fn test_from_implementations() {
         let from_string: SecureCredential = "test_password".to_string().into();
         let from_str: SecureCredential = "test_password".into();
-        
+
         assert_eq!(from_string.as_str(), "test_password");
         assert_eq!(from_str.as_str(), "test_password");
     }
@@ -160,7 +160,7 @@ mod tests {
         let cred1 = SecureCredential::new("password123".to_string());
         let cred2 = SecureCredential::new("password123".to_string());
         let cred3 = SecureCredential::new("different".to_string());
-        
+
         assert_eq!(cred1, cred2);
         assert_ne!(cred1, cred3);
     }
@@ -169,7 +169,7 @@ mod tests {
     fn test_debug_format() {
         let credential = SecureCredential::new("secret".to_string());
         let debug_str = format!("{:?}", credential);
-        
+
         // Should not contain the actual secret
         assert!(!debug_str.contains("secret"));
         assert!(debug_str.contains("REDACTED"));
@@ -180,7 +180,7 @@ mod tests {
     fn test_display_format() {
         let credential = SecureCredential::new("secret".to_string());
         let display_str = format!("{}", credential);
-        
+
         // Should not contain the actual secret
         assert!(!display_str.contains("secret"));
         assert!(display_str.contains("6 bytes"));

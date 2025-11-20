@@ -450,8 +450,8 @@ fn extract_frame_at_percentage(
 fn save_frame_as_jpeg(frame: &ffmpeg::util::frame::video::Video, output_path: &Path) -> Result<()> {
     use image::{ImageBuffer, Rgb};
 
-    let width = frame.width() as u32;
-    let height = frame.height() as u32;
+    let width = frame.width();
+    let height = frame.height();
     let stride = frame.stride(0);
     let data = frame.data(0);
 
@@ -471,7 +471,7 @@ fn save_frame_as_jpeg(frame: &ffmpeg::util::frame::video::Video, output_path: &P
         // Remove padding from each row
         let mut clean_data = Vec::with_capacity((width * height * 3) as usize);
         for y in 0..height {
-            let row_start = (y as usize) * (stride as usize);
+            let row_start = (y as usize) * stride;
             let row_end = row_start + (width as usize) * 3;
             clean_data.extend_from_slice(&data[row_start..row_end]);
         }

@@ -90,6 +90,12 @@ impl Video {
     /// Create a Wayland video (following simple_player.rs pattern)
     fn new_wayland(uri: &url::Url) -> Result<Arc<Self>, VideoError> {
         log::info!("Creating Wayland video for URI: {}", uri);
+        let uri = &url::Url::parse(
+            uri.to_string()
+                .replace("/stream", "/api/v1/stream")
+                .as_str(),
+        )
+        .unwrap();
 
         // Initialize GStreamer if needed (matches simple_player.rs)
         if let Err(e) = wayland_video::init() {
@@ -162,11 +168,11 @@ impl Video {
         match &self.inner {
             VideoInner::Standard(video) => video.paused(),
             VideoInner::Wayland(video_mutex) => {
-                if let Ok(guard) = video_mutex.lock() {
+                match video_mutex.lock() { Ok(guard) => {
                     guard.as_ref().map(|v| v.is_paused()).unwrap_or(true)
-                } else {
+                } _ => {
                     true
-                }
+                }}
             }
         }
     }
@@ -181,11 +187,11 @@ impl Video {
         match &self.inner {
             VideoInner::Standard(video) => Some(video.duration()),
             VideoInner::Wayland(video_mutex) => {
-                if let Ok(guard) = video_mutex.lock() {
+                match video_mutex.lock() { Ok(guard) => {
                     guard.as_ref().and_then(|v| v.duration())
-                } else {
+                } _ => {
                     None
-                }
+                }}
             }
         }
     }
@@ -195,7 +201,7 @@ impl Video {
         match &self.inner {
             VideoInner::Standard(video) => video.position(),
             VideoInner::Wayland(video_mutex) => {
-                if let Ok(guard) = video_mutex.lock() {
+                match video_mutex.lock() { Ok(guard) => {
                     if let Some(video) = guard.as_ref() {
                         if let Some(position) = video.position() {
                             //log::info!("[VideoBackend]: Position: {:?}", position);
@@ -208,10 +214,10 @@ impl Video {
                         log::error!("Failed to get reference to video to query position");
                         Duration::ZERO
                     }
-                } else {
+                } _ => {
                     log::error!("Failed to get lock on video to query position");
                     Duration::ZERO
-                }
+                }}
             }
         }
     }
@@ -273,11 +279,11 @@ impl Video {
         match &self.inner {
             VideoInner::Standard(video) => video.size().0,
             VideoInner::Wayland(video_mutex) => {
-                if let Ok(guard) = video_mutex.lock() {
+                match video_mutex.lock() { Ok(guard) => {
                     guard.as_ref().and_then(|v| v.width()).unwrap_or(1920)
-                } else {
+                } _ => {
                     1920
-                }
+                }}
             }
         }
     }
@@ -287,11 +293,11 @@ impl Video {
         match &self.inner {
             VideoInner::Standard(video) => video.size().1,
             VideoInner::Wayland(video_mutex) => {
-                if let Ok(guard) = video_mutex.lock() {
+                match video_mutex.lock() { Ok(guard) => {
                     guard.as_ref().and_then(|v| v.height()).unwrap_or(1080)
-                } else {
+                } _ => {
                     1080
-                }
+                }}
             }
         }
     }
@@ -442,7 +448,7 @@ impl Video {
                 .seek(position, accurate)
                 .map_err(|err| VideoError::Standard(err.to_string())),
             VideoInner::Wayland(video_mutex) => {
-                if let Ok(guard) = video_mutex.lock() {
+                match video_mutex.lock() { Ok(guard) => {
                     if let Some(video) = guard.as_ref() {
                         video
                             .seek(position, accurate)
@@ -450,9 +456,9 @@ impl Video {
                     } else {
                         Err(VideoError::Wayland("Video not initialized".into()))
                     }
-                } else {
+                } _ => {
                     Err(VideoError::Wayland("Failed to lock video".into()))
-                }
+                }}
             }
         }
     }

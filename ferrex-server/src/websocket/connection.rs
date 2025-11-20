@@ -1,9 +1,9 @@
+use anyhow::Result;
+use ferrex_core::sync_session::SyncMessage;
+use ferrex_core::user::User;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
-use ferrex_core::sync_session::SyncMessage;
-use ferrex_core::user::User;
-use anyhow::Result;
 
 #[derive(Clone)]
 pub struct Connection {
@@ -29,7 +29,7 @@ impl Connection {
             last_ping: Arc::new(RwLock::new(chrono::Utc::now().timestamp())),
         }
     }
-    
+
     /// Send a message to this connection
     pub async fn send_message(&self, message: SyncMessage) -> Result<()> {
         self.sender
@@ -37,22 +37,22 @@ impl Connection {
             .await
             .map_err(|_| anyhow::anyhow!("Failed to send message: channel closed"))
     }
-    
+
     /// Update the current room code
     pub async fn set_room_code(&self, room_code: Option<String>) {
         *self.room_code.write().await = room_code;
     }
-    
+
     /// Get the current room code
     pub async fn get_room_code(&self) -> Option<String> {
         self.room_code.read().await.clone()
     }
-    
+
     /// Update last ping timestamp
     pub async fn update_ping(&self) {
         *self.last_ping.write().await = chrono::Utc::now().timestamp();
     }
-    
+
     /// Check if connection is healthy (pinged within last 60 seconds)
     pub async fn is_healthy(&self) -> bool {
         let last_ping = *self.last_ping.read().await;

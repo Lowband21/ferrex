@@ -3,18 +3,18 @@
 //! This module provides the core trait and implementations for sorting strategies
 //! that can be composed, cached, and optimized based on dataset characteristics.
 
-use super::{HasField, SortFieldMarker, SortableEntity, SortKey};
+use super::{HasField, SortFieldMarker, SortKey, SortableEntity};
 use std::marker::PhantomData;
 
 /// A sorting strategy that can be composed
 pub trait SortStrategy<T>: Send + Sync {
     /// Apply this sorting strategy to the given items
     fn sort(&self, items: &mut [T]);
-    
+
     /// Check if this strategy can be applied to the given sample item
     /// Used for adaptive sorting to determine if required data is available
     fn can_apply(&self, sample: &T) -> bool;
-    
+
     /// Estimate the computational cost of this sorting strategy
     fn cost_estimate(&self) -> SortCost;
 }
@@ -33,8 +33,8 @@ pub enum SortCost {
 }
 
 /// Single field sort strategy
-pub struct FieldSort<T, F> 
-where 
+pub struct FieldSort<T, F>
+where
     T: SortableEntity,
     F: SortFieldMarker,
     T::AvailableFields: HasField<F>,
@@ -45,7 +45,7 @@ where
 }
 
 impl<T, F> FieldSort<T, F>
-where 
+where
     T: SortableEntity,
     F: SortFieldMarker,
     T::AvailableFields: HasField<F>,
@@ -61,18 +61,19 @@ where
 }
 
 impl<T, F> SortStrategy<T> for FieldSort<T, F>
-where 
+where
     T: SortableEntity + Clone,
     F: SortFieldMarker + Clone,
     T::AvailableFields: HasField<F>,
 {
     fn sort(&self, items: &mut [T]) {
         // Extract keys once for efficiency
-        let mut keys: Vec<_> = items.iter()
+        let mut keys: Vec<_> = items
+            .iter()
             .enumerate()
             .map(|(i, item)| (i, item.extract_key(self.field.clone())))
             .collect();
-            
+
         // Sort by keys
         keys.sort_by(|a, b| {
             if self.reverse {
@@ -81,12 +82,12 @@ where
                 a.1.cmp(&b.1)
             }
         });
-        
+
         // Reorder items based on sorted indices
         let indices: Vec<_> = keys.into_iter().map(|(i, _)| i).collect();
         crate::query::sorting::utils::reorder_by_indices(items, &indices);
     }
-    
+
     fn can_apply(&self, sample: &T) -> bool {
         // Check if the field's data is available
         // If it requires fetch and we don't have the data, this returns false
@@ -99,7 +100,7 @@ where
             true
         }
     }
-    
+
     fn cost_estimate(&self) -> SortCost {
         if F::REQUIRES_FETCH {
             SortCost::Expensive
@@ -121,7 +122,7 @@ impl<T> ChainedSort<T> {
             strategies: Vec::new(),
         }
     }
-    
+
     /// Add a sorting strategy to the chain
     pub fn then_by(mut self, strategy: impl SortStrategy<T> + 'static) -> Self {
         self.strategies.push(Box::new(strategy));
@@ -137,17 +138,19 @@ impl<T: Clone> SortStrategy<T> for ChainedSort<T> {
             strategy.sort(items);
         }
     }
-    
+
     fn can_apply(&self, sample: &T) -> bool {
         // Can apply if at least the primary strategy can apply
-        self.strategies.first()
+        self.strategies
+            .first()
             .map(|s| s.can_apply(sample))
             .unwrap_or(true)
     }
-    
+
     fn cost_estimate(&self) -> SortCost {
         // Cost is the sum of all strategies' costs
-        self.strategies.iter()
+        self.strategies
+            .iter()
             .map(|s| s.cost_estimate())
             .max()
             .unwrap_or(SortCost::Trivial)
@@ -184,12 +187,12 @@ impl<T: Clone> SortStrategy<T> for AdaptiveSort<T> {
             }
         }
     }
-    
+
     fn can_apply(&self, sample: &T) -> bool {
         // Can apply if either strategy works
         self.preferred.can_apply(sample) || self.fallback.can_apply(sample)
     }
-    
+
     fn cost_estimate(&self) -> SortCost {
         // Return the preferred strategy's cost if it's likely to be used
         // Otherwise return fallback cost
@@ -204,7 +207,7 @@ pub struct ConstFieldSort<T, F, const REVERSE: bool> {
 }
 
 impl<T, F, const REVERSE: bool> ConstFieldSort<T, F, REVERSE>
-where 
+where
     T: SortableEntity,
     F: SortFieldMarker,
     T::AvailableFields: HasField<F>,
@@ -219,18 +222,19 @@ where
 }
 
 impl<T, F, const REVERSE: bool> SortStrategy<T> for ConstFieldSort<T, F, REVERSE>
-where 
+where
     T: SortableEntity + Clone,
     F: SortFieldMarker + Clone,
     T::AvailableFields: HasField<F>,
 {
     fn sort(&self, items: &mut [T]) {
         // Same implementation as FieldSort but with const generic for reverse
-        let mut keys: Vec<_> = items.iter()
+        let mut keys: Vec<_> = items
+            .iter()
             .enumerate()
             .map(|(i, item)| (i, item.extract_key(self.field.clone())))
             .collect();
-            
+
         keys.sort_by(|a, b| {
             if REVERSE {
                 b.1.cmp(&a.1)
@@ -238,11 +242,11 @@ where
                 a.1.cmp(&b.1)
             }
         });
-        
+
         let indices: Vec<_> = keys.into_iter().map(|(i, _)| i).collect();
         crate::query::sorting::utils::reorder_by_indices(items, &indices);
     }
-    
+
     fn can_apply(&self, sample: &T) -> bool {
         if F::REQUIRES_FETCH {
             let key = sample.extract_key(self.field.clone());
@@ -251,7 +255,7 @@ where
             true
         }
     }
-    
+
     fn cost_estimate(&self) -> SortCost {
         if F::REQUIRES_FETCH {
             SortCost::Expensive

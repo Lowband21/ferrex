@@ -1,6 +1,9 @@
 use crate::domains::library::messages::Message;
-use crate::infrastructure::api_types::{MediaId, MediaReference};
-use ferrex_core::MediaEvent;
+use crate::infrastructure::{
+    api_types::{Media, MediaID},
+    constants::routes::API_BASE,
+};
+use ferrex_core::{MediaEvent, MediaIDLike};
 use futures::stream;
 use futures::StreamExt;
 use iced::Subscription;
@@ -128,7 +131,7 @@ impl MediaEventState {
             tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
         }
 
-        let url = format!("{}/library/events/sse", self.server_url);
+        let url = format!("{}{}/library/events/sse", self.server_url, API_BASE);
         log::info!("Creating media events SSE connection to: {}", url);
 
         // Create channel for communication
@@ -210,23 +213,20 @@ impl MediaEventState {
             // These events indicate we should refresh our library data
             MediaEvent::MovieAdded { movie } => {
                 log::info!("Movie added: {}", movie.title.as_str());
-                Some(Message::MediaDiscovered(vec![MediaReference::Movie(movie)]))
+                Some(Message::MediaDiscovered(vec![Media::Movie(movie)]))
             }
             MediaEvent::SeriesAdded { series } => {
                 log::info!("Series added: {}", series.title.as_str());
-                Some(Message::MediaDiscovered(vec![MediaReference::Series(
-                    series,
-                )]))
+                Some(Message::MediaDiscovered(vec![Media::Series(series)]))
             }
             MediaEvent::SeasonAdded { season } => {
+                let mut buf = Uuid::encode_buffer();
                 log::info!(
                     "Season added: S{} for series {}",
                     season.season_number.value(),
-                    season.series_id.as_str()
+                    season.series_id.as_str(&mut buf)
                 );
-                Some(Message::MediaDiscovered(vec![MediaReference::Season(
-                    season,
-                )]))
+                Some(Message::MediaDiscovered(vec![Media::Season(season)]))
             }
             MediaEvent::EpisodeAdded { episode } => {
                 log::info!(
@@ -234,23 +234,21 @@ impl MediaEventState {
                     episode.season_number.value(),
                     episode.episode_number.value()
                 );
-                Some(Message::MediaDiscovered(vec![MediaReference::Episode(
-                    episode,
-                )]))
+                Some(Message::MediaDiscovered(vec![Media::Episode(episode)]))
             }
 
             // Updates require refreshing existing data
             MediaEvent::MovieUpdated { movie } => {
                 log::info!("Movie updated: {}", movie.title.as_str());
-                Some(Message::MediaUpdated(MediaReference::Movie(movie)))
+                Some(Message::MediaUpdated(Media::Movie(movie)))
             }
             MediaEvent::SeriesUpdated { series } => {
                 log::info!("Series updated: {}", series.title.as_str());
-                Some(Message::MediaUpdated(MediaReference::Series(series)))
+                Some(Message::MediaUpdated(Media::Series(series)))
             }
             MediaEvent::SeasonUpdated { season } => {
                 log::info!("Season updated: S{}", season.season_number.value());
-                Some(Message::MediaUpdated(MediaReference::Season(season)))
+                Some(Message::MediaUpdated(Media::Season(season)))
             }
             MediaEvent::EpisodeUpdated { episode } => {
                 log::info!(
@@ -258,7 +256,7 @@ impl MediaEventState {
                     episode.season_number.value(),
                     episode.episode_number.value()
                 );
-                Some(Message::MediaUpdated(MediaReference::Episode(episode)))
+                Some(Message::MediaUpdated(Media::Episode(episode)))
             }
 
             // Deletion events
@@ -307,20 +305,20 @@ impl Drop for MediaEventState {
     }
 }
 
-// Helper extension to convert MediaReference to legacy MediaFile if needed
+// Helper extension to convert Media to legacy MediaFile if needed
 impl Message {
     /// Create a MediaDiscovered message from media references
-    pub fn media_discovered(references: Vec<MediaReference>) -> Self {
+    pub fn media_discovered(references: Vec<Media>) -> Self {
         Message::MediaDiscovered(references)
     }
 
     /// Create a MediaUpdated message from a media reference
-    pub fn media_updated(reference: MediaReference) -> Self {
+    pub fn media_updated(reference: Media) -> Self {
         Message::MediaUpdated(reference)
     }
 
     /// Create a MediaDeleted message from a media ID
-    pub fn media_deleted(id: MediaId) -> Self {
+    pub fn media_deleted(id: MediaID) -> Self {
         Message::MediaDeleted(id)
     }
 }

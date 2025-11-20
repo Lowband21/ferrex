@@ -1,6 +1,6 @@
 use anyhow::Result;
-use uuid::Uuid;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::auth::domain::repositories::DeviceSessionRepository;
 use crate::auth::domain::value_objects::DeviceFingerprint;

@@ -273,7 +273,8 @@ impl WorkerPool {
             .context("Failed to create master output directory")?;
 
         // Generate master playlist content
-        let mut master_content = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n\n".to_string();
+        let mut master_content =
+            "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n\n".to_string();
 
         // Add variants to the master playlist
         // Note: In a real implementation, we'd look up the actual variant details
@@ -625,7 +626,7 @@ fn build_ffmpeg_command(
     // Remove append_list flag to avoid discontinuity
     cmd.arg("-hls_playlist_type").arg("event"); // Event allows streaming while transcoding
     cmd.arg("-start_number").arg("0"); // Ensure segments start from 0
-    
+
     cmd.arg("-hls_segment_filename").arg(
         job.output_dir
             .join("segment_%03d.ts")
@@ -689,7 +690,7 @@ async fn monitor_ffmpeg_progress_with_errors(
     // Use metadata if available, otherwise try to parse from FFmpeg
     let mut duration_seconds = source_metadata.as_ref().map(|m| m.duration);
     let total_frames = source_metadata.as_ref().map(|m| m.total_frames);
-    
+
     info!(
         "Job {} starting progress monitoring - duration: {:?}s, total_frames: {:?}",
         job_id, duration_seconds, total_frames
@@ -710,9 +711,15 @@ async fn monitor_ffmpeg_progress_with_errors(
         if line.contains("Duration:") && duration_seconds.is_none() {
             if let Some(duration) = parse_duration_from_line(&line) {
                 duration_seconds = Some(duration);
-                info!("Job {} detected duration from FFmpeg output: {} seconds", job_id, duration);
+                info!(
+                    "Job {} detected duration from FFmpeg output: {} seconds",
+                    job_id, duration
+                );
             } else {
-                warn!("Job {} found Duration line but failed to parse: {}", job_id, line);
+                warn!(
+                    "Job {} found Duration line but failed to parse: {}",
+                    job_id, line
+                );
             }
         }
 
@@ -724,9 +731,15 @@ async fn monitor_ffmpeg_progress_with_errors(
             if let Some(progress) =
                 parse_ffmpeg_progress(&line, &job_id, duration_seconds, total_frames)
             {
-                info!("Job {} progress parsed: status={:?}, fps={:?}, frame={:?}/{:?}", 
-                    job_id, progress.status, progress.fps, progress.current_frame, progress.total_frames);
-                
+                info!(
+                    "Job {} progress parsed: status={:?}, fps={:?}, frame={:?}/{:?}",
+                    job_id,
+                    progress.status,
+                    progress.fps,
+                    progress.current_frame,
+                    progress.total_frames
+                );
+
                 // Send progress update
                 if let Err(e) = progress_tx.send(progress.clone()).await {
                     error!("Job {} failed to send progress update: {}", job_id, e);
@@ -737,7 +750,11 @@ async fn monitor_ffmpeg_progress_with_errors(
                 // Also update job status in the queue
                 // This is passed in via the worker context
             } else {
-                debug!("Job {} failed to parse progress from line: {}", job_id, line.trim());
+                debug!(
+                    "Job {} failed to parse progress from line: {}",
+                    job_id,
+                    line.trim()
+                );
             }
             last_update = tokio::time::Instant::now();
         }
@@ -769,7 +786,7 @@ fn parse_ffmpeg_progress(
             // Assume 25fps as default, so ~100 frames per segment
             if let (Some(current_frame), Some(total)) = (
                 extract_value(line, "frame=").and_then(|s| s.trim().parse::<u64>().ok()),
-                total_frames
+                total_frames,
             ) {
                 if total > 0 {
                     (current_frame as f64 / total as f64).min(1.0)
@@ -797,7 +814,7 @@ fn parse_ffmpeg_progress(
             progress: progress_fraction as f32,
         },
         current_frame: None,
-        total_frames: total_frames, // Use the actual metadata
+        total_frames, // Use the actual metadata
         fps: None,
         bitrate: None,
         speed: None,
@@ -820,8 +837,8 @@ fn parse_ffmpeg_progress(
         if bitrate_clean != "N/A" && !bitrate_clean.is_empty() {
             // Extract numeric value and unit
             let parts: Vec<&str> = bitrate_clean.split_whitespace().collect();
-            if let Some(value) = parts.get(0) {
-                let unit = parts.get(1).map(|s| *s).unwrap_or("kbits/s");
+            if let Some(value) = parts.first() {
+                let unit = parts.get(1).copied().unwrap_or("kbits/s");
                 if let Ok(num_value) = value.parse::<f64>() {
                     // Normalize to kbps
                     let kbps = match unit {
@@ -839,9 +856,7 @@ fn parse_ffmpeg_progress(
     // Parse speed - more robust parsing
     if let Some(speed_str) = extract_value(line, "speed=") {
         // Remove any trailing 'x' and parse
-        let speed_clean = speed_str
-            .trim()
-            .trim_end_matches(|c| c == 'x' || c == 'X' || c == ' ');
+        let speed_clean = speed_str.trim().trim_end_matches(['x', 'X', ' ']);
 
         if let Ok(speed_val) = speed_clean.parse::<f32>() {
             progress.speed = Some(speed_val);
@@ -897,7 +912,7 @@ fn extract_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
         });
 
         if let Some(end) = end {
-            Some(&rest[..end].trim())
+            Some(rest[..end].trim())
         } else {
             Some(rest.trim())
         }

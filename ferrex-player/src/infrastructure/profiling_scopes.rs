@@ -15,32 +15,32 @@ pub mod scopes {
     pub const GRID_LAYOUT: &str = "UI::Grid::Layout";
     pub const GRID_SCROLL: &str = "UI::Grid::Scroll";
     pub const GRID_ITEM_CREATE: &str = "UI::Grid::ItemCreate";
-    
+
     // Poster loading scopes
     pub const POSTER_LOAD: &str = "UI::Poster::Load";
     pub const POSTER_NETWORK: &str = "UI::Poster::Network";
     pub const POSTER_DECODE: &str = "UI::Poster::Decode";
     pub const POSTER_GPU_UPLOAD: &str = "UI::Poster::GPUUpload";
     pub const POSTER_CACHE_HIT: &str = "UI::Poster::CacheHit";
-    
+
     // Animation scopes
     pub const ANIM_HOVER: &str = "UI::Animation::Hover";
     pub const ANIM_LOADING: &str = "UI::Animation::Loading";
     pub const ANIM_TRANSITION: &str = "UI::Animation::Transition";
     pub const ANIM_SCROLL: &str = "UI::Animation::Scroll";
-    
+
     // View operation scopes
     pub const VIEW_UPDATE: &str = "UI::View::Update";
     pub const VIEW_RENDER: &str = "UI::View::Render";
     pub const VIEW_LAYOUT: &str = "UI::View::Layout";
     pub const VIEW_DRAW: &str = "UI::View::Draw";
-    
+
     // Metadata operation scopes
     pub const METADATA_FETCH: &str = "Metadata::Fetch";
     pub const METADATA_BATCH: &str = "Metadata::Batch";
     pub const METADATA_TV: &str = "Metadata::TV";
     pub const METADATA_MOVIE: &str = "Metadata::Movie";
-    
+
     // Specific view function scopes
     pub const LIBRARY_VIEW: &str = "UI::View::Library";
     pub const VIRTUAL_LIST_RENDER: &str = "UI::VirtualList::Render";
@@ -50,7 +50,7 @@ pub mod scopes {
     pub const TV_DETAIL_VIEW: &str = "UI::View::TVDetail";
     pub const SEASON_DETAIL_VIEW: &str = "UI::View::SeasonDetail";
     pub const EPISODE_DETAIL_VIEW: &str = "UI::View::EpisodeDetail";
-    
+
     // Domain update scopes
     pub const AUTH_UPDATE: &str = "Domain::Auth::Update";
     pub const LIBRARY_UPDATE: &str = "Domain::Library::Update";
@@ -76,32 +76,33 @@ macro_rules! profile_ui {
     (grid_scroll) => {
         profiling::scope!($crate::infrastructure::profiling_scopes::scopes::GRID_SCROLL)
     };
-    (poster_load, $media_id:expr) => {
-        profiling::scope!(
-            &format!("{}::{}", $crate::infrastructure::profiling_scopes::scopes::POSTER_LOAD, $media_id)
-        )
+    (poster_load, $media_id:expr_2021) => {
+        profiling::scope!(&format!(
+            "{}::{}",
+            $crate::infrastructure::profiling_scopes::scopes::POSTER_LOAD,
+            $media_id
+        ))
     };
-    (animation, $type:expr) => {
+    (animation, $type:expr_2021) => {
         profiling::scope!(&format!("UI::Animation::{}", $type))
     };
 }
 
-
 /// Performance target definitions
 pub struct PerformanceTargets {
-    pub view_operation_ms: f32,      // Target: 8ms
-    pub frame_time_ms: f32,          // Target: 8.33ms (120fps)
-    pub scroll_frame_ms: f32,        // Target: 4ms during scroll
-    pub metadata_per_item_ms: f32,   // Target: 10ms
-    pub poster_load_ms: f32,         // Target: 50ms
-    pub cache_hit_rate: f32,         // Target: 80%
+    pub view_operation_ms: f32,    // Target: 8ms
+    pub frame_time_ms: f32,        // Target: 8.33ms (120fps)
+    pub scroll_frame_ms: f32,      // Target: 4ms during scroll
+    pub metadata_per_item_ms: f32, // Target: 10ms
+    pub poster_load_ms: f32,       // Target: 50ms
+    pub cache_hit_rate: f32,       // Target: 80%
 }
 
 impl Default for PerformanceTargets {
     fn default() -> Self {
         Self {
             view_operation_ms: 8.0,
-            frame_time_ms: 8.33,  // 120fps
+            frame_time_ms: 8.33, // 120fps
             scroll_frame_ms: 4.0,
             metadata_per_item_ms: 10.0,
             poster_load_ms: 50.0,
@@ -122,7 +123,7 @@ pub struct PerformanceAnalysis {
 }
 
 /// Analyze profiling data to identify performance issues
-/// 
+///
 /// This would integrate with puffin's ProfilerScope data to extract metrics
 /// In production, this would read from puffin's GlobalProfiler
 pub fn analyze_performance() -> PerformanceAnalysis {
@@ -141,7 +142,7 @@ pub fn analyze_performance() -> PerformanceAnalysis {
     // 2. Filter for our specific scopes
     // 3. Calculate metrics
     // 4. Generate recommendations
-    
+
     #[cfg(feature = "profiling-puffin")]
     {
         // Example of how to read puffin data (simplified)
@@ -154,24 +155,25 @@ pub fn analyze_performance() -> PerformanceAnalysis {
         //     }
         // }
     }
-    
+
     // Generate recommendations based on findings
     if analysis.metadata_bottleneck {
         analysis.recommendations.push(
             "TV metadata fetching is the primary bottleneck (55ms per item). \
-             Consider caching, batching, or async prefetching.".to_string()
+             Consider caching, batching, or async prefetching."
+                .to_string(),
         );
     }
-    
+
     if analysis.cache_hit_rate < targets.cache_hit_rate {
-        analysis.recommendations.push(
-            format!("Cache hit rate ({:.1}%) below target ({:.1}%). \
+        analysis.recommendations.push(format!(
+            "Cache hit rate ({:.1}%) below target ({:.1}%). \
                     Consider increasing cache size or improving prefetch logic.",
-                    analysis.cache_hit_rate * 100.0,
-                    targets.cache_hit_rate * 100.0)
-        );
+            analysis.cache_hit_rate * 100.0,
+            targets.cache_hit_rate * 100.0
+        ));
     }
-    
+
     analysis
 }
 
@@ -179,7 +181,7 @@ pub fn analyze_performance() -> PerformanceAnalysis {
 pub fn check_performance_target(operation: &str, duration: Duration) -> bool {
     let targets = PerformanceTargets::default();
     let ms = duration.as_secs_f32() * 1000.0;
-    
+
     match operation {
         s if s.starts_with(scopes::GRID_RENDER) => ms <= targets.view_operation_ms,
         s if s.starts_with(scopes::GRID_SCROLL) => ms <= targets.scroll_frame_ms,
@@ -194,12 +196,16 @@ pub fn check_performance_target(operation: &str, duration: Duration) -> bool {
 pub fn log_if_slow(operation: &str, duration: Duration) {
     if !check_performance_target(operation, duration) {
         let ms = duration.as_secs_f32() * 1000.0;
-        log::warn!("🔴 Performance: {} took {:.2}ms (over target)", operation, ms);
+        log::warn!(
+            "🔴 Performance: {} took {:.2}ms (over target)",
+            operation,
+            ms
+        );
     }
 }
 
 // Integration with puffin's web UI
-// 
+//
 // When running with puffin enabled, you can:
 // 1. Open http://127.0.0.1:8585 in a browser
 // 2. Use the filter to show only "UI::" scopes

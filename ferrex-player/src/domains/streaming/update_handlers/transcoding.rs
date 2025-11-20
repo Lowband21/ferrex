@@ -1,9 +1,9 @@
 use crate::{
-    domains::streaming::StreamingDomainState,
-    domains::streaming::messages::Message,
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
-    state_refactored::State,
+    domains::streaming::messages::Message,
+    domains::streaming::StreamingDomainState,
     domains::ui::types::ViewState,
+    state_refactored::State,
 };
 use ferrex_core::TranscodingStatus;
 use iced::Task;
@@ -25,12 +25,14 @@ pub fn handle_transcoding_started(
                     Some(TranscodingStatus::Completed);
 
                 // Send direct message to Player domain to load video
-                if state.domains.player.state.video_opt.is_none() && state.domains.streaming.state.using_hls {
-                    return DomainUpdateResult::task(
-                        Task::done(crate::common::messages::DomainMessage::Player(
-                            crate::domains::player::messages::Message::VideoReadyToPlay
-                        ))
-                    );
+                if state.domains.player.state.video_opt.is_none()
+                    && state.domains.streaming.state.using_hls
+                {
+                    return DomainUpdateResult::task(Task::done(
+                        crate::common::messages::DomainMessage::Player(
+                            crate::domains::player::messages::Message::VideoReadyToPlay,
+                        ),
+                    ));
                 } else {
                     return DomainUpdateResult::task(Task::none());
                 }
@@ -43,7 +45,9 @@ pub fn handle_transcoding_started(
             state.domains.streaming.state.transcoding_check_count = 0; // Reset check count
 
             // Start checking status immediately
-            DomainUpdateResult::task(Task::perform(async {}, |_| DomainMessage::Streaming(Message::CheckTranscodingStatus)))
+            DomainUpdateResult::task(Task::perform(async {}, |_| {
+                DomainMessage::Streaming(Message::CheckTranscodingStatus)
+            }))
         }
         Err(e) => {
             log::error!("Failed to start transcoding: {}", e);
@@ -73,8 +77,14 @@ pub fn handle_check_transcoding_status(state: &State) -> DomainUpdateResult {
                             "pending" => TranscodingStatus::Pending,
                             "queued" => TranscodingStatus::Queued,
                             "completed" => TranscodingStatus::Completed,
-                            "failed" => TranscodingStatus::Failed { error: status.message.unwrap_or_else(|| "Unknown error".to_string()) },
-                            _ => TranscodingStatus::Processing { progress: status.progress.unwrap_or(0.0) },
+                            "failed" => TranscodingStatus::Failed {
+                                error: status
+                                    .message
+                                    .unwrap_or_else(|| "Unknown error".to_string()),
+                            },
+                            _ => TranscodingStatus::Processing {
+                                progress: status.progress.unwrap_or(0.0),
+                            },
                         };
                         Ok((converted, None, None))
                     }
@@ -91,20 +101,12 @@ pub fn handle_check_transcoding_status(state: &State) -> DomainUpdateResult {
 /// Handle transcoding status update
 pub fn handle_transcoding_status_update(
     state: &mut State,
-    result: Result<
-        (
-            TranscodingStatus,
-            Option<f64>,
-            Option<String>,
-        ),
-        String,
-    >,
+    result: Result<(TranscodingStatus, Option<f64>, Option<String>), String>,
 ) -> DomainUpdateResult {
     match result {
         Ok((status, duration, playlist_path)) => {
             let should_continue_checking = match &status {
-                TranscodingStatus::Pending
-                | TranscodingStatus::Queued => true,
+                TranscodingStatus::Pending | TranscodingStatus::Queued => true,
                 TranscodingStatus::Processing { progress } => {
                     // For HLS, we can start playback once we have enough segments
                     // Continue checking if video not loaded yet or progress < 100%
@@ -131,7 +133,9 @@ pub fn handle_transcoding_status_update(
                     }
 
                     // Update player duration if video is already loaded but had no duration
-                    if state.domains.player.state.duration <= 0.0 && state.domains.player.state.video_opt.is_some() {
+                    if state.domains.player.state.duration <= 0.0
+                        && state.domains.player.state.video_opt.is_some()
+                    {
                         state.domains.player.state.duration = dur;
                         log::info!("Updated player duration from transcoding job");
                     }
@@ -165,12 +169,14 @@ pub fn handle_transcoding_status_update(
                     Some(TranscodingStatus::Completed);
                 state.domains.streaming.state.transcoding_job_id = None;
 
-                if state.domains.player.state.video_opt.is_none() && state.domains.streaming.state.using_hls {
-                    return DomainUpdateResult::task(
-                        Task::done(crate::common::messages::DomainMessage::Player(
-                            crate::domains::player::messages::Message::VideoReadyToPlay
-                        ))
-                    );
+                if state.domains.player.state.video_opt.is_none()
+                    && state.domains.streaming.state.using_hls
+                {
+                    return DomainUpdateResult::task(Task::done(
+                        crate::common::messages::DomainMessage::Player(
+                            crate::domains::player::messages::Message::VideoReadyToPlay,
+                        ),
+                    ));
                 } else {
                     return DomainUpdateResult::task(Task::none());
                 }
@@ -181,11 +187,14 @@ pub fn handle_transcoding_status_update(
                 TranscodingStatus::Processing { progress } => {
                     // Start playback when we have at least 1% transcoded (ensures initial segments exist)
                     // With 4-second segments, 2 segments = 8 seconds, which is <1% of most videos
-                    *progress >= 0.01 && state.domains.player.state.video_opt.is_none() && state.domains.streaming.state.using_hls
+                    *progress >= 0.01
+                        && state.domains.player.state.video_opt.is_none()
+                        && state.domains.streaming.state.using_hls
                 }
                 TranscodingStatus::Completed => {
                     // Also try when completed if not already playing
-                    state.domains.player.state.video_opt.is_none() && state.domains.streaming.state.using_hls
+                    state.domains.player.state.video_opt.is_none()
+                        && state.domains.streaming.state.using_hls
                 }
                 _ => false,
             };
@@ -206,9 +215,13 @@ pub fn handle_transcoding_status_update(
             if should_try_playback {
                 log::info!("Attempting to start HLS playback (status: {:?})...", status);
                 // Load video now that we have segments ready
-                if state.domains.player.state.video_opt.is_none() && state.domains.streaming.state.using_hls {
+                if state.domains.player.state.video_opt.is_none()
+                    && state.domains.streaming.state.using_hls
+                {
                     // First check if master playlist exists before trying to load
-                    let check_playlist_task = if let Some(media) = &state.domains.player.state.current_media {
+                    let check_playlist_task = if let Some(media) =
+                        &state.domains.player.state.current_media
+                    {
                         if let Some(client) = &state.domains.streaming.state.hls_client {
                             let client_clone = client.clone();
                             let media_id = media.id.clone();
@@ -233,7 +246,9 @@ pub fn handle_transcoding_status_update(
                                         }
                                     }
                                 },
-                                |playlist| DomainMessage::Streaming(Message::MasterPlaylistReady(playlist)),
+                                |playlist| {
+                                    DomainMessage::Streaming(Message::MasterPlaylistReady(playlist))
+                                },
                             ))
                         } else {
                             None
@@ -248,7 +263,7 @@ pub fn handle_transcoding_status_update(
                     } else {
                         // Send direct message to Player domain
                         tasks.push(Task::done(crate::common::messages::DomainMessage::Player(
-                            crate::domains::player::messages::Message::VideoReadyToPlay
+                            crate::domains::player::messages::Message::VideoReadyToPlay,
                         )));
                     }
                 }
@@ -258,14 +273,16 @@ pub fn handle_transcoding_status_update(
             match &status {
                 TranscodingStatus::Failed { error } => {
                     log::error!("Transcoding failed: {}", error);
-                    state.domains.ui.state.error_message = Some(format!("Transcoding failed: {}", error));
+                    state.domains.ui.state.error_message =
+                        Some(format!("Transcoding failed: {}", error));
                     state.domains.ui.state.view = ViewState::VideoError {
                         message: format!("Transcoding failed: {}", error),
                     };
                 }
                 TranscodingStatus::Cancelled => {
                     log::warn!("Transcoding was cancelled");
-                    state.domains.ui.state.error_message = Some("Transcoding was cancelled".to_string());
+                    state.domains.ui.state.error_message =
+                        Some("Transcoding was cancelled".to_string());
                 }
                 _ => {}
             }
@@ -278,7 +295,7 @@ pub fn handle_transcoding_status_update(
             } else {
                 Task::batch(tasks)
             };
-            
+
             if events.is_empty() {
                 DomainUpdateResult::task(task)
             } else {
@@ -293,7 +310,9 @@ pub fn handle_transcoding_status_update(
                 log::info!("Transcoding job not found - this could mean the job completed or the master playlist is ready");
 
                 // For adaptive streaming, check if the master playlist exists
-                if state.domains.streaming.state.using_hls && state.domains.player.state.video_opt.is_none() {
+                if state.domains.streaming.state.using_hls
+                    && state.domains.player.state.video_opt.is_none()
+                {
                     if let Some(ref media) = state.domains.player.state.current_media {
                         log::info!(
                             "Checking if master playlist is available for media {}",
@@ -306,7 +325,9 @@ pub fn handle_transcoding_status_update(
                         state.domains.streaming.state.transcoding_job_id = None;
 
                         // Load video and fetch master playlist
-                        let fetch_playlist_task = if let Some(client) = &state.domains.streaming.state.hls_client {
+                        let fetch_playlist_task = if let Some(client) =
+                            &state.domains.streaming.state.hls_client
+                        {
                             let client_clone = client.clone();
                             let media_id = media.id.clone();
 
@@ -326,27 +347,29 @@ pub fn handle_transcoding_status_update(
                                         }
                                     }
                                 },
-                                |playlist| DomainMessage::Streaming(Message::MasterPlaylistLoaded(playlist)),
+                                |playlist| {
+                                    DomainMessage::Streaming(Message::MasterPlaylistLoaded(
+                                        playlist,
+                                    ))
+                                },
                             ))
                         } else {
                             None
                         };
 
                         if let Some(playlist_task) = fetch_playlist_task {
-                            DomainUpdateResult::task(
-                                Task::batch(vec![
-                                    playlist_task,
-                                    Task::done(crate::common::messages::DomainMessage::Player(
-                                        crate::domains::player::messages::Message::VideoReadyToPlay
-                                    ))
-                                ])
-                            )
-                        } else {
-                            DomainUpdateResult::task(
+                            DomainUpdateResult::task(Task::batch(vec![
+                                playlist_task,
                                 Task::done(crate::common::messages::DomainMessage::Player(
-                                    crate::domains::player::messages::Message::VideoReadyToPlay
-                                ))
-                            )
+                                    crate::domains::player::messages::Message::VideoReadyToPlay,
+                                )),
+                            ]))
+                        } else {
+                            DomainUpdateResult::task(Task::done(
+                                crate::common::messages::DomainMessage::Player(
+                                    crate::domains::player::messages::Message::VideoReadyToPlay,
+                                ),
+                            ))
                         }
                     } else {
                         DomainUpdateResult::task(Task::none())

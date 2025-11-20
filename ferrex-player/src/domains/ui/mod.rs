@@ -15,25 +15,42 @@ pub mod update_handlers;
 pub mod view_models;
 pub mod views;
 pub mod widgets;
+pub mod yoke_cache;
 // pub mod shaders; // Removed - shaders are part of widgets module
 
 pub use self::types::{SortBy, SortOrder};
 use self::views::carousel::CarouselState;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
+use crate::domains::media::repository::accessor::{Accessor, ReadOnly};
+use crate::domains::media::repository::{MovieYoke, SeriesYoke};
 use crate::domains::ui::background_state::BackgroundShaderState;
 use crate::domains::ui::messages::Message as UIMessage;
 use crate::domains::ui::scroll_manager::ScrollPositionManager;
 use crate::domains::ui::types::{DisplayMode, ViewState};
+use ferrex_core::LibraryID;
 use iced::Task;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 use uuid::Uuid;
+use yoke_cache::YokeCache;
 
 /// UI domain state - moved from monolithic State
 #[derive(Debug)]
 pub struct UIDomainState {
     // From State struct:
     pub view: ViewState,
+
+    /// Default widget animation resolved at UI init from constants
+    pub default_widget_animation: crate::domains::ui::widgets::AnimationType,
+
+    pub repo_accessor: Accessor<ReadOnly>,
+
+    // Minimal PoC: yoke cache for visible movie items in grid + prefetch band
+    pub movie_yoke_cache: YokeCache<MovieYoke>,
+    pub series_yoke_cache: YokeCache<SeriesYoke>,
+
+    pub movies_carousel: CarouselState,
+    pub tv_carousel: CarouselState,
 
     pub display_mode: DisplayMode,
     pub sort_by: SortBy,
@@ -44,8 +61,11 @@ pub struct UIDomainState {
     pub expanded_shows: HashSet<String>,
     pub hovered_media_id: Option<Uuid>,
 
+    /// Cached theme colors by media UUID to avoid parsing on every render
+    pub theme_color_cache: parking_lot::RwLock<HashMap<Uuid, iced::Color>>,
+
     // Library filtering
-    pub current_library_id: Option<Uuid>,
+    pub current_library_id: Option<LibraryID>,
 
     // Scroll-related state
     pub last_scroll_position: f32,
@@ -72,38 +92,9 @@ pub struct UIDomainState {
 
     // Navigation history for back button functionality
     pub navigation_history: Vec<ViewState>,
-}
 
-impl Default for UIDomainState {
-    fn default() -> Self {
-        Self {
-            view: ViewState::Library,
-
-            display_mode: DisplayMode::Curated,
-            sort_by: SortBy::Title,
-            sort_order: SortOrder::Ascending,
-            loading: true,
-            error_message: None,
-            window_size: iced::Size::new(1920.0, 1080.0),
-            expanded_shows: HashSet::new(),
-            hovered_media_id: None,
-            current_library_id: None,
-            last_scroll_position: 0.0,
-            scroll_stopped_time: None,
-            last_scroll_time: None,
-            last_check_task_created: None,
-            scroll_manager: ScrollPositionManager::new(),
-            background_shader_state: BackgroundShaderState::default(),
-            search_query: String::new(),
-            show_library_menu: false,
-            library_menu_target: None,
-            is_fullscreen: false,
-            show_seasons_carousel: None,
-            season_episodes_carousel: None,
-            show_clear_database_confirm: false,
-            navigation_history: Vec::new(),
-        }
-    }
+    // Keep UI alive while poster flip animations are running
+    pub poster_anim_active_until: Option<std::time::Instant>,
 }
 
 impl UIDomainState {}

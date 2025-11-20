@@ -2,18 +2,12 @@ use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
-use axum::{
-    extract::State,
-    http::StatusCode,
-    Extension, Json,
-};
+use axum::{extract::State, http::StatusCode, Extension, Json};
 use chrono::Utc;
 use ferrex_core::{
     api_types::ApiResponse,
     error::MediaError,
-    user::{
-        AuthError, AuthToken, LoginRequest, RegisterRequest, User, UserSession,
-    },
+    user::{AuthError, AuthToken, LoginRequest, RegisterRequest, User, UserSession},
 };
 use serde::Deserialize;
 
@@ -21,21 +15,29 @@ use serde::Deserialize;
 pub struct RefreshRequest {
     pub refresh_token: String,
 }
-use std::sync::Arc;
 use uuid::Uuid;
 
 use super::jwt::{generate_access_token, generate_refresh_token};
-use crate::{AppState, errors::{AppError, AppResult}};
+use crate::{
+    errors::{AppError, AppResult},
+    AppState,
+};
 
 pub async fn register(
     State(state): State<AppState>,
     Json(request): Json<RegisterRequest>,
 ) -> AppResult<Json<ApiResponse<AuthToken>>> {
-    request.validate()
+    request
+        .validate()
         .map_err(|e| AppError::bad_request(format!("Validation error: {}", e)))?;
 
     // Check if username already exists
-    if let Ok(Some(_)) = state.db.backend().get_user_by_username(&request.username).await {
+    if let Ok(Some(_)) = state
+        .db
+        .backend()
+        .get_user_by_username(&request.username)
+        .await
+    {
         return Err(AppError::conflict(AuthError::UsernameTaken.to_string()));
     }
 
@@ -62,13 +64,22 @@ pub async fn register(
         preferences: Default::default(),
     };
 
-    state.db.backend().create_user(&user).await.map_err(|e| match e {
-        MediaError::Conflict(msg) => AppError::conflict(msg),
-        _ => AppError::internal("Failed to create user"),
-    })?;
+    state
+        .db
+        .backend()
+        .create_user(&user)
+        .await
+        .map_err(|e| match e {
+            MediaError::Conflict(msg) => AppError::conflict(msg),
+            _ => AppError::internal("Failed to create user"),
+        })?;
 
     // Store password hash in user_credentials table
-    state.db.backend().update_user_password(user_id, &password_hash).await
+    state
+        .db
+        .backend()
+        .update_user_password(user_id, &password_hash)
+        .await
         .map_err(|_| AppError::internal("Failed to store password"))?;
 
     // Generate tokens for the new user
@@ -79,7 +90,7 @@ pub async fn register(
 
     // Store refresh token
     let expires_at = chrono::Utc::now() + chrono::Duration::days(30);
-    
+
     state
         .db
         .backend()
@@ -98,7 +109,11 @@ pub async fn register(
         created_at: Utc::now().timestamp(),
     };
 
-    state.db.backend().create_session(&session).await
+    state
+        .db
+        .backend()
+        .create_session(&session)
+        .await
         .map_err(|_| AppError::internal("Failed to create session"))?;
 
     Ok(Json(ApiResponse::success(AuthToken {
@@ -147,11 +162,16 @@ pub async fn login(
     // Store refresh token
     // Calculate expiry time (30 days from now)
     let expires_at = chrono::Utc::now() + chrono::Duration::days(30);
-    
+
     state
         .db
         .backend()
-        .store_refresh_token(&refresh_token, user.id, request.device_name.clone(), expires_at)
+        .store_refresh_token(
+            &refresh_token,
+            user.id,
+            request.device_name.clone(),
+            expires_at,
+        )
         .await
         .map_err(|_| AppError::internal("Failed to store refresh token"))?;
 
@@ -166,7 +186,11 @@ pub async fn login(
         created_at: Utc::now().timestamp(),
     };
 
-    state.db.backend().create_session(&session).await
+    state
+        .db
+        .backend()
+        .create_session(&session)
+        .await
         .map_err(|_| AppError::internal("Failed to create session"))?;
 
     Ok(Json(ApiResponse::success(AuthToken {
@@ -186,7 +210,7 @@ pub async fn refresh(
         .get_refresh_token(&request.refresh_token)
         .await
         .map_err(|_| AppError::internal(AuthError::InternalError.to_string()))?;
-    
+
     let (user_id, _expires_at) = refresh_token_data
         .ok_or_else(|| AppError::unauthorized(AuthError::TokenInvalid.to_string()))?;
 
@@ -207,7 +231,7 @@ pub async fn refresh(
     // Store new refresh token
     // Calculate expiry time (30 days from now)
     let expires_at = chrono::Utc::now() + chrono::Duration::days(30);
-    
+
     state
         .db
         .backend()
@@ -230,22 +254,34 @@ pub async fn logout(
     let mut updated_user = user.clone();
     updated_user.preferences.auto_login_enabled = false;
     updated_user.updated_at = Utc::now();
-    
-    state.db.backend().update_user(&updated_user).await
+
+    state
+        .db
+        .backend()
+        .update_user(&updated_user)
+        .await
         .map_err(|_| AppError::internal("Failed to update user preferences"))?;
-    
+
     // Delete all refresh tokens for this user (logout from all devices)
-    state.db.backend().delete_user_refresh_tokens(user.id).await
+    state
+        .db
+        .backend()
+        .delete_user_refresh_tokens(user.id)
+        .await
         .map_err(|_| AppError::internal("Failed to invalidate refresh tokens"))?;
-    
+
     // Get all sessions for this user and delete them
-    let sessions = state.db.backend().get_user_sessions(user.id).await
+    let sessions = state
+        .db
+        .backend()
+        .get_user_sessions(user.id)
+        .await
         .map_err(|_| AppError::internal("Failed to get user sessions"))?;
-    
+
     for session in sessions {
         let _ = state.db.backend().delete_session(session.id).await;
     }
-    
+
     Ok(StatusCode::NO_CONTENT)
 }
 

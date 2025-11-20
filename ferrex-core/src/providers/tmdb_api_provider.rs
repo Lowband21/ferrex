@@ -1,6 +1,6 @@
-use crate::media::{
-    MediaDetailsOption, MovieID, MovieReference, MovieTitle, MovieURL, SeriesID, SeriesReference,
-    SeriesTitle, SeriesURL,
+use crate::{
+    LibraryID, MediaDetailsOption, MovieID, MovieReference, MovieTitle, MovieURL, SeriesID,
+    SeriesReference, SeriesTitle, SeriesURL,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -124,11 +124,12 @@ impl TmdbApiProvider {
             .results
             .into_iter()
             .map(|r| MovieReference {
-                id: MovieID::new(uuid::Uuid::new_v4().to_string()).unwrap(),
+                id: MovieID::new_uuid(),
+                library_id: LibraryID(uuid::Uuid::nil()), // Search results aren't tied to a library yet
                 tmdb_id: r.inner.id as u64,
                 title: MovieTitle::new(r.inner.title).unwrap(),
-                details: MediaDetailsOption::Endpoint(format!("/api/movie/{}", r.inner.id)),
-                endpoint: MovieURL::from_string(format!("/api/stream/movie/{}", r.inner.id)),
+                details: MediaDetailsOption::Endpoint(format!("/movie/{}", r.inner.id)),
+                endpoint: MovieURL::from(format!("/stream/movie/{}", r.inner.id)),
                 file: crate::MediaFile::default(), // Placeholder - will be filled during scan
                 theme_color: None,
             })
@@ -147,12 +148,12 @@ impl TmdbApiProvider {
             .results
             .into_iter()
             .map(|r| SeriesReference {
-                id: SeriesID::new(uuid::Uuid::new_v4().to_string()).unwrap(),
-                library_id: uuid::Uuid::nil(), // Search results aren't tied to a library yet
+                id: SeriesID::new_uuid(),
+                library_id: LibraryID(uuid::Uuid::nil()), // Search results aren't tied to a library yet
                 tmdb_id: r.inner.id as u64,
                 title: SeriesTitle::new(r.inner.name).unwrap(),
-                details: MediaDetailsOption::Endpoint(format!("/api/series/{}", r.inner.id)),
-                endpoint: SeriesURL::from_string(format!("/api/series/{}", r.inner.id)),
+                details: MediaDetailsOption::Endpoint(format!("/series/{}", r.inner.id)),
+                endpoint: SeriesURL::from_string(format!("/series/{}", r.inner.id)),
                 created_at: chrono::Utc::now(), // New results use current time
                 theme_color: None,
             })

@@ -1,11 +1,12 @@
 //! Search domain types and state management
 
+use ferrex_core::LibraryID;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
-use crate::infrastructure::api_types::MediaReference;
+use crate::infrastructure::api_types::Media;
 use ferrex_core::query::types::{SearchField, SearchQuery};
 
 /// Search UI mode
@@ -32,7 +33,7 @@ pub enum SearchStrategy {
 #[derive(Debug, Clone)]
 pub struct SearchResult {
     /// The media reference
-    pub media_ref: MediaReference,
+    pub media_ref: Media,
     /// Display title
     pub title: String,
     /// Subtitle (e.g., "Series • S01E05" or "2024 • Action")
@@ -46,7 +47,7 @@ pub struct SearchResult {
     /// Which field matched the search
     pub match_field: SearchField,
     /// Library this result belongs to
-    pub library_id: Option<Uuid>,
+    pub library_id: Option<LibraryID>,
 }
 
 /// Search cache entry
@@ -98,7 +99,7 @@ pub struct SearchState {
     /// Error message if search failed
     pub error: Option<String>,
     /// Selected library for search scope
-    pub library_id: Option<Uuid>,
+    pub library_id: Option<LibraryID>,
     /// Search fields to include
     pub search_fields: Vec<SearchField>,
     /// Enable fuzzy matching

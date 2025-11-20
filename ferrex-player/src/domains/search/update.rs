@@ -273,28 +273,29 @@ fn handle_execute_search(state: &mut State, switch_to_fullscreen: bool) -> Domai
     }
 
     // Determine search strategy using the enhanced decision engine
-    let data_completeness = calculate_data_completeness(state);
-    let network_available = state.domains.search.service.has_network();
+    //let data_completeness = calculate_data_completeness(state);
+    //let network_available = state.domains.search.service.has_network();
 
-    let strategy = state
-        .domains
-        .search
-        .state
-        .decision_engine
-        .determine_strategy_enhanced(
-            &query,
-            data_completeness,
-            &state.domains.search.state.search_fields,
-            network_available,
-        );
+    //let strategy = state
+    //    .domains
+    //    .search
+    //    .state
+    //    .decision_engine
+    //    .determine_strategy_enhanced(
+    //        &query,
+    //        data_completeness,
+    //        &state.domains.search.state.search_fields,
+    //        network_available,
+    //    );
 
-    log::info!(
-        "Search strategy selected: {:?} (query: '{}', completeness: {:.1}%, network: {})",
-        strategy,
-        query,
-        data_completeness * 100.0,
-        network_available
-    );
+    //log::info!(
+    //    "Search strategy selected: {:?} (query: '{}', completeness: {:.1}%, network: {})",
+    //    strategy,
+    //    query,
+    //    data_completeness * 100.0,
+    //    network_available
+    //);
+    let strategy = SearchStrategy::Server;
 
     state.domains.search.state.current_strategy = Some(strategy);
     state.domains.search.state.is_searching = true;
@@ -334,7 +335,7 @@ fn handle_execute_search(state: &mut State, switch_to_fullscreen: bool) -> Domai
 
 fn handle_select_result(
     state: &mut State,
-    media_ref: crate::infrastructure::api_types::MediaReference,
+    media_ref: crate::infrastructure::api_types::Media,
 ) -> DomainUpdateResult {
     #[cfg(any(
         feature = "profile-with-puffin",
@@ -354,6 +355,7 @@ fn handle_select_result(
     }))
 }
 
+/*
 /// Calculate how complete our local data is
 fn calculate_data_completeness(state: &State) -> f32 {
     // Simple heuristic: check what percentage of media has TMDB details
@@ -379,4 +381,4 @@ fn calculate_data_completeness(state: &State) -> f32 {
             .count();
 
     with_details as f32 / total_media as f32
-}
+} */

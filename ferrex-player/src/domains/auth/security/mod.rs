@@ -1,5 +1,5 @@
 //! Security utilities for the Ferrex Player
-//! 
+//!
 //! This module provides secure handling of sensitive data like credentials,
 //! tokens, and other authentication-related information.
 

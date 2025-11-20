@@ -4,8 +4,10 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
+use ferrex_core::{SeasonID, SeriesID};
 use serde_json::{json, Value};
 use tracing::{info, warn};
+use uuid::Uuid;
 
 // TV Show handlers
 pub async fn list_shows_handler(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
@@ -34,15 +36,12 @@ pub async fn list_shows_handler(State(state): State<AppState>) -> Result<Json<Va
 
 pub async fn show_details_handler(
     State(state): State<AppState>,
-    Path(series_id): Path<String>,
+    Path(series_id): Path<Uuid>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("Getting details for series ID: {}", series_id);
 
     // Parse the series ID
-    let series_id = match ferrex_core::SeriesID::new(series_id) {
-        Ok(id) => id,
-        Err(_) => return Err(StatusCode::BAD_REQUEST),
-    };
+    let series_id = SeriesID(series_id);
 
     // Get the series reference
     match state.db.backend().get_series_reference(&series_id).await {
@@ -78,15 +77,12 @@ pub async fn show_details_handler(
 
 pub async fn season_details_handler(
     State(state): State<AppState>,
-    Path(season_id): Path<String>,
+    Path(season_id): Path<Uuid>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("Getting details for season ID: {}", season_id);
 
     // Parse the season ID
-    let season_id = match ferrex_core::SeasonID::new(season_id) {
-        Ok(id) => id,
-        Err(_) => return Err(StatusCode::BAD_REQUEST),
-    };
+    let season_id = SeasonID(season_id);
 
     // Get the season reference
     match state.db.backend().get_season_reference(&season_id).await {
@@ -123,15 +119,12 @@ pub async fn season_details_handler(
 // Get all episodes for a series
 pub async fn show_episodes_handler(
     State(state): State<AppState>,
-    Path(series_id): Path<String>,
+    Path(series_id): Path<Uuid>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("Getting episodes for series ID: {}", series_id);
 
     // Parse the series ID
-    let series_id = match ferrex_core::SeriesID::new(series_id) {
-        Ok(id) => id,
-        Err(_) => return Err(StatusCode::BAD_REQUEST),
-    };
+    let series_id = SeriesID(series_id);
 
     // Get all seasons for the series
     match state.db.backend().get_series_seasons(&series_id).await {

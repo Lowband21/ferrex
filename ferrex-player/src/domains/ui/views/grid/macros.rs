@@ -2,36 +2,36 @@
 
 /// Macro to generate virtual grid views for different reference types
 /// This eliminates code duplication between movie and series grids
+use iced::Color;
 #[macro_export]
 macro_rules! virtual_reference_grid {
     (
         $name:ident,
         $item_type:ty,
-        $create_card:expr,
+        $create_card:expr_2021,
         $profiler_label:literal
     ) => {
         pub fn $name<'a>(
-            items: &'a [$item_type],
-            grid_state: &$crate::domains::ui::views::grid::virtual_list::VirtualGridState,
+            item_index: &[Uuid],
+            grid_state: &super::VirtualGridState,
             hovered_media_id: &Option<Uuid>,
             on_scroll: impl Fn(iced::widget::scrollable::Viewport) -> $crate::domains::ui::messages::Message + 'a,
             state: &'a $crate::state_refactored::State,
         ) -> iced::Element<'a, $crate::domains::ui::messages::Message> {
-            let reference_grid = iced::debug::time($profiler_label);
+            let len = item_index.len();
+            //let reference_grid = iced::debug::time($profiler_label);
             use iced::{
                 widget::{column, container, row, scrollable, text, Space},
                 Length,
             };
-            use $crate::infrastructure::profiling_scopes::scopes;
             // Profile grid rendering operations
             #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
             profiling::scope!("View::Grid::Total");
 
-            // Scroll-aware profiling: sample less during scrolling to reduce overhead
             let is_scrolling = if let Some(last_scroll) = state.domains.ui.state.last_scroll_time {
                 let elapsed = last_scroll.elapsed();
                 elapsed < std::time::Duration::from_millis(
-                    $crate::infrastructure::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS
+                    $crate::infrastructure::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS
                 )
             } else {
                 false
@@ -44,7 +44,7 @@ macro_rules! virtual_reference_grid {
                 log::trace!("First item in grid");
             } */
 
-            use $crate::infrastructure::constants::{grid, poster};
+            use $crate::infrastructure::constants::{grid, poster, layout::header};
 
             // Don't add spacing here since ROW_HEIGHT already includes spacing
             let mut content = column![].spacing(0).width(Length::Fill);
@@ -61,10 +61,10 @@ macro_rules! virtual_reference_grid {
             }
 
             // Add top padding to prevent content from touching header
-            content = content.push(Space::with_height(grid::TOP_PADDING));
+            //content = content.push(Space::with_height(header::HEIGHT * 2.0));
 
             // Calculate total rows
-            let total_rows = (items.len() + grid_state.columns - 1) / grid_state.columns;
+            let total_rows = (len + grid_state.columns - 1) / grid_state.columns;
 
             // Add spacer for rows above viewport
             let start_row = grid_state.visible_range.start / grid_state.columns;
@@ -83,8 +83,8 @@ macro_rules! virtual_reference_grid {
 
                 for col in 0..grid_state.columns {
                     let item_idx = row_idx * grid_state.columns + col;
-                    if item_idx < items.len() && item_idx < grid_state.visible_range.end {
-                        let item = &items[item_idx];
+                    if item_idx < len && item_idx < grid_state.visible_range.end {
+                        //let item = &items[item_idx];
 
                         let is_visible = if is_scrolling {
                             false  // Always use Preload priority while scrolling
@@ -93,19 +93,22 @@ macro_rules! virtual_reference_grid {
                                 && item_idx < grid_state.visible_range.end
                         };
 
+                        let item_id = item_index[item_idx];
 
-                        let item_id = item.id;
-
-
-                        use $crate::infrastructure::api_types::{MediaId};
                         let item_watch_progress = if let Some(watch_state) = watch_state_opt {
-                            watch_state.get_watch_progress(&MediaId::from(item_id)) // TODO: See if we can remove this clone
+                            watch_state.get_watch_progress(&item_id)
                         } else {
                             None
                         };
 
                         // Call the card creation function with visibility info
-                        let card = $create_card(item, hovered_media_id, is_visible, item_watch_progress);
+                        let card = $create_card(
+                            item_id,
+                            hovered_media_id,
+                            is_visible,
+                            item_watch_progress,
+                            state,
+                        );
 
                         // Use container dimensions that account for animation padding
                         let (container_width, container_height) =
@@ -128,7 +131,7 @@ macro_rules! virtual_reference_grid {
                                 .height(Length::Fixed(total_card_height))
                                 .clip(false),
                         );
-                    } else if item_idx < items.len() {
+                    } else if item_idx < len {
                         // Placeholder for items not yet visible but in the row
                         let (container_width, _) =
                             $crate::infrastructure::constants::calculations::get_container_dimensions(1.0);
@@ -146,7 +149,7 @@ macro_rules! virtual_reference_grid {
 
                 // Fill remaining columns with empty space only if this is the last row and it's incomplete
                 if row_idx == total_rows - 1 {
-                    let items_in_last_row = items.len() - (row_idx * grid_state.columns);
+                    let items_in_last_row = len - (row_idx * grid_state.columns);
                     if items_in_last_row < grid_state.columns {
                         for _ in items_in_last_row..grid_state.columns {
                             let (container_width, _) =
@@ -201,8 +204,308 @@ macro_rules! virtual_reference_grid {
             .height(Length::Fill)
             .style($crate::domains::ui::theme::Scrollable::style());
 
-            reference_grid.finish();
             scrollable_content.into()
         }
     };
+}
+
+/// Parse a hex color string into an Iced Color
+pub fn parse_hex_color(hex: &str) -> Result<Color, String> {
+    let hex = hex.trim_start_matches('#');
+
+    if hex.len() != 6 {
+        return Err(format!("Invalid hex color length: {}", hex.len()));
+    }
+
+    let r =
+        u8::from_str_radix(&hex[0..2], 16).map_err(|e| format!("Invalid red component: {}", e))?;
+    let g = u8::from_str_radix(&hex[2..4], 16)
+        .map_err(|e| format!("Invalid green component: {}", e))?;
+    let b =
+        u8::from_str_radix(&hex[4..6], 16).map_err(|e| format!("Invalid blue component: {}", e))?;
+
+    Ok(Color::from_rgb8(r, g, b))
+}
+
+/// Truncate text to fit within a given width with ellipsis
+pub fn truncate_text(text: &str, max_chars: usize) -> String {
+    // Count actual characters, not bytes
+    let char_count = text.chars().count();
+
+    if char_count <= max_chars {
+        text.to_string()
+    } else {
+        // Reserve space for "..."
+        let target_chars = max_chars.saturating_sub(3);
+
+        // Collect characters up to the target count
+        let mut chars_collected = 0;
+        let mut byte_index = 0;
+
+        for (i, ch) in text.char_indices() {
+            if chars_collected >= target_chars {
+                byte_index = i;
+                break;
+            }
+            chars_collected += 1;
+        }
+
+        // If we didn't break early, use the full string length
+        if chars_collected < target_chars {
+            byte_index = text.len();
+        }
+
+        // Try to break at a space for better readability
+        let truncated = &text[..byte_index];
+        if let Some(space_pos) = truncated.rfind(' ') {
+            // Only use the space if it's not too far back (at least halfway)
+            let space_chars = text[..space_pos].chars().count();
+            if space_chars > target_chars / 2 {
+                return format!("{}...", &text[..space_pos]);
+            }
+        }
+
+        format!("{}...", truncated)
+    }
+}
+
+/// Trait for accessing theme color on media references
+pub trait ThemeColorAccess {
+    fn theme_color(&self) -> Option<&str>;
+}
+
+// Implement for types that have theme_color
+impl ThemeColorAccess for crate::infrastructure::api_types::MovieReference {
+    fn theme_color(&self) -> Option<&str> {
+        self.theme_color.as_deref()
+    }
+}
+
+impl ThemeColorAccess for crate::infrastructure::api_types::SeriesReference {
+    fn theme_color(&self) -> Option<&str> {
+        self.theme_color.as_deref()
+    }
+}
+
+impl ThemeColorAccess for crate::infrastructure::api_types::SeasonReference {
+    fn theme_color(&self) -> Option<&str> {
+        self.theme_color.as_deref()
+    }
+}
+
+// Episodes don't have theme_color
+impl ThemeColorAccess for crate::infrastructure::api_types::EpisodeReference {
+    fn theme_color(&self) -> Option<&str> {
+        None
+    }
+}
+
+/// Main macro for creating media cards with consistent styling and behavior
+#[macro_export]
+macro_rules! media_card {
+    (
+        // Required parameters
+        type: $card_type:ident,
+        data: $data:expr_2021,
+
+        // Card configuration block
+        {
+            id: $id:expr_2021,
+            title: $title:expr_2021,
+            subtitle: $subtitle:expr_2021,
+            image: {
+                key: $image_key:expr_2021,
+                type: $image_type:ident,
+                fallback: $fallback:expr_2021,
+            },
+            size: $size:ident,
+
+            // Actions
+            on_click: $click_msg:expr_2021,
+            on_play: $play_msg:expr_2021,
+
+            // Optional fields
+            $(hover_icon: $hover_icon:expr_2021,)?
+            $(badge: $badge:expr_2021,)?
+            $(animation: $animation:expr_2021,)?
+            $(loading_text: $loading_text:expr_2021,)?
+            $(is_hovered: $is_hovered:expr_2021,)?
+            $(priority: $priority:expr_2021,)?
+        }
+    ) => {{
+        use $crate::domains::ui::views::grid::types::*;
+        use $crate::domains::ui::widgets::{AnimationType as WidgetAnimationType};
+        use $crate::domains::ui::theme;
+        use iced::{
+            widget::{button, column, container, text},
+            Length,
+        };
+
+        // Extract dimensions from card size
+        let card_size = CardSize::$size;
+        let (width, height) = card_size.dimensions();
+        let radius = card_size.radius();
+        let (title_size, subtitle_size) = card_size.text_sizes();
+
+        // Determine if card is hovered
+        let is_hovered = {
+            #[allow(unused)]
+            let mut hovered = false;
+            $(hovered = $is_hovered;)?
+            hovered
+        };
+
+        // Get animation config
+        let animation_config = {
+            #[allow(unused_mut)]
+            let mut config = AnimationConfig::default();
+            $(config = $animation;)?
+            config
+        };
+
+        // Determine widget animation type early so it can be used for both image and overlay
+        let widget_anim = match animation_config.animation_type {
+AnimationType::Flip => WidgetAnimationType::flip(),
+            AnimationType::FadeIn | AnimationType::FadeScale => WidgetAnimationType::Fade {
+                duration: animation_config.duration
+            },
+            _ => WidgetAnimationType::None,
+        };
+
+        // Create the main image/poster element using image_for
+        let image_element: Element<'_, $crate::domains::ui::messages::Message> = {
+            use $crate::domains::ui::widgets::image_for;
+
+            // Determine image size based on card size
+            let image_size = match card_size {
+                CardSize::Small => $crate::domains::metadata::image_types::ImageSize::Thumbnail,
+                CardSize::Medium => $crate::domains::metadata::image_types::ImageSize::Poster,
+                CardSize::Large => $crate::domains::metadata::image_types::ImageSize::Full,
+                CardSize::Wide => $crate::domains::metadata::image_types::ImageSize::Backdrop,
+                CardSize::Custom(_, _) => $crate::domains::metadata::image_types::ImageSize::Poster,
+            };
+
+            //// Map priority if provided
+            let priority = $crate::domains::metadata::image_types::Priority::Preload;
+            $(let priority = $priority;)?
+
+            // Create the image widget
+            let mut img = image_for($id)
+                .size(image_size)
+                .rounded(radius)
+                .width(Length::Fixed(width))
+                .height(Length::Fixed(height))
+                .animation(widget_anim)
+                .placeholder($fallback.chars().next().map(|c| {
+                    // Convert emoji to appropriate icon
+                    match c {
+                        '🎬' => lucide_icons::Icon::Film,
+                        '📺' => lucide_icons::Icon::Tv,
+                        '🎞' => lucide_icons::Icon::Play,
+                        _ => lucide_icons::Icon::Image,
+                    }
+                }).unwrap_or(lucide_icons::Icon::Image))
+                .priority(priority)
+                .is_hovered(is_hovered)
+                .on_play($play_msg)
+                .on_click($click_msg);
+
+            // Add loading text if provided
+            $(img = img.placeholder_text($loading_text);)?
+
+            // Add theme color if available
+            use $crate::domains::ui::views::grid::macros::ThemeColorAccess;
+            if let Some(theme_color_str) = $data.theme_color() {
+                //log::info!("Card for {} has theme_color: {}", $title, theme_color_str);
+                if let Ok(color) = $crate::domains::ui::views::grid::macros::parse_hex_color(theme_color_str) {
+                    img = img.theme_color(color);
+                } else {
+                    log::warn!("Could not parse theme_color_str {} for {}", theme_color_str, $title);
+                }
+            }
+
+            img.into()
+        };
+
+        // Wrap the image element with precise hover detection
+        // This tracks only the actual poster bounds, not the container
+        let image_with_hover = iced::widget::mouse_area(image_element)
+            .on_enter($crate::domains::ui::messages::Message::MediaHovered($image_key))
+            .on_exit($crate::domains::ui::messages::Message::MediaUnhovered($image_key));
+
+        // Create the poster element
+        // Always wrap in button for non-hover clicks, but the shader handles its own overlay buttons
+        let poster_element = button(image_with_hover)
+            .on_press($click_msg)
+            .padding(0)
+            .style(theme::Button::MediaCard.style())
+            .into();
+
+        // Calculate proper container dimensions based on animation type
+let (container_width, container_height) = if matches!(widget_anim, WidgetAnimationType::Flip { .. }) {
+            // For enhanced flip, use expanded dimensions to accommodate animation
+            use $crate::infrastructure::constants::animation;
+            let h_padding = animation::calculate_horizontal_padding(width);
+            let v_padding = animation::calculate_vertical_padding(height);
+            (width + h_padding * 2.0, height + v_padding * 2.0)
+        } else {
+            // For other animations, use standard dimensions
+            (width, height)
+        };
+
+        // For enhanced flip, we need to center the poster within the container
+let poster_with_overlay_element = if matches!(widget_anim, WidgetAnimationType::Flip { .. }) {
+            // Center the poster within the larger container
+            // The shader handles all hover detection internally based on actual poster bounds
+            let centered_poster: Element<'_, $crate::domains::ui::messages::Message> = container(poster_element)
+                .width(Length::Fixed(container_width))
+                .height(Length::Fixed(container_height))
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center)
+                .into();
+            centered_poster
+        } else {
+            // For non-animated posters, return directly
+            // The shader handles all hover detection internally
+            poster_element
+        };
+
+        // Calculate max characters based on card width and text size
+        // Rough estimate: ~7-8 pixels per character for typical fonts
+        let title_max_chars = ((width - 10.0) / (title_size as f32 * 0.6)) as usize;
+        let subtitle_max_chars = ((width - 10.0) / (subtitle_size as f32 * 0.6)) as usize;
+
+        // Truncate title and subtitle to prevent wrapping
+        let truncated_title = $crate::domains::ui::views::grid::macros::truncate_text($title, title_max_chars);
+        let truncated_subtitle = $crate::domains::ui::views::grid::macros::truncate_text($subtitle, subtitle_max_chars);
+
+        // Create the complete card with text
+        let card_content = column![
+            poster_with_overlay_element,
+            // Text container
+            container(
+                column![
+                    text(truncated_title)
+                        .size(title_size)
+                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                    text(truncated_subtitle)
+                        .size(subtitle_size)
+                        .color(theme::MediaServerTheme::TEXT_SECONDARY)
+                ]
+                .spacing(2)
+            )
+            .padding(5)
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(60.0))
+            .clip(true)
+        ]
+        .spacing(5);
+
+        // Final container (no mouse area here anymore)
+        container(card_content)
+            .width(Length::Fixed(container_width))
+            .height(Length::Fixed(container_height + 65.0)) // Image + text height
+            .clip(false) // Allow animation overflow
+            .into()
+    }};
 }

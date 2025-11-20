@@ -2,10 +2,10 @@
 //!
 //! Provides helpers for building test data, custom assertions, and fixtures.
 
-pub mod builders;
 pub mod assertions;
+pub mod builders;
 pub mod fixtures;
 
-pub use builders::{Builder, RequiredField};
 pub use assertions::{AsyncAssertions, EventuallyExt, StateAssertions};
-pub use fixtures::{FixtureGenerator, TestData, Scenario};
+pub use builders::{Builder, RequiredField};
+pub use fixtures::{FixtureGenerator, Scenario, TestData};

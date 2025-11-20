@@ -76,11 +76,9 @@ pub fn sort_dropdown<'a>(current_sort: SortBy) -> Element<'a, Message> {
         .copied();
 
     container(
-        pick_list(
-            SortOption::OPTIONS,
-            selected,
-            |option| Message::SetSortBy(option.value),
-        )
+        pick_list(SortOption::OPTIONS, selected, |option| {
+            Message::SetSortBy(option.value)
+        })
         .placeholder("Sort by...")
         .width(Length::Fixed(160.0))
         .style(sort_dropdown_style),

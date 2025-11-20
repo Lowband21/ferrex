@@ -3,8 +3,7 @@ use std::time::{Duration, Instant};
 use criterion::Criterion;
 use ferrex_player::{
     domains::{
-        media::library::{fetch_libraries, fetch_library_media_references},
-        metadata::image_types::{ImageRequest, ImageSize, Priority},
+        library::update_handlers::fetch_libraries, metadata::image_types::{ImageRequest, Priority}
     },
     infrastructure::{api_types::Library, service_registry},
     state_refactored::State,
@@ -216,7 +215,7 @@ pub async fn full_initialization_operation(
                 // Step 5: Trigger actual image loading to verify poster fetching
                 log::info!("   🖼️  Step 5: Testing poster/image loading...");
                 log::info!(
-                    "   📡 Expected image URLs: {}/api/images/{{media_id}}/poster",
+                    "   📡 Expected image URLs: {}/images/{{media_id}}/poster",
                     state.server_url
                 );
                 let image_start = Instant::now();
@@ -226,7 +225,7 @@ pub async fn full_initialization_operation(
                     .collect();
 
                 for media_ref in sample_media.iter().by_ref() {
-                    let media_id = media_ref.as_ref().id();
+                    let media_id = media_ref.as_ref().media_id();
                     log::info!(
                         "     🎨 Requesting poster for {} ({})",
                         media_ref.media_type(),
@@ -267,7 +266,7 @@ pub async fn full_initialization_operation(
 
                 // Check again for any that might have loaded quickly
                 for media_ref in sample_media.iter() {
-                    let media_id = media_ref.as_ref().id();
+                    let media_id = media_ref.as_ref().media_id();
                     let image_request = ImageRequest {
                         media_id: media_id.clone(),
                         size: ImageSize::Poster,

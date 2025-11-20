@@ -2,25 +2,12 @@
 //!
 //! Provides abstractions for testing domains in isolation.
 
+pub mod boundary;
 pub mod context;
 pub mod harness;
-pub mod boundary;
 
-pub use context::{
-    DomainTestContext,
-    GenericDomainContext,
-    DomainContextBuilder,
-};
+pub use context::{DomainContextBuilder, DomainTestContext, GenericDomainContext};
 
-pub use harness::{
-    TestHarness,
-    HarnessConfig,
-    TestResult,
-};
+pub use harness::{HarnessConfig, TestHarness, TestResult};
 
-pub use boundary::{
-    DomainBoundary,
-    ServiceDependency,
-    EventBus,
-    InMemoryEventBus,
-};
+pub use boundary::{DomainBoundary, EventBus, InMemoryEventBus, ServiceDependency};

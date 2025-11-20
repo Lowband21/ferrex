@@ -1,6 +1,7 @@
 pub mod subscriptions;
 
 use crate::domains::ui::{views::carousel::CarouselMessage, DisplayMode, SortBy};
+use ferrex_core::{LibraryID, MediaFile, MediaID, MediaIDLike, MovieID, MovieLike, MovieReference};
 use iced::widget::scrollable;
 use iced::Size;
 use uuid::Uuid;
@@ -8,10 +9,10 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub enum Message {
     // View mode control
-    SetDisplayMode(DisplayMode),      // New library-centric display mode
-    SelectLibraryAndMode(uuid::Uuid), // Select library and set to Library display mode
-    ViewDetails(crate::domains::media::library::MediaFile),
-    ViewMovieDetails(crate::infrastructure::api_types::MovieReference),
+    SetDisplayMode(DisplayMode),     // New library-centric display mode
+    SelectLibraryAndMode(LibraryID), // Select library and set to Library display mode
+    ViewDetails(MediaID),
+    ViewMovieDetails(MovieID),
     ViewTvShow(ferrex_core::SeriesID), // series_id
     ViewSeason(ferrex_core::SeriesID, ferrex_core::SeasonID), // series_id, season_id
     ViewEpisode(ferrex_core::EpisodeID), // episode_id
@@ -114,32 +115,26 @@ pub enum Message {
     QueueVisibleDetailsForFetch, // Queue visible items for background detail fetching
 
     // Cross-domain proxy messages
-    ToggleFullscreen,                  // Proxy for Media::ToggleFullscreen
-    ToggleScanProgress,                // Proxy for Library::ToggleScanProgress
-    SelectLibrary(Option<uuid::Uuid>), // Proxy for Library::SelectLibrary
-    PlayMediaWithId(
-        crate::domains::media::library::MediaFile,
-        ferrex_core::api_types::MediaId,
-    ), // Proxy for Media::PlayMediaWithId
+    ToggleFullscreen,                 // Proxy for Media::ToggleFullscreen
+    ToggleScanProgress,               // Proxy for Library::ToggleScanProgress
+    SelectLibrary(Option<LibraryID>), // Proxy for Library::SelectLibrary
+    PlayMediaWithId(MediaID),         // Proxy for Media::PlayMediaWithId
     PlaySeriesNextEpisode(ferrex_core::SeriesID), // Play next unwatched/in-progress episode
 
     // TV Show loading
-    TvShowLoaded(
-        String,
-        Result<crate::domains::media::models::TvShowDetails, String>,
-    ), // series_id, result
+    //TvShowLoaded(String, Result<TvShowDetails, String>), // series_id, result
 
     // Library aggregation
     AggregateAllLibraries, // Signal to aggregate all libraries
 
     // Library management proxies
-    ShowLibraryForm(Option<ferrex_core::Library>), // Proxy for Library::ShowLibraryForm
-    HideLibraryForm,                               // Proxy for Library::HideLibraryForm
-    ScanLibrary_(uuid::Uuid),                      // Proxy for Library::ScanLibrary_
-    DeleteLibrary(uuid::Uuid),                     // Proxy for Library::DeleteLibrary
-    UpdateLibraryFormName(String),                 // Proxy for Library::UpdateLibraryFormName
-    UpdateLibraryFormType(String),                 // Proxy for Library::UpdateLibraryFormType
-    UpdateLibraryFormPaths(String),                // Proxy for Library::UpdateLibraryFormPaths
+    ShowLibraryForm(Option<ferrex_core::types::library::Library>), // Proxy for Library::ShowLibraryForm
+    HideLibraryForm,                       // Proxy for Library::HideLibraryForm
+    ScanLibrary_(LibraryID),               // Proxy for Library::ScanLibrary_
+    DeleteLibrary(LibraryID),              // Proxy for Library::DeleteLibrary
+    UpdateLibraryFormName(String),         // Proxy for Library::UpdateLibraryFormName
+    UpdateLibraryFormType(String),         // Proxy for Library::UpdateLibraryFormType
+    UpdateLibraryFormPaths(String),        // Proxy for Library::UpdateLibraryFormPaths
     UpdateLibraryFormScanInterval(String), // Proxy for Library::UpdateLibraryFormScanInterval
     ToggleLibraryFormEnabled,              // Proxy for Library::ToggleLibraryFormEnabled
     SubmitLibraryForm,                     // Proxy for Library::SubmitLibraryForm
@@ -259,11 +254,11 @@ impl Message {
             Self::ToggleFullscreen => "UI::ToggleFullscreen",
             Self::ToggleScanProgress => "UI::ToggleScanProgress",
             Self::SelectLibrary(_) => "UI::SelectLibrary",
-            Self::PlayMediaWithId(_, _) => "UI::PlayMediaWithId",
+            Self::PlayMediaWithId(_) => "UI::PlayMediaWithId",
             Self::PlaySeriesNextEpisode(_) => "UI::PlaySeriesNextEpisode",
 
             // TV Show loading
-            Self::TvShowLoaded(_, _) => "UI::TvShowLoaded",
+            //Self::TvShowLoaded(_, _) => "UI::TvShowLoaded",
 
             // Library aggregation
             Self::AggregateAllLibraries => "UI::AggregateAllLibraries",
@@ -291,9 +286,9 @@ impl std::fmt::Debug for Message {
         match self {
             Self::SetDisplayMode(mode) => write!(f, "UI::SetDisplayMode({:?})", mode),
             Self::SelectLibraryAndMode(id) => write!(f, "UI::SelectLibraryAndMode({})", id),
-            Self::ViewDetails(file) => write!(f, "UI::ViewDetails({})", file.display_title()),
+            Self::ViewDetails(id) => write!(f, "UI::ViewDetails({})", id.to_uuid()),
             Self::ViewMovieDetails(movie) => {
-                write!(f, "UI::ViewMovieDetails({})", movie.title.as_str())
+                write!(f, "UI::ViewMovieDetails({:?})", movie) // FIX
             }
             Self::ViewTvShow(id) => write!(f, "UI::ViewTvShow({})", id),
             Self::ViewSeason(series_id, season_id) => {
@@ -310,10 +305,10 @@ impl std::fmt::Debug for Message {
             Self::WindowResized(size) => write!(f, "UI::WindowResized({:?})", size),
             Self::WindowMoved(position) => write!(f, "UI::WindowMoved({:?})", position),
             Self::ToggleBackdropAspectMode => write!(f, "UI::ToggleBackdropAspectMode"),
-            Self::TvShowLoaded(series_id, result) => match result {
-                Ok(_) => write!(f, "UI::TvShowLoaded({}, Ok)", series_id),
-                Err(e) => write!(f, "UI::TvShowLoaded({}, Err: {})", series_id, e),
-            },
+            //Self::TvShowLoaded(series_id, result) => match result {
+            //    Ok(_) => write!(f, "UI::TvShowLoaded({}, Ok)", series_id),
+            //    Err(e) => write!(f, "UI::TvShowLoaded({}, Err: {})", series_id, e),
+            //},
             Self::AggregateAllLibraries => write!(f, "UI::AggregateAllLibraries"),
             Self::ShowLibraryForm(lib) => {
                 if let Some(l) = lib {
@@ -395,8 +390,8 @@ impl std::fmt::Debug for Message {
             Self::ToggleFullscreen => write!(f, "UI::ToggleFullscreen"),
             Self::ToggleScanProgress => write!(f, "UI::ToggleScanProgress"),
             Self::SelectLibrary(uuid) => write!(f, "UI::SelectLibrary({:?})", uuid),
-            Self::PlayMediaWithId(media_file, media_id) => {
-                write!(f, "UI::PlayMediaWithId({:?}, {:?})", media_file, media_id)
+            Self::PlayMediaWithId(media_id) => {
+                write!(f, "UI::PlayMediaWithId({:?})", media_id)
             }
             Message::PlaySeriesNextEpisode(series_id) => {
                 write!(f, "PlaySeriesNextEpisode({:?})", series_id)

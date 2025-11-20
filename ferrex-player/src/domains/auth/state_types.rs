@@ -13,7 +13,7 @@ use tokio::sync::watch;
 pub enum AuthState {
     /// No authenticated user
     Unauthenticated,
-    
+
     /// User is authenticated with valid credentials
     Authenticated {
         user: User,
@@ -22,7 +22,7 @@ pub enum AuthState {
         /// Server URL this auth is valid for
         server_url: String,
     },
-    
+
     /// Token is being refreshed
     Refreshing {
         /// Previous auth state to fall back to if refresh fails
@@ -33,9 +33,12 @@ pub enum AuthState {
 impl AuthState {
     /// Check if the state represents an authenticated user
     pub fn is_authenticated(&self) -> bool {
-        matches!(self, AuthState::Authenticated { .. } | AuthState::Refreshing { .. })
+        matches!(
+            self,
+            AuthState::Authenticated { .. } | AuthState::Refreshing { .. }
+        )
     }
-    
+
     /// Get the current user if authenticated
     pub fn user(&self) -> Option<&User> {
         match self {
@@ -44,7 +47,7 @@ impl AuthState {
             AuthState::Unauthenticated => None,
         }
     }
-    
+
     /// Get the current auth token if authenticated
     pub fn token(&self) -> Option<&AuthToken> {
         match self {
@@ -53,7 +56,7 @@ impl AuthState {
             AuthState::Unauthenticated => None,
         }
     }
-    
+
     /// Get the current permissions if authenticated
     pub fn permissions(&self) -> Option<&UserPermissions> {
         match self {
@@ -81,38 +84,44 @@ impl AuthStateStore {
             receiver,
         }
     }
-    
+
     /// Get the current auth state
     pub fn current(&self) -> AuthState {
         self.receiver.borrow().clone()
     }
-    
+
     /// Check if authenticated without cloning
     pub fn is_authenticated(&self) -> bool {
         self.receiver.borrow().is_authenticated()
     }
-    
+
     /// Access state without cloning
-    pub fn with_state<F, R>(&self, f: F) -> R 
-    where 
-        F: FnOnce(&AuthState) -> R 
+    pub fn with_state<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&AuthState) -> R,
     {
         f(&*self.receiver.borrow())
     }
-    
+
     /// Subscribe to auth state changes
     pub fn subscribe(&self) -> watch::Receiver<AuthState> {
         self.receiver.clone()
     }
-    
+
     /// Update the auth state
     pub fn set(&self, state: AuthState) {
         // Ignore send errors (no receivers)
         let _ = self.sender.send(state);
     }
-    
+
     /// Transition to authenticated state
-    pub fn authenticate(&self, user: User, token: AuthToken, permissions: UserPermissions, server_url: String) {
+    pub fn authenticate(
+        &self,
+        user: User,
+        token: AuthToken,
+        permissions: UserPermissions,
+        server_url: String,
+    ) {
         self.set(AuthState::Authenticated {
             user,
             token,
@@ -120,7 +129,7 @@ impl AuthStateStore {
             server_url,
         });
     }
-    
+
     /// Transition to refreshing state
     pub fn start_refresh(&self) {
         let current = self.current();
@@ -130,11 +139,17 @@ impl AuthStateStore {
             });
         }
     }
-    
+
     /// Complete token refresh
     pub fn complete_refresh(&self, token: AuthToken) {
         if let AuthState::Refreshing { previous } = self.current() {
-            if let AuthState::Authenticated { user, permissions, server_url, .. } = *previous {
+            if let AuthState::Authenticated {
+                user,
+                permissions,
+                server_url,
+                ..
+            } = *previous
+            {
                 self.set(AuthState::Authenticated {
                     user,
                     token,
@@ -144,14 +159,14 @@ impl AuthStateStore {
             }
         }
     }
-    
+
     /// Cancel refresh and restore previous state
     pub fn cancel_refresh(&self) {
         if let AuthState::Refreshing { previous } = self.current() {
             self.set(*previous);
         }
     }
-    
+
     /// Log out the current user
     pub fn logout(&self) {
         self.set(AuthState::Unauthenticated);

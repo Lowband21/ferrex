@@ -1,16 +1,15 @@
 use crate::{
-    domains::ui::theme,
     domains::{
-        self,
-        metadata::image_types::{ImageSize, Priority},
-        ui::{messages::Message, widgets::image_for::image_for},
+        metadata::image_types::Priority,
+        ui::{messages::Message, theme, widgets::image_for::image_for},
     },
-    infrastructure::api_types::{MediaReference, SeasonReference},
     state_refactored::State,
 };
-use ferrex_core::{api_types::MediaId, EpisodeID, SeasonID, SeriesID};
+use ferrex_core::{
+    EpisodeID, ImageSize, ImageType, MediaIDLike, SeasonID, SeriesDetailsLike, SeriesID, SeriesLike,
+};
 use iced::{
-    widget::{button, column, container, row, scrollable, text, Space, Stack},
+    widget::{column, container, row, text, Space, Stack},
     Element, Length,
 };
 use lucide_icons::Icon;
@@ -32,7 +31,69 @@ fn lucide_font() -> iced::Font {
     ),
     profiling::function
 )]
-pub fn view_tv_show_detail<'a>(state: &'a State, _id: &'a SeriesID) -> Element<'a, Message> {
+pub fn view_tv_show_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<'a, Message> {
+    // Resolve series yoke via UI cache with lazy fetch (interior mutable cache)
+    let series_uuid = series_id.to_uuid();
+    let series_yoke_arc = match state
+        .domains
+        .ui
+        .state
+        .series_yoke_cache
+        .peek_ref(&series_uuid)
+    { Some(arc) => {
+        arc
+    } _ => {
+        match state
+            .domains
+            .ui
+            .state
+            .repo_accessor
+            .get_series_yoke(&ferrex_core::MediaID::Series(series_id))
+        {
+            Ok(yoke) => {
+                let arc = std::sync::Arc::new(yoke);
+                state
+                    .domains
+                    .ui
+                    .state
+                    .series_yoke_cache
+                    .insert(series_uuid, arc.clone());
+                arc
+            }
+            Err(e) => {
+                log::warn!(
+                    "[TV] Failed to fetch series yoke for {}: {:?}",
+                    series_uuid,
+                    e
+                );
+                // Render minimal error content
+                return container(
+                    column![
+                        text("Media Not Found")
+                            .size(24)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                        Space::with_height(10),
+                        text("Repository error:")
+                            .size(16)
+                            .color(theme::MediaServerTheme::TEXT_SUBDUED),
+                    ]
+                    .spacing(10)
+                    .align_x(iced::Alignment::Center),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into();
+            }
+        }
+    }};
+    let series = series_yoke_arc.get();
+    //let season = season.get();
+    let media_id = series_id.to_media_id();
+
+    //let media_id = MediaID::Series(SeriesID(series_id.to_uuid()));
+
     let mut content = column![].spacing(20);
 
     // Add dynamic spacing at the top based on backdrop dimensions
@@ -46,354 +107,312 @@ pub fn view_tv_show_detail<'a>(state: &'a State, _id: &'a SeriesID) -> Element<'
         .calculate_content_offset_with_height(window_width, window_height);
     content = content.push(Space::with_height(Length::Fixed(content_offset)));
 
-    // Get the series ID from the current view state
-    let series_id = match &state.domains.ui.state.view {
-        crate::domains::ui::types::ViewState::TvShowDetail { series_id, .. } => series_id.clone(),
-        _ => {
-            // Should not happen, but handle gracefully
-            return scrollable(
-                content.push(
-                    text("Error: Invalid view state")
-                        .size(16)
-                        .color(theme::MediaServerTheme::ERROR),
-                ),
-            )
-            .into();
-        }
-    };
+    let poster_element: Element<Message> = image_for(media_id.to_uuid())
+        .size(ImageSize::Full)
+        .image_type(ImageType::Series)
+        .width(Length::Fixed(300.0))
+        .height(Length::Fixed(450.0))
+        .priority(Priority::Visible)
+        .into();
 
-    // Use MediaQueryService (clean architecture)
-    let series_ref = state
-        .domains
-        .media
-        .state
-        .query_service
-        .get_series(&series_id);
+    // Details column
+    let mut details = column![].spacing(15).padding(20).width(Length::Fill);
 
-    if let Some(series_ref) = series_ref {
-        // Use MediaQueryService to get seasons (clean architecture)
-        let seasons = state
-            .domains
-            .media
-            .state
-            .query_service
-            .get_seasons_for_series(&series_id);
+    // Title
+    details = details.push(
+        text("title")
+            .size(32)
+            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+    );
 
-        let poster_element: Element<Message> = image_for(MediaId::Series(series_id.clone()))
-            .size(ImageSize::Full)
-            .width(Length::Fixed(300.0))
-            .height(Length::Fixed(450.0))
-            .priority(Priority::Visible)
-            .into();
+    let series_details = series.details();
 
-        // Details column
-        let mut details = column![].spacing(15).padding(20).width(Length::Fill);
-
-        // Title
-        details = details.push(
-            text(series_ref.title.as_str().to_string())
-                .size(32)
-                .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        );
-
-        // Extract details from the series reference
-        let (description, genres, rating, total_episodes) = match &series_ref.details {
-            crate::infrastructure::api_types::MediaDetailsOption::Details(
-                crate::infrastructure::api_types::TmdbDetails::Series(series_details),
-            ) => {
-                /*
-                log::info!(
-                    "Series {} has overview: {:?}",
-                    series_ref.title.as_str(),
-                    series_details
-                        .overview
-                        .as_ref()
-                        .map(|o| crate::domains::ui::views::macros::truncate_text(o, 50))
-                ); */
-                (
-                    series_details.overview.clone(),
-                    series_details.genres.clone(),
-                    series_details.vote_average.map(|v| v as f32),
-                    series_details.number_of_episodes,
-                )
-            }
-            _ => {
-                log::warn!("Series {} has no TMDB details", series_ref.title.as_str());
-                (None, vec![], None, None)
-            }
-        };
-
-        // Stats - use the seasons we already fetched
-        let season_count = seasons.len();
-        if season_count > 0 {
+    /*
+    // Extract details from the series reference
+    let (description, rating, total_episodes) = match series_details {
+        MediaDetailsOption::Details(TmdbDetails::Series(series_details)) => {
+            /*
             log::info!(
-                "DETAIL VIEW: Found {} seasons for series '{}' (ID: {})",
-                season_count,
+                "Series {} has overview: {:?}",
                 series_ref.title.as_str(),
-                series_id.as_str()
-            );
+                series_details
+                    .overview
+                    .as_ref()
+                    .map(|o| crate::domains::ui::views::macros::truncate_text(o, 50))
+            ); */
+            (
+                series_details.overview,
+                series_details.vote_average,
+                series_details.number_of_episodes,
+            )
         }
+        _ => {
+            log::warn!("Series {} has no TMDB details", series.title.to_string());
+            (None, vec![], None, None)
+        }
+    }; */
 
-        let stats = format!(
-            "{} Seasons • {} Episodes",
+    /*
+    // Stats - use the seasons we already fetched
+    let season_count = seasons.len();
+    if season_count > 0 {
+        log::info!(
+            "DETAIL VIEW: Found {} seasons for series '{}' (ID: {})",
             season_count,
-            total_episodes.unwrap_or(0)
+            series_ref.title.as_str(),
+            series_id.as_str()
         );
+    }
+
+    let stats = format!(
+        "{} Seasons • {} Episodes",
+        season_count,
+        total_episodes.unwrap_or(0)
+    );
+    details = details.push(
+        text(stats)
+            .size(16)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+    ); */
+
+    // Rating
+    /*
+    if let Some(rating) = rating {
         details = details.push(
-            text(stats)
+            text(format!("★ {:.1}", rating))
                 .size(16)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                .color(theme::MediaServerTheme::ACCENT_BLUE),
         );
+    } */
 
-        // Rating
-        if let Some(rating) = rating {
-            details = details.push(
-                text(format!("★ {:.1}", rating))
-                    .size(16)
-                    .color(theme::MediaServerTheme::ACCENT_BLUE),
-            );
-        }
+    //// Play button row - use series progress service to find appropriate episode
+    //use crate::domains::media::services::SeriesProgressService;
 
-        // Play button row - use series progress service to find appropriate episode
-        use crate::domains::media::services::SeriesProgressService;
+    //let media_store = state.domains.media.state.media_store.clone();
+    //let service = SeriesProgressService::new(media_store);
+    //let watch_state = state.domains.media.state.user_watch_state.as_ref();
 
-        let media_store = state.domains.media.state.media_store.clone();
-        let service = SeriesProgressService::new(media_store);
-        let watch_state = state.domains.media.state.user_watch_state.as_ref();
+    //// Get next episode to continue and first episode for play from beginning
+    //let next_episode_info = service.get_next_episode_for_series(&series_id, watch_state);
 
-        // Get next episode to continue and first episode for play from beginning
-        let next_episode_info = service.get_next_episode_for_series(&series_id, watch_state);
+    //// Also get the very first episode for "Play from Beginning" option
+    //let first_episode = {
+    //    let first_season = seasons
+    //        .iter()
+    //        .find(|season| season.season_number.value() == 1)
+    //        .or_else(|| seasons.first());
 
-        // Also get the very first episode for "Play from Beginning" option
-        let first_episode = {
-            let first_season = seasons
-                .iter()
-                .find(|season| season.season_number.value() == 1)
-                .or_else(|| seasons.first());
+    //    if let Some(season) = first_season {
+    //        let episodes = state
+    //            .domains
+    //            .media
+    //            .state
+    //            .query_service
+    //            .get_episodes_for_season(&season.id);
+    //        episodes.into_iter().next()
+    //    } else {
+    //        None
+    //    }
+    //};
 
-            if let Some(season) = first_season {
-                let episodes = state
-                    .domains
-                    .media
-                    .state
-                    .query_service
-                    .get_episodes_for_season(&season.id);
-                episodes.into_iter().next()
+    //// Calculate series progress percentage
+    //let series_progress = service.get_series_progress(&series_id, watch_state);
+    //let unwatched_count = service.get_unwatched_count(&series_id, watch_state);
+
+    /*
+    // Build button row based on watch state
+    let mut buttons = vec![];
+
+    if let Some((next_episode, resume_position)) = next_episode_info {
+        // Determine if this is a continuation or fresh start
+        let is_in_progress = resume_position.is_some() || series_progress > 0.0;
+
+        let primary_label = if is_in_progress {
+            if let Some(pos) = resume_position {
+                format!(
+                    "Continue S{:02}E{:02}",
+                    next_episode.season_number.value(),
+                    next_episode.episode_number.value()
+                )
             } else {
-                None
+                format!(
+                    "Continue S{:02}E{:02}",
+                    next_episode.season_number.value(),
+                    next_episode.episode_number.value()
+                )
             }
+        } else {
+            "Play".to_string()
         };
 
-        // Calculate series progress percentage
-        let series_progress = service.get_series_progress(&series_id, watch_state);
-        let unwatched_count = service.get_unwatched_count(&series_id, watch_state);
+        // Primary action button
+        buttons.push(
+            button(
+                row![
+                    icon_text(Icon::Play),
+                    Space::with_width(8),
+                    text(primary_label).size(16)
+                ]
+                .align_y(iced::Alignment::Center),
+            )
+            .padding([10, 20])
+            .on_press(Message::PlaySeriesNextEpisode(series_id.clone()))
+            .style(theme::Button::Primary.style())
+            .into(),
+        );
 
-        // Build button row based on watch state
-        let mut buttons = vec![];
-
-        if let Some((next_episode, resume_position)) = next_episode_info {
-            // Determine if this is a continuation or fresh start
-            let is_in_progress = resume_position.is_some() || series_progress > 0.0;
-
-            let primary_label = if is_in_progress {
-                if let Some(pos) = resume_position {
-                    format!(
-                        "Continue S{:02}E{:02}",
-                        next_episode.season_number.value(),
-                        next_episode.episode_number.value()
+        // Add "Play from Beginning" if we're not already at the beginning
+        if is_in_progress
+            && first_episode.is_some()
+            && first_episode
+                .as_ref()
+                .map(|e| e.id != next_episode.id)
+                .unwrap_or(false)
+        {
+            if let Some(first_ep) = first_episode {
+                let series_details = match &series_ref.details {
+                    crate::infrastructure::api_types::MediaDetailsOption::Details(
+                        crate::infrastructure::api_types::TmdbDetails::Series(details),
+                    ) => Some(details),
+                    _ => None,
+                };
+                let legacy_file = crate::infrastructure::api_types::episode_reference_to_legacy(
+                    &first_ep,
+                    series_details,
+                );
+                buttons.push(
+                    button(
+                        row![
+                            icon_text(Icon::SkipBack),
+                            Space::with_width(8),
+                            text("Play from Beginning").size(16)
+                        ]
+                        .align_y(iced::Alignment::Center),
                     )
-                } else {
-                    format!(
-                        "Continue S{:02}E{:02}",
-                        next_episode.season_number.value(),
-                        next_episode.episode_number.value()
-                    )
-                }
-            } else {
-                "Play".to_string()
-            };
-
-            // Primary action button
-            buttons.push(
-                button(
-                    row![
-                        icon_text(Icon::Play),
-                        Space::with_width(8),
-                        text(primary_label).size(16)
-                    ]
-                    .align_y(iced::Alignment::Center),
-                )
-                .padding([10, 20])
-                .on_press(Message::PlaySeriesNextEpisode(series_id.clone()))
-                .style(theme::Button::Primary.style())
-                .into(),
-            );
-
-            // Add "Play from Beginning" if we're not already at the beginning
-            if is_in_progress
-                && first_episode.is_some()
-                && first_episode
-                    .as_ref()
-                    .map(|e| e.id != next_episode.id)
-                    .unwrap_or(false)
-            {
-                if let Some(first_ep) = first_episode {
-                    let series_details = match &series_ref.details {
-                        crate::infrastructure::api_types::MediaDetailsOption::Details(
-                            crate::infrastructure::api_types::TmdbDetails::Series(details),
-                        ) => Some(details),
-                        _ => None,
-                    };
-                    let legacy_file = crate::infrastructure::api_types::episode_reference_to_legacy(
-                        &first_ep,
-                        series_details,
-                    );
-                    buttons.push(
-                        button(
-                            row![
-                                icon_text(Icon::SkipBack),
-                                Space::with_width(8),
-                                text("Play from Beginning").size(16)
-                            ]
-                            .align_y(iced::Alignment::Center),
-                        )
-                        .padding([10, 20])
-                        .on_press(Message::PlayMediaWithId(
-                            legacy_file,
-                            ferrex_core::api_types::MediaId::Episode(first_ep.id.clone()),
-                        ))
-                        .style(theme::Button::Secondary.style())
-                        .into(),
-                    );
-                }
+                    .padding([10, 20])
+                    .on_press(Message::PlayMediaWithId(
+                        legacy_file,
+                        ferrex_core::MediaID::Episode(first_ep.id.clone()),
+                    ))
+                    .style(theme::Button::Secondary.style())
+                    .into(),
+                );
             }
-        } else if let Some(first_ep) = first_episode {
-            // No watch state, just show Play button for first episode
-            let series_details = match &series_ref.details {
-                crate::infrastructure::api_types::MediaDetailsOption::Details(
-                    crate::infrastructure::api_types::TmdbDetails::Series(details),
-                ) => Some(details),
-                _ => None,
-            };
-            let legacy_file = crate::infrastructure::api_types::episode_reference_to_legacy(
-                &first_ep,
-                series_details,
-            );
-            buttons.push(
-                button(
-                    row![
-                        icon_text(Icon::Play),
-                        Space::with_width(8),
-                        text("Play").size(16)
-                    ]
-                    .align_y(iced::Alignment::Center),
-                )
-                .padding([10, 20])
-                .on_press(Message::PlayMediaWithId(
-                    legacy_file,
-                    ferrex_core::api_types::MediaId::Episode(first_ep.id.clone()),
-                ))
-                .style(theme::Button::Primary.style())
-                .into(),
-            );
         }
+    } else if let Some(first_ep) = first_episode {
+        // No watch state, just show Play button for first episode
+        let series_details = match &series_ref.details {
+            crate::infrastructure::api_types::MediaDetailsOption::Details(
+                crate::infrastructure::api_types::TmdbDetails::Series(details),
+            ) => Some(details),
+            _ => None,
+        };
+        let legacy_file = crate::infrastructure::api_types::episode_reference_to_legacy(
+            &first_ep,
+            series_details,
+        );
+        buttons.push(
+            button(
+                row![
+                    icon_text(Icon::Play),
+                    Space::with_width(8),
+                    text("Play").size(16)
+                ]
+                .align_y(iced::Alignment::Center),
+            )
+            .padding([10, 20])
+            .on_press(Message::PlayMediaWithId(
+                legacy_file,
+                ferrex_core::MediaID::Episode(first_ep.id.clone()),
+            ))
+            .style(theme::Button::Primary.style())
+            .into(),
+        );
+    }
 
-        // Add progress info if available
-        if series_progress > 0.0 {
+    // Add progress info if available
+    if series_progress > 0.0 {
+        details = details.push(
+            text(format!(
+                "{} unwatched episodes • {:.0}% complete",
+                unwatched_count,
+                series_progress * 100.0
+            ))
+            .size(14)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        );
+    }
+
+    // Add button row if we have buttons
+    if !buttons.is_empty() {
+        details = details.push(Space::with_height(10));
+        details = details.push(row(buttons).spacing(10).align_y(iced::Alignment::Center));
+    }
+
+    // Description
+    if let Some(desc) = description {
+        details = details.push(Space::with_height(10));
+        details = details.push(
+            container(
+                text(desc.to_string())
+                    .size(14)
+                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            )
+            .width(Length::Fill)
+            .padding(10),
+        );
+    }*/
+
+    // Genres
+    if let Some(ref series_details) = series_details {
+        if !series_details.genres().is_empty() {
             details = details.push(
-                text(format!(
-                    "{} unwatched episodes • {:.0}% complete",
-                    unwatched_count,
-                    series_progress * 100.0
-                ))
-                .size(14)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            );
-        }
-
-        // Add button row if we have buttons
-        if !buttons.is_empty() {
-            details = details.push(Space::with_height(10));
-            details = details.push(row(buttons).spacing(10).align_y(iced::Alignment::Center));
-        }
-
-        // Description
-        if let Some(desc) = description {
-            details = details.push(Space::with_height(10));
-            details = details.push(
-                container(
-                    text(desc)
-                        .size(14)
-                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                )
-                .width(Length::Fill)
-                .padding(10),
-            );
-        }
-
-        // Genres
-        if !genres.is_empty() {
-            details = details.push(
-                text(format!("Genres: {}", genres.join(", ")))
+                text(format!("Genres: {}", series_details.genres().join(", ")))
                     .size(14)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
             );
         }
-
-        // Content row with poster and details
-        let info_row = row![poster_element, details]
-            .spacing(10)
-            .align_y(iced::Alignment::Start);
-
-        content = content.push(info_row);
-
-        // Seasons carousel - use the seasons we fetched at the beginning
-        if !seasons.is_empty() {
-            content = content.push(Space::with_height(20));
-
-            if let Some(carousel_state) = &state.domains.ui.state.show_seasons_carousel {
-                // Pass owned seasons to components - idiomatic Iced pattern
-                // Components take ownership to avoid lifetime issues
-                let season_cards: Vec<_> = seasons
-                    .iter()
-                    .cloned()
-                    .map(|season| {
-                        crate::domains::ui::components::season_reference_card_with_state(
-                            // We need to pass watch status here
-                            season,
-                            false,
-                            Some(state),
-                            None,
-                        )
-                    })
-                    .collect();
-
-                let seasons_carousel = crate::domains::ui::views::carousel::media_carousel(
-                    "show_seasons".to_string(),
-                    "Seasons",
-                    season_cards,
-                    carousel_state,
-                );
-
-                content = content.push(seasons_carousel);
-            }
-        }
-    } else {
-        // Loading state
-        content = content.push(
-            container(
-                column![
-                    text("⏳").size(48),
-                    text("Loading show details...")
-                        .size(16)
-                        .color(theme::MediaServerTheme::TEXT_SECONDARY)
-                ]
-                .spacing(10),
-            )
-            .padding(100),
-        );
     }
 
+    // Content row with poster and details
+    let info_row = row![poster_element, details]
+        .spacing(10)
+        .align_y(iced::Alignment::Start);
+
+    content = content.push(info_row);
+
+    /*
+    // Seasons carousel - use the seasons we fetched at the beginning
+    if !seasons.is_empty() {
+        content = content.push(Space::with_height(20));
+
+        if let Some(carousel_state) = &state.domains.ui.state.show_seasons_carousel {
+            // Pass owned seasons to components - idiomatic Iced pattern
+            // Components take ownership to avoid lifetime issues
+            let season_cards: Vec<_> = seasons
+                .iter()
+                .cloned()
+                .map(|season| {
+                    crate::domains::ui::components::season_reference_card_with_state(
+                        // We need to pass watch status here
+                        season,
+                        false,
+                        Some(state),
+                        None,
+                    )
+                })
+                .collect();
+
+            let seasons_carousel = crate::domains::ui::views::carousel::media_carousel(
+                "show_seasons".to_string(),
+                "Seasons",
+                season_cards,
+                carousel_state,
+            );
+
+            content = content.push(seasons_carousel);
+        }
+    } */
     // Create the main content container
     let content_container = container(content).width(Length::Fill);
 
@@ -452,19 +471,20 @@ pub fn view_season_detail<'a>(
         .calculate_content_offset_with_height(window_width, window_height);
     content = content.push(Space::with_height(Length::Fixed(content_offset)));
 
+    /*
     // NEW ARCHITECTURE: Get data from MediaStore
     let (series_ref, season_ref, episodes) =
         if let Ok(store) = state.domains.media.state.media_store.read() {
-            let series_ref = if let Some(MediaReference::Series(series)) =
-                store.get(&MediaId::Series(series_id.clone()))
+            let series_ref = if let Some(Media::Series(series)) =
+                store.get(&MediaID::Series(series_id.clone()))
             {
                 Some(series.clone())
             } else {
                 None
             };
 
-            let season_ref = if let Some(MediaReference::Season(season)) =
-                store.get(&MediaId::Season(season_id.clone()))
+            let season_ref = if let Some(Media::Season(season)) =
+                store.get(&MediaID::Season(season_id.clone()))
             {
                 Some(season.clone())
             } else {
@@ -496,7 +516,7 @@ pub fn view_season_detail<'a>(
     // Check if we have season reference
     if let Some(season_ref) = season_ref {
         // Season poster using unified image system
-        let poster_element: Element<Message> = image_for(MediaId::Season(season_id.to_owned()))
+        let poster_element: Element<Message> = image_for(MediaID::Season(season_id.to_owned()))
             .size(ImageSize::Full)
             .width(Length::Fixed(300.0))
             .height(Length::Fixed(450.0))
@@ -595,14 +615,10 @@ pub fn view_season_detail<'a>(
                 ) => Some(details.clone()),
                 _ => None,
             });
-            let legacy_file = crate::infrastructure::api_types::episode_reference_to_legacy(
-                first_episode,
-                series_details.as_ref(),
-            );
             let button_row = crate::domains::ui::components::create_action_button_row(
                 Message::PlayMediaWithId(
-                    legacy_file,
-                    ferrex_core::api_types::MediaId::Episode(first_episode.id.clone()),
+                    first_episode.,
+                    ferrex_core::MediaID::Episode(first_episode.id.clone()),
                 ),
                 vec![], // No additional buttons yet
             );
@@ -696,10 +712,10 @@ pub fn view_season_detail<'a>(
                             .domains
                             .media
                             .state
-                            .get_media_progress(&MediaId::Episode(episode.id.clone()));
+                            .get_media_progress(&MediaID::Episode(episode.id.clone()));
 
                         // Create episode thumbnail with watch progress
-                        let mut episode_image = image_for(MediaId::Episode(episode.id.clone()))
+                        let mut episode_image = image_for(MediaID::Episode(episode.id.clone()))
                             .size(ImageSize::Thumbnail)
                             .width(Length::Fixed(250.0))
                             .height(Length::Fixed(140.0))
@@ -754,21 +770,21 @@ pub fn view_season_detail<'a>(
                 content = content.push(episodes_carousel);
             }
         }
-    } else {
-        // Loading state
-        content = content.push(
-            container(
-                column![
-                    text("⏳").size(48),
-                    text("Loading season details...")
-                        .size(16)
-                        .color(theme::MediaServerTheme::TEXT_SECONDARY)
-                ]
-                .spacing(10),
-            )
-            .padding(100),
-        );
-    }
+    } else { */
+    // Loading state
+    content = content.push(
+        container(
+            column![
+                text("⏳").size(48),
+                text("Loading season details...")
+                    .size(16)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY)
+            ]
+            .spacing(10),
+        )
+        .padding(100),
+    );
+    //}
 
     // Create the main content container
     let content_container = container(content).width(Length::Fill);
@@ -814,7 +830,7 @@ pub fn view_episode_detail<'a>(
     state: &'a State,
     episode_id: &'a EpisodeID,
 ) -> Element<'a, Message> {
-    let mut content = column![].spacing(20).padding(20);
+    //let mut content = column![].spacing(20).padding(20);
 
     // Add dynamic spacing at the top based on backdrop dimensions
     let window_width = state.window_size.width;
@@ -825,13 +841,15 @@ pub fn view_episode_detail<'a>(
         .state
         .background_shader_state
         .calculate_content_offset_with_height(window_width, window_height);
-    content = content.push(Space::with_height(Length::Fixed(content_offset)));
+    //content = content.push(Space::with_height(Length::Fixed(content_offset)));
+
+    /*
 
     // NEW ARCHITECTURE: Find the episode from MediaStore
     let (episode_ref, series_name) = if let Ok(store) = state.domains.media.state.media_store.read()
     {
-        let episode = if let Some(MediaReference::Episode(ep)) =
-            store.get(&MediaId::Episode(episode_id.clone()))
+        let episode = if let Some(Media::Episode(ep)) =
+            store.get(&MediaID::Episode(episode_id.clone()))
         {
             Some(ep.clone())
         } else {
@@ -840,7 +858,7 @@ pub fn view_episode_detail<'a>(
 
         let series_name = if let Some(ref ep) = episode {
             if let Ok(series_id) = SeriesID::new(ep.series_id.as_str().to_string()) {
-                if let Some(MediaReference::Series(series)) = store.get(&MediaId::Series(series_id))
+                if let Some(Media::Series(series)) = store.get(&MediaID::Series(series_id))
                 {
                     series.title.as_str().to_string()
                 } else {
@@ -864,10 +882,10 @@ pub fn view_episode_detail<'a>(
             .domains
             .media
             .state
-            .get_media_progress(&MediaId::Episode(episode_id.to_owned()));
+            .get_media_progress(&MediaID::Episode(episode_id.to_owned()));
 
         // Episode still/thumbnail using unified image system
-        let mut episode_still = image_for(MediaId::Episode(episode_id.to_owned()))
+        let mut episode_still = image_for(MediaID::Episode(episode_id.to_owned()))
             .size(ImageSize::Thumbnail)
             .width(Length::Fixed(640.0))
             .height(Length::Fixed(360.0))
@@ -926,7 +944,7 @@ pub fn view_episode_detail<'a>(
                 .domains
                 .media
                 .state
-                .is_watched(&MediaId::Episode(episode_id.to_owned()))
+                .is_watched(&MediaID::Episode(episode_id.to_owned()))
             {
                 info_parts.push("✓ Watched".to_string());
             } else if progress > 0.0 {
@@ -973,7 +991,7 @@ pub fn view_episode_detail<'a>(
         // Play button - convert to legacy MediaFile for playback
         let series_details = if let Ok(store) = state.domains.media.state.media_store.read() {
             if let Ok(series_id) = SeriesID::new(episode.series_id.as_str().to_string()) {
-                if let Some(MediaReference::Series(series)) = store.get(&MediaId::Series(series_id))
+                if let Some(Media::Series(series)) = store.get(&MediaID::Series(series_id))
                 {
                     match &series.details {
                         crate::infrastructure::api_types::MediaDetailsOption::Details(
@@ -991,14 +1009,10 @@ pub fn view_episode_detail<'a>(
             None
         };
 
-        let legacy_file = crate::infrastructure::api_types::episode_reference_to_legacy(
-            &episode,
-            series_details.as_ref(),
-        );
         let button_row = crate::domains::ui::components::create_action_button_row(
             Message::PlayMediaWithId(
-                legacy_file,
-                ferrex_core::api_types::MediaId::Episode(episode.id.clone()),
+                episode.file,
+                ferrex_core::MediaID::Episode(episode.id.clone()),
             ),
             vec![], // No additional buttons yet
         );
@@ -1066,5 +1080,23 @@ pub fn view_episode_detail<'a>(
     Stack::new()
         .push(content_container)
         .push(button_container)
-        .into()
+        .into() */
+    container(
+        column![
+            text("Media Not Found")
+                .size(24)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            Space::with_height(10),
+            text(format!("Repository error:"))
+                .size(16)
+                .color(theme::MediaServerTheme::TEXT_SUBDUED),
+        ]
+        .spacing(10)
+        .align_x(iced::Alignment::Center),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .center_x(Length::Fill)
+    .center_y(Length::Fill)
+    .into()
 }

@@ -1,59 +1,33 @@
-use iced::{Task, Theme};
-use lucide_icons::lucide_font_bytes;
+#![feature(type_alias_impl_trait)]
+use ferrex_player::*;
 
-// Use all modules from lib
-use ferrex_player::{
-    common, domains, infrastructure, state_refactored, subscriptions, update, view,
-};
+use env_logger::{Builder, Env, Target};
+use iced::{Task, Theme};
+use log::LevelFilter;
+use lucide_icons::lucide_font_bytes;
 
 use common::messages::DomainMessage;
 use domains::ui::theme;
 use iced::Program;
-use reqwest::header::VIA;
 use state_refactored::State;
 
-/*
-pub struct MyApp;
-
-// Conditional renderer type based on features
-//#[cfg(target_os = "linux")]
-pub type AppRenderer = iced_wgpu::Renderer;
-
-impl Program for MyApp {
-    type State = State;
-    type Message = DomainMessage;
-    //type Theme = theme::Theme;
-    type Renderer = AppRenderer; // Using the conditional type
-                                 //type Executor = DefaultExecutor;
-
-    fn name() -> &'static str {
-        "Ferrex Player"
-    }
-
-    /*
-    fn init(&self) -> (Self::State, Task<Self::Message>) {
-        init::init()
-    } */
-
-    fn update(&self, state: &mut Self::State, message: Self::Message) -> Task<Self::Message> {
-        update::update(state, message)
-    }
-
-    fn view<'a>(
-        &self,
-        state: &'a Self::State,
-        _window: Id,
-    ) -> Element<'a, Self::Message, Self::Theme, Self::Renderer> {
-        view::view(state)
-    }
-}*/
+fn init_logger() {
+    Builder::new()
+        .target(Target::Stdout)
+        .filter_level(LevelFilter::Warn)  // Warn level for dependencies
+        .filter_module("ferrex-player", LevelFilter::Debug)
+        //.filter_module("iced", log::LevelFilter::Info)  // Dependency level override
+        .init();
+}
 
 fn main() -> iced::Result {
-    // Initialize logger with debug level if not set
     if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "info");
+        log::warn!("Failed to initialize logger from env, falling back to default");
+        init_logger();
+    } else {
+        log::warn!("Initializing logger from env");
+        env_logger::init();
     }
-    env_logger::init();
 
     // Initialize profiling system if enabled
     #[cfg(any(
@@ -62,11 +36,17 @@ fn main() -> iced::Result {
         feature = "profile-with-tracing"
     ))]
     infrastructure::profiling::init();
+
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
     log::info!("Profiling system initialized");
 
+    #[cfg(feature = "profile-with-puffin")]
     log::info!("Puffin server listening on 127.0.0.1:8585 - connect with: puffin_viewer --url 127.0.0.1:8585");
 
-    // Starting the Tracy client is necessary before any invoking any of its APIs
     #[cfg(feature = "profile-with-tracy")]
     tracy_client::Client::start();
 
@@ -80,11 +60,15 @@ fn main() -> iced::Result {
         // Initialize the global service registry
         infrastructure::service_registry::init_registry(state.image_service.clone());
 
-        // Extract auth_service for use in the auth task (RUS-136: using trait-based service)
+        // Extract auth_service for use in the auth task
         let auth_service = state.domains.auth.state.auth_service.clone();
 
-        // BatchMetadataFetcher initialization moved to after login success
-        // to ensure ApiClient has authentication token
+        let lib_id = state
+            .domains
+            .library
+            .state
+            .current_library_id
+            .map(|library_id| library_id.as_uuid());
 
         // Initialize depth lines for the default library view
         state
@@ -96,7 +80,7 @@ fn main() -> iced::Result {
                 &state.domains.ui.state.view,
                 state.window_size.width,
                 state.window_size.height,
-                state.domains.library.state.current_library_id,
+                lib_id,
             );
 
         // Check for stored authentication
@@ -104,8 +88,6 @@ fn main() -> iced::Result {
             async move {
                 log::info!("[Auth] Checking for stored authentication...");
 
-                // RUS-136: Using trait-based AuthService methods
-                // Try to load stored authentication from keychain
                 match auth_service.load_from_keychain().await {
                     Ok(Some(stored_auth)) => {
                         log::info!(
@@ -177,7 +159,7 @@ fn main() -> iced::Result {
     .subscription(subscriptions::subscription)
     .font(lucide_font_bytes())
     .theme(|_| theme::MediaServerTheme::theme())
-    .present_mode(iced::PresentMode::AutoNoVsync) // Enable 120fps+ with no VSync
+    .present_mode(iced::PresentMode::Mailbox) // Enable 120fps+ with no VSync
     .window(iced::window::Settings {
         size: iced::Size::new(1280.0, 720.0),
         resizable: true,

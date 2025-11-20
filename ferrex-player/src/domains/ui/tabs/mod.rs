@@ -4,6 +4,7 @@
 //! and the "All" view have completely independent state, including
 //! scroll positions, grid states, and cached content.
 
+use ferrex_core::LibraryID;
 use std::fmt;
 use uuid::Uuid;
 
@@ -11,16 +12,16 @@ pub mod manager;
 pub mod state;
 
 pub use manager::TabManager;
-pub use state::{TabState, AllTabState, LibraryTabState};
+pub use state::{AllTabState, LibraryTabState, TabState};
 
 /// Unique identifier for each tab in the application
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TabId {
     /// The "All" tab showing curated content from all libraries
     All,
-    
+
     /// A specific library tab
-    Library(Uuid),
+    Library(LibraryID),
 }
 
 impl TabId {
@@ -28,14 +29,14 @@ impl TabId {
     pub fn is_all(&self) -> bool {
         matches!(self, TabId::All)
     }
-    
+
     /// Check if this is a library tab
     pub fn is_library(&self) -> bool {
         matches!(self, TabId::Library(_))
     }
-    
+
     /// Get the library ID if this is a library tab
-    pub fn library_id(&self) -> Option<Uuid> {
+    pub fn library_id(&self) -> Option<LibraryID> {
         match self {
             TabId::Library(id) => Some(*id),
             TabId::All => None,
@@ -52,8 +53,8 @@ impl fmt::Display for TabId {
     }
 }
 
-impl From<Uuid> for TabId {
-    fn from(library_id: Uuid) -> Self {
+impl From<LibraryID> for TabId {
+    fn from(library_id: LibraryID) -> Self {
         TabId::Library(library_id)
     }
 }

@@ -10,9 +10,13 @@ use crate::{
 
 /// Handle user management domain messages
 pub fn update_user_management(state: &mut State, message: Message) -> DomainUpdateResult {
-    #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
     profiling::scope!(crate::infrastructure::profiling_scopes::scopes::USER_MGMT_UPDATE);
-    
+
     debug!("User management update: {}", message.name());
 
     match message {
@@ -20,16 +24,20 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
         Message::LoadUsers => {
             info!("Loading users from server");
             // Prefer trait-based service
-            let Some(service) = state.domains.user_management.state.user_admin_service.clone() else {
+            let Some(service) = state
+                .domains
+                .user_management
+                .state
+                .user_admin_service
+                .clone()
+            else {
                 error!("No UserAdminService available");
                 return DomainUpdateResult::task(Task::none());
             };
-            DomainUpdateResult::task(
-                Task::perform(
-                    async move { service.list_users().await.map_err(|e| e.to_string()) },
-                    |result| DomainMessage::from(Message::UsersLoaded(result)),
-                )
-            )
+            DomainUpdateResult::task(Task::perform(
+                async move { service.list_users().await.map_err(|e| e.to_string()) },
+                |result| DomainMessage::from(Message::UsersLoaded(result)),
+            ))
         }
 
         Message::UsersLoaded(result) => {
@@ -68,7 +76,7 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
                         permissions: std::collections::HashMap::new(),
                         permission_details: None,
                     }, // TODO: Load actual permissions
-                )]
+                )],
             )
         }
 
@@ -121,7 +129,8 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
                 user.display_name, user.username
             );
             // TODO: Update state and emit event
-            DomainUpdateResult::with_events(Task::none(), vec![CrossDomainEvent::LibraryUpdated]) // TODO: Create proper UserCreated event
+            DomainUpdateResult::with_events(Task::none(), vec![CrossDomainEvent::LibraryUpdated])
+            // TODO: Create proper UserCreated event
         }
 
         Message::CreateUserError(error) => {
@@ -185,7 +194,8 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
                 user.display_name, user.username
             );
             // TODO: Update state and emit event
-            DomainUpdateResult::with_events(Task::none(), vec![CrossDomainEvent::LibraryUpdated]) // TODO: Create proper UserUpdated event
+            DomainUpdateResult::with_events(Task::none(), vec![CrossDomainEvent::LibraryUpdated])
+            // TODO: Create proper UserUpdated event
         }
 
         Message::UpdateUserError(error) => {
@@ -209,27 +219,36 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
 
         Message::DeleteUserConfirm(user_id) => {
             info!("Deleting user: {}", user_id);
-            let Some(service) = state.domains.user_management.state.user_admin_service.clone() else {
+            let Some(service) = state
+                .domains
+                .user_management
+                .state
+                .user_admin_service
+                .clone()
+            else {
                 error!("No UserAdminService available for deletion");
                 return DomainUpdateResult::task(Task::none());
             };
-            DomainUpdateResult::task(
-                Task::perform(
-                    async move {
-                        service.delete_user(user_id).await.map(|_| user_id).map_err(|e| e.to_string())
-                    },
-                    |result| match result {
-                        Ok(id) => DomainMessage::from(Message::DeleteUserSuccess(id)),
-                        Err(err) => DomainMessage::from(Message::DeleteUserError(err)),
-                    },
-                )
-            )
+            DomainUpdateResult::task(Task::perform(
+                async move {
+                    service
+                        .delete_user(user_id)
+                        .await
+                        .map(|_| user_id)
+                        .map_err(|e| e.to_string())
+                },
+                |result| match result {
+                    Ok(id) => DomainMessage::from(Message::DeleteUserSuccess(id)),
+                    Err(err) => DomainMessage::from(Message::DeleteUserError(err)),
+                },
+            ))
         }
 
         Message::DeleteUserSuccess(user_id) => {
             info!("User deleted successfully: {}", user_id);
             // TODO: Update state and emit event
-            DomainUpdateResult::with_events(Task::none(), vec![CrossDomainEvent::LibraryUpdated]) // TODO: Create proper UserDeleted event
+            DomainUpdateResult::with_events(Task::none(), vec![CrossDomainEvent::LibraryUpdated])
+            // TODO: Create proper UserDeleted event
         }
 
         Message::DeleteUserError(error) => {
@@ -295,7 +314,7 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
             // TODO: Complete first-run setup
             DomainUpdateResult::with_events(
                 Task::none(),
-                vec![CrossDomainEvent::AuthenticationComplete]
+                vec![CrossDomainEvent::AuthenticationComplete],
             )
         }
 

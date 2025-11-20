@@ -1,5 +1,5 @@
 //! User Management API Endpoints
-//! 
+//!
 //! Centralized API handlers for user management operations.
 //! These endpoints provide a clean interface for user CRUD operations
 //! with proper authentication, authorization, and validation.
@@ -9,18 +9,11 @@ use axum::{
     http::StatusCode,
     Extension, Json,
 };
-use ferrex_core::{
-    api_types::ApiResponse,
-    user::{User, UserUpdateRequest},
-};
+use ferrex_core::{api_types::ApiResponse, user::User};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{
-    errors::AppResult,
-    services::{UserService, user_service::{CreateUserParams, UpdateUserParams}},
-    AppState,
-};
+use crate::{errors::AppResult, AppState};
 
 /// Query parameters for user listing
 #[derive(Debug, Deserialize)]
@@ -86,16 +79,16 @@ pub struct UserResponse {
 // ============================================================================
 
 /// List users with filtering and pagination
-/// 
+///
 /// GET /api/users
-/// 
+///
 /// Query parameters:
 /// - role: Filter by role name
 /// - search: Search in username/display_name
 /// - limit: Max results (default: 50, max: 1000)
 /// - offset: Skip results for pagination
 /// - include_inactive: Include inactive users
-/// 
+///
 /// Requires: `user.list` permission or admin role
 pub async fn list_users(
     State(_state): State<AppState>,
@@ -108,18 +101,18 @@ pub async fn list_users(
     // TODO: Implement pagination with limit/offset
     // TODO: Convert User entities to UserResponse format
     // TODO: Include role information and session counts
-    
+
     // Placeholder response
     let users = Vec::new();
     Ok(Json(ApiResponse::success(users)))
 }
 
 /// Create a new user
-/// 
+///
 /// POST /api/users
-/// 
+///
 /// Request body: CreateUserRequest
-/// 
+///
 /// Requires: `user.create` permission or admin role
 pub async fn create_user(
     State(_state): State<AppState>,
@@ -135,7 +128,7 @@ pub async fn create_user(
     // TODO: Assign initial roles if specified
     // TODO: Log user creation activity
     // TODO: Return created user in UserResponse format
-    
+
     // Placeholder response
     let user_response = UserResponse {
         id: Uuid::new_v4(),
@@ -150,19 +143,19 @@ pub async fn create_user(
         roles: vec![],
         session_count: 0,
     };
-    
+
     Ok(Json(ApiResponse::success(user_response)))
 }
 
 /// Update an existing user's profile and settings
-/// 
+///
 /// PUT /api/users/:id
-/// 
+///
 /// Path parameters:
 /// - id: User UUID to update
-/// 
+///
 /// Request body: UpdateUserRequest
-/// 
+///
 /// Requires: `user.update` permission for any user, or ownership of the user account
 pub async fn update_user(
     State(_state): State<AppState>,
@@ -178,7 +171,7 @@ pub async fn update_user(
     // TODO: Use UserService to update user with proper validation
     // TODO: Log user update activity
     // TODO: Return updated user in UserResponse format
-    
+
     // Placeholder response
     let user_response = UserResponse {
         id: Uuid::new_v4(),
@@ -193,17 +186,17 @@ pub async fn update_user(
         roles: vec![],
         session_count: 0,
     };
-    
+
     Ok(Json(ApiResponse::success(user_response)))
 }
 
 /// Delete a user account and all associated data
-/// 
+///
 /// DELETE /api/users/:id
-/// 
+///
 /// Path parameters:
 /// - id: User UUID to delete
-/// 
+///
 /// Requires: `user.delete` permission or admin role
 /// Note: Users cannot delete their own accounts through this endpoint
 pub async fn delete_user(
@@ -224,7 +217,7 @@ pub async fn delete_user(
     // TODO: Use UserService.delete_user for atomic deletion
     // TODO: Log user deletion activity
     // TODO: Return 204 No Content on success
-    
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -233,18 +226,15 @@ pub async fn delete_user(
 // ============================================================================
 
 /// Convert a User entity to UserResponse format
-/// 
+///
 /// This helper function enriches the base User entity with additional
 /// information like roles and session counts for API responses.
-async fn _user_to_response(
-    _state: &AppState,
-    _user: User,
-) -> AppResult<UserResponse> {
+async fn _user_to_response(_state: &AppState, _user: User) -> AppResult<UserResponse> {
     // TODO: Get user roles from database
     // TODO: Get active session count
     // TODO: Convert timestamps to Unix timestamps
     // TODO: Build and return UserResponse
-    
+
     Ok(UserResponse {
         id: _user.id,
         username: _user.username,
@@ -255,13 +245,13 @@ async fn _user_to_response(
         updated_at: _user.updated_at.timestamp(),
         last_login: _user.last_login.map(|dt| dt.timestamp()),
         is_active: _user.is_active,
-        roles: vec![], // TODO: Fetch from database
+        roles: vec![],    // TODO: Fetch from database
         session_count: 0, // TODO: Fetch from database
     })
 }
 
 /// Validate that the current user has permission to perform user management operations
-/// 
+///
 /// This helper checks for specific permissions or admin role membership.
 async fn _check_user_management_permission(
     _state: &AppState,
@@ -271,30 +261,27 @@ async fn _check_user_management_permission(
     // TODO: Check for specific permission (e.g., "user.list", "user.create", etc.)
     // TODO: Check for admin role as fallback
     // TODO: Return true if user has permission, false otherwise
-    
+
     Ok(false) // Placeholder
 }
 
 /// Apply search filters to user list
-/// 
+///
 /// Filters users by username and display name using case-insensitive search.
 fn _apply_search_filter(users: &mut Vec<User>, search: &str) {
     let search_lower = search.to_lowercase();
     users.retain(|user| {
-        user.username.to_lowercase().contains(&search_lower) ||
-        user.display_name.to_lowercase().contains(&search_lower)
+        user.username.to_lowercase().contains(&search_lower)
+            || user.display_name.to_lowercase().contains(&search_lower)
     });
 }
 
 /// Apply pagination to user list
-/// 
+///
 /// Applies offset and limit to the user list for pagination.
 fn _apply_pagination<T>(items: Vec<T>, offset: Option<i64>, limit: Option<i64>) -> Vec<T> {
     let offset = offset.unwrap_or(0).max(0) as usize;
     let limit = limit.unwrap_or(50).max(1).min(1000) as usize;
-    
-    items.into_iter()
-        .skip(offset)
-        .take(limit)
-        .collect()
+
+    items.into_iter().skip(offset).take(limit).collect()
 }

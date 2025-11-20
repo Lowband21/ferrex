@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use super::messages::Message;
-use crate::common::messages::{DomainMessage, DomainUpdate, DomainUpdateResult};
+use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::infrastructure::services::api::ApiService;
 use crate::state_refactored::State;
+use ferrex_core::{MediaIDLike, UpdateProgressRequest};
 use iced::Task;
 
 /// Handle media domain messages - focused on media management, not playback
@@ -27,10 +28,10 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
             log::info!(
                 "PlayMediaWithId: Received media file '{}' with duration = {:?}",
                 media.filename,
-                media.metadata.as_ref().and_then(|m| m.duration)
+                media.media_file_metadata.as_ref().and_then(|m| m.duration)
             );
 
-            // Store the MediaId for watch status tracking
+            // Store the MediaID for watch status tracking
             state.domains.media.state.current_media_id = Some(media_id.clone());
             state.domains.player.state.current_media_id = Some(media_id.clone());
 
@@ -38,7 +39,7 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
             let resume_position =
                 if let Some(watch_state) = &state.domains.media.state.user_watch_state {
                     watch_state
-                        .get_by_media_id(&media_id)
+                        .get_by_media_id(media_id.as_uuid())
                         .map(|item| item.position)
                 } else {
                     None
@@ -55,36 +56,41 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
         }
 
         Message::LoadMediaById(media_id) => {
-            // Load a media file by its ID from the media store - O(1) efficient lookup
             log::info!("Loading media by ID: {:?}", media_id);
 
-            // Efficient O(1) lookup in media store (with read lock)
-            let core_media_file = {
-                let store = state.domains.media.state.media_store.read().unwrap();
-                store.get_media_file_by_id(&media_id)
-            };
+            let media_result = state.domains.media.state.repo_accessor.get(&media_id);
 
-            if let Some(core_file) = core_media_file {
-                // Log the core file's metadata
-                log::info!(
-                    "Core MediaFile metadata: duration = {:?}",
-                    core_file
-                        .media_file_metadata
-                        .as_ref()
-                        .and_then(|m| m.duration)
-                );
+            if let Ok(media_ref) = media_result {
+                let mediafile_opt = match media_ref {
+                    ferrex_core::Media::Movie(movie_reference) => Some(movie_reference.file),
+                    ferrex_core::Media::Series(series_reference) => None,
+                    ferrex_core::Media::Season(season_reference) => None,
+                    ferrex_core::Media::Episode(episode_reference) => Some(episode_reference.file),
+                };
+                if let Some(mediafile) = mediafile_opt {
+                    // Log the core file's metadata
+                    log::info!(
+                        "Core MediaFile metadata: duration = {:?}",
+                        mediafile
+                            .media_file_metadata
+                            .as_ref()
+                            .and_then(|m| m.duration)
+                    );
 
-                // Convert from core type to player type (temporary until migration complete)
-                let player_media_file = crate::domains::media::library::MediaFile::from(core_file);
-
-                // Log the converted file's metadata
-                log::info!(
-                    "Converted MediaFile metadata: duration = {:?}",
-                    player_media_file.metadata.as_ref().and_then(|m| m.duration)
-                );
-
-                // Play the media with ID tracking
-                update_media(state, Message::PlayMediaWithId(player_media_file, media_id))
+                    // Play the media with ID tracking
+                    update_media(state, Message::PlayMediaWithId(mediafile, media_id))
+                } else {
+                    log::error!(
+                        "MediaID does not reference a playable media: {:?}",
+                        media_id
+                    );
+                    // Return an error view
+                    state.domains.ui.state.view =
+                        crate::domains::ui::types::ViewState::VideoError {
+                            message: format!("Media not playable: {:?}", media_id),
+                        };
+                    DomainUpdateResult::task(Task::none())
+                }
             } else {
                 log::error!("Media not found for ID: {:?}", media_id);
                 // Return an error view
@@ -220,11 +226,12 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
         }
 
         Message::PlayNextEpisode => {
+            /* TODO: Reimplement this
             // Check if current media is an episode and play the next one
             if let Some(current_media_id) = &state.domains.media.state.current_media_id {
-                if let ferrex_core::api_types::MediaId::Episode(episode_id) = current_media_id {
+                if let ferrex_core::MediaID::Episode(episode_id) = current_media_id {
                     // Use series progress service to find next episode
-                    use crate::domains::media::services::SeriesProgressService;
+                    //use crate::domains::media::services::SeriesProgressService;
 
                     let media_store = state.domains.media.state.media_store.clone();
                     let service = SeriesProgressService::new(media_store);
@@ -240,8 +247,7 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                         let media_file = crate::domains::media::library::MediaFile::from(
                             next_episode.file.clone(),
                         );
-                        let media_id =
-                            ferrex_core::api_types::MediaId::Episode(next_episode.id.clone());
+                        let media_id = ferrex_core::MediaID::Episode(next_episode.id.clone());
 
                         // Clear any pending resume position for fresh start of next episode
                         state.domains.media.state.pending_resume_position = None;
@@ -259,7 +265,8 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                 }
             } else {
                 DomainUpdateResult::task(Task::none())
-            }
+            } */
+            DomainUpdateResult::task(Task::none())
         }
 
         Message::MediaAvailabilityChecked(media_file) => {
@@ -311,7 +318,7 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                     if let Some(watch_state) = &mut state.domains.media.state.user_watch_state {
                         // Update progress in local watch state
                         watch_state.update_progress(
-                            media_id.clone(),
+                            media_id.to_uuid(),
                             position as f32,
                             duration as f32,
                         );
@@ -323,19 +330,19 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                         );
 
                         // Debug: Check what's actually in the watch state now
-                        if let Some(item) = watch_state.in_progress.get(media_id) {
+                        if let Some(item) = watch_state.in_progress.get(media_id.as_uuid()) {
                             log::debug!(
-                                "Watch state verification - MediaId {:?} has position: {:.1}s, duration: {:.1}s",
+                                "Watch state verification - MediaID {:?} has position: {:.1}s, duration: {:.1}s",
                                 media_id, item.position, item.duration
                             );
-                        } else if watch_state.completed.contains(media_id) {
+                        } else if watch_state.completed.contains(media_id.as_uuid()) {
                             log::debug!(
-                                "Watch state verification - MediaId {:?} is marked as completed",
+                                "Watch state verification - MediaID {:?} is marked as completed",
                                 media_id
                             );
                         } else {
                             log::warn!(
-                                "Watch state verification - MediaId {:?} not found after update!",
+                                "Watch state verification - MediaID {:?} not found after update!",
                                 media_id
                             );
                         }
@@ -403,12 +410,12 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
 
                 if position > 0.0 && duration > 0.0 {
                     let api_service = api_service.clone();
-                    let media_id = media_id.clone();
 
                     DomainUpdateResult::task(Task::perform(
                         async move {
-                            let request = ferrex_core::watch_status::UpdateProgressRequest {
-                                media_id,
+                            let request = UpdateProgressRequest {
+                                media_id: media_id.to_uuid(),
+                                media_type: media_id.media_type(),
                                 position: position as f32,
                                 duration: duration as f32,
                             };

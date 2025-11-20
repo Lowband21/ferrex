@@ -7,7 +7,9 @@ use crate::infrastructure::api_client::ApiClient;
 
 #[async_trait]
 pub trait SettingsService: Send + Sync {
-    async fn list_user_devices(&self) -> Result<Vec<ferrex_core::auth::device::AuthenticatedDevice>>;
+    async fn list_user_devices(
+        &self,
+    ) -> Result<Vec<ferrex_core::auth::device::AuthenticatedDevice>>;
     async fn revoke_device(&self, device_id: Uuid) -> Result<()>;
 }
 
@@ -17,12 +19,16 @@ pub struct SettingsApiAdapter {
 }
 
 impl SettingsApiAdapter {
-    pub fn new(client: Arc<ApiClient>) -> Self { Self { client } }
+    pub fn new(client: Arc<ApiClient>) -> Self {
+        Self { client }
+    }
 }
 
 #[async_trait]
 impl SettingsService for SettingsApiAdapter {
-    async fn list_user_devices(&self) -> Result<Vec<ferrex_core::auth::device::AuthenticatedDevice>> {
+    async fn list_user_devices(
+        &self,
+    ) -> Result<Vec<ferrex_core::auth::device::AuthenticatedDevice>> {
         self.client.list_user_devices().await
     }
 

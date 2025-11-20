@@ -1,13 +1,13 @@
 //! User management domain
-//! 
+//!
 //! Contains all user management-related state and logic
 
 pub mod messages;
 pub mod update;
 
-use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
-use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use self::messages::Message as UserManagementMessage;
+use crate::common::messages::{CrossDomainEvent, DomainMessage};
+use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use ferrex_core::rbac::UserPermissions;
 use iced::Task;
 
@@ -16,7 +16,9 @@ pub struct UserManagementDomainState {
     // References needed by user management domain
     pub api_service: Option<std::sync::Arc<ApiClientAdapter>>,
     pub user_permissions: Option<UserPermissions>,
-    pub user_admin_service: Option<std::sync::Arc<dyn crate::infrastructure::services::user_management::UserAdminService>>,
+    pub user_admin_service: Option<
+        std::sync::Arc<dyn crate::infrastructure::services::user_management::UserAdminService>,
+    >,
 }
 
 impl Default for UserManagementDomainState {
@@ -34,7 +36,10 @@ impl std::fmt::Debug for UserManagementDomainState {
         f.debug_struct("UserManagementDomainState")
             .field("has_api_service", &self.api_service.as_ref().map(|_| true))
             .field("user_permissions", &self.user_permissions)
-            .field("has_user_admin_service", &self.user_admin_service.as_ref().map(|_| true))
+            .field(
+                "has_user_admin_service",
+                &self.user_admin_service.as_ref().map(|_| true),
+            )
             .finish()
     }
 }

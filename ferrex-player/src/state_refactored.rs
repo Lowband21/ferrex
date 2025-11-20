@@ -3,12 +3,35 @@
 //! This new State structure delegates domain-specific state to the DomainRegistry,
 //! keeping only the view models and cross-cutting concerns at the top level.
 
-use crate::domains::media::store::MediaStoreSubscriber;
+use crate::domains::auth::AuthDomainState;
+use crate::domains::auth::AuthManager;
+use crate::domains::library::LibraryDomainState;
+use crate::domains::media::repository::{
+    accessor::{Accessor, ReadOnly, ReadWrite},
+    repository::MediaRepo,
+};
+use crate::domains::media::MediaDomainState;
+use crate::domains::metadata::image_service::UnifiedImageService;
+use crate::domains::metadata::MetadataDomainState;
+use crate::domains::player::PlayerDomain;
+use crate::domains::search::SearchDomain;
+use crate::domains::settings::SettingsDomainState;
+use crate::domains::streaming::StreamingDomainState;
 use crate::domains::ui::tabs::{TabId, TabManager};
-use crate::domains::ui::view_models::AllViewModel;
+use crate::domains::ui::views::carousel::CarouselState;
+use crate::domains::ui::UIDomainState;
+use crate::domains::user_management::UserManagementDomainState;
 use crate::domains::DomainRegistry;
-use crate::infrastructure::api_types::Library;
-use std::sync::{Arc, RwLock as StdRwLock, Weak};
+use crate::infrastructure::adapters::ApiClientAdapter;
+use crate::infrastructure::adapters::AuthManagerAdapter;
+use crate::infrastructure::api_client::ApiClient;
+use crate::infrastructure::services::settings::SettingsApiAdapter;
+use crate::infrastructure::services::streaming::StreamingApiAdapter;
+use crate::infrastructure::services::user_management::UserAdminApiAdapter;
+use crate::infrastructure::ServiceBuilder;
+use ferrex_core::LibraryID;
+use parking_lot::RwLock as StdRwLock;
+use std::sync::Arc;
 
 /// Application state - refactored to use domain-driven architecture
 #[derive(Debug)]
@@ -19,21 +42,16 @@ pub struct State {
     /// Tab manager for independent tab states (NEW ARCHITECTURE)
     pub tab_manager: TabManager,
 
-    /// View model for the All tab's carousel view
-    pub all_view_model: AllViewModel,
-
     /// Server URL - needed by multiple domains
     pub server_url: String,
 
     /// Shared services and infrastructure
-    pub api_client: Option<crate::infrastructure::ApiClient>,
-    pub image_service: crate::domains::metadata::image_service::UnifiedImageService,
+    pub api_service: Arc<ApiClientAdapter>,
+    pub image_service: UnifiedImageService,
     pub image_receiver: Arc<std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
 
-    /// Shared metadata services
-    pub batch_metadata_fetcher:
-        Option<Arc<crate::domains::metadata::batch_fetcher::BatchMetadataFetcher>>,
-
+    //pub batch_metadata_fetcher:
+    //    Option<Arc<crate::domains::metadata::batch_fetcher::BatchMetadataFetcher>>,
     /// Top-level application state
     pub loading: bool,
     pub is_authenticated: bool,
@@ -41,86 +59,121 @@ pub struct State {
     pub window_position: Option<iced::Point>,
     pub is_fullscreen: bool,
 
-    /// Notifier for MediaStore changes - triggers ViewModel refreshes
-    pub media_store_notifier: Arc<crate::domains::media::store::MediaStoreNotifier>,
+    /// MediaRepo for new architecture - single source of truth for media/library data
+    pub media_repo: Arc<StdRwLock<Option<MediaRepo>>>,
 }
 
 impl State {
     /// Create a new State with the given server URL
     pub fn new(server_url: String) -> Self {
         // Create shared resources
-        let media_store = Arc::new(StdRwLock::new(
-            crate::domains::media::store::MediaStore::new(),
-        ));
-        let api_client = crate::infrastructure::api_client::ApiClient::new(server_url.clone());
-        let (image_service, _receiver) =
-            crate::domains::metadata::image_service::UnifiedImageService::new(16);
+        // Initialize MediaRepo (will be populated when libraries are loaded)
+        let media_repo = Arc::new(StdRwLock::new(None));
+        let ui_accessor: Accessor<ReadOnly> = Accessor::new(media_repo.clone());
+        let lib_accessor: Accessor<ReadWrite> = Accessor::new(media_repo.clone());
+        // Media and library domains should be combined
+        let media_accessor: Accessor<ReadWrite> = Accessor::new(media_repo.clone());
+
+        let api_client = ApiClient::new(server_url.clone());
+        let (image_service, _receiver) = UnifiedImageService::new(16);
 
         // Create service builder/toggles first (used by multiple domains)
-        let service_builder = crate::infrastructure::services::ServiceBuilder::new();
+        let service_builder = ServiceBuilder::new();
 
         // RUS-136: Create single ApiClientAdapter instance to share across all domains
-        let api_adapter = std::sync::Arc::new(
-            crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter::new(
-                std::sync::Arc::new(api_client.clone()),
-            ),
-        );
+        let api_adapter = std::sync::Arc::new(ApiClientAdapter::new(std::sync::Arc::new(
+            api_client.clone(),
+        )));
 
         // RUS-136: Create trait-based AuthService via adapter
         // Create AuthManager inline for the adapter (not stored in State)
-        let auth_manager = crate::domains::auth::manager::AuthManager::new(api_client.clone());
+        let auth_manager = AuthManager::new(api_client.clone());
         let mgr_arc = std::sync::Arc::new(auth_manager);
-        let adapter = crate::infrastructure::adapters::AuthManagerAdapter::new(mgr_arc);
+        let adapter = AuthManagerAdapter::new(mgr_arc);
         let auth_service = std::sync::Arc::new(adapter);
 
         // Create domain states with required services
-        let auth_state =
-            crate::domains::auth::AuthDomainState::new(api_adapter.clone(), auth_service.clone());
+        let auth_state = AuthDomainState::new(api_adapter.clone(), auth_service.clone());
 
-        let library_state = crate::domains::library::LibraryDomainState::new(
-            media_store.clone(),
-            Some(api_adapter.clone()),
-        );
+        let library_state = LibraryDomainState::new(Some(api_adapter.clone()), lib_accessor);
 
-        let media_state = crate::domains::media::MediaDomainState::new(
-            media_store.clone(),
-            Some(api_adapter.clone()),
-        );
+        let media_state = MediaDomainState::new(media_accessor, Some(api_adapter.clone()));
 
-        let metadata_state = crate::domains::metadata::MetadataDomainState::new(
+        let metadata_state = MetadataDomainState::new(
             server_url.clone(),
-            media_store.clone(),
             Some(api_adapter.clone()),
             image_service.clone(),
         );
 
-        let ui_state = crate::domains::ui::UIDomainState::default();
+        let ui_state = UIDomainState {
+            view: crate::domains::ui::types::ViewState::Library,
+            // Resolve default widget animation from constants
+            default_widget_animation: {
+                use crate::domains::ui::widgets::AnimationType as WidgetAnim;
+                use crate::infrastructure::constants::animation::{
+                    PosterAnimationKind, DEFAULT_DURATION_MS, DEFAULT_POSTER_ANIMATION,
+                };
+                match DEFAULT_POSTER_ANIMATION {
+                    PosterAnimationKind::None => WidgetAnim::None,
+                    PosterAnimationKind::Fade => WidgetAnim::Fade {
+                        duration: std::time::Duration::from_millis(DEFAULT_DURATION_MS),
+                    },
+                    PosterAnimationKind::Flip => WidgetAnim::flip(),
+                }
+            },
+            repo_accessor: ui_accessor.clone(),
+            // New zero-copy fields
+            movie_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(2048),
+            series_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(256),
+
+            movies_carousel: CarouselState::new(0),
+            tv_carousel: CarouselState::new(0),
+
+            display_mode: crate::domains::ui::types::DisplayMode::Curated,
+            sort_by: crate::domains::ui::SortBy::Title,
+            sort_order: crate::domains::ui::SortOrder::Ascending,
+            loading: false,
+            error_message: None,
+            window_size: iced::Size::new(1280.0, 720.0),
+            expanded_shows: std::collections::HashSet::new(),
+            hovered_media_id: None,
+            theme_color_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            current_library_id: None,
+            last_scroll_position: 0.0,
+            scroll_stopped_time: None,
+            last_scroll_time: None,
+            last_check_task_created: None,
+            scroll_manager: crate::domains::ui::scroll_manager::ScrollPositionManager::default(),
+            background_shader_state:
+                crate::domains::ui::background_state::BackgroundShaderState::default(),
+            search_query: String::new(),
+            show_library_menu: false,
+            library_menu_target: None,
+            is_fullscreen: false,
+            show_seasons_carousel: None,
+            season_episodes_carousel: None,
+            show_clear_database_confirm: false,
+            navigation_history: Vec::new(),
+            poster_anim_active_until: None,
+        };
 
         // Create settings service adapter
-        let api_arc = std::sync::Arc::new(api_client.clone());
-        let settings_adapter =
-            crate::infrastructure::services::settings::SettingsApiAdapter::new(api_arc);
-        let settings_service = std::sync::Arc::new(settings_adapter);
+        let api_arc = Arc::new(api_client.clone());
+        let settings_adapter = SettingsApiAdapter::new(api_arc);
+        let settings_service = Arc::new(settings_adapter);
 
-        let settings_state = crate::domains::settings::SettingsDomainState::new(
-            auth_service.clone(),
-            api_adapter.clone(),
-            settings_service,
-        );
+        let settings_state =
+            SettingsDomainState::new(auth_service.clone(), api_adapter.clone(), settings_service);
 
         // Create streaming service adapter
-        let api_arc = std::sync::Arc::new(api_client.clone());
-        let streaming_adapter =
-            crate::infrastructure::services::streaming::StreamingApiAdapter::new(api_arc);
-        let streaming_service = std::sync::Arc::new(streaming_adapter);
+        let api_arc_stream = Arc::new(api_client.clone());
+        let streaming_adapter = StreamingApiAdapter::new(api_arc_stream);
+        let streaming_service = Arc::new(streaming_adapter);
 
-        let streaming_state = crate::domains::streaming::StreamingDomainState::new(
-            media_store.clone(),
-            api_adapter.clone(),
-            streaming_service,
-        );
+        let streaming_state =
+            StreamingDomainState::new(api_adapter.clone(), streaming_service, ui_accessor.clone());
 
-        let mut user_mgmt_state = crate::domains::user_management::UserManagementDomainState {
+        let mut user_mgmt_state = UserManagementDomainState {
             api_service: Some(api_adapter.clone()),
             user_admin_service: None,
             ..Default::default()
@@ -128,20 +181,13 @@ impl State {
 
         if service_builder.toggles().prefer_trait_services {
             let api_arc = std::sync::Arc::new(api_client.clone());
-            let adapter =
-                crate::infrastructure::services::user_management::UserAdminApiAdapter::new(api_arc);
+            let adapter = UserAdminApiAdapter::new(api_arc);
             user_mgmt_state.user_admin_service = Some(std::sync::Arc::new(adapter));
         }
 
-        let player_domain = crate::domains::player::PlayerDomain::new(
-            media_store.clone(),
-            Some(api_adapter.clone()),
-        );
+        let player_domain = PlayerDomain::new(Some(api_adapter.clone()));
 
-        let search_domain = crate::domains::search::SearchDomain::new_with_metrics(
-            media_store.clone(),
-            Some(api_adapter.clone()),
-        );
+        let search_domain = SearchDomain::new_with_metrics(Some(api_adapter.clone()));
 
         // Create domain registry
         let domains = DomainRegistry {
@@ -159,63 +205,30 @@ impl State {
             search: search_domain,
         };
 
-        // Create batch metadata fetcher for efficient metadata processing
-        let batch_metadata_fetcher = Arc::new(
-            crate::domains::metadata::batch_fetcher::BatchMetadataFetcher::new(
-                api_adapter.clone(),
-                media_store.clone(),
-            ),
-        );
-
-        // Create MediaStore notifier with longer debounce to reduce refresh frequency
-        // 250ms debounce reduces UI refresh load during initial library loading
-        let media_store_notifier =
-            Arc::new(crate::domains::media::store::MediaStoreNotifier::with_debounce(250));
-        {
-            if let Ok(mut store) = media_store.write() {
-                store.subscribe(
-                    Arc::downgrade(&media_store_notifier) as Weak<dyn MediaStoreSubscriber>
-                );
-                log::info!("[MediaStore] Notifier subscribed for ViewModel refresh tracking");
-            } else {
-                log::error!(
-                    "[MediaStore] Failed to subscribe notifier - ViewModels won't auto-refresh"
-                );
-            }
-        }
-
         // Create tab manager (NEW ARCHITECTURE)
-        let mut tab_manager = TabManager::new(media_store.clone());
-
+        let mut tab_manager = TabManager::new(ui_accessor.clone());
         // Initialize and activate the All tab at startup
         tab_manager.get_or_create_tab(crate::domains::ui::tabs::TabId::All);
         tab_manager.set_active_tab(crate::domains::ui::tabs::TabId::All);
         tab_manager.refresh_active_tab();
         log::info!("[Startup] Initialized and activated All tab for curated view");
 
-        // Create view model for the All tab
-        let all_view_model = AllViewModel::new(media_store.clone());
-
-        // NOTE: ViewModels themselves are not directly subscribed to avoid Arc<ViewModel> complexity
-        // Instead, MediaStoreNotifier tracks changes and triggers RefreshViewModels when needed
-        log::info!("[Architecture] Using MediaStoreNotifier pattern for ViewModel updates");
+        // NOTE: Tabs and views use the repo accessor pattern for data access
         log::info!("[Architecture] TabManager created for independent tab state management");
 
         Self {
             domains,
             tab_manager,
-            all_view_model,
             server_url: server_url.clone(),
-            api_client: Some(api_client),
+            api_service: api_adapter,
             image_service: image_service.clone(), // TODO: Fix this clone
             image_receiver: Arc::new(std::sync::Mutex::new(Some(_receiver))),
-            batch_metadata_fetcher: Some(batch_metadata_fetcher),
             loading: true,
             is_authenticated: false,
             window_size: iced::Size::new(1280.0, 720.0),
             window_position: None,
             is_fullscreen: false,
-            media_store_notifier,
+            media_repo,
         }
     }
 
@@ -230,23 +243,14 @@ impl State {
     }
 
     /// Helper method to get current library ID
-    pub fn current_library_id(&self) -> Option<uuid::Uuid> {
+    pub fn current_library_id(&self) -> Option<LibraryID> {
         self.domains.library.state.current_library_id
     }
 
     /// Update TabManager with library information
     pub fn update_tab_manager_libraries(&mut self) {
-        // Update TabManager with current libraries
-        self.tab_manager
-            .update_libraries(&self.domains.library.state.libraries);
-
-        // Also register each library's type for tab creation
-        for library in &self.domains.library.state.libraries {
-            if library.enabled {
-                self.tab_manager
-                    .register_library(library.id, library.library_type);
-            }
-        }
+        // Update TabManager with current libraries via the repo accessor
+        self.tab_manager.update_libraries();
     }
 
     /// Get the active tab ID

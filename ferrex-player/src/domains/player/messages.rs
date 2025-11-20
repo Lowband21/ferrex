@@ -1,4 +1,4 @@
-use crate::domains::media::library::MediaFile;
+use ferrex_core::MediaFile;
 use iced::ContentFit;
 use std::fmt;
 use std::time::Duration;
@@ -34,7 +34,7 @@ pub enum Message {
     // Playlist control (NEW - for Phase 2 direct commands)
     ToggleShuffle,
     ToggleRepeat,
-    LoadTrack(ferrex_core::api_types::MediaId),
+    LoadTrack(ferrex_core::MediaID),
 
     // Video events
     VideoLoaded(bool), // Success flag

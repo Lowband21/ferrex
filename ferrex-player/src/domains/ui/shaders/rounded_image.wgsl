@@ -5,7 +5,7 @@ struct Globals {
     transform: mat4x4<f32>,  // 64 bytes
     scale_factor: f32,       // 4 bytes
     _padding1: f32,          // 4 bytes padding
-    _padding2: f32,          // 4 bytes padding  
+    _padding2: f32,          // 4 bytes padding
     _padding3: f32,          // 4 bytes padding
     _padding4: vec4<f32>,    // 16 bytes padding - total struct is 96 bytes
 }
@@ -231,6 +231,16 @@ fn linear_to_srgb(color: vec3<f32>) -> vec3<f32> {
     return pow(color, vec3<f32>(1.0 / 2.2));
 }
 
+fn to_premul(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(c.rgb * c.a, c.a);
+}
+
+fn over(top: vec4<f32>, bottom: vec4<f32>) -> vec4<f32> {
+    let out_a = top.a + bottom.a * (1.0 - top.a);
+    let out_rgb = top.rgb + bottom.rgb * (1.0 - top.a);
+    return vec4<f32>(out_rgb, out_a);
+}
+
 // Signed distance function for rounded rectangle in normalized coordinates (0-1)
 fn rounded_rect_sdf_normalized(p: vec2<f32>, radius_normalized: f32) -> f32 {
     // p is in range 0-1, with (0.5, 0.5) at center
@@ -434,7 +444,7 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
     let center_hover = has_mouse && circle_sdf(mouse_pos, center_button_pos, center_button_radius) < 0.0;
 
     // For circles, we need proper anti-aliasing
-    let aa_width = 0.002; // Anti-aliasing width
+    let aa_width = max(1e-3, fwidth(center_button_dist));
 
     if center_button_dist < -aa_width {
         // Fully inside button
@@ -481,7 +491,8 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
                 vec4<f32>(0.0, 0.0, 0.0, 1.0), // Black when hovered
                 center_hover
             );
-            let icon_alpha = smoothstep(0.002, -0.002, play_dist);
+            let play_aa = max(1e-3, fwidth(play_dist));
+            let icon_alpha = smoothstep(play_aa, -play_aa, play_dist);
             button_color = mix(button_color, icon_color, icon_alpha);
         }
     }
@@ -500,7 +511,8 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
     let edit_icon_scale = 0.045 * edit_scale; // Slightly larger base size
     let edit_dist = edit_icon_sdf(tex_coord, edit_button_pos, edit_icon_scale);
     if edit_dist < 0.0 {
-        let icon_alpha = smoothstep(0.002, -0.002, edit_dist) * edit_opacity;
+        let edit_aa = max(1e-3, fwidth(edit_dist));
+        let icon_alpha = smoothstep(edit_aa, -edit_aa, edit_dist) * edit_opacity;
         let icon_color = vec4<f32>(1.0, 1.0, 1.0, icon_alpha);
         button_color = mix(button_color, icon_color, icon_color.a);
     }
@@ -519,7 +531,8 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
     let dots_icon_scale = 0.045 * dots_scale; // Slightly larger base size
     let dots_dist = dots_icon_sdf(tex_coord, dots_button_pos, dots_icon_scale);
     if dots_dist < 0.0 {
-        let icon_alpha = smoothstep(0.002, -0.002, dots_dist) * dots_opacity;
+        let dots_aa = max(1e-3, fwidth(dots_dist));
+        let icon_alpha = smoothstep(dots_aa, -dots_aa, dots_dist) * dots_opacity;
         let icon_color = vec4<f32>(1.0, 1.0, 1.0, icon_alpha);
         button_color = mix(button_color, icon_color, icon_color.a);
     }
@@ -543,17 +556,18 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let show_overlay = input.hover_overlay_params.y;
     let is_animating = input.animation_progress < 0.99;
 
-    // For backface, use theme color with dimming
+    // For backface, use theme color with stronger dimming
     if input.is_backface > 0.5 {
-        // Dim the theme color by 30% for backface (matching placeholder)
-        linear_rgb = input.theme_color * 0.7;
+        linear_rgb = input.theme_color * 0.5;
     } else {
-        // Front face: check if we have valid atlas UVs
+        // Front face: build cross-fade from dimmed placeholder to texture
         // Invalid UVs are set to a tiny range (0.001, 0.001) when image fails to load
         let uv_range = length(input.tex_coord);
+        let placeholder_rgb = input.theme_color * 0.5;
         if uv_range < 0.01 {  // Detect invalid/fallback UVs
-            // No valid texture, use theme color
-            linear_rgb = input.theme_color * 0.7;
+        // No valid texture, use placeholder only
+        linear_rgb = placeholder_rgb;
+        alpha = 1.0;
         } else {
             // Valid UVs - sample the poster texture from atlas
             let sampled_color = textureSample(
@@ -568,47 +582,39 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // Calculate SDF once for reuse
-    // Use local_pos (widget space) for SDF calculations, not tex_coord (atlas space)
-    let dist_normalized = rounded_rect_sdf_normalized(input.local_pos, input.corner_radius_normalized);
-    let fw = length(fwidth(input.local_pos));
-    let rounded_alpha = 1.0 - smoothstep(-fw, fw, dist_normalized);
+    // Calculate SDF and AA coverage once for reuse
+    let dist = rounded_rect_sdf_normalized(input.local_pos, input.corner_radius_normalized);
+    let aa = max(1e-3, fwidth(dist));
+    let coverage = 1.0 - smoothstep(0.0, aa, dist);
 
     // FAST PATH: Skip expensive calculations for non-hovered, non-animating posters
     // But still render progress indicators and borders
     let needs_full_render = show_overlay > 0.5 || is_animating || abs(z_depth) > 0.01 || shadow_intensity > 0.01;
 
     if !needs_full_render {
-        // Fast path - skip shadows and complex effects
-        // Keep in linear space - GPU will convert to sRGB if framebuffer is sRGB
-        var fast_color = vec4<f32>(linear_rgb, alpha * rounded_alpha * input.opacity);
+        // Base color in pre-multiplied space with coverage and opacity
+        var final_color = to_premul(vec4<f32>(linear_rgb, alpha)) * (coverage * input.opacity);
 
-        // Always render border (simple version)
-        if is_hovered > 0.5 {
-            // Hovered border
-            let border_width = 0.005;
-            if dist_normalized > -border_width && dist_normalized < border_width {
-                let inner_alpha = smoothstep(-border_width, -border_width + 0.001, dist_normalized);
-                let outer_alpha = 1.0 - smoothstep(border_width - 0.001, border_width, dist_normalized);
-                let border_alpha = min(inner_alpha, outer_alpha);
-                fast_color = vec4<f32>(
-                    mix(fast_color.rgb, input.progress_color, border_alpha),
-                    max(fast_color.a, border_alpha)
-                );
-            }
-        } else {
-            // Unhovered border
-            if dist_normalized < 0.0 && dist_normalized > -0.004 {
-                let border_alpha = smoothstep(-0.004, -0.003, dist_normalized);
-                fast_color = vec4<f32>(
-                    mix(fast_color.rgb, vec3<f32>(0.0), border_alpha),
-                    max(fast_color.a, border_alpha)
-                );
+        // Pixel-accurate inside-only border using SDF-aware fwidth
+        {
+            let d = dist;
+            let d_aa = max(1e-3, fwidth(d));
+            let border_px = select(1.2, 1.6, is_hovered > 0.5);
+            let w = border_px * d_aa;
+
+            let inner = smoothstep(-w, -w + d_aa, d);
+            let edge = 1.0 - smoothstep(0.0, d_aa, d);
+            let border_alpha = clamp(min(inner, edge), 0.0, 1.0);
+
+            if border_alpha > 0.0 {
+                let border_rgb = select(vec3<f32>(0.0, 0.0, 0.0), input.progress_color, is_hovered > 0.5);
+                let border_pm = vec4<f32>(border_rgb * border_alpha, border_alpha);
+                final_color = over(border_pm, final_color);
             }
         }
 
-        // Check for watch status corner only after animation completes
-        if input.progress >= 0.0 && dist_normalized < 0.0 && input.animation_progress >= 0.99 {
+        // Watch status corner indicator (top-right) after animation completes
+        if input.progress >= 0.0 && dist < 0.0 && input.animation_progress >= 0.99 {
             let aspect_ratio = 2.0 / 3.0;
             let fold_size_x = input.corner_radius_normalized * 2.5;
             let fold_size_y = fold_size_x * aspect_ratio;
@@ -629,31 +635,30 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 var indicator_opacity = select(0.85, 0.6, input.progress > 0.0);
                 indicator_opacity = select(indicator_opacity, 0.2, input.progress >= 0.95);
 
-                // Keep colors in linear space
-                let indicator_with_alpha = vec4<f32>(input.progress_color, indicator_opacity * triangle_alpha);
-                fast_color = mix(fast_color, indicator_with_alpha, indicator_with_alpha.a);
+                let ia = indicator_opacity * triangle_alpha;
+                let indicator_pm = vec4<f32>(input.progress_color * ia, ia);
+                final_color = over(indicator_pm, final_color);
             }
         }
 
-        // Check for progress bar only after animation completes
+        // Progress bar at bottom after animation completes
         if input.progress > 0.0 && input.progress < 0.95 && input.animation_progress >= 0.99 {
             let bar_start_y = 1.0 - 0.03;
-            if input.local_pos.y >= bar_start_y && dist_normalized < 0.0 {
-                let edge_fade = smoothstep(0.0, -0.01, dist_normalized);
+            if input.local_pos.y >= bar_start_y && dist < 0.0 {
+                let edge_fade = smoothstep(0.0, -0.01, dist);
                 if input.local_pos.x <= input.progress {
-                    // Keep colors in linear space
-                    let bar_with_alpha = vec4<f32>(input.progress_color, 0.8 * edge_fade);
-                    fast_color = mix(fast_color, bar_with_alpha, bar_with_alpha.a);
+                    let a = 0.8 * edge_fade;
+                    let bar_pm = vec4<f32>(input.progress_color * a, a);
+                    final_color = over(bar_pm, final_color);
                 } else {
-                    let bg_color = vec4<f32>(0.0, 0.0, 0.0, 0.4 * edge_fade);
-                    fast_color = mix(fast_color, bg_color, bg_color.a);
+                    let a = 0.4 * edge_fade;
+                    let bg_pm = vec4<f32>(vec3<f32>(0.0), a);
+                    final_color = over(bg_pm, final_color);
                 }
             }
         }
-
-        return fast_color;
+        return final_color;
     }
-
 
     // Apply shadow effects only when actually visible
     if shadow_intensity > 0.01 && abs(z_depth) > 0.01 {
@@ -664,95 +669,77 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // SDF and alpha already calculated at the beginning of the function
+    // Build base pre-multiplied color with coverage and opacity
+    var final_color = to_premul(vec4<f32>(linear_rgb, alpha)) * (coverage * input.opacity);
 
-    // Apply alpha clipping and opacity (rounded_alpha already computed)
-    let final_alpha = alpha * rounded_alpha * input.opacity;
-
-    // Keep in linear space - GPU handles sRGB conversion if needed
-    var final_color = vec4<f32>(linear_rgb, final_alpha);
-
-    // Apply border glow effect
-    final_color = apply_border_glow(final_color, dist_normalized, border_glow);
-
-    // Render drop shadow only when significantly elevated
-    if z_depth > 1.0 && shadow_intensity > 0.1 {
-        let shadow = render_drop_shadow(input.local_pos, input.corner_radius_normalized, shadow_intensity, z_depth);
-        // Composite shadow behind the main image
-        final_color = mix(shadow, final_color, final_color.a);
+    // Apply border glow as a premultiplied overlay near the edge
+    if border_glow > 0.0 {
+        let glow_dist = abs(dist);
+        let glow_edge = 1.5 * aa;
+        let glow_t = 1.0 - smoothstep(0.0, glow_edge, glow_dist);
+        let glow_alpha = glow_t * border_glow * 0.3;
+        if glow_alpha > 0.0 {
+            let glow_color = vec3<f32>(0.8, 0.9, 1.0);
+            let glow_pm = vec4<f32>(glow_color * glow_alpha, glow_alpha);
+            final_color = over(glow_pm, final_color);
+        }
     }
 
-
+    // Render drop shadow behind when significantly elevated
+    if z_depth > 1.0 && shadow_intensity > 0.1 {
+        let shadow = render_drop_shadow(input.local_pos, input.corner_radius_normalized, shadow_intensity, z_depth);
+        let shadow_pm = to_premul(shadow);
+        final_color = over(final_color, shadow_pm);
+    }
 
     // Extract remaining hover parameters (show_overlay and is_hovered already extracted above)
     let show_border = input.hover_overlay_params.z;
 
     // Render overlay when hovered and animation complete
     if show_overlay > 0.5 {
-        let hover_dist = rounded_rect_sdf_normalized(input.local_pos, input.corner_radius_normalized);
+        let hover_dist = dist;
 
-        // Dark tinted background (only inside poster bounds)
+        // Dark tinted background (only inside poster bounds); preserve alpha
         if hover_dist < 0.0 {
-            let overlay_tint = vec4<f32>(0.0, 0.0, 0.0, 0.5);
-            final_color = mix(final_color, overlay_tint, overlay_tint.a);
+            let overlay_alpha = 0.5;
+            let darken_factor = 1.0 - overlay_alpha;
+            final_color.r *= darken_factor;
+            final_color.g *= darken_factor;
+            final_color.b *= darken_factor;
+            // final_color.a unchanged
         }
 
-        // Render overlay buttons with mouse position (use widget space local_pos)
+        // Overlay buttons composed in pre-multiplied space
         let button_color = render_overlay_buttons(input.local_pos, hover_dist, input.mouse_position, input.theme_color, input.progress_color);
         if button_color.a > 0.0 {
-            final_color = mix(final_color, button_color, button_color.a);
+            let button_pm = to_premul(button_color);
+            final_color = over(button_pm, final_color);
         }
     }
 
-    // Always render border - optimized approach
+    // Always render border - pixel-accurate, inside-only
     {
-        // Distance already calculated earlier as dist_normalized
-        let poster_dist = dist_normalized;
+        let d = dist;
+        let d_aa = max(1e-3, fwidth(d));
+        let border_px = select(1.2, 1.6, is_hovered > 0.5);
+        let w = border_px * d_aa;
 
-        // Select border width based on hover state
-        let border_width = select(0.004, 0.005, is_hovered > 0.5);
+        let inner = smoothstep(-w, -w + d_aa, d);
+        let edge = 1.0 - smoothstep(0.0, d_aa, d);
+        let border_alpha = clamp(min(inner, edge), 0.0, 1.0);
 
-        // Simplified border detection
-        let is_in_hovered_border = is_hovered > 0.5 && abs(poster_dist) < border_width;
-        let is_in_unhovered_border = is_hovered < 0.5 && poster_dist < 0.0 && poster_dist > -border_width;
-
-        if is_in_hovered_border || is_in_unhovered_border {
-            var border_alpha: f32;
-
-            if is_hovered > 0.5 {
-                // Hovered: border expands outward
-                let inner_alpha = smoothstep(-border_width, -border_width + 0.001, poster_dist);
-                let outer_alpha = 1.0 - smoothstep(border_width - 0.001, border_width, poster_dist);
-                border_alpha = min(inner_alpha, outer_alpha);
-            } else {
-                // Not hovered: thin border inside
-                border_alpha = smoothstep(-border_width, -border_width + 0.001, poster_dist);
-            }
-
-            if border_alpha > 0.0 {
-                // Select border color based on hover state
-                let border_color = select(
-                    vec3<f32>(0.0, 0.0, 0.0),  // Black when not hovered
-                    input.progress_color,       // Progress color when hovered
-                    is_hovered > 0.5
-                );
-
-                // Apply border with proper alpha blending (border_color already in linear space)
-                final_color = vec4<f32>(
-                    mix(final_color.rgb, border_color, border_alpha),
-                    max(final_color.a, border_alpha)
-                );
-            }
+        if border_alpha > 0.0 {
+            let border_rgb = select(vec3<f32>(0.0, 0.0, 0.0), input.progress_color, is_hovered > 0.5);
+            let border_pm = vec4<f32>(border_rgb * border_alpha, border_alpha);
+            final_color = over(border_pm, final_color);
         }
     }
 
     // Render watch status corner indicator if progress is valid and animation is complete
     if input.progress >= 0.0 && input.animation_progress >= 0.99 {
-        // Standard poster aspect ratio is 2:3 (width:height)
         let aspect_ratio = 2.0 / 3.0;
 
         // Create a triangular indicator shaped like a folded corner
-        // Adjust the size to account for aspect ratio so it appears square
         let fold_size_x = input.corner_radius_normalized * 2.5;
         let fold_size_y = fold_size_x * aspect_ratio;
 
@@ -760,41 +747,31 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let corner_origin = vec2<f32>(1.0, 0.0);
         let rel_pos = input.local_pos - corner_origin;
 
-        // Simple right triangle check - like a corner folded down
-        // Triangle with vertices at: (0,0), (-fold_size_x,0), (0,fold_size_y)
-        // Adjust the diagonal check to account for different x and y sizes
+        // Triangle check in normalized coordinates
         let normalized_x = rel_pos.x / fold_size_x;
         let normalized_y = rel_pos.y / fold_size_y;
         let in_triangle = rel_pos.x <= 0.0 &&
-                         rel_pos.y >= 0.0 &&
-                         (normalized_y - normalized_x) <= 1.0;
+                          rel_pos.y >= 0.0 &&
+                          (normalized_y - normalized_x) <= 1.0;
 
-        // Also check against the rounded corner boundary
-        let corner_dist = rounded_rect_sdf_normalized(input.local_pos, input.corner_radius_normalized);
-
-        if in_triangle && corner_dist < 0.0 {
-            // Calculate distance to diagonal edge for smooth anti-aliasing
-            // Pre-compute reciprocals to avoid divisions
+        if in_triangle && dist < 0.0 {
+            // Distance to diagonal edge for AA
             let inv_fold_x = 1.0 / fold_size_x;
             let inv_fold_y = 1.0 / fold_size_y;
             let a = inv_fold_x;
             let b = -inv_fold_y;
             let c = 1.0;
-            // Pre-compute normalization factor
             let inv_norm = 1.0 / sqrt(a*a + b*b);
             let diagonal_dist = abs(a * rel_pos.x + b * rel_pos.y + c) * inv_norm;
             let edge_softness = 0.005;
             let triangle_alpha = smoothstep(-edge_softness, edge_softness, diagonal_dist);
 
-            // Determine opacity based on watch status using select
             var indicator_opacity = select(0.85, 0.6, input.progress > 0.0);
             indicator_opacity = select(indicator_opacity, 0.2, input.progress >= 0.95);
 
-            // Apply the indicator color (keep in linear space)
-            let indicator_with_alpha = vec4<f32>(input.progress_color, indicator_opacity * triangle_alpha);
-
-            // Blend the indicator over the current color
-            final_color = mix(final_color, indicator_with_alpha, indicator_with_alpha.a);
+            let ia = indicator_opacity * triangle_alpha;
+            let indicator_pm = vec4<f32>(input.progress_color * ia, ia);
+            final_color = over(indicator_pm, final_color);
         }
     }
 
@@ -813,18 +790,16 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             // Check if we're within the bar height
             if input.local_pos.y >= bar_start_y && input.local_pos.y <= bar_end_y {
                 // Only show bar within poster bounds (including rounded corners)
-                let poster_dist = rounded_rect_sdf_normalized(input.local_pos, input.corner_radius_normalized);
-                if poster_dist < 0.0 {
+                if dist < 0.0 {
                     // Apply smooth fade at the very edges for anti-aliasing
-                    let edge_fade = smoothstep(0.0, -0.01, poster_dist);
+                    let edge_fade = smoothstep(0.0, -0.01, dist);
 
                     // Use select for branchless progress bar rendering
                     let is_filled = input.local_pos.x <= input.progress;
-                    // Keep colors in linear space
                     let bar_alpha = select(0.4, 0.8, is_filled) * edge_fade;
                     let bar_rgb = select(vec3<f32>(0.0, 0.0, 0.0), input.progress_color, is_filled);
-                    let bar_with_alpha = vec4<f32>(bar_rgb, bar_alpha);
-                    final_color = mix(final_color, bar_with_alpha, bar_with_alpha.a);
+                    let bar_pm = vec4<f32>(bar_rgb * bar_alpha, bar_alpha);
+                    final_color = over(bar_pm, final_color);
                 }
             }
         }

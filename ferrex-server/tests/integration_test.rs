@@ -1,5 +1,5 @@
-use std::time::Duration;
 use serde_json::{json, Value};
+use std::time::Duration;
 use tempfile::TempDir;
 
 const BASE_URL: &str = "http://localhost:3000";
@@ -11,7 +11,7 @@ async fn test_library_crud_operations() {
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let client = reqwest::Client::new();
-    
+
     // Test creating a library
     let temp_dir = TempDir::new().unwrap();
     let path = temp_dir.path().to_str().unwrap();
@@ -32,7 +32,7 @@ async fn test_library_crud_operations() {
         .unwrap();
 
     assert_eq!(response.status(), 200);
-    
+
     let json: Value = response.json().await.unwrap();
     assert_eq!(json["status"], "success");
     let library_id = json["id"].as_str().unwrap();
@@ -139,7 +139,10 @@ async fn test_library_validation() {
     assert_eq!(response.status(), 200);
     let json: Value = response.json().await.unwrap();
     assert_eq!(json["status"], "error");
-    assert!(json["error"].as_str().unwrap().contains("Invalid library type"));
+    assert!(json["error"]
+        .as_str()
+        .unwrap()
+        .contains("Invalid library type"));
 
     // Test non-existent path
     let create_request = json!({
@@ -160,7 +163,10 @@ async fn test_library_validation() {
     assert_eq!(response.status(), 200);
     let json: Value = response.json().await.unwrap();
     assert_eq!(json["status"], "error");
-    assert!(json["error"].as_str().unwrap().contains("Path does not exist"));
+    assert!(json["error"]
+        .as_str()
+        .unwrap()
+        .contains("Path does not exist"));
 }
 
 #[tokio::test]
@@ -219,27 +225,27 @@ async fn test_multiple_libraries() {
 
     let json: Value = response.json().await.unwrap();
     let libraries = json["libraries"].as_array().unwrap();
-    
+
     assert!(libraries.len() >= 2);
-    
-    let has_movies = libraries.iter().any(|lib| 
-        lib["id"].as_str() == Some(movies_id) && 
-        lib["library_type"].as_str() == Some("Movies")
-    );
-    let has_tv = libraries.iter().any(|lib| 
-        lib["id"].as_str() == Some(tv_id) && 
-        lib["library_type"].as_str() == Some("TvShows")
-    );
-    
+
+    let has_movies = libraries.iter().any(|lib| {
+        lib["id"].as_str() == Some(movies_id) && lib["library_type"].as_str() == Some("Movies")
+    });
+    let has_tv = libraries.iter().any(|lib| {
+        lib["id"].as_str() == Some(tv_id) && lib["library_type"].as_str() == Some("TvShows")
+    });
+
     assert!(has_movies);
     assert!(has_tv);
 
     // Clean up
-    client.delete(&format!("{}/libraries/{}", BASE_URL, movies_id))
+    client
+        .delete(&format!("{}/libraries/{}", BASE_URL, movies_id))
         .send()
         .await
         .unwrap();
-    client.delete(&format!("{}/libraries/{}", BASE_URL, tv_id))
+    client
+        .delete(&format!("{}/libraries/{}", BASE_URL, tv_id))
         .send()
         .await
         .unwrap();

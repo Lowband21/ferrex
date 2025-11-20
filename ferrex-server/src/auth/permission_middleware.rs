@@ -3,10 +3,8 @@ use axum::{
     http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
-    Extension,
 };
-use ferrex_core::{rbac::UserPermissions, user::User, api_types::ApiResponse};
-use std::sync::Arc;
+use ferrex_core::{api_types::ApiResponse, rbac::UserPermissions, user::User};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -16,10 +14,12 @@ use crate::AppState;
 /// This should be run AFTER auth_middleware which sets the User extension
 pub fn require_permission(
     permission: &'static str,
-) -> impl Fn(Request, Next) -> Pin<Box<dyn Future<Output = Response> + Send>> + Clone + Send + Sync + 'static {
-    move |request: Request, next: Next| {
-        Box::pin(check_permission_async(request, next, permission))
-    }
+) -> impl Fn(Request, Next) -> Pin<Box<dyn Future<Output = Response> + Send>>
+       + Clone
+       + Send
+       + Sync
+       + 'static {
+    move |request: Request, next: Next| Box::pin(check_permission_async(request, next, permission))
 }
 
 async fn check_permission_async(request: Request, next: Next, permission: &str) -> Response {
@@ -29,22 +29,28 @@ async fn check_permission_async(request: Request, next: Next, permission: &str) 
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                axum::Json(ApiResponse::<()>::error("Authentication required".to_string())),
-            ).into_response();
+                axum::Json(ApiResponse::<()>::error(
+                    "Authentication required".to_string(),
+                )),
+            )
+                .into_response();
         }
     };
-    
+
     // Extract permissions from extensions (should be set by auth_middleware)
     let permissions = match request.extensions().get::<UserPermissions>() {
         Some(perms) => perms,
         None => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiResponse::<()>::error("Permissions not loaded".to_string())),
-            ).into_response();
+                axum::Json(ApiResponse::<()>::error(
+                    "Permissions not loaded".to_string(),
+                )),
+            )
+                .into_response();
         }
     };
-    
+
     // Check if user has the required permission
     if !permissions.has_permission(permission) {
         return (
@@ -53,9 +59,10 @@ async fn check_permission_async(request: Request, next: Next, permission: &str) 
                 "Permission '{}' required",
                 permission
             ))),
-        ).into_response();
+        )
+            .into_response();
     }
-    
+
     // User has permission, continue
     next.run(request).await
 }
@@ -63,35 +70,49 @@ async fn check_permission_async(request: Request, next: Next, permission: &str) 
 /// Middleware that checks if the user has any of the specified permissions
 pub fn require_any_permission(
     permissions: &'static [&'static str],
-) -> impl Fn(Request, Next) -> Pin<Box<dyn Future<Output = Response> + Send>> + Clone + Send + Sync + 'static {
+) -> impl Fn(Request, Next) -> Pin<Box<dyn Future<Output = Response> + Send>>
+       + Clone
+       + Send
+       + Sync
+       + 'static {
     move |request: Request, next: Next| {
         Box::pin(check_any_permission_async(request, next, permissions))
     }
 }
 
-async fn check_any_permission_async(request: Request, next: Next, permissions: &[&str]) -> Response {
+async fn check_any_permission_async(
+    request: Request,
+    next: Next,
+    permissions: &[&str],
+) -> Response {
     // Extract the user from extensions (set by auth_middleware)
     let user = match request.extensions().get::<User>() {
         Some(user) => user,
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                axum::Json(ApiResponse::<()>::error("Authentication required".to_string())),
-            ).into_response();
+                axum::Json(ApiResponse::<()>::error(
+                    "Authentication required".to_string(),
+                )),
+            )
+                .into_response();
         }
     };
-    
+
     // Extract permissions from extensions (should be set by auth_middleware)
     let user_permissions = match request.extensions().get::<UserPermissions>() {
         Some(perms) => perms,
         None => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiResponse::<()>::error("Permissions not loaded".to_string())),
-            ).into_response();
+                axum::Json(ApiResponse::<()>::error(
+                    "Permissions not loaded".to_string(),
+                )),
+            )
+                .into_response();
         }
     };
-    
+
     // Check if user has any of the required permissions
     if !user_permissions.has_any_permission(permissions) {
         return (
@@ -100,9 +121,10 @@ async fn check_any_permission_async(request: Request, next: Next, permissions: &
                 "One of these permissions required: {}",
                 permissions.join(", ")
             ))),
-        ).into_response();
+        )
+            .into_response();
     }
-    
+
     // User has permission, continue
     next.run(request).await
 }
@@ -120,11 +142,14 @@ pub async fn require_permission_async(
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                axum::Json(ApiResponse::<()>::error("Authentication required".to_string())),
-            ).into_response();
+                axum::Json(ApiResponse::<()>::error(
+                    "Authentication required".to_string(),
+                )),
+            )
+                .into_response();
         }
     };
-    
+
     // Load permissions if not already loaded
     let permissions = if let Some(perms) = request.extensions().get::<UserPermissions>() {
         perms.clone()
@@ -138,12 +163,15 @@ pub async fn require_permission_async(
             Err(_) => {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    axum::Json(ApiResponse::<()>::error("Failed to load permissions".to_string())),
-                ).into_response();
+                    axum::Json(ApiResponse::<()>::error(
+                        "Failed to load permissions".to_string(),
+                    )),
+                )
+                    .into_response();
             }
         }
     };
-    
+
     // Check if user has the required permission
     if !permissions.has_permission(permission) {
         return (
@@ -152,15 +180,20 @@ pub async fn require_permission_async(
                 "Permission '{}' required",
                 permission
             ))),
-        ).into_response();
+        )
+            .into_response();
     }
-    
+
     next.run(request).await
 }
 
 /// Create a middleware function that requires a specific permission
 pub fn permission_layer(
     permission: &'static str,
-) -> impl Fn(Request, Next) -> Pin<Box<dyn Future<Output = Response> + Send>> + Clone + Send + Sync + 'static {
+) -> impl Fn(Request, Next) -> Pin<Box<dyn Future<Output = Response> + Send>>
+       + Clone
+       + Send
+       + Sync
+       + 'static {
     require_permission(permission)
 }

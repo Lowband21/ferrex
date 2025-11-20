@@ -14,36 +14,36 @@ impl Username {
     /// Create a new username with validation
     pub fn new(username: impl AsRef<str>) -> Result<Self, UsernameError> {
         let username = username.as_ref().trim().to_lowercase();
-        
+
         // Check length constraints
         if username.len() < 3 {
             return Err(UsernameError::TooShort);
         }
-        
+
         if username.len() > 30 {
             return Err(UsernameError::TooLong);
         }
-        
+
         // Check character constraints
         if !username.chars().all(|c| c.is_alphanumeric() || c == '_') {
             return Err(UsernameError::InvalidCharacters);
         }
-        
+
         // Cannot start with underscore
         if username.starts_with('_') {
             return Err(UsernameError::InvalidFormat);
         }
-        
+
         // Cannot end with underscore
         if username.ends_with('_') {
             return Err(UsernameError::InvalidFormat);
         }
-        
+
         // Cannot have consecutive underscores
         if username.contains("__") {
             return Err(UsernameError::InvalidFormat);
         }
-        
+
         Ok(Self(username))
     }
 
@@ -75,13 +75,13 @@ impl AsRef<str> for Username {
 pub enum UsernameError {
     #[error("Username too short: minimum 3 characters required")]
     TooShort,
-    
+
     #[error("Username too long: maximum 30 characters allowed")]
     TooLong,
-    
+
     #[error("Username contains invalid characters: only alphanumeric and underscore allowed")]
     InvalidCharacters,
-    
+
     #[error("Username format invalid: cannot start/end with underscore or contain consecutive underscores")]
     InvalidFormat,
 }

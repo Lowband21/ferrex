@@ -1,26 +1,51 @@
 use crate::AppState;
 use axum::{
+    body::Bytes,
     extract::{Path, State},
     http::StatusCode,
-    response::Json,
+    response::{IntoResponse, Json},
 };
+use ferrex_core::ManualMatchRequest;
+use ferrex_core::Media;
+use ferrex_core::MediaDetailsOption;
+use ferrex_core::MediaEvent;
+use ferrex_core::MediaIDLike;
+use ferrex_core::ParsedMediaInfo;
+use ferrex_core::TmdbDetails;
 use ferrex_core::{
-    database::traits::MediaFilters,
-    media::{EnhancedMovieDetails, EnhancedSeriesDetails},
-    ApiResponse, CreateLibraryRequest, FetchMediaRequest, Library, LibraryMediaResponse,
-    LibraryReference, ManualMatchRequest, MediaDetailsOption, MediaEvent, MediaId, MediaReference,
-    ParsedMediaInfo, TmdbDetails, UpdateLibraryRequest,
+    database::traits::MediaFilters, ApiResponse, CreateLibraryRequest, EnhancedMovieDetails,
+    EnhancedSeriesDetails, FetchMediaRequest, Library, LibraryID, LibraryMediaResponse,
+    LibraryReference, MediaID, UpdateLibraryRequest,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+pub async fn get_library_media_util(
+    state: &AppState,
+    library: LibraryReference,
+) -> Result<LibraryMediaResponse, StatusCode> {
+    let media = match state
+        .db
+        .backend()
+        .get_library_media_references(library.id, library.library_type)
+        .await
+    {
+        Ok(media) => media,
+        Err(e) => {
+            warn!("Failed to get library movies: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    Ok(LibraryMediaResponse { library, media })
+}
+
 /// Get all references for a library (lightweight, no TMDB metadata)
 pub async fn get_library_media_handler(
     State(state): State<AppState>,
     Path(library_id): Path<Uuid>,
-) -> Result<Json<ApiResponse<LibraryMediaResponse>>, StatusCode> {
+) -> impl IntoResponse {
     info!("Getting media references for library: {}", library_id);
 
     // Get library reference
@@ -28,102 +53,64 @@ pub async fn get_library_media_handler(
         Ok(lib) => lib,
         Err(e) => {
             error!("Failed to get library reference: {}", e);
-            return Ok(Json(ApiResponse::error(e.to_string())));
+            return Err(StatusCode::NOT_FOUND);
         }
     };
 
-    // Get all media references for this library
-    let mut media = Vec::new();
+    let response = get_library_media_util(&state, library).await?;
 
-    // Get movies
-    match state.db.backend().get_library_movies(library_id).await {
-        Ok(movies) => {
-            for movie in movies {
-                media.push(MediaReference::Movie(movie));
-            }
-        }
+    info!(
+        "Found {} media items for library {}",
+        response.media.len(),
+        library_id
+    );
+
+    // Serialize to rkyv format
+    match rkyv::to_bytes::<rkyv::rancor::Error>(&response) {
+        Ok(bytes) => Ok::<_, StatusCode>(Bytes::from(bytes.into_vec())),
         Err(e) => {
-            warn!("Failed to get library movies: {}", e);
+            error!("Failed to serialize response with rkyv: {:?}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
+}
 
-    // Get series with their seasons and episodes
-    match state.db.backend().get_library_series(library_id).await {
-        Ok(series_list) => {
-            for series in series_list {
-                let series_id = series.id.clone();
-                media.push(MediaReference::Series(series.clone()));
+pub async fn get_libraries_with_media_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match state.db.backend().list_library_references().await {
+        Ok(libraries) => {
+            let mut library_results = Vec::new();
+            for library_ref in libraries {
+                let library = state
+                    .db
+                    .backend()
+                    .get_library(&library_ref.id)
+                    .await
+                    .map_err(|e| {
+                        error!("Failed to get library: {}", e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })?;
+                let library_media_response = get_library_media_util(&state, library_ref).await?;
+                if let Some(mut library) = library {
+                    library.media = Some(library_media_response.media);
+                    library_results.push(library);
+                }
+            }
+            let library_responses: Vec<_> = library_results.into_iter().collect::<Vec<_>>();
 
-                // Get seasons for this series
-                match state.db.backend().get_series_seasons(&series_id).await {
-                    Ok(seasons) => {
-                        info!(
-                            "Found {} seasons for series {} ({})",
-                            seasons.len(),
-                            series.title.as_str(),
-                            series_id.as_str()
-                        );
-                        for season in seasons {
-                            let season_id = season.id.clone();
-                            info!(
-                                "Adding season {} (S{}) for series {} to media references",
-                                season_id.as_str(),
-                                season.season_number.value(),
-                                series.title.as_str()
-                            );
-
-                            // DEBUG: Verify series_id matches
-                            if season.series_id != series.id {
-                                error!(
-                                    "SERIES_ID MISMATCH! Season {} has series_id {} but belongs to series {}",
-                                    season_id.as_str(),
-                                    season.series_id.as_str(),
-                                    series.id.as_str()
-                                );
-                            } else {
-                                info!(
-                                    "Season {} correctly has series_id {} matching series",
-                                    season_id.as_str(),
-                                    season.series_id.as_str()
-                                );
-                            }
-
-                            media.push(MediaReference::Season(season.clone()));
-
-                            // Get episodes for this season
-                            match state.db.backend().get_season_episodes(&season_id).await {
-                                Ok(episodes) => {
-                                    for episode in episodes {
-                                        media.push(MediaReference::Episode(episode));
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!("Failed to get season episodes: {}", e);
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Failed to get series seasons: {}", e);
-                    }
+            // Serialize to rkyv format
+            match rkyv::to_bytes::<rkyv::rancor::Error>(&library_responses) {
+                Ok(bytes) => Ok::<_, StatusCode>(Bytes::from(bytes.into_vec())),
+                Err(e) => {
+                    error!("Failed to serialize response with rkyv: {:?}", e);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
                 }
             }
         }
         Err(e) => {
-            warn!("Failed to get library series: {}", e);
+            error!("Failed to get libraries: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
-
-    info!(
-        "Found {} media items for library {}",
-        media.len(),
-        library_id
-    );
-
-    Ok(Json(ApiResponse::success(LibraryMediaResponse {
-        library,
-        media,
-    })))
 }
 
 /// Fetch a specific media item with full metadata from database
@@ -131,14 +118,14 @@ pub async fn get_library_media_handler(
 pub async fn fetch_media_handler(
     State(state): State<AppState>,
     Json(request): Json<FetchMediaRequest>,
-) -> Result<Json<ApiResponse<MediaReference>>, StatusCode> {
+) -> Result<Json<ApiResponse<Media>>, StatusCode> {
     info!(
         "Fetching media: {:?} from library {}",
         request.media_id, request.library_id
     );
 
     match request.media_id {
-        MediaId::Movie(id) => {
+        MediaID::Movie(id) => {
             match state.db.backend().get_movie_reference(&id).await {
                 Ok(mut movie) => {
                     // Check if we need to fetch metadata from TMDB
@@ -147,7 +134,7 @@ pub async fn fetch_media_handler(
 
                         // Get the associated media file to extract TMDB ID
                         if let Ok(Some(media_file)) =
-                            state.db.backend().get_media(id.as_ref()).await
+                            state.db.backend().get_media(id.as_uuid()).await
                         {
                             if let Some(metadata) = &media_file.media_file_metadata {
                                 if let Some(parsed) = &metadata.parsed_info {
@@ -159,7 +146,7 @@ pub async fn fetch_media_handler(
                                             match tmdb_provider
                                                 .search_movies(
                                                     &movie_info.title,
-                                                    movie_info.year.map(|y| y as u16),
+                                                    movie_info.year.map(|y| y),
                                                 )
                                                 .await
                                             {
@@ -174,8 +161,7 @@ pub async fn fetch_media_handler(
                                                                 MediaDetailsOption::Details(
                                                                     TmdbDetails::Movie(
                                                                         EnhancedMovieDetails {
-                                                                            id: details.inner.id
-                                                                                as u64,
+                                                                            id: details.inner.id,
                                                                             title: details
                                                                                 .inner
                                                                                 .title
@@ -189,7 +175,6 @@ pub async fn fetch_media_handler(
                                                                             release_date: details
                                                                                 .inner
                                                                                 .release_date
-                                                                                .clone()
                                                                                 .map(|d| {
                                                                                     d.to_string()
                                                                                 }),
@@ -242,7 +227,9 @@ pub async fn fetch_media_handler(
                                                                 .store_movie_reference(&movie)
                                                                 .await;
 
-                                                            info!("Successfully fetched and stored TMDB metadata for movie {}", id.as_str());
+                                                            let mut buff = Uuid::encode_buffer();
+
+                                                            info!("Successfully fetched and stored TMDB metadata for movie {}", id.as_str(&mut buff));
                                                         }
                                                         Err(e) => {
                                                             warn!("Failed to get movie details from TMDB: {}", e);
@@ -268,7 +255,7 @@ pub async fn fetch_media_handler(
                         }
                     }
 
-                    Ok(Json(ApiResponse::success(MediaReference::Movie(movie))))
+                    Ok(Json(ApiResponse::success(Media::Movie(movie))))
                 }
                 Err(e) => {
                     error!("Failed to get movie reference: {}", e);
@@ -276,14 +263,15 @@ pub async fn fetch_media_handler(
                 }
             }
         }
-        MediaId::Series(id) => {
+        MediaID::Series(id) => {
             match state.db.backend().get_series_reference(&id).await {
                 Ok(mut series) => {
                     // Check if we need to fetch metadata from TMDB
                     if matches!(series.details, MediaDetailsOption::Endpoint(_)) {
+                        let mut buff = Uuid::encode_buffer();
                         info!(
                             "Series {} has endpoint URL, fetching TMDB metadata",
-                            id.as_str()
+                            id.as_str(&mut buff)
                         );
 
                         // Get any associated media file to extract show name
@@ -318,10 +306,10 @@ pub async fn fetch_media_handler(
                                                             Ok(details) => {
                                                                 // Update the series with full details
                                                                 series.details = MediaDetailsOption::Details(TmdbDetails::Series(EnhancedSeriesDetails {
-                                                                id: details.inner.id as u64,
+                                                                id: details.inner.id,
                                                                 name: details.inner.name.clone(),
                                                                 overview: details.inner.overview.clone(),
-                                                                first_air_date: details.inner.first_air_date.clone().map(|d| d.to_string()),
+                                                                first_air_date: details.inner.first_air_date.map(|d| d.to_string()),
                                                                 last_air_date: None, // Not available in TVShowBase
                                                                 number_of_seasons: None, // Not available in TVShowBase
                                                                 number_of_episodes: None, // Not available in TVShowBase
@@ -348,7 +336,9 @@ pub async fn fetch_media_handler(
                                                                     .store_series_reference(&series)
                                                                     .await;
 
-                                                                info!("Successfully fetched and stored TMDB metadata for series {}", id.as_str());
+                                                                let mut buff =
+                                                                    Uuid::encode_buffer();
+                                                                info!("Successfully fetched and stored TMDB metadata for series {}", id.as_str(&mut buff));
                                                             }
                                                             Err(e) => {
                                                                 warn!("Failed to get series details from TMDB: {}", e);
@@ -378,7 +368,7 @@ pub async fn fetch_media_handler(
                         }
                     }
 
-                    Ok(Json(ApiResponse::success(MediaReference::Series(series))))
+                    Ok(Json(ApiResponse::success(Media::Series(series))))
                 }
                 Err(e) => {
                     error!("Failed to get series reference: {}", e);
@@ -386,11 +376,11 @@ pub async fn fetch_media_handler(
                 }
             }
         }
-        MediaId::Season(id) => {
+        MediaID::Season(id) => {
             match state.db.backend().get_season_reference(&id).await {
                 Ok(season) => {
                     // TODO: Implement on-demand season metadata fetching if needed
-                    Ok(Json(ApiResponse::success(MediaReference::Season(season))))
+                    Ok(Json(ApiResponse::success(Media::Season(season))))
                 }
                 Err(e) => {
                     error!("Failed to get season reference: {}", e);
@@ -398,25 +388,17 @@ pub async fn fetch_media_handler(
                 }
             }
         }
-        MediaId::Episode(id) => {
+        MediaID::Episode(id) => {
             match state.db.backend().get_episode_reference(&id).await {
                 Ok(episode) => {
                     // TODO: Implement on-demand episode metadata fetching if needed
-                    Ok(Json(ApiResponse::success(MediaReference::Episode(episode))))
+                    Ok(Json(ApiResponse::success(Media::Episode(episode))))
                 }
                 Err(e) => {
                     error!("Failed to get episode reference: {}", e);
                     Ok(Json(ApiResponse::error(e.to_string())))
                 }
             }
-        }
-        MediaId::Person(_id) => {
-            // Person references are not stored as media items
-            // They are part of cast/crew data in movie/series metadata
-            error!("Person references cannot be fetched as media items");
-            Ok(Json(ApiResponse::error(
-                "Person references are not stored as separate media items".to_string(),
-            )))
         }
     }
 }
@@ -432,7 +414,7 @@ pub async fn manual_match_media_handler(
     );
 
     match request.media_id {
-        MediaId::Movie(id) => {
+        MediaID::Movie(id) => {
             match state
                 .db
                 .backend()
@@ -457,7 +439,7 @@ pub async fn manual_match_media_handler(
                 }
             }
         }
-        MediaId::Series(id) => {
+        MediaID::Series(id) => {
             match state
                 .db
                 .backend()
@@ -532,7 +514,7 @@ pub async fn create_library_handler(
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
     info!("Creating new library: {}", request.name);
 
-    let library_id = Uuid::new_v4();
+    let library_id = LibraryID::new();
     info!("Generated library ID: {}", library_id);
 
     let library = Library {
@@ -568,17 +550,17 @@ pub async fn create_library_handler(
             }
 
             // Trigger immediate folder discovery for the new library
-            if let Err(e) = state
+            match state
                 .folder_monitor
                 .discover_library_folders_immediate(&library.id)
                 .await
-            {
+            { Err(e) => {
                 warn!(
                     "Failed to trigger immediate folder discovery for library {}: {}",
                     id, e
                 );
                 // Continue anyway - folder discovery will happen in the next scheduled cycle
-            } else {
+            } _ => {
                 info!("Immediate folder discovery triggered for library {}", id);
 
                 // Trigger an immediate scan for the newly created library after folder discovery
@@ -599,7 +581,7 @@ pub async fn create_library_handler(
                         // Continue anyway - scan can be triggered manually or will happen on schedule
                     }
                 }
-            }
+            }}
 
             Ok(Json(ApiResponse::success(id)))
         }
@@ -613,13 +595,14 @@ pub async fn create_library_handler(
 /// Update an existing library
 pub async fn update_library_handler(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(id): Path<String>, // TODO: Use LibraryID directly
     Json(request): Json<UpdateLibraryRequest>,
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
     info!("Updating library: {}", id);
 
     // Get the existing library
-    let mut library = match state.db.backend().get_library(&id).await {
+    let uuid = Uuid::parse_str(&id).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let mut library = match state.db.backend().get_library(&LibraryID(uuid)).await {
         Ok(Some(lib)) => lib,
         Ok(None) => {
             return Ok(Json(ApiResponse::error("Library not found".to_string())));

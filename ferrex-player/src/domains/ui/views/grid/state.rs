@@ -1,0 +1,168 @@
+use iced::widget::scrollable;
+
+use std::ops::Range;
+
+/// Grid-based virtual list for media cards
+#[derive(Debug, Clone)]
+pub struct VirtualGridState {
+    /// Total number of items
+    pub total_items: usize,
+    /// Number of columns
+    pub columns: usize,
+    /// Height of each row
+    pub row_height: f32,
+    /// Current scroll position
+    pub scroll_position: f32,
+    /// Viewport height
+    pub viewport_height: f32,
+    /// Viewport width
+    pub viewport_width: f32,
+    /// Number of rows to render outside viewport (above)
+    pub overscan_rows_above: usize,
+    /// Number of rows to render outside viewport (below)
+    pub overscan_rows_below: usize,
+    /// Currently visible item range
+    pub visible_range: Range<usize>,
+    /// Scrollable ID
+    pub scrollable_id: scrollable::Id,
+    /// Item width (calculated from viewport width)
+    pub item_width: f32,
+    /// Force refresh flag (for resize events)
+    pub needs_refresh: bool,
+}
+
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::all_functions
+)]
+impl VirtualGridState {
+    pub fn new(total_items: usize, columns: usize, row_height: f32) -> Self {
+        Self::with_id(total_items, columns, row_height, scrollable::Id::unique())
+    }
+
+    /// Create a new VirtualGridState with a specific scrollable ID
+    pub fn with_id(
+        total_items: usize,
+        columns: usize,
+        row_height: f32,
+        scrollable_id: scrollable::Id,
+    ) -> Self {
+        let mut grid = Self {
+            total_items,
+            columns,
+            row_height,
+            scroll_position: 0.0,
+            viewport_height: 800.0,
+            viewport_width: 1200.0, // Default
+            overscan_rows_above:
+                crate::infrastructure::constants::virtual_grid::PREFETCH_ROWS_ABOVE,
+            overscan_rows_below:
+                crate::infrastructure::constants::virtual_grid::PREFETCH_ROWS_BELOW,
+            visible_range: 0..0,
+            scrollable_id,
+            item_width: 200.0, // Default
+            needs_refresh: false,
+        };
+
+        // Calculate initial visible range
+        grid.calculate_visible_range();
+
+        grid
+    }
+
+    /// Update columns based on viewport width
+    pub fn update_columns(&mut self, viewport_width: f32) {
+        use crate::infrastructure::constants::{calculations, poster, scale_presets};
+
+        // Calculate columns using centralized logic
+        let scale = scale_presets::DEFAULT_SCALE;
+        self.columns = calculations::calculate_columns(viewport_width, scale);
+
+        // Keep item width based on scale
+        self.item_width = poster::BASE_WIDTH * scale;
+
+        // DO NOT call calculate_visible_range() here - viewport_height may not be updated yet
+        // The scrollable widget will trigger this via update_scroll()
+    }
+
+    /// Calculate visible item range
+    pub fn calculate_visible_range(&mut self) -> Range<usize> {
+        if self.total_items == 0 || self.columns == 0 || self.viewport_height <= 0.0 {
+            log::debug!(
+                "Empty visible range: items={}, cols={}, viewport_height={}",
+                self.total_items,
+                self.columns,
+                self.viewport_height
+            );
+            self.visible_range = 0..0;
+            return self.visible_range.clone();
+        }
+
+        let total_rows = (self.total_items + self.columns - 1) / self.columns;
+        let first_visible_row = (self.scroll_position / self.row_height).floor() as usize;
+        let visible_rows = (self.viewport_height / self.row_height).ceil() as usize;
+        let last_visible_row = (first_visible_row + visible_rows).min(total_rows);
+
+        // Add overscan (configurable prefetch zone)
+        let start_row = first_visible_row.saturating_sub(self.overscan_rows_above);
+        let end_row = (last_visible_row + self.overscan_rows_below).min(total_rows);
+
+        // Convert to item indices
+        let start_item = start_row * self.columns;
+        let end_item = (end_row * self.columns).min(self.total_items);
+
+        self.visible_range = start_item..end_item;
+
+        /*
+        log::debug!(
+            "Visible range calculated: {}..{} (rows {}-{}, viewport_height={})",
+            start_item,
+            end_item,
+            start_row,
+            end_row,
+            self.viewport_height
+        ); */
+
+        self.visible_range.clone()
+    }
+
+    /// Update scroll position
+    pub fn update_scroll(&mut self, viewport: scrollable::Viewport) {
+        self.scroll_position = viewport.absolute_offset().y;
+        self.viewport_height = viewport.bounds().height;
+        self.calculate_visible_range();
+    }
+
+    /// Get items to preload
+    pub fn get_preload_range(&self, preload_rows: usize) -> Range<usize> {
+        let preload_items = preload_rows * self.columns;
+        let end = (self.visible_range.end + preload_items).min(self.total_items);
+        self.visible_range.end..end
+    }
+
+    /// Update columns on window resize
+    pub fn resize(&mut self, width: f32) {
+        log::debug!("Resize: updating columns for width {}", width);
+
+        use crate::infrastructure::constants::{calculations, scale_presets};
+
+        let scale = scale_presets::DEFAULT_SCALE;
+        let old_columns = self.columns;
+        self.columns = calculations::calculate_columns(width, scale);
+
+        // If columns changed, log it but don't recalculate visible range yet
+        // The scrollable widget needs to report its viewport dimensions first
+        if old_columns != self.columns {
+            log::debug!(
+                "Columns changed from {} to {}, visible range will be updated when scrollable reports viewport",
+                old_columns,
+                self.columns
+            );
+            // DO NOT call calculate_visible_range() here - viewport_height may be stale
+        }
+    }
+}

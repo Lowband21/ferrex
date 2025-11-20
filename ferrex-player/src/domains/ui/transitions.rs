@@ -369,7 +369,7 @@ impl GradientTransitionState {
 pub fn generate_random_gradient_center() -> (f32, f32) {
     use rand::Rng;
     let mut rng = rand::thread_rng();
-    (0.3 + rng.gen::<f32>() * 0.4, 0.3 + rng.gen::<f32>() * 0.4)
+    (0.3 + rng.r#gen::<f32>() * 0.4, 0.3 + rng.r#gen::<f32>() * 0.4)
 }
 
 #[cfg(test)]

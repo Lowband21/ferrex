@@ -1,38 +1,37 @@
 use crate::database::PostgresDatabase;
-use crate::{
-    SyncSession, PlaybackState, Participant,
-    MediaError, Result, api_types::MediaId,
-};
+use crate::{MediaError, MediaType, Participant, PlaybackState, Result, SyncSession};
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 use serde_json;
 use tracing::info;
+use uuid::Uuid;
 
 /// Synchronized playback session extensions for PostgresDatabase
 impl PostgresDatabase {
     pub async fn create_sync_session(&self, session: &SyncSession) -> Result<()> {
-        let media_id_json = serde_json::to_value(&session.media_id)
-            .map_err(|e| MediaError::Internal(format!("Failed to serialize MediaId: {}", e)))?;
-        
-        let playback_state_json = serde_json::to_value(&session.state)
-            .map_err(|e| MediaError::Internal(format!("Failed to serialize PlaybackState: {}", e)))?;
-        
-        let mut tx = self.pool().begin().await
+        let playback_state_json = serde_json::to_value(&session.state).map_err(|e| {
+            MediaError::Internal(format!("Failed to serialize PlaybackState: {}", e))
+        })?;
+
+        let mut tx = self
+            .pool()
+            .begin()
+            .await
             .map_err(|e| MediaError::Internal(format!("Failed to start transaction: {}", e)))?;
-        
+
         // Insert sync session
         sqlx::query!(
             r#"
             INSERT INTO sync_sessions (
-                id, room_code, host_id, media_id_json, playback_state, 
+                id, room_code, host_id, media_uuid, media_type, playback_state,
                 created_at, expires_at, is_active
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
             "#,
             session.id,
             session.room_code,
             session.host_id,
-            media_id_json,
+            session.media_id,
+            session.media_type as i16,
             playback_state_json,
             DateTime::<Utc>::from_timestamp_millis(session.created_at)
                 .ok_or_else(|| MediaError::Internal("Invalid timestamp".to_string()))?,
@@ -49,7 +48,7 @@ impl PostgresDatabase {
             }
             MediaError::Internal(format!("Failed to create sync session: {}", e))
         })?;
-        
+
         // Add host as participant
         sqlx::query!(
             r#"
@@ -62,19 +61,23 @@ impl PostgresDatabase {
         .execute(&mut *tx)
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to add host participant: {}", e)))?;
-        
-        tx.commit().await
+
+        tx.commit()
+            .await
             .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
-        
-        info!("Created sync session {} with room code {}", session.id, session.room_code);
+
+        info!(
+            "Created sync session {} with room code {}",
+            session.id, session.room_code
+        );
         Ok(())
     }
-    
+
     pub async fn get_sync_session_by_code(&self, room_code: &str) -> Result<Option<SyncSession>> {
         let row = sqlx::query!(
             r#"
-            SELECT 
-                s.id, s.room_code, s.host_id, s.media_id_json, s.playback_state,
+            SELECT
+                s.id, s.room_code, s.host_id, s.media_uuid, s.media_type, s.playback_state,
                 s.created_at, s.expires_at,
                 COALESCE(
                     json_agg(
@@ -100,37 +103,44 @@ impl PostgresDatabase {
         .fetch_optional(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get sync session: {}", e)))?;
-        
+
         if let Some(row) = row {
-            let media_id: MediaId = serde_json::from_value(row.media_id_json)
-                .map_err(|e| MediaError::Internal(format!("Failed to deserialize MediaId: {}", e)))?;
-            
-            let state: PlaybackState = serde_json::from_value(row.playback_state)
-                .map_err(|e| MediaError::Internal(format!("Failed to deserialize PlaybackState: {}", e)))?;
-            
-            let participants: Vec<Participant> = serde_json::from_value(row.participants.unwrap_or(serde_json::json!([])))
-                .map_err(|e| MediaError::Internal(format!("Failed to deserialize participants: {}", e)))?;
-            
+            let media_uuid: Uuid = row.media_uuid;
+            let media_type = MediaType::from(row.media_type);
+
+            let state: PlaybackState = serde_json::from_value(row.playback_state).map_err(|e| {
+                MediaError::Internal(format!("Failed to deserialize PlaybackState: {}", e))
+            })?;
+
+            let participants: Vec<Participant> =
+                serde_json::from_value(row.participants.unwrap_or(serde_json::json!([]))).map_err(
+                    |e| MediaError::Internal(format!("Failed to deserialize participants: {}", e)),
+                )?;
+
             Ok(Some(SyncSession {
                 id: row.id,
                 room_code: row.room_code,
                 host_id: row.host_id,
-                media_id,
+                media_id: media_uuid,
+                media_type,
                 state,
                 participants,
-                created_at: row.created_at.unwrap_or_else(chrono::Utc::now).timestamp_millis(),
+                created_at: row
+                    .created_at
+                    .unwrap_or_else(chrono::Utc::now)
+                    .timestamp_millis(),
                 expires_at: row.expires_at.timestamp_millis(),
             }))
         } else {
             Ok(None)
         }
     }
-    
+
     pub async fn get_sync_session(&self, id: Uuid) -> Result<Option<SyncSession>> {
         let row = sqlx::query!(
             r#"
-            SELECT 
-                s.id, s.room_code, s.host_id, s.media_id_json, s.playback_state,
+            SELECT
+                s.id, s.room_code, s.host_id, s.media_uuid, s.media_type, s.playback_state,
                 s.created_at, s.expires_at,
                 COALESCE(
                     json_agg(
@@ -156,39 +166,47 @@ impl PostgresDatabase {
         .fetch_optional(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to get sync session: {}", e)))?;
-        
+
         if let Some(row) = row {
-            let media_id: MediaId = serde_json::from_value(row.media_id_json)
-                .map_err(|e| MediaError::Internal(format!("Failed to deserialize MediaId: {}", e)))?;
-            
-            let state: PlaybackState = serde_json::from_value(row.playback_state)
-                .map_err(|e| MediaError::Internal(format!("Failed to deserialize PlaybackState: {}", e)))?;
-            
-            let participants: Vec<Participant> = serde_json::from_value(row.participants.unwrap_or(serde_json::json!([])))
-                .map_err(|e| MediaError::Internal(format!("Failed to deserialize participants: {}", e)))?;
-            
+            let media_uuid: Uuid = row.media_uuid;
+            let media_type = MediaType::from(row.media_type);
+
+            let state: PlaybackState = serde_json::from_value(row.playback_state).map_err(|e| {
+                MediaError::Internal(format!("Failed to deserialize PlaybackState: {}", e))
+            })?;
+
+            let participants: Vec<Participant> =
+                serde_json::from_value(row.participants.unwrap_or(serde_json::json!([]))).map_err(
+                    |e| MediaError::Internal(format!("Failed to deserialize participants: {}", e)),
+                )?;
+
             Ok(Some(SyncSession {
                 id: row.id,
                 room_code: row.room_code,
                 host_id: row.host_id,
-                media_id,
+                media_id: media_uuid,
+                media_type,
                 state,
                 participants,
-                created_at: row.created_at.unwrap_or_else(chrono::Utc::now).timestamp_millis(),
+                created_at: row
+                    .created_at
+                    .unwrap_or_else(chrono::Utc::now)
+                    .timestamp_millis(),
                 expires_at: row.expires_at.timestamp_millis(),
             }))
         } else {
             Ok(None)
         }
     }
-    
+
     pub async fn update_sync_session_state(&self, id: Uuid, state: &PlaybackState) -> Result<()> {
-        let playback_state_json = serde_json::to_value(state)
-            .map_err(|e| MediaError::Internal(format!("Failed to serialize PlaybackState: {}", e)))?;
-        
+        let playback_state_json = serde_json::to_value(state).map_err(|e| {
+            MediaError::Internal(format!("Failed to serialize PlaybackState: {}", e))
+        })?;
+
         let result = sqlx::query!(
             r#"
-            UPDATE sync_sessions 
+            UPDATE sync_sessions
             SET playback_state = $2
             WHERE id = $1 AND is_active = true
             "#,
@@ -198,68 +216,74 @@ impl PostgresDatabase {
         .execute(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to update sync session state: {}", e)))?;
-        
+
         if result.rows_affected() == 0 {
-            return Err(MediaError::NotFound("Sync session not found or inactive".to_string()));
+            return Err(MediaError::NotFound(
+                "Sync session not found or inactive".to_string(),
+            ));
         }
-        
+
         Ok(())
     }
-    
+
     pub async fn update_sync_session(&self, id: Uuid, session: &SyncSession) -> Result<()> {
-        // Serialize the playback state and media ID
-        let playback_state_json = serde_json::to_value(&session.state)
-            .map_err(|e| MediaError::Internal(format!("Failed to serialize PlaybackState: {}", e)))?;
-        let media_id_json = serde_json::to_value(&session.media_id)
-            .map_err(|e| MediaError::Internal(format!("Failed to serialize MediaId: {}", e)))?;
-        
+        // Serialize the playback state
+        let playback_state_json = serde_json::to_value(&session.state).map_err(|e| {
+            MediaError::Internal(format!("Failed to serialize PlaybackState: {}", e))
+        })?;
+
         // Update the session
         let result = sqlx::query!(
             r#"
-            UPDATE sync_sessions 
+            UPDATE sync_sessions
             SET room_code = $2,
                 host_id = $3,
-                media_id_json = $4,
-                playback_state = $5
+                media_uuid = $4,
+                media_type = $5,
+                playback_state = $6
             WHERE id = $1 AND is_active = true
             "#,
             id,
             session.room_code,
             session.host_id,
-            media_id_json,
+            session.media_id,
+            session.media_type as i16,
             playback_state_json
         )
         .execute(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to update sync session: {}", e)))?;
-        
+
         if result.rows_affected() == 0 {
-            return Err(MediaError::NotFound("Sync session not found or inactive".to_string()));
+            return Err(MediaError::NotFound(
+                "Sync session not found or inactive".to_string(),
+            ));
         }
-        
+
         // Update participants - first remove existing ones
-        sqlx::query!(
-            "DELETE FROM sync_participants WHERE session_id = $1",
-            id
-        )
-        .execute(self.pool())
-        .await
-        .map_err(|e| MediaError::Internal(format!("Failed to remove participants: {}", e)))?;
-        
+        sqlx::query!("DELETE FROM sync_participants WHERE session_id = $1", id)
+            .execute(self.pool())
+            .await
+            .map_err(|e| MediaError::Internal(format!("Failed to remove participants: {}", e)))?;
+
         // Then add new participants
         for participant in &session.participants {
             self.add_sync_participant(id, participant).await?;
         }
-        
+
         Ok(())
     }
-    
-    pub async fn add_sync_participant(&self, session_id: Uuid, participant: &Participant) -> Result<()> {
+
+    pub async fn add_sync_participant(
+        &self,
+        session_id: Uuid,
+        participant: &Participant,
+    ) -> Result<()> {
         let now = DateTime::<Utc>::from_timestamp_millis(chrono::Utc::now().timestamp_millis())
             .ok_or_else(|| MediaError::Internal("Invalid timestamp".to_string()))?;
         let last_ping = DateTime::<Utc>::from_timestamp_millis(participant.last_ping)
             .ok_or_else(|| MediaError::Internal("Invalid timestamp".to_string()))?;
-        
+
         sqlx::query!(
             r#"
             INSERT INTO sync_participants (session_id, user_id, joined_at, last_ping, is_ready, latency_ms)
@@ -279,15 +303,18 @@ impl PostgresDatabase {
         .execute(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to add participant: {}", e)))?;
-        
-        info!("Added participant {} to sync session {}", participant.user_id, session_id);
+
+        info!(
+            "Added participant {} to sync session {}",
+            participant.user_id, session_id
+        );
         Ok(())
     }
-    
+
     pub async fn remove_sync_participant(&self, session_id: Uuid, user_id: Uuid) -> Result<()> {
         let result = sqlx::query!(
             r#"
-            DELETE FROM sync_participants 
+            DELETE FROM sync_participants
             WHERE session_id = $1 AND user_id = $2
             "#,
             session_id,
@@ -296,18 +323,21 @@ impl PostgresDatabase {
         .execute(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to remove participant: {}", e)))?;
-        
+
         if result.rows_affected() > 0 {
-            info!("Removed participant {} from sync session {}", user_id, session_id);
+            info!(
+                "Removed participant {} from sync session {}",
+                user_id, session_id
+            );
         }
-        
+
         Ok(())
     }
-    
+
     pub async fn delete_sync_session(&self, id: Uuid) -> Result<()> {
         let result = sqlx::query!(
             r#"
-            UPDATE sync_sessions 
+            UPDATE sync_sessions
             SET is_active = false
             WHERE id = $1
             "#,
@@ -316,18 +346,18 @@ impl PostgresDatabase {
         .execute(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to delete sync session: {}", e)))?;
-        
+
         if result.rows_affected() > 0 {
             info!("Deactivated sync session {}", id);
         }
-        
+
         Ok(())
     }
-    
+
     pub async fn cleanup_expired_sync_sessions(&self) -> Result<u32> {
         let result = sqlx::query!(
             r#"
-            UPDATE sync_sessions 
+            UPDATE sync_sessions
             SET is_active = false
             WHERE expires_at < NOW() AND is_active = true
             "#
@@ -335,12 +365,12 @@ impl PostgresDatabase {
         .execute(self.pool())
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to cleanup expired sessions: {}", e)))?;
-        
+
         let count = result.rows_affected() as u32;
         if count > 0 {
             info!("Cleaned up {} expired sync sessions", count);
         }
-        
+
         Ok(count)
     }
 }

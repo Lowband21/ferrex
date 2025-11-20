@@ -78,9 +78,7 @@ impl JobQueue {
         // Spawn queue manager task
         let queue_clone = queue.clone();
         tokio::spawn(async move {
-            queue_clone
-                .run(submit_rx, job_request_rx, command_rx)
-                .await;
+            queue_clone.run(submit_rx, job_request_rx, command_rx).await;
         });
 
         (queue, handle)
@@ -166,17 +164,17 @@ impl JobQueue {
     /// Get next job for processing
     async fn get_next_job(&self) -> Option<TranscodingJob> {
         let mut pending = self.pending.write().await;
-        
+
         if let Some(priority_job) = pending.pop() {
             let mut job = priority_job.job;
             job.status = TranscodingStatus::Processing { progress: 0.0 };
-            
+
             // Update job in map
             let mut jobs = self.jobs.write().await;
             if let Some(stored_job) = jobs.get_mut(&job.id) {
                 stored_job.status = job.status.clone();
             }
-            
+
             debug!("Job {} dequeued for processing", job.id);
             Some(job)
         } else {
@@ -187,9 +185,7 @@ impl JobQueue {
     /// Handle commands
     async fn handle_command(&self, command: JobMessage) -> JobResponse {
         match command {
-            JobMessage::Cancel(job_id) => {
-                self.cancel_job(&job_id).await
-            }
+            JobMessage::Cancel(job_id) => self.cancel_job(&job_id).await,
             JobMessage::GetStatus(job_id) => {
                 let jobs = self.jobs.read().await;
                 JobResponse::Status(jobs.get(&job_id).cloned())
@@ -207,20 +203,18 @@ impl JobQueue {
     /// Cancel a job
     async fn cancel_job(&self, job_id: &str) -> JobResponse {
         let mut jobs = self.jobs.write().await;
-        
+
         if let Some(job) = jobs.get_mut(job_id) {
             match &job.status {
                 TranscodingStatus::Pending | TranscodingStatus::Queued => {
                     job.status = TranscodingStatus::Cancelled;
-                    
+
                     // Remove from pending queue
                     let mut pending = self.pending.write().await;
-                    let new_heap: BinaryHeap<_> = pending
-                        .drain()
-                        .filter(|pj| pj.job.id != job_id)
-                        .collect();
+                    let new_heap: BinaryHeap<_> =
+                        pending.drain().filter(|pj| pj.job.id != job_id).collect();
                     *pending = new_heap;
-                    
+
                     JobResponse::Cancelled
                 }
                 _ => JobResponse::Error("Job cannot be cancelled in current state".to_string()),
@@ -233,24 +227,24 @@ impl JobQueue {
     /// Update job priority
     async fn update_priority(&self, job_id: &str, new_priority: JobPriority) -> JobResponse {
         let mut jobs = self.jobs.write().await;
-        
+
         if let Some(job) = jobs.get_mut(job_id) {
             match &job.status {
                 TranscodingStatus::Pending | TranscodingStatus::Queued => {
                     job.priority = new_priority;
-                    
+
                     // Rebuild priority queue
                     let mut pending = self.pending.write().await;
                     let mut items: Vec<_> = pending.drain().collect();
-                    
+
                     for item in &mut items {
                         if item.job.id == job_id {
                             item.job.priority = new_priority;
                         }
                     }
-                    
+
                     *pending = items.into_iter().collect();
-                    
+
                     JobResponse::Status(Some(job.clone()))
                 }
                 _ => JobResponse::Error("Cannot update priority of running job".to_string()),
@@ -263,7 +257,7 @@ impl JobQueue {
     /// Update job status
     async fn update_job_status(&self, job_id: &str, status: TranscodingStatus) -> JobResponse {
         let mut jobs = self.jobs.write().await;
-        
+
         if let Some(job) = jobs.get_mut(job_id) {
             job.update_status(status);
             JobResponse::Status(Some(job.clone()))
@@ -276,10 +270,10 @@ impl JobQueue {
     pub async fn get_stats(&self) -> QueueStats {
         let pending_count = self.pending.read().await.len();
         let jobs = self.jobs.read().await;
-        
+
         let mut stats = QueueStats::default();
         stats.pending = pending_count;
-        
+
         for job in jobs.values() {
             match &job.status {
                 TranscodingStatus::Processing { .. } => stats.processing += 1,
@@ -289,7 +283,7 @@ impl JobQueue {
                 _ => {}
             }
         }
-        
+
         stats.total = jobs.len();
         stats
     }
@@ -324,7 +318,7 @@ impl JobQueueHandle {
             .send((job, response_tx))
             .await
             .map_err(|_| anyhow::anyhow!("Queue channel closed"))?;
-        
+
         response_rx
             .await
             .map_err(|_| anyhow::anyhow!("Failed to get response"))?
@@ -337,10 +331,10 @@ impl JobQueueHandle {
             .send((command, response_tx))
             .await
             .map_err(|_| anyhow::anyhow!("Command channel closed"))?;
-        
-        Ok(response_rx
+
+        response_rx
             .await
-            .map_err(|_| anyhow::anyhow!("Failed to get response"))?)
+            .map_err(|_| anyhow::anyhow!("Failed to get response"))
     }
 }
 

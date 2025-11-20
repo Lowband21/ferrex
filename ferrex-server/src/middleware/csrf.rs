@@ -1,18 +1,17 @@
-use rand::{thread_rng, RngCore};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use sha2::{Sha256, Digest};
 use axum::{
-    async_trait,
     body::Body,
     extract::FromRequestParts,
     http::{request::Parts, HeaderMap, Request, Response, StatusCode},
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use rand::{thread_rng, RngCore};
+use sha2::{Digest, Sha256};
 
 /// Generates a cryptographically secure 32-byte CSRF token
 pub fn generate_token() -> String {
     let mut token_bytes = [0u8; 32];
     thread_rng().fill_bytes(&mut token_bytes);
-    URL_SAFE_NO_PAD.encode(&token_bytes)
+    URL_SAFE_NO_PAD.encode(token_bytes)
 }
 
 /// Hashes a CSRF token with SHA256 for secure storage
@@ -46,8 +45,8 @@ pub fn extract_csrf_from_cookies(headers: &HeaderMap) -> Option<String> {
         })
 }
 
-use tower::Layer;
 use std::task::{Context, Poll};
+use tower::Layer;
 
 #[derive(Clone)]
 pub struct CsrfLayer;
@@ -86,15 +85,16 @@ where
 
 pub struct ValidateCsrf;
 
-#[async_trait]
 impl<S> FromRequestParts<S> for ValidateCsrf
 where
     S: Send + Sync,
 {
     type Rejection = StatusCode;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        // For now, just return Ok - validation logic will be added later
-        Ok(ValidateCsrf)
+    fn from_request_parts(
+        _parts: &mut Parts,
+        _state: &S,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self, Self::Rejection>> + Send>> {
+        Box::pin(async move { Ok(ValidateCsrf) })
     }
 }

@@ -42,13 +42,17 @@ pub fn handle_database_cleared(
         Ok(()) => {
             log::info!("Database cleared successfully");
 
-            // Clear MediaStore (single source of truth)
-            if let Ok(mut store) = state.domains.media.state.media_store.write() {
-                store.clear();
+            // Clear MediaRepo (new single source of truth)
+            {
+                let mut repo_lock = state.media_repo.write();
+                if let Some(repo) = repo_lock.as_mut() {
+                    repo.clear();
+                }
+                // Clear the repo entirely
+                *repo_lock = None;
             }
 
-            // Clear library data
-            state.domains.library.state.libraries.clear();
+            // Clear library state
             state.domains.library.state.current_library_id = None;
             state.domains.library.state.library_form_data = None;
             state.domains.library.state.library_form_errors.clear();
@@ -77,12 +81,10 @@ pub fn handle_database_cleared(
             state.domains.ui.state.scroll_stopped_time = None;
 
             // Reset TabManager tabs
-            state.tab_manager = crate::domains::ui::tabs::TabManager::new(
-                state.domains.media.state.media_store.clone(),
-            );
+            //state.tab_manager.clear();
 
             // Reset AllViewModel - it will automatically reflect empty MediaStore
-            state.all_view_model.set_library_filter(None);
+            //state.all_view_model.set_library_filter(None);
 
             // Reset view to library (in case user was in detail view)
             state.domains.ui.state.view = ViewState::Library;

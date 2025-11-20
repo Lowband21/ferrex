@@ -2,13 +2,13 @@ use crate::domains::library::messages::Message;
 use crate::domains::library::server::{start_library_scan, start_media_scan};
 use crate::domains::library::LibraryDomainState;
 use crate::state_refactored::State;
-use ferrex_core::{ScanProgress, ScanStatus};
+use ferrex_core::{LibraryID, ScanProgress, ScanStatus};
 use iced::Task;
 use uuid::Uuid;
 
 pub fn handle_scan_library(
     state: &mut State,
-    library_id: Uuid,
+    library_id: LibraryID,
     server_url: String,
 ) -> Task<Message> {
     log::info!("Starting scan for library: {}", library_id);
@@ -55,13 +55,13 @@ pub fn handle_scan_started(state: &mut State, result: Result<String, String>) ->
             log::info!("Scan started with ID: {}", scan_id);
             state.domains.library.state.active_scan_id = Some(scan_id);
             state.domains.library.state.show_scan_progress = true; // Auto-show progress overlay
-            
+
             // NEW: Enter batch mode in MediaStore to prevent sorting during scan
-            if let Ok(mut store) = state.domains.media.state.media_store.write() {
+            /*if let Ok(mut store) = state.domains.media.state.media_store.write() {
                 log::info!("Entering batch mode in MediaStore for scan");
                 store.begin_batch();
-            }
-            
+            }*/
+
             Task::none()
         }
         Err(e) => {
@@ -106,12 +106,16 @@ pub fn handle_scan_progress_update(state: &mut State, progress: ScanProgress) ->
         || progress.status == ScanStatus::Cancelled
     {
         state.domains.library.state.scanning = false;
-        
+
+        /*
         // NEW: Exit batch mode in MediaStore when scan completes
-        if let Ok(mut store) = state.domains.media.state.media_store.write() {
-            log::info!("Exiting batch mode in MediaStore - scan complete with status: {:?}", progress.status);
+        if let Ok(mut store) = state.domains.library.state.repo_access.write() {
+            log::info!(
+                "Exiting batch mode in MediaStore - scan complete with status: {:?}",
+                progress.status
+            );
             store.end_batch();
-        }
+        } */
         // Don't clear active_scan_id yet - keep it until we clear scan_progress
 
         if progress.status == ScanStatus::Completed {

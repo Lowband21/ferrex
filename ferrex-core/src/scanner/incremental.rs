@@ -1,14 +1,13 @@
 use crate::{
     database::traits::{MediaProcessingStatus, ScanState},
     providers::TmdbApiProvider,
-    LibraryReference, MediaDatabase, Result, 
-    StreamingScannerConfig, StreamingScannerV2,
+    LibraryReference, MediaDatabase, Result, StreamingScannerConfig, StreamingScannerV2,
 };
+use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
-use chrono::Utc;
 
 use super::orchestrator::{ScanOptions, ScanOrchestrator};
 
@@ -110,44 +109,53 @@ impl IncrementalScanner {
             .update_scan_progress(
                 scan_state.id,
                 None,
-                Some((unprocessed_metadata.len() + unprocessed_tmdb.len() + unprocessed_images.len() + failed_files.len()) as i32),
+                Some(
+                    (unprocessed_metadata.len()
+                        + unprocessed_tmdb.len()
+                        + unprocessed_images.len()
+                        + failed_files.len()) as i32,
+                ),
                 None,
             )
             .await?;
 
         // Group files by their parent folders
-        let mut folders_to_process = std::collections::HashMap::<std::path::PathBuf, Vec<crate::MediaFile>>::new();
-        
+        let mut folders_to_process =
+            std::collections::HashMap::<std::path::PathBuf, Vec<crate::MediaFile>>::new();
+
         // Add unprocessed metadata files
         for file in unprocessed_metadata {
             let folder = self.get_media_folder(&file.path, &library);
             if let Some(folder_path) = folder {
-                folders_to_process.entry(folder_path)
+                folders_to_process
+                    .entry(folder_path)
                     .or_insert_with(Vec::new)
                     .push(file);
             }
         }
-        
+
         // Add unprocessed TMDB files
         for file in unprocessed_tmdb {
             let folder = self.get_media_folder(&file.path, &library);
             if let Some(folder_path) = folder {
-                folders_to_process.entry(folder_path)
+                folders_to_process
+                    .entry(folder_path)
                     .or_insert_with(Vec::new)
                     .push(file);
             }
         }
-        
+
         // Add failed files
         for file in failed_files {
             let folder = self.get_media_folder(&file.path, &library);
             if let Some(folder_path) = folder {
-                folders_to_process.entry(folder_path)
+                folders_to_process
+                    .entry(folder_path)
                     .or_insert_with(Vec::new)
                     .push(file);
             }
         }
-        
+
         // Process each folder
         let mut processed_count = 0;
         for (folder_path, files) in folders_to_process {
@@ -155,30 +163,48 @@ impl IncrementalScanner {
                 info!("Scan {} is no longer active, stopping", scan_state.id);
                 break;
             }
-            
-            info!("Processing folder: {} with {} unprocessed files", folder_path.display(), files.len());
-            
+
+            info!(
+                "Processing folder: {} with {} unprocessed files",
+                folder_path.display(),
+                files.len()
+            );
+
             // Process the entire folder using the scanner
-            match self.process_media_folder(&folder_path, &library, output_tx.clone()).await {
+            match self
+                .process_media_folder(&folder_path, &library, output_tx.clone())
+                .await
+            {
                 Ok(_) => {
                     processed_count += files.len();
                     self.orchestrator
-                        .update_scan_progress(scan_state.id, None, Some(processed_count as i32), Some(folder_path.display().to_string()))
+                        .update_scan_progress(
+                            scan_state.id,
+                            None,
+                            Some(processed_count as i32),
+                            Some(folder_path.display().to_string()),
+                        )
                         .await?;
                 }
                 Err(e) => {
                     error!("Failed to process folder {:?}: {}", folder_path, e);
                     self.orchestrator
-                        .add_scan_error(scan_state.id, format!("Folder processing failed for {:?}: {}", folder_path, e))
+                        .add_scan_error(
+                            scan_state.id,
+                            format!("Folder processing failed for {:?}: {}", folder_path, e),
+                        )
                         .await?;
-                    
+
                     // Update processing status for all files in this folder
                     for file in files {
                         let mut status = self.get_or_create_processing_status(file.id).await?;
                         status.last_error = Some(format!("Folder processing failed: {}", e));
                         status.retry_count += 1;
                         status.next_retry_at = Some(Utc::now() + chrono::Duration::hours(1));
-                        self.db.backend().create_or_update_processing_status(&status).await?;
+                        self.db
+                            .backend()
+                            .create_or_update_processing_status(&status)
+                            .await?;
                     }
                 }
             }
@@ -196,7 +222,6 @@ impl IncrementalScanner {
             warn!("Image caching for existing files not yet implemented");
         }
 
-
         // Perform regular scan for new files
         info!("Checking for new files in library {}", library.name);
         self.scanner
@@ -206,15 +231,19 @@ impl IncrementalScanner {
 
         Ok(())
     }
-    
+
     /// Get the media folder for a file path based on library type
-    fn get_media_folder(&self, file_path: &std::path::Path, library: &LibraryReference) -> Option<std::path::PathBuf> {
+    fn get_media_folder(
+        &self,
+        file_path: &std::path::Path,
+        library: &LibraryReference,
+    ) -> Option<std::path::PathBuf> {
         match library.library_type {
             crate::LibraryType::Movies => {
                 // For movies, the parent folder is the movie folder
                 file_path.parent().map(|p| p.to_path_buf())
             }
-            crate::LibraryType::TvShows => {
+            crate::LibraryType::Series => {
                 // For TV shows, we need the series root folder
                 // Structure: Series Name/Season XX/episode.mkv
                 if file_path.is_file() {
@@ -234,7 +263,7 @@ impl IncrementalScanner {
             }
         }
     }
-    
+
     /// Process a media folder using the streaming scanner
     async fn process_media_folder(
         &self,
@@ -245,24 +274,40 @@ impl IncrementalScanner {
         match library.library_type {
             crate::LibraryType::Movies => {
                 // Process as a movie folder
-                match self.scanner.process_movie_folder(folder_path.to_path_buf(), library.id).await {
+                match self
+                    .scanner
+                    .process_movie_folder(folder_path.to_path_buf(), library.id)
+                    .await
+                {
                     Ok(movie_ref) => {
-                        let _ = output_tx.send(crate::ScanOutput::MovieFound(movie_ref)).await;
+                        let _ = output_tx
+                            .send(crate::ScanOutput::MovieFound(movie_ref))
+                            .await;
                         Ok(())
                     }
-                    Err(e) => Err(e)
+                    Err(e) => Err(e),
                 }
             }
-            crate::LibraryType::TvShows => {
+            crate::LibraryType::Series => {
                 // Process as a series folder
-                self.scanner.process_series_folder(folder_path.to_path_buf(), library.id, &output_tx).await
+                self.scanner
+                    .process_series_folder(folder_path.to_path_buf(), library.id, &output_tx)
+                    .await
             }
         }
     }
 
     /// Get or create processing status for a media file
-    async fn get_or_create_processing_status(&self, media_file_id: Uuid) -> Result<MediaProcessingStatus> {
-        if let Some(status) = self.db.backend().get_processing_status(media_file_id).await? {
+    async fn get_or_create_processing_status(
+        &self,
+        media_file_id: Uuid,
+    ) -> Result<MediaProcessingStatus> {
+        if let Some(status) = self
+            .db
+            .backend()
+            .get_processing_status(media_file_id)
+            .await?
+        {
             Ok(status)
         } else {
             Ok(MediaProcessingStatus {
@@ -330,14 +375,20 @@ impl IncrementalScanner {
             }
 
             // TODO: Implement analysis (thumbnail generation, etc.)
-            warn!("File analysis not yet implemented for {:?}", media_file.path);
+            warn!(
+                "File analysis not yet implemented for {:?}",
+                media_file.path
+            );
 
             // Update processing status
             let mut status = self.get_or_create_processing_status(media_file.id).await?;
             status.file_analyzed = true;
             status.file_analyzed_at = Some(Utc::now());
-            
-            self.db.backend().create_or_update_processing_status(&status).await?;
+
+            self.db
+                .backend()
+                .create_or_update_processing_status(&status)
+                .await?;
         }
 
         Ok(())

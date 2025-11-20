@@ -4,14 +4,11 @@
 //! from media references based on available data.
 
 use super::{
-    DateAddedField, HasField, MovieFieldSet, OptionalDateKey, OptionalFloatKey,
-    OptionalU32Key, SeriesFieldSet,
-    SortFieldMarker, SortableEntity, SortKey, StringKey,
+    DateAddedField, HasField, MovieFieldSet, OptionalDateKey, OptionalFloatKey, OptionalU32Key,
+    SeriesFieldSet, SortFieldMarker, SortKey, SortableEntity, StringKey,
 };
 
-use crate::{
-    MediaDetailsOption, MediaReference, MovieReference, SeriesReference, TmdbDetails,
-};
+use crate::{Media, MediaDetailsOption, MovieReference, SeriesReference, TmdbDetails};
 
 /// Implementation of SortableEntity for MovieReference
 impl SortableEntity for MovieReference {
@@ -23,11 +20,11 @@ impl SortableEntity for MovieReference {
     {
         // We need to match on the field's ID to determine which key to extract
         // This is a runtime dispatch based on the const ID
-        // 
+        //
         // NOTE: We use a type assertion approach to avoid unsafe transmute_copy
         // which was causing double-free issues. The compiler should optimize
         // this to be zero-cost.
-        
+
         if F::ID == "title" {
             // Title is always available from MovieReference
             let key = StringKey::from_str(self.title.as_str());
@@ -46,10 +43,13 @@ impl SortableEntity for MovieReference {
                     movie_details.release_date.as_ref().and_then(|date_str| {
                         // Parse the date string (expected format: YYYY-MM-DD)
                         use chrono::{NaiveDate, NaiveTime, Utc};
-                        NaiveDate::parse_from_str(date_str, "%Y-%m-%d").ok().and_then(|date| {
-                            let naive_datetime = date.and_time(NaiveTime::from_hms_opt(0, 0, 0)?);
-                            naive_datetime.and_local_timezone(Utc).single()
-                        })
+                        NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                            .ok()
+                            .and_then(|date| {
+                                let naive_datetime =
+                                    date.and_time(NaiveTime::from_hms_opt(0, 0, 0)?);
+                                naive_datetime.and_local_timezone(Utc).single()
+                            })
                     })
                 }
                 _ => None,
@@ -113,7 +113,7 @@ impl SortableEntity for SeriesReference {
     {
         // We need to match on the field's ID to determine which key to extract
         // Using type assertion to avoid unsafe code
-        
+
         if F::ID == "title" {
             // Title is always available from SeriesReference
             let key = StringKey::from_str(self.title.as_str());
@@ -129,10 +129,13 @@ impl SortableEntity for SeriesReference {
                     series_details.first_air_date.as_ref().and_then(|date_str| {
                         // Parse the date string (expected format: YYYY-MM-DD)
                         use chrono::{NaiveDate, NaiveTime, Utc};
-                        NaiveDate::parse_from_str(date_str, "%Y-%m-%d").ok().and_then(|date| {
-                            let naive_datetime = date.and_time(NaiveTime::from_hms_opt(0, 0, 0)?);
-                            naive_datetime.and_local_timezone(Utc).single()
-                        })
+                        NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                            .ok()
+                            .and_then(|date| {
+                                let naive_datetime =
+                                    date.and_time(NaiveTime::from_hms_opt(0, 0, 0)?);
+                                naive_datetime.and_local_timezone(Utc).single()
+                            })
                     })
                 }
                 _ => None,
@@ -175,20 +178,23 @@ impl SortableEntity for SeriesReference {
         }
     }
 }
-// NOTE: MediaReference deliberately does NOT implement SortableEntity
+// NOTE: Media deliberately does NOT implement SortableEntity
 // because different media types (Movie, Series, Season, Episode) have
 // different sortable fields. Use type-specific sorting for each media type.
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EnhancedMovieDetails, MovieID, MovieTitle, MovieURL};
-    use crate::query::sorting::fields::{DateAddedField, PopularityField, RatingField, ReleaseDateField, RuntimeField, TitleField};
+    use crate::query::sorting::fields::{
+        DateAddedField, PopularityField, RatingField, ReleaseDateField, RuntimeField, TitleField,
+    };
+    use crate::{EnhancedMovieDetails, LibraryID, MovieID, MovieTitle, MovieURL, UrlLike};
     use uuid::Uuid;
 
     fn create_test_movie_with_details() -> MovieReference {
         MovieReference {
-            id: MovieID::new("test-movie-1".to_string()).unwrap(),
+            id: MovieID::new(),
+            library_id: LibraryID::new(),
             tmdb_id: 12345,
             title: MovieTitle::new("Test Movie".to_string()).unwrap(),
             details: MediaDetailsOption::Details(TmdbDetails::Movie(EnhancedMovieDetails {
@@ -212,7 +218,7 @@ mod tests {
                 keywords: vec![],
                 external_ids: crate::ExternalIds::default(),
             })),
-            endpoint: MovieURL::from_string("/api/movies/test-movie-1".to_string()),
+            endpoint: MovieURL::from_string("/movies/test-movie-1".to_string()),
             file: crate::MediaFile {
                 id: Uuid::new_v4(),
                 path: std::path::PathBuf::from("/movies/test.mp4"),
@@ -220,7 +226,7 @@ mod tests {
                 size: 1000000,
                 created_at: chrono::Utc::now(),
                 media_file_metadata: None,
-                library_id: Uuid::new_v4(),
+                library_id: LibraryID::new(),
             },
             theme_color: None,
         }
@@ -228,7 +234,7 @@ mod tests {
 
     fn create_test_movie_without_details() -> MovieReference {
         let mut movie = create_test_movie_with_details();
-        movie.details = MediaDetailsOption::Endpoint("/api/movies/test-movie-1".to_string());
+        movie.details = MediaDetailsOption::Endpoint("/movies/test-movie-1".to_string());
         movie
     }
 
@@ -287,6 +293,4 @@ mod tests {
         let key: OptionalFloatKey = movie.extract_key(PopularityField);
         assert!(!key.is_missing());
     }
-
-
 }

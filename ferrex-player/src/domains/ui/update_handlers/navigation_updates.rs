@@ -1,13 +1,13 @@
 use iced::Task;
+use uuid::Uuid;
 
 use super::super::views::carousel::CarouselState;
 use crate::{
-    domains::media::library::MediaFile,
     domains::ui::{messages::Message, types, ViewState},
-    infrastructure::api_types::{MediaReference, MovieReference},
+    infrastructure::api_types::{Media, MovieReference},
     state_refactored::State,
 };
-use ferrex_core::{EpisodeID, SeasonID, SeriesID};
+use ferrex_core::{EpisodeID, MediaFile, MediaID, MediaIDLike, MovieID, SeasonID, SeriesID};
 
 /// Updates background shader depth regions when transitioning to a detail view
 /// This ensures smooth animation from current regions to new regions
@@ -22,6 +22,13 @@ use ferrex_core::{EpisodeID, SeasonID, SeriesID};
 fn prepare_depth_regions_for_transition(state: &mut State, new_view: &ViewState) {
     // Update depth regions for the new view BEFORE changing view state
     // This triggers the fade animation between different depth layouts
+
+    // TODO: This is cumbersome, fix it
+    let uuid = if let Some(library_id) = state.domains.library.state.current_library_id {
+        Some(library_id.as_uuid())
+    } else {
+        None
+    };
     state
         .domains
         .ui
@@ -31,7 +38,7 @@ fn prepare_depth_regions_for_transition(state: &mut State, new_view: &ViewState)
             new_view,
             state.window_size.width,
             state.window_size.height,
-            state.domains.library.state.current_library_id,
+            uuid,
         );
 }
 
@@ -43,9 +50,7 @@ fn prepare_depth_regions_for_transition(state: &mut State, new_view: &ViewState)
     ),
     profiling::function
 )]
-pub fn handle_view_details(state: &mut State, media: MediaFile) -> Task<Message> {
-    log::info!("Viewing details for: {}", media.display_title());
-
+pub fn handle_view_details(state: &mut State, media: MediaID) -> Task<Message> {
     // Save current view to navigation history
     state
         .domains
@@ -57,6 +62,7 @@ pub fn handle_view_details(state: &mut State, media: MediaFile) -> Task<Message>
     // Save current scroll position before navigating away
     save_current_scroll_state(state);
 
+    /* TODO: Get media for details views
     // Determine if it's a movie or TV episode
     if media.is_tv_episode() {
         state.domains.ui.state.view = ViewState::EpisodeDetail {
@@ -68,11 +74,11 @@ pub fn handle_view_details(state: &mut State, media: MediaFile) -> Task<Message>
         // NEW ARCHITECTURE: Find movie in MediaStore
         let movie_id = ferrex_core::MovieID::new(media.id.clone())
             .unwrap_or_else(|_| ferrex_core::MovieID::new("unknown".to_string()).unwrap());
-        let media_id = ferrex_core::api_types::MediaId::Movie(movie_id);
+        let media_id = ferrex_core::MediaID::Movie(movie_id);
 
         if let Ok(store) = state.domains.media.state.media_store.read() {
             // TODO: Media state reference outside of media domain
-            if let Some(MediaReference::Movie(movie)) = store.get(&media_id) {
+            if let Some(Media::Movie(movie)) = store.get(&media_id) {
                 state.domains.ui.state.view = ViewState::MovieDetail {
                     movie: movie.clone(),
                     backdrop_handle: None,
@@ -83,9 +89,10 @@ pub fn handle_view_details(state: &mut State, media: MediaFile) -> Task<Message>
                     Some(format!("Movie not found: {}", media.display_title()));
             }
         }
-    }
+    } */
 
     // Update depth regions for the new detail view
+    // TODO: Please don't push this
     state
         .domains
         .ui
@@ -95,7 +102,7 @@ pub fn handle_view_details(state: &mut State, media: MediaFile) -> Task<Message>
             &state.domains.ui.state.view,
             state.window_size.width,
             state.window_size.height,
-            state.domains.library.state.current_library_id,
+            None,
         );
 
     Task::none()
@@ -109,11 +116,11 @@ pub fn handle_view_details(state: &mut State, media: MediaFile) -> Task<Message>
     ),
     profiling::function
 )]
-pub fn handle_view_movie_details(state: &mut State, movie: MovieReference) -> Task<Message> {
+pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<Message> {
+    let mut buff = Uuid::encode_buffer();
     log::info!(
-        "Viewing movie details for: {} (id: {})",
-        movie.title.as_str(),
-        movie.id.as_str()
+        "Viewing movie details for id: {})",
+        movie_id.as_str(&mut buff)
     );
 
     // Save current view to navigation history
@@ -124,10 +131,34 @@ pub fn handle_view_movie_details(state: &mut State, movie: MovieReference) -> Ta
         .navigation_history
         .push(state.domains.ui.state.view.clone());
 
+    // Ensure yoke is in the UI cache for detail view borrowing
+    let movie_uuid = movie_id.to_uuid();
+    if let Ok(yoke) = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_movie_yoke(&MediaID::Movie(movie_id))
+    {
+        state
+            .domains
+            .ui
+            .state
+            .movie_yoke_cache
+            .insert(movie_uuid, std::sync::Arc::new(yoke));
+    }
+
+    // Switch to the detail view using the provided reference
+    state.domains.ui.state.view = ViewState::MovieDetail {
+        movie_id: movie_id,
+        backdrop_handle: None,
+    };
+
+    /*
     // CRITICAL FIX: Get the latest version from MediaStore, not the stale UI reference
     let movie = if let Ok(store) = state.domains.media.state.media_store.read() {
-        if let Some(MediaReference::Movie(fresh_movie)) =
-            store.get(&ferrex_core::api_types::MediaId::Movie(movie.id.clone()))
+        if let Some(Media::Movie(fresh_movie)) =
+            store.get(&ferrex_core::MediaID::Movie(movie.id.clone()))
         {
             log::info!(
                 "Got fresh movie from MediaStore with details: {}",
@@ -156,7 +187,7 @@ pub fn handle_view_movie_details(state: &mut State, movie: MovieReference) -> Ta
 
     // Check if we need to fetch details on-demand
     let fetch_task = if let Some(library_id) = state.domains.library.state.current_library_id {
-        let movie_media_id = ferrex_core::api_types::MediaId::Movie(movie.id.clone());
+        let movie_media_id = ferrex_core::MediaID::Movie(movie.id.clone());
         state
             .domains
             .metadata
@@ -219,7 +250,7 @@ pub fn handle_view_movie_details(state: &mut State, movie: MovieReference) -> Ta
     {
         if movie_details.backdrop_path.is_some() {
             let request = crate::domains::metadata::image_types::ImageRequest::new(
-                ferrex_core::api_types::MediaId::Movie(movie.id.clone()),
+                ferrex_core::MediaID::Movie(movie.id.clone()),
                 crate::domains::metadata::image_types::ImageSize::Backdrop,
             );
             // Just request the image if not in cache - view will pull it when ready
@@ -243,9 +274,10 @@ pub fn handle_view_movie_details(state: &mut State, movie: MovieReference) -> Ta
 
     // Finally change the view state (after all transitions are set up)
     state.domains.ui.state.view = new_view;
-
+    */
     // Convert DomainMessage task to ui::Message task
-    fetch_task.map(|_| Message::NoOp)
+    //fetch_task.map(|_| Message::NoOp)
+    Task::none()
 }
 
 #[cfg_attr(
@@ -273,6 +305,7 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
     // No need to clear show details - using MediaStore as single source of truth
 
     // NEW ARCHITECTURE: Get seasons from MediaStore
+    /*
     if let Ok(store) = state.domains.media.state.media_store.read() {
         // TODO: Media state reference outside of media domain
         let seasons = store.get_seasons(series_id.as_ref());
@@ -294,7 +327,7 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
     save_current_scroll_state(state);
 
     // NEW ARCHITECTURE: Get series from MediaStore
-    let series_media_id = ferrex_core::api_types::MediaId::Series(series_id.clone());
+    let series_media_id = ferrex_core::MediaID::Series(series_id.clone());
 
     // Check if we need to fetch details on-demand
     let fetch_task = if let Some(library_id) = state.domains.library.state.current_library_id {
@@ -306,7 +339,8 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
             .map(|_| Message::NoOp)
     } else {
         Task::none()
-    };
+    }; */
+    /*
 
     // Create the new view state first (needed for depth region calculation)
     let new_view = ViewState::TvShowDetail {
@@ -320,7 +354,7 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
     // THEN: Apply transitions if we have the series data
     if let Ok(store) = state.domains.media.state.media_store.read() {
         // TODO: Media state reference outside of media domain
-        if let Some(MediaReference::Series(series)) = store.get(&series_media_id) {
+        if let Some(Media::Series(series)) = store.get(&series_media_id) {
             // Transition to new theme colors
             if let Some(hex) = &series.theme_color {
                 if let Ok(color) = super::super::views::macros::parse_hex_color(hex) {
@@ -365,7 +399,7 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
             {
                 if series_details.backdrop_path.is_some() {
                     let request = crate::domains::metadata::image_types::ImageRequest::new(
-                        ferrex_core::api_types::MediaId::Series(series.id.clone()),
+                        ferrex_core::MediaID::Series(series.id.clone()),
                         crate::domains::metadata::image_types::ImageSize::Backdrop,
                     );
                     // Just request the image if not in cache - view will pull it when ready
@@ -456,11 +490,11 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
     // The existing fetch_media_details call is still needed for loading the TvShowDetails
     // But we'll also return the fetch_task to ensure details are fetched if needed
     let existing_task = if let Some(library_id) = state.domains.library.state.current_library_id {
-        let media_id = ferrex_core::MediaId::Series(series_id.clone());
+        let media_id = ferrex_core::MediaID::Series(series_id.clone());
         Task::perform(
             crate::domains::media::library::fetch_media_details(server_url, library_id, media_id),
             move |result| match result {
-                Ok(MediaReference::Series(series_ref)) => {
+                Ok(Media::Series(series_ref)) => {
                     // Debug: Log the series we're loading
                     log::info!(
                         "Loading details for series: {} (ID: {})",
@@ -575,9 +609,11 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
         // No library selected
         Task::none()
     };
+    */
 
     // Batch both tasks together
-    Task::batch([fetch_task, existing_task])
+    //Task::batch([fetch_task, existing_task])
+    Task::none()
 }
 
 #[cfg_attr(
@@ -609,9 +645,10 @@ pub fn handle_view_season(
     // Clear previous season details
     state.domains.media.state.current_season_details = None;
 
+    /*
     // Check if we need to fetch season details on-demand
     let fetch_task = if let Some(library_id) = state.domains.library.state.current_library_id {
-        let season_media_id = ferrex_core::api_types::MediaId::Season(season_id.clone());
+        let season_media_id = ferrex_core::MediaID::Season(season_id.clone());
         state
             .domains
             .metadata
@@ -641,7 +678,7 @@ pub fn handle_view_season(
                 carousel.update_items_per_page(available_width);
             }
         }
-    }
+    }*/
 
     // Save current scroll position if navigating from library view
     if matches!(state.domains.ui.state.view, ViewState::Library) {}
@@ -661,7 +698,8 @@ pub fn handle_view_season(
     state.domains.ui.state.view = new_view;
 
     // Return the fetch task converted to ui::Message
-    fetch_task.map(|_| Message::NoOp)
+    //fetch_task.map(|_| Message::NoOp)
+    Task::none()
 }
 
 #[cfg_attr(
@@ -673,7 +711,8 @@ pub fn handle_view_season(
     profiling::function
 )]
 pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Message> {
-    log::info!("Viewing episode: {}", episode_id.as_str());
+    let mut buff = Uuid::encode_buffer();
+    log::info!("Viewing episode: {}", episode_id.as_str(&mut buff));
 
     // Save current view to navigation history
     state
@@ -686,9 +725,10 @@ pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Mes
     // Save current scroll position before navigating away
     save_current_scroll_state(state);
 
+    /*
     // Check if we need to fetch episode details on-demand
     let fetch_task = if let Some(library_id) = state.domains.library.state.current_library_id {
-        let episode_media_id = ferrex_core::api_types::MediaId::Episode(episode_id.clone());
+        let episode_media_id = ferrex_core::MediaID::Episode(episode_id.clone());
         state
             .domains
             .metadata
@@ -696,7 +736,7 @@ pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Mes
             .fetch_media_details_on_demand(library_id, episode_media_id)
     } else {
         Task::none()
-    };
+    };*/
 
     // Create the new view state
     let new_view = ViewState::EpisodeDetail {
@@ -712,7 +752,8 @@ pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Mes
     state.domains.ui.state.view = new_view;
 
     // Convert DomainMessage task to ui::Message task
-    fetch_task.map(|_| Message::NoOp)
+    //fetch_task.map(|_| Message::NoOp)
+    Task::none()
 }
 
 #[cfg_attr(

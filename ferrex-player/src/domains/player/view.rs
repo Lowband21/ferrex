@@ -174,14 +174,23 @@ impl PlayerDomainState {
         video: &'a crate::domains::player::video_backend::Video,
     ) -> Element<'a, Message> {
         // Create the appropriate video player widget based on the backend
+        // Determine if overlay is active (controls or menus visible)
+        let overlay_active = self.controls
+            || self.show_settings
+            || self.show_subtitle_menu
+            || self.show_quality_menu
+            || self.track_notification.is_some();
+
         let player: iced::Element<Message, Theme, iced_wgpu::Renderer> = match video.inner() {
             VideoInner::Wayland(wayland_video_arc) => {
-                iced_video_player_wayland::VideoPlayer::new(wayland_video_arc)
+                let mut vp = iced_video_player_wayland::VideoPlayer::new(wayland_video_arc)
                     .width(Length::Fill)
                     .height(Length::Fill)
-                    .content_fit(self.content_fit)
-                    .on_new_frame(Message::NewFrame)  // Add NewFrame message for position updates
-                    .into()
+                    .content_fit(self.content_fit);
+                if overlay_active {
+                    vp = vp.on_new_frame(Message::NewFrame);
+                }
+                vp.into()
             }
             VideoInner::Standard(std_video) => {
                 // For standard video, we need to leak the reference (temporary solution)
@@ -192,7 +201,7 @@ impl PlayerDomainState {
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .content_fit(self.content_fit)
-                    .on_new_frame(Message::NewFrame)  // Ensure standard player also has this
+                    .on_new_frame(Message::NewFrame) // Ensure standard player also has this
                     .into()
             }
         };

@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod ui_widgets_tests {
-    use ferrex_player::domains::ui::{messages::Message, SortBy, SortOrder};
     use ferrex_player::domains::ui::widgets::{filter_button, sort_dropdown, sort_order_toggle};
+    use ferrex_player::domains::ui::{messages::Message, SortBy, SortOrder};
     use iced::Element;
 
     #[test]
@@ -9,7 +9,7 @@ mod ui_widgets_tests {
         // Test that sort_dropdown creates a valid element for each SortBy variant
         let sort_options = vec![
             SortBy::DateAdded,
-            SortBy::Title, 
+            SortBy::Title,
             SortBy::Year,
             SortBy::Rating,
         ];
@@ -49,13 +49,13 @@ mod ui_widgets_tests {
     #[test]
     fn test_sort_option_display() {
         use ferrex_player::domains::ui::widgets::sort_dropdown::SortOption;
-        
+
         // Test that SortOption displays correctly
         assert_eq!(SortOption::OPTIONS[0].label, "Date Added");
         assert_eq!(SortOption::OPTIONS[1].label, "Title");
         assert_eq!(SortOption::OPTIONS[2].label, "Release Year");
         assert_eq!(SortOption::OPTIONS[3].label, "Rating");
-        
+
         // Test that display formatting works
         assert_eq!(format!("{}", SortOption::OPTIONS[0]), "Date Added");
     }

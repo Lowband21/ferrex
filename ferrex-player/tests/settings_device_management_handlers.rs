@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
+use chrono::Utc;
 use ferrex_core::auth::device::AuthenticatedDevice;
 use ferrex_player::domains::settings::messages as settings_messages;
 use ferrex_player::domains::ui::views::settings::device_management::UserDevice;
 use ferrex_player::infrastructure::services::settings::SettingsService;
 use ferrex_player::state_refactored::State;
 use iced::Task;
-use uuid::Uuid;
-use chrono::Utc;
 use serde_json::json;
+use uuid::Uuid;
 
 struct MockSettingsServiceOk;
 #[async_trait::async_trait]
@@ -49,7 +49,8 @@ impl SettingsService for MockSettingsServiceErr {
 fn new_state_with_service(service: Option<Arc<dyn SettingsService>>) -> State {
     let mut state = State::default();
     // Ensure settings view is device management for clarity
-    state.domains.settings.current_view = ferrex_player::domains::settings::state::SettingsView::DeviceManagement;
+    state.domains.settings.current_view =
+        ferrex_player::domains::settings::state::SettingsView::DeviceManagement;
     if let Some(svc) = service {
         state.domains.settings.settings_service = svc;
     }
@@ -59,20 +60,39 @@ fn new_state_with_service(service: Option<Arc<dyn SettingsService>>) -> State {
 #[test]
 fn handle_load_devices_without_service_is_noop() {
     let mut state = new_state_with_service(None);
-    assert!(state.domains.settings.device_management_state.devices.is_empty());
+    assert!(state
+        .domains
+        .settings
+        .device_management_state
+        .devices
+        .is_empty());
 
-    let result = ferrex_player::domains::settings::update::device_management::handle_load_devices(&mut state);
+    let result = ferrex_player::domains::settings::update::device_management::handle_load_devices(
+        &mut state,
+    );
     let _task = result.task; // Extract task from DomainUpdateResult
 
     // We cannot easily inspect the Task, but we can assert state toggles were set
     assert!(state.domains.settings.device_management_state.loading);
-    assert!(state.domains.settings.device_management_state.error_message.is_none());
+    assert!(state
+        .domains
+        .settings
+        .device_management_state
+        .error_message
+        .is_none());
 
     // Simulate completion with an error and ensure reducer updates state
     let result: Result<Vec<UserDevice>, String> = Err("No service".to_string());
-    let _ = ferrex_player::domains::settings::update::device_management::handle_devices_loaded(&mut state, result);
+    let _ = ferrex_player::domains::settings::update::device_management::handle_devices_loaded(
+        &mut state, result,
+    );
     assert!(!state.domains.settings.device_management_state.loading);
-    assert!(state.domains.settings.device_management_state.error_message.is_some());
+    assert!(state
+        .domains
+        .settings
+        .device_management_state
+        .error_message
+        .is_some());
 }
 
 #[test]
@@ -87,16 +107,34 @@ fn handle_devices_loaded_success_updates_state() {
         is_current_device: false,
         location: None,
     }];
-    let _ = ferrex_player::domains::settings::update::device_management::handle_devices_loaded(&mut state, Ok(devices.clone()));
-    assert_eq!(state.domains.settings.device_management_state.devices.len(), 1);
-    assert!(state.domains.settings.device_management_state.error_message.is_none());
+    let _ = ferrex_player::domains::settings::update::device_management::handle_devices_loaded(
+        &mut state,
+        Ok(devices.clone()),
+    );
+    assert_eq!(
+        state.domains.settings.device_management_state.devices.len(),
+        1
+    );
+    assert!(state
+        .domains
+        .settings
+        .device_management_state
+        .error_message
+        .is_none());
 }
 
 #[test]
 fn handle_revoke_device_invalid_id_is_noop() {
     let mut state = new_state_with_service(Some(Arc::new(MockSettingsServiceOk)));
-    let _task = ferrex_player::domains::settings::update::device_management::handle_revoke_device(&mut state, "not-a-uuid".into());
+    let _task = ferrex_player::domains::settings::update::device_management::handle_revoke_device(
+        &mut state,
+        "not-a-uuid".into(),
+    );
     // Ensure no panic and no changes to devices list
-    assert!(state.domains.settings.device_management_state.devices.is_empty());
+    assert!(state
+        .domains
+        .settings
+        .device_management_state
+        .devices
+        .is_empty());
 }
-

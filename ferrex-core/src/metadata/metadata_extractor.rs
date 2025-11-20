@@ -1,9 +1,8 @@
-use crate::{LibraryType, MediaError, MediaFileMetadata, Result};
 use super::{
-    filename_parser::FilenameParser,
-    hdr_metadata::HdrMetadataExtractor,
+    filename_parser::FilenameParser, hdr_metadata::HdrMetadataExtractor,
     technical_metadata::TechnicalMetadataExtractor,
 };
+use crate::{LibraryType, MediaError, MediaFileMetadata, Result};
 use std::path::Path;
 use tracing::{info, warn};
 
@@ -127,8 +126,12 @@ impl MetadataExtractor {
             framerate: technical_metadata.framerate,
             file_size,
             // HDR metadata
-            color_primaries: hdr_metadata.color_primaries.or(technical_metadata.color_primaries),
-            color_transfer: hdr_metadata.color_transfer.or(technical_metadata.color_transfer),
+            color_primaries: hdr_metadata
+                .color_primaries
+                .or(technical_metadata.color_primaries),
+            color_transfer: hdr_metadata
+                .color_transfer
+                .or(technical_metadata.color_transfer),
             color_space: hdr_metadata.color_space.or(technical_metadata.color_space),
             bit_depth: hdr_metadata.bit_depth.or(technical_metadata.bit_depth),
             parsed_info,

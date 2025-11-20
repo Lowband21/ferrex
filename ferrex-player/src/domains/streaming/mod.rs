@@ -8,18 +8,21 @@ pub mod update_handlers;
 
 use self::messages::Message as StreamingMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::domains::media::store::MediaStore;
 use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
+use ferrex_core::LibraryID;
 use iced::Task;
 use std::sync::{Arc, RwLock as StdRwLock};
 use uuid::Uuid;
+
+use super::media::repository::accessor::{Accessor, ReadOnly};
 
 /// Streaming domain state
 pub struct StreamingDomainState {
     // References needed by streaming domain
     pub api_service: Arc<ApiClientAdapter>,
-    pub current_library_id: Option<Uuid>,
-    pub media_store: Arc<StdRwLock<MediaStore>>,
+    pub current_library_id: Option<LibraryID>,
+
+    pub repo_accessor: Accessor<ReadOnly>,
 
     // Streaming-specific service trait
     pub streaming_service: Arc<dyn crate::infrastructure::services::streaming::StreamingApiService>,
@@ -85,14 +88,14 @@ impl std::fmt::Debug for StreamingDomainState {
 )]
 impl StreamingDomainState {
     pub fn new(
-        media_store: Arc<StdRwLock<MediaStore>>,
         api_service: Arc<ApiClientAdapter>,
         streaming_service: Arc<dyn crate::infrastructure::services::streaming::StreamingApiService>,
+        repo_accessor: Accessor<ReadOnly>,
     ) -> Self {
         Self {
             api_service,
             current_library_id: None,
-            media_store,
+            repo_accessor,
             streaming_service,
 
             // Initialize streaming state

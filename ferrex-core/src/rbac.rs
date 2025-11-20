@@ -114,33 +114,35 @@ impl UserPermissions {
     pub fn has_permission(&self, permission: &str) -> bool {
         self.permissions.get(permission).copied().unwrap_or(false)
     }
-    
+
     /// Check if the user has any of the specified permissions
     pub fn has_any_permission(&self, permissions: &[&str]) -> bool {
         permissions.iter().any(|p| self.has_permission(p))
     }
-    
+
     /// Check if the user has all of the specified permissions
     pub fn has_all_permissions(&self, permissions: &[&str]) -> bool {
         permissions.iter().all(|p| self.has_permission(p))
     }
-    
+
     /// Check if the user has a specific role
     pub fn has_role(&self, role_name: &str) -> bool {
         self.roles.iter().any(|r| r.name == role_name)
     }
-    
+
     /// Get all permission names the user has
     pub fn granted_permissions(&self) -> Vec<&str> {
         self.permissions
             .iter()
-            .filter_map(|(name, &granted)| {
-                if granted {
-                    Some(name.as_str())
-                } else {
-                    None
-                }
-            })
+            .filter_map(
+                |(name, &granted)| {
+                    if granted {
+                        Some(name.as_str())
+                    } else {
+                        None
+                    }
+                },
+            )
             .collect()
     }
 }
@@ -172,7 +174,7 @@ impl PermissionCategory {
             PermissionCategory::Sync,
         ]
     }
-    
+
     /// Convert to string representation
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -193,27 +195,27 @@ pub mod permissions {
     pub const USERS_UPDATE: &str = "users:update";
     pub const USERS_DELETE: &str = "users:delete";
     pub const USERS_MANAGE_ROLES: &str = "users:manage_roles";
-    
+
     // Library Management
     pub const LIBRARIES_READ: &str = "libraries:read";
     pub const LIBRARIES_CREATE: &str = "libraries:create";
     pub const LIBRARIES_UPDATE: &str = "libraries:update";
     pub const LIBRARIES_DELETE: &str = "libraries:delete";
     pub const LIBRARIES_SCAN: &str = "libraries:scan";
-    
+
     // Media Access
     pub const MEDIA_READ: &str = "media:read";
     pub const MEDIA_STREAM: &str = "media:stream";
     pub const MEDIA_DOWNLOAD: &str = "media:download";
     pub const MEDIA_UPDATE: &str = "media:update";
     pub const MEDIA_DELETE: &str = "media:delete";
-    
+
     // Server Management
     pub const SERVER_READ_SETTINGS: &str = "server:read_settings";
     pub const SERVER_UPDATE_SETTINGS: &str = "server:update_settings";
     pub const SERVER_READ_LOGS: &str = "server:read_logs";
     pub const SERVER_MANAGE_TASKS: &str = "server:manage_tasks";
-    
+
     // Sync Sessions
     pub const SYNC_CREATE: &str = "sync:create";
     pub const SYNC_JOIN: &str = "sync:join";
@@ -246,29 +248,29 @@ pub struct OverridePermissionRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_user_permissions() {
         let mut permissions = HashMap::new();
         permissions.insert("media:stream".to_string(), true);
         permissions.insert("media:delete".to_string(), false);
         permissions.insert("users:read".to_string(), true);
-        
+
         let user_perms = UserPermissions {
             user_id: Uuid::new_v4(),
             roles: vec![],
             permissions,
             permission_details: None,
         };
-        
+
         assert!(user_perms.has_permission("media:stream"));
         assert!(!user_perms.has_permission("media:delete"));
         assert!(user_perms.has_permission("users:read"));
         assert!(!user_perms.has_permission("unknown:permission"));
-        
+
         assert!(user_perms.has_any_permission(&["media:stream", "media:delete"]));
         assert!(!user_perms.has_all_permissions(&["media:stream", "media:delete"]));
-        
+
         let granted = user_perms.granted_permissions();
         assert_eq!(granted.len(), 2);
         assert!(granted.contains(&"media:stream"));

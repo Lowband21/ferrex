@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, library_id, tmdb_id as \"tmdb_id?\", title, theme_color, created_at\n            FROM series_references\n            WHERE library_id = $1 AND title ILIKE $2\n            ORDER BY\n                CASE\n                    WHEN LOWER(title) = LOWER($3) THEN 0\n                    WHEN LOWER(title) LIKE LOWER($3 || '%') THEN 1\n                    ELSE 2\n                END,\n                LENGTH(title)\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "tmdb_id?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "theme_color",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "f83f7e821005a7fc2d5a551a88f05d2c0d3c916a7b78fdb0abc456b0abab0883"
+}

@@ -51,36 +51,36 @@ pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResul
                 }
             }
         }
-        Message::MediaDetailsFetched(media_id, result) => {
-            match result {
-                Ok(media_ref) => {
-                    log::info!("Media details fetched for {:?}", media_id);
-                    // Delegate to MediaDetailsUpdated
-                    DomainUpdateResult::task(
-                        Task::done(Message::MediaDetailsUpdated(media_ref))
-                            .map(DomainMessage::Metadata),
-                    )
-                }
-                Err(e) => {
-                    log::error!("Failed to fetch media details for {:?}: {}", media_id, e);
-                    DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
-                }
-            }
-        }
-        Message::MetadataUpdated(media_id) => {
-            log::info!("Metadata updated for {:?}", media_id);
-            // TODO: Trigger UI refresh for affected media
-            DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
-        }
-        Message::MediaOrganized(media_files, tv_shows) => {
-            log::info!(
-                "Media organized: {} files, {} shows",
-                media_files.len(),
-                tv_shows.len()
-            );
-            // TODO: Update state with organized media
-            DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
-        }
+        //Message::MediaDetailsFetched(media_id, result) => {
+        //    match result {
+        //        Ok(media_ref) => {
+        //            log::info!("Media details fetched for {:?}", media_id);
+        //            // Delegate to MediaDetailsUpdated
+        //            DomainUpdateResult::task(
+        //                Task::done(Message::MediaDetailsUpdated(media_ref))
+        //                    .map(DomainMessage::Metadata),
+        //            )
+        //        }
+        //        Err(e) => {
+        //            log::error!("Failed to fetch media details for {:?}: {}", media_id, e);
+        //            DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
+        //        }
+        //    }
+        //}
+        //Message::MetadataUpdated(media_id) => {
+        //    log::info!("Metadata updated for {:?}", media_id);
+        //    // TODO: Trigger UI refresh for affected media
+        //    DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
+        //}
+        //Message::MediaOrganized(media_files, tv_shows) => {
+        //    log::info!(
+        //        "Media organized: {} files, {} shows",
+        //        media_files.len(),
+        //        tv_shows.len()
+        //    );
+        //    // TODO: Update state with organized media
+        //    DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
+        //}
         Message::SeriesSortingCompleted(series_refs) => {
             log::info!("Series sorting completed: {} series", series_refs.len());
             // TODO: Update UI with sorted series
@@ -110,62 +110,62 @@ pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResul
             state.loading = false;
             DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
         }
-        Message::MediaDetailsUpdated(media_reference) => {
-            log::debug!("Single media details updated");
-            // Process single media update through the batch handler for consistency
-            DomainUpdateResult::task(
-                state
-                    .handle_media_details_batch(vec![media_reference])
-                    .discard()
-                    .map(DomainMessage::Metadata),
-            )
-        }
-        Message::MediaDetailsBatch(media_references) => {
-            log::info!(
-                "Processing batch of {} media details",
-                media_references.len()
-            );
-            // Delegate to the state's batch handler which updates MediaStore efficiently
-            DomainUpdateResult::task(
-                state
-                    .handle_media_details_batch(media_references)
-                    .map(|_| Message::BatchMetadataComplete)
-                    .map(DomainMessage::Metadata),
-            )
-        }
+        //Message::MediaDetailsUpdated(media_reference) => {
+        //    log::debug!("Single media details updated");
+        //    // Process single media update through the batch handler for consistency
+        //    DomainUpdateResult::task(
+        //        state
+        //            .handle_media_details_batch(vec![media_reference])
+        //            .discard()
+        //            .map(DomainMessage::Metadata),
+        //    )
+        //}
+        //Message::MediaDetailsBatch(media_references) => {
+        //    log::info!(
+        //        "Processing batch of {} media details",
+        //        media_references.len()
+        //    );
+        //    // Delegate to the state's batch handler which updates MediaStore efficiently
+        //    DomainUpdateResult::task(
+        //        state
+        //            .handle_media_details_batch(media_references)
+        //            .map(|_| Message::BatchMetadataComplete)
+        //            .map(DomainMessage::Metadata),
+        //    )
+        //}
         Message::CheckDetailsFetcherQueue => {
             log::debug!("CheckDetailsFetcherQueue - deprecated with new batch metadata service");
             // This is no longer needed with the new metadata service
             // The service sends MediaDetailsUpdated messages directly
             DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
         }
-        Message::FetchBatchMetadata(libraries_data) => {
-            log::info!(
-                "Fetching batch metadata for {} libraries",
-                libraries_data.len()
-            );
+        //Message::FetchBatchMetadata(libraries_data) => {
+        //    log::info!(
+        //        "Fetching batch metadata for {} libraries",
+        //        libraries_data.len()
+        //    );
 
-            // Execute the batch metadata fetcher directly on background thread
-            if let Some(fetcher) = &state.batch_metadata_fetcher {
-                let fetcher_clone = std::sync::Arc::clone(fetcher);
+        //    // Execute the batch metadata fetcher directly on background thread
+        //    if let Some(fetcher) = &state.batch_metadata_fetcher {
+        //        let fetcher_clone = std::sync::Arc::clone(fetcher);
 
-                // Spawn the metadata fetching directly - no Iced tasks
-                tokio::spawn(async move {
-                    log::info!("[Metadata] Starting batch metadata fetch");
-                    // Process libraries will now emit events directly, not return tasks
-                    fetcher_clone
-                        .process_libraries_with_verification(libraries_data)
-                        .await;
-                    log::info!("[Metadata] Batch metadata fetch initiated");
-                });
+        //        // Spawn the metadata fetching directly - no Iced tasks
+        //        tokio::spawn(async move {
+        //            log::info!("[Metadata] Starting batch metadata fetch");
+        //            // Process libraries will now emit events directly, not return tasks
+        //            fetcher_clone
+        //                .process_libraries_with_verification(libraries_data)
+        //                .await;
+        //            log::info!("[Metadata] Batch metadata fetch initiated");
+        //        });
 
-                // Return immediately - processing happens in background
-                DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
-            } else {
-                log::error!("BatchMetadataFetcher not initialized");
-                DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
-            }
-        }
+        //        // Return immediately - processing happens in background
+        //        DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
+        //    } else {
+        //        log::error!("BatchMetadataFetcher not initialized");
+        //        DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
+        //    }
+        //}
         Message::ImageLoaded(_, items) => todo!(),
         Message::UnifiedImageLoaded(request, handle) => {
             let task = crate::domains::metadata::update_handlers::unified_image::handle_unified_image_loaded(state, request, handle);

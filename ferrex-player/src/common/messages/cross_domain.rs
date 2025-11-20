@@ -9,7 +9,6 @@ use crate::domains::ui::scroll_manager::ScrollStateExt;
 use crate::domains::{auth, library, media, ui};
 use crate::state_refactored::State;
 use iced::Task;
-use std::sync::Arc;
 
 #[cfg_attr(
     any(
@@ -277,9 +276,10 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
             let mut series_with_details = 0;
             let mut still_need_fetch = 0;
 
+            /*
             for item in &items {
                 match item {
-                    crate::infrastructure::api_types::MediaReference::Movie(movie) => {
+                    crate::infrastructure::api_types::Media::Movie(movie) => {
                         if crate::infrastructure::api_types::needs_details_fetch(&movie.details) {
                             still_need_fetch += 1;
                             log::debug!(
@@ -291,7 +291,7 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
                             log::debug!("Movie {} has full Details", movie.title.as_str());
                         }
                     }
-                    crate::infrastructure::api_types::MediaReference::Series(series) => {
+                    crate::infrastructure::api_types::Media::Series(series) => {
                         if crate::infrastructure::api_types::needs_details_fetch(&series.details) {
                             still_need_fetch += 1;
                             log::debug!(
@@ -305,25 +305,18 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
                     }
                     _ => {}
                 }
-            }
+            } */
 
             log::info!(
                 "[CrossDomain] Batch contains: {} movies with details, {} series with details, {} still need fetch",
                 movies_with_details, series_with_details, still_need_fetch
             );
 
-            // Update MediaStore with the fetched metadata
-            // Note: We process metadata updates without batch mode to avoid conflicts
-            // when multiple batches are processed simultaneously
-            log::info!(
-                "[CrossDomain] Updating MediaStore with {} items (no batch mode)",
-                items.len()
-            );
-
             // Update MediaStore directly - don't create a task that can be re-executed
-            let media_store = Arc::clone(&state.domains.media.state.media_store);
-            let items_clone = items.clone();
+            //let media_store = Arc::clone(&state.domains.media.state.media_store);
+            //let items_clone = items.clone();
 
+            /*
             // Spawn processing on background thread directly
             tokio::spawn(async move {
                 let coordinator = crate::domains::media::store::BatchCoordinator::new(media_store);
@@ -337,7 +330,7 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
                         log::error!("[CrossDomain] Failed to process metadata batch: {}", e);
                     }
                 }
-            });
+            });*/
 
             // Return Task::none() - processing happens in the background
             Task::none()
@@ -349,9 +342,10 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
                 libraries_data.len()
             );
             // Forward to metadata domain to handle the batch fetching
-            Task::done(DomainMessage::Metadata(
-                crate::domains::metadata::messages::Message::FetchBatchMetadata(libraries_data),
-            ))
+            //Task::done(DomainMessage::Metadata(
+            //    crate::domains::metadata::messages::Message::FetchBatchMetadata(libraries_data),
+            //))
+            Task::none()
         }
 
         // Search-related events
@@ -364,15 +358,15 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         CrossDomainEvent::NavigateToMedia(media_ref) => {
             log::info!("[CrossDomain] Navigate to media requested");
             // Convert to appropriate UI navigation message based on media type
-            use crate::infrastructure::api_types::MediaReference;
+            use crate::infrastructure::api_types::Media;
 
             let ui_message = match media_ref {
-                MediaReference::Movie(movie) => ui::messages::Message::ViewMovieDetails(movie),
-                MediaReference::Series(series) => ui::messages::Message::ViewTvShow(series.id),
-                MediaReference::Season(season) => {
+                Media::Movie(movie) => ui::messages::Message::ViewMovieDetails(movie.id),
+                Media::Series(series) => ui::messages::Message::ViewTvShow(series.id),
+                Media::Season(season) => {
                     ui::messages::Message::ViewSeason(season.series_id, season.id)
                 }
-                MediaReference::Episode(episode) => ui::messages::Message::ViewEpisode(episode.id),
+                Media::Episode(episode) => ui::messages::Message::ViewEpisode(episode.id),
             };
 
             Task::done(DomainMessage::Ui(ui_message))
@@ -404,9 +398,15 @@ fn handle_authentication_complete(state: &State) -> Task<DomainMessage> {
     );
 
     // Guard against duplicate library loading
-    if !state.domains.library.state.libraries.is_empty() {
-        log::info!("[CrossDomain] Libraries already loaded, skipping duplicate load");
-        return Task::none();
+    let accessor = &state.domains.library.state.repo_accessor;
+    if let Ok(library_count) = accessor.library_count() {
+        if library_count > 0 {
+            log::info!(
+                "[CrossDomain] {} libraries already loaded, skipping duplicate load",
+                library_count
+            );
+            return Task::none();
+        }
     }
 
     let mut tasks = vec![];
@@ -448,10 +448,14 @@ fn handle_library_refresh_request(state: &State) -> Task<DomainMessage> {
 
     let mut tasks = vec![];
 
-    // Reload libraries
-    tasks.push(Task::done(DomainMessage::Library(
-        library::messages::Message::LoadLibraries,
-    )));
+    if !state.domains.library.state.repo_accessor.is_initialized()
+        && !state.domains.library.state.initial_library_fetch
+    {
+        // Reload libraries
+        tasks.push(Task::done(DomainMessage::Library(
+            library::messages::Message::LoadLibraries,
+        )));
+    }
 
     // If we have a current library, refresh its content
     if let Some(library_id) = state.domains.library.state.current_library_id {
