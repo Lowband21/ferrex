@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v pre-commit >/dev/null 2>&1; then
+  echo "pre-commit not found. Install with: pipx install pre-commit (recommended) or pip install --user pre-commit" >&2
+  exit 1
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+# Run push-stage hooks. pre-commit will determine files/commits for push.
+exec pre-commit run --hook-stage pre-push

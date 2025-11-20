@@ -48,10 +48,10 @@ async fn test_token_stored_with_refresh_token() {
     let temp_dir = TempDir::new().unwrap();
     let cache_path = temp_dir.path().join("auth_cache");
     let storage = AuthStorage::with_cache_path(cache_path);
-    
+
     let user = create_test_user();
     let token = create_test_token(3600, "refresh_token_123".to_string());
-    
+
     // Create stored auth
     let stored_auth = StoredAuth {
         token: token.clone(),
@@ -62,17 +62,17 @@ async fn test_token_stored_with_refresh_token() {
         device_trust_expires_at: Some(Utc::now() + Duration::days(30)),
         refresh_token: Some(token.refresh_token.clone()),
     };
-    
+
     // Save auth
     let fingerprint = "test_fingerprint";
     storage.save_auth(&stored_auth, fingerprint).await
         .expect("Should save auth successfully");
-    
+
     // Load and verify
     let loaded = storage.load_auth(fingerprint).await
         .expect("Should load auth")
         .expect("Auth should exist");
-    
+
     assert_eq!(loaded.refresh_token, Some("refresh_token_123".to_string()));
     assert_eq!(loaded.token.refresh_token, "refresh_token_123");
 }
@@ -83,11 +83,11 @@ async fn test_expired_token_triggers_refresh_attempt() {
     let temp_dir = TempDir::new().unwrap();
     let cache_path = temp_dir.path().join("auth_cache");
     let storage = AuthStorage::with_cache_path(cache_path);
-    
+
     let user = create_test_user();
     // Create an expired token (negative expires_in)
     let token = create_test_token(-60, "valid_refresh_token".to_string());
-    
+
     // Create stored auth with expired token
     let stored_auth = StoredAuth {
         token: token.clone(),
@@ -98,17 +98,17 @@ async fn test_expired_token_triggers_refresh_attempt() {
         device_trust_expires_at: Some(Utc::now() + Duration::days(30)),
         refresh_token: Some(token.refresh_token.clone()),
     };
-    
+
     // Save auth
     let fingerprint = "test_fingerprint";
     storage.save_auth(&stored_auth, fingerprint).await
         .expect("Should save auth successfully");
-    
+
     // Load auth - in real scenario, AuthManager would trigger refresh
     let loaded = storage.load_auth(fingerprint).await
         .expect("Should load auth")
         .expect("Auth should exist");
-    
+
     // Verify expired token is loaded (refresh would happen in AuthManager)
     assert_eq!(loaded.token.expires_in, 0, "Token should be expired (expires_in == 0)");
     assert!(loaded.refresh_token.is_some(), "Refresh token should be present");
@@ -120,10 +120,10 @@ async fn test_device_trust_persists_across_refresh() {
     let temp_dir = TempDir::new().unwrap();
     let cache_path = temp_dir.path().join("auth_cache");
     let storage = AuthStorage::with_cache_path(cache_path);
-    
+
     let user = create_test_user();
     let initial_token = create_test_token(3600, "refresh_token_1".to_string());
-    
+
     // Create stored auth with device trust
     let device_trust_expires = Utc::now() + Duration::days(30);
     let stored_auth = StoredAuth {
@@ -135,12 +135,12 @@ async fn test_device_trust_persists_across_refresh() {
         device_trust_expires_at: Some(device_trust_expires),
         refresh_token: Some(initial_token.refresh_token.clone()),
     };
-    
+
     // Save auth
     let fingerprint = "test_fingerprint";
     storage.save_auth(&stored_auth, fingerprint).await
         .expect("Should save auth successfully");
-    
+
     // Simulate refresh by updating token but keeping device trust
     let new_token = create_test_token(3600, "refresh_token_2".to_string());
     let refreshed_auth = StoredAuth {
@@ -152,15 +152,15 @@ async fn test_device_trust_persists_across_refresh() {
         device_trust_expires_at: Some(device_trust_expires), // Same device trust
         refresh_token: Some(new_token.refresh_token.clone()),
     };
-    
+
     storage.save_auth(&refreshed_auth, fingerprint).await
         .expect("Should save refreshed auth");
-    
+
     // Load and verify
     let loaded = storage.load_auth(fingerprint).await
         .expect("Should load auth")
         .expect("Auth should exist");
-    
+
     assert_eq!(loaded.device_trust_expires_at, Some(device_trust_expires));
     assert_eq!(loaded.token.refresh_token, "refresh_token_2");
 }
@@ -171,7 +171,7 @@ async fn test_missing_refresh_token_clears_auth() {
     let temp_dir = TempDir::new().unwrap();
     let cache_path = temp_dir.path().join("auth_cache");
     let storage = AuthStorage::with_cache_path(cache_path);
-    
+
     let user = create_test_user();
     // Create token without refresh token
     let token = AuthToken {
@@ -183,7 +183,7 @@ async fn test_missing_refresh_token_clears_auth() {
         user_id: None,
         scope: SessionScope::Full,
     };
-    
+
     // Create stored auth without refresh token
     let stored_auth = StoredAuth {
         token: token.clone(),
@@ -194,18 +194,18 @@ async fn test_missing_refresh_token_clears_auth() {
         device_trust_expires_at: Some(Utc::now() + Duration::days(30)),
         refresh_token: None, // No refresh token
     };
-    
+
     // Save auth
     let fingerprint = "test_fingerprint";
     storage.save_auth(&stored_auth, fingerprint).await
         .expect("Should save auth successfully");
-    
+
     // In real scenario, AuthManager would detect expired token with no refresh
     // and clear the auth. Here we just verify the state
     let loaded = storage.load_auth(fingerprint).await
         .expect("Should load auth")
         .expect("Auth should exist");
-    
+
     assert!(loaded.refresh_token.is_none(), "Refresh token should be missing");
     assert_eq!(loaded.token.expires_in, 0, "Token should be expired (expires_in == 0)");
 }
@@ -216,11 +216,11 @@ async fn test_token_within_buffer_triggers_refresh() {
     let temp_dir = TempDir::new().unwrap();
     let cache_path = temp_dir.path().join("auth_cache");
     let storage = AuthStorage::with_cache_path(cache_path);
-    
+
     let user = create_test_user();
     // Create token that expires in 30 seconds (within 60 second buffer)
     let token = create_test_token(30, "refresh_token".to_string());
-    
+
     // Create stored auth
     let stored_auth = StoredAuth {
         token: token.clone(),
@@ -231,17 +231,17 @@ async fn test_token_within_buffer_triggers_refresh() {
         device_trust_expires_at: Some(Utc::now() + Duration::days(30)),
         refresh_token: Some(token.refresh_token.clone()),
     };
-    
+
     // Save auth
     let fingerprint = "test_fingerprint";
     storage.save_auth(&stored_auth, fingerprint).await
         .expect("Should save auth successfully");
-    
+
     // Load auth
     let loaded = storage.load_auth(fingerprint).await
         .expect("Should load auth")
         .expect("Auth should exist");
-    
+
     // Token should be within refresh buffer (30 seconds < 60 seconds buffer)
     assert!(loaded.token.expires_in <= 60, "Token should be within refresh buffer");
     assert!(loaded.refresh_token.is_some(), "Refresh token should be present for refresh");
@@ -253,10 +253,10 @@ async fn test_concurrent_refresh_attempts() {
     let temp_dir = TempDir::new().unwrap();
     let cache_path = temp_dir.path().join("auth_cache");
     let storage = AuthStorage::with_cache_path(cache_path.clone());
-    
+
     let user = create_test_user();
     let token = create_test_token(-60, "refresh_token".to_string());
-    
+
     // Create stored auth with expired token
     let stored_auth = StoredAuth {
         token: token.clone(),
@@ -267,17 +267,17 @@ async fn test_concurrent_refresh_attempts() {
         device_trust_expires_at: Some(Utc::now() + Duration::days(30)),
         refresh_token: Some(token.refresh_token.clone()),
     };
-    
+
     let fingerprint = "test_fingerprint";
     storage.save_auth(&stored_auth, fingerprint).await
         .expect("Should save auth successfully");
-    
+
     // Simulate concurrent loads (which would trigger refresh in real scenario)
     let mut handles = vec![];
     for i in 0..3 {
         let storage_clone = AuthStorage::with_cache_path(cache_path.clone());
         let fingerprint_clone = fingerprint.to_string();
-        
+
         let handle = tokio::spawn(async move {
             let loaded = storage_clone.load_auth(&fingerprint_clone).await
                 .expect("Should load auth")
@@ -286,7 +286,7 @@ async fn test_concurrent_refresh_attempts() {
         });
         handles.push(handle);
     }
-    
+
     // Wait for all loads to complete
     for handle in handles {
         let (index, loaded) = handle.await.expect("Task should complete");

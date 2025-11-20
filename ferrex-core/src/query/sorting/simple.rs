@@ -49,7 +49,11 @@ pub fn compare_media(
     let a_has = has_poster(a);
     let b_has = has_poster(b);
     if a_has != b_has {
-        return Some(if a_has { Ordering::Less } else { Ordering::Greater });
+        return Some(if a_has {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        });
     }
 
     let ord = match sort_by {

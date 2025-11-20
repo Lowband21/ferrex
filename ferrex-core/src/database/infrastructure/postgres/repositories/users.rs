@@ -40,8 +40,8 @@ impl UsersRepository for PostgresUsersRepository {
         sqlx::query!(
             r#"
             INSERT INTO users (
-                id, username, display_name, avatar_url, 
-                created_at, updated_at, last_login, is_active, 
+                id, username, display_name, avatar_url,
+                created_at, updated_at, last_login, is_active,
                 email, preferences
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -101,7 +101,7 @@ impl UsersRepository for PostgresUsersRepository {
     async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>> {
         let row = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 id, username, display_name, avatar_url,
                 created_at, updated_at, last_login, is_active,
                 email, preferences
@@ -137,7 +137,7 @@ impl UsersRepository for PostgresUsersRepository {
     ) -> Result<Option<User>> {
         let row = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 id, username, display_name, avatar_url,
                 created_at, updated_at, last_login, is_active,
                 email, preferences
@@ -173,7 +173,7 @@ impl UsersRepository for PostgresUsersRepository {
     async fn get_all_users(&self) -> Result<Vec<User>> {
         let rows = sqlx::query!(
             r#"
-            SELECT 
+            SELECT
                 id, username, display_name, avatar_url,
                 created_at, updated_at, last_login, is_active,
                 email, preferences
@@ -211,8 +211,8 @@ impl UsersRepository for PostgresUsersRepository {
     async fn update_user(&self, user: &User) -> Result<()> {
         let result = sqlx::query!(
             r#"
-            UPDATE users 
-            SET display_name = $2, avatar_url = $3, email = $4, 
+            UPDATE users
+            SET display_name = $2, avatar_url = $3, email = $4,
                 is_active = $5, preferences = $6, updated_at = NOW()
             WHERE id = $1
             "#,

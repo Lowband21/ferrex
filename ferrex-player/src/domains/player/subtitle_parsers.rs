@@ -36,7 +36,7 @@ fn parse_plain_text(data: &[u8]) -> Option<ParsedSubtitle> {
     if text.trim().is_empty() {
         return None;
     }
-    
+
     Some(ParsedSubtitle::Text(TextSubtitle {
         segments: vec![StyledSegment {
             text,
@@ -51,11 +51,11 @@ fn parse_plain_text(data: &[u8]) -> Option<ParsedSubtitle> {
 fn parse_html(data: &[u8]) -> Option<ParsedSubtitle> {
     let html = String::from_utf8_lossy(data).to_string();
     let segments = parse_html_to_segments(&html);
-    
+
     if segments.is_empty() {
         return None;
     }
-    
+
     Some(ParsedSubtitle::Text(TextSubtitle {
         segments,
         position: None,
@@ -70,17 +70,17 @@ fn parse_html_to_segments(html: &str) -> Vec<StyledSegment> {
         text: String::new(),
         style: TextStyle::default(),
     };
-    
+
     let mut chars = html.chars().peekable();
     let mut style_stack: Vec<String> = Vec::new();
-    
+
     while let Some(ch) = chars.next() {
         if ch == '<' {
             // Look ahead to see if this is really a tag
             let mut lookahead = chars.clone();
             let mut tag_content = String::new();
             let mut found_closing = false;
-            
+
             // Look for closing > within reasonable distance (50 chars)
             for _ in 0..50 {
                 if let Some(next_ch) = lookahead.next() {
@@ -91,36 +91,36 @@ fn parse_html_to_segments(html: &str) -> Vec<StyledSegment> {
                     tag_content.push(next_ch);
                 }
             }
-            
+
             // If we found a closing > and it looks like a valid tag, process it
-            if found_closing && (tag_content.starts_with('/') || 
+            if found_closing && (tag_content.starts_with('/') ||
                                 tag_content.chars().next().map(|c| c.is_alphabetic()).unwrap_or(false)) {
                 // Save current segment if it has text
                 if !current_segment.text.is_empty() {
                     segments.push(current_segment.clone());
                     current_segment.text.clear();
                 }
-                
+
                 // Parse tag
                 let mut tag = String::new();
                 let mut is_closing = false;
-                
+
                 if chars.peek() == Some(&'/') {
                     is_closing = true;
                     chars.next();
                 }
-                
+
                 while let Some(tag_ch) = chars.next() {
                     if tag_ch == '>' {
                         break;
                     }
                     tag.push(tag_ch);
                 }
-                
+
                 // Handle tag
                 let tag_parts: Vec<&str> = tag.split_whitespace().collect();
                 let tag_name = tag_parts.get(0).unwrap_or(&"").to_lowercase();
-                
+
                 if is_closing {
                     // Pop style from stack
                     if let Some(last_tag) = style_stack.last() {
@@ -166,12 +166,12 @@ fn parse_html_to_segments(html: &str) -> Vec<StyledSegment> {
             current_segment.text.push(ch);
         }
     }
-    
+
     // Add final segment
     if !current_segment.text.is_empty() {
         segments.push(current_segment);
     }
-    
+
     segments
 }
 
@@ -189,7 +189,7 @@ fn parse_html_color(color: &str) -> Option<Color> {
             }
         }
     }
-    
+
     // Handle named colors
     match color.to_lowercase().as_str() {
         "white" => Some(Color::WHITE),

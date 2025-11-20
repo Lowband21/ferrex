@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# shellcheck source=utils/lib/python.sh
 source "$ROOT_DIR/utils/lib/python.sh"
 
 usage() {
@@ -183,6 +184,7 @@ if [[ ! -s "$ENV_FILE" ]]; then
 fi
 
 set -a
+# shellcheck source=/dev/null
 source "$ENV_FILE"
 set +a
 

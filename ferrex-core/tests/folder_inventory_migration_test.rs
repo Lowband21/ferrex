@@ -8,8 +8,8 @@ async fn test_folder_inventory_table_exists(
 ) -> Result<(), sqlx::Error> {
     let result = sqlx::query(
         "SELECT EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_schema = 'ferrex' 
+            SELECT FROM information_schema.tables
+            WHERE table_schema = 'ferrex'
             AND table_name = 'folder_inventory'
         )",
     )
@@ -32,7 +32,7 @@ async fn test_folder_inventory_constraints(
 ) -> Result<(), sqlx::Error> {
     // Test folder_type check constraint
     let invalid_folder_type = sqlx::query(
-        "INSERT INTO folder_inventory (library_id, folder_path, folder_type) 
+        "INSERT INTO folder_inventory (library_id, folder_path, folder_type)
          VALUES ($1, $2, $3)",
     )
     .bind(Uuid::now_v7())
@@ -48,7 +48,7 @@ async fn test_folder_inventory_constraints(
 
     // Test discovery_source check constraint
     let invalid_discovery_source = sqlx::query(
-        "INSERT INTO folder_inventory (library_id, folder_path, folder_type, discovery_source) 
+        "INSERT INTO folder_inventory (library_id, folder_path, folder_type, discovery_source)
          VALUES ($1, $2, $3, $4)",
     )
     .bind(Uuid::now_v7())
@@ -65,7 +65,7 @@ async fn test_folder_inventory_constraints(
 
     // Test processing_status check constraint
     let invalid_processing_status = sqlx::query(
-        "INSERT INTO folder_inventory (library_id, folder_path, folder_type, processing_status) 
+        "INSERT INTO folder_inventory (library_id, folder_path, folder_type, processing_status)
          VALUES ($1, $2, $3, $4)",
     )
     .bind(Uuid::now_v7())
@@ -82,7 +82,7 @@ async fn test_folder_inventory_constraints(
 
     // Test valid_file_counts constraint (processed_files > total_files)
     let invalid_file_counts = sqlx::query(
-        "INSERT INTO folder_inventory (library_id, folder_path, folder_type, total_files, processed_files) 
+        "INSERT INTO folder_inventory (library_id, folder_path, folder_type, total_files, processed_files)
          VALUES ($1, $2, $3, $4, $5)"
     )
     .bind(Uuid::now_v7())
@@ -108,7 +108,7 @@ async fn test_folder_inventory_crud_operations(
     // First, we need a library to reference
     let library_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO libraries (id, name, paths, library_type, created_at, updated_at) 
+        "INSERT INTO libraries (id, name, paths, library_type, created_at, updated_at)
          VALUES ($1, $2, $3, $4, NOW(), NOW())",
     )
     .bind(library_id)
@@ -122,8 +122,8 @@ async fn test_folder_inventory_crud_operations(
     let folder_id = Uuid::now_v7();
     let insert_result = sqlx::query(
         "INSERT INTO folder_inventory (
-            id, library_id, folder_path, folder_type, 
-            discovery_source, processing_status, total_files, 
+            id, library_id, folder_path, folder_type,
+            discovery_source, processing_status, total_files,
             processed_files, total_size_bytes, file_types, metadata
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id",
@@ -147,8 +147,8 @@ async fn test_folder_inventory_crud_operations(
 
     // Test SELECT
     let select_result = sqlx::query(
-        "SELECT folder_path, folder_type, processing_status, total_files 
-         FROM folder_inventory 
+        "SELECT folder_path, folder_type, processing_status, total_files
+         FROM folder_inventory
          WHERE id = $1",
     )
     .bind(folder_id)
@@ -168,8 +168,8 @@ async fn test_folder_inventory_crud_operations(
 
     // Test UPDATE
     sqlx::query(
-        "UPDATE folder_inventory 
-         SET processing_status = $1, processed_files = $2, last_processed_at = NOW() 
+        "UPDATE folder_inventory
+         SET processing_status = $1, processed_files = $2, last_processed_at = NOW()
          WHERE id = $3",
     )
     .bind("completed")
@@ -179,8 +179,8 @@ async fn test_folder_inventory_crud_operations(
     .await?;
 
     let update_result = sqlx::query(
-        "SELECT processing_status, processed_files, last_processed_at 
-         FROM folder_inventory 
+        "SELECT processing_status, processed_files, last_processed_at
+         FROM folder_inventory
          WHERE id = $1",
     )
     .bind(folder_id)
@@ -228,7 +228,7 @@ async fn test_folder_inventory_cascade_delete(
     // Create a library
     let library_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO libraries (id, name, paths, library_type, created_at, updated_at) 
+        "INSERT INTO libraries (id, name, paths, library_type, created_at, updated_at)
          VALUES ($1, $2, $3, $4, NOW(), NOW())",
     )
     .bind(library_id)
@@ -241,7 +241,7 @@ async fn test_folder_inventory_cascade_delete(
     // Create parent folder
     let parent_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO folder_inventory (id, library_id, folder_path, folder_type) 
+        "INSERT INTO folder_inventory (id, library_id, folder_path, folder_type)
          VALUES ($1, $2, $3, $4)",
     )
     .bind(parent_id)
@@ -254,7 +254,7 @@ async fn test_folder_inventory_cascade_delete(
     // Create child folder
     let child_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO folder_inventory (id, library_id, folder_path, folder_type, parent_folder_id) 
+        "INSERT INTO folder_inventory (id, library_id, folder_path, folder_type, parent_folder_id)
          VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(child_id)
@@ -295,7 +295,7 @@ async fn test_folder_inventory_unique_constraint(
     // Create a library
     let library_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO libraries (id, name, paths, library_type, created_at, updated_at) 
+        "INSERT INTO libraries (id, name, paths, library_type, created_at, updated_at)
          VALUES ($1, $2, $3, $4, NOW(), NOW())",
     )
     .bind(library_id)
@@ -307,7 +307,7 @@ async fn test_folder_inventory_unique_constraint(
 
     // Insert first folder
     sqlx::query(
-        "INSERT INTO folder_inventory (library_id, folder_path, folder_type) 
+        "INSERT INTO folder_inventory (library_id, folder_path, folder_type)
          VALUES ($1, $2, $3)",
     )
     .bind(library_id)
@@ -318,7 +318,7 @@ async fn test_folder_inventory_unique_constraint(
 
     // Try to insert duplicate (same library_id and folder_path)
     let duplicate_result = sqlx::query(
-        "INSERT INTO folder_inventory (library_id, folder_path, folder_type) 
+        "INSERT INTO folder_inventory (library_id, folder_path, folder_type)
          VALUES ($1, $2, $3)",
     )
     .bind(library_id)
@@ -348,7 +348,7 @@ async fn test_folder_inventory_trigger_updated_at(
     // Create a library
     let library_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO libraries (id, name, paths, library_type, created_at, updated_at) 
+        "INSERT INTO libraries (id, name, paths, library_type, created_at, updated_at)
          VALUES ($1, $2, $3, $4, NOW(), NOW())",
     )
     .bind(library_id)
@@ -361,7 +361,7 @@ async fn test_folder_inventory_trigger_updated_at(
     // Insert folder
     let folder_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO folder_inventory (id, library_id, folder_path, folder_type) 
+        "INSERT INTO folder_inventory (id, library_id, folder_path, folder_type)
          VALUES ($1, $2, $3, $4)",
     )
     .bind(folder_id)

@@ -113,7 +113,7 @@ impl SecuritySettingsRepository for PostgresSecuritySettingsRepository {
 
         let row = sqlx::query(
             r#"
-            SELECT 
+            SELECT
                 admin_password_policy,
                 user_password_policy,
                 updated_at,
@@ -180,7 +180,7 @@ impl SecuritySettingsRepository for PostgresSecuritySettingsRepository {
                 updated_at = NOW(),
                 updated_by = $3
             WHERE id = $4
-            RETURNING 
+            RETURNING
                 admin_password_policy,
                 user_password_policy,
                 updated_at,

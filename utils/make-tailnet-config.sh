@@ -6,6 +6,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# shellcheck source=utils/lib/python.sh
 source "$ROOT_DIR/utils/lib/python.sh"
 
 usage() {
@@ -87,8 +88,6 @@ mkdir -p "$TO_DIR"
 cp -f "$SRC_ENV" "$TO_DIR/.env"
 
 DEST_ENV="$TO_DIR/.env"
-DEST_TOML=""
-DEST_SECRETS_DIR=""
 
 # Patch .env for new directory and Tailnet endpoints
 ferrex_python - "$DEST_ENV" "$TO_DIR" <<'PY'

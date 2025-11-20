@@ -60,7 +60,7 @@ pub trait MediaState {
     fn current_library_id(&self) -> Option<Uuid>;
 }
 
-/// UI domain state requirements  
+/// UI domain state requirements
 pub trait UIState {
     fn view_mode(&self) -> ViewMode;
     fn set_view_mode(&mut self, mode: ViewMode);
@@ -110,14 +110,14 @@ pub trait UserManagementState {
 }
 
 /// A trait that combines all domain states for integration testing
-pub trait IntegrationState: 
-    AuthState + 
-    LibraryState + 
-    MediaState + 
-    UIState + 
-    MetadataState + 
-    SettingsState + 
-    StreamingState + 
+pub trait IntegrationState:
+    AuthState +
+    LibraryState +
+    MediaState +
+    UIState +
+    MetadataState +
+    SettingsState +
+    StreamingState +
     UserManagementState {}
 
 #[cfg(test)]

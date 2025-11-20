@@ -1,0 +1,110 @@
+# Shared, tracked pre-commit configuration for all worktrees.
+# Install: pipx install pre-commit  (or pip install --user pre-commit)
+# One-time setup (from repo root dir):
+#   git --git-dir=.bare config core.hooksPath .githooks
+# First run (optional): pre-commit run --all-files
+
+minimum_pre_commit_version: "3.0.0"
+default_stages: [pre-commit]
+
+# Exclude common build/output dirs across worktrees
+exclude: |
+  ^(
+    (?:.*/)?target/|
+    (?:.*/)?\.sqlx/|
+    (?:.*/)?cache/|
+    (?:.*/)?dist-windows/
+  )
+
+repos:
+  # Run Rust formatter first to auto-fix .rs files
+  - repo: local
+    hooks:
+      - id: rustfmt-fix
+        name: cargo fmt (auto-fix)
+        entry: cargo fmt --all
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+  # Basic hygiene + config syntax checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        args: ["--markdown-linebreak-ext=md"]
+      - id: end-of-file-fixer
+        exclude: \.rs$
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: detect-private-key
+      - id: check-case-conflict
+      # To block commits directly to main, uncomment the hook below.
+      # - id: no-commit-to-branch
+      #   args: ["--branch", "main"]
+
+  # Shell formatting (shfmt) — auto-fix on commit
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.7.0-1
+    hooks:
+      - id: shfmt
+        args: ["-i", "2", "-ci", "-s"]
+
+  # Shell lint (shellcheck)
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        args: ["-x"]
+        # -x: follow sourced files if they can be found
+
+  # Dockerfile lint (hadolint) — run at push
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint
+        stages: [pre-push]
+        files: ^(.*/)?Dockerfile(\..*)?$
+
+  # Local hooks for Rust + tooling
+  - repo: local
+    hooks:
+      # rustfmt check on push (ensure formatted code reaches remote)
+      - id: rustfmt
+        name: rustfmt (check)
+        entry: cargo fmt --all -- --check
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      # clippy on push (heavier); treat warnings as errors
+      - id: clippy
+        name: cargo clippy (workspace, all targets, all features)
+        entry: bash -lc 'cargo clippy --workspace --all-targets --all-features -- -D warnings'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      # SQLx offline drift check on push (requires sqlx-cli and .sqlx/ present)
+      - id: sqlx-prepare-check
+        name: sqlx prepare --check (offline)
+        entry: bash -lc 'SQLX_OFFLINE=true cargo sqlx prepare --workspace --check'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      # Cargo deny on push (uses deny.toml). This will fail on errors, not warnings.
+      - id: cargo-deny
+        name: cargo deny check
+        entry: bash -lc 'cargo deny check'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        # NOTE: To also fail on warnings later, you can switch your policy in deny.toml
+        # to elevate relevant rules to "deny" severity, or invoke cargo-deny with
+        # stricter fail-level settings. Example (uncomment to enable when ready):
+        # entry: bash -lc 'cargo deny check --fail-level warn'

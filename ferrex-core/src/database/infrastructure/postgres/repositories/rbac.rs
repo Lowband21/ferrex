@@ -36,7 +36,7 @@ impl RbacRepository for PostgresRbacRepository {
         let roles: Vec<Role> = sqlx::query_as!(
             Role,
             r#"
-            SELECT r.id, r.name, r.description, r.is_system as "is_system!", 
+            SELECT r.id, r.name, r.description, r.is_system as "is_system!",
                    EXTRACT(EPOCH FROM r.created_at)::BIGINT as "created_at!"
             FROM roles r
             INNER JOIN user_roles ur ON r.id = ur.role_id
@@ -190,7 +190,7 @@ impl RbacRepository for PostgresRbacRepository {
             let is_admin_role: bool = sqlx::query_scalar!(
                 r#"
                 SELECT EXISTS(
-                    SELECT 1 FROM roles 
+                    SELECT 1 FROM roles
                     WHERE id = $1 AND name = 'admin'
                 ) as "exists!"
                 "#,
@@ -313,8 +313,8 @@ impl RbacRepository for PostgresRbacRepository {
             r#"
             INSERT INTO user_permissions (user_id, permission_id, granted, granted_by, granted_at, reason)
             VALUES ($1, $2, $3, $4, NOW(), $5)
-            ON CONFLICT (user_id, permission_id) 
-            DO UPDATE SET 
+            ON CONFLICT (user_id, permission_id)
+            DO UPDATE SET
                 granted = EXCLUDED.granted,
                 granted_by = EXCLUDED.granted_by,
                 granted_at = EXCLUDED.granted_at,

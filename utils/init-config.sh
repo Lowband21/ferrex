@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# shellcheck source=utils/lib/python.sh
 source "$ROOT_DIR/utils/lib/python.sh"
 
 resolve_path() {
@@ -25,7 +26,7 @@ relative_to_root() {
   local path="$1"
   case "$path" in
     "$ROOT_DIR"/*)
-      printf '%s\n' "${path#$ROOT_DIR/}"
+      printf '%s\n' "${path#"$ROOT_DIR"/}"
       ;;
     *)
       printf '%s\n' "$path"
@@ -108,6 +109,7 @@ echo "Preparing configuration environment at $CONFIG_DIR"
 
 if [ -s "$ENV_FILE" ]; then
   set -a
+  # shellcheck source=/dev/null
   source "$ENV_FILE"
   set +a
 fi
@@ -223,7 +225,7 @@ prompt_password() {
     fi
     printf "%s password already set in %s.\n" "$label" "$ENV_FILE_DISPLAY"
     local resp=""
-    read -p "Keep existing $label password? [Y/n] " resp || true
+    read -r -p "Keep existing $label password? [Y/n] " resp || true
     resp=${resp:-y}
     if [[ "$resp" =~ ^[Yy]$ ]]; then
       printf "Keeping existing %s password.\n" "$label"
@@ -236,16 +238,16 @@ prompt_password() {
     printf "Generated secure %s password automatically. Stored in %s. Please keep this file safe.\n" "$label" "$ENV_FILE_DISPLAY"
   else
     local choice=""
-    read -p "Generate a secure $label password automatically? [Y/n] " choice || true
+    read -r -p "Generate a secure $label password automatically? [Y/n] " choice || true
     choice=${choice:-y}
     if [[ "$choice" =~ ^[Yy]$ ]]; then
       new_pwd="$(generate_password)"
       printf "Generated secure %s password. Stored in %s. Please keep this file safe.\n" "$label" "$ENV_FILE_DISPLAY"
     else
       while true; do
-        read -s -p "Enter $label password: " new_pwd || true
+        read -r -s -p "Enter $label password: " new_pwd || true
         echo
-        read -s -p "Confirm $label password: " confirm_pwd || true
+        read -r -s -p "Confirm $label password: " confirm_pwd || true
         echo
         if [ -z "$new_pwd" ]; then
           echo "Password cannot be empty."
@@ -281,7 +283,7 @@ maybe_prompt_database_reset() {
     echo "Non-interactive mode; keeping existing database volume."
   else
     local resp=""
-    read -p "Reset this database volume? This will permanently delete its contents. [y/N] " resp || true
+    read -r -p "Reset this database volume? This will permanently delete its contents. [y/N] " resp || true
     resp=${resp:-n}
     if [[ "$resp" =~ ^[Yy]$ ]]; then
       reset="yes"
@@ -373,7 +375,7 @@ if [ -f "$ENV_FILE" ]; then
     SHOULD_RUN_WIZARD=false
   else
     local_resp=""
-    read -p "$ENV_FILE_DISPLAY already exists. Re-run interactive wizard to overwrite/update it? [y/N] " local_resp || true
+    read -r -p "$ENV_FILE_DISPLAY already exists. Re-run interactive wizard to overwrite/update it? [y/N] " local_resp || true
     local_resp=${local_resp:-n}
     if [[ ! "$local_resp" =~ ^[Yy]$ ]]; then
       SHOULD_RUN_WIZARD=false
@@ -406,7 +408,7 @@ if [ "$SHOULD_RUN_WIZARD" = true ]; then
     docker run --rm "${DOCKER_TTY_ARGS[@]}" \
       --user "$RUN_AS_USER" \
       --entrypoint /usr/local/bin/ferrex-server \
-      -v "$CONFIG_DIR":/app/config${DETECTED_MOUNT_SUFFIX} \
+      -v "$CONFIG_DIR":/app/config"${DETECTED_MOUNT_SUFFIX}" \
       -e FERREX_CONFIG_INIT_DATABASE_URL="$FERREX_CONFIG_INIT_DATABASE_URL" \
       -e FERREX_CONFIG_INIT_HOST_DATABASE_URL="$FERREX_CONFIG_INIT_HOST_DATABASE_URL" \
       -e FERREX_CONFIG_INIT_REDIS_URL="$FERREX_CONFIG_INIT_REDIS_URL" \

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO user_permissions (user_id, permission_id, granted, granted_by, granted_at, reason)\n            VALUES ($1, $2, $3, $4, NOW(), $5)\n            ON CONFLICT (user_id, permission_id)\n            DO UPDATE SET\n                granted = EXCLUDED.granted,\n                granted_by = EXCLUDED.granted_by,\n                granted_at = EXCLUDED.granted_at,\n                reason = EXCLUDED.reason\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bool",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6f4d8fa8041f627c2e3a52f3155c6e7b281dabf2738400a3926bde85b0ade73f"
+}

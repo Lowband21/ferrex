@@ -66,13 +66,13 @@ impl TestTaskRunner {
     }
 
     /// Execute a task and collect all messages it produces
-    pub fn run_task<M>(&mut self, task: Task<M>) -> Vec<M> 
+    pub fn run_task<M>(&mut self, task: Task<M>) -> Vec<M>
     where
         M: Clone + Send + 'static,
     {
         let messages = Arc::new(Mutex::new(Vec::new()));
         let messages_clone = messages.clone();
-        
+
         // Convert Iced task to futures and execute
         // Note: This is a simplified version - actual implementation
         // will need to handle Iced's task execution model properly
@@ -103,7 +103,7 @@ mod tests {
     async fn test_context_records_messages() {
         let ctx = TestContext::new();
         ctx.record_message(DomainMessage::NoOp).await;
-        
+
         let messages = ctx.get_messages().await;
         assert_eq!(messages.len(), 1);
     }

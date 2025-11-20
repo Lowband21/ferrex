@@ -6,7 +6,7 @@ CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
 
 
 --
--- Name: EXTENSION citext; Type: COMMENT; Schema: -; Owner: 
+-- Name: EXTENSION citext; Type: COMMENT; Schema: -; Owner:
 --
 
 
@@ -19,7 +19,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 
 
 --
--- Name: EXTENSION pg_trgm; Type: COMMENT; Schema: -; Owner: 
+-- Name: EXTENSION pg_trgm; Type: COMMENT; Schema: -; Owner:
 --
 
 
@@ -32,7 +32,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 
 
 --
--- Name: EXTENSION pgcrypto; Type: COMMENT; Schema: -; Owner: 
+-- Name: EXTENSION pgcrypto; Type: COMMENT; Schema: -; Owner:
 --
 
 
@@ -84,7 +84,7 @@ BEGIN
     UPDATE sync_sessions
     SET is_active = false
     WHERE expires_at < NOW() AND is_active = true;
-    
+
     -- Delete very old inactive sessions (> 7 days)
     DELETE FROM sync_sessions
     WHERE expires_at < (NOW() - INTERVAL '7 days');
@@ -132,13 +132,13 @@ BEGIN
                 ARRAY['A','B','C','D','E','F','G','H','J','K','L','M','N','P','Q','R','S','T','U','V','W','X','Y','Z','2','3','4','5','6','7','8','9']
             )[floor(random() * 32 + 1)];
         END LOOP;
-        
+
         -- Check if code already exists in active sessions
         SELECT EXISTS(
-            SELECT 1 FROM sync_sessions 
+            SELECT 1 FROM sync_sessions
             WHERE room_code = new_code AND is_active = true
         ) INTO code_exists;
-        
+
         -- If code doesn't exist, we can use it
         IF NOT code_exists THEN
             RETURN new_code;
@@ -373,12 +373,12 @@ BEGIN
         NEW.runtime := (NEW.tmdb_details->>'runtime')::INTEGER;
         NEW.popularity := (NEW.tmdb_details->>'popularity')::NUMERIC(10,3);
         NEW.overview := NEW.tmdb_details->>'overview';
-        
+
         -- Update year from date
         IF NEW.release_date IS NOT NULL THEN
             NEW.release_year := EXTRACT(YEAR FROM NEW.release_date);
         END IF;
-        
+
         -- Update genre_names
         IF NEW.tmdb_details->'genres' IS NOT NULL THEN
             NEW.genre_names := ARRAY(
@@ -386,14 +386,14 @@ BEGIN
             );
         END IF;
     END IF;
-    
+
     -- Update cast_names
     IF NEW.cast_crew->'cast' IS NOT NULL THEN
         NEW.cast_names := ARRAY(
             SELECT jsonb_array_elements(NEW.cast_crew->'cast')->>'name'
         );
     END IF;
-    
+
     RETURN NEW;
 END;
 $$;
@@ -415,12 +415,12 @@ BEGIN
         NEW.popularity := (NEW.tmdb_details->>'popularity')::NUMERIC(10,3);
         NEW.overview := NEW.tmdb_details->>'overview';
         NEW.status := NEW.tmdb_details->>'status';
-        
+
         -- Update year from date
         IF NEW.first_air_date IS NOT NULL THEN
             NEW.first_air_year := EXTRACT(YEAR FROM NEW.first_air_date);
         END IF;
-        
+
         -- Update genre_names
         IF NEW.tmdb_details->'genres' IS NOT NULL THEN
             NEW.genre_names := ARRAY(
@@ -428,14 +428,14 @@ BEGIN
             );
         END IF;
     END IF;
-    
+
     -- Update cast_names
     IF NEW.cast_crew->'cast' IS NOT NULL THEN
         NEW.cast_names := ARRAY(
             SELECT jsonb_array_elements(NEW.cast_crew->'cast')->>'name'
         );
     END IF;
-    
+
     RETURN NEW;
 END;
 $$;

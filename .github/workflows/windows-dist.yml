@@ -35,7 +35,7 @@ jobs:
       - name: Setup GStreamer (Windows)
         uses: marcpabst/setup-gstreamer@v1.5.3
         with:
-          version: '${{ github.event.inputs.gstreamer_version || '1.26.6' }}'
+          version: "${{ github.event.inputs.gstreamer_version || '1.26.6' }}"
           arch: x86_64
 
       - name: Show pkg-config
@@ -99,11 +99,10 @@ jobs:
           Compress-Archive -Path 'dist-windows/*' -DestinationPath $zip -Force
           "Artifact: $zip" | Write-Host
           (Get-FileHash $zip -Algorithm SHA256).Hash | Write-Host
-          echo "ZIP_FILE=$zip" >> $env:GITHUB_ENV
+          "ZIP_FILE=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ferrex-player-windows
           path: ${{ env.ZIP_FILE }}
-
