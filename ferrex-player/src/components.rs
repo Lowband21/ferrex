@@ -3,15 +3,16 @@ use crate::{
     models::{MediaOrganizer, Season, TvShow},
     poster_cache::{PosterCache, PosterState},
     theme,
-    widgets::{rounded_image, rounded_image_shader},
+    widgets::{rounded_image, rounded_image_shader, AnimationType},
     Message,
 };
 use iced::{
-    widget::{button, column, container, image, row, scrollable, text, Column, Row, Space, Stack},
+    widget::{button, column, container, row, scrollable, text, Column, Row, Space, Stack},
     Element, Length,
 };
 use iced::{Color, Font};
 use lucide_icons::Icon;
+use std::collections::HashMap;
 
 /// Get the lucide font
 fn lucide_font() -> Font {
@@ -40,7 +41,7 @@ pub fn movie_card<'a>(
     // Create poster element with fixed dimensions
     let poster_element_base: Element<Message> = match poster_cache.get(&file.id) {
         Some(PosterState::Loaded {
-            thumbnail, opacity, ..
+            thumbnail, opacity: _, ..
         }) => {
             // TEST: Use shader-based rounded image widget
             rounded_image_shader(thumbnail.clone())
@@ -899,6 +900,7 @@ pub fn movie_card_lazy<'a>(
     poster_cache: &'a PosterCache,
     is_hovered: bool,
     _is_loading: bool, // Unused - we only check poster_cache state
+    animation_types: &'a HashMap<String, (AnimationType, std::time::Instant)>,
 ) -> Element<'a, Message> {
     use crate::profiling::PROFILER;
     PROFILER.start("movie_card_lazy");
@@ -918,14 +920,23 @@ pub fn movie_card_lazy<'a>(
 
     let poster_element_base: Element<Message> = match poster_state {
         Some(PosterState::Loaded {
-            thumbnail, opacity, ..
+            thumbnail, opacity: _, ..
         }) => {
-            // Use shader-based rounded image
-            rounded_image_shader(thumbnail.clone())
+            // Use shader-based rounded image with opacity from poster cache
+            let mut rounded_img = rounded_image_shader(thumbnail.clone())
                 .radius(8.0)
                 .width(Length::Fixed(200.0))
                 .height(Length::Fixed(300.0))
-                .into()
+                .opacity(opacity);
+            
+            // Check if this poster has an active animation
+            if let Some((animation_type, start_time)) = animation_types.get(&file.id) {
+                rounded_img = rounded_img
+                    .with_animation(*animation_type)
+                    .with_load_time(*start_time);
+            }
+            
+            rounded_img.into()
         }
         Some(PosterState::Loading) => container(
             column![text("⏳").size(32), text("Loading...").size(12)]
@@ -1096,6 +1107,7 @@ pub fn tv_show_card_lazy<'a>(
     _is_hovered: bool,
     _is_loading: bool, // Unused - we only check poster_cache state
     compact: bool,
+    animation_types: &'a HashMap<String, (AnimationType, std::time::Instant)>,
 ) -> Element<'a, Message> {
     let seasons_text = if show.seasons.len() == 1 {
         format!("1 Season")
@@ -1113,24 +1125,23 @@ pub fn tv_show_card_lazy<'a>(
             Some(PosterState::Loaded {
                 thumbnail, opacity, ..
             }) => {
-                // Double-wrap to prevent GPU overflow
-                container(
-                    container(
-                        image(thumbnail)
-                            .content_fit(iced::ContentFit::Cover)
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .opacity(opacity),
-                    )
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .clip(true), // Inner clip
-                )
-                .width(Length::Fixed(200.0))
-                .height(Length::Fixed(300.0))
-                .style(theme::Container::Card.style())
-                .clip(true) // Outer clip
-                .into()
+                // Use shader-based rounded image with opacity from poster cache
+                let mut rounded_img = rounded_image_shader(thumbnail.clone())
+                    .radius(8.0)
+                    .width(Length::Fixed(200.0))
+                    .height(Length::Fixed(300.0))
+                    .opacity(opacity);
+                
+                // Check if this poster has an active animation
+                if let Some(poster_id) = &poster_id {
+                    if let Some((animation_type, start_time)) = animation_types.get(poster_id) {
+                        rounded_img = rounded_img
+                            .with_animation(*animation_type)
+                            .with_load_time(*start_time);
+                    }
+                }
+                
+                rounded_img.into()
             }
             Some(PosterState::Loading) => container(
                 column![text("⏳").size(32), text("Loading...").size(12)]

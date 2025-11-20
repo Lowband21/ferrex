@@ -1,6 +1,6 @@
 use crate::{
     components::default_movie_poster, media_library::MediaFile, models::TvShow,
-    poster_cache::PosterCache, theme, virtual_list, Message,
+    poster_cache::PosterCache, theme, virtual_list, widgets::AnimationType, Message,
 };
 use iced::{
     alignment,
@@ -230,6 +230,7 @@ pub fn virtual_media_grid<'a>(
     poster_cache: &'a PosterCache,
     loading_posters: &HashSet<String>,
     hovered_media_id: &Option<String>,
+    animation_types: &'a HashMap<String, (AnimationType, std::time::Instant)>,
     on_scroll: impl Fn(scrollable::Viewport) -> Message + 'a,
     fast_scrolling: bool,
 ) -> Element<'a, Message> {
@@ -273,6 +274,7 @@ pub fn virtual_media_grid<'a>(
                     poster_cache,
                     is_hovered,
                     loading_posters.contains(&media.id),
+                    animation_types,
                 );
                 row_content = row_content
                     .push(container(card).width(Length::Fixed(adjusted_state.item_width)));
@@ -345,6 +347,7 @@ pub fn virtual_tv_grid<'a>(
     poster_cache: &'a PosterCache,
     loading_posters: &HashSet<String>,
     hovered_media_id: &Option<String>,
+    animation_types: &'a HashMap<String, (AnimationType, std::time::Instant)>,
     on_scroll: impl Fn(scrollable::Viewport) -> Message + 'a,
     fast_scrolling: bool,
 ) -> Element<'a, Message> {
@@ -386,6 +389,7 @@ pub fn virtual_tv_grid<'a>(
                     is_hovered,
                     loading_posters.contains(&show.name),
                     false,
+                    animation_types,
                 );
                 row_content = row_content
                     .push(container(card).width(Length::Fixed(adjusted_state.item_width)));

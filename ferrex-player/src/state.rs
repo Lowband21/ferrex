@@ -160,6 +160,7 @@ pub struct State {
 
     // Track animation states for fade-in effect
     pub poster_animation_states: HashMap<String, f32>, // media_id -> opacity
+    pub poster_animation_types: HashMap<String, (crate::widgets::AnimationType, Instant)>, // media_id -> (animation type, start time)
 
     // Performance tracking
     pub poster_load_semaphore: Arc<tokio::sync::Semaphore>,
@@ -445,6 +446,7 @@ impl Default for State {
             posters_to_load: VecDeque::new(),
             loading_posters: HashSet::new(),
             poster_animation_states: HashMap::new(),
+            poster_animation_types: HashMap::new(),
             poster_load_semaphore: Arc::new(tokio::sync::Semaphore::new(8)), // Max 8 concurrent poster loads
             poster_monitor: None,
             poster_mark_progress: 0,

@@ -13,6 +13,9 @@ struct VertexInput {
     @location(0) position: vec2<f32>,    // Top-left position
     @location(1) size: vec2<f32>,        // Width and height
     @location(2) radius: f32,            // Corner radius
+    @location(3) opacity: f32,           // Opacity for fade animations
+    @location(4) rotation_y: f32,        // Y-axis rotation for flip animation
+    @location(5) animation_progress: f32, // Animation progress (0.0 to 1.0)
 }
 
 struct VertexOutput {
@@ -22,6 +25,8 @@ struct VertexOutput {
     @location(2) bounds_center: vec2<f32>,   // Center of the bounds for SDF
     @location(3) bounds_half_size: vec2<f32>, // Half size for SDF
     @location(4) corner_radius: f32,         // Pass radius to fragment shader
+    @location(5) opacity: f32,               // Pass opacity to fragment shader
+    @location(6) is_backface: f32,           // 1.0 if showing back of card, 0.0 if front
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -37,6 +42,23 @@ fn vertex_position(vertex_index: u32) -> vec2<f32> {
     return vec2<f32>(x, y);
 }
 
+// Apply 3D rotation around Y-axis for flip animation
+fn apply_flip_rotation(pos: vec2<f32>, center: vec2<f32>, rotation_y: f32) -> vec3<f32> {
+    // Translate to origin (center of image)
+    let translated = pos - center;
+    
+    // Apply Y-axis rotation
+    let cos_theta = cos(rotation_y);
+    let sin_theta = sin(rotation_y);
+    
+    // Rotate around Y-axis (x changes, y stays the same)
+    let rotated_x = translated.x * cos_theta;
+    let rotated_z = translated.x * sin_theta;
+    
+    // Return 3D position (add back center x, keep y)
+    return vec3<f32>(rotated_x + center.x, pos.y, rotated_z);
+}
+
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
@@ -46,18 +68,34 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     
     // Calculate position within bounds using instance data
     let position = input.position + vertex_pos * input.size;
+    let center = input.position + input.size * 0.5;
+    
+    // Apply flip rotation if needed
+    var transformed_pos: vec4<f32>;
+    if input.rotation_y > 0.0 {
+        let rotated_3d = apply_flip_rotation(position, center, input.rotation_y);
+        // Apply perspective scaling based on Z
+        let perspective_scale = 1.0 / (1.0 + rotated_3d.z * 0.001);
+        transformed_pos = vec4<f32>(rotated_3d.x, rotated_3d.y, 0.0, 1.0);
+        transformed_pos.x = center.x + (transformed_pos.x - center.x) * perspective_scale;
+    } else {
+        transformed_pos = vec4<f32>(position, 0.0, 1.0);
+    }
     
     // Transform to clip space
-    output.clip_position = globals.transform * vec4<f32>(position, 0.0, 1.0);
+    output.clip_position = globals.transform * transformed_pos;
     
-    // Pass texture coordinates
-    output.tex_coord = vertex_pos;
+    // Pass texture coordinates (flip horizontally if showing back)
+    let is_backface = f32(input.rotation_y > 1.5708); // > PI/2 means showing back
+    output.tex_coord = vec2<f32>(mix(vertex_pos.x, 1.0 - vertex_pos.x, is_backface), vertex_pos.y);
     
     // Pass data for SDF calculation in fragment shader
     output.screen_position = position;
-    output.bounds_center = input.position + input.size * 0.5;
+    output.bounds_center = center;
     output.bounds_half_size = input.size * 0.5;
     output.corner_radius = input.radius;
+    output.opacity = input.opacity;
+    output.is_backface = is_backface;
     
     return output;
 }
@@ -73,6 +111,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Sample the texture
     var color = textureSample(image_texture, texture_sampler, input.tex_coord);
     
+    // For backface, we could show a different texture or solid color
+    // For now, just tint it darker to show it's the back
+    if input.is_backface > 0.5 {
+        color = vec4<f32>(color.rgb * 0.7, color.a);
+    }
+    
     // Calculate signed distance to rounded rectangle edge
     let dist = rounded_rect_sdf(
         input.screen_position, 
@@ -86,8 +130,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // We use a 2-pixel smooth transition for better anti-aliasing
     let alpha = 1.0 - smoothstep(-2.0, 2.0, dist);
     
-    // Apply alpha clipping
-    color.a = color.a * alpha;
+    // Apply alpha clipping and opacity
+    color.a = color.a * alpha * input.opacity;
     
     return color;
 }

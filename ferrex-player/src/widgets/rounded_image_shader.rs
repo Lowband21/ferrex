@@ -14,14 +14,36 @@ use iced::widget::shader::{Primitive, Storage};
 use iced::{mouse, Element, Length, Rectangle};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 // Image loading functions are in the image crate root
+
+/// Animation type for poster loading
+#[derive(Debug, Clone, Copy)]
+pub enum AnimationType {
+    None,
+    Fade { duration: Duration },
+    Flip { duration: Duration },
+}
+
+impl AnimationType {
+    fn as_u32(&self) -> u32 {
+        match self {
+            AnimationType::None => 0,
+            AnimationType::Fade { .. } => 1,
+            AnimationType::Flip { .. } => 2,
+        }
+    }
+}
 
 /// A shader program for rendering rounded images
 #[derive(Debug, Clone)]
 pub struct RoundedImageProgram {
     pub handle: Handle,
     pub radius: f32,
+    pub animation: AnimationType,
+    pub load_time: Option<Instant>,
+    pub opacity: f32,
 }
 
 impl<Message> Program<Message> for RoundedImageProgram {
@@ -38,6 +60,9 @@ impl<Message> Program<Message> for RoundedImageProgram {
             image_handle: self.handle.clone(),
             bounds,
             radius: self.radius,
+            animation: self.animation,
+            load_time: self.load_time,
+            opacity: self.opacity,
         }
     }
 }
@@ -48,6 +73,9 @@ pub struct RoundedImagePrimitive {
     pub image_handle: Handle,
     pub bounds: Rectangle,
     pub radius: f32,
+    pub animation: AnimationType,
+    pub load_time: Option<Instant>,
+    pub opacity: f32,
 }
 
 /// Global uniform data (viewport transform)
@@ -63,10 +91,12 @@ struct Globals {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct Instance {
-    position: [f32; 2], // Top-left position
-    size: [f32; 2],     // Width and height
-    radius: f32,        // Corner radius
-    _padding: [f32; 3], // Padding for alignment
+    position: [f32; 2],    // Top-left position
+    size: [f32; 2],        // Width and height
+    radius: f32,           // Corner radius
+    opacity: f32,          // Opacity for fade animations (0.0 to 1.0)
+    rotation_y: f32,       // Y-axis rotation for flip animation (in radians)
+    animation_progress: f32, // Animation progress (0.0 to 1.0)
 }
 
 /// Pipeline state (immutable after creation)
@@ -199,6 +229,24 @@ impl Pipeline {
                 wgpu::VertexAttribute {
                     offset: 16,
                     shader_location: 2,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                // opacity
+                wgpu::VertexAttribute {
+                    offset: 20,
+                    shader_location: 3,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                // rotation_y
+                wgpu::VertexAttribute {
+                    offset: 24,
+                    shader_location: 4,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                // animation_progress
+                wgpu::VertexAttribute {
+                    offset: 28,
+                    shader_location: 5,
                     format: wgpu::VertexFormat::Float32,
                 },
             ],
@@ -409,7 +457,6 @@ impl Primitive for RoundedImagePrimitive {
 
         // Update globals with current viewport
         let transform: [f32; 16] = viewport.projection().into();
-        log::info!("Viewport transform: {:?}", transform);
         let globals = Globals {
             transform,
             scale_factor: viewport.scale_factor() as f32,
@@ -458,11 +505,39 @@ impl Primitive for RoundedImagePrimitive {
 
         // Create instance data for this primitive
         // Use the bounds parameter which includes scroll transformation
+        
+        // Calculate animation values based on animation type
+        let (actual_opacity, rotation_y, animation_progress) = match self.animation {
+            AnimationType::None => (self.opacity, 0.0, 1.0),
+            AnimationType::Fade { duration } => {
+                if let Some(load_time) = self.load_time {
+                    let elapsed = load_time.elapsed().as_secs_f32();
+                    let progress = (elapsed / duration.as_secs_f32()).min(1.0);
+                    (self.opacity, 0.0, progress)
+                } else {
+                    (self.opacity, 0.0, 1.0)
+                }
+            }
+            AnimationType::Flip { duration } => {
+                if let Some(load_time) = self.load_time {
+                    let elapsed = load_time.elapsed().as_secs_f32();
+                    let progress = (elapsed / duration.as_secs_f32()).min(1.0);
+                    let rotation = progress * std::f32::consts::PI; // 0 to PI (180 degrees)
+                    // Opacity is handled by AnimatePoster, just pass through
+                    (self.opacity, rotation, progress)
+                } else {
+                    (self.opacity, 0.0, 0.0)
+                }
+            }
+        };
+        
         let instance = Instance {
             position: [bounds.x, bounds.y],
             size: [bounds.width, bounds.height],
             radius: self.radius,
-            _padding: [0.0; 3],
+            opacity: actual_opacity,
+            rotation_y,
+            animation_progress,
         };
 
         // Create or update instance buffer for this primitive
@@ -553,6 +628,9 @@ pub struct RoundedImage {
     radius: f32,
     width: Length,
     height: Length,
+    animation: AnimationType,
+    load_time: Option<Instant>,
+    opacity: f32,
 }
 
 impl RoundedImage {
@@ -563,6 +641,9 @@ impl RoundedImage {
             radius: 8.0,
             width: Length::Fixed(200.0),
             height: Length::Fixed(300.0),
+            animation: AnimationType::None,
+            load_time: None,
+            opacity: 1.0,
         }
     }
 
@@ -583,6 +664,27 @@ impl RoundedImage {
         self.height = height.into();
         self
     }
+    
+    /// Sets the animation type
+    pub fn with_animation(mut self, animation: AnimationType) -> Self {
+        self.animation = animation;
+        if self.load_time.is_none() {
+            self.load_time = Some(Instant::now());
+        }
+        self
+    }
+    
+    /// Sets the load time for animation
+    pub fn with_load_time(mut self, load_time: Instant) -> Self {
+        self.load_time = Some(load_time);
+        self
+    }
+    
+    /// Sets the opacity
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self
+    }
 }
 
 /// Helper function to create a rounded image widget
@@ -595,6 +697,9 @@ impl<'a> From<RoundedImage> for Element<'a, Message> {
         iced::widget::shader(RoundedImageProgram {
             handle: image.handle,
             radius: image.radius,
+            animation: image.animation,
+            load_time: image.load_time,
+            opacity: image.opacity,
         })
         .width(image.width)
         .height(image.height)

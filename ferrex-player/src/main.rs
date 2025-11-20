@@ -576,6 +576,7 @@ fn view_library_old(state: &State) -> Element<Message> {
                                     &state.poster_cache,
                                     false, // is_hovered
                                     false, // is_loading - not used, poster cache handles loading state
+                                    &state.poster_animation_types,
                                 )
                             })
                             .collect();
@@ -629,6 +630,7 @@ fn view_library_old(state: &State) -> Element<Message> {
                         &state.poster_cache,
                         &state.loading_posters,
                         &state.hovered_media_id,
+                        &state.poster_animation_types,
                         Message::MoviesGridScrolled,
                         state.fast_scrolling,
                     )
@@ -641,6 +643,7 @@ fn view_library_old(state: &State) -> Element<Message> {
                         &state.poster_cache,
                         &state.loading_posters,
                         &state.hovered_media_id,
+                        &state.poster_animation_types,
                         Message::TvShowsGridScrolled,
                         state.fast_scrolling,
                     )

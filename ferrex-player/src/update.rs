@@ -1008,12 +1008,19 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         Ok((thumbnail_handle, full_size_handle)) => {
                             // Check if poster is visible before animating
                             if state.is_media_visible(&media_id) {
-                                log::debug!("Poster {} is visible, starting fade-in animation", media_id);
-                                // Start at 0 opacity for fade-in animation
+                                log::debug!("Poster {} is visible, starting flip animation", media_id);
+                                // Start at 0 opacity for animation
                                 state.poster_cache.set_loaded(media_id.clone(), thumbnail_handle, full_size_handle);
+                                state.poster_cache.update_opacity(&media_id, 0.0); // Start at 0 opacity
                                 state.poster_animation_states.insert(media_id.clone(), 0.0);
+                                
+                                // Set flip animation type
+                                state.poster_animation_types.insert(
+                                    media_id.clone(), 
+                                    (crate::widgets::AnimationType::Flip { duration: Duration::from_millis(600) }, Instant::now())
+                                );
 
-                                // Start fade-in animation
+                                // Start animation
                                 tasks.push(Task::perform(
                                     async move { media_id },
                                     Message::AnimatePoster,
@@ -1059,42 +1066,83 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::AnimatePoster(media_id) => {
-            // Animate poster fade-in only if still visible
+            // Animate poster only if still visible
             if !state.is_media_visible(&media_id) {
                 // Item scrolled out of view, complete animation immediately
                 state.poster_cache.update_opacity(&media_id, 1.0);
                 state.poster_animation_states.remove(&media_id);
+                state.poster_animation_types.remove(&media_id);
                 return Task::none();
             }
 
-            if let Some(opacity) = state.poster_animation_states.get_mut(&media_id) {
-                if *opacity < 1.0 {
-                    // Much slower fade-in for visibility
-                    let increment = 0.02; // 50 frames total at 16ms = 800ms fade-in
-                    *opacity = (*opacity + increment).min(1.0);
-
-                    // Simple linear fade for now to make it more visible
-                    state.poster_cache.update_opacity(&media_id, *opacity);
-
-                    // Continue animation if not complete
+            // Get animation type and calculate progress
+            if let Some((animation_type, start_time)) = state.poster_animation_types.get(&media_id) {
+                let elapsed = start_time.elapsed().as_secs_f32();
+                
+                let (is_complete, new_opacity) = match animation_type {
+                    crate::widgets::AnimationType::Fade { duration } => {
+                        let progress = (elapsed / duration.as_secs_f32()).min(1.0);
+                        (progress >= 1.0, progress)
+                    }
+                    crate::widgets::AnimationType::Flip { duration } => {
+                        let progress = (elapsed / duration.as_secs_f32()).min(1.0);
+                        // For flip, opacity stays at 0 for first half, then fades in
+                        let opacity = if progress < 0.5 { 
+                            0.0 
+                        } else { 
+                            (progress - 0.5) * 2.0 
+                        };
+                        (progress >= 1.0, opacity)
+                    }
+                    crate::widgets::AnimationType::None => (true, 1.0),
+                };
+                
+                // Update opacity
+                state.poster_cache.update_opacity(&media_id, new_opacity);
+                if let Some(opacity) = state.poster_animation_states.get_mut(&media_id) {
+                    *opacity = new_opacity;
+                }
+                
+                if !is_complete {
+                    // Continue animation
+                    Task::perform(
+                        async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(16)).await; // ~60fps
+                            media_id
+                        },
+                        Message::AnimatePoster,
+                    )
+                } else {
+                    // Animation complete, cleanup
+                    state.poster_animation_states.remove(&media_id);
+                    state.poster_animation_types.remove(&media_id);
+                    Task::none()
+                }
+            } else {
+                // No animation type set, use default fade
+                if let Some(opacity) = state.poster_animation_states.get_mut(&media_id) {
                     if *opacity < 1.0 {
-                        Task::perform(
-                            async move {
-                                tokio::time::sleep(std::time::Duration::from_millis(16)).await; // ~60fps
-                                media_id
-                            },
-                            Message::AnimatePoster,
-                        )
+                        let increment = 0.02;
+                        *opacity = (*opacity + increment).min(1.0);
+                        state.poster_cache.update_opacity(&media_id, *opacity);
+                        
+                        if *opacity < 1.0 {
+                            Task::perform(
+                                async move {
+                                    tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+                                    media_id
+                                },
+                                Message::AnimatePoster,
+                            )
+                        } else {
+                            Task::none()
+                        }
                     } else {
-                        // Animation complete, remove from tracking
-                        //state.poster_animation_states.remove(&media_id);
                         Task::none()
                     }
                 } else {
                     Task::none()
                 }
-            } else {
-                Task::none()
             }
         }
 
