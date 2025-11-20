@@ -24,6 +24,7 @@ mod update;
 mod util;
 mod views;
 mod virtual_list;
+mod widgets;
 
 use gstreamer as gst;
 use iced_video_player::Video;

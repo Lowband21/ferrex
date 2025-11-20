@@ -2,7 +2,9 @@ use crate::{
     media_library::MediaFile,
     models::{MediaOrganizer, Season, TvShow},
     poster_cache::{PosterCache, PosterState},
-    theme, Message,
+    theme,
+    widgets::{rounded_image, rounded_image_shader},
+    Message,
 };
 use iced::{
     widget::{button, column, container, image, row, scrollable, text, Column, Row, Space, Stack},
@@ -40,28 +42,12 @@ pub fn movie_card<'a>(
         Some(PosterState::Loaded {
             thumbnail, opacity, ..
         }) => {
-            // Double-wrap images to prevent GPU layer overflow
-            container(
-                container(
-                    image(thumbnail)
-                        .content_fit(iced::ContentFit::Cover)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .opacity(opacity),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .clip(true), // Inner clip
-            )
-            .width(Length::Fixed(200.0))
-            .height(Length::Fixed(300.0))
-            .style(if is_hovered {
-                theme::Container::CardHovered.style()
-            } else {
-                theme::Container::Card.style()
-            })
-            .clip(true) // Outer clip
-            .into()
+            // TEST: Use shader-based rounded image widget
+            rounded_image_shader(thumbnail.clone())
+                .radius(8.0)
+                .width(iced::Length::Fixed(200.0))
+                .height(iced::Length::Fixed(300.0))
+                .into()
         }
         Some(PosterState::Loading) => container(
             column![text("⏳").size(32), text("Loading...").size(12)]
@@ -231,28 +217,11 @@ pub fn tv_show_card<'a>(
                     thumbnail, opacity, ..
                 }) = poster_cache.get(&episode.id)
                 {
-                    poster_elem = container(
-                        container(
-                            image(thumbnail)
-                                .content_fit(iced::ContentFit::Cover)
-                                .width(Length::Fill)
-                                .height(Length::Fill)
-                                .opacity(opacity),
-                        )
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .clip(true), // Inner clip
-                    )
-                    .width(Length::Fixed(200.0))
-                    .height(Length::Fixed(300.0))
-                    .align_x(iced::alignment::Horizontal::Left)
-                    .style(if is_hovered {
-                        theme::Container::CardHovered.style()
-                    } else {
-                        theme::Container::Card.style()
-                    })
-                    .clip(true) // Outer clip
-                    .into();
+                    poster_elem = rounded_image(thumbnail.clone())
+                        .size(200.0, 300.0)
+                        .radius(8.0)
+                        .opacity(opacity)
+                        .build();
                     poster_found = true;
                     break 'outer;
                 }
@@ -899,7 +868,7 @@ pub fn episode_card<'a>(
 }
 
 /// Default season poster
-fn default_season_poster() -> Element<'static, Message> {
+pub fn default_season_poster() -> Element<'static, Message> {
     container(text("📺").size(48))
         .width(Length::Fixed(200.0))
         .height(Length::Fixed(300.0))
@@ -910,7 +879,7 @@ fn default_season_poster() -> Element<'static, Message> {
 }
 
 /// Default episode thumbnail
-fn default_episode_thumbnail(episode_num: u32) -> Element<'static, Message> {
+pub fn default_episode_thumbnail(episode_num: u32) -> Element<'static, Message> {
     container(
         text(format!("E{:02}", episode_num))
             .size(32)
@@ -922,121 +891,6 @@ fn default_episode_thumbnail(episode_num: u32) -> Element<'static, Message> {
     .align_y(iced::alignment::Vertical::Center)
     .style(theme::Container::Card.style())
     .into()
-}
-
-// Helper functions for icons
-// Removed - now using lucide_icons::icon directly
-
-/// Create a minimal movie card for fast scrolling - much simpler widget structure
-pub fn movie_card_fast<'a>(
-    file: &'a MediaFile,
-    poster_cache: &'a PosterCache,
-    is_hovered: bool,
-) -> Element<'a, Message> {
-    use crate::profiling::PROFILER;
-    PROFILER.start("movie_card_fast");
-    // Simple poster with title only - no stack, no overlays
-    let poster_element = match poster_cache.get(&file.id) {
-        Some(PosterState::Loaded {
-            thumbnail, opacity, ..
-        }) => {
-            // Double-wrap to prevent GPU overflow
-            container(
-                container(
-                    image(thumbnail)
-                        .content_fit(iced::ContentFit::Cover)
-                        .width(Length::Fixed(200.0))
-                        .height(Length::Fixed(300.0))
-                        .opacity(opacity),
-                )
-                .width(Length::Fixed(200.0))
-                .height(Length::Fixed(300.0))
-                .clip(true), // Inner clip
-            )
-            .width(Length::Fixed(200.0))
-            .height(Length::Fixed(300.0))
-            .style(theme::Container::Card.style())
-            .clip(true) // Outer clip
-        }
-        _ => {
-            // Simple gray placeholder during fast scroll
-            container(Space::with_width(Length::Fixed(200.0)))
-                .width(Length::Fixed(200.0))
-                .height(Length::Fixed(300.0))
-                .style(theme::Container::Card.style())
-        }
-    };
-
-    // Add hover overlay if hovered
-    let poster_with_overlay = if is_hovered {
-        // Same overlay as regular movie_card
-        let overlay_background: Element<Message> = container("")
-            .width(Length::Fixed(200.0))
-            .height(Length::Fixed(300.0))
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgba(
-                    0.0, 0.0, 0.0, 0.4,
-                ))),
-                border: iced::Border {
-                    color: Color::TRANSPARENT,
-                    width: 0.0,
-                    radius: 8.0.into(),
-                },
-                ..Default::default()
-            })
-            .into();
-
-        let play_button = button(icon_text(Icon::Play).size(32).style(theme::icon_white))
-            .on_press(Message::PlayMedia(file.clone()))
-            .padding(16)
-            .style(theme::Button::PlayOverlay.style());
-
-        Stack::new()
-            .push(
-                button(poster_element)
-                    .padding(0)
-                    .on_press(Message::ViewDetails(file.clone()))
-                    .style(theme::Button::Card.style()),
-            )
-            .push(overlay_background)
-            .push(
-                container(play_button)
-                    .width(Length::Fixed(200.0))
-                    .height(Length::Fixed(300.0))
-                    .align_x(iced::alignment::Horizontal::Center)
-                    .align_y(iced::alignment::Vertical::Center),
-            )
-    } else {
-        Stack::new().push(
-            button(poster_element)
-                .padding(0)
-                .on_press(Message::ViewDetails(file.clone()))
-                .style(theme::Button::Card.style()),
-        )
-    };
-
-    // Minimal layout with mouse area
-    let content = column![
-        poster_with_overlay,
-        text(file.display_title())
-            .size(14)
-            .width(Length::Fixed(200.0))
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
-    ]
-    .spacing(5)
-    .width(Length::Fixed(200.0));
-
-    let result = iced::widget::mouse_area(container(content).style(if is_hovered {
-        theme::Container::CardHovered.style()
-    } else {
-        theme::Container::Card.style()
-    }))
-    .on_enter(Message::MediaHovered(file.id.clone()))
-    .on_exit(Message::MediaUnhovered)
-    .into();
-
-    PROFILER.end("movie_card_fast");
-    result
 }
 
 /// Create a movie card with lazy loading support
@@ -1066,24 +920,12 @@ pub fn movie_card_lazy<'a>(
         Some(PosterState::Loaded {
             thumbnail, opacity, ..
         }) => {
-            // Double-wrap images to prevent GPU layer overflow
-            container(
-                container(
-                    image(thumbnail)
-                        .content_fit(iced::ContentFit::Cover)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .opacity(opacity),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .clip(true), // Inner clip
-            )
-            .width(Length::Fixed(200.0))
-            .height(Length::Fixed(300.0))
-            .style(theme::Container::Card.style())
-            .clip(true) // Outer clip
-            .into()
+            // Use shader-based rounded image
+            rounded_image_shader(thumbnail.clone())
+                .radius(8.0)
+                .width(Length::Fixed(200.0))
+                .height(Length::Fixed(300.0))
+                .into()
         }
         Some(PosterState::Loading) => container(
             column![text("⏳").size(32), text("Loading...").size(12)]
@@ -1185,10 +1027,10 @@ pub fn movie_card_lazy<'a>(
         .padding(8);
 
         Stack::new()
-            .push(poster_border)
+            //.push(poster_border)
             .push(poster_element_base)
-            .push(overlay_background)
-            .push(overlay_content)
+            //.push(overlay_background)
+            //.push(overlay_content)
             .width(Length::Fixed(200.0))
             .height(Length::Fixed(300.0))
             .into()
@@ -1245,62 +1087,6 @@ pub fn movie_card_lazy<'a>(
 
     PROFILER.end("movie_card_lazy");
     result
-}
-
-/// Create a minimal TV show card for fast scrolling
-pub fn tv_show_card_fast<'a>(
-    show: &'a TvShow,
-    poster_cache: &'a PosterCache,
-    _is_hovered: bool,
-) -> Element<'a, Message> {
-    // Get poster for the first episode that has one
-    let poster_id = show.get_poster_id();
-
-    let poster_element = match poster_id.as_ref().and_then(|id| poster_cache.get(id)) {
-        Some(PosterState::Loaded {
-            thumbnail, opacity, ..
-        }) => {
-            // Double-wrap to prevent GPU overflow
-            container(
-                container(
-                    image(thumbnail)
-                        .content_fit(iced::ContentFit::Cover)
-                        .width(Length::Fixed(200.0))
-                        .height(Length::Fixed(300.0))
-                        .opacity(opacity),
-                )
-                .width(Length::Fixed(200.0))
-                .height(Length::Fixed(300.0))
-                .clip(true), // Inner clip
-            )
-            .width(Length::Fixed(200.0))
-            .height(Length::Fixed(300.0))
-            .style(theme::Container::Card.style())
-            .clip(true) // Outer clip
-        }
-        _ => {
-            // Simple gray placeholder
-            container(Space::with_width(Length::Fixed(200.0)))
-                .width(Length::Fixed(200.0))
-                .height(Length::Fixed(300.0))
-                .style(theme::Container::Card.style())
-        }
-    };
-
-    // Minimal layout
-    column![
-        button(poster_element)
-            .padding(0)
-            .on_press(Message::ViewTvShow(show.name.clone()))
-            .style(theme::Button::Card.style()),
-        text(&show.name)
-            .size(14)
-            .width(Length::Fixed(200.0))
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
-    ]
-    .spacing(5)
-    .width(Length::Fixed(200.0))
-    .into()
 }
 
 /// Create a TV show card with lazy loading support

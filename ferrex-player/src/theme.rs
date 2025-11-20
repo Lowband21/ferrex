@@ -54,6 +54,7 @@ pub enum Container {
     ProgressBarBackground,
     Badge,
     Header,
+    RoundedImage,
 }
 
 impl Container {
@@ -171,6 +172,17 @@ impl Container {
                     offset: iced::Vector::new(0.0, 2.0),
                     blur_radius: 4.0,
                 },
+                snap: false,
+            },
+            Container::RoundedImage => |_| container::Style {
+                text_color: None,
+                background: None,
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 8.0.into(),
+                },
+                shadow: Shadow::default(),
                 snap: false,
             },
         }

@@ -268,16 +268,12 @@ pub fn virtual_media_grid<'a>(
                 let media = &items[item_idx];
                 let is_hovered = hovered_media_id.as_ref() == Some(&media.id);
                 // Use fast card variant during fast scrolling
-                let card = if fast_scrolling {
-                    crate::components::movie_card_fast(media, poster_cache, is_hovered)
-                } else {
-                    crate::components::movie_card_lazy(
-                        media,
-                        poster_cache,
-                        is_hovered,
-                        loading_posters.contains(&media.id),
-                    )
-                };
+                let card = crate::components::movie_card_lazy(
+                    media,
+                    poster_cache,
+                    is_hovered,
+                    loading_posters.contains(&media.id),
+                );
                 row_content = row_content
                     .push(container(card).width(Length::Fixed(adjusted_state.item_width)));
             } else {
@@ -331,7 +327,7 @@ pub fn virtual_media_grid<'a>(
             ))
             .on_scroll(on_scroll)
             .width(Length::Fill)
-            .height(Length::Fill)
+            .height(Length::Fill),
     )
     .width(Length::Fill)
     .height(Length::Fill)
@@ -384,17 +380,13 @@ pub fn virtual_tv_grid<'a>(
                 // Use fast card variant during fast scrolling
                 let poster_id = show.get_poster_id().unwrap_or_else(|| show.name.clone());
                 let is_hovered = hovered_media_id.as_ref() == Some(&poster_id);
-                let card = if fast_scrolling {
-                    crate::components::tv_show_card_fast(show, poster_cache, is_hovered)
-                } else {
-                    crate::components::tv_show_card_lazy(
-                        show,
-                        poster_cache,
-                        is_hovered,
-                        loading_posters.contains(&show.name),
-                        false,
-                    )
-                };
+                let card = crate::components::tv_show_card_lazy(
+                    show,
+                    poster_cache,
+                    is_hovered,
+                    loading_posters.contains(&show.name),
+                    false,
+                );
                 row_content = row_content
                     .push(container(card).width(Length::Fixed(adjusted_state.item_width)));
             } else {
@@ -428,7 +420,7 @@ pub fn virtual_tv_grid<'a>(
             ))
             .on_scroll(on_scroll)
             .width(Length::Fill)
-            .height(Length::Fill)
+            .height(Length::Fill),
     )
     .width(Length::Fill)
     .height(Length::Fill)

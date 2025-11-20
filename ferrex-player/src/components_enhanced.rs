@@ -1,8 +1,12 @@
 use crate::{
+    components::{default_episode_thumbnail, default_season_poster},
     image_cache::{ImageCache, ImageState},
     models::{EpisodeSummary, SeasonSummary},
-    theme, Message,
+    theme,
+    widgets::rounded_image,
+    Message,
 };
+use iced::advanced::Widget;
 use iced::{
     widget::{button, column, container, image, text, Stack},
     Color, Element, Length,
@@ -34,17 +38,10 @@ pub fn season_card_with_cache<'a>(
             poster_url.clone()
         };
         match image_cache.get(&full_url) {
-            Some(ImageState::Loaded(handle)) => container(
-                image(handle)
-                    .content_fit(iced::ContentFit::Cover)
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-            )
-            .width(Length::Fixed(200.0))
-            .height(Length::Fixed(300.0))
-            .style(theme::Container::Card.style())
-            .clip(true)
-            .into(),
+            Some(ImageState::Loaded(handle)) => rounded_image(handle.clone())
+                .size(200.0, 300.0)
+                .radius(8.0)
+                .build(),
             Some(ImageState::Loading) => container(
                 column![text("⏳").size(32), text("Loading...").size(12)]
                     .align_x(iced::Alignment::Center)
@@ -119,17 +116,10 @@ pub fn episode_card_with_cache<'a>(
     // Episodes use server thumbnails
     let thumbnail_key = format!("thumbnail:{}", episode.id);
     let thumbnail_element: Element<Message> = match image_cache.get(&thumbnail_key) {
-        Some(ImageState::Loaded(handle)) => container(
-            image(handle)
-                .content_fit(iced::ContentFit::Cover)
-                .width(Length::Fill)
-                .height(Length::Fill),
-        )
-        .width(Length::Fixed(250.0))
-        .height(Length::Fixed(140.0))
-        .style(theme::Container::Card.style())
-        .clip(true)
-        .into(),
+        Some(ImageState::Loaded(handle)) => rounded_image(handle.clone())
+            .size(250.0, 140.0)
+            .radius(8.0)
+            .build(),
         Some(ImageState::Loading) => container(
             column![text("⏳").size(24), text("Loading...").size(11)]
                 .align_x(iced::Alignment::Center)
@@ -264,31 +254,5 @@ pub fn episode_card_with_cache<'a>(
     )
     .width(Length::Fixed(250.0))
     .height(Length::Fixed(230.0))
-    .into()
-}
-
-/// Default season poster
-fn default_season_poster() -> Element<'static, Message> {
-    container(text("📺").size(48))
-        .width(Length::Fixed(200.0))
-        .height(Length::Fixed(300.0))
-        .align_x(iced::alignment::Horizontal::Center)
-        .align_y(iced::alignment::Vertical::Center)
-        .style(theme::Container::Card.style())
-        .into()
-}
-
-/// Default episode thumbnail
-fn default_episode_thumbnail(episode_num: u32) -> Element<'static, Message> {
-    container(
-        text(format!("E{:02}", episode_num))
-            .size(32)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-    )
-    .width(Length::Fixed(250.0))
-    .height(Length::Fixed(140.0))
-    .align_x(iced::alignment::Horizontal::Center)
-    .align_y(iced::alignment::Vertical::Center)
-    .style(theme::Container::Card.style())
     .into()
 }

@@ -69,5 +69,8 @@ thiserror = "1"
 anyhow = "1"
 uuid.workspace = true
 
+# GPU utilities
+bytemuck = { version = "1.14", features = ["derive"] }
+
 [features]
 default = []

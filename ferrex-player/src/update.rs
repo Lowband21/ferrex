@@ -1087,7 +1087,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         )
                     } else {
                         // Animation complete, remove from tracking
-                        state.poster_animation_states.remove(&media_id);
+                        //state.poster_animation_states.remove(&media_id);
                         Task::none()
                     }
                 } else {
