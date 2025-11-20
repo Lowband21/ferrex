@@ -141,6 +141,11 @@ pub struct VirtualGridState {
 
 impl VirtualGridState {
     pub fn new(total_items: usize, columns: usize, row_height: f32) -> Self {
+        Self::with_id(total_items, columns, row_height, scrollable::Id::unique())
+    }
+    
+    /// Create a new VirtualGridState with a specific scrollable ID
+    pub fn with_id(total_items: usize, columns: usize, row_height: f32, scrollable_id: scrollable::Id) -> Self {
         let mut grid = Self {
             total_items,
             columns,
@@ -150,7 +155,7 @@ impl VirtualGridState {
             viewport_width: 1200.0, // Default
             overscan_rows: 2,
             visible_range: 0..0,
-            scrollable_id: scrollable::Id::unique(),
+            scrollable_id,
             item_width: 200.0, // Default
             needs_refresh: false,
         };

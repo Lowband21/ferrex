@@ -72,8 +72,35 @@ macro_rules! virtual_reference_grid {
                         let item = &items[item_idx];
 
                         // Determine if this item is truly visible (not just in overscan area)
-                        let is_visible = item_idx >= grid_state.visible_range.start
-                            && item_idx < grid_state.visible_range.end;
+                        // During scrolling, NEVER mark items as visible to ensure they get Preload priority
+                        // Check if we're within the debounce window of the last scroll event
+                        let is_scrolling = if let Some(last_scroll) = state.domains.ui.state.last_scroll_time {
+                            let elapsed = last_scroll.elapsed();
+                            elapsed < std::time::Duration::from_millis(
+                                $crate::infrastructure::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS
+                            )
+                        } else {
+                            false
+                        };
+                        
+                        let is_visible = if is_scrolling {
+                            false  // Always use Preload priority while scrolling
+                        } else {
+                            item_idx >= grid_state.visible_range.start
+                                && item_idx < grid_state.visible_range.end
+                        };
+                        
+                        // Log priority decision for first item in range for debugging
+                        if item_idx == grid_state.visible_range.start {
+                            let elapsed_ms = state.domains.ui.state.last_scroll_time
+                                .map(|t| t.elapsed().as_millis())
+                                .unwrap_or(999999);
+                            log::debug!("Grid item priority: scrolling={}, elapsed={}ms, is_visible={} -> priority={}",
+                                is_scrolling, 
+                                elapsed_ms,
+                                is_visible,
+                                if is_visible { "VISIBLE" } else { "PRELOAD" });
+                        }
 
                         // Call the card creation function with visibility info
                         let card = $create_card(item, hovered_media_id, is_visible, state);
@@ -161,6 +188,7 @@ macro_rules! virtual_reference_grid {
                     .padding([0, horizontal_padding as u16])
                     .clip(false),
             )
+            .id(grid_state.scrollable_id.clone())
             .direction(scrollable::Direction::Vertical(
                 scrollable::Scrollbar::default(),
             ))

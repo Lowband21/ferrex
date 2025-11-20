@@ -439,6 +439,8 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
 
 fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
     use crate::domains::ui::types::DisplayMode;
+    use crate::domains::ui::tabs::TabId;
+    
     if state.domains.library.state.libraries.is_empty() {
         // No libraries configured - show only curated view
         row![
@@ -452,15 +454,25 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
     } else {
         // Show library tabs
         let mut tabs_vec: Vec<Element<Message>> = Vec::new();
+        
+        // Check if "All" tab is active
+        let is_all_active = state.tab_manager.active_tab_id() == TabId::All;
+        let all_button_style = if is_all_active {
+            theme::Button::Primary.style()
+        } else {
+            theme::Button::HeaderIcon.style()
+        };
+        
         // Add "All" tab - shows curated collections from all libraries
         tabs_vec.push(
             button(container(text("All").size(14)).center_y(Length::Fill))
                 .on_press(Message::SetDisplayMode(DisplayMode::Curated))
-                .style(theme::Button::HeaderIcon.style())
+                .style(all_button_style)
                 .padding([0, 16])
                 .height(HEIGHT)
                 .into(),
         );
+        
         // Add individual library tabs
         for library in state
             .domains
@@ -470,10 +482,18 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
             .iter()
             .filter(|l| l.enabled)
         {
+            // Check if this library tab is active
+            let is_active = state.tab_manager.active_tab_id() == TabId::Library(library.id);
+            let button_style = if is_active {
+                theme::Button::Primary.style()
+            } else {
+                theme::Button::HeaderIcon.style()
+            };
+            
             tabs_vec.push(
                 button(container(text(&library.name).size(14)).center_y(Length::Fill))
                     .on_press(Message::SelectLibraryAndMode(library.id.clone()))
-                    .style(theme::Button::HeaderIcon.style())
+                    .style(button_style)
                     .padding([0, 16])
                     .height(HEIGHT)
                     .into(),

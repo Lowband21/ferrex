@@ -16,7 +16,6 @@ pub enum Message {
     PlayMedia(MediaFile),
     PlayMediaWithId(MediaFile, ferrex_core::api_types::MediaId), // includes MediaId for watch tracking
     LoadMediaById(ferrex_core::api_types::MediaId), // Load track by ID (NEW - for Phase 2 direct commands)
-    BackToLibrary,
 
     // Seeking
     Seek(f64),
@@ -110,7 +109,6 @@ impl Message {
             Self::PlayMedia(_) => "Media::PlayMedia",
             Self::PlayMediaWithId(_, _) => "Media::PlayMediaWithId",
             Self::LoadMediaById(_) => "Media::LoadMediaById",
-            Self::BackToLibrary => "Media::BackToLibrary",
 
             // Seeking
             Self::Seek(_) => "Media::Seek",

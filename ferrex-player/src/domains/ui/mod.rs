@@ -6,6 +6,7 @@ pub mod background_state;
 pub mod components;
 pub mod messages;
 pub mod scroll_manager;
+pub mod tabs;
 pub mod theme;
 pub mod transitions;
 pub mod types;
@@ -52,8 +53,6 @@ pub struct UIDomainState {
     pub scroll_samples: VecDeque<(Instant, f32)>,
     pub fast_scrolling: bool,
     pub scroll_stopped_time: Option<Instant>,
-    pub movies_scroll_position: Option<f32>,
-    pub tv_shows_scroll_position: Option<f32>,
     pub last_scroll_time: Option<Instant>,
     pub scroll_manager: ScrollPositionManager,
 
@@ -96,8 +95,6 @@ impl Default for UIDomainState {
             scroll_samples: VecDeque::new(),
             fast_scrolling: false,
             scroll_stopped_time: None,
-            movies_scroll_position: None,
-            tv_shows_scroll_position: None,
             last_scroll_time: None,
             scroll_manager: ScrollPositionManager::new(),
             background_shader_state: BackgroundShaderState::default(),
@@ -145,11 +142,8 @@ impl UIDomain {
                 // Reset view state when library changes
                 self.state.expanded_shows.clear();
                 self.state.hovered_media_id = None;
-                // Update filters AND refresh to ensure data is loaded
-                Task::batch(vec![
-                    Task::done(DomainMessage::Ui(UIMessage::UpdateViewModelFilters)),
-                    Task::done(DomainMessage::Ui(UIMessage::RefreshViewModels)),
-                ])
+                // Update filters - this already triggers refresh, no need to call RefreshViewModels
+                Task::done(DomainMessage::Ui(UIMessage::UpdateViewModelFilters))
             }
             CrossDomainEvent::LibrarySelectAll => {
                 log::info!("UI domain handling LibrarySelectAll event");
@@ -159,11 +153,8 @@ impl UIDomain {
                 // Reset view state
                 self.state.expanded_shows.clear();
                 self.state.hovered_media_id = None;
-                // Update filters AND refresh to ensure data is loaded
-                Task::batch(vec![
-                    Task::done(DomainMessage::Ui(UIMessage::UpdateViewModelFilters)),
-                    Task::done(DomainMessage::Ui(UIMessage::RefreshViewModels)),
-                ])
+                // Update filters - this already triggers refresh, no need to call RefreshViewModels
+                Task::done(DomainMessage::Ui(UIMessage::UpdateViewModelFilters))
             }
             CrossDomainEvent::RequestLibraryRefresh => {
                 // This is for actual data refresh, not just filter changes

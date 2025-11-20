@@ -64,6 +64,11 @@ impl AllViewModel {
             self.refresh_from_store();  // AllViewModel doesn't use needs_refresh flag
         }
     }
+    
+    /// Get current library filter
+    pub fn current_library_filter(&self) -> Option<Uuid> {
+        self.library_id
+    }
 
     /// Update carousel state for movies
     pub fn update_movies_carousel(&mut self, state: CarouselState) {

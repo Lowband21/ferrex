@@ -26,7 +26,7 @@ pub fn view_video_error(error_message: &str) -> Element<Message> {
                     .spacing(5)
                     .align_y(iced::Alignment::Center),
             )
-            .on_press(Message::BackToLibrary)
+            .on_press(Message::NavigateBack)
             .style(theme::Button::Secondary.style()),
         )
         .padding(20),
@@ -50,7 +50,7 @@ pub fn view_video_error(error_message: &str) -> Element<Message> {
             .align_x(iced::alignment::Horizontal::Center),
             Space::with_height(40),
             button("Back to Library")
-                .on_press(Message::BackToLibrary)
+                .on_press(Message::NavigateBack)
                 .style(theme::Button::Primary.style()),
         ]
         .align_x(iced::Alignment::Center),

@@ -1,12 +1,8 @@
 //! View Models for transforming store data for specific views
 
 pub mod all_view_model;
-pub mod movies_view_model;
-pub mod tv_view_model;
 
 pub use all_view_model::AllViewModel;
-pub use movies_view_model::MoviesViewModel;
-pub use tv_view_model::TvViewModel;
 
 use crate::domains::metadata::service::FetchPriority;
 use crate::infrastructure::api_types::MediaId;

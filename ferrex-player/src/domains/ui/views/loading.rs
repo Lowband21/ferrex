@@ -27,7 +27,7 @@ pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Mes
                     .spacing(5)
                     .align_y(iced::Alignment::Center),
             )
-            .on_press(Message::BackToLibrary)
+            .on_press(Message::NavigateBack)
             .style(theme::Button::Secondary.style()),
         )
         .padding(20),

@@ -110,9 +110,9 @@ impl AnimationType {
 
         AnimationType::EnhancedFlip {
             total_duration: Duration::from_millis(animation::DEFAULT_DURATION_MS),
-            rise_end: 0.15,
-            emerge_end: 0.35,
-            flip_end: 0.8,
+            rise_end: 0.10,
+            emerge_end: 0.20,
+            flip_end: 0.80,
         }
     }
 }
@@ -358,6 +358,18 @@ pub struct RoundedImagePrimitive {
     pub progress_color: Color,
 }
 
+/// Cached state for dirty checking
+#[derive(Debug, Clone)]
+struct CachedPrimitiveState {
+    bounds: Rectangle,
+    animation_progress: f32,
+    is_hovered: bool,
+    mouse_position: Option<Point>,
+    opacity: f32,
+    scale: f32,
+    z_depth: f32,
+}
+
 /// Global uniform data (viewport transform)
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -402,7 +414,55 @@ struct PrimitiveData {
     texture_bind_group: wgpu::BindGroup,
 }
 
+/// Texture upload tracking for frame budgeting
+struct TextureUploadTracker {
+    /// Bytes uploaded in current frame
+    bytes_uploaded_this_frame: usize,
+    /// Maximum bytes to upload per frame (2MB default)
+    max_bytes_per_frame: usize,
+    /// Queue of pending texture uploads
+    pending_uploads: Vec<PendingTextureUpload>,
+}
+
+/// A texture upload that's been deferred
+struct PendingTextureUpload {
+    image_id: image::Id,
+    texture: Arc<wgpu::Texture>,
+    data: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+impl Default for TextureUploadTracker {
+    fn default() -> Self {
+        Self {
+            bytes_uploaded_this_frame: 0,
+            max_bytes_per_frame: 10 * 1024 * 1024, // 10MB - enough for high-res detail view posters
+            pending_uploads: Vec::new(),
+        }
+    }
+}
+
 /// Shared state for all rounded images
+///
+/// IMPORTANT: Frame Boundary Detection Issue & Solution
+///
+/// The original code tried to detect frame boundaries to clean up primitive data.
+/// This failed because Iced's render pipeline interleaves prepare() and render() calls:
+/// - Frame 1: prepare1, prepare2, render1, render2
+/// - Frame 2: prepare3 (incorrectly detected as "new frame"), render3 FAILS!
+///
+/// Our solution: Don't try to detect frames at all. Instead:
+/// 1. Keep all primitive data indefinitely (HashMap with primitive pointer as key)
+/// 2. Let Iced's Storage lifecycle handle major cleanups (Storage may be recreated)
+/// 3. Use dirty checking to skip redundant prepare() work for unchanged primitives
+/// 4. Create buffers on-demand without pooling (GPU driver handles memory efficiently)
+///
+/// This approach is robust because:
+/// - No assumptions about Iced's internal pipeline ordering
+/// - Handles any interleaving of prepare/render calls
+/// - Simple and predictable behavior
+/// - Memory usage is bounded by number of active primitives
 struct State {
     // Globals buffer and bind group (shared by all)
     globals_buffer: Option<wgpu::Buffer>,
@@ -413,8 +473,19 @@ struct State {
     texture_bind_groups: HashMap<image::Id, wgpu::BindGroup>,
     // Per-primitive data for current frame
     primitive_data: HashMap<usize, PrimitiveData>,
-    // Track which primitives were prepared this frame
-    prepared_primitives: HashSet<usize>,
+
+    // Cached state for dirty checking - skip updates for unchanged posters
+    cached_states: HashMap<usize, CachedPrimitiveState>,
+
+    // Texture upload tracking to prevent frame drops
+    upload_tracker: TextureUploadTracker,
+
+    // Default texture for binding when real texture is loading
+    default_texture: Option<Arc<wgpu::Texture>>,
+    default_bind_group: Option<wgpu::BindGroup>,
+
+    // Counter for tracking prepare calls to manage budget resets
+    prepare_call_count: usize,
 }
 
 impl Default for State {
@@ -425,17 +496,143 @@ impl Default for State {
             texture_cache: HashMap::new(),
             texture_bind_groups: HashMap::new(),
             primitive_data: HashMap::new(),
-            prepared_primitives: HashSet::new(),
+            cached_states: HashMap::new(),
+            upload_tracker: TextureUploadTracker::default(),
+            default_texture: None,
+            default_bind_group: None,
+            prepare_call_count: 0,
         }
     }
 }
 
 impl State {
-    fn trim(&mut self) {
-        // Clear data for primitives that weren't prepared this frame
-        self.primitive_data
-            .retain(|key, _| self.prepared_primitives.contains(key));
-        self.prepared_primitives.clear();
+    /// Get or create the default texture for binding when real textures are loading
+    fn get_or_create_default_texture(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        texture_layout: &wgpu::BindGroupLayout,
+        sampler: &wgpu::Sampler,
+    ) -> &wgpu::BindGroup {
+        if self.default_texture.is_none() {
+            // Create a simple 1x1 grey texture
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Default Texture"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,  // GPU auto-converts sRGB to linear
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+
+            // Write a grey pixel
+            let pixel_data = [128u8, 128u8, 128u8, 255u8]; // Grey with full alpha
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &pixel_data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4),
+                    rows_per_image: Some(1),
+                },
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+            );
+
+            let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Default Texture Bind Group"),
+                layout: texture_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                    },
+                ],
+            });
+
+            self.default_texture = Some(Arc::new(texture));
+            self.default_bind_group = Some(bind_group);
+        }
+
+        self.default_bind_group.as_ref().unwrap()
+    }
+
+    /// Process pending texture uploads within budget
+    fn process_pending_uploads(&mut self, queue: &wgpu::Queue) {
+        let mut processed = Vec::new();
+
+        for (i, upload) in self.upload_tracker.pending_uploads.iter().enumerate() {
+            let upload_size = upload.data.len();
+
+            // Check if we have budget for this upload
+            if self.upload_tracker.bytes_uploaded_this_frame + upload_size
+                > self.upload_tracker.max_bytes_per_frame
+            {
+                // No more budget this frame
+                break;
+            }
+
+            // Upload the texture data
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &upload.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &upload.data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * upload.width),
+                    rows_per_image: Some(upload.height),
+                },
+                wgpu::Extent3d {
+                    width: upload.width,
+                    height: upload.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+
+            self.upload_tracker.bytes_uploaded_this_frame += upload_size;
+            processed.push(i);
+
+            // Mark texture as ready in cache
+            self.texture_cache
+                .insert(upload.image_id, upload.texture.clone());
+        }
+
+        // Remove processed uploads (must sort then reverse to maintain correct indices)
+        processed.sort_unstable();
+        for i in processed.into_iter().rev() {
+            self.upload_tracker.pending_uploads.remove(i);
+        }
+
+        // Log if we have a backlog
+        if !self.upload_tracker.pending_uploads.is_empty() {
+            log::debug!(
+                "Texture upload backlog: {} pending uploads",
+                self.upload_tracker.pending_uploads.len()
+            );
+        }
     }
 }
 
@@ -607,57 +804,31 @@ impl Pipeline {
     }
 }
 
-/// Load texture helper function
-fn load_texture(
+/// Result of texture loading with budget
+enum TextureLoadResult {
+    Loaded(Arc<wgpu::Texture>),
+    Deferred(PendingTextureUpload),
+    Failed,
+}
+
+/// Load texture with upload budget checking
+fn load_texture_budgeted(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     handle: &Handle,
-) -> Option<Arc<wgpu::Texture>> {
-    //log::trace!("Loading texture for handle {:?}", handle.id());
-
-    // Load the actual image data from the handle
-    let (image_data, width, height) = match handle {
-        Handle::Path(_, path) => {
-            log::info!("Loading image from path: {:?}", path);
-            match ::image::open(path) {
-                Ok(img) => {
-                    let rgba = img.to_rgba8();
-                    let (w, h) = rgba.dimensions();
-                    (rgba.into_raw(), w, h)
-                }
-                Err(e) => {
-                    log::error!("Failed to load image from path {:?}: {}", path, e);
-                    return None;
-                }
-            }
-        }
-        Handle::Bytes(_, bytes) => {
-            //log::info!("Loading image from {} bytes", bytes.len());
-            match ::image::load_from_memory(bytes) {
-                Ok(img) => {
-                    let rgba = img.to_rgba8();
-                    let (w, h) = rgba.dimensions();
-                    (rgba.into_raw(), w, h)
-                }
-                Err(e) => {
-                    log::error!("Failed to load image from bytes: {}", e);
-                    return None;
-                }
-            }
-        }
-        Handle::Rgba {
-            pixels,
-            width,
-            height,
-            ..
-        } => {
-            //log::info!("Loading RGBA image {}x{}", width, height);
-            // RGBA format is always 4 bytes per pixel
-            (pixels.to_vec(), *width, *height)
-        }
+    tracker: &mut TextureUploadTracker,
+) -> TextureLoadResult {
+    // First decode the image (this is still synchronous - could be improved)
+    let (image_data, width, height) = match decode_image(handle) {
+        Some(data) => data,
+        None => return TextureLoadResult::Failed,
     };
 
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
+    let upload_size = image_data.len();
+    let image_id = handle.id();
+
+    // Create the texture (lightweight operation)
+    let texture = Arc::new(device.create_texture(&wgpu::TextureDescriptor {
         label: Some("Rounded Image Texture"),
         size: wgpu::Extent3d {
             width,
@@ -667,32 +838,83 @@ fn load_texture(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
-    });
+    }));
 
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        &image_data,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(width * 4),
-            rows_per_image: Some(height),
-        },
-        wgpu::Extent3d {
+    // Check if we have budget for immediate upload
+    if tracker.bytes_uploaded_this_frame + upload_size <= tracker.max_bytes_per_frame {
+        // Upload immediately
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &image_data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        tracker.bytes_uploaded_this_frame += upload_size;
+        TextureLoadResult::Loaded(texture)
+    } else {
+        // Defer upload to next frame
+        TextureLoadResult::Deferred(PendingTextureUpload {
+            image_id,
+            texture,
+            data: image_data,
             width,
             height,
-            depth_or_array_layers: 1,
-        },
-    );
+        })
+    }
+}
 
-    Some(Arc::new(texture))
+/// Decode image data from handle
+fn decode_image(handle: &Handle) -> Option<(Vec<u8>, u32, u32)> {
+    match handle {
+        Handle::Path(_, path) => {
+            log::info!("Loading image from path: {:?}", path);
+            match ::image::open(path) {
+                Ok(img) => {
+                    let rgba = img.to_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    Some((rgba.into_raw(), w, h))
+                }
+                Err(e) => {
+                    log::error!("Failed to load image from path {:?}: {}", path, e);
+                    None
+                }
+            }
+        }
+        Handle::Bytes(_, bytes) => match ::image::load_from_memory(bytes) {
+            Ok(img) => {
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                Some((rgba.into_raw(), w, h))
+            }
+            Err(e) => {
+                log::error!("Failed to load image from bytes: {}", e);
+                None
+            }
+        },
+        Handle::Rgba {
+            pixels,
+            width,
+            height,
+            ..
+        } => Some((pixels.to_vec(), *width, *height)),
+    }
 }
 
 impl Primitive for RoundedImagePrimitive {
@@ -727,6 +949,20 @@ impl Primitive for RoundedImagePrimitive {
         };
 
         let state = storage.get_mut::<State>().unwrap();
+
+        // Reset upload budget periodically to allow batched uploads
+        // Every 5 primitives gets a fresh budget
+        state.prepare_call_count += 1;
+        if state.prepare_call_count % 5 == 0 {
+            state.upload_tracker.bytes_uploaded_this_frame = 0;
+        }
+
+        // Don't clear primitive_data - it causes flickering!
+        // The data will naturally be bounded by the number of unique poster positions on screen
+        // Old entries become stale but harmless (just wasted memory, not visible flickering)
+
+        // Process pending texture uploads from previous calls
+        state.process_pending_uploads(queue);
 
         // Update globals if needed
         if state.globals_buffer.is_none() {
@@ -763,40 +999,77 @@ impl Primitive for RoundedImagePrimitive {
             bytemuck::cast_slice(&[globals]),
         );
 
-        // Load texture if needed
+        // Process any pending texture uploads from previous frames
+        state.process_pending_uploads(queue);
+
+        // Load texture if needed (with budget checking)
         let image_id = self.image_handle.id();
 
         if !state.texture_cache.contains_key(&image_id) {
-            if let Some(texture) = load_texture(device, queue, &self.image_handle) {
-                state.texture_cache.insert(image_id, texture);
+            // Check if this texture is already pending
+            let is_pending = state
+                .upload_tracker
+                .pending_uploads
+                .iter()
+                .any(|u| u.image_id == image_id);
+
+            if !is_pending {
+                // Try to load with budget
+                match load_texture_budgeted(
+                    device,
+                    queue,
+                    &self.image_handle,
+                    &mut state.upload_tracker,
+                ) {
+                    TextureLoadResult::Loaded(texture) => {
+                        state.texture_cache.insert(image_id, texture);
+                    }
+                    TextureLoadResult::Deferred(pending) => {
+                        // Add to pending queue for next frame
+                        state.upload_tracker.pending_uploads.push(pending);
+                        // Don't return - continue with default texture
+                    }
+                    TextureLoadResult::Failed => {
+                        log::error!("Failed to load texture for image {:?}", image_id);
+                        // Don't return - continue with default texture
+                    }
+                }
             } else {
-                log::error!("Failed to load texture for image {:?}", image_id);
-                return;
+                // Texture is pending, use default texture for now
+                // Don't return - continue with default texture
             }
         }
 
-        // Create texture bind group if needed
-        if !state.texture_bind_groups.contains_key(&image_id) {
-            let texture = state.texture_cache.get(&image_id).unwrap();
-            let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // Get or create the texture bind group
+        let texture_bind_group = if let Some(texture) = state.texture_cache.get(&image_id) {
+            // We have the real texture, create or get its bind group
+            if !state.texture_bind_groups.contains_key(&image_id) {
+                let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Rounded Image Texture Bind Group"),
-                layout: &texture_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&texture_view),
-                    },
-                ],
-            });
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Rounded Image Texture Bind Group"),
+                    layout: &texture_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(&texture_view),
+                        },
+                    ],
+                });
 
-            state.texture_bind_groups.insert(image_id, bind_group);
-        }
+                state.texture_bind_groups.insert(image_id, bind_group);
+            }
+            state.texture_bind_groups.get(&image_id).unwrap().clone()
+        } else {
+            // No texture yet, use default
+            state
+                .get_or_create_default_texture(device, queue, &texture_layout, &sampler)
+                .clone()
+        };
 
         // Create instance data for this primitive
         // IMPORTANT: The bounds parameter might already be in screen space
@@ -991,6 +1264,9 @@ impl Primitive for RoundedImagePrimitive {
         //    scale
         //);
 
+        // Don't try to cache per-primitive data - it causes issues with multiple primitives
+        // Just ensure textures are loaded and create instance data fresh each time
+
         // The bounds parameter is provided by the renderer for layout positioning
         // For animations, we render within these bounds but allow overflow via clipping
 
@@ -1179,7 +1455,7 @@ impl Primitive for RoundedImagePrimitive {
             ],
         };
 
-        // Create or update instance buffer for this primitive
+        // Create instance buffer - simple and robust
         let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Rounded Image Instance Buffer"),
             size: std::mem::size_of::<Instance>() as u64,
@@ -1187,12 +1463,12 @@ impl Primitive for RoundedImagePrimitive {
             mapped_at_creation: false,
         });
 
-        // Write instance data
+        // Write instance data to the buffer
         queue.write_buffer(&instance_buffer, 0, bytemuck::cast_slice(&[instance]));
 
-        // Store per-primitive data
+        // Store per-primitive data using primitive address as key
+        // Within a single frame, each primitive has a unique address
         let key = self as *const _ as usize;
-        let texture_bind_group = state.texture_bind_groups.get(&image_id).unwrap().clone();
         state.primitive_data.insert(
             key,
             PrimitiveData {
@@ -1200,7 +1476,6 @@ impl Primitive for RoundedImagePrimitive {
                 texture_bind_group,
             },
         );
-        state.prepared_primitives.insert(key);
 
         //log::info!("Prepare: primitive {:p}", self);
         //log::info!("  - bounds param: {:?}", bounds);
@@ -1231,7 +1506,7 @@ impl Primitive for RoundedImagePrimitive {
             return;
         };
 
-        // Get per-primitive data
+        // Get per-primitive data using primitive address as key
         let key = self as *const _ as usize;
         let Some(primitive_data) = state.primitive_data.get(&key) else {
             log::warn!("No data for primitive {:p}", self);

@@ -27,6 +27,11 @@ pub fn handle_library_created(state: &mut State, result: Result<Library, String>
         Ok(library) => {
             log::info!("Created library: {}", library.name);
             state.domains.library.state.libraries.push(library);
+            
+            // Update TabManager with new library
+            state.update_tab_manager_libraries();
+            log::info!("Updated TabManager after creating library");
+            
             state.domains.library.state.library_form_data = None; // Close form on success
             state.domains.library.state.library_form_errors.clear();
         }
@@ -72,6 +77,11 @@ pub fn handle_library_updated(state: &mut State, result: Result<Library, String>
             {
                 state.domains.library.state.libraries[index] = library;
             }
+            
+            // Update TabManager with updated library
+            state.update_tab_manager_libraries();
+            log::info!("Updated TabManager after updating library");
+            
             state.domains.library.state.library_form_data = None; // Close form on success
             state.domains.library.state.library_form_errors.clear();
         }
@@ -114,6 +124,10 @@ pub fn handle_library_deleted(state: &mut State, result: Result<Uuid, String>) -
                 .state
                 .libraries
                 .retain(|l| l.id != library_id);
+            
+            // Update TabManager to remove deleted library
+            state.update_tab_manager_libraries();
+            log::info!("Updated TabManager after deleting library");
 
             // If we deleted the current library, clear selection
             if state.domains.library.state.current_library_id.as_ref() == Some(&library_id) {

@@ -45,9 +45,6 @@ pub enum Message {
     CheckActiveScans,
     ActiveScansChecked(Vec<ScanProgress>),
 
-    // Navigation
-    BackToLibrary,
-
     // Media references
     LibraryMediaReferencesLoaded(Result<LibraryMediaResponse, String>),
 
@@ -109,9 +106,6 @@ impl Message {
             Self::ToggleScanProgress => "Library::ToggleScanProgress",
             Self::CheckActiveScans => "Library::CheckActiveScans",
             Self::ActiveScansChecked(_) => "Library::ActiveScansChecked",
-
-            // Navigation
-            Self::BackToLibrary => "Library::BackToLibrary",
 
             // Media references
             Self::LibraryMediaReferencesLoaded(_) => "Library::LibraryMediaReferencesLoaded",
@@ -221,9 +215,6 @@ impl std::fmt::Debug for Message {
             Self::ActiveScansChecked(scans) => {
                 write!(f, "Library::ActiveScansChecked({} scans)", scans.len())
             }
-
-            // Navigation
-            Self::BackToLibrary => write!(f, "Library::BackToLibrary"),
 
             // Media references
             Self::LibraryMediaReferencesLoaded(result) => match result {

@@ -7,7 +7,6 @@ use std::time::Duration;
 pub enum Message {
     // Media control
     PlayMedia(MediaFile),
-    BackToLibrary, // Deprecated - use NavigateBack
     NavigateBack,   // Navigate to previous view
     NavigateHome,   // Navigate to home/library view
 

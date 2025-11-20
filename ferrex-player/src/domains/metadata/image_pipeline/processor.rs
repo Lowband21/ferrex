@@ -18,7 +18,7 @@ impl DefaultImageProcessor {
     /// Create a new image processor
     pub fn new() -> Self {
         let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_cpus::get().min(4))
+            .num_threads(num_cpus::get().min(16))
             .thread_name(|idx| format!("image-processor-{}", idx))
             .build()
             .expect("Failed to create thread pool");

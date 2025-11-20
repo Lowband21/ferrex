@@ -113,70 +113,54 @@ pub fn view_library(state: &State) -> Element<Message> {
                     view_all_content(state)
                 }
                 DisplayMode::Library => {
-                    // In Library mode, show specific library if selected
-                    if let Some(library_id) = &state.domains.library.state.current_library_id {
-                        // A specific library is selected
-                        if let Some(selected_library) = state
-                            .domains
-                            .library
-                            .state
-                            .libraries
-                            .iter()
-                            .find(|l| l.id == *library_id)
-                        {
-                            // Use library type to determine which view to show
-                            use crate::infrastructure::api_types::LibraryType;
-
-                            match selected_library.library_type {
+                    // Use the tab system to get the active tab
+                    use crate::domains::ui::tabs::TabState;
+                    use crate::infrastructure::api_types::LibraryType;
+                    
+                    let active_tab = state.tab_manager.active_tab();
+                    match active_tab {
+                        TabState::Library(lib_state) => {
+                            match lib_state.library_type {
                                 LibraryType::Movies => {
-                                    // Use movie references grid from ViewModel
-                                    let movies = state.movies_view_model.all_movies();
+                                    // Use movies from tab state
+                                    let movies = lib_state.movies().unwrap_or(&[]);
                                     log::debug!(
                                         "[Library Movies View] Rendering {} movies for library {}",
                                         movies.len(),
-                                        library_id
+                                        lib_state.library_id
                                     );
-                                    log::debug!("[Library Movies View] MoviesViewModel library_filter: {:?}", state.movies_view_model.current_library_filter());
                                     grid_view::virtual_movie_references_grid(
                                         movies,
-                                        state.movies_view_model.grid_state(),
+                                        &lib_state.grid_state,
                                         &state.domains.ui.state.hovered_media_id,
-                                        Message::MoviesGridScrolled,
+                                        Message::TabGridScrolled,
                                         state.domains.ui.state.fast_scrolling,
                                         state,
                                     )
                                 }
                                 LibraryType::TvShows => {
-                                    // Use series references grid from ViewModel
-                                    let series = state.tv_view_model.all_series();
+                                    // Use TV shows from tab state
+                                    let shows = lib_state.tv_shows().unwrap_or(&[]);
                                     log::debug!(
                                         "[Library TV View] Rendering {} series for library {}",
-                                        series.len(),
-                                        library_id
-                                    );
-                                    log::debug!(
-                                        "[Library TV View] TvViewModel library_filter: {:?}",
-                                        state.tv_view_model.current_library_filter()
+                                        shows.len(),
+                                        lib_state.library_id
                                     );
                                     grid_view::virtual_series_references_grid(
-                                        series,
-                                        state.tv_view_model.grid_state(),
+                                        shows,
+                                        &lib_state.grid_state,
                                         &state.domains.ui.state.hovered_media_id,
-                                        Message::TvShowsGridScrolled,
+                                        Message::TabGridScrolled,
                                         state.domains.ui.state.fast_scrolling,
                                         state,
                                     )
                                 }
                             }
-                        } else {
-                            // Library not found, show all content
+                        }
+                        TabState::All(all_state) => {
+                            // Use the AllViewModel from all_state
                             view_all_content(state)
                         }
-                    } else {
-                        // Should have a library selected if in Library mode
-                        // Fallback to curated view
-                        log::warn!("In Library display mode but no library selected");
-                        view_all_content(state)
                     }
                 }
                 _ => {

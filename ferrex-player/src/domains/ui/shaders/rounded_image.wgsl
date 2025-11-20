@@ -51,12 +51,14 @@ fn vertex_position(vertex_index: u32) -> vec2<f32> {
 }
 
 
-// Apply 3D rotation around Y-axis for flip animation
+// Apply 3D rotation around Y-axis for flip animation (front face only)
+// Note: This is only called for rotation_y from 0 to PI/2 (front face)
+// The backface uses a cheaper squeeze effect instead
 fn apply_flip_rotation(pos: vec2<f32>, center: vec2<f32>, rotation_y: f32) -> vec3<f32> {
     // Translate to origin (center of image)
     let translated = pos - center;
     
-    // Apply Y-axis rotation
+    // Full trig calculation for smooth front face rotation
     let cos_theta = cos(rotation_y);
     let sin_theta = sin(rotation_y);
     
@@ -119,15 +121,31 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     // First apply scale and z-depth transformations
     transformed_pos = apply_3d_transform(position_final, center, z_depth, scale);
     
-    // Then apply flip rotation if needed
-    if rotation_y > 0.0 {
-        let rotated_3d = apply_flip_rotation(transformed_pos, center, rotation_y);
-        // Apply perspective scaling based on rotation Z
-        let perspective_scale = 1.0 / (1.0 + rotated_3d.z * 0.001);
-        transformed_pos = vec2<f32>(
-            center.x + (rotated_3d.x - center.x) * perspective_scale,
-            rotated_3d.y
-        );
+    // Apply flip effect
+    if abs(rotation_y) > 0.0001 {  // Very small threshold just to avoid unnecessary computation at exactly 0
+        // For backface (rotation > PI/2), use cheap squeeze effect instead of full 3D
+        if rotation_y > 1.5708 {  // PI/2
+            // Backface showing - squeeze horizontally
+            // Animation goes from PI (full width) to PI/2 (squeezed to line)
+            // Map rotation from PI to PI/2 into scale from 1 to 0
+            let backface_progress = (rotation_y - 1.5708) / 1.5708;  // 1 to 0 as we rotate from PI to PI/2
+            let squeeze_scale = backface_progress;  // 1 to 0 (full width to squeezed)
+            
+            // Simple horizontal squeeze
+            transformed_pos = vec2<f32>(
+                center.x + (transformed_pos.x - center.x) * squeeze_scale,
+                transformed_pos.y
+            );
+        } else {
+            // Front face showing - use full 3D rotation for realistic perspective
+            let rotated_3d = apply_flip_rotation(transformed_pos, center, rotation_y);
+            // Smooth perspective calculation
+            let perspective_scale = 1.0 / (1.0 + rotated_3d.z * 0.001);
+            transformed_pos = vec2<f32>(
+                center.x + (rotated_3d.x - center.x) * perspective_scale,
+                rotated_3d.y
+            );
+        }
     }
     
     // Extract viewport dimensions from the projection matrix scale
@@ -146,7 +164,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     
     // Pass texture coordinates (flip horizontally if showing back)
     // Show backface when rotation is past 90 degrees (including exactly at PI)
-    let is_backface = f32(rotation_y >= 1.5708); // >= PI/2 (90 degrees)
+    let is_backface = select(0.0, 1.0, rotation_y >= 1.5708); // >= PI/2 (90 degrees), branchless
     output.tex_coord = vec2<f32>(mix(vertex_pos.x, 1.0 - vertex_pos.x, is_backface), vertex_pos.y);
     
     // Pass normalized corner radius (as fraction of smaller dimension)
@@ -239,7 +257,10 @@ fn apply_border_glow(color: vec4<f32>, dist_normalized: f32, glow_intensity: f32
     
     // Create glow around the border
     let glow_dist = abs(dist_normalized);
-    let glow = exp(-glow_dist * 3.0) * glow_intensity;
+    // Use cheaper approximation instead of exp()
+    // exp(-x*3) ≈ 1/(1 + 3x + 4.5x²) for small x
+    let glow_factor = glow_dist * 3.0;
+    let glow = glow_intensity / (1.0 + glow_factor + glow_factor * glow_factor * 1.5);
     
     // Add subtle blue-white glow
     let glow_color = vec3<f32>(0.8, 0.9, 1.0);
@@ -493,6 +514,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let scale = input.shadow_params.z;
     let border_glow = input.shadow_params.w;
     
+    // Extract hover state for early-out optimization
+    let is_hovered = input.hover_overlay_params.x;
+    let show_overlay = input.hover_overlay_params.y;
+    let is_animating = input.animation_progress < 0.99;
+    
     // For backface, use theme color with dimming
     if input.is_backface > 0.5 {
         // Dim the theme color by 30% for backface (matching placeholder)
@@ -500,24 +526,109 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     } else {
         // Front face: sample and display the poster texture
         let sampled_color = textureSample(image_texture, texture_sampler, input.tex_coord);
-        linear_rgb = srgb_to_linear(sampled_color.rgb);
+        // With Rgba8UnormSrgb format, GPU auto-converts sRGB to linear when sampling
+        // So sampled_color is already in linear space - no manual conversion needed!
+        linear_rgb = sampled_color.rgb;
         alpha = sampled_color.a;
     }
     
-    
-    // Apply shadow effects based on z-depth
-    linear_rgb = apply_shadow(linear_rgb, input.local_pos, shadow_intensity, z_depth);
-    linear_rgb = apply_inner_shadow(linear_rgb, input.local_pos, z_depth);
-    
-    // Use texture coordinates for SDF (already in 0-1 range)
+    // Calculate SDF once for reuse
     let dist_normalized = rounded_rect_sdf_normalized(input.tex_coord, input.corner_radius_normalized);
-    
-    // Anti-aliased alpha using smoothstep
-    // Use fwidth for screen-space derivatives to get proper anti-aliasing
     let fw = length(fwidth(input.tex_coord));
     let rounded_alpha = 1.0 - smoothstep(-fw, fw, dist_normalized);
     
-    // Apply alpha clipping and opacity
+    // FAST PATH: Skip expensive calculations for non-hovered, non-animating posters
+    // But still render progress indicators and borders
+    let needs_full_render = show_overlay > 0.5 || is_animating || abs(z_depth) > 0.01 || shadow_intensity > 0.01;
+    
+    if !needs_full_render {
+        // Fast path - skip shadows and complex effects
+        var fast_color = vec4<f32>(linear_to_srgb(linear_rgb), alpha * rounded_alpha * input.opacity);
+        
+        // Always render border (simple version)
+        if is_hovered > 0.5 {
+            // Hovered border
+            let border_width = 0.005;
+            if dist_normalized > -border_width && dist_normalized < border_width {
+                let inner_alpha = smoothstep(-border_width, -border_width + 0.001, dist_normalized);
+                let outer_alpha = 1.0 - smoothstep(border_width - 0.001, border_width, dist_normalized);
+                let border_alpha = min(inner_alpha, outer_alpha);
+                fast_color = vec4<f32>(
+                    mix(fast_color.rgb, linear_to_srgb(input.progress_color), border_alpha),
+                    max(fast_color.a, border_alpha)
+                );
+            }
+        } else {
+            // Unhovered border
+            if dist_normalized < 0.0 && dist_normalized > -0.004 {
+                let border_alpha = smoothstep(-0.004, -0.003, dist_normalized);
+                fast_color = vec4<f32>(
+                    mix(fast_color.rgb, vec3<f32>(0.0), border_alpha),
+                    max(fast_color.a, border_alpha)
+                );
+            }
+        }
+        
+        // Check for watch status corner only after animation completes
+        if input.progress >= 0.0 && dist_normalized < 0.0 && input.animation_progress >= 0.99 {
+            let aspect_ratio = 2.0 / 3.0;
+            let fold_size_x = input.corner_radius_normalized * 2.5;
+            let fold_size_y = fold_size_x * aspect_ratio;
+            let corner_origin = vec2<f32>(1.0, 0.0);
+            let rel_pos = input.tex_coord - corner_origin;
+            
+            let normalized_x = rel_pos.x / fold_size_x;
+            let normalized_y = rel_pos.y / fold_size_y;
+            let in_triangle = rel_pos.x <= 0.0 && rel_pos.y >= 0.0 && (normalized_y - normalized_x) <= 1.0;
+            
+            if in_triangle {
+                let a = 1.0 / fold_size_x;
+                let b = -1.0 / fold_size_y;
+                let c = 1.0;
+                let diagonal_dist = abs(a * rel_pos.x + b * rel_pos.y + c) / sqrt(a*a + b*b);
+                let triangle_alpha = smoothstep(-0.005, 0.005, diagonal_dist);
+                
+                var indicator_opacity = select(0.85, 0.6, input.progress > 0.0);
+                indicator_opacity = select(indicator_opacity, 0.2, input.progress >= 0.95);
+                
+                let indicator_color_srgb = linear_to_srgb(input.progress_color);
+                let indicator_with_alpha = vec4<f32>(indicator_color_srgb, indicator_opacity * triangle_alpha);
+                fast_color = mix(fast_color, indicator_with_alpha, indicator_with_alpha.a);
+            }
+        }
+        
+        // Check for progress bar only after animation completes
+        if input.progress > 0.0 && input.progress < 0.95 && input.animation_progress >= 0.99 {
+            let bar_start_y = 1.0 - 0.03;
+            if input.tex_coord.y >= bar_start_y && dist_normalized < 0.0 {
+                let edge_fade = smoothstep(0.0, -0.01, dist_normalized);
+                if input.tex_coord.x <= input.progress {
+                    let bar_color = linear_to_srgb(input.progress_color);
+                    let bar_with_alpha = vec4<f32>(bar_color, 0.8 * edge_fade);
+                    fast_color = mix(fast_color, bar_with_alpha, bar_with_alpha.a);
+                } else {
+                    let bg_color = vec4<f32>(0.0, 0.0, 0.0, 0.4 * edge_fade);
+                    fast_color = mix(fast_color, bg_color, bg_color.a);
+                }
+            }
+        }
+        
+        return fast_color;
+    }
+    
+    
+    // Apply shadow effects only when actually visible
+    if shadow_intensity > 0.01 && abs(z_depth) > 0.01 {
+        linear_rgb = apply_shadow(linear_rgb, input.local_pos, shadow_intensity, z_depth);
+        // Only check inner shadow for negative z_depth
+        if z_depth < -0.01 {
+            linear_rgb = apply_inner_shadow(linear_rgb, input.local_pos, z_depth);
+        }
+    }
+    
+    // SDF and alpha already calculated at the beginning of the function
+    
+    // Apply alpha clipping and opacity (rounded_alpha already computed)
     let final_alpha = alpha * rounded_alpha * input.opacity;
     
     // Convert back to sRGB for display
@@ -526,8 +637,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Apply border glow effect
     final_color = apply_border_glow(final_color, dist_normalized, border_glow);
     
-    // Render drop shadow behind the image
-    if z_depth > 0.0 && shadow_intensity > 0.0 {
+    // Render drop shadow only when significantly elevated
+    if z_depth > 1.0 && shadow_intensity > 0.1 {
         let shadow = render_drop_shadow(input.tex_coord, input.corner_radius_normalized, shadow_intensity, z_depth);
         // Composite shadow behind the main image
         final_color = mix(shadow, final_color, final_color.a);
@@ -535,9 +646,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     
     
     
-    // Extract hover and overlay parameters
-    let is_hovered = input.hover_overlay_params.x;
-    let show_overlay = input.hover_overlay_params.y;
+    // Extract remaining hover parameters (show_overlay and is_hovered already extracted above)
     let show_border = input.hover_overlay_params.z;
     
     // Render overlay when hovered and animation complete
@@ -557,60 +666,50 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
     
-    // Always render border - simple, clean approach
+    // Always render border - optimized approach
     {
-        // Calculate distance from poster edge
-        let poster_dist = rounded_rect_sdf_normalized(input.tex_coord, input.corner_radius_normalized);
+        // Distance already calculated earlier as dist_normalized
+        let poster_dist = dist_normalized;
         
-        // Border widths - expand outward on hover
-        let unhovered_width = 0.004;  // Thin border when not hovered
-        let hovered_width = 0.005;    // Thicker border when hovered
-        let border_width = select(unhovered_width, hovered_width, is_hovered > 0.5);
+        // Select border width based on hover state
+        let border_width = select(0.004, 0.005, is_hovered > 0.5);
         
-        // For hover state, we want the border to expand outward
-        // So we check if we're in the border region differently based on hover state
-        var in_border = false;
-        var border_alpha = 0.0;
+        // Simplified border detection
+        let is_in_hovered_border = is_hovered > 0.5 && abs(poster_dist) < border_width;
+        let is_in_unhovered_border = is_hovered < 0.5 && poster_dist < 0.0 && poster_dist > -border_width;
         
-        if is_hovered > 0.5 {
-            // Hovered: border expands outward from poster edge
-            // We're in border if distance is between -border_width and +border_width
-            in_border = poster_dist > -border_width && poster_dist < border_width;
-            if in_border {
-                // Anti-aliasing for both inner and outer edges
+        if is_in_hovered_border || is_in_unhovered_border {
+            var border_alpha: f32;
+            
+            if is_hovered > 0.5 {
+                // Hovered: border expands outward
                 let inner_alpha = smoothstep(-border_width, -border_width + 0.001, poster_dist);
                 let outer_alpha = 1.0 - smoothstep(border_width - 0.001, border_width, poster_dist);
                 border_alpha = min(inner_alpha, outer_alpha);
-            }
-        } else {
-            // Not hovered: thin border just inside poster edge
-            // We're in border if we're inside poster and close to edge
-            in_border = poster_dist < 0.0 && poster_dist > -border_width;
-            if in_border {
-                // Anti-aliasing for inner edge only
+            } else {
+                // Not hovered: thin border inside
                 border_alpha = smoothstep(-border_width, -border_width + 0.001, poster_dist);
             }
-        }
-        
-        // Apply border if we're in the border region
-        if border_alpha > 0.0 {
-            // Border color based on hover state
-            let border_color = select(
-                vec3<f32>(0.0, 0.0, 0.0),  // Black when not hovered
-                input.progress_color,       // Progress color (blue) when hovered
-                is_hovered > 0.5
-            );
             
-            // Apply border with proper alpha blending
-            final_color = vec4<f32>(
-                mix(final_color.rgb, border_color, border_alpha),
-                max(final_color.a, border_alpha)
-            );
+            if border_alpha > 0.0 {
+                // Select border color based on hover state
+                let border_color = select(
+                    vec3<f32>(0.0, 0.0, 0.0),  // Black when not hovered
+                    input.progress_color,       // Progress color when hovered
+                    is_hovered > 0.5
+                );
+                
+                // Apply border with proper alpha blending
+                final_color = vec4<f32>(
+                    mix(final_color.rgb, border_color, border_alpha),
+                    max(final_color.a, border_alpha)
+                );
+            }
         }
     }
     
-    // Render watch status corner indicator if progress is valid (not -1.0)
-    if input.progress >= 0.0 {
+    // Render watch status corner indicator if progress is valid and animation is complete
+    if input.progress >= 0.0 && input.animation_progress >= 0.99 {
         // Standard poster aspect ratio is 2:3 (width:height)
         let aspect_ratio = 2.0 / 3.0;
         
@@ -637,28 +736,21 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         
         if in_triangle && corner_dist < 0.0 {
             // Calculate distance to diagonal edge for smooth anti-aliasing
-            // For the normalized diagonal: normalized_y - normalized_x = 1
-            // Distance formula: |ax + by + c| / sqrt(a² + b²)
-            // Where line is: x/fold_size_x - y/fold_size_y + 1 = 0
-            let a = 1.0 / fold_size_x;
-            let b = -1.0 / fold_size_y;
+            // Pre-compute reciprocals to avoid divisions
+            let inv_fold_x = 1.0 / fold_size_x;
+            let inv_fold_y = 1.0 / fold_size_y;
+            let a = inv_fold_x;
+            let b = -inv_fold_y;
             let c = 1.0;
-            let diagonal_dist = abs(a * rel_pos.x + b * rel_pos.y + c) / sqrt(a*a + b*b);
+            // Pre-compute normalization factor
+            let inv_norm = 1.0 / sqrt(a*a + b*b);
+            let diagonal_dist = abs(a * rel_pos.x + b * rel_pos.y + c) * inv_norm;
             let edge_softness = 0.005;
             let triangle_alpha = smoothstep(-edge_softness, edge_softness, diagonal_dist);
             
-            // Determine opacity based on watch status
-            var indicator_opacity: f32;
-            if input.progress == 0.0 {
-                // Unwatched - colored indicator
-                indicator_opacity = 0.85;
-            } else if input.progress < 0.95 {
-                // In progress - semi-transparent
-                indicator_opacity = 0.6;
-            } else {
-                // Watched - very subtle
-                indicator_opacity = 0.2;
-            }
+            // Determine opacity based on watch status using select
+            var indicator_opacity = select(0.85, 0.6, input.progress > 0.0);
+            indicator_opacity = select(indicator_opacity, 0.2, input.progress >= 0.95);
             
             // Apply the indicator color
             let indicator_color_srgb = linear_to_srgb(input.progress_color);
@@ -669,8 +761,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
     
-    // Render progress bar at bottom for in-progress media
-    if input.progress > 0.0 && input.progress < 0.95 {
+    // Render progress bar at bottom for in-progress media (after animation completes)
+    if input.progress > 0.0 && input.progress < 0.95 && input.animation_progress >= 0.99 {
         // Progress bar dimensions
         let bar_height = 0.02; // 2% of poster height
         let bar_margin = 0.01; // 1% margin from bottom
@@ -689,17 +781,13 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                     // Apply smooth fade at the very edges for anti-aliasing
                     let edge_fade = smoothstep(0.0, -0.01, poster_dist);
                     
-                    // Determine if we're in the filled or unfilled part
-                    if input.tex_coord.x <= input.progress {
-                        // Filled part - use progress color
-                        let bar_color = linear_to_srgb(input.progress_color);
-                        let bar_with_alpha = vec4<f32>(bar_color, 0.8 * edge_fade);
-                        final_color = mix(final_color, bar_with_alpha, bar_with_alpha.a);
-                    } else {
-                        // Unfilled part - dark transparent background
-                        let bg_color = vec4<f32>(0.0, 0.0, 0.0, 0.4 * edge_fade);
-                        final_color = mix(final_color, bg_color, bg_color.a);
-                    }
+                    // Use select for branchless progress bar rendering
+                    let is_filled = input.tex_coord.x <= input.progress;
+                    let bar_color = linear_to_srgb(input.progress_color);
+                    let bar_alpha = select(0.4, 0.8, is_filled) * edge_fade;
+                    let bar_rgb = select(vec3<f32>(0.0, 0.0, 0.0), bar_color, is_filled);
+                    let bar_with_alpha = vec4<f32>(bar_rgb, bar_alpha);
+                    final_color = mix(final_color, bar_with_alpha, bar_with_alpha.a);
                 }
             }
         }

@@ -15,7 +15,7 @@ ferrex-core = { path = "../ferrex-core", default-features = false }
 # Core GUI framework
 #iced = { version = "0.13.1", features = ["tokio", "debug", "image", "canvas", "advanced", "wgpu"] }
 #iced = { git = "https://github.com/iced-rs/iced.git", features = ["tokio", "debug", "image", "canvas", "advanced", "wgpu"] }
-iced = { path = "../iced_fork", features = ["tokio", "debug", "image", "canvas", "advanced", "wgpu", "prefer_10bit"] }
+iced = { path = "../iced_fork", features = ["tokio", "debug", "image", "canvas", "advanced", "wgpu", "prefer_10bit", "high-refresh-rate"] }
 
 # Icons
 lucide-icons = { path = "../lucide_icons_iced_0.14", features = ["iced"] }
@@ -83,6 +83,7 @@ bytemuck = { version = "1.14", features = ["derive"] }
 
 # Advanced caching and concurrency
 dashmap = "6.1"
+priority-queue = "2.5.0"
 moka = { version = "0.12", features = ["future"] }
 rayon = "1.10"
 rand = "0.8"

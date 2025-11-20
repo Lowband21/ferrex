@@ -18,14 +18,6 @@ pub fn update_player(
             DomainUpdateResult::task(Task::none())
         }
 
-        Message::BackToLibrary => {
-            // Deprecated - use NavigateBack instead
-            // Send direct UI domain message for navigation
-            DomainUpdateResult::task(
-                Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack))
-            )
-        }
-        
         Message::NavigateBack => {
             // Reset player state and navigate back
             state.reset();

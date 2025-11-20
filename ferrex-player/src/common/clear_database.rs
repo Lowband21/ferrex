@@ -73,22 +73,22 @@ pub fn handle_database_cleared(
             state.domains.ui.state.error_message = None;
 
             // Reset scroll positions
-            state.domains.ui.state.movies_scroll_position = None;
-            state.domains.ui.state.tv_shows_scroll_position = None;
             state.domains.ui.state.last_scroll_position = 0.0;
             state.domains.ui.state.scroll_velocity = 0.0;
             state.domains.ui.state.fast_scrolling = false;
             state.domains.ui.state.scroll_stopped_time = None;
             state.domains.ui.state.scroll_samples.clear();
 
-            // Reset ViewModels - they will automatically reflect empty MediaStore
+            // Reset TabManager tabs
+            state.tab_manager = crate::domains::ui::tabs::TabManager::new(
+                state.domains.media.state.media_store.clone(),
+            );
+
+            // Reset AllViewModel - it will automatically reflect empty MediaStore
             state.all_view_model.set_library_filter(None);
-            state.movies_view_model.set_library_filter(None);
-            state.tv_view_model.set_library_filter(None);
 
             // Reset view to library (in case user was in detail view)
             state.domains.ui.state.view = ViewState::Library;
-
 
             log::info!("All local state cleared and reset");
 

@@ -6,6 +6,7 @@
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::domains::{auth, library, media, ui};
+use crate::domains::ui::scroll_manager::ScrollStateExt;
 use crate::state_refactored::State;
 use iced::Task;
 use std::sync::Arc;
@@ -108,6 +109,10 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         // Library events
         CrossDomainEvent::LibrarySelected(library_id) => {
             state.domains.library.state.current_library_id = Some(library_id);
+            
+            // Restore scroll state for the new library context
+            state.restore_library_scroll_state(Some(library_id));
+            
             Task::batch(vec![
                 Task::done(DomainMessage::Library(
                     library::messages::Message::SelectLibrary(Some(library_id)),
@@ -118,6 +123,10 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         }
         CrossDomainEvent::LibrarySelectAll => {
             state.domains.library.state.current_library_id = None;
+            
+            // Restore scroll state for the global context (all libraries)
+            state.restore_library_scroll_state(None);
+            
             Task::batch(vec![
                 Task::done(DomainMessage::Library(
                     library::messages::Message::SelectLibrary(None),

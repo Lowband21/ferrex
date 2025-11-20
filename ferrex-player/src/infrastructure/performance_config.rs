@@ -17,7 +17,7 @@ pub mod scrolling {
 
     /// Time to wait before considering scroll stopped (milliseconds)
     /// Lower values = quicker poster loading after scroll
-    pub const SCROLL_STOP_DEBOUNCE_MS: u64 = 10;
+    pub const SCROLL_STOP_DEBOUNCE_MS: u64 = 150;
 
     // Number of rows to preload ahead of visible area
     //pub const PRELOAD_AHEAD_ROWS: usize = 2;

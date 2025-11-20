@@ -15,6 +15,17 @@ pub fn handle_libraries_loaded(
         Ok(libraries) => {
             log::info!("Loaded {} libraries", libraries.len());
             state.domains.library.state.libraries = libraries;
+            
+            // Register libraries with TabManager for tab creation
+            state.update_tab_manager_libraries();
+            log::info!("Registered {} libraries with TabManager", state.domains.library.state.libraries.len());
+            
+            // Refresh the All tab immediately even if no media is loaded yet
+            // This ensures the UI is responsive and shows empty state if needed
+            state.tab_manager.refresh_active_tab();
+            use crate::domains::ui::view_models::ViewModel;
+            state.all_view_model.refresh_from_store();
+            log::info!("Initial All tab refresh after libraries loaded");
 
             // Clear loading flag after libraries are loaded
             state.loading = false;

@@ -37,6 +37,7 @@ pub enum Message {
     // Scrolling
     MoviesGridScrolled(scrollable::Viewport),
     TvShowsGridScrolled(scrollable::Viewport),
+    TabGridScrolled(scrollable::Viewport),    // Unified scroll message for tab system
     CheckScrollStopped,                       // Check if scrolling has stopped
     RecalculateGridsAfterResize,              // Recalculate grid states after window resize
     DetailViewScrolled(scrollable::Viewport), // Scroll events in detail views
@@ -50,7 +51,6 @@ pub enum Message {
 
     // Header navigation
     NavigateHome,
-    BackToLibrary, // Navigate back to library/home view (deprecated - use NavigateBack)
     NavigateBack,  // Navigate to previous view in history
     UpdateSearchQuery(String),
     ExecuteSearch,
@@ -182,6 +182,7 @@ impl Message {
             // Scrolling
             Self::MoviesGridScrolled(_) => "UI::MoviesGridScrolled",
             Self::TvShowsGridScrolled(_) => "UI::TvShowsGridScrolled",
+            Self::TabGridScrolled(_) => "UI::TabGridScrolled",
             Self::CheckScrollStopped => "UI::CheckScrollStopped",
             Self::RecalculateGridsAfterResize => "UI::RecalculateGridsAfterResize",
             Self::DetailViewScrolled(_) => "UI::DetailViewScrolled",
@@ -195,7 +196,6 @@ impl Message {
 
             // Header navigation
             Self::NavigateHome => "UI::NavigateHome",
-            Self::BackToLibrary => "UI::BackToLibrary",
             Self::NavigateBack => "UI::NavigateBack",
             Self::UpdateSearchQuery(_) => "UI::UpdateSearchQuery",
             Self::ExecuteSearch => "UI::ExecuteSearch",
@@ -338,6 +338,9 @@ impl std::fmt::Debug for Message {
             Self::TvShowsGridScrolled(viewport) => {
                 write!(f, "UI::TvShowsGridScrolled({:?})", viewport)
             }
+            Self::TabGridScrolled(viewport) => {
+                write!(f, "UI::TabGridScrolled({:?})", viewport)
+            }
             Self::CheckScrollStopped => write!(f, "UI::CheckScrollStopped"),
             Self::RecalculateGridsAfterResize => write!(f, "UI::RecalculateGridsAfterResize"),
             Self::DetailViewScrolled(viewport) => {
@@ -345,7 +348,6 @@ impl std::fmt::Debug for Message {
             }
             Self::MediaHovered(_) => write!(f, "UI::MediaHovered"),
             Self::MediaUnhovered(_) => write!(f, "UI::MediaUnhovered"),
-            Self::BackToLibrary => write!(f, "UI::BackToLibrary"),
             Self::NavigateBack => write!(f, "UI::NavigateBack"),
             Self::UpdateSearchQuery(_) => write!(f, "UI::UpdateSearchQuery"),
             Self::ExecuteSearch => write!(f, "UI::ExecuteSearch"),

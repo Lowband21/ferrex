@@ -202,20 +202,6 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
-        // Navigation
-        Message::BackToLibrary => {
-            // This is handled as part of PlayerMessage::BackToLibrary in update.rs
-            // For library domain, we just navigate back to library view
-            state.domains.ui.state.view = ViewState::Library;
-
-            // REMOVED: No longer clearing duplicate state fields
-            // MediaStore is the single source of truth
-
-            // The scroll position will be restored automatically by the view
-
-            DomainUpdateResult::task(Task::none())
-        }
-
         // Media references - inline handlers from update.rs
         Message::LibraryMediaReferencesLoaded(result) => match result {
             Ok(response) => {
@@ -240,9 +226,16 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
                 // Process the media references (populates MediaStore)
                 let tasks = state.process_media_references(response);
                 
-                // If items need metadata, emit the cross-domain event
+                // Refresh the All tab after MediaStore is populated
+                // This ensures content is visible on startup with poster placeholders
+                state.tab_manager.refresh_active_tab();
+                state.all_view_model.refresh_from_store();
+                log::info!("Refreshed All tab after loading media references - UI should display immediately");
+                
+                // If items need metadata, emit batch metadata fetch event
+                // This will fetch metadata in the background without blocking UI
                 if !needs_metadata.is_empty() {
-                    log::info!("Requesting batch metadata fetch for {} items", needs_metadata.len());
+                    log::info!("Requesting batch metadata fetch for {} items (non-blocking)", needs_metadata.len());
                     let library_data = vec![(library_id, needs_metadata)];
                     DomainUpdateResult::with_events(
                         Task::batch(tasks).map(DomainMessage::Library),

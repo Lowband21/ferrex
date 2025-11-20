@@ -3,7 +3,6 @@
 //! Contains all metadata-related state and logic moved from the monolithic State
 
 pub mod batch_fetcher;
-pub mod coordinator;
 pub mod image_pipeline;
 pub mod image_service;
 pub mod image_types;
@@ -13,14 +12,15 @@ pub mod update;
 pub mod update_handlers;
 
 use self::batch_fetcher::BatchMetadataFetcher;
-use self::coordinator::MetadataCoordinator;
 use self::image_service::UnifiedImageService;
 use self::image_types::ImageRequest;
 use self::messages::Message as MetadataMessage;
 use self::service::MetadataFetchService;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::domains::media::store::MediaStore;
-use crate::infrastructure::{api_types::MediaReference, adapters::api_client_adapter::ApiClientAdapter};
+use crate::infrastructure::{
+    adapters::api_client_adapter::ApiClientAdapter, api_types::MediaReference,
+};
 use ferrex_core::permissions::SERVER_MANAGE_TASKS;
 use ferrex_core::MediaId;
 use iced::Task;
@@ -35,12 +35,11 @@ pub struct MetadataDomainState {
     // From State struct:
     pub server_url: String,
     pub metadata_service: Option<Arc<MetadataFetchService>>,
-    pub metadata_coordinator: MetadataCoordinator,
     pub loading_posters: HashSet<String>,
     pub tmdb_poster_urls: HashMap<String, String>,
     pub metadata_fetch_attempts: HashMap<String, Instant>,
     pub image_service: UnifiedImageService,
-    pub image_receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<ImageRequest>>>>,
+    pub image_receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
 
     // Shared references needed by metadata domain
     pub media_store: Arc<StdRwLock<MediaStore>>,
@@ -57,7 +56,6 @@ impl MetadataDomainState {
         Self {
             server_url,
             metadata_service: None,
-            metadata_coordinator: MetadataCoordinator::new(),
             loading_posters: HashSet::new(),
             tmdb_poster_urls: HashMap::new(),
             metadata_fetch_attempts: HashMap::new(),

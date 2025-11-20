@@ -291,11 +291,14 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                 if let Some(progress) = image.progress {
                     shader = shader.progress(progress);
 
+                    /*
                     // Use theme color as default progress color if not specified
                     let progress_color = image
                         .progress_color
                         .or(image.theme_color)
                         .unwrap_or(Color::from_rgb(0.0, 0.47, 1.0)); // Default blue
+                    */
+                    let progress_color = Color::from_rgb(0.0, 0.47, 1.0); // Default blue
 
                     shader = shader.progress_color(progress_color);
                 }
@@ -311,6 +314,8 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                 //    "  - Creating placeholder with theme_color: {:?}",
                 //    image.theme_color
                 //);
+
+                // Request the image - throttling happens in the loader thread
                 image_service.get().request_image(request);
 
                 create_loading_placeholder(bounds, image.radius, image.theme_color)

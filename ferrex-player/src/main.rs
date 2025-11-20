@@ -116,6 +116,7 @@ fn main() -> iced::Result {
         .subscription(subscriptions::subscription)
         .font(lucide_font_bytes())
         .theme(|_| theme::MediaServerTheme::theme())
+        .present_mode(iced::PresentMode::Immediate)  // Enable 120fps+ with no VSync
         .window(iced::window::Settings {
             size: iced::Size::new(1280.0, 720.0),
             resizable: true,

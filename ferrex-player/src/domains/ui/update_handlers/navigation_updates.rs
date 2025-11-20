@@ -3,20 +3,43 @@ use iced::Task;
 use super::super::views::carousel::CarouselState;
 use crate::{
     domains::media::library::MediaFile,
-    domains::ui::{messages::Message, types, ViewState},
+    domains::ui::{messages::Message, scroll_manager::ScrollStateExt, types, ViewState},
     infrastructure::api_types::{MediaReference, MovieReference},
     state_refactored::State,
 };
 use ferrex_core::{EpisodeID, SeasonID, SeriesID};
 
+/// Updates background shader depth regions when transitioning to a detail view
+/// This ensures smooth animation from current regions to new regions
+fn prepare_depth_regions_for_transition(state: &mut State, new_view: &ViewState) {
+    // Update depth regions for the new view BEFORE changing view state
+    // This triggers the fade animation between different depth layouts
+    state
+        .domains
+        .ui
+        .state
+        .background_shader_state
+        .update_depth_lines(
+            new_view,
+            state.window_size.width,
+            state.window_size.height,
+            state.domains.library.state.current_library_id,
+        );
+}
+
 pub fn handle_view_details(state: &mut State, media: MediaFile) -> Task<Message> {
     log::info!("Viewing details for: {}", media.display_title());
 
     // Save current view to navigation history
-    state.domains.ui.state.navigation_history.push(state.domains.ui.state.view.clone());
+    state
+        .domains
+        .ui
+        .state
+        .navigation_history
+        .push(state.domains.ui.state.view.clone());
 
     // Save current scroll position before navigating away
-
+    save_current_scroll_state(state);
 
     // Determine if it's a movie or TV episode
     if media.is_tv_episode() {
@@ -63,16 +86,29 @@ pub fn handle_view_details(state: &mut State, media: MediaFile) -> Task<Message>
 }
 
 pub fn handle_view_movie_details(state: &mut State, movie: MovieReference) -> Task<Message> {
-    log::info!("Viewing movie details for: {} (id: {})", movie.title.as_str(), movie.id.as_str());
-    
+    log::info!(
+        "Viewing movie details for: {} (id: {})",
+        movie.title.as_str(),
+        movie.id.as_str()
+    );
+
     // Save current view to navigation history
-    state.domains.ui.state.navigation_history.push(state.domains.ui.state.view.clone());
-    
+    state
+        .domains
+        .ui
+        .state
+        .navigation_history
+        .push(state.domains.ui.state.view.clone());
+
     // CRITICAL FIX: Get the latest version from MediaStore, not the stale UI reference
     let movie = if let Ok(store) = state.domains.media.state.media_store.read() {
-        if let Some(MediaReference::Movie(fresh_movie)) = store.get(&ferrex_core::api_types::MediaId::Movie(movie.id.clone())) {
-            log::info!("Got fresh movie from MediaStore with details: {}", 
-                !crate::infrastructure::api_types::needs_details_fetch(&fresh_movie.details));
+        if let Some(MediaReference::Movie(fresh_movie)) =
+            store.get(&ferrex_core::api_types::MediaId::Movie(movie.id.clone()))
+        {
+            log::info!(
+                "Got fresh movie from MediaStore with details: {}",
+                !crate::infrastructure::api_types::needs_details_fetch(&fresh_movie.details)
+            );
             fresh_movie.clone()
         } else {
             log::warn!("Movie not found in MediaStore, using stale reference");
@@ -82,15 +118,17 @@ pub fn handle_view_movie_details(state: &mut State, movie: MovieReference) -> Ta
         log::error!("Failed to read MediaStore, using stale reference");
         movie
     };
-    
-    log::info!("Using movie with details type: {:?}", 
+
+    log::info!(
+        "Using movie with details type: {:?}",
         match &movie.details {
             crate::infrastructure::api_types::MediaDetailsOption::Endpoint(_) => "Endpoint",
             crate::infrastructure::api_types::MediaDetailsOption::Details(_) => "Details",
-        });
+        }
+    );
 
     // Save current scroll position before navigating away
-
+    save_current_scroll_state(state);
 
     // Check if we need to fetch details on-demand
     let fetch_task = if let Some(library_id) = state.domains.library.state.current_library_id {
@@ -104,7 +142,16 @@ pub fn handle_view_movie_details(state: &mut State, movie: MovieReference) -> Ta
         Task::none()
     };
 
-    // Transition to new theme colors
+    // Create the new view state first (needed for depth region calculation)
+    let new_view = ViewState::MovieDetail {
+        movie: movie.clone(),
+        backdrop_handle: None, // Deprecated - kept for compatibility, will be removed
+    };
+
+    // FIRST: Set up depth regions for the transition (this enables the fade animation)
+    prepare_depth_regions_for_transition(state, &new_view);
+
+    // THEN: Transition to new theme colors
     if let Some(hex) = &movie.theme_color {
         if let Ok(color) = crate::domains::ui::views::macros::parse_hex_color(hex) {
             // Apply stronger contrast for detail views
@@ -170,24 +217,8 @@ pub fn handle_view_movie_details(state: &mut State, movie: MovieReference) -> Ta
     // Keep gradient effect active, just update the backdrop handle
     // The shader will overlay the backdrop on top of the gradient
 
-    // Store the full movie reference directly (backdrop will be pulled reactively)
-    state.domains.ui.state.view = ViewState::MovieDetail {
-        movie,
-        backdrop_handle: None, // Deprecated - kept for compatibility, will be removed
-    };
-
-    // Update depth regions for movie detail view
-    state
-        .domains
-        .ui
-        .state
-        .background_shader_state
-        .update_depth_lines(
-            &state.domains.ui.state.view,
-            state.window_size.width,
-            state.window_size.height,
-            state.domains.library.state.current_library_id,
-        );
+    // Finally change the view state (after all transitions are set up)
+    state.domains.ui.state.view = new_view;
 
     // Convert DomainMessage task to ui::Message task
     fetch_task.map(|_| Message::NoOp)
@@ -197,7 +228,15 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
     log::info!("Viewing TV show: {:?}", series_id);
 
     // Save current view to navigation history
-    state.domains.ui.state.navigation_history.push(state.domains.ui.state.view.clone());
+    state
+        .domains
+        .ui
+        .state
+        .navigation_history
+        .push(state.domains.ui.state.view.clone());
+
+    // Save current scroll position before navigating away
+    save_current_scroll_state(state);
 
     // No need to clear show details - using MediaStore as single source of truth
 
@@ -220,7 +259,7 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
     }
 
     // Save current scroll position before navigating away
-
+    save_current_scroll_state(state);
 
     // NEW ARCHITECTURE: Get series from MediaStore
     let series_media_id = ferrex_core::api_types::MediaId::Series(series_id.clone());
@@ -237,6 +276,16 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
         Task::none()
     };
 
+    // Create the new view state first (needed for depth region calculation)
+    let new_view = ViewState::TvShowDetail {
+        series_id: series_id.clone(),
+        backdrop_handle: None, // Deprecated - kept for compatibility, will be removed
+    };
+
+    // FIRST: Set up depth regions for the transition (this enables the fade animation)
+    prepare_depth_regions_for_transition(state, &new_view);
+
+    // THEN: Apply transitions if we have the series data
     if let Ok(store) = state.domains.media.state.media_store.read() {
         // TODO: Media state reference outside of media domain
         if let Some(MediaReference::Series(series)) = store.get(&series_media_id) {
@@ -302,36 +351,11 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
                 .background_shader_state
                 .backdrop_transitions
                 .start_fade_slide(50.0); // 50px slide
-
-            state.domains.ui.state.view = ViewState::TvShowDetail {
-                series_id: series_id.clone(),
-                backdrop_handle: None, // Deprecated - kept for compatibility, will be removed
-            };
-        } else {
-            state.domains.ui.state.view = ViewState::TvShowDetail {
-                series_id: series_id.clone(),
-                backdrop_handle: None, // Deprecated - kept for compatibility, will be removed
-            };
         }
-    } else {
-        state.domains.ui.state.view = ViewState::TvShowDetail {
-            series_id: series_id.clone(),
-            backdrop_handle: None, // Deprecated - kept for compatibility, will be removed
-        };
     }
 
-    // Update depth regions for TV show detail view
-    state
-        .domains
-        .ui
-        .state
-        .background_shader_state
-        .update_depth_lines(
-            &state.domains.ui.state.view,
-            state.window_size.width,
-            state.window_size.height,
-            state.domains.library.state.current_library_id,
-        );
+    // Finally change the view state (after all transitions are set up)
+    state.domains.ui.state.view = new_view;
 
     // Load show details using the unified API
     let server_url = state.server_url.clone();
@@ -342,18 +366,24 @@ pub fn handle_view_tv_show(state: &mut State, series_id: SeriesID) -> Task<Messa
         if let Ok(store) = state.domains.media.state.media_store.read() {
             // TODO: Media state reference outside of media domain
             let seasons = store.get_seasons_owned(series_id.as_str());
-            
+
             log::info!(
                 "Navigation: Found {} seasons for series {} in MediaStore",
                 seasons.len(),
                 series_id.as_str()
             );
-            
+
             // Debug: Log all seasons in the store
             if seasons.is_empty() {
-                log::warn!("No seasons found for series {}. Checking what's in MediaStore...", series_id.as_str());
+                log::warn!(
+                    "No seasons found for series {}. Checking what's in MediaStore...",
+                    series_id.as_str()
+                );
                 // Check if there are ANY seasons in the store
-                log::warn!("No seasons found for series {} - check if server is sending them", series_id.as_str());
+                log::warn!(
+                    "No seasons found for series {} - check if server is sending them",
+                    series_id.as_str()
+                );
             } else {
                 for season in &seasons {
                     log::info!(
@@ -526,7 +556,15 @@ pub fn handle_view_season(
     log::info!("Viewing season {:?} of series {:?}", season_id, series_id);
 
     // Save current view to navigation history
-    state.domains.ui.state.navigation_history.push(state.domains.ui.state.view.clone());
+    state
+        .domains
+        .ui
+        .state
+        .navigation_history
+        .push(state.domains.ui.state.view.clone());
+
+    // Save current scroll position before navigating away
+    save_current_scroll_state(state);
 
     // Clear previous season details
     state.domains.media.state.current_season_details = None;
@@ -566,28 +604,21 @@ pub fn handle_view_season(
     }
 
     // Save current scroll position if navigating from library view
-    if matches!(state.domains.ui.state.view, ViewState::Library) {
-    
-    }
+    if matches!(state.domains.ui.state.view, ViewState::Library) {}
 
-    state.domains.ui.state.view = ViewState::SeasonDetail {
+    // Create the new view state
+    let new_view = ViewState::SeasonDetail {
         series_id: series_id.clone(),
         season_id: season_id.clone(),
         backdrop_handle: None,
     };
 
-    // Update depth regions for season detail view
-    state
-        .domains
-        .ui
-        .state
-        .background_shader_state
-        .update_depth_lines(
-            &state.domains.ui.state.view,
-            state.window_size.width,
-            state.window_size.height,
-            state.domains.library.state.current_library_id,
-        );
+    // Update depth regions for season detail view (uses same regions as movie/series for now)
+    // TODO: Add season-specific depth regions in the future
+    prepare_depth_regions_for_transition(state, &new_view);
+    
+    // Change the view state
+    state.domains.ui.state.view = new_view;
 
     // Return the fetch task converted to ui::Message
     fetch_task.map(|_| Message::NoOp)
@@ -597,12 +628,15 @@ pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Mes
     log::info!("Viewing episode: {}", episode_id.as_str());
 
     // Save current view to navigation history
-    state.domains.ui.state.navigation_history.push(state.domains.ui.state.view.clone());
+    state
+        .domains
+        .ui
+        .state
+        .navigation_history
+        .push(state.domains.ui.state.view.clone());
 
-    // Save current scroll position if navigating from library view
-    if matches!(state.domains.ui.state.view, ViewState::Library) {
-    
-    }
+    // Save current scroll position before navigating away
+    save_current_scroll_state(state);
 
     // Check if we need to fetch episode details on-demand
     let fetch_task = if let Some(library_id) = state.domains.library.state.current_library_id {
@@ -616,23 +650,18 @@ pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Mes
         Task::none()
     };
 
-    state.domains.ui.state.view = ViewState::EpisodeDetail {
+    // Create the new view state
+    let new_view = ViewState::EpisodeDetail {
         episode_id: episode_id,
         backdrop_handle: None,
     };
 
-    // Update depth regions for episode detail view
-    state
-        .domains
-        .ui
-        .state
-        .background_shader_state
-        .update_depth_lines(
-            &state.domains.ui.state.view,
-            state.window_size.width,
-            state.window_size.height,
-            state.domains.library.state.current_library_id,
-        );
+    // Update depth regions for episode detail view (uses same regions as movie/series for now)
+    // TODO: Add episode-specific depth regions in the future
+    prepare_depth_regions_for_transition(state, &new_view);
+    
+    // Change the view state
+    state.domains.ui.state.view = new_view;
 
     // Convert DomainMessage task to ui::Message task
     fetch_task.map(|_| Message::NoOp)
@@ -690,4 +719,26 @@ pub fn handle_toggle_backdrop_aspect_mode(state: &mut State) -> Task<Message> {
     );
 
     Task::none()
+}
+
+/// Helper function to save current scroll state based on the current view
+/// This efficiently saves scroll positions for library grid views with proper library context
+fn save_current_scroll_state(state: &mut State) {
+    let current_view = state.domains.ui.state.view.clone();
+    let library_id = state.domains.library.state.current_library_id;
+
+    match current_view {
+        ViewState::Library => {
+            // Scroll state management for libraries is handled by tabs, it should be migrated to the unified tab mangager
+
+            log::debug!(
+                "Saved independent scroll states for movies and TV ViewModels (library_id: {:?})",
+                library_id
+            );
+        }
+        _ => {
+            // We need to save scroll state for detail views, settings, etc.
+            log::debug!("No scroll state to save for view: {:?}", current_view);
+        }
+    }
 }

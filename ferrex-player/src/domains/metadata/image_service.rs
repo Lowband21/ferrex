@@ -1,10 +1,13 @@
 use super::image_types::ImageRequest;
 use dashmap::DashMap;
 use iced::widget::image::Handle;
-use std::cmp::{Ordering, Reverse};
-use std::collections::BinaryHeap;
+use priority_queue::PriorityQueue;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio::sync::mpsc;
+
+// Maximum number of retry attempts for failed images
+const MAX_RETRY_ATTEMPTS: u8 = 5;
 
 #[derive(Debug, Clone)]
 pub enum LoadState {
@@ -16,72 +19,37 @@ pub enum LoadState {
 #[derive(Debug)]
 pub struct ImageEntry {
     pub state: LoadState,
-    pub last_accessed: std::time::Instant,
-    pub loaded_at: Option<std::time::Instant>,
+    pub last_accessed: Instant,
+    pub loaded_at: Option<Instant>,
     pub retry_count: u8,
 }
 
-// Priority queue item for loading
-#[derive(Debug, Clone)]
-struct QueuedRequest {
-    request: ImageRequest,
-    queued_at: std::time::Instant,
-}
-
-impl PartialEq for QueuedRequest {
-    fn eq(&self, other: &Self) -> bool {
-        self.request == other.request
-    }
-}
-
-impl Eq for QueuedRequest {}
-
-impl PartialOrd for QueuedRequest {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for QueuedRequest {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // Higher priority first, then older requests first
-        match self
-            .request
-            .priority
-            .weight()
-            .cmp(&other.request.priority.weight())
-        {
-            Ordering::Equal => other.queued_at.cmp(&self.queued_at),
-            other => other,
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct UnifiedImageService {
     // Single cache for all images
     cache: Arc<DashMap<ImageRequest, ImageEntry>>,
 
-    // Priority queue for pending loads
-    queue: Arc<Mutex<BinaryHeap<Reverse<QueuedRequest>>>>,
+    // Priority queue for pending loads (using u8 priority, higher is better)
+    queue: Arc<Mutex<PriorityQueue<ImageRequest, u8>>>,
 
     // Currently loading requests
     loading: Arc<DashMap<ImageRequest, std::time::Instant>>,
 
-    // Channel for load requests
-    load_sender: mpsc::UnboundedSender<ImageRequest>,
+    // Channel for wake-up signals to notify loader of new requests
+    load_sender: mpsc::UnboundedSender<()>,
 
     // Maximum concurrent loads
     max_concurrent: usize,
 }
 
 impl UnifiedImageService {
-    pub fn new(max_concurrent: usize) -> (Self, mpsc::UnboundedReceiver<ImageRequest>) {
+    pub fn new(max_concurrent: usize) -> (Self, mpsc::UnboundedReceiver<()>) {
         let (load_sender, load_receiver) = mpsc::unbounded_channel();
 
         let service = Self {
             cache: Arc::new(DashMap::new()),
-            queue: Arc::new(Mutex::new(BinaryHeap::new())),
+            queue: Arc::new(Mutex::new(PriorityQueue::new())),
             loading: Arc::new(DashMap::new()),
             load_sender,
             max_concurrent,
@@ -118,7 +86,16 @@ impl UnifiedImageService {
         // Check if already cached
         if let Some(mut entry) = self.cache.get_mut(&request) {
             entry.last_accessed = std::time::Instant::now();
+            
+            // Don't retry if already loaded
             if matches!(entry.state, LoadState::Loaded(_)) {
+                return;
+            }
+            
+            // Don't retry if failed too many times
+            if matches!(entry.state, LoadState::Failed(_)) && entry.retry_count >= MAX_RETRY_ATTEMPTS {
+                log::debug!("Skipping image request for {:?} - exceeded max retries ({}/{})", 
+                          request.media_id, entry.retry_count, MAX_RETRY_ATTEMPTS);
                 return;
             }
         }
@@ -128,21 +105,30 @@ impl UnifiedImageService {
             return;
         }
 
-        // Add to queue
-        let queued = QueuedRequest {
-            request: request.clone(),
-            queued_at: std::time::Instant::now(),
-        };
-
+        // Add to queue or upgrade priority
         if let Ok(mut queue) = self.queue.lock() {
-            // Check if already in queue
-            let already_queued = queue.iter().any(|Reverse(q)| q.request == request);
-            if !already_queued {
-                queue.push(Reverse(queued));
-                // Notify loader
-                match self.load_sender.send(request.clone()) {
-                    Ok(_) => log::debug!("Sent image request through channel: {:?}", request),
-                    Err(e) => log::error!("Failed to send image request: {:?}", e),
+            let new_priority = request.priority.weight();
+            
+            if let Some(&existing_priority) = queue.get_priority(&request) {
+                // Image already queued - upgrade priority if new is higher
+                if new_priority > existing_priority {
+                    log::info!("Upgrading priority for {:?} from {} to {} ({})", 
+                               request.media_id, existing_priority, new_priority,
+                               if new_priority == 3 { "VISIBLE" } else if new_priority == 2 { "PRELOAD" } else { "BACKGROUND" });
+                    queue.change_priority(&request, new_priority);
+                    // Send wake-up signal to notify loader of priority change
+                    match self.load_sender.send(()) {
+                        Ok(_) => log::debug!("Sent wake-up signal for priority upgrade"),
+                        Err(e) => log::error!("Failed to send wake-up signal: {:?}", e),
+                    }
+                }
+            } else {
+                // New request - add to queue
+                queue.push(request.clone(), new_priority);
+                // Send wake-up signal to notify loader of new request
+                match self.load_sender.send(()) {
+                    Ok(_) => log::debug!("Sent wake-up signal for new request: {:?}", request),
+                    Err(e) => log::error!("Failed to send wake-up signal: {:?}", e),
                 }
             }
         }
@@ -183,34 +169,60 @@ impl UnifiedImageService {
     pub fn mark_failed(&self, request: &ImageRequest, error: String) {
         self.loading.remove(request);
 
-        if let Some(mut entry) = self.cache.get_mut(request) {
-            entry.state = LoadState::Failed(error);
-            entry.retry_count += 1;
+        // Check if this is a 404 error (image doesn't exist on server)
+        let is_404 = error.contains("404");
+        
+        let retry_count = if let Some(mut entry) = self.cache.get_mut(request) {
+            entry.state = LoadState::Failed(error.clone());
+            // For 404 errors, immediately set to max retries to prevent further attempts
+            if is_404 {
+                entry.retry_count = MAX_RETRY_ATTEMPTS;
+            } else {
+                entry.retry_count += 1;
+            }
+            entry.retry_count
         } else {
+            let retry_count = if is_404 { MAX_RETRY_ATTEMPTS } else { 1 };
             self.cache.insert(
                 request.clone(),
                 ImageEntry {
-                    state: LoadState::Failed(error),
+                    state: LoadState::Failed(error.clone()),
                     last_accessed: std::time::Instant::now(),
                     loaded_at: None,
-                    retry_count: 1,
+                    retry_count,
                 },
             );
+            retry_count
+        };
+        
+        // Log permanent failures for metadata aggregation
+        if retry_count >= MAX_RETRY_ATTEMPTS {
+            if is_404 {
+                log::info!("Image not found on server (404): {:?}", request.media_id);
+            } else {
+                log::warn!("Image permanently failed after {} attempts: {:?} - {}", 
+                          retry_count, request.media_id, error);
+            }
+            // TODO: Could aggregate these failures for missing metadata reporting
+        } else {
+            log::debug!("Image failed (attempt {}/{}): {:?} - {}", 
+                       retry_count, MAX_RETRY_ATTEMPTS, request.media_id, error);
         }
     }
 
     pub fn get_next_request(&self) -> Option<ImageRequest> {
         let mut queue = self.queue.lock().ok()?;
 
-        // Skip if we're at capacity
-        if self.loading.len() >= self.max_concurrent {
+        // Only process one at a time for staggered loading effect
+        // This ensures images load sequentially, not in parallel
+        if !self.loading.is_empty() {
             return None;
         }
 
-        // Find next request that isn't already loading
-        while let Some(Reverse(queued)) = queue.pop() {
-            if !self.loading.contains_key(&queued.request) {
-                return Some(queued.request);
+        // Pop highest priority item
+        while let Some((request, _priority)) = queue.pop() {
+            if !self.loading.contains_key(&request) {
+                return Some(request);
             }
         }
 
