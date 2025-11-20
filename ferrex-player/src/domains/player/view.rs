@@ -17,7 +17,7 @@ use iced::{
 )]
 impl PlayerDomainState {
     /// Build the main player view
-    /// Note: Returns wgpu renderer elements since video playback requires GPU acceleration
+    /// Note: Returns wgpu renderer elements since waylandsink video playback requires GPU acceleration
     pub fn view(&self) -> iced::Element<'_, Message, Theme> {
         log::trace!(
             "PlayerState::view() called - position: {:.2}s, duration: {:.2}s, source_duration: {:?}, controls: {}",
@@ -52,37 +52,22 @@ impl PlayerDomainState {
         }
 
         if let Some(video) = &self.video_opt {
-            // Create the clickable video
             let clickable_video = self.video_view(video);
 
-            // Build subtitle overlay element (between video and controls) when present
-            let subtitle_overlay: Option<iced::Element<Message, Theme, iced_wgpu::Renderer>> =
-                self.overlay.as_ref().map(|ov| {
-                    subwave_overlay::overlay::overlay_element::<Message, Theme>(
-                        ov,
-                        Length::Fill,
-                        Length::Fill,
-                        self.content_fit,
-                    )
-                });
-
-            // Create overlay stack: video, maybe subtitle overlay, then controls
+            // Overlay stack: video, then controls
             let player_with_overlay: iced::Element<Message, Theme> = if self.controls {
                 let controls = self.controls_overlay();
+
                 let mut children: Vec<iced::Element<Message, Theme, iced_wgpu::Renderer>> =
                     vec![clickable_video];
-                if let Some(ov) = subtitle_overlay {
-                    children.push(ov);
-                }
+
                 children.push(controls);
+
                 iced::widget::Stack::with_children(children).into()
-            } else if let Some(ov) = subtitle_overlay {
-                iced::widget::Stack::with_children(vec![clickable_video, ov]).into()
             } else {
                 clickable_video
             };
 
-            // Add settings panel if visible
             let player_with_settings: iced::Element<Message, Theme> = if self.show_settings {
                 let settings = self.settings_panel();
                 let positioned_settings = container(row![
@@ -109,7 +94,6 @@ impl PlayerDomainState {
                 player_with_overlay
             };
 
-            // Add subtitle menu if visible
             let player_with_menus: iced::Element<Message, Theme, iced_wgpu::Renderer> = if self
                 .show_quality_menu
             {
@@ -122,7 +106,6 @@ impl PlayerDomainState {
                 player_with_settings
             };
 
-            // Add track notification overlay if present
             let player_with_notification: iced::Element<Message, Theme, iced_wgpu::Renderer> =
                 if let Some(notification) = &self.track_notification {
                     let notification_overlay = self.notification_overlay(notification);
@@ -147,8 +130,8 @@ impl PlayerDomainState {
         } else if self.is_loading_video {
             // Show loading spinner in player view
             let loading_content = column![
-                // Static loading icon for now - can be animated later
-                text("⟳").size(64), // Using a refresh/loading unicode symbol
+                // Static loading icon for now - animate later
+                text("⟳").size(64),
                 Space::new().height(Length::Fixed(20.0)),
                 text("Loading video...")
                     .size(18)
@@ -157,7 +140,6 @@ impl PlayerDomainState {
             .align_x(iced::Alignment::Center)
             .spacing(10);
 
-            // Full screen player-style container with loading spinner
             container(loading_content)
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -166,7 +148,6 @@ impl PlayerDomainState {
                 .style(theme::container_player)
                 .into()
         } else {
-            // No video loaded and not loading - show minimal view
             container(
                 column![
                     text("No video loaded")

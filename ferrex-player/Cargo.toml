@@ -16,23 +16,7 @@ description = "Cross-platform desktop player for Ferrex with a focus on performa
 ferrex-core = { path = "../ferrex-core", default-features = false }
 
 # Iced
-# iced = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", default-features = false, features = [
-#     "tokio",
-#     "debug",
-#     "image",
-#     "canvas",
-#     "advanced",
-#     "wgpu",
-#     "prefer_10bit",
-#     "web-colors",
-#     "batch",
-#     "lazy",
-# ] }
-# iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", features = [
-#     "image",
-#     "batch",
-# ] }
-iced = { path = "../../iced_ferrex", default-features = false, features = [
+iced = { git = "https://github.com/Lowband21/iced-ferrex.git", default-features = false, features = [
     "tokio",
     "debug",
     "image",
@@ -44,11 +28,27 @@ iced = { path = "../../iced_ferrex", default-features = false, features = [
     "batch",
     "lazy",
 ] }
-iced_wgpu = { path = "../../iced_ferrex/wgpu", features = [
+iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", features = [
     "image",
     "batch",
 ] }
-#iced_aw = { git = "https://github.com/iced-rs/iced_aw.git", default-features = false, features = ["menu"] }
+# iced = { path = "../../iced_ferrex", default-features = false, features = [
+#     "tokio",
+#     "debug",
+#     "image",
+#     "canvas",
+#     "advanced",
+#     "wgpu",
+#     "prefer_10bit",
+#     "web-colors",
+#     "batch",
+#     "lazy",
+# ] }
+# iced_wgpu = { path = "../../iced_ferrex/wgpu", features = [
+#     "image",
+#     "batch",
+# ] }
+# iced_aw = { git = "https://github.com/iced-rs/iced_aw.git", default-features = false, features = ["menu"] }
 iced_aw = { path = "../../../iced_aw", default-features = false, features = ["menu"] }
 
 # Icons
@@ -57,7 +57,6 @@ lucide-icons = { path = "../../../lucide_icons_iced_0.14", features = ["iced"] }
 # Unified video abstraction based on subwave
 subwave_unified = { path = "../../../subwave/subwave_unified" }
 subwave_core = { path = "../../../subwave/subwave_core" }
-subwave_overlay = { path = "../../../subwave/subwave_overlay" }
 
 # Async runtime
 tokio.workspace = true
@@ -189,12 +188,12 @@ criterion = { version = "^0.7", features = ["html_reports"] }
 #name = "grid_rendering_bench"
 #harness = false
 
-[patch."https://github.com/Lowband21/iced-ferrex.git"]
-iced = { path = "../../iced_ferrex" }
-iced_core = { path = "../../iced_ferrex/core" }
-iced_graphics = { path = "../../iced_ferrex/graphics" }
-iced_renderer = { path = "../../iced_ferrex/renderer" }
-iced_runtime = { path = "../../iced_ferrex/runtime" }
-iced_widget = { path = "../../iced_ferrex/widget" }
-iced_wgpu = { path = "../../iced_ferrex/wgpu" }
-iced_winit = { path = "../../iced_ferrex/winit" }
+# [patch."https://github.com/Lowband21/iced-ferrex.git"]
+# iced = { path = "../../iced_ferrex" }
+# iced_core = { path = "../../iced_ferrex/core" }
+# iced_graphics = { path = "../../iced_ferrex/graphics" }
+# iced_renderer = { path = "../../iced_ferrex/renderer" }
+# iced_runtime = { path = "../../iced_ferrex/runtime" }
+# iced_widget = { path = "../../iced_ferrex/widget" }
+# iced_wgpu = { path = "../../iced_ferrex/wgpu" }
+# iced_winit = { path = "../../iced_ferrex/winit" }

@@ -161,29 +161,29 @@ missing_crate_level_docs = "allow"
 missing_docs = "allow"
 missing_debug_implementations = "warn"
 
-# [patch.crates-io]
-# iced = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", package = "iced" }
-# iced_core = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", package = "iced_core" }
-# iced_widget = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", package = "iced_widget" }
-# iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", package = "iced_wgpu" }
+[patch.crates-io]
+iced = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced" }
+iced_core = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_core" }
+iced_widget = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_widget" }
+iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_wgpu" }
 
-# [patch."https://github.com/iced-rs/iced.git"]
-# iced = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", package = "iced" }
-# iced_core = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", package = "iced_core" }
-# iced_widget = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", package = "iced_widget" }
-# iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", package = "iced_wgpu" }
+[patch."https://github.com/iced-rs/iced.git"]
+iced = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced" }
+iced_core = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_core" }
+iced_widget = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_widget" }
+iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_wgpu" }
 
 #[patch."https://github.com/iced-rs/iced_aw.git"]
 #iced_aw = { path = "../../iced_aw" }
 # 
-[patch.crates-io]
- iced = { path = "../iced_ferrex", package = "iced" }
- iced_core = { path = "../iced_ferrex/core", package = "iced_core" }
- iced_widget = { path = "../iced_ferrex/widget", package = "iced_widget" }
- iced_wgpu = { path = "../iced_ferrex/wgpu", package = "iced_wgpu" }
+# [patch.crates-io]
+#  iced = { path = "../iced_ferrex", package = "iced" }
+#  iced_core = { path = "../iced_ferrex/core", package = "iced_core" }
+#  iced_widget = { path = "../iced_ferrex/widget", package = "iced_widget" }
+#  iced_wgpu = { path = "../iced_ferrex/wgpu", package = "iced_wgpu" }
 
- [patch."https://github.com/iced-rs/iced.git"]
- iced = { path = "../iced_ferrex", package = "iced" }
- iced_core = { path = "../iced_ferrex/core", package = "iced_core" }
- iced_widget = { path = "../iced_ferrex/widget", package = "iced_widget" }
- iced_wgpu = { path = "../iced_ferrex/wgpu", package = "iced_wgpu" }
+#  [patch."https://github.com/iced-rs/iced.git"]
+#  iced = { path = "../iced_ferrex", package = "iced" }
+#  iced_core = { path = "../iced_ferrex/core", package = "iced_core" }
+#  iced_widget = { path = "../iced_ferrex/widget", package = "iced_widget" }
+#  iced_wgpu = { path = "../iced_ferrex/wgpu", package = "iced_wgpu" }

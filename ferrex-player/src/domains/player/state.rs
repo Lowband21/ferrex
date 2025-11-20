@@ -58,40 +58,28 @@ pub struct PlayerDomainState {
     pub current_audio_track: i32,
     pub available_subtitle_tracks: Vec<SubtitleTrack>,
     pub current_subtitle_track: Option<i32>,
-    pub last_subtitle_track: Option<i32>, // Track the last used subtitle for toggling
+    pub last_subtitle_track: Option<i32>,
     pub subtitles_enabled: bool,
 
-    // Track selection notification
     pub track_notification: Option<TrackNotification>,
 
-    // Subtitle menu state
     pub show_subtitle_menu: bool,
 
-    // Quality selection menu state
     pub show_quality_menu: bool,
     pub current_quality_profile: Option<String>,
 
-    // Current subtitle text to display (raw text for processing)
-
-    // Seek throttling
     pub last_seek_time: Option<Instant>,
     pub pending_seek_position: Option<f64>,
 
-    // Robustness against transient 0 position/duration from backend
     pub last_valid_position: f64,
     pub last_valid_duration: f64,
 
-    // HDR content detection (non-streaming related)
     pub is_hdr_content: bool,
-    pub is_loading_video: bool, // Flag to prevent duplicate video loading
+    pub is_loading_video: bool, // Flag to prevent duplicate video loading TODO: refactor out
     pub source_duration: Option<f64>, // Original source video duration (never changes)
 
-    // External MPV player support
     pub external_mpv_handle: Option<Box<super::external_mpv::ExternalMpvHandle>>,
     pub external_mpv_active: bool,
-
-    // Subtitle overlay (appsink RGBA) to layer over the video when Wayland backend is active
-    pub overlay: Option<subwave_overlay::SubtitleOverlay>,
 }
 
 #[derive(Debug, Clone)]
@@ -147,7 +135,6 @@ impl Default for PlayerDomainState {
             source_duration: None,
             external_mpv_handle: None,
             external_mpv_active: false,
-            overlay: None,
         }
     }
 }

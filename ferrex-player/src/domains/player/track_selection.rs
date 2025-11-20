@@ -78,11 +78,6 @@ impl PlayerDomainState {
                 log::info!("Subtitles Disabled");
             }
 
-            // Keep overlay (if present) in sync for Wayland backend
-            if let Some(overlay) = self.overlay.as_ref() {
-                overlay.select_subtitle_index(index);
-            }
-
             // Show notification
             let message = if let Some(idx) = index {
                 let track_name = self.format_subtitle_track(idx);
@@ -124,8 +119,6 @@ impl PlayerDomainState {
             } else {
                 // Disable reliably by selecting None (updates backend and UI state)
                 self.select_subtitle_track(None)?;
-                // Drop overlay when disabling; creation handled elsewhere if needed
-                self.overlay = None;
             }
             Ok(())
         } else {
