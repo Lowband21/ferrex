@@ -263,11 +263,7 @@ impl BackgroundShaderState {
         }
     }*/
     /// Calculate content offset for detail views based on backdrop dimensions with known window height
-    pub fn calculate_content_offset_with_height(
-        &self,
-        window_width: f32,
-        window_height: f32,
-    ) -> f32 {
+    pub fn calculate_content_offset_height(&self, window_width: f32, window_height: f32) -> f32 {
         use crate::infrastructure::constants::layout::header;
 
         // Calculate the display aspect based on current mode and actual window dimensions

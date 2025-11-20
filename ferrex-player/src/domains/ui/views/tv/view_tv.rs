@@ -99,7 +99,7 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
         .ui
         .state
         .background_shader_state
-        .calculate_content_offset_with_height(window_width, window_height);
+        .calculate_content_offset_height(window_width, window_height);
     content = content.push(Space::new().height(Length::Fixed(content_offset)));
 
     // Details column
@@ -574,7 +574,7 @@ pub fn view_season_detail<'a>(
         .ui
         .state
         .background_shader_state
-        .calculate_content_offset_with_height(window_width, window_height);
+        .calculate_content_offset_height(window_width, window_height);
     content = content.push(Space::new().height(Length::Fixed(content_offset)));
 
     // Poster element
@@ -821,7 +821,7 @@ pub fn view_episode_detail<'a>(
         .ui
         .state
         .background_shader_state
-        .calculate_content_offset_with_height(window_width, window_height);
+        .calculate_content_offset_height(window_width, window_height);
 
     let mut content = column![].spacing(20).padding(20);
     content = content.push(Space::new().height(Length::Fixed(content_offset)));

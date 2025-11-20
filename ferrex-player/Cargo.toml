@@ -48,7 +48,8 @@ iced_wgpu = { path = "../../iced_ferrex/wgpu", features = [
     "image",
     "batch",
 ] }
-#iced_aw = { version = "0.12.2", default-features = false, features = ["menu", "quad"] }
+#iced_aw = { git = "https://github.com/iced-rs/iced_aw.git", default-features = false, features = ["menu"] }
+iced_aw = { path = "../../../iced_aw", default-features = false, features = ["menu"] }
 
 # Icons
 lucide-icons = { path = "../../../lucide_icons_iced_0.14", features = ["iced"] }

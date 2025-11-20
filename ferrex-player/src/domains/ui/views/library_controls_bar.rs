@@ -2,7 +2,7 @@ use crate::{
     domains::ui::{
         messages::Message,
         tabs::{TabId, TabState},
-        widgets::{filter_button, sort_dropdown, sort_order_toggle},
+        widgets::{filter_button, library_sort_filter_menu, sort_dropdown, sort_order_toggle},
     },
     infrastructure::constants::layout::header::HEIGHT,
     state_refactored::State,
@@ -67,16 +67,14 @@ pub fn view_library_controls_bar<'a>(
         };
     let is_filter_open = ui_state.show_filter_panel;
 
-    // Create the controls row
-    let controls = row![
-        sort_dropdown(current_sort),
-        sort_order_toggle(current_order),
-        filter_button(active_filter_count, is_filter_open),
-        Space::new().width(Length::Fill),
-        text(item_count.to_string()),
-    ]
-    .spacing(12)
-    .padding([0, 16])
+    let controls = container(library_sort_filter_menu(
+        current_sort,
+        current_order,
+        active_filter_count,
+        is_filter_open,
+    ))
+    .padding([0, 20])
+    .width(Length::Fill)
     .align_y(iced::Alignment::Center);
 
     Some(

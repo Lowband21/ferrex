@@ -48,7 +48,7 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 .ui
                 .state
                 .background_shader_state
-                .calculate_content_offset_with_height(window_width, window_height);
+                .calculate_content_offset_height(window_width, window_height);
             content = content.push(Space::new().height(Length::Fixed(content_offset)));
 
             let mut poster_element = image_for(media_id.to_uuid())

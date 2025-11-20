@@ -1,8 +1,9 @@
 #![feature(type_alias_impl_trait)]
 use ferrex_player::*;
 
-use env_logger::{Builder, Target};
+use env_logger::{Builder, Env, Target};
 use iced::{Font, Task, Theme};
+use iced_aw::ICED_AW_FONT_BYTES;
 use log::LevelFilter;
 use lucide_icons::lucide_font_bytes;
 
@@ -170,6 +171,7 @@ fn main() -> iced::Result {
     .settings(settings)
     .title("Ferrex Player")
     .subscription(subscriptions::subscription)
+    .font(ICED_AW_FONT_BYTES)
     .font(lucide_font_bytes())
     .theme(app_theme)
     .window(iced::window::Settings {
