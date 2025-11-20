@@ -140,7 +140,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
                     .align_y(iced::Alignment::Center),
                     Space::new().height(20),
                     button("Manage Users")
-                        .on_press(Message::NoOp) // TODO: Implement user management view
+                        .on_press(Message::ShowUserManagement)
                         .style(theme::Button::Primary.style())
                         .padding([12, 20])
                         .width(Length::Fill),

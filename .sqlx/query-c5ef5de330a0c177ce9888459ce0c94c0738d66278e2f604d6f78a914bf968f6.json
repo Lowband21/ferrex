@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                u.id,\n                u.username,\n                u.is_active,\n                u.is_locked,\n                u.failed_login_attempts,\n                u.locked_until,\n                u.last_login,\n                uc.password_hash,\n                uc.pin_hash,\n                uc.pin_updated_at\n            FROM users u\n            INNER JOIN user_credentials uc ON u.id = uc.user_id\n            WHERE u.id = $1\n            ",
+  "query": "\n            SELECT\n                u.id,\n                u.username,\n                u.is_active,\n                u.is_locked,\n                u.failed_login_attempts,\n                u.locked_until,\n                u.last_login,\n                uc.password_hash,\n                uc.pin_hash,\n                uc.pin_client_salt,\n                uc.pin_updated_at\n            FROM users u\n            INNER JOIN user_credentials uc ON u.id = uc.user_id\n            WHERE u.username = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -55,13 +55,23 @@
       },
       {
         "ordinal": 9,
+        "name": "pin_client_salt",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 10,
         "name": "pin_updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        {
+          "Custom": {
+            "name": "citext",
+            "kind": "Simple"
+          }
+        }
       ]
     },
     "nullable": [
@@ -74,8 +84,9 @@
       true,
       false,
       true,
+      false,
       true
     ]
   },
-  "hash": "35d5d5e043ff736dfa936ce805d7f3748bb769217f3705ac71a7307e8c6b0a67"
+  "hash": "c5ef5de330a0c177ce9888459ce0c94c0738d66278e2f604d6f78a914bf968f6"
 }

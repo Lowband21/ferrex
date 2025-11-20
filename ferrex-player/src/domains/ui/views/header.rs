@@ -398,6 +398,25 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 element
             });
 
+            // Users management button
+            right_section = right_section.push({
+                let element: Element<Message> = if state.permission_checker().can_view_users() {
+                    button(
+                        container(icon_text_with_size(Icon::Users, 16.0))
+                            .center_x(Length::Fill)
+                            .center_y(Length::Fill),
+                    )
+                    .on_press(Message::ShowUserManagement)
+                    .style(theme::Button::HeaderIcon.style())
+                    .width(Length::Fixed(HEIGHT))
+                    .height(HEIGHT)
+                    .into()
+                } else {
+                    Space::new().width(HEIGHT).into()
+                };
+                element
+            });
+
             // Profile button
             right_section = right_section.push(
                 button(
@@ -586,7 +605,9 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 .height(HEIGHT)
                 .into()
         }
-        ViewState::AdminDashboard => {
+        // Note: Duplicate AdminDashboard branch removed (handled above)
+        ViewState::AdminUsers => {
+            // Header for User Management view
             let mut left_section_items = vec![];
 
             // Home button
@@ -603,7 +624,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 .into(),
             );
 
-            // Back button (always shown since we came from somewhere)
+            // Back button
             left_section_items.push(
                 button(
                     container(icon_text_with_size(Icon::ChevronLeft, 16.0))
@@ -621,9 +642,8 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
 
             Stack::new()
                 .push(
-                    // Base layer: centered title
                     container(
-                        text("Admin Dashboard")
+                        text("User Management")
                             .size(20)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                     )
@@ -633,7 +653,6 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     .align_y(iced::alignment::Vertical::Center),
                 )
                 .push(
-                    // Top layer: left section
                     container(left_section)
                         .width(Length::Fill)
                         .height(HEIGHT)

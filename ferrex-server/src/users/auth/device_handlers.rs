@@ -15,17 +15,18 @@ use ferrex_core::{
                 TokenBundle,
             },
         },
-        generate_trust_token,
     },
     user::User,
 };
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::time::Instant;
+use std::{collections::HashMap, fmt, sync::Arc};
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 use uuid::Uuid;
-use crate::infra::middleware::rate_limit_setup::InMemoryRateLimiter;
-use once_cell::sync::OnceCell;
 
 use crate::{
     application::auth::AuthFacadeError,
@@ -33,11 +34,53 @@ use crate::{
         app_state::AppState,
         errors::{AppError, AppResult},
     },
+    users::map_auth_facade_error,
 };
-use ferrex_core::auth::domain::value_objects::{DeviceFingerprint, PinPolicy};
 use ferrex_core::auth::domain::services::AuthenticationError as CoreAuthError;
+use ferrex_core::auth::domain::value_objects::{DeviceFingerprint, PinPolicy};
 
 const MAX_PIN_ATTEMPTS: u8 = 3;
+
+#[derive(Clone)]
+struct InMemoryRateLimiter {
+    requests: Arc<RwLock<HashMap<String, Vec<Instant>>>>,
+}
+
+impl fmt::Debug for InMemoryRateLimiter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InMemoryRateLimiter").finish()
+    }
+}
+
+impl Default for InMemoryRateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl InMemoryRateLimiter {
+    fn new() -> Self {
+        Self {
+            requests: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    async fn check_limit(&self, key: &str, limit: u32, window: std::time::Duration) -> bool {
+        let mut requests = self.requests.write().await;
+        let now = Instant::now();
+
+        let timestamps = requests.entry(key.to_string()).or_insert_with(Vec::new);
+
+        timestamps.retain(|&t| now.duration_since(t) < window);
+
+        if timestamps.len() < limit as usize {
+            timestamps.push(now);
+            true
+        } else {
+            false
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct DeviceLoginRequest {
@@ -106,8 +149,8 @@ pub async fn device_login(
     Json(request): Json<DeviceLoginRequest>,
 ) -> AppResult<Json<ApiResponse<AuthResult>>> {
     let device_info = extract_device_info(&headers, request.device_info);
-    let fingerprint = generate_device_fingerprint(&device_info, &headers)
-        .map_err(AppError::bad_request)?;
+    let fingerprint =
+        generate_device_fingerprint(&device_info, &headers).map_err(AppError::bad_request)?;
 
     let mut context = build_event_context(&headers);
     context.insert_metadata("device_name", json!(device_info.device_name.clone()));
@@ -128,12 +171,11 @@ pub async fn device_login(
 
     // Persist device public key if provided (validate base64 and algorithm)
     if let Some(pk_b64) = request.device_public_key.as_ref() {
-        let alg = request
-            .device_key_alg
-            .as_deref()
-            .unwrap_or("ed25519");
+        let alg = request.device_key_alg.as_deref().unwrap_or("ed25519");
         if alg != "ed25519" {
-            return Err(AppError::bad_request("unsupported device_key_alg".to_string()));
+            return Err(AppError::bad_request(
+                "unsupported device_key_alg".to_string(),
+            ));
         }
         let pk_bytes = base64::engine::general_purpose::STANDARD
             .decode(pk_b64.as_bytes())
@@ -237,7 +279,9 @@ pub async fn pin_login(
         )
         .await;
     if !allowed_ip || !allowed_dev {
-        return Err(AppError::rate_limited("Too many failed authentication attempts".to_string()));
+        return Err(AppError::rate_limited(
+            "Too many failed authentication attempts".to_string(),
+        ));
     }
     // Decode device signature
     let sig = base64::engine::general_purpose::STANDARD
@@ -274,6 +318,7 @@ pub struct PinChallengeResponse {
     pub challenge_id: Uuid,
     pub nonce: String, // base64
     pub expires_in_secs: i64,
+    pub pin_salt: String, // base64
 }
 
 /// Issue a device possession challenge for PIN login
@@ -282,6 +327,7 @@ pub async fn pin_challenge(
     headers: HeaderMap,
     Json(request): Json<PinChallengeRequest>,
 ) -> AppResult<Json<ApiResponse<PinChallengeResponse>>> {
+    let facade = state.auth_facade.clone();
     // Minimal in-memory rate limiting for challenge issuance
     fn auth_rate_limiter() -> &'static InMemoryRateLimiter {
         static LIM: OnceCell<InMemoryRateLimiter> = OnceCell::new();
@@ -310,6 +356,15 @@ pub async fn pin_challenge(
     if !allowed_ip || !allowed_dev {
         return Err(AppError::rate_limited("Too many requests".to_string()));
     }
+    let session = facade
+        .get_device_by_id(request.device_id)
+        .await
+        .map_err(map_auth_facade_error)?;
+    let user_id = session.user_id();
+    let pin_salt = facade
+        .get_pin_client_salt(user_id)
+        .await
+        .map_err(map_auth_facade_error)?;
     // 2 minute TTL
     let (id, nonce) = state
         .auth_service()
@@ -317,10 +372,12 @@ pub async fn pin_challenge(
         .await
         .map_err(map_authentication_error)?;
     let nonce_b64 = base64::engine::general_purpose::STANDARD.encode(nonce);
+    let pin_salt_b64 = base64::engine::general_purpose::STANDARD.encode(pin_salt);
     Ok(Json(ApiResponse::success(PinChallengeResponse {
         challenge_id: id,
         nonce: nonce_b64,
         expires_in_secs: 120,
+        pin_salt: pin_salt_b64,
     })))
 }
 
@@ -533,9 +590,12 @@ fn map_core_auth_error(err: CoreAuthError) -> AppError {
         CoreAuthError::InvalidCredentials | CoreAuthError::InvalidPin => {
             AppError::unauthorized("Invalid authentication".to_string())
         }
-        CoreAuthError::TooManyFailedAttempts =>
-            AppError::rate_limited("Too many failed attempts".to_string()),
-        CoreAuthError::DeviceNotFound => AppError::not_found("Device session not found".to_string()),
+        CoreAuthError::TooManyFailedAttempts => {
+            AppError::rate_limited("Too many failed attempts".to_string())
+        }
+        CoreAuthError::DeviceNotFound => {
+            AppError::not_found("Device session not found".to_string())
+        }
         CoreAuthError::DeviceNotTrusted => AppError::forbidden("Device is not trusted".to_string()),
         CoreAuthError::SessionExpired => AppError::unauthorized("Session expired".to_string()),
         CoreAuthError::UserNotFound => AppError::not_found("User not found".to_string()),
@@ -594,9 +654,7 @@ fn device_session_to_device_registration(
         device_name: info.device_name.clone(),
         platform: info.platform.clone(),
         app_version: info.app_version.clone(),
-        trust_token: generate_trust_token(),
-        // Device no longer stores a PIN hash; user-level PIN is shared across trusted devices.
-        pin_hash: None,
+        pin_configured: session.has_pin(),
         registered_at: session.created_at(),
         last_used_at: session.last_activity(),
         expires_at: None,
@@ -616,10 +674,7 @@ fn device_session_to_authenticated_device(session: &DeviceSession) -> Authentica
         app_version: None,
         hardware_id: None,
         status: map_device_status(session.status()),
-        // User-level PIN is canonical; device-level fields are deprecated.
-        pin_hash: None,
-        pin_set_at: None,
-        pin_last_used_at: None,
+        pin_configured: session.has_pin(),
         failed_attempts: i32::from(session.failed_attempts()),
         locked_until: None,
         first_authenticated_by: session.user_id(),

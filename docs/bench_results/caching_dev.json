@@ -1,0 +1,44 @@
+{
+  "results": [
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_DEV_OPT_LEVEL -u CARGO_PROFILE_RELEASE_OPT_LEVEL     -u CARGO_PROFILE_RELEASE_INCREMENTAL cargo build",
+      "mean": 63.13782908798667,
+      "stddev": 0.2521028465282471,
+      "median": 63.05753443932,
+      "user": 238.2349299133333,
+      "system": 32.13282802,
+      "min": 62.93565344132001,
+      "max": 63.42029938332001,
+      "times": [
+        63.42029938332001,
+        63.05753443932,
+        62.93565344132001
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_DEV_OPT_LEVEL -u CARGO_PROFILE_RELEASE_OPT_LEVEL     -u CARGO_PROFILE_RELEASE_INCREMENTAL RUSTC_WRAPPER=sccache cargo build",
+      "mean": 63.115395678653336,
+      "stddev": 0.3072706899778672,
+      "median": 62.968647338320004,
+      "user": 238.74547857999997,
+      "system": 32.22504868666667,
+      "min": 62.909012864320005,
+      "max": 63.468526833320006,
+      "times": [
+        62.909012864320005,
+        63.468526833320006,
+        62.968647338320004
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}

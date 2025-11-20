@@ -3,7 +3,7 @@ version: '3.9'
 services:
   # PostgreSQL for testing
   db:
-    image: postgres:18
+    image: postgres:17
     security_opt:
       - "seccomp:./seccomp-allow-iouring.json"
     container_name: ferrex_media_db_simple
@@ -28,7 +28,7 @@ services:
 
   # Redis for caching
   cache:
-    image: redis:8-alpine
+    image: redis:7-alpine
     container_name: ferrex_media_cache_simple
     ports:
       - "6379:6379"

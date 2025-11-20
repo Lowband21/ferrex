@@ -26,32 +26,28 @@ A high-performance media player built with Iced and GStreamer, featuring video r
 
 ## Running the Application
 
-1. **Start the media server** (in another terminal):
+1. **Start the media server** (in another terminal, from the workspace root):
    ```bash
-   cd ../server
-   cargo run
+   cargo run -p ferrex-server
    ```
 
 2. **Run the media player**:
    ```bash
-   ./run.sh
+   # Default (connects to http://localhost:3000)
+   cargo run -p ferrex-player
 
-   # Or with custom server URL
-   MEDIA_SERVER_URL=http://localhost:8080 ./run.sh
+   # Or with a custom server URL
+   FERREX_SERVER_URL=http://localhost:3000 cargo run -p ferrex-player
    ```
 
-3. **Scan for media files**:
-   - The application will load any previously scanned media on startup
-   - To scan new directories on the server, use the scan controls in the UI:
-     - Enter the **server-side** path to scan (e.g., `/home/user/Videos`)
-     - Click the "Scan" button
-     - The server will scan its local directories and store media metadata
-   - Alternatively, use the command-line script:
+3. **Media scanning**:
+   - The player displays media indexed by the server.
+   - Make sure the server has at least one library configured (with `MEDIA_ROOT` set) and trigger a scan via the API if needed:
      ```bash
-     ./scan_media.sh /path/on/server/to/media/files
+     # Start a scan for a library (replace {id} with the library UUID)
+     curl -X POST http://localhost:3000/api/v1/libraries/{id}/scans:start
      ```
-   
-   **Note**: The path must exist on the server machine, not your local machine!
+   - The media path must exist on the server machine.
 
 ## Features
 
@@ -72,12 +68,12 @@ This client uses:
 - **Tokio**: Async runtime for network requests
 - **Profiling**: Puffin/Tracy/Tracing for performance analysis
 
-## Authentication Tokens & "Remember This Device"
+## Authentication & "Remember This Device"
 
-- **Password Login (JWT)**: Standard username/password authentication returns a short-lived JWT (15 minutes by default). The server requires the `JWT_SECRET` environment variable in development (e.g. `export JWT_SECRET=dev-secret` before running tests or the server).
-- **Device Sessions (PIN / Remember Device)**: Device-aware login returns a 64-character session token tied to the current device. These tokens are not JWTs and instead rely on a 30-day trust window that refreshes whenever you log in with "Remember this device" enabled.
-- **Auto-login toggle**: The login screen checkbox and the Settings → Preferences toggle are now synchronized. Enabling one enables the other, updates the server-side preference, and persists the device trust window so the player can sign in automatically on next launch.
-- **Device management**: Settings → Device Management lists trusted devices, highlights the current device, and allows revocation. Revoking a device clears its remembered-session window immediately.
+- **Opaque session tokens**: Password login returns a short‑lived opaque access token with a refresh token (no JWT). The server keys for auth are `AUTH_PASSWORD_PEPPER` and `AUTH_TOKEN_KEY`.
+- **Device Sessions (PIN / Remember Device)**: Device‑aware login can bind a trusted device and PIN. Trusted devices maintain a 30‑day window that refreshes when "Remember this device" is enabled.
+- **Auto‑login toggle**: The login screen checkbox and the Settings → Preferences toggle are synchronized.
+- **Device management**: Settings → Device Management lists trusted devices, highlights the current device, and allows revocation.
 
 ## Performance Profiling
 

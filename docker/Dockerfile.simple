@@ -1,5 +1,5 @@
 # Simpler development environment
-FROM rust:1.75-bookworm
+FROM rust:1.81-bookworm
 
 # Install only essential dependencies
 RUN apt-get update && apt-get install -y \
@@ -18,4 +18,4 @@ WORKDIR /app
 EXPOSE 3000
 
 # Default command
-CMD ["cargo", "run", "--bin", "server"]
+CMD ["cargo", "run", "-p", "ferrex-server"]

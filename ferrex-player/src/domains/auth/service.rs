@@ -7,7 +7,6 @@ use crate::domains::auth::errors::{AuthError, AuthResult, DeviceError};
 use chrono::Utc;
 use ferrex_core::player_prelude::{
     DeviceRegistration, Platform, Role, User, UserPermissions, UserPreferences,
-    generate_trust_token,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -425,6 +424,15 @@ impl AuthService {
         // Remove existing PIN if any
         pins.retain(|p| p.user_id != user_id);
         pins.push(user_pin);
+        drop(pins);
+
+        let mut registrations = self.device_registrations.write().await;
+        for registration in registrations
+            .iter_mut()
+            .filter(|reg| reg.user_id == user_id)
+        {
+            registration.pin_configured = true;
+        }
 
         Ok(())
     }
@@ -433,6 +441,11 @@ impl AuthService {
 
     /// Trust a device for a user (30-day default expiry per requirements)
     pub async fn trust_device(&self, user_id: Uuid, device_id: String) -> AuthResult<()> {
+        let has_pin = {
+            let pins = self.user_pins.read().await;
+            pins.iter().any(|p| p.user_id == user_id)
+        };
+
         let mut registrations = self.device_registrations.write().await;
         let now = self.now().await;
 
@@ -444,8 +457,7 @@ impl AuthService {
             device_name: device_id.clone(),
             platform: Platform::Unknown,
             app_version: "1.0.0".to_string(),
-            trust_token: generate_trust_token(),
-            pin_hash: None,
+            pin_configured: has_pin,
             registered_at: now,
             last_used_at: now,
             expires_at: Some(now + chrono::Duration::days(30)), // 30-day expiry
@@ -825,6 +837,15 @@ impl AuthService {
         let mut pins = self.user_pins.write().await;
         pins.retain(|p| p.user_id != user_id);
         drop(pins);
+
+        let mut registrations = self.device_registrations.write().await;
+        for registration in registrations
+            .iter_mut()
+            .filter(|reg| reg.user_id == user_id)
+        {
+            registration.pin_configured = false;
+        }
+        drop(registrations);
 
         // Remove failed attempts
         let mut attempts = self.failed_attempts.write().await;

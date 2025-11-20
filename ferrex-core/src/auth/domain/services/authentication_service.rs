@@ -949,6 +949,26 @@ impl AuthenticationService {
     }
 
     /// Create a short-lived device possession challenge nonce
+    pub async fn get_pin_client_salt(&self, user_id: Uuid) -> Result<Vec<u8>, AuthenticationError> {
+        let mut user = self
+            .user_repo
+            .find_by_id(user_id)
+            .await
+            .map_err(AuthenticationError::from)?
+            .ok_or(AuthenticationError::UserNotFound)?;
+
+        if user.pin_client_salt().is_empty() {
+            user.rotate_pin_client_salt();
+            self.user_repo
+                .save(&user)
+                .await
+                .map_err(AuthenticationError::from)?;
+        }
+
+        Ok(user.pin_client_salt().to_vec())
+    }
+
+    /// Create a short-lived device possession challenge nonce
     pub async fn create_device_challenge(
         &self,
         device_session_id: Uuid,

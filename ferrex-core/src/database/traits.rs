@@ -15,7 +15,7 @@ use crate::{
         library::{Library, LibraryType},
         media::{EpisodeReference, Media, MovieReference, SeasonReference, SeriesReference},
     },
-    user::{User, UserSession},
+    user::User,
     watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
 };
 use async_trait::async_trait;
@@ -557,26 +557,6 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn user_has_role(&self, user_id: Uuid, role_name: &str) -> Result<bool>;
     async fn get_users_with_role(&self, role_name: &str) -> Result<Vec<Uuid>>;
 
-    // Authentication methods
-    async fn store_refresh_token(
-        &self,
-        token: &str,
-        user_id: Uuid,
-        device_name: Option<String>,
-        expires_at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<()>;
-    async fn get_refresh_token(
-        &self,
-        token: &str,
-    ) -> Result<Option<(Uuid, chrono::DateTime<chrono::Utc>)>>;
-    async fn delete_refresh_token(&self, token: &str) -> Result<()>;
-    async fn delete_user_refresh_tokens(&self, user_id: Uuid) -> Result<()>;
-
-    // Session management
-    async fn create_session(&self, session: &UserSession) -> Result<()>;
-    async fn get_user_sessions(&self, user_id: Uuid) -> Result<Vec<UserSession>>;
-    async fn delete_session(&self, session_id: Uuid) -> Result<()>;
-
     // Watch status methods
     async fn update_watch_progress(
         &self,
@@ -607,20 +587,6 @@ pub trait MediaDatabaseTrait: Send + Sync {
 
     // Query system
     async fn query_media(&self, query: &MediaQuery) -> Result<Vec<MediaWithStatus>>;
-
-    // Device authentication methods (legacy: removed in favor of auth domain repositories)
-
-    /// Update failed login attempts
-    async fn update_device_failed_attempts(
-        &self,
-        user_id: Uuid,
-        device_id: Uuid,
-        attempts: i32,
-        locked_until: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<()>;
-
-    // Kept intentionally empty. Use auth/domain repositories for device trust,
-    // sessions, and audit events.
 
     // Folder inventory management methods
     /// Get folders that need scanning based on filters

@@ -4,7 +4,9 @@ use axum::{
     Extension, Json,
 };
 use ferrex_core::{
-    api_types::ApiResponse, auth::domain::services::AuthenticationError, user::User,
+    api_types::{ApiResponse, users_admin::AdminUserInfo},
+    auth::domain::services::AuthenticationError,
+    user::User,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -30,16 +32,14 @@ pub struct DeleteUserRequest {
     pub user_id: Uuid,
 }
 
-/// Response for user list with role info
-#[derive(Debug, Serialize)]
-pub struct AdminUserInfo {
-    pub id: Uuid,
-    pub username: String,
-    pub display_name: String,
-    pub roles: Vec<String>, // Role names
-    pub created_at: i64,
-    pub session_count: i64,
+/// Request payload to register an admin session on a device
+#[derive(Debug, Deserialize)]
+pub struct RegisterAdminSessionRequest {
+    pub device_id: Uuid,
+    pub session_token: String,
 }
+
+/// Response for user list with role info lives in ferrex-core::api_types::users_admin::AdminUserInfo
 
 /// Query parameters for filtering users
 #[derive(Debug, Deserialize)]
@@ -206,6 +206,34 @@ pub async fn delete_user_admin(
         user.id
     );
 
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Register an admin session for PIN-eligible operations on a device
+pub async fn register_admin_session(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(request): Json<RegisterAdminSessionRequest>,
+) -> AppResult<StatusCode> {
+    match state
+        .register_admin_session(user.id, request.device_id, request.session_token)
+        .await
+    {
+        Ok(_) => Ok(StatusCode::CREATED),
+        Err(e) => {
+            tracing::error!("Failed to register admin session: {}", e);
+            Err(AppError::internal("Failed to register admin session"))
+        }
+    }
+}
+
+/// Remove an admin session binding for a device
+pub async fn remove_admin_session(
+    State(state): State<AppState>,
+    Extension(_user): Extension<User>,
+    Path(device_id): Path<Uuid>,
+) -> AppResult<StatusCode> {
+    state.remove_admin_session(device_id).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

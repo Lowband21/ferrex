@@ -4,9 +4,7 @@
 
 pub use crate::api_scan::{ScanConfig, ScanMetrics};
 pub use crate::api_types::player::*;
-pub use crate::auth::device::{
-    AuthenticatedDevice, DeviceRegistration, Platform, generate_trust_token,
-};
+pub use crate::auth::device::{AuthenticatedDevice, DeviceRegistration, Platform};
 pub use crate::query::prelude::*;
 pub use crate::traits::prelude::*;
 pub use crate::types::prelude::*;

@@ -85,6 +85,11 @@ impl AuthApplicationFacade {
         self.unit_of_work.users.clone()
     }
 
+    pub async fn get_pin_client_salt(&self, user_id: Uuid) -> Result<Vec<u8>, AuthFacadeError> {
+        let salt = self.auth_service.get_pin_client_salt(user_id).await?;
+        Ok(salt)
+    }
+
     pub async fn device_password_login(
         &self,
         username: &str,

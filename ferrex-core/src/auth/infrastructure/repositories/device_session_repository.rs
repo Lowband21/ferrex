@@ -25,8 +25,6 @@ struct DeviceSessionRecord {
     failed_attempts: i16,
     created_at: DateTime<Utc>,
     last_activity: DateTime<Utc>,
-    #[allow(dead_code)]
-    updated_at: DateTime<Utc>,
     session_token_hash: Option<String>,
     session_created_at: Option<DateTime<Utc>>,
     session_expires_at: Option<DateTime<Utc>>,
@@ -67,10 +65,9 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 ds.failed_attempts,
                 ds.created_at,
                 ds.last_activity,
-                ds.updated_at,
-                sess.session_token_hash,
-                sess.created_at AS session_created_at,
-                sess.expires_at AS session_expires_at
+                sess.session_token_hash AS "session_token_hash?",
+                sess.created_at AS "session_created_at?",
+                sess.expires_at AS "session_expires_at?"
             FROM auth_device_sessions ds
             INNER JOIN user_credentials uc ON uc.user_id = ds.user_id
             LEFT JOIN LATERAL (
@@ -115,10 +112,9 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 ds.failed_attempts,
                 ds.created_at,
                 ds.last_activity,
-                ds.updated_at,
-                sess.session_token_hash,
-                sess.created_at AS session_created_at,
-                sess.expires_at AS session_expires_at
+                sess.session_token_hash AS "session_token_hash?",
+                sess.created_at AS "session_created_at?",
+                sess.expires_at AS "session_expires_at?"
             FROM auth_device_sessions ds
             INNER JOIN user_credentials uc ON uc.user_id = ds.user_id
             LEFT JOIN LATERAL (
@@ -161,10 +157,9 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 ds.failed_attempts,
                 ds.created_at,
                 ds.last_activity,
-                ds.updated_at,
-                sess.session_token_hash,
-                sess.created_at AS session_created_at,
-                sess.expires_at AS session_expires_at
+                sess.session_token_hash AS "session_token_hash?",
+                sess.created_at AS "session_created_at?",
+                sess.expires_at AS "session_expires_at?"
             FROM auth_device_sessions ds
             INNER JOIN user_credentials uc ON uc.user_id = ds.user_id
             LEFT JOIN LATERAL (
@@ -199,7 +194,7 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
             .try_into()
             .context("failed attempts exceeds database representation")?;
 
-            sqlx::query!(
+        sqlx::query!(
                 r#"
                 INSERT INTO auth_device_sessions (
                 id,
@@ -397,14 +392,28 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
 
 impl PostgresDeviceSessionRepository {
     fn hydrate_session(&self, row: DeviceSessionRecord) -> Result<DeviceSession> {
-        let fingerprint = DeviceFingerprint::from_hash(row.device_fingerprint)
+        let DeviceSessionRecord {
+            id,
+            user_id,
+            device_fingerprint,
+            device_name,
+            device_public_key,
+            device_key_alg,
+            status: status_value,
+            pin_configured,
+            failed_attempts,
+            created_at,
+            last_activity,
+            session_token_hash,
+            session_created_at,
+            session_expires_at,
+            ..
+        } = row;
+
+        let fingerprint = DeviceFingerprint::from_hash(device_fingerprint)
             .context("invalid device fingerprint stored in database")?;
 
-        let session_token = match (
-            row.session_token_hash,
-            row.session_created_at,
-            row.session_expires_at,
-        ) {
+        let session_token = match (session_token_hash, session_created_at, session_expires_at) {
             (Some(token), Some(created_at), Some(expires_at)) => Some(
                 SessionToken::from_value(token, created_at, expires_at)
                     .context("failed to hydrate session token from database row")?,
@@ -413,33 +422,26 @@ impl PostgresDeviceSessionRepository {
         };
 
         let status =
-            status_from_db(&row.status).context("invalid auth_device_sessions.status value")?;
+            status_from_db(&status_value).context("invalid auth_device_sessions.status value")?;
 
-        let failed_attempts: u8 = row
-            .failed_attempts
+        let failed_attempts: u8 = failed_attempts
             .try_into()
             .context("failed_attempts exceeds u8 range")?;
 
         Ok(DeviceSession::hydrate(
-            row.id,
-            row.user_id,
+            id,
+            user_id,
             fingerprint,
-            row.device_name,
+            device_name,
+            device_public_key,
+            device_key_alg,
             status,
-            row.pin_configured,
+            pin_configured,
             session_token,
             failed_attempts,
-            row.created_at,
-            row.last_activity,
+            created_at,
+            last_activity,
         ))
-        .map(|mut s| {
-            if let Some(alg) = row.device_key_alg.as_ref() {
-                if let Some(pk) = row.device_public_key.as_ref() {
-                    s.set_device_public_key(alg.clone(), pk.clone());
-                }
-            }
-            s
-        })
     }
 }
 

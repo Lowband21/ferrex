@@ -408,6 +408,35 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             state.domains.ui.state.view = ViewState::Library;
             DomainUpdateResult::task(Task::none())
         }
+        ui::Message::ShowUserManagement => {
+            // Save current view to navigation history
+            state
+                .domains
+                .ui
+                .state
+                .navigation_history
+                .push(state.domains.ui.state.view.clone());
+
+            state.domains.ui.state.view = ViewState::AdminUsers;
+
+            // Trigger load of users from the user management domain
+            let task = Task::done(DomainMessage::UserManagement(
+                crate::domains::user_management::messages::Message::LoadUsers,
+            ));
+            DomainUpdateResult::task(task)
+        }
+        ui::Message::HideUserManagement => {
+            // Return to Admin Dashboard
+            state.domains.ui.state.view = ViewState::AdminDashboard;
+            DomainUpdateResult::task(Task::none())
+        }
+        ui::Message::UserAdminDelete(user_id) => {
+            // Proxy to user_management domain delete confirm action
+            let task = Task::done(DomainMessage::UserManagement(
+                crate::domains::user_management::messages::Message::DeleteUserConfirm(user_id),
+            ));
+            DomainUpdateResult::task(task)
+        }
         ui::Message::ShowLibraryManagement => {
             // Save current view to navigation history
             state

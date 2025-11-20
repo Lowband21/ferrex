@@ -12,7 +12,7 @@ use ferrex_core::player_prelude::{
     LibraryType, Media, MediaQuery, MediaWithStatus, Platform, Role, ScanCommandAcceptedResponse,
     ScanCommandRequest, ScanConfig, ScanMetrics, StartClaimResponse, StartScanRequest,
     UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions, UserPreferences,
-    UserWatchState, generate_trust_token,
+    UserWatchState,
 };
 use rkyv::util::AlignedVec;
 use uuid::Uuid;
@@ -365,7 +365,7 @@ impl ApiService for TestApiService {
 
         let token = AuthToken {
             access_token: format!("admin-{}", password),
-            refresh_token: generate_trust_token(),
+            refresh_token: format!("refresh-{}", Uuid::now_v7()),
             expires_in: 3600,
             session_id: Some(Uuid::now_v7()),
             device_session_id: Some(Uuid::now_v7()),
@@ -493,9 +493,7 @@ fn sample_device(user_id: Uuid) -> AuthenticatedDevice {
         app_version: Some("tester".into()),
         hardware_id: None,
         status: AuthDeviceStatus::Trusted,
-        pin_hash: None,
-        pin_set_at: None,
-        pin_last_used_at: None,
+        pin_configured: false,
         failed_attempts: 0,
         locked_until: None,
         first_authenticated_by: user_id,

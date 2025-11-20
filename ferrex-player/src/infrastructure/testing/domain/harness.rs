@@ -148,6 +148,7 @@ impl TestHarness {
         self.run_setup();
 
         // Run the test with timeout and panic capture
+        println!("capture_panics: {}", self.config.capture_panics);
         let result = if self.config.capture_panics {
             self.run_with_panic_capture(test_fn).await
         } else {

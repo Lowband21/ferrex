@@ -35,28 +35,7 @@ pub struct ListUsersQuery {
     pub include_inactive: bool,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CreateUserRequest {
-    pub username: String,
-    pub display_name: String,
-    pub password: String,
-    pub email: Option<String>,
-    pub avatar_url: Option<String>,
-    #[serde(default)]
-    pub role_ids: Vec<Uuid>,
-    #[serde(default = "default_true")]
-    pub is_active: bool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateUserRequest {
-    pub display_name: Option<String>,
-    pub email: Option<String>,
-    pub avatar_url: Option<String>,
-    pub is_active: Option<bool>,
-    pub role_ids: Option<Vec<Uuid>>,
-    pub new_password: Option<String>,
-}
+pub use ferrex_core::api_types::users_admin::{CreateUserRequest, UpdateUserRequest};
 
 #[derive(Debug, Serialize)]
 pub struct UserResponse {
@@ -81,9 +60,7 @@ pub struct UserListResponse {
     pub users: Vec<UserResponse>,
 }
 
-fn default_true() -> bool {
-    true
-}
+// default_true now lives in ferrex-core types; not needed here
 
 pub async fn list_users(
     State(state): State<AppState>,

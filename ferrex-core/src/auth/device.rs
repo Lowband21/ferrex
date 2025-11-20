@@ -142,10 +142,8 @@ pub struct DeviceRegistration {
     pub device_name: String,
     pub platform: Platform,
     pub app_version: String,
-    /// Cryptographically secure trust token
-    pub trust_token: String,
-    /// Optional PIN hash for this device-user combination
-    pub pin_hash: Option<String>,
+    /// Indicates whether the user had a PIN configured when this device was registered
+    pub pin_configured: bool,
     /// When the device was first registered
     pub registered_at: DateTime<Utc>,
     /// When the device was last used
@@ -178,7 +176,7 @@ impl DeviceRegistration {
 
     /// Check if PIN is required for this device
     pub fn requires_pin(&self) -> bool {
-        self.pin_hash.is_some()
+        self.pin_configured
     }
 }
 
@@ -194,7 +192,6 @@ pub struct RegisterDeviceRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterDeviceResponse {
     pub device_registration: DeviceRegistration,
-    pub trust_token: String,
 }
 
 /// Request for device-based authentication
@@ -202,7 +199,6 @@ pub struct RegisterDeviceResponse {
 pub struct DeviceAuthRequest {
     pub device_id: Uuid,
     pub user_id: Uuid,
-    pub trust_token: String,
     pub pin: Option<String>,
 }
 
@@ -219,23 +215,6 @@ pub enum DeviceCheckResult {
     Expired,
 }
 
-/// Generate a cryptographically secure trust token
-pub fn generate_trust_token() -> String {
-    use rand::distr::Alphanumeric;
-    use rand::{Rng, rng};
-
-    rng()
-        .sample_iter(&Alphanumeric)
-        .take(64)
-        .map(char::from)
-        .collect()
-}
-
-// Note: Device salt derivation is implemented in the server module
-// to have access to proper cryptographic dependencies.
-
-// Legacy device-user credential removed; user-level PIN is canonical.
-
 /// Authenticated device record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthenticatedDevice {
@@ -247,9 +226,7 @@ pub struct AuthenticatedDevice {
     pub app_version: Option<String>,
     pub hardware_id: Option<String>,
     pub status: AuthDeviceStatus,
-    pub pin_hash: Option<String>,
-    pub pin_set_at: Option<DateTime<Utc>>,
-    pub pin_last_used_at: Option<DateTime<Utc>>,
+    pub pin_configured: bool,
     pub failed_attempts: i32,
     pub locked_until: Option<DateTime<Utc>>,
     pub first_authenticated_by: Uuid,

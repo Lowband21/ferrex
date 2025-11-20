@@ -3,7 +3,7 @@
 use crate::common::messages::DomainMessage;
 use crate::domains::ui::theme;
 use crate::domains::ui::types::ViewState;
-use crate::domains::ui::views::admin::{view_admin_dashboard, view_library_management};
+use crate::domains::ui::views::admin::{view_admin_dashboard, view_admin_users, view_library_management};
 use crate::domains::ui::views::auth::view_auth;
 use crate::domains::ui::views::header::view_header;
 use crate::domains::ui::views::library::view_library;
@@ -46,6 +46,7 @@ pub fn view(state: &State) -> Element<'_, DomainMessage> {
         ViewState::Library => view_library(state).map(DomainMessage::from),
         ViewState::LibraryManagement => view_library_management(state).map(DomainMessage::from),
         ViewState::AdminDashboard => view_admin_dashboard(state).map(DomainMessage::from),
+        ViewState::AdminUsers => view_admin_users(state).map(DomainMessage::from),
         ViewState::Player => view_player(state).map(DomainMessage::Player),
         ViewState::LoadingVideo { url } => view_loading_video(state, url).map(DomainMessage::from),
         ViewState::VideoError { message } => view_video_error(message).map(DomainMessage::from),

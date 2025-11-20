@@ -3,31 +3,76 @@ members = ["ferrex-server", "ferrex-core", "ferrex-player"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
 edition = "2024"
-authors = ["Grayson Hieb"]
+version = "0.1.0"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/Lowband21/rusty-media-server"
-documentation = "https://docs.rs/ferrex"
-homepage = "https://github.com/Lowband21/ferrex_media_server"
+repository = "https://github.com/Lowband21/ferrex.git"
+homepage = "https://github.com/Lowband21/ferrex"
 readme = "README.md"
-keywords = ["media-server", "streaming", "rust", "video", "hdr", "iced", "shader"]
+keywords = [
+  "media-server",
+  "streaming",
+  "rust",
+  "video",
+  "hdr",
+  "iced",
+  "shader",
+]
 categories = ["multimedia", "web-programming::http-server"]
+
+# Documentation settings
+[workspace.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+# Define documentation lints
+[workspace.lints.rustdoc]
+#broken_intra_doc_links = "warn"
+#private_intra_doc_links = "warn"
+missing_crate_level_docs = "allow"
+#private_doc_tests = "warn"
+#invalid_codeblock_attributes = "warn"
+#invalid_rust_codeblocks = "warn"
+#bare_urls = "warn"
+
+[workspace.lints.rust]
+# Still need to add docs
+missing_docs = "allow"
+missing_debug_implementations = "deny"
+
 
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "^1.47", default-features = false, features = ["full"] }
+tokio = { version = "^1.47", default-features = false, features = [
+  "rt",
+  "rt-multi-thread",
+  "macros",
+  "parking_lot",
+] }
 tokio-util = { version = "^0.7", default-features = false, features = ["io"] }
-tokio-stream = { version = "^0.1", default-features = false, features = ["sync"] }
+tokio-stream = { version = "^0.1", default-features = false, features = [
+  "sync",
+] }
 
 # Futures
 futures = "^0.3"
 futures-util = "^0.3"
 
 # Serialization
-serde = { version = "^1.0", default-features = false, features = ["std", "derive"] }
+serde = { version = "^1.0", default-features = false, features = [
+  "std",
+  "derive",
+] }
 serde_json = "^1.0"
-rkyv = { version = "^0.8.12", default-features = false, features = ["std", "alloc", "bytecheck", "little_endian", "aligned", "pointer_width_32", "uuid-1"] }
+rkyv = { version = "^0.8.12", default-features = false, features = [
+  "std",
+  "alloc",
+  "bytecheck",
+  "little_endian",
+  "aligned",
+  "pointer_width_32",
+  "uuid-1",
+] }
 
 # Error handling
 anyhow = "^1.0"
@@ -39,14 +84,41 @@ tracing-subscriber = { version = "^0.3", features = ["env-filter"] }
 log = "^0.4"
 
 # Time handling
-chrono = { version = "^0.4", default-features = false, features = ["alloc", "std", "clock", "now", "serde"] }
+chrono = { version = "^0.4", default-features = false, features = [
+  "alloc",
+  "std",
+  "clock",
+  "now",
+  "serde",
+] }
 
 # HTTP/Web
-axum = { version = "^0.8.6", features = ["ws", "macros"] }
-axum-server = { version = "^0.7", features = ["tls-rustls"] }
-tower = { version = "^0.5", features = ["util"] }
-tower-http = { version = "^0.6", features = ["fs", "cors", "trace"] }
-reqwest = { version = "^0.12", features = ["json", "stream"] }
+axum = { version = "^0.8.6", default-features = false, features = [
+  "http1",
+  "http2",
+  "ws",
+  "macros",
+  "json",
+  "form",
+  "query",
+] }
+axum-server = { version = "^0.7", default-features = false, features = [
+  "tls-rustls-no-provider",
+] }
+tower = { version = "^0.5", default-features = false, features = ["util"] }
+tower-http = { version = "^0.6", default-features = false, features = [
+  "fs",
+  "cors",
+  "trace",
+] }
+reqwest = { version = "^0.12", default-features = false, features = [
+  "http2",
+  "rustls-tls",
+  "json",
+  "stream",
+  "charset",
+  "system-proxy",
+] }
 
 # Async traits
 async-stream = "^0.3.6"
@@ -54,19 +126,24 @@ async-trait = "^0.1"
 
 # Database
 sqlx = { version = "0.8.6", features = [
-    "runtime-tokio",
-    "postgres",
-    "chrono",
-    "uuid",
-    "migrate",
-    "macros",
-    "derive",
-    "bigdecimal",
-    "rust_decimal",
-    "ipnetwork",
-    "json"
+  "runtime-tokio",
+  "postgres",
+  "chrono",
+  "uuid",
+  "migrate",
+  "macros",
+  "derive",
+  "bigdecimal",
+  "rust_decimal",
+  "ipnetwork",
+  "json",
 ] }
-redis = { version = "^0.32", features = ["tokio-comp", "connection-manager", "aio"] }
+redis = { version = "^0.32", default-features = false, features = [
+  "tokio-comp",
+  "connection-manager",
+  "aio",
+  "script",
+] }
 ipnetwork = "^0.20"
 
 # Media processing
@@ -79,8 +156,8 @@ image = "^0.25"
 sha2 = "^0.10"
 aes-gcm = "^0.10"
 base64 = "^0.22"
-rustls = "^0.23"
-rustls-pemfile = "^2.2"
+rustls = { version = "^0.23", default-features = false }
+rustls-pemfile = { version = "^2.2", default-features = false }
 rustls-pki-types = "^1.12"
 rand = "^0.9"
 
@@ -117,37 +194,22 @@ jsonwebtoken = "^9.3"
 argon2 = "^0.5.3"
 
 [profile.release]
-lto = "thin"
-codegen-units = 256
+lto = "fat"
+codegen-units = 16
 opt-level = 3
 
 [profile.dev]
 opt-level = 1
 
-## Makes debug builds of ferrex-player usable
-## With the downside of slowing diagnostics
-#[profile.dev.package."*"]
-#opt-level = 3
+[profile.dev.package.ferrex-player]
+opt-level = 1
 
-# Documentation settings
-[workspace.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
+[profile.priority]
+inherits = "dev"
+opt-level = 1
 
-# Define documentation lints
-[workspace.lints.rustdoc]
-#broken_intra_doc_links = "warn"
-#private_intra_doc_links = "warn"
-missing_crate_level_docs = "allow"
-#private_doc_tests = "warn"
-#invalid_codeblock_attributes = "warn"
-#invalid_rust_codeblocks = "warn"
-#bare_urls = "warn"
-
-[workspace.lints.rust]
-# Still need to add docs
-missing_docs = "allow"
-missing_debug_implementations = "deny"
+[profile.priority.package.ferrex-player]
+opt-level = 3
 
 [patch.crates-io]
 iced = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced" }

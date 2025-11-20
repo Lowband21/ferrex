@@ -3,7 +3,6 @@ pub mod device_validation;
 pub mod handlers;
 pub mod middleware;
 pub mod permission_middleware;
-pub mod pin_handlers;
 pub mod tls;
 pub mod user_preferences;
 

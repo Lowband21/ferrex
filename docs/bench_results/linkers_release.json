@@ -1,0 +1,64 @@
+{
+  "results": [
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL cargo build --release",
+      "mean": 62.265081661626674,
+      "stddev": 0.22581535092120567,
+      "median": 62.13539705896,
+      "user": 699.0112970266667,
+      "system": 48.877274853333326,
+      "min": 62.13401837196,
+      "max": 62.52582955396,
+      "times": [
+        62.52582955396,
+        62.13401837196,
+        62.13539705896
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL RUSTFLAGS='-Clinker=clang -Clink-args=--ld-path=wild' cargo build --release",
+      "mean": 66.10336159362667,
+      "stddev": 3.5732206575384513,
+      "median": 64.29802891496,
+      "user": 699.2993373600001,
+      "system": 46.32555885333333,
+      "min": 63.79300967796,
+      "max": 70.21904618795999,
+      "times": [
+        70.21904618795999,
+        63.79300967796,
+        64.29802891496
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL mold -run cargo build --release",
+      "mean": 73.40047984929332,
+      "stddev": 12.645283347295697,
+      "median": 67.01240710495999,
+      "user": 703.1322756933333,
+      "system": 47.21998418666666,
+      "min": 65.22360658795999,
+      "max": 87.96542585495999,
+      "times": [
+        67.01240710495999,
+        65.22360658795999,
+        87.96542585495999
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}

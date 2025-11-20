@@ -97,6 +97,8 @@ impl DeviceSession {
         user_id: Uuid,
         device_fingerprint: DeviceFingerprint,
         device_name: String,
+        device_public_key: Option<String>,
+        device_key_alg: Option<String>,
         status: DeviceStatus,
         pin_configured: bool,
         session_token: Option<SessionToken>,
@@ -109,8 +111,8 @@ impl DeviceSession {
             user_id,
             device_fingerprint,
             device_name,
-            device_public_key: None,
-            device_key_alg: None,
+            device_public_key,
+            device_key_alg,
             status,
             pin_configured,
             session_token,
@@ -194,6 +196,7 @@ impl DeviceSession {
         self.session_token = None;
         self.failed_attempts = 0;
         self.last_activity = Utc::now();
+        self.pin_configured = false;
 
         self.add_event(AuthEvent::PinRemoved {
             session_id: self.id,
@@ -364,8 +367,12 @@ impl DeviceSession {
     pub fn device_name(&self) -> &str {
         &self.device_name
     }
-    pub fn device_public_key(&self) -> Option<&str> { self.device_public_key.as_deref() }
-    pub fn device_key_alg(&self) -> Option<&str> { self.device_key_alg.as_deref() }
+    pub fn device_public_key(&self) -> Option<&str> {
+        self.device_public_key.as_deref()
+    }
+    pub fn device_key_alg(&self) -> Option<&str> {
+        self.device_key_alg.as_deref()
+    }
     pub fn status(&self) -> DeviceStatus {
         self.status
     }
@@ -399,7 +406,6 @@ impl DeviceSession {
     pub fn set_persisted_token(&mut self, token: Option<SessionToken>) {
         self.session_token = token;
     }
-
 }
 
 #[cfg(test)]
@@ -433,9 +439,7 @@ mod tests {
 
         // Authenticate (server verification happens upstream)
         session.ensure_pin_available(3).unwrap();
-        let token = session
-            .issue_pin_session(Duration::hours(1))
-            .unwrap();
+        let token = session.issue_pin_session(Duration::hours(1)).unwrap();
         assert!(token.is_valid());
 
         // Simulate a failure and ensure lockout rules apply

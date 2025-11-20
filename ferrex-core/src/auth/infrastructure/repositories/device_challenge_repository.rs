@@ -18,7 +18,9 @@ impl fmt::Debug for PostgresDeviceChallengeRepository {
 }
 
 impl PostgresDeviceChallengeRepository {
-    pub fn new(pool: PgPool) -> Self { Self { pool } }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
 }
 
 #[async_trait]
@@ -80,10 +82,7 @@ impl DeviceChallengeRepository for PostgresDeviceChallengeRepository {
         Ok(())
     }
 
-    async fn consume_if_fresh(
-        &self,
-        id: Uuid,
-    ) -> Result<Option<(Uuid, Vec<u8>)>> {
+    async fn consume_if_fresh(&self, id: Uuid) -> Result<Option<(Uuid, Vec<u8>)>> {
         let row = sqlx::query!(
             r#"
             WITH got AS (

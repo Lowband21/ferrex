@@ -1,0 +1,64 @@
+{
+  "results": [
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_DEV_OPT_LEVEL -u CARGO_PROFILE_RELEASE_OPT_LEVEL     -u CARGO_PROFILE_RELEASE_INCREMENTAL CARGO_PROFILE_RELEASE_INCREMENTAL=true cargo build --profile dev -j3",
+      "mean": 5.669071975406666,
+      "stddev": 0.014669320924488811,
+      "median": 5.67367229774,
+      "user": 9.251761359999998,
+      "system": 7.342163333333333,
+      "min": 5.65265385574,
+      "max": 5.68088977274,
+      "times": [
+        5.65265385574,
+        5.68088977274,
+        5.67367229774
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_DEV_OPT_LEVEL -u CARGO_PROFILE_RELEASE_OPT_LEVEL     -u CARGO_PROFILE_RELEASE_INCREMENTAL CARGO_PROFILE_RELEASE_INCREMENTAL=true RUSTFLAGS='-Clinker=clang -Clink-args=--ld-path=wild' cargo build --profile dev -j3",
+      "mean": 5.349168081073333,
+      "stddev": 0.05288270090567716,
+      "median": 5.36281618374,
+      "user": 5.5779403599999995,
+      "system": 1.929038,
+      "min": 5.29079912674,
+      "max": 5.3938889327399995,
+      "times": [
+        5.36281618374,
+        5.3938889327399995,
+        5.29079912674
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_DEV_OPT_LEVEL -u CARGO_PROFILE_RELEASE_OPT_LEVEL     -u CARGO_PROFILE_RELEASE_INCREMENTAL CARGO_PROFILE_RELEASE_INCREMENTAL=true mold -run cargo build --profile dev -j3",
+      "mean": 5.434183171073333,
+      "stddev": 0.034048918813333745,
+      "median": 5.4429649397399995,
+      "user": 5.549181693333334,
+      "system": 1.9407646666666665,
+      "min": 5.39660359474,
+      "max": 5.46298097874,
+      "times": [
+        5.46298097874,
+        5.4429649397399995,
+        5.39660359474
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}

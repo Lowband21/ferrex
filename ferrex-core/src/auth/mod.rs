@@ -9,7 +9,6 @@ pub mod device;
 pub mod domain;
 #[cfg(feature = "database")]
 pub mod infrastructure;
-pub mod pin;
 pub mod policy;
 pub mod rate_limit;
 pub mod session;
@@ -18,8 +17,6 @@ pub mod state_machine;
 
 pub use crypto::{AuthCrypto, AuthCryptoError};
 pub use device::*;
-#[cfg(feature = "database")]
-pub use pin::*;
 pub use policy::{AuthSecuritySettings, PasswordPolicy, PasswordPolicyCheck, PasswordPolicyRule};
 // Re-export session types with explicit naming to avoid conflicts
 pub use session::{

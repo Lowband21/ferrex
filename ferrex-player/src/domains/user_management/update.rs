@@ -1,4 +1,5 @@
 use ferrex_core::player_prelude::UserPermissions;
+use ferrex_core::api_types::users_admin::AdminUserInfo;
 use iced::Task;
 use log::{debug, error, info};
 
@@ -36,24 +37,24 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
             };
             DomainUpdateResult::task(Task::perform(
                 async move { service.list_users().await.map_err(|e| e.to_string()) },
-                |result| DomainMessage::from(Message::UsersLoaded(result)),
+                |result: Result<Vec<AdminUserInfo>, String>| {
+                    DomainMessage::from(Message::UsersLoaded(result))
+                },
             ))
         }
 
-        Message::UsersLoaded(result) => {
-            match result {
-                Ok(users) => {
-                    info!("Successfully loaded {} users", users.len());
-                    // TODO: Update state with loaded users
-                    DomainUpdateResult::task(Task::none())
-                }
-                Err(error) => {
-                    error!("Failed to load users: {}", error);
-                    // TODO: Handle error state
-                    DomainUpdateResult::task(Task::none())
-                }
+        Message::UsersLoaded(result) => match result {
+            Ok(users) => {
+                info!("Successfully loaded {} users (admin view)", users.len());
+                state.domains.user_management.state.users = users;
+                DomainUpdateResult::task(Task::none())
             }
-        }
+            Err(error) => {
+                error!("Failed to load users: {}", error);
+                // Keep previous list; optionally surface an error in UI later
+                DomainUpdateResult::task(Task::none())
+            }
+        },
 
         // User selection
         Message::SelectUser(user_id) => {
@@ -246,7 +247,13 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
 
         Message::DeleteUserSuccess(user_id) => {
             info!("User deleted successfully: {}", user_id);
-            // TODO: Update state and emit event
+            // Remove from cached admin users list for immediate UI feedback
+            state
+                .domains
+                .user_management
+                .state
+                .users
+                .retain(|u| u.id != user_id);
             DomainUpdateResult::with_events(Task::none(), vec![CrossDomainEvent::LibraryUpdated])
             // TODO: Create proper UserDeleted event
         }

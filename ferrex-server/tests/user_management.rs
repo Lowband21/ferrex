@@ -143,10 +143,11 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
     promote_to_admin(&state, admin_id).await?;
 
     // Track baseline admin_actions entries; user CRUD should eventually populate this log.
-    let admin_actions_before: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM admin_actions")
-        .fetch_one(state.postgres.pool())
-        .await?
-        .unwrap_or(0);
+    let admin_actions_before: i64 =
+        sqlx::query!("SELECT COUNT(*) as \"count!\" FROM admin_actions")
+            .fetch_one(state.postgres.pool())
+            .await?
+            .count;
 
     // Create a managed user through the admin API.
     let create_response = server
@@ -243,25 +244,25 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
     assert_eq!(managed_entry_after_login["session_count"].as_u64(), Some(1));
 
     // Confirm the database reflects the active session and refresh token before deletion.
-    let sessions_before: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM auth_sessions WHERE user_id = $1",
+    let sessions_before: i64 = sqlx::query!(
+        "SELECT COUNT(*) as \"count!\" FROM auth_sessions WHERE user_id = $1",
         managed_id
     )
     .fetch_one(state.postgres.pool())
     .await?
-    .unwrap_or(0);
+    .count;
     assert_eq!(
         sessions_before, 1,
         "expected one active session before deletion"
     );
 
-    let refresh_before: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM auth_refresh_tokens WHERE user_id = $1",
+    let refresh_before: i64 = sqlx::query!(
+        "SELECT COUNT(*) as \"count!\" FROM auth_refresh_tokens WHERE user_id = $1",
         managed_id
     )
     .fetch_one(state.postgres.pool())
     .await?
-    .unwrap_or(0);
+    .count;
     assert_eq!(
         refresh_before, 1,
         "expected one refresh token before deletion"
@@ -278,35 +279,35 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
     let deleted_user = state.unit_of_work.users.get_user_by_id(managed_id).await?;
     assert!(deleted_user.is_none(), "user record should be removed");
 
-    let sessions_after: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM auth_sessions WHERE user_id = $1",
+    let sessions_after: i64 = sqlx::query!(
+        "SELECT COUNT(*) as \"count!\" FROM auth_sessions WHERE user_id = $1",
         managed_id
     )
     .fetch_one(state.postgres.pool())
     .await?
-    .unwrap_or(0);
+    .count;
     assert_eq!(
         sessions_after, 0,
         "all sessions must be revoked after deletion"
     );
 
-    let refresh_after: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM auth_refresh_tokens WHERE user_id = $1",
+    let refresh_after: i64 = sqlx::query!(
+        "SELECT COUNT(*) as \"count!\" FROM auth_refresh_tokens WHERE user_id = $1",
         managed_id
     )
     .fetch_one(state.postgres.pool())
     .await?
-    .unwrap_or(0);
+    .count;
     assert_eq!(
         refresh_after, 0,
         "all refresh tokens must be removed after deletion"
     );
 
     // Admin actions are not yet persisted for user management flows; track the gap explicitly.
-    let admin_actions_after: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM admin_actions")
+    let admin_actions_after: i64 = sqlx::query!("SELECT COUNT(*) as \"count!\" FROM admin_actions")
         .fetch_one(state.postgres.pool())
         .await?
-        .unwrap_or(0);
+        .count;
     assert_eq!(
         admin_actions_after - admin_actions_before,
         0,
@@ -356,22 +357,22 @@ async fn admin_endpoints_record_audit_logs(pool: PgPool) -> Result<()> {
     let managed_id = Uuid::parse_str(&managed_id_raw)?;
 
     // Verify admin_actions and security_audit_log entries for creation
-    let admin_actions_created: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM admin_actions WHERE action_type = 'user.create' AND target_id = $1",
+    let admin_actions_created: i64 = sqlx::query!(
+        "SELECT COUNT(*) as \"count!\" FROM admin_actions WHERE action_type = 'user.create' AND target_id = $1",
         managed_id
     )
     .fetch_one(state.postgres.pool())
     .await?
-    .unwrap_or(0);
+    .count;
     assert_eq!(admin_actions_created, 1, "one admin action for create");
 
-    let security_created: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM security_audit_log WHERE event_type = 'user_created' AND user_id = $1",
+    let security_created: i64 = sqlx::query!(
+        "SELECT COUNT(*) as \"count!\" FROM security_audit_log WHERE event_type = 'user_created' AND user_id = $1",
         managed_id
     )
     .fetch_one(state.postgres.pool())
     .await?
-    .unwrap_or(0);
+    .count;
     assert_eq!(security_created, 1, "one security audit for create");
 
     // Update via admin API
@@ -386,22 +387,22 @@ async fn admin_endpoints_record_audit_logs(pool: PgPool) -> Result<()> {
         .await;
     update_response.assert_status_ok();
 
-    let admin_actions_updated: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM admin_actions WHERE action_type = 'user.update' AND target_id = $1",
+    let admin_actions_updated: i64 = sqlx::query!(
+        "SELECT COUNT(*) as \"count!\" FROM admin_actions WHERE action_type = 'user.update' AND target_id = $1",
         managed_id
     )
     .fetch_one(state.postgres.pool())
     .await?
-    .unwrap_or(0);
+    .count;
     assert_eq!(admin_actions_updated, 1, "one admin action for update");
 
-    let security_updated: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM security_audit_log WHERE event_type = 'user_updated' AND user_id = $1",
+    let security_updated: i64 = sqlx::query!(
+        "SELECT COUNT(*) as \"count!\" FROM security_audit_log WHERE event_type = 'user_updated' AND user_id = $1",
         managed_id
     )
     .fetch_one(state.postgres.pool())
     .await?
-    .unwrap_or(0);
+    .count;
     assert_eq!(security_updated, 1, "one security audit for update");
 
     // Delete via admin API
@@ -411,22 +412,23 @@ async fn admin_endpoints_record_audit_logs(pool: PgPool) -> Result<()> {
         .await;
     delete_response.assert_status(StatusCode::NO_CONTENT);
 
-    let admin_actions_deleted: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM admin_actions WHERE action_type = 'user.delete' AND target_id = $1",
+    let admin_actions_deleted: i64 = sqlx::query!(
+        "SELECT COUNT(*) as \"count!\" FROM admin_actions WHERE action_type = 'user.delete' AND target_id = $1",
         managed_id
     )
     .fetch_one(state.postgres.pool())
     .await?
-    .unwrap_or(0);
+    .count;
     assert_eq!(admin_actions_deleted, 1, "one admin action for delete");
 
-    let security_deleted: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM security_audit_log WHERE event_type = 'user_deleted' AND user_id = $1",
-        managed_id
+    let managed_id_str = managed_id.to_string();
+    let security_deleted: i64 = sqlx::query!(
+        "SELECT COUNT(*) as \"count!\" FROM security_audit_log WHERE event_type = 'user_deleted' AND event_data->>'target_user_id' = $1",
+        managed_id_str
     )
     .fetch_one(state.postgres.pool())
     .await?
-    .unwrap_or(0);
+    .count;
     assert_eq!(security_deleted, 1, "one security audit for delete");
 
     Ok(())

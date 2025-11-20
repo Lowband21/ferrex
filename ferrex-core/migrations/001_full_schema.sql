@@ -27,6 +27,20 @@ COMMENT ON EXTENSION pg_trgm IS 'text similarity measurement and index searching
 
 
 --
+-- Name: pgcrypto; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION pgcrypto; Type: COMMENT; Schema: -; Owner: 
+--
+
+COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions, including gen_random_bytes()';
+
+
+--
 -- Name: check_and_move_completed(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -2585,6 +2599,7 @@ CREATE TABLE public.user_credentials (
     user_id uuid NOT NULL,
     password_hash character varying(255) NOT NULL,
     pin_hash text,
+    pin_client_salt bytea DEFAULT public.gen_random_bytes(16) NOT NULL,
     pin_updated_at timestamp with time zone,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );

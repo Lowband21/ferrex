@@ -42,6 +42,10 @@ pub enum Message {
     HideAdminDashboard,
     ShowLibraryManagement,
     HideLibraryManagement,
+    ShowUserManagement,
+    HideUserManagement,
+    // Proxies to user management domain
+    UserAdminDelete(uuid::Uuid),
     #[cfg(feature = "demo")]
     DemoMoviesTargetChanged(String),
     #[cfg(feature = "demo")]
@@ -206,6 +210,9 @@ impl Message {
             Self::HideAdminDashboard => "UI::HideAdminDashboard",
             Self::ShowLibraryManagement => "UI::ShowLibraryManagement",
             Self::HideLibraryManagement => "UI::HideLibraryManagement",
+            Self::ShowUserManagement => "UI::ShowUserManagement",
+            Self::HideUserManagement => "UI::HideUserManagement",
+            Self::UserAdminDelete(_) => "UI::UserAdminDelete",
             #[cfg(feature = "demo")]
             Self::DemoMoviesTargetChanged(_) => "UI::DemoMoviesTargetChanged",
             #[cfg(feature = "demo")]
@@ -373,6 +380,9 @@ impl std::fmt::Debug for Message {
             Self::HideAdminDashboard => write!(f, "UI::HideAdminDashboard"),
             Self::ShowLibraryManagement => write!(f, "UI::ShowLibraryManagement"),
             Self::HideLibraryManagement => write!(f, "UI::HideLibraryManagement"),
+            Self::ShowUserManagement => write!(f, "UI::ShowUserManagement"),
+            Self::HideUserManagement => write!(f, "UI::HideUserManagement"),
+            Self::UserAdminDelete(uuid) => write!(f, "UI::UserAdminDelete({})", uuid),
             #[cfg(feature = "demo")]
             Self::DemoMoviesTargetChanged(value) => {
                 write!(f, "UI::DemoMoviesTargetChanged({value})")

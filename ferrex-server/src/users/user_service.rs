@@ -62,6 +62,7 @@ impl<'a> UserService<'a> {
             state.unit_of_work.rbac.clone(),
             state.unit_of_work.security_settings.clone(),
             state.auth_crypto.clone(),
+            state.auth_service(),
         );
 
         Self { state, admin }

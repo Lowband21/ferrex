@@ -106,6 +106,9 @@ impl ViewIdentifier for ViewState {
             ViewState::AdminDashboard => {
                 ScrollPositionManager::generate_key("admin_dashboard", None, None)
             }
+            ViewState::AdminUsers => {
+                ScrollPositionManager::generate_key("admin_users", None, None)
+            }
             ViewState::UserSettings => {
                 ScrollPositionManager::generate_key("user_settings", None, None)
             }

@@ -8,6 +8,7 @@ pub mod library;
 pub mod media;
 pub mod responses;
 pub mod scan;
+pub mod users_admin;
 pub mod setup;
 
 pub use demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
@@ -25,6 +26,7 @@ pub use scan::{
     ActiveScansResponse, LatestProgressResponse, ScanCommandAcceptedResponse, ScanCommandRequest,
     ScanLifecycleStatus, ScanSnapshotDto, StartScanRequest,
 };
+pub use users_admin::{AdminUserInfo, CreateUserRequest, UpdateUserRequest};
 
 /// Curated exports relied on by the UI/player crates.
 pub mod player {
@@ -46,4 +48,5 @@ pub mod player {
         FilterIndicesRequest, IndicesResponse, MetadataRequest, RatingValue, ScalarRange,
         rating_value_from_f32, rating_value_to_f32,
     };
+    pub use super::users_admin::{AdminUserInfo, CreateUserRequest, UpdateUserRequest};
 }

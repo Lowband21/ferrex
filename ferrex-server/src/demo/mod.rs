@@ -9,6 +9,7 @@ use ferrex_core::providers::TmdbApiProvider;
 use ferrex_core::rbac::roles;
 use ferrex_core::types::LibraryID;
 use ferrex_core::types::library::LibraryType;
+use reqwest::Url;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;

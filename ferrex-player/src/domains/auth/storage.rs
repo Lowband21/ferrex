@@ -98,8 +98,7 @@ impl AuthStorage {
             tokio::fs::read(&wrap_path).await?
         } else {
             let mut key = [0u8; 32];
-            getrandom::getrandom(&mut key)
-                .map_err(|e| anyhow::anyhow!("rng failed: {}", e))?;
+            getrandom::getrandom(&mut key).map_err(|e| anyhow::anyhow!("rng failed: {}", e))?;
             if let Some(parent) = wrap_path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
@@ -165,8 +164,13 @@ impl AuthStorage {
             // Backward compatibility: older format used Argon2id + random salt
             let salt = SaltString::from_b64(salt_str)
                 .map_err(|e| anyhow::anyhow!("Invalid salt format: {}", e))?;
-            let params = Params::new(ARGON2_MEM_COST, ARGON2_TIME_COST, ARGON2_PARALLELISM, Some(32))
-                .map_err(|e| anyhow::anyhow!("Invalid Argon2 parameters: {}", e))?;
+            let params = Params::new(
+                ARGON2_MEM_COST,
+                ARGON2_TIME_COST,
+                ARGON2_PARALLELISM,
+                Some(32),
+            )
+            .map_err(|e| anyhow::anyhow!("Invalid Argon2 parameters: {}", e))?;
             let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
             let mut out = [0u8; 32];
             argon2

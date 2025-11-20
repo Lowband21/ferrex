@@ -8,19 +8,15 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use ferrex_core::{
-    api_types::ApiResponse,
-    rbac::UserPermissions,
-    user::User,
-};
-use sqlx::types::ipnetwork::IpNetwork;
+use ferrex_core::{api_types::ApiResponse, rbac::UserPermissions, user::User};
 use serde_json::json;
+use sqlx::types::ipnetwork::IpNetwork;
 use uuid::Uuid;
 
 use crate::infra::app_state::AppState;
 use crate::infra::errors::{AppError, AppResult};
-use crate::users::admin_handlers::AdminUserInfo;
-use crate::users::user_management::{CreateUserRequest, UpdateUserRequest, map_auth_facade_error};
+use ferrex_core::api_types::users_admin::{AdminUserInfo, CreateUserRequest, UpdateUserRequest};
+use crate::users::user_management::map_auth_facade_error;
 use crate::users::{CreateUserParams, UpdateUserParams, UserService};
 
 /// Create a user via the admin API.
@@ -237,12 +233,15 @@ pub async fn admin_delete_user(
     .await?;
     record_security_event(
         &state,
-        Some(user_id),
+        None,
         None,
         "user_deleted",
         true,
         None,
-        Some(json!({"admin_id": admin.id})),
+        Some(json!({
+            "admin_id": admin.id,
+            "target_user_id": user_id,
+        })),
     )
     .await?;
 

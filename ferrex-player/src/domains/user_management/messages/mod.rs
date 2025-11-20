@@ -1,11 +1,12 @@
 use ferrex_core::player_prelude::User;
+use ferrex_core::api_types::users_admin::AdminUserInfo;
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub enum Message {
     // User CRUD operations
     LoadUsers,
-    UsersLoaded(Result<Vec<User>, String>),
+    UsersLoaded(Result<Vec<AdminUserInfo>, String>),
 
     // User selection
     SelectUser(Uuid),

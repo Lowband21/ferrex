@@ -20,6 +20,8 @@ pub struct UserManagementDomainState {
     pub user_admin_service: Option<
         std::sync::Arc<dyn crate::infrastructure::services::user_management::UserAdminService>,
     >,
+    /// Cached admin user list for the admin users page
+    pub users: Vec<ferrex_core::api_types::users_admin::AdminUserInfo>,
 }
 
 impl std::fmt::Debug for UserManagementDomainState {
@@ -31,6 +33,7 @@ impl std::fmt::Debug for UserManagementDomainState {
                 "has_user_admin_service",
                 &self.user_admin_service.as_ref().map(|_| true),
             )
+            .field("users_len", &self.users.len())
             .finish()
     }
 }

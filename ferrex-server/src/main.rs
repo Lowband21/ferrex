@@ -36,14 +36,14 @@ use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::auth::{
     AuthCrypto,
     domain::repositories::{
-        AuthEventRepository, AuthSessionRepository, DeviceChallengeRepository, DeviceSessionRepository,
-        RefreshTokenRepository, UserAuthenticationRepository,
+        AuthEventRepository, AuthSessionRepository, DeviceChallengeRepository,
+        DeviceSessionRepository, RefreshTokenRepository, UserAuthenticationRepository,
     },
     domain::services::{AuthenticationService, DeviceTrustService, PinManagementService},
     infrastructure::repositories::{
-        PostgresAuthEventRepository, PostgresAuthSessionRepository, PostgresDeviceChallengeRepository,
-        PostgresDeviceSessionRepository, PostgresRefreshTokenRepository,
-        PostgresUserAuthRepository,
+        PostgresAuthEventRepository, PostgresAuthSessionRepository,
+        PostgresDeviceChallengeRepository, PostgresDeviceSessionRepository,
+        PostgresRefreshTokenRepository, PostgresUserAuthRepository,
     },
 };
 use ferrex_core::database::ports::media_files::MediaFileFilter;
@@ -56,12 +56,8 @@ use ferrex_server::db::validate_primary_database_url;
 use ferrex_server::{
     application::auth::AuthApplicationFacade,
     infra::{
-        app_state::AppState,
-        config::Config,
-        middleware::rate_limit_setup::{self, RateLimitConfig},
-        orchestration::ScanOrchestrator,
-        scan::scan_manager::ScanControlPlane,
-        websocket,
+        app_state::AppState, config::Config, orchestration::ScanOrchestrator,
+        scan::scan_manager::ScanControlPlane, websocket,
     },
     media::prep::thumbnail_service::ThumbnailService,
     routes,
@@ -375,8 +371,9 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(PostgresAuthSessionRepository::new(postgres_pool.clone()));
     let auth_event_repo: Arc<dyn AuthEventRepository> =
         Arc::new(PostgresAuthEventRepository::new(postgres_pool.clone()));
-    let device_challenges: Arc<dyn DeviceChallengeRepository> =
-        Arc::new(PostgresDeviceChallengeRepository::new(postgres_pool.clone()));
+    let device_challenges: Arc<dyn DeviceChallengeRepository> = Arc::new(
+        PostgresDeviceChallengeRepository::new(postgres_pool.clone()),
+    );
 
     let auth_service = Arc::new(
         AuthenticationService::new(
@@ -532,10 +529,6 @@ pub fn create_app(state: AppState) -> Router {
     let mut versioned_api = routes::create_api_router(state.clone());
 
     // Apply rate limiting to API routes
-    let rate_limit_config = RateLimitConfig::default();
-    versioned_api = rate_limit_setup::apply_auth_rate_limits(versioned_api, &rate_limit_config);
-    versioned_api = rate_limit_setup::apply_public_rate_limits(versioned_api, &rate_limit_config);
-    versioned_api = rate_limit_setup::apply_api_rate_limits(versioned_api, &rate_limit_config);
 
     // Public routes
     Router::new()

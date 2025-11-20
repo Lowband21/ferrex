@@ -1,9 +1,7 @@
 use crate::database::ports::rbac::RbacRepository;
 use crate::database::ports::users::UsersRepository;
 use crate::error::Result;
-use crate::user::UserSession;
 use crate::{database::PostgresDatabase, user::User};
-use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 /// User management and authentication extensions for PostgresDatabase
@@ -72,47 +70,5 @@ impl PostgresDatabase {
     /// Get all users with a specific role
     pub async fn get_users_with_role(&self, role_name: &str) -> Result<Vec<Uuid>> {
         self.rbac_repository().get_users_with_role(role_name).await
-    }
-
-    // ==================== Authentication Methods ====================
-
-    pub async fn store_refresh_token(
-        &self,
-        token: &str,
-        user_id: Uuid,
-        device_name: Option<String>,
-        expires_at: DateTime<Utc>,
-    ) -> Result<()> {
-        self.users_repository()
-            .store_refresh_token(token, user_id, device_name, expires_at)
-            .await
-    }
-
-    pub async fn get_refresh_token(&self, token: &str) -> Result<Option<(Uuid, DateTime<Utc>)>> {
-        self.users_repository().get_refresh_token(token).await
-    }
-
-    pub async fn delete_refresh_token(&self, token: &str) -> Result<()> {
-        self.users_repository().delete_refresh_token(token).await
-    }
-
-    pub async fn delete_user_refresh_tokens(&self, user_id: Uuid) -> Result<()> {
-        self.users_repository()
-            .delete_user_refresh_tokens(user_id)
-            .await
-    }
-
-    // ==================== Session Management ====================
-
-    pub async fn create_session(&self, session: &UserSession) -> Result<()> {
-        self.users_repository().create_session(session).await
-    }
-
-    pub async fn get_user_sessions(&self, user_id: Uuid) -> Result<Vec<UserSession>> {
-        self.users_repository().get_user_sessions(user_id).await
-    }
-
-    pub async fn delete_session(&self, session_id: Uuid) -> Result<()> {
-        self.users_repository().delete_session(session_id).await
     }
 }

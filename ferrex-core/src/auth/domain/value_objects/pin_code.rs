@@ -86,7 +86,11 @@ impl fmt::Debug for PinValue {
 
 impl PinCode {
     /// Create a new PIN code with validation
-    pub fn new(pin: String, _policy: &PinPolicy, crypto: &AuthCrypto) -> Result<Self, PinCodeError> {
+    pub fn new(
+        pin: String,
+        _policy: &PinPolicy,
+        crypto: &AuthCrypto,
+    ) -> Result<Self, PinCodeError> {
         // Wrap in zeroizing container
         let mut pin_value = PinValue(pin);
 

@@ -32,6 +32,7 @@ use crate::{
         scan::folder_inventory::{get_folder_inventory, get_scan_progress},
     },
     stream::stream_handlers,
+    users::admin_user_management,
     users::{
         admin_handlers, auth, role_handlers, security_settings_handlers, session_handlers,
         setup::{
@@ -40,7 +41,6 @@ use crate::{
         },
         user_handlers, user_management, watch_status_handlers,
     },
-    users::admin_user_management,
 };
 
 /// Create all v1 API routes
@@ -326,12 +326,18 @@ fn create_metadata_routes() -> Router<AppState> {
 fn create_admin_routes(state: AppState) -> Router<AppState> {
     let router = Router::new()
         .route(v1::admin::USERS, get(admin_handlers::list_all_users))
-        .route(v1::admin::USERS, post(admin_user_management::admin_create_user))
+        .route(
+            v1::admin::USERS,
+            post(admin_user_management::admin_create_user),
+        )
         .route(
             v1::admin::USER_ROLES,
             put(admin_handlers::assign_user_roles),
         )
-        .route(v1::admin::USER_ITEM, put(admin_user_management::admin_update_user))
+        .route(
+            v1::admin::USER_ITEM,
+            put(admin_user_management::admin_update_user),
+        )
         .route(
             v1::admin::USER_ITEM,
             axum::routing::delete(admin_user_management::admin_delete_user),
@@ -357,11 +363,11 @@ fn create_admin_routes(state: AppState) -> Router<AppState> {
         // Admin session management for PIN authentication
         .route(
             v1::admin::sessions::REGISTER,
-            post(auth::pin_handlers::register_admin_session),
+            post(admin_handlers::register_admin_session),
         )
         .route(
             v1::admin::sessions::REMOVE,
-            axum::routing::delete(auth::pin_handlers::remove_admin_session),
+            axum::routing::delete(admin_handlers::remove_admin_session),
         )
         .route(
             v1::admin::security::SETTINGS,
@@ -376,11 +382,12 @@ fn create_admin_routes(state: AppState) -> Router<AppState> {
         .route(v1::admin::demo::RESET, post(demo_handlers::reset));
 
     router
+        // route_layer applies inside-out; add admin guard first so auth runs before it
+        .route_layer(middleware::from_fn(auth::middleware::admin_middleware))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,
         ))
-        .route_layer(middleware::from_fn(auth::middleware::admin_middleware))
 }
 
 /// Create role management routes

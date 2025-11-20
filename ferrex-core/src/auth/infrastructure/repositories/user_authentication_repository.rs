@@ -5,8 +5,8 @@ use std::fmt;
 use uuid::Uuid;
 
 use crate::auth::domain::aggregates::UserAuthentication;
-use crate::auth::domain::value_objects::PinCode;
 use crate::auth::domain::repositories::UserAuthenticationRepository;
+use crate::auth::domain::value_objects::PinCode;
 use std::collections::HashMap;
 
 pub struct PostgresUserAuthRepository {
@@ -40,6 +40,7 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
                 u.last_login,
                 uc.password_hash,
                 uc.pin_hash,
+                uc.pin_client_salt,
                 uc.pin_updated_at
             FROM users u
             INNER JOIN user_credentials uc ON u.id = uc.user_id
@@ -64,6 +65,7 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
                     row.locked_until,
                     row.pin_hash.map(PinCode::from_hash),
                     row.pin_updated_at,
+                    row.pin_client_salt,
                     HashMap::new(),
                     10, // max_devices hardcoded for now
                     row.last_login,
@@ -87,6 +89,7 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
                 u.last_login,
                 uc.password_hash,
                 uc.pin_hash,
+                uc.pin_client_salt,
                 uc.pin_updated_at
             FROM users u
             INNER JOIN user_credentials uc ON u.id = uc.user_id
@@ -111,6 +114,7 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
                     row.locked_until,
                     row.pin_hash.map(PinCode::from_hash),
                     row.pin_updated_at,
+                    row.pin_client_salt,
                     HashMap::new(),
                     10, // max_devices hardcoded for now
                     row.last_login,
@@ -132,13 +136,15 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
             UPDATE user_credentials
             SET password_hash = $2,
                 pin_hash = $3,
-                pin_updated_at = $4,
+                pin_client_salt = $4,
+                pin_updated_at = $5,
                 updated_at = NOW()
             WHERE user_id = $1
             "#,
             user_id,
             user_auth.password_hash(),
             user_auth.pin_hash(),
+            user_auth.pin_client_salt(),
             user_auth.pin_updated_at()
         )
         .execute(&self.pool)

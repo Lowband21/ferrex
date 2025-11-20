@@ -1,7 +1,7 @@
 # Multi-stage build for ferrex-server on Unraid
 
 # Build stage
-FROM rust:1.75-bookworm AS builder
+FROM rust:1.81-bookworm AS builder
 
 # Build dependencies for ffmpeg bindings and general build tools
 RUN apt-get update && apt-get install -y \
@@ -54,4 +54,3 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=5 \
   CMD curl -fsS http://localhost:3000/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/ferrex-server"]
-

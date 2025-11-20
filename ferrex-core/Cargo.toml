@@ -2,10 +2,8 @@
 name = "ferrex-core"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
 license.workspace = true
 repository.workspace = true
-documentation.workspace = true
 homepage.workspace = true
 readme = "../README.md"
 keywords.workspace = true
@@ -69,7 +67,7 @@ rayon.workspace = true
 rand.workspace = true
 
 # Ordered floating point for sorting
-ordered-float = "^5"
+ordered-float = { version = "^5", default-features = false }
 
 # File watching
 notify = { version = "^7", optional = true }
@@ -78,30 +76,24 @@ notify = { version = "^7", optional = true }
 image = { workspace = true, optional = true }
 
 # Cryptography
+password-hash = { version = "^0.5", default-features = false }
 sha2 = { workspace = true }
 argon2 = { workspace = true }
 zeroize.workspace = true
 base64.workspace = true
 hmac = "0.12"
-hex = "0.4"
-password-hash = { version = "^0.5", features = ["getrandom"] }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
 num_cpus = "1.17.0"
-constant_time_eq = "0.4.2"
+constant_time_eq = { version = "0.4.2", default-features = false }
 tokio-util.workspace = true
-ed25519-dalek = { version = "2", default-features = false, features = ["rand_core"] }
+ed25519-dalek = { version = "2", default-features = false, features = [
+  "rand_core",
+] }
 
 [features]
 default = ["ffmpeg", "database", "compat", "scan-runtime"]
 ffmpeg = ["dep:ffmpeg-next"]
-database = [
-    "dep:sqlx",
-
-    "dep:redis",
-    "dep:ipnetwork",
-    "dep:image",
-    "dep:notify",
-
-]
+database = ["dep:sqlx", "dep:redis", "dep:ipnetwork", "dep:image", "dep:notify"]
 compat = []
 demo = []
 
@@ -115,10 +107,4 @@ ffi = []
 [dev-dependencies]
 tempfile.workspace = true
 tokio.workspace = true
-env_logger = "0.11"
-sqlx = { workspace = true, features = [
-    "runtime-tokio",
-    "postgres",
-    "migrate",
-    "derive",
-] }
+sqlx.workspace = true

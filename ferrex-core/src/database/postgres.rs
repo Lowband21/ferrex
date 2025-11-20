@@ -39,7 +39,7 @@ use crate::{
         titles::{MovieTitle, SeriesTitle},
         urls::{MovieURL, SeriesURL, UrlLike},
     },
-    user::{User, UserSession},
+    user::User,
     watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
 };
 use async_trait::async_trait;
@@ -461,17 +461,6 @@ impl MediaDatabaseTrait for PostgresDatabase {
     async fn get_tv_show(&self, _tmdb_id: &str) -> Result<Option<TvShowInfo>> {
         // TODO: Convert from new reference system
         Ok(None)
-    }
-
-    // Legacy device auth hook; deprecated. Device lockout state is managed by auth domain repos.
-    async fn update_device_failed_attempts(
-        &self,
-        _user_id: Uuid,
-        _device_id: Uuid,
-        _attempts: i32,
-        _locked_until: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<()> {
-        Ok(())
     }
 
     async fn link_episode_to_file(
@@ -2215,49 +2204,6 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     async fn get_users_with_role(&self, role_name: &str) -> Result<Vec<Uuid>> {
         self.rbac.get_users_with_role(role_name).await
-    }
-
-    // ==================== Authentication Methods ====================
-
-    async fn store_refresh_token(
-        &self,
-        token: &str,
-        user_id: Uuid,
-        device_name: Option<String>,
-        expires_at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<()> {
-        self.users
-            .store_refresh_token(token, user_id, device_name, expires_at)
-            .await
-    }
-
-    async fn get_refresh_token(
-        &self,
-        token: &str,
-    ) -> Result<Option<(Uuid, chrono::DateTime<chrono::Utc>)>> {
-        self.users.get_refresh_token(token).await
-    }
-
-    async fn delete_refresh_token(&self, token: &str) -> Result<()> {
-        self.users.delete_refresh_token(token).await
-    }
-
-    async fn delete_user_refresh_tokens(&self, user_id: Uuid) -> Result<()> {
-        self.users.delete_user_refresh_tokens(user_id).await
-    }
-
-    // ==================== Session Management ====================
-
-    async fn create_session(&self, session: &UserSession) -> Result<()> {
-        self.users.create_session(session).await
-    }
-
-    async fn get_user_sessions(&self, user_id: Uuid) -> Result<Vec<UserSession>> {
-        self.users.get_user_sessions(user_id).await
-    }
-
-    async fn delete_session(&self, session_id: Uuid) -> Result<()> {
-        self.users.delete_session(session_id).await
     }
 
     // ==================== Watch Status Methods ====================

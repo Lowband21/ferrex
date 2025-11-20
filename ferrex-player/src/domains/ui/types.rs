@@ -9,6 +9,7 @@ pub enum ViewState {
     Library,
     LibraryManagement, // New view for library management
     AdminDashboard,    // New comprehensive admin dashboard
+    AdminUsers,        // Admin user management page
     Player,
     LoadingVideo {
         url: String,
@@ -52,6 +53,7 @@ impl ViewState {
             ViewState::Library
                 | ViewState::LibraryManagement
                 | ViewState::AdminDashboard
+                | ViewState::AdminUsers
                 | ViewState::UserSettings
                 | ViewState::MovieDetail { .. }
                 | ViewState::SeriesDetail { .. }
@@ -80,6 +82,7 @@ impl ViewState {
                 } // Same header height
                 ViewState::LibraryManagement
                 | ViewState::AdminDashboard
+                | ViewState::AdminUsers
                 | ViewState::UserSettings => {
                     Some(crate::infrastructure::constants::layout::header::HEIGHT)
                 } // Same header height

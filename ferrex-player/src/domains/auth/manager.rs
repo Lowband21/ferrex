@@ -3,21 +3,21 @@ use crate::domains::auth::errors::{
     AuthError, AuthResult, DeviceError, NetworkError, StorageError, TokenError,
 };
 use crate::domains::auth::state_types::{AuthState, AuthStateStore};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
 use ed25519_dalek::ed25519::signature::SignerMut;
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use ferrex_core::api_routes::v1;
 use ferrex_core::auth::domain::value_objects::SessionScope;
 use ferrex_core::auth::{AuthResult as ServerAuthResult, DeviceInfo};
-use ed25519_dalek::{Signer, Signature, SigningKey, VerifyingKey};
-use rand_core::OsRng;
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64;
 use ferrex_core::player_prelude::{
     ApiResponse, AuthToken, LoginRequest, Platform, RegisterRequest, User, UserPermissions,
 };
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use log::{debug, error, info, warn};
+use rand_core::OsRng;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
@@ -898,19 +898,26 @@ impl AuthManager {
                     "device key unavailable".to_string(),
                 ))
             })?
-            .ok_or_else(|| AuthError::Storage(StorageError::InitFailed("device key not found".to_string())))?;
-        let signing_key = SigningKey::from_bytes(
-            signing_key_bytes
-                .as_slice()
-                .try_into()
-                .map_err(|_| AuthError::Storage(StorageError::InitFailed("invalid device key".to_string())))?,
-        );
+            .ok_or_else(|| {
+                AuthError::Storage(StorageError::InitFailed("device key not found".to_string()))
+            })?;
+        let signing_key =
+            SigningKey::from_bytes(signing_key_bytes.as_slice().try_into().map_err(|_| {
+                AuthError::Storage(StorageError::InitFailed("invalid device key".to_string()))
+            })?);
 
         // Request a challenge
         #[derive(serde::Serialize)]
-        struct ChallengeReq { device_id: Uuid }
+        struct ChallengeReq {
+            device_id: Uuid,
+        }
         #[derive(serde::Deserialize)]
-        struct ChallengeResp { challenge_id: Uuid, nonce: String, expires_in_secs: i64 }
+        struct ChallengeResp {
+            challenge_id: Uuid,
+            nonce: String,
+            expires_in_secs: i64,
+            pin_salt: String,
+        }
 
         let challenge: ChallengeResp = self
             .api_client
@@ -918,9 +925,12 @@ impl AuthManager {
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
-        let nonce = BASE64
-            .decode(challenge.nonce.as_bytes())
-            .map_err(|_| AuthError::Storage(StorageError::InitFailed("invalid nonce".to_string())))?;
+        let nonce = BASE64.decode(challenge.nonce.as_bytes()).map_err(|_| {
+            AuthError::Storage(StorageError::InitFailed("invalid nonce".to_string()))
+        })?;
+        let pin_salt = BASE64
+            .decode(challenge.pin_salt.as_bytes())
+            .map_err(|_| AuthError::Internal("invalid PIN salt from server".to_string()))?;
         // Build message v1: "Ferrex-PIN-v1" || challenge_id || nonce || user_id
         const CTX: &[u8] = b"Ferrex-PIN-v1";
         let mut msg = Vec::with_capacity(CTX.len() + 16 + nonce.len() + 16);
@@ -930,8 +940,7 @@ impl AuthManager {
         msg.extend_from_slice(user.id.as_bytes());
         let sig: Signature = signing_key.sign(&msg);
         let sig_b64 = BASE64.encode(sig.to_bytes());
-
-        let client_proof = Self::derive_client_pin_proof(&pin, user.id);
+        let client_proof = Self::derive_client_pin_proof(&pin, &pin_salt)?;
         let request = SetPinRequest {
             device_id,
             client_proof,
@@ -964,8 +973,6 @@ impl AuthManager {
             .get_current_user()
             .await
             .ok_or(AuthError::NotAuthenticated)?;
-        let current_proof = Self::derive_client_pin_proof(&current_pin, user.id);
-        let new_proof = Self::derive_client_pin_proof(&new_pin, user.id);
         // Load signing key
         let signing_key_bytes = self
             .auth_storage
@@ -977,38 +984,45 @@ impl AuthManager {
                     "device key unavailable".to_string(),
                 ))
             })?
-            .ok_or_else(|| AuthError::Storage(StorageError::InitFailed("device key not found".to_string())))?;
-        let signing_key = SigningKey::from_bytes(
-            signing_key_bytes
-                .as_slice()
-                .try_into()
-                .map_err(|_| AuthError::Storage(StorageError::InitFailed("invalid device key".to_string())))?,
-        );
+            .ok_or_else(|| {
+                AuthError::Storage(StorageError::InitFailed("device key not found".to_string()))
+            })?;
+        let signing_key =
+            SigningKey::from_bytes(signing_key_bytes.as_slice().try_into().map_err(|_| {
+                AuthError::Storage(StorageError::InitFailed("invalid device key".to_string()))
+            })?);
 
         // Request a challenge
         #[derive(serde::Serialize)]
-        struct ChallengeReq { device_id: Uuid }
+        struct ChallengeReq {
+            device_id: Uuid,
+        }
         #[derive(serde::Deserialize)]
-        struct ChallengeResp { challenge_id: Uuid, nonce: String, expires_in_secs: i64 }
+        struct ChallengeResp {
+            challenge_id: Uuid,
+            nonce: String,
+            expires_in_secs: i64,
+            pin_salt: String,
+        }
         let challenge: ChallengeResp = self
             .api_client
             .post(v1::auth::device::PIN_CHALLENGE, &ChallengeReq { device_id })
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
-        let nonce = BASE64
-            .decode(challenge.nonce.as_bytes())
-            .map_err(|_| AuthError::Storage(StorageError::InitFailed("invalid nonce".to_string())))?;
+        let nonce = BASE64.decode(challenge.nonce.as_bytes()).map_err(|_| {
+            AuthError::Storage(StorageError::InitFailed("invalid nonce".to_string()))
+        })?;
+        let pin_salt = BASE64
+            .decode(challenge.pin_salt.as_bytes())
+            .map_err(|_| AuthError::Internal("invalid PIN salt from server".to_string()))?;
+        let current_proof = Self::derive_client_pin_proof(&current_pin, &pin_salt)?;
+        let new_proof = Self::derive_client_pin_proof(&new_pin, &pin_salt)?;
         // Build message v1: "Ferrex-PIN-v1" || challenge_id || nonce || user_id
         const CTX: &[u8] = b"Ferrex-PIN-v1";
         let mut msg = Vec::with_capacity(CTX.len() + 16 + nonce.len() + 16);
         msg.extend_from_slice(CTX);
         msg.extend_from_slice(challenge.challenge_id.as_bytes());
         msg.extend_from_slice(&nonce);
-        // user id needed
-        let user = self
-            .get_current_user()
-            .await
-            .ok_or(AuthError::NotAuthenticated)?;
         msg.extend_from_slice(user.id.as_bytes());
         let sig: Signature = signing_key.sign(&msg);
         let sig_b64 = BASE64.encode(sig.to_bytes());
@@ -1423,25 +1437,17 @@ impl AuthManager {
             )))
         })?;
 
-        let signing_key = match self
-            .auth_storage
-            .load_device_key()
-            .await
-            .map_err(|e| {
-                error!("failed to load device key: {e}");
+        let signing_key = match self.auth_storage.load_device_key().await.map_err(|e| {
+            error!("failed to load device key: {e}");
+            AuthError::Storage(StorageError::InitFailed(
+                "device key unavailable".to_string(),
+            ))
+        })? {
+            Some(bytes) => SigningKey::from_bytes(bytes.as_slice().try_into().map_err(|_| {
                 AuthError::Storage(StorageError::InitFailed(
-                    "device key unavailable".to_string(),
+                    "invalid stored device key".to_string(),
                 ))
-            })?
-        {
-            Some(bytes) => SigningKey::from_bytes(
-                bytes
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| AuthError::Storage(StorageError::InitFailed(
-                        "invalid stored device key".to_string(),
-                    )))?,
-            ),
+            })?),
             None => {
                 let mut rng = OsRng;
                 let sk = SigningKey::generate(&mut rng);
@@ -1531,19 +1537,26 @@ impl AuthManager {
                     "device key unavailable".to_string(),
                 ))
             })?
-            .ok_or_else(|| AuthError::Storage(StorageError::InitFailed("device key not found".to_string())))?;
-        let signing_key = SigningKey::from_bytes(
-            signing_key_bytes
-                .as_slice()
-                .try_into()
-                .map_err(|_| AuthError::Storage(StorageError::InitFailed("invalid device key".to_string())))?,
-        );
+            .ok_or_else(|| {
+                AuthError::Storage(StorageError::InitFailed("device key not found".to_string()))
+            })?;
+        let signing_key =
+            SigningKey::from_bytes(signing_key_bytes.as_slice().try_into().map_err(|_| {
+                AuthError::Storage(StorageError::InitFailed("invalid device key".to_string()))
+            })?);
 
         // Request a challenge
         #[derive(serde::Serialize)]
-        struct ChallengeReq { device_id: Uuid }
+        struct ChallengeReq {
+            device_id: Uuid,
+        }
         #[derive(serde::Deserialize)]
-        struct ChallengeResp { challenge_id: Uuid, nonce: String, expires_in_secs: i64 }
+        struct ChallengeResp {
+            challenge_id: Uuid,
+            nonce: String,
+            expires_in_secs: i64,
+            pin_salt: String,
+        }
 
         let challenge: ChallengeResp = self
             .api_client
@@ -1551,9 +1564,12 @@ impl AuthManager {
             .await
             .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
 
-        let nonce = BASE64
-            .decode(challenge.nonce.as_bytes())
-            .map_err(|_| AuthError::Storage(StorageError::InitFailed("invalid nonce".to_string())))?;
+        let nonce = BASE64.decode(challenge.nonce.as_bytes()).map_err(|_| {
+            AuthError::Storage(StorageError::InitFailed("invalid nonce".to_string()))
+        })?;
+        let pin_salt = BASE64
+            .decode(challenge.pin_salt.as_bytes())
+            .map_err(|_| AuthError::Internal("invalid PIN salt from server".to_string()))?;
         // Build message v1: "Ferrex-PIN-v1" || challenge_id || nonce || user_id
         const CTX: &[u8] = b"Ferrex-PIN-v1";
         let mut msg = Vec::with_capacity(CTX.len() + 16 + nonce.len() + 16);
@@ -1563,7 +1579,7 @@ impl AuthManager {
         msg.extend_from_slice(user_id.as_bytes());
         let sig: Signature = signing_key.sign(&msg);
         let sig_b64 = BASE64.encode(sig.to_bytes());
-        let client_proof = Self::derive_client_pin_proof(&pin, user_id);
+        let client_proof = Self::derive_client_pin_proof(&pin, &pin_salt)?;
         let request = PinLoginRequest {
             device_id,
             client_proof,
@@ -1598,49 +1614,43 @@ impl AuthManager {
         })
     }
 
-/// Derive a deterministic client-side PIN proof (PHC string) scoped to a user.
-///
-/// Construction:
-/// - password material = pin || user_id (UUID bytes)
-/// - salt (deterministic) = first 16 bytes of SHA-256("ferrex.pin.v1|" || user_id-uuid)
-/// - Argon2id params: m=64MiB, t=3, p=1, outlen=32
-fn derive_client_pin_proof(pin: &str, user_id: Uuid) -> String {
-    use argon2::{Algorithm, Argon2, Params, ParamsBuilder, Version};
-    use argon2::password_hash::{PasswordHasher, SaltString};
-    use sha2::{Digest, Sha256};
-    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+    /// Derive a deterministic client-side PIN proof (PHC string) scoped to the provided salt.
+    ///
+    /// Construction:
+    /// - password material = pin || user_salt (server-managed)
+    /// - Argon2id params: m=64MiB, t=3, p=1, outlen=32
+    /// - Argon2 salt = user_salt
+    fn derive_client_pin_proof(pin: &str, user_salt: &[u8]) -> AuthResult<String> {
+        use argon2::password_hash::{PasswordHasher, SaltString};
+        use argon2::{Algorithm, Argon2, Params, ParamsBuilder, Version};
 
-    // Password material: pin || user_id bytes
-    let mut material = Vec::with_capacity(pin.len() + 16);
-    material.extend_from_slice(pin.as_bytes());
-    material.extend_from_slice(user_id.as_bytes());
+        if user_salt.is_empty() {
+            return Err(AuthError::Internal("missing PIN salt".to_string()));
+        }
 
-    // Deterministic salt from user id
-    let mut hasher = Sha256::new();
-    hasher.update(b"ferrex.pin.v1|");
-    hasher.update(user_id.to_string().as_bytes());
-    let digest = hasher.finalize();
-    let salt_bytes = &digest[..16];
-    let salt_b64 = BASE64.encode(salt_bytes);
-    let salt = SaltString::from_b64(&salt_b64).expect("valid base64 salt");
+        // Password material: pin || user_salt bytes
+        let mut material = Vec::with_capacity(pin.len() + user_salt.len());
+        material.extend_from_slice(pin.as_bytes());
+        material.extend_from_slice(user_salt);
 
-    // Argon2id params
-    let params: Params = ParamsBuilder::new()
-        .m_cost(64 * 1024)
-        .t_cost(3)
-        .p_cost(1)
-        .output_len(32)
-        .build()
-        .expect("valid argon2 params");
-    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+        let salt = SaltString::encode_b64(user_salt)
+            .map_err(|_| AuthError::Internal("invalid PIN salt payload".to_string()))?;
 
-    // Produce PHC string (hash_password formats as PHC)
-    let phc = argon2
-        .hash_password(&material, &salt)
-        .expect("argon2 hash")
-        .to_string();
-    phc
-}
+        let params: Params = ParamsBuilder::new()
+            .m_cost(64 * 1024)
+            .t_cost(3)
+            .p_cost(1)
+            .output_len(32)
+            .build()
+            .map_err(|_| AuthError::Internal("invalid Argon2 parameters".to_string()))?;
+        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+
+        let phc = argon2
+            .hash_password(&material, &salt)
+            .map_err(|_| AuthError::Internal("failed to derive PIN proof".to_string()))?
+            .to_string();
+        Ok(phc)
+    }
 
     /// Enable admin PIN unlock (stub for now)
     pub async fn enable_admin_pin_unlock(&self) -> AuthResult<()> {
@@ -1705,6 +1715,39 @@ fn get_device_name() -> String {
 
     // Fallback to generic name
     format!("{} Device", get_current_platform().as_ref())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derive_pin_proof_requires_non_empty_salt() {
+        let result = AuthManager::derive_client_pin_proof("1234", &[]);
+        assert!(result.is_err(), "empty salt should be rejected");
+    }
+
+    #[test]
+    fn derive_pin_proof_varies_with_salt() {
+        let salt_a = vec![0xAA; 16];
+        let salt_b = vec![0xBB; 16];
+
+        let proof_a =
+            AuthManager::derive_client_pin_proof("2580", &salt_a).expect("proof for salt A");
+        let proof_a_repeat =
+            AuthManager::derive_client_pin_proof("2580", &salt_a).expect("repeat proof for salt A");
+        let proof_b =
+            AuthManager::derive_client_pin_proof("2580", &salt_b).expect("proof for salt B");
+
+        assert_eq!(
+            proof_a, proof_a_repeat,
+            "same salt should yield deterministic proof"
+        );
+        assert_ne!(
+            proof_a, proof_b,
+            "different salts must produce distinct proofs"
+        );
+    }
 }
 
 /// Check if a token is expired. Exposed publicly so integration tests can

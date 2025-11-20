@@ -1,4 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
+use rand::RngCore;
 use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
@@ -6,8 +7,8 @@ use uuid::Uuid;
 use crate::auth::AuthCrypto;
 use crate::auth::domain::aggregates::{DeviceSession, DeviceStatus};
 use crate::auth::domain::events::AuthEvent;
-use crate::auth::domain::value_objects::{DeviceFingerprint, PinCode, PinPolicy, SessionToken};
 use crate::auth::domain::value_objects::PinCodeError;
+use crate::auth::domain::value_objects::{DeviceFingerprint, PinCode, PinPolicy, SessionToken};
 
 /// Errors that can occur during user authentication
 #[derive(Debug, Error)]
@@ -67,6 +68,9 @@ pub struct UserAuthentication {
     /// Last time the PIN was updated
     pin_updated_at: Option<DateTime<Utc>>,
 
+    /// Server-issued salt that scopes client-side proofs
+    pin_client_salt: Vec<u8>,
+
     /// Device sessions by device fingerprint
     device_sessions: HashMap<String, DeviceSession>,
 
@@ -93,6 +97,7 @@ impl UserAuthentication {
         locked_until: Option<DateTime<Utc>>,
         user_pin: Option<PinCode>,
         pin_updated_at: Option<DateTime<Utc>>,
+        pin_client_salt: Vec<u8>,
         device_sessions: HashMap<String, DeviceSession>,
         max_devices: usize,
         last_login: Option<DateTime<Utc>>,
@@ -107,6 +112,7 @@ impl UserAuthentication {
             locked_until,
             user_pin,
             pin_updated_at,
+            pin_client_salt,
             device_sessions,
             max_devices,
             last_login,
@@ -116,6 +122,9 @@ impl UserAuthentication {
 
     /// Create a new user authentication aggregate
     pub fn new(user_id: Uuid, username: String, password_hash: String, max_devices: usize) -> Self {
+        let mut salt = vec![0u8; 16];
+        rand::thread_rng().fill_bytes(&mut salt);
+
         Self {
             user_id,
             username,
@@ -126,6 +135,7 @@ impl UserAuthentication {
             locked_until: None,
             user_pin: None,
             pin_updated_at: None,
+            pin_client_salt: salt,
             device_sessions: HashMap::new(),
             max_devices,
             last_login: None,
@@ -141,6 +151,11 @@ impl UserAuthentication {
     /// Timestamp of the last PIN update, if any.
     pub fn pin_updated_at(&self) -> Option<DateTime<Utc>> {
         self.pin_updated_at
+    }
+
+    /// Current server-issued salt for client PIN proofs.
+    pub fn pin_client_salt(&self) -> &[u8] {
+        &self.pin_client_salt
     }
 
     /// Configure or replace the user-level PIN using a client-derived proof.
@@ -160,6 +175,13 @@ impl UserAuthentication {
     pub fn clear_user_pin(&mut self) {
         self.user_pin = None;
         self.pin_updated_at = None;
+    }
+
+    /// Rotate the server-issued salt for future client proofs.
+    pub fn rotate_pin_client_salt(&mut self) {
+        let mut salt = vec![0u8; 16];
+        rand::thread_rng().fill_bytes(&mut salt);
+        self.pin_client_salt = salt;
     }
 
     /// Verify a client proof against the stored user-level PIN hash.
@@ -326,7 +348,8 @@ impl UserAuthentication {
             session.ensure_pin_available(max_attempts)?;
         }
 
-        let verified = self.verify_user_pin(pin_proof, crypto)
+        let verified = self
+            .verify_user_pin(pin_proof, crypto)
             .map_err(|_| UserAuthenticationError::InvalidCredentials)?;
 
         if !verified {

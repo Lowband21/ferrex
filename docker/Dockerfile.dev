@@ -1,5 +1,5 @@
 # Development environment for Rusty Media Server
-FROM rust:1.75-bookworm
+FROM rust:1.81-bookworm
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -37,4 +37,4 @@ ENV RUST_BACKTRACE=1
 EXPOSE 3000
 
 # Default command
-CMD ["cargo", "watch", "-x", "run"]
+CMD ["cargo", "watch", "-x", "run -p ferrex-server"]

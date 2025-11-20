@@ -7,14 +7,14 @@ use ferrex_core::{
     auth::{
         AuthCrypto,
         domain::repositories::{
-            AuthEventRepository, AuthSessionRepository, DeviceSessionRepository,
-            RefreshTokenRepository, UserAuthenticationRepository,
+            AuthEventRepository, AuthSessionRepository, DeviceChallengeRepository,
+            DeviceSessionRepository, RefreshTokenRepository, UserAuthenticationRepository,
         },
         domain::services::{AuthenticationService, DeviceTrustService, PinManagementService},
         infrastructure::repositories::{
             PostgresAuthEventRepository, PostgresAuthSessionRepository,
-            PostgresDeviceSessionRepository, PostgresRefreshTokenRepository,
-            PostgresUserAuthRepository,
+            PostgresDeviceChallengeRepository, PostgresDeviceSessionRepository,
+            PostgresRefreshTokenRepository, PostgresUserAuthRepository,
         },
     },
     database::PostgresDatabase,
@@ -157,6 +157,9 @@ pub async fn build_test_app(pool: PgPool) -> Result<TestApp> {
     let event_repo: Arc<dyn AuthEventRepository> =
         Arc::new(PostgresAuthEventRepository::new(pool.clone()));
 
+    let challenge_repo: Arc<dyn DeviceChallengeRepository> =
+        Arc::new(PostgresDeviceChallengeRepository::new(pool.clone()));
+
     let auth_service = Arc::new(
         AuthenticationService::new(
             user_auth_repo.clone(),
@@ -165,7 +168,8 @@ pub async fn build_test_app(pool: PgPool) -> Result<TestApp> {
             session_repo.clone(),
             auth_crypto.clone(),
         )
-        .with_event_repository(event_repo.clone()),
+        .with_event_repository(event_repo.clone())
+        .with_challenge_repository(challenge_repo.clone()),
     );
 
     let device_trust_service = Arc::new(DeviceTrustService::new(

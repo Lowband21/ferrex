@@ -7,8 +7,11 @@ use chrono::Utc;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::auth::AuthCrypto;
 use crate::auth::policy::{PasswordPolicy, PasswordPolicyCheck, PasswordPolicyRule};
+use crate::auth::{
+    AuthCrypto,
+    domain::services::{AuthenticationError, AuthenticationService},
+};
 use crate::database::ports::{
     rbac::RbacRepository, security_settings::SecuritySettingsRepository, users::UsersRepository,
 };
@@ -22,6 +25,7 @@ pub struct UserAdministrationService {
     rbac: Arc<dyn RbacRepository>,
     security: Arc<dyn SecuritySettingsRepository>,
     crypto: Arc<AuthCrypto>,
+    auth: Arc<AuthenticationService>,
 }
 
 impl std::fmt::Debug for UserAdministrationService {
@@ -40,12 +44,14 @@ impl UserAdministrationService {
         rbac: Arc<dyn RbacRepository>,
         security: Arc<dyn SecuritySettingsRepository>,
         crypto: Arc<AuthCrypto>,
+        auth: Arc<AuthenticationService>,
     ) -> Self {
         Self {
             users,
             rbac,
             security,
             crypto,
+            auth,
         }
     }
 
@@ -263,16 +269,17 @@ impl UserAdministrationService {
                 .map_err(UserAdminError::from)?;
         }
 
-        let sessions = self
-            .users
-            .get_user_sessions(user_id)
+        let session_count = self
+            .auth
+            .list_sessions_for_user(user_id)
             .await
-            .map_err(UserAdminError::from)?;
+            .map_err(UserAdminError::from)?
+            .len();
 
         Ok(UserAdminRecord {
             user,
             roles: current_permissions.roles,
-            session_count: sessions.len(),
+            session_count,
         })
     }
 
@@ -411,16 +418,17 @@ impl UserAdministrationService {
                     continue;
                 }
 
-            let sessions = self
-                .users
-                .get_user_sessions(user.id)
+            let session_count = self
+                .auth
+                .list_sessions_for_user(user.id)
                 .await
-                .map_err(UserAdminError::from)?;
+                .map_err(UserAdminError::from)?
+                .len();
 
             records.push(UserAdminRecord {
                 user,
                 roles: permissions.roles,
-                session_count: sessions.len(),
+                session_count,
             });
         }
 
@@ -552,6 +560,25 @@ impl From<MediaError> for UserAdminError {
                 }
             }
             other => UserAdminError::Internal(other.to_string()),
+        }
+    }
+}
+
+impl From<AuthenticationError> for UserAdminError {
+    fn from(err: AuthenticationError) -> Self {
+        match err {
+            AuthenticationError::InvalidCredentials
+            | AuthenticationError::InvalidPin
+            | AuthenticationError::DeviceNotFound
+            | AuthenticationError::DeviceNotTrusted
+            | AuthenticationError::TooManyFailedAttempts
+            | AuthenticationError::SessionExpired => {
+                UserAdminError::PermissionDenied(err.to_string())
+            }
+            AuthenticationError::UserNotFound => UserAdminError::UserNotFound,
+            AuthenticationError::DatabaseError(inner) => {
+                UserAdminError::Internal(inner.to_string())
+            }
         }
     }
 }

@@ -5,14 +5,14 @@ Ferrex ships with an optional **demo mode** that seeds a disposable media librar
 ---
 
 ## At a Glance
-- **Synthetic library**: Generates movies and series folders/files with plausible names sourced from TMDB's popular lists (optionally deviating from the ideal structure to test scanner robustness).
+- **Synthetic library**: Generates movies and series folders/files with plausible names sourced from TMDB's popular lists.
 - **Live metadata**: Requires a valid `TMDB_API_KEY` so the seeder can call TMDB's popular endpoints for both movies and TV shows.
 - **Temporary storage**: Seeds directories under a demo root (defaults to `$CACHE_DIR/demo-media`); all files are zero-length placeholders.
 - **Relaxed validation**: Scanner accepts zero-byte files for demo libraries (and only demo libraries) and skips expensive FFmpeg probes when configured, so the pipeline remains fast.
-- **Isolated database**: Server automatically switches to a `_demo` database (derived from `DATABASE_URL`) to avoid touching production data.
-- **Auto-provisioned admin**: A demo user (`demo`/`demo` by default) is created and granted admin rights.
-- **Player auto-login**: When built with the demo feature, the desktop player can auto-authenticate using the demo credentials.
-- **In-app demo controls** *(player build with `demo` feature)*: The Library Management screen exposes demo-only sizing fields and scanner controls so you can manage resets and scan actions directly from the UI. (An iced_aw dropdown will replace the current text inputs in an upcoming polish pass.)
+- **Isolated database**: Server automatically switches to a reserved `demo` database to avoid touching production data.
+- **Auto-provisioned admin**: A demo user (`demo`/`demodemo` by default) is created and granted admin rights.
+- **Player auto-login**: When built with the demo feature, the desktop player can enable remember-me using the demo credentials.
+- **In-app demo controls** *(player build with `demo` feature)*: The library management controls view exposes demo-only sizing fields and scanner controls so you can manage resets and scan actions directly from the UI.
 - **Admin controls**: REST endpoints expose demo status and allow resetting the synthetic tree at runtime.
 
 ---
@@ -38,7 +38,7 @@ ferrex-server --demo
 # or env
 FERREX_DEMO_MODE=1 ferrex-server
 ```
-Optional env overrides:
+Optional env overrides (in-progress implementation):
 - `FERREX_DEMO_ROOT=/tmp/ferrex-demo` – fixed root path.
 - `FERREX_DEMO_OPTIONS='{...json...}'` – complete JSON configuration (see **Configuration** below).
 - `FERREX_DEMO_USERNAME` / `FERREX_DEMO_PASSWORD` – override default credentials.
@@ -53,18 +53,10 @@ FERREX_PLAYER_DEMO_MODE=1 ferrex-player
 # or
 ferrex-player --demo
 ```
-Make sure the player points at the demo server (`FERREX_SERVER_URL`).
-
-When the player is running in demo mode with an admin-capable session you can open **Admin → Library Management** to:
-
-- Inspect active scans, pause/resume/cancel them, and refresh queue metrics without touching the REST API.
-- Review demo metadata (library IDs, seeded counts, root path, demo username).
-- Adjust synthetic library size by entering desired movie/series counts and clicking **Apply Size**—the player invokes `POST /api/v1/admin/demo/reset` for you and refreshes status automatically.
-- Trigger a full demo status refresh via the UI (handy before live demos). The text inputs will evolve into iced_aw dropdowns/spinners for quicker preset selection.
 
 ---
 
-## Configuration Reference
+## Configuration Reference (unstable)
 Demo generation is driven by `DemoSeedOptions`:
 - `root`: optional filesystem root (Path). Defaults to `$CACHE_DIR/demo-media`.
 - `libraries`: array of library definitions:
@@ -112,31 +104,11 @@ Set via `FERREX_DEMO_OPTIONS`.
 
 ---
 
-## Typical Usage Scenarios
-
-### Developer smoke tests
-1. Ensure `TMDB_API_KEY` is exported (e.g. `export TMDB_API_KEY=...`).
-2. `cargo run -p ferrex-server --features demo -- --demo`
-2. `cargo run -p ferrex-player --features demo -- --demo`
-3. Log into the player automatically as `demo` and explore the catalog.
-4. Use admin reset endpoint to verify scanning/idempotency flows.
-
-### QA regression without media assets
-- Adjust `FERREX_DEMO_OPTIONS` to mimic corner cases (missing episodes, weird folders). TMDB titles ensure scans behave like production data.
-- Run scheduled scans or orchestrator behaviors against the synthetic tree.
-
-### Customer-facing demo
-- Point a pre-built binary at `FERREX_DEMO_MODE=1`; hand clients the `demo/demo` credentials.
-- Reset as needed between sessions to ensure a clean library.
-
----
-
 ## Caveats & Notes
 - Demo mode is **feature-gated**; production builds without the flag include no demo code.
 - Placeholder files are zero-size; streaming/transcoding won’t work—this mode is for library UX/testing, not media playback.
 - Do not rely on debug/demo database for real data; it is meant to be disposable.
-- When demo mode is disabled, all behavior reverts to normal without lingering side effects (libraries created during demo can be deleted manually if needed).
-- Warnings during build (`cargo fix --lib -p ferrex-core`) are unrelated but recommended to resolve.
+- When demo mode is disabled, all behavior reverts to normal without lingering side effects (testing needed).
 
 ---
 

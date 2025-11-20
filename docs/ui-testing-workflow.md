@@ -40,8 +40,7 @@ and replays them with the emulator. Failures surface as regular test failures.
 
 ### Useful Flags
 - `-- --nocapture` keeps emulator log output visible during the run.
-- `TEST_LOG=debug` (or similar) can be used with env_logger to increase logging
-  detail when diagnosing failures.
+- `TEST_LOG=debug` (or similar) can be used to increase logging detail.
 
 ## 5. Tips for Reliable Recordings
 - Assign stable `widget::Id`s to interactive controls before recording to make

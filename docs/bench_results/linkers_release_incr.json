@@ -1,0 +1,64 @@
+{
+  "results": [
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_DEV_OPT_LEVEL -u CARGO_PROFILE_RELEASE_OPT_LEVEL     -u CARGO_PROFILE_RELEASE_INCREMENTAL CARGO_PROFILE_RELEASE_INCREMENTAL=true cargo build --release -j3",
+      "mean": 13.894188576586666,
+      "stddev": 0.09908957087071928,
+      "median": 13.841258180919999,
+      "user": 266.8877462,
+      "system": 20.270376359999997,
+      "min": 13.83280434092,
+      "max": 14.008503207919999,
+      "times": [
+        13.83280434092,
+        14.008503207919999,
+        13.841258180919999
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_DEV_OPT_LEVEL -u CARGO_PROFILE_RELEASE_OPT_LEVEL     -u CARGO_PROFILE_RELEASE_INCREMENTAL CARGO_PROFILE_RELEASE_INCREMENTAL=true RUSTFLAGS='-Clinker=clang -Clink-args=--ld-path=wild' cargo build --release -j3",
+      "mean": 13.922487762253333,
+      "stddev": 0.047590898203721185,
+      "median": 13.92893648592,
+      "user": 266.2359072,
+      "system": 19.512653359999998,
+      "min": 13.87200132192,
+      "max": 13.96652547892,
+      "times": [
+        13.92893648592,
+        13.87200132192,
+        13.96652547892
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_DEV_OPT_LEVEL -u CARGO_PROFILE_RELEASE_OPT_LEVEL     -u CARGO_PROFILE_RELEASE_INCREMENTAL CARGO_PROFILE_RELEASE_INCREMENTAL=true mold -run cargo build --release -j3",
+      "mean": 15.052075456919999,
+      "stddev": 1.7923637197515951,
+      "median": 14.05915928892,
+      "user": 267.22904719999997,
+      "system": 19.676914026666665,
+      "min": 13.975906497919999,
+      "max": 17.12116058392,
+      "times": [
+        17.12116058392,
+        13.975906497919999,
+        14.05915928892
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}

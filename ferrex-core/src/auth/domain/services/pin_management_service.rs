@@ -82,8 +82,7 @@ impl PinManagementService {
         ctx.insert_metadata("operation", json!("set"));
         let (mut user, mut session) = self.load_session(user_id, fingerprint).await?;
 
-        user
-            .set_user_pin(&new_pin, policy, &self.crypto)
+        user.set_user_pin(&new_pin, policy, &self.crypto)
             .map_err(|_| PinManagementError::InvalidPinFormat)?;
 
         session.mark_trusted_after_pin_setup();
@@ -117,13 +116,11 @@ impl PinManagementService {
         if !verified {
             let err = session.register_pin_failure(max_attempts);
             let mapped = map_pin_error(err, true);
-            self.persist_state(&user, &mut session, ctx.clone())
-                .await?;
+            self.persist_state(&user, &mut session, ctx.clone()).await?;
             return Err(mapped);
         }
 
-        user
-            .set_user_pin(&new_pin, policy, &self.crypto)
+        user.set_user_pin(&new_pin, policy, &self.crypto)
             .map_err(|_| PinManagementError::InvalidPinFormat)?;
 
         session.mark_trusted_after_pin_setup();
@@ -155,13 +152,15 @@ impl PinManagementService {
         if !verified {
             let err = session.register_pin_failure(max_attempts);
             let mapped = map_pin_error(err, true);
-            self.persist_state(&user, &mut session, ctx.clone())
-                .await?;
+            self.persist_state(&user, &mut session, ctx.clone()).await?;
             return Err(mapped);
         }
 
         user.clear_user_pin();
-        session.clear_pin_association().map_err(|err| map_pin_error(err, true))?;
+        session
+            .clear_pin_association()
+            .map_err(|err| map_pin_error(err, true))?;
+        user.rotate_pin_client_salt();
 
         self.persist_state(&user, &mut session, ctx).await
     }
@@ -180,7 +179,10 @@ impl PinManagementService {
 
         let (mut user, mut session) = self.load_session(user_id, fingerprint).await?;
         user.clear_user_pin();
-        session.clear_pin_association().map_err(|err| map_pin_error(err, false))?;
+        session
+            .clear_pin_association()
+            .map_err(|err| map_pin_error(err, false))?;
+        user.rotate_pin_client_salt();
 
         self.persist_state(&user, &mut session, ctx).await
     }
@@ -471,8 +473,7 @@ mod tests {
             DeviceSession::new(user.user_id(), sample_fingerprint(), "Test".to_string());
         let _ = session.take_events();
         let crypto = test_crypto();
-        user
-            .set_user_pin("0000", &PinPolicy::default(), crypto.as_ref())
+        user.set_user_pin("0000", &PinPolicy::default(), crypto.as_ref())
             .unwrap_or_else(|_| panic!("failed to install initial pin"));
         session.mark_trusted_after_pin_setup();
         let _ = session.take_events();
@@ -512,8 +513,7 @@ mod tests {
         let mut session =
             DeviceSession::new(user.user_id(), sample_fingerprint(), "Trusted".to_string());
         let crypto = test_crypto();
-        user
-            .set_user_pin("1357", &PinPolicy::default(), crypto.as_ref())
+        user.set_user_pin("1357", &PinPolicy::default(), crypto.as_ref())
             .unwrap();
         session.mark_trusted_after_pin_setup();
         let _ = session.take_events();
@@ -548,8 +548,7 @@ mod tests {
             DeviceSession::new(user.user_id(), sample_fingerprint(), "Test".to_string());
         let _ = session.take_events();
         let crypto = test_crypto();
-        user
-            .set_user_pin("4861", &PinPolicy::default(), crypto.as_ref())
+        user.set_user_pin("4861", &PinPolicy::default(), crypto.as_ref())
             .unwrap();
         session.mark_trusted_after_pin_setup();
         let _ = session.take_events();
@@ -582,8 +581,7 @@ mod tests {
             DeviceSession::new(user.user_id(), sample_fingerprint(), "Test".to_string());
         let _ = session.take_events();
         let crypto = test_crypto();
-        user
-            .set_user_pin("1357", &PinPolicy::default(), crypto.as_ref())
+        user.set_user_pin("1357", &PinPolicy::default(), crypto.as_ref())
             .unwrap();
         session.mark_trusted_after_pin_setup();
         let _ = session.take_events();

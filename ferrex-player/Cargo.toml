@@ -2,10 +2,8 @@
 name = "ferrex-player"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
 license.workspace = true
 repository.workspace = true
-documentation.workspace = true
 homepage.workspace = true
 readme = "../README.md"
 keywords.workspace = true
@@ -17,20 +15,18 @@ ferrex-core = { path = "../ferrex-core", default-features = false }
 
 # Iced
 iced = { git = "https://github.com/Lowband21/iced-ferrex.git", default-features = false, features = [
-    "tokio",
-    "debug",
-    "image",
-    "canvas",
-    "advanced",
-    "wgpu",
-    "prefer_10bit",
-    "web-colors",
-    "batch",
-    "lazy",
+  "tokio",
+  "image",
+  "canvas",
+  "advanced",
+  "wgpu",
+  "web-colors",
+  "batch",
+  #"lazy",
 ] }
 iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", features = [
-    "image",
-    "batch",
+  "image",
+  "batch",
 ] }
 
 # iced = { path = "/home/lowband/dev/ferrex-parent/ferrex-worktrees/iced_ferrex", default-features = false, features = [
@@ -112,7 +108,6 @@ lazy_static = "^1.5"
 thiserror.workspace = true
 anyhow.workspace = true
 uuid.workspace = true
-zxcvbn = "3.1"
 
 # GPU utilities
 bytemuck = { version = "^1.23", features = ["derive"] }
@@ -122,7 +117,9 @@ dashmap.workspace = true
 priority-queue = "^2.5.0"
 rand.workspace = true
 base64 = "^0.22"
-ed25519-dalek = { version = "2", default-features = false, features = ["rand_core"] }
+ed25519-dalek = { version = "2", default-features = false, features = [
+  "rand_core",
+] }
 getrandom = "^0.2"
 num_cpus = "^1"
 rand_core = "^0.6"
@@ -160,16 +157,26 @@ iced_tester = ["iced/tester"]
 hot = ["iced/hot"]
 demo = ["ferrex-core/demo"]
 
+# Optional: turn on additional iced_aw widgets used for UI polish
+# (kept off by default to minimize compile time and risk).
+aw-polish = [
+  "iced_aw/drop_down",
+  "iced_aw/spinner",
+  "iced_aw/selection_list",
+  "iced_aw/typed_input",
+  "iced_aw/number_input",
+]
+
 profile-with-puffin = [
-    "dep:profiling",
-    "profiling/profile-with-puffin",
-    "dep:puffin",
-    "dep:puffin_http",
+  "dep:profiling",
+  "profiling/profile-with-puffin",
+  "dep:puffin",
+  "dep:puffin_http",
 ]
 profile-with-tracy = [
-    "dep:profiling",
-    #"profiling/profile-with-tracy",
-    #"dep:tracy-client",
+  "dep:profiling",
+  #"profiling/profile-with-tracy",
+  #"dep:tracy-client",
 ]
 profile-with-tracing = ["dep:profiling"] #"profiling/profile-with-tracing"]
 
@@ -177,20 +184,14 @@ profiling-stats = ["dep:hdrhistogram"]
 
 [dev-dependencies]
 # Testing framework
-tokio-test = "0.4"
-mockall.workspace = true
-pretty_assertions = "^1.4"
-rstest = "^0.26"
-insta = "^1"
-wiremock = "^0.6"
-fake = "^4"
-quickcheck = "^1.0"
-proptest = "^1.7"
 rand.workspace = true
+#iced = { git = "https://github.com/Lowband21/iced-ferrex.git", features = [
+#  "debug",
+#] }
 iced_test = { git = "https://github.com/Lowband21/iced-ferrex.git" }
 
 # Performance benchmarking
-criterion = { version = "^0.7", features = ["html_reports"] }
+# criterion = { version = "^0.7", features = ["html_reports"] }
 
 #[[bench]]
 #name = "grid_rendering_bench"

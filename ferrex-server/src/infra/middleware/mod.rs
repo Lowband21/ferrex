@@ -10,7 +10,6 @@ pub mod hsts;
 /// - Security headers
 pub mod https;
 pub mod rate_limit;
-pub mod rate_limit_setup;
 
 pub use csrf::{
     CsrfLayer, CsrfMiddleware, ValidateCsrf, create_csrf_cookie, extract_csrf_from_cookies,
