@@ -1,7 +1,6 @@
 use crate::{
     LibraryLike, LibraryReference, MediaDatabase, Result, ScanOutput,
-    database::traits::{FileWatchEventType, ScanType},
-    providers::TmdbApiProvider,
+    database::traits::FileWatchEventType, providers::TmdbApiProvider,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,11 +9,7 @@ use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use super::{
-    file_watcher::FileWatcher,
-    incremental::IncrementalScanner,
-    orchestrator::{ScanOptions, ScanOrchestrator},
-};
+use super::{file_watcher::FileWatcher, orchestrator::ScanOrchestrator};
 use std::path::{Path, PathBuf};
 
 /// Background scanner that runs continuously
@@ -265,71 +260,52 @@ impl BackgroundScanner {
                                 paths: library.paths.clone(),
                             };
 
-                            // Start an incremental scan
-                            let scan_options = ScanOptions {
-                                force_refresh: false,
-                                skip_file_metadata: false,
-                                skip_tmdb: false,
-                                analyze_files: library.analyze_on_scan,
-                                retry_failed: true,
-                                max_retries: library.max_retry_attempts,
+                            // Process pending folders using folder inventory via StreamingScannerV2
+                            let config = crate::StreamingScannerConfig {
+                                folder_workers: 4,
                                 batch_size: 100,
-                                concurrent_workers: 4,
+                                tmdb_rate_limit_ms: 250,
+                                fuzzy_match_threshold: 60,
+                                cache_dir: None,
+                                max_error_retries: 3,
+                                folder_batch_limit: 50,
+                                force_refresh: false,
                             };
 
-                            match self
-                                .orchestrator
-                                .create_scan(
-                                    &library_ref,
-                                    ScanType::Incremental,
-                                    scan_options.clone(),
-                                )
+                            let scanner = Arc::new(crate::StreamingScannerV2::with_config(
+                                config,
+                                self.db.clone(),
+                                self.tmdb_provider.clone(),
+                            ));
+
+                            let (tx, mut rx) = mpsc::channel(1000);
+                            let output_tx = self.output_tx.clone();
+
+                            // Forward scan outputs
+                            tokio::spawn(async move {
+                                while let Some(output) = rx.recv().await {
+                                    let _ = output_tx.send(output);
+                                }
+                            });
+
+                            // Run the scan against folder inventory
+                            let scanner_task = Arc::clone(&scanner);
+                            tokio::spawn(async move {
+                                if let Err(e) =
+                                    scanner_task.scan_library(library_ref, tx).await
+                                {
+                                    error!("Inventory-driven scan failed: {}", e);
+                                }
+                            });
+
+                            // Update last scan time
+                            if let Err(e) = self
+                                .db
+                                .backend()
+                                .update_library_last_scan(&library.id)
                                 .await
                             {
-                                Ok(scan_state) => {
-                                    let scanner = IncrementalScanner::new(
-                                        self.db.clone(),
-                                        self.tmdb_provider.clone(),
-                                        self.orchestrator.clone(),
-                                        scan_options,
-                                    );
-
-                                    let (tx, mut rx) = mpsc::channel(1000);
-                                    let output_tx = self.output_tx.clone();
-
-                                    // Forward scan outputs
-                                    tokio::spawn(async move {
-                                        while let Some(output) = rx.recv().await {
-                                            let _ = output_tx.send(output);
-                                        }
-                                    });
-
-                                    // Run the scan
-                                    tokio::spawn(async move {
-                                        if let Err(e) = scanner
-                                            .scan_incremental(library_ref, &scan_state, tx)
-                                            .await
-                                        {
-                                            error!("Incremental scan failed: {}", e);
-                                        }
-                                    });
-
-                                    // Update last scan time
-                                    if let Err(e) = self
-                                        .db
-                                        .backend()
-                                        .update_library_last_scan(&library.id)
-                                        .await
-                                    {
-                                        error!("Failed to update last scan time: {}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    error!(
-                                        "Failed to create scan for library {}: {}",
-                                        library.name, e
-                                    );
-                                }
+                                error!("Failed to update last scan time: {}", e);
                             }
                         }
                     }

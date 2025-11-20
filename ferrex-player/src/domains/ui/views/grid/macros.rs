@@ -274,27 +274,51 @@ pub trait ThemeColorAccess {
     fn theme_color(&self) -> Option<&str>;
 }
 
-// Implement for types that have theme_color
-impl ThemeColorAccess for crate::infrastructure::api_types::MovieReference {
+// Theme color access for ferrex_core types
+impl ThemeColorAccess for ferrex_core::MovieReference {
     fn theme_color(&self) -> Option<&str> {
         self.theme_color.as_deref()
     }
 }
 
-impl ThemeColorAccess for crate::infrastructure::api_types::SeriesReference {
+impl ThemeColorAccess for ferrex_core::SeriesReference {
     fn theme_color(&self) -> Option<&str> {
         self.theme_color.as_deref()
     }
 }
 
-impl ThemeColorAccess for crate::infrastructure::api_types::SeasonReference {
+impl ThemeColorAccess for ferrex_core::SeasonReference {
     fn theme_color(&self) -> Option<&str> {
         self.theme_color.as_deref()
     }
 }
 
-// Episodes don't have theme_color
-impl ThemeColorAccess for crate::infrastructure::api_types::EpisodeReference {
+impl ThemeColorAccess for ferrex_core::EpisodeReference {
+    fn theme_color(&self) -> Option<&str> {
+        None
+    }
+}
+
+// Archived ferrex_core types (yoked)
+impl ThemeColorAccess for ferrex_core::ArchivedMovieReference {
+    fn theme_color(&self) -> Option<&str> {
+        self.theme_color.as_deref()
+    }
+}
+
+impl ThemeColorAccess for ferrex_core::ArchivedSeriesReference {
+    fn theme_color(&self) -> Option<&str> {
+        self.theme_color.as_deref()
+    }
+}
+
+impl ThemeColorAccess for ferrex_core::ArchivedSeasonReference {
+    fn theme_color(&self) -> Option<&str> {
+        self.theme_color.as_deref()
+    }
+}
+
+impl ThemeColorAccess for ferrex_core::ArchivedEpisodeReference {
     fn theme_color(&self) -> Option<&str> {
         None
     }
@@ -365,7 +389,7 @@ macro_rules! media_card {
 
         // Determine widget animation type early so it can be used for both image and overlay
         let widget_anim = match animation_config.animation_type {
-AnimationType::Flip => WidgetAnimationType::flip(),
+            AnimationType::Flip => WidgetAnimationType::flip(),
             AnimationType::FadeIn | AnimationType::FadeScale => WidgetAnimationType::Fade {
                 duration: animation_config.duration
             },
@@ -378,11 +402,11 @@ AnimationType::Flip => WidgetAnimationType::flip(),
 
             // Determine image size based on card size
             let image_size = match card_size {
-                CardSize::Small => $crate::domains::metadata::image_types::ImageSize::Thumbnail,
-                CardSize::Medium => $crate::domains::metadata::image_types::ImageSize::Poster,
-                CardSize::Large => $crate::domains::metadata::image_types::ImageSize::Full,
-                CardSize::Wide => $crate::domains::metadata::image_types::ImageSize::Backdrop,
-                CardSize::Custom(_, _) => $crate::domains::metadata::image_types::ImageSize::Poster,
+                CardSize::Small => ferrex_core::ImageSize::Thumbnail,
+                CardSize::Medium => ferrex_core::ImageSize::Poster,
+                CardSize::Large => ferrex_core::ImageSize::Full,
+                CardSize::Wide => ferrex_core::ImageSize::Backdrop,
+                CardSize::Custom(_, _) => ferrex_core::ImageSize::Poster,
             };
 
             //// Map priority if provided
@@ -392,7 +416,7 @@ AnimationType::Flip => WidgetAnimationType::flip(),
             // Create the image widget
             let mut img = image_for($id)
                 .size(image_size)
-                .rounded(radius)
+                .radius(radius)
                 .width(Length::Fixed(width))
                 .height(Length::Fixed(height))
                 .animation(widget_anim)
@@ -442,7 +466,7 @@ AnimationType::Flip => WidgetAnimationType::flip(),
             .into();
 
         // Calculate proper container dimensions based on animation type
-let (container_width, container_height) = if matches!(widget_anim, WidgetAnimationType::Flip { .. }) {
+        let (container_width, container_height) = if matches!(widget_anim, WidgetAnimationType::Flip { .. }) {
             // For enhanced flip, use expanded dimensions to accommodate animation
             use $crate::infrastructure::constants::animation;
             let h_padding = animation::calculate_horizontal_padding(width);
@@ -454,7 +478,7 @@ let (container_width, container_height) = if matches!(widget_anim, WidgetAnimati
         };
 
         // For enhanced flip, we need to center the poster within the container
-let poster_with_overlay_element = if matches!(widget_anim, WidgetAnimationType::Flip { .. }) {
+        let poster_with_overlay_element = if matches!(widget_anim, WidgetAnimationType::Flip { .. }) {
             // Center the poster within the larger container
             // The shader handles all hover detection internally based on actual poster bounds
             let centered_poster: Element<'_, $crate::domains::ui::messages::Message> = container(poster_element)

@@ -10,7 +10,8 @@ use crate::{
         image_handlers,
         library_handlers_v2::{
             create_library_handler, delete_library_handler, get_libraries_with_media_handler,
-            get_library_handler, get_library_media_handler, update_library_handler,
+            get_library_handler, get_library_media_handler, get_library_sorted_indices_handler,
+            post_library_filtered_indices_handler, update_library_handler,
         },
         query_handlers,
         scan::{
@@ -251,6 +252,15 @@ fn create_libraries_routes(state: AppState) -> Router<AppState> {
         .route("/library/scan", post(scan_library_handler))
         .route("/libraries/scan", post(scan_all_libraries_handler))
         .route("/libraries/{id}/media", get(get_library_media_handler))
+        // New binary indices endpoints
+        .route(
+            "/libraries/{id}/indices/sorted",
+            get(get_library_sorted_indices_handler),
+        )
+        .route(
+            "/libraries/{id}/indices/filter",
+            post(post_library_filtered_indices_handler),
+        )
     //.route_layer(middleware::from_fn_with_state(
     //    state.clone(),
     //    auth::middleware::auth_middleware,

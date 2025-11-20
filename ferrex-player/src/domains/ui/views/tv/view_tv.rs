@@ -1,12 +1,13 @@
 use crate::{
     domains::{
         metadata::image_types::Priority,
-        ui::{messages::Message, theme, widgets::image_for::image_for},
-    },
-    state_refactored::State,
+        ui::{messages::Message, theme, views::grid::macros::ThemeColorAccess, widgets::image_for::image_for},
+    }, media_card, state_refactored::State
 };
+use crate::domains::ui::views::grid::macros::parse_hex_color;
+use crate::domains::ui::components;
 use ferrex_core::{
-    EpisodeID, ImageSize, ImageType, MediaIDLike, SeasonID, SeriesDetailsLike, SeriesID, SeriesLike,
+    ArchivedMediaDetailsOption, EpisodeID, EpisodeLike, ImageSize, ImageType, MediaID, MediaIDLike, SeasonID, SeasonLike, SeriesDetailsLike, SeriesID, SeriesLike
 };
 use iced::{
     Element, Length,
@@ -31,7 +32,7 @@ fn lucide_font() -> iced::Font {
     ),
     profiling::function
 )]
-pub fn view_tv_show_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<'a, Message> {
+pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<'a, Message> {
     // Resolve series yoke via UI cache with lazy fetch (interior mutable cache)
     let series_uuid = series_id.to_uuid();
     let series_yoke_arc = match state
@@ -121,37 +122,63 @@ pub fn view_tv_show_detail<'a>(state: &'a State, series_id: SeriesID) -> Element
 
     // Title
     details = details.push(
-        text("title")
+        text(series.title().to_string())
             .size(32)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
     );
 
-    let series_details = series.details();
+    // Apply theme color to poster if present
+    let mut poster = image_for(media_id.to_uuid())
+        .size(ImageSize::Full)
+        .image_type(ImageType::Series)
+        .width(Length::Fixed(300.0))
+        .height(Length::Fixed(450.0))
+        .priority(Priority::Visible);
+    if let Some(hex) = series.theme_color() {
+        if let Ok(color) = parse_hex_color(hex) {
+            poster = poster.theme_color(color);
+        }
+    }
+    let poster_element: Element<Message> = poster.into();
 
-    /*
+    let series_details_opt = series.details();
+
+    // Fetch seasons for this series
+    let seasons: Vec<ferrex_core::SeasonReference> = match state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_series_seasons(&series_id)
+    {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("[TV] Failed to fetch seasons for series {}: {:?}", series_id, e);
+            Vec::new()
+        }
+    };
+
     // Extract details from the series reference
-    let (description, rating, total_episodes) = match series_details {
-        MediaDetailsOption::Details(TmdbDetails::Series(series_details)) => {
-            /*
-            log::info!(
-                "Series {} has overview: {:?}",
-                series_ref.title.as_str(),
-                series_details
-                    .overview
-                    .as_ref()
-                    .map(|o| crate::domains::ui::views::macros::truncate_text(o, 50))
-            ); */
-            (
-                series_details.overview,
-                series_details.vote_average,
-                series_details.number_of_episodes,
-            )
-        }
-        _ => {
-            log::warn!("Series {} has no TMDB details", series.title.to_string());
-            (None, vec![], None, None)
-        }
-    }; */
+    let (series_details, description, rating, total_episodes) = if let Some(series_details) = series_details_opt {
+        /*
+        log::info!(
+            "Series {} has overview: {:?}",
+            series_ref.title.as_str(),
+            series_details
+                .overview
+                .as_ref()
+                .map(|o| crate::domains::ui::views::macros::truncate_text(o, 50))
+        ); */
+        (
+            Some(series_details),
+            series_details.overview.as_ref(),
+            series_details.vote_average.as_ref(),
+            series_details.number_of_episodes.as_ref(),
+        )
+    } else {
+        log::warn!("Series {} has no TMDB details", series.title.to_string());
+        (None, None, None, None)
+    };
 
     /*
     // Stats - use the seasons we already fetched
@@ -176,15 +203,28 @@ pub fn view_tv_show_detail<'a>(state: &'a State, series_id: SeriesID) -> Element
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
     ); */
 
+    // Stats: seasons and total episodes (if season list available)
+    if !seasons.is_empty() {
+        let season_count = seasons.len();
+        let total_eps: u32 = seasons
+            .iter()
+            .map(|s| s.details().map(|d| d.episode_count).unwrap_or(0))
+            .sum();
+        details = details.push(
+            text(format!("{} Seasons • {} Episodes", season_count, total_eps))
+                .size(16)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        );
+    }
+
     // Rating
-    /*
     if let Some(rating) = rating {
         details = details.push(
             text(format!("★ {:.1}", rating))
                 .size(16)
                 .color(theme::MediaServerTheme::ACCENT_BLUE),
         );
-    } */
+    }
 
     //// Play button row - use series progress service to find appropriate episode
     //use crate::domains::media::services::SeriesProgressService;
@@ -348,7 +388,7 @@ pub fn view_tv_show_detail<'a>(state: &'a State, series_id: SeriesID) -> Element
     if !buttons.is_empty() {
         details = details.push(Space::with_height(10));
         details = details.push(row(buttons).spacing(10).align_y(iced::Alignment::Center));
-    }
+    }*/
 
     // Description
     if let Some(desc) = description {
@@ -362,7 +402,7 @@ pub fn view_tv_show_detail<'a>(state: &'a State, series_id: SeriesID) -> Element
             .width(Length::Fill)
             .padding(10),
         );
-    }*/
+    }
 
     // Genres
     if let Some(ref series_details) = series_details {
@@ -382,38 +422,56 @@ pub fn view_tv_show_detail<'a>(state: &'a State, series_id: SeriesID) -> Element
 
     content = content.push(info_row);
 
-    /*
-    // Seasons carousel - use the seasons we fetched at the beginning
+    // Seasons carousel - use the seasons we fetched above
     if !seasons.is_empty() {
         content = content.push(Space::with_height(20));
 
         if let Some(carousel_state) = &state.domains.ui.state.show_seasons_carousel {
-            // Pass owned seasons to components - idiomatic Iced pattern
-            // Components take ownership to avoid lifetime issues
-            let season_cards: Vec<_> = seasons
-                .iter()
-                .cloned()
-                .map(|season| {
-                    crate::domains::ui::components::season_reference_card_with_state(
-                        // We need to pass watch status here
-                        season,
-                        false,
-                        Some(state),
-                        None,
-                    )
-                })
-                .collect();
-
-            let seasons_carousel = crate::domains::ui::views::carousel::media_carousel(
+            // Build season cards lazily using windowed carousel with media_card!
+            let seasons_vec = seasons.clone();
+            let section = crate::domains::ui::views::carousel::windowed_media_carousel(
                 "show_seasons".to_string(),
                 "Seasons",
-                season_cards,
+                seasons_vec.len(),
                 carousel_state,
+                move |idx| {
+                    seasons_vec.get(idx).map(|s| {
+                        let title_str = if s.season_number.value() == 0 {
+                            "Specials".to_string()
+                        } else {
+                            format!("Season {}", s.season_number.value())
+                        };
+                        let subtitle_str = s
+                            .details()
+                            .map(|d| format!("{} episodes", d.episode_count))
+                            .unwrap_or_else(|| String::from("\u{00A0}")); // non-breaking space to keep height
+
+                        media_card! {
+                            type: Season,
+                            data: s.clone(),
+                            {
+                                id: s.id.to_uuid(),
+                                title: title_str.as_str(),
+                                subtitle: subtitle_str.as_str(),
+                                image: {
+                                    key: s.id.to_uuid(),
+                                    type: Poster,
+                                    fallback: "📺",
+                                },
+                                size: Medium,
+                                on_click: Message::ViewSeason(s.series_id, s.id),
+                                on_play: Message::ViewSeason(s.series_id, s.id),
+                                hover_icon: lucide_icons::Icon::List,
+                                is_hovered: false,
+                            }
+                        }
+                    })
+                },
             );
 
-            content = content.push(seasons_carousel);
+            content = content.push(section);
         }
-    } */
+    }
     // Create the main content container
     let content_container = container(content).width(Length::Fill);
 
@@ -456,9 +514,57 @@ pub fn view_tv_show_detail<'a>(state: &'a State, series_id: SeriesID) -> Element
 )]
 pub fn view_season_detail<'a>(
     state: &'a State,
-    series_id: &'a SeriesID,
+    _series_id: &'a SeriesID,
     season_id: &'a SeasonID,
 ) -> Element<'a, Message> {
+    // Resolve season yoke via UI cache with lazy fetch
+    let season_uuid = season_id.to_uuid();
+    let season_yoke_arc = match state
+        .domains
+        .ui
+        .state
+        .season_yoke_cache
+        .peek_ref(&season_uuid)
+    {
+        Some(arc) => arc,
+        _ => match state
+            .domains
+            .ui
+            .state
+            .repo_accessor
+            .get_season_yoke(&ferrex_core::MediaID::Season(*season_id))
+        {
+            Ok(yoke) => {
+                let arc = std::sync::Arc::new(yoke);
+                state
+                    .domains
+                    .ui
+                    .state
+                    .season_yoke_cache
+                    .insert(season_uuid, arc.clone());
+                arc
+            }
+            Err(e) => {
+                log::warn!("[TV] Failed to fetch season yoke for {}: {:?}", season_uuid, e);
+                return container(
+                    column![
+                        text("Media Not Found").size(24).color(theme::MediaServerTheme::TEXT_SECONDARY),
+                        Space::with_height(10),
+                        text("Repository error:").size(16).color(theme::MediaServerTheme::TEXT_SUBDUED),
+                    ]
+                    .spacing(10)
+                    .align_x(iced::Alignment::Center),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into();
+            }
+        },
+    };
+    let season = season_yoke_arc.get();
+
     let mut content = column![].spacing(20);
 
     // Add dynamic spacing at the top based on backdrop dimensions
@@ -472,320 +578,144 @@ pub fn view_season_detail<'a>(
         .calculate_content_offset_with_height(window_width, window_height);
     content = content.push(Space::with_height(Length::Fixed(content_offset)));
 
-    /*
-    // NEW ARCHITECTURE: Get data from MediaStore
-    let (series_ref, season_ref, episodes) =
-        if let Ok(store) = state.domains.media.state.media_store.read() {
-            let series_ref = if let Some(Media::Series(series)) =
-                store.get(&MediaID::Series(series_id.clone()))
-            {
-                Some(series.clone())
-            } else {
-                None
-            };
-
-            let season_ref = if let Some(Media::Season(season)) =
-                store.get(&MediaID::Season(season_id.clone()))
-            {
-                Some(season.clone())
-            } else {
-                None
-            };
-
-            // SINGLE SOURCE OF TRUTH: Always get episodes from MediaStore
-            let episodes: Vec<_> = if let Some(ref season) = season_ref {
-                store
-                    .get_episodes(season.id.as_ref())
-                    .into_iter()
-                    .cloned()
-                    .collect()
-            } else {
-                vec![]
-            };
-
-            (series_ref, season_ref, episodes)
-        } else {
-            (None, None, vec![])
-        };
-
-    // Get series name for display
-    let series_name = series_ref
-        .as_ref()
-        .map(|s| s.title.as_str())
-        .unwrap_or("Unknown Series");
-
-    // Check if we have season reference
-    if let Some(season_ref) = season_ref {
-        // Season poster using unified image system
-        let poster_element: Element<Message> = image_for(MediaID::Season(season_id.to_owned()))
-            .size(ImageSize::Full)
-            .width(Length::Fixed(300.0))
-            .height(Length::Fixed(450.0))
-            .priority(Priority::Visible)
-            .into();
-
-        // Details column
-        let mut details = column![].spacing(15).padding(20).width(Length::Fill);
-
-        // Extract season details from the reference
-        let (season_name, overview) = match &season_ref.details {
-            crate::infrastructure::api_types::MediaDetailsOption::Details(
-                crate::infrastructure::api_types::TmdbDetails::Season(details),
-            ) => (Some(details.name.clone()), details.overview.clone()),
-            _ => (None, None),
-        };
-
-        // Title
-        let season_number = season_ref.season_number.value();
-        let display_title = if let Some(name) = season_name.filter(|n| !n.is_empty()) {
-            format!("{} - {}", series_name, name)
-        } else if season_number == 0 {
-            format!("{} - Specials", series_name)
-        } else {
-            format!("{} - Season {}", series_name, season_number)
-        };
-
-        details = details.push(
-            text(display_title)
-                .size(32)
-                .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        );
-
-        // Episode count
-        details = details.push(
-            text(format!("{} Episodes", episodes.len()))
-                .size(16)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        );
-
-        // Air date range if available
-        let air_dates: Vec<String> = episodes
-            .iter()
-            .filter_map(|e| match &e.details {
-                crate::infrastructure::api_types::MediaDetailsOption::Details(
-                    crate::infrastructure::api_types::TmdbDetails::Episode(details),
-                ) => details.air_date.clone(),
-                _ => None,
-            })
-            .collect();
-
-        if !air_dates.is_empty() {
-            let empty_string = String::new();
-            let first_date = air_dates.iter().min().unwrap_or(&empty_string);
-            let last_date = air_dates.iter().max().unwrap_or(&empty_string);
-
-            let date_range = if first_date == last_date {
-                first_date.to_string()
-            } else {
-                format!("{} - {}", first_date, last_date)
-            };
-
-            details = details.push(
-                text(format!("Aired: {}", date_range))
-                    .size(14)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            );
+    // Poster element
+    let mut poster = image_for(season.id.to_uuid())
+        .size(ImageSize::Full)
+        .image_type(ImageType::Season)
+        .width(Length::Fixed(300.0))
+        .height(Length::Fixed(450.0))
+        .priority(Priority::Visible);
+    if let Some(hex) = season.theme_color() {
+        if let Ok(color) = parse_hex_color(hex) {
+            poster = poster.theme_color(color);
         }
+    }
+    let poster_element: Element<Message> = poster.into();
 
-        // Total duration
-        let total_duration: f64 = episodes
-            .iter()
-            .filter_map(|e| match &e.details {
-                crate::infrastructure::api_types::MediaDetailsOption::Details(
-                    crate::infrastructure::api_types::TmdbDetails::Episode(details),
-                ) => details.runtime.map(|r| r as f64 * 60.0),
-                _ => None,
-            })
-            .sum();
+    // Details column
+    let mut details = column![].spacing(15).padding(20).width(Length::Fill);
 
-        if total_duration > 0.0 {
-            let hours = (total_duration / 3600.0) as u32;
-            let minutes = ((total_duration % 3600.0) / 60.0) as u32;
-            details = details.push(
-                text(format!("Total Runtime: {}h {}m", hours, minutes))
-                    .size(14)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            );
-        }
+    // Title and episode count
+    let season_number = season.details().map(|d| d.season_number).unwrap_or(0);
+    let title = if season_number == 0 {
+        "Specials".to_string()
+    } else {
+        format!("Season {}", season_number)
+    };
+    details = details.push(text(title).size(32).color(theme::MediaServerTheme::TEXT_PRIMARY));
 
-        // Play button row - play first episode of the season
-        if let Some(first_episode) = episodes.first() {
-            let series_details = series_ref.as_ref().and_then(|s| match &s.details {
-                crate::infrastructure::api_types::MediaDetailsOption::Details(
-                    crate::infrastructure::api_types::TmdbDetails::Series(details),
-                ) => Some(details.clone()),
-                _ => None,
-            });
-            let button_row = crate::domains::ui::components::create_action_button_row(
-                Message::PlayMediaWithId(
-                    first_episode.,
-                    ferrex_core::MediaID::Episode(first_episode.id.clone()),
-                ),
-                vec![], // No additional buttons yet
-            );
-            details = details.push(Space::with_height(10));
-            details = details.push(button_row);
-        }
-
-        // Overview/Description
-        if let Some(desc) = overview {
-            details = details.push(Space::with_height(10));
-            details = details.push(
-                container(
-                    text(desc)
-                        .size(14)
-                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                )
-                .width(Length::Fill)
-                .padding(10),
-            );
-        }
-
-        // Content row with poster and details
-        let info_row = row![poster_element, details]
-            .spacing(10)
-            .align_y(iced::Alignment::Start);
-
-        content = content.push(info_row);
-
-        // Episodes carousel
-        if !episodes.is_empty() {
-            content = content.push(Space::with_height(20));
-
-            if let Some(carousel_state) = &state.domains.ui.state.season_episodes_carousel {
-                // Get visible range for virtualization
-                let visible_range = carousel_state.get_visible_range();
-
-                // Create episode cards directly from references
-                let episode_cards: Vec<_> = episodes
-                    .iter()
-                    .enumerate()
-                    .map(|(index, episode)| {
-                        // Create episode card directly
-                        let title = match &episode.details {
-                            crate::infrastructure::api_types::MediaDetailsOption::Details(
-                                crate::infrastructure::api_types::TmdbDetails::Episode(details),
-                            ) => details.name.clone(),
-                            _ => format!("Episode {}", episode.episode_number.value()),
-                        };
-
-                        let mut info_parts =
-                            vec![format!("E{:02}", episode.episode_number.value())];
-
-                        // Add duration if available
-                        if let Some(metadata) = &episode.file.media_file_metadata {
-                            if let Some(dur) = metadata.duration {
-                                info_parts.push(format!("{} min", (dur / 60.0) as u32));
-                            }
-                        }
-
-                        // Add air date if available
-                        if let crate::infrastructure::api_types::MediaDetailsOption::Details(
-                            crate::infrastructure::api_types::TmdbDetails::Episode(details),
-                        ) = &episode.details
-                        {
-                            if let Some(air_date) = &details.air_date {
-                                if let Ok(date) =
-                                    chrono::NaiveDate::parse_from_str(air_date, "%Y-%m-%d")
-                                {
-                                    info_parts.push(date.format("%Y").to_string());
-                                }
-                            }
-                        }
-
-                        let info = info_parts.join(" • ");
-
-                        // Determine image priority based on visibility
-                        let image_priority = if visible_range.contains(&index) {
-                            Priority::Visible
-                        } else if index < visible_range.start
-                            && index >= visible_range.start.saturating_sub(2)
-                        {
-                            Priority::Preload
-                        } else if index > visible_range.end && index <= visible_range.end + 2 {
-                            Priority::Preload
-                        } else {
-                            Priority::Background
-                        };
-
-                        // Get watch progress for this episode
-                        let watch_progress = state
-                            .domains
-                            .media
-                            .state
-                            .get_media_progress(&MediaID::Episode(episode.id.clone()));
-
-                        // Create episode thumbnail with watch progress
-                        let mut episode_image = image_for(MediaID::Episode(episode.id.clone()))
-                            .size(ImageSize::Thumbnail)
-                            .width(Length::Fixed(250.0))
-                            .height(Length::Fixed(140.0))
-                            .priority(image_priority);
-
-                        // Add watch progress - default to unwatched (0.0) if no watch state
-                        let progress = watch_progress.unwrap_or(0.0);
-                        episode_image = episode_image.progress(progress);
-
-                        // Create a clickable episode card
-                        button(
-                            container(
-                                column![
-                                    // Episode thumbnail using unified image system
-                                    episode_image,
-                                    // Episode info
-                                    container(
-                                        column![
-                                            text(title)
-                                                .size(14)
-                                                .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                                            text(info)
-                                                .size(12)
-                                                .color(theme::MediaServerTheme::TEXT_SECONDARY)
-                                        ]
-                                        .spacing(2)
-                                    )
-                                    .padding(5)
-                                    .width(Length::Fixed(250.0))
-                                    .height(Length::Fixed(80.0))
-                                    .clip(true)
-                                ]
-                                .spacing(5),
-                            )
-                            .width(Length::Fixed(250.0))
-                            .height(Length::Fixed(230.0)),
-                        )
-                        .on_press(Message::ViewEpisode(episode.id.clone()))
-                        .padding(0)
-                        .style(theme::Button::MediaCard.style())
-                        .into()
-                    })
-                    .collect();
-
-                let episodes_carousel = crate::domains::ui::views::carousel::media_carousel(
-                    "season_episodes".to_string(),
-                    "Episodes",
-                    episode_cards,
-                    carousel_state,
-                );
-
-                content = content.push(episodes_carousel);
-            }
-        }
-    } else { */
-    // Loading state
-    content = content.push(
-        container(
-            column![
-                text("⏳").size(48),
-                text("Loading season details...")
-                    .size(16)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY)
-            ]
-            .spacing(10),
-        )
-        .padding(100),
+    let episode_count = season.num_episodes();
+    details = details.push(
+        text(format!("{} Episodes", episode_count))
+            .size(16)
+            .color(theme::MediaServerTheme::TEXT_SECONDARY),
     );
-    //}
+
+    // Overview
+    if let Some(season_details) = season.details() {
+        if let Some(desc) = season_details.overview.as_ref() {
+            details = details.push(Space::with_height(10));
+            details = details.push(
+                container(text(desc.to_string()).size(14).color(theme::MediaServerTheme::TEXT_PRIMARY))
+                    .width(Length::Fill)
+                    .padding(10),
+            );
+        }
+    }
+
+    // Content row with poster and details
+    let info_row = row![poster_element, details]
+        .spacing(10)
+        .align_y(iced::Alignment::Start);
+
+    content = content.push(info_row);
+
+    // Episodes carousel for this season
+    let episodes = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_season_episodes(season_id)
+        .unwrap_or_else(|_| Vec::new());
+
+    if !episodes.is_empty() {
+        content = content.push(Space::with_height(20));
+        if let Some(ep_cs) = &state.domains.ui.state.season_episodes_carousel {
+            let eps_vec = episodes.clone();
+            let ep_section = crate::domains::ui::views::carousel::windowed_media_carousel(
+                "season_episodes".to_string(),
+                "Episodes",
+                eps_vec.len(),
+                ep_cs,
+                move |idx| {
+                    eps_vec.get(idx).map(|e| {
+                        // Build episode title/subtitle
+                        let title_str = format!("S{:02}E{:02}", e.season_number.value(), e.episode_number.value());
+                        let subtitle_str = e
+                            .details()
+                            .map(|d| d.name.as_str())
+                            .unwrap(); // TODO: unwrap
+
+                        media_card! {
+                            type: Episode,
+                            data: e.clone(),
+                            {
+                                id: e.id.to_uuid(),
+                                title: title_str.as_str(),
+                                subtitle: subtitle_str,
+                                image: {
+                                    key: e.id.to_uuid(),
+                                    type: Thumbnail,
+                                    fallback: "🎞",
+                                },
+                                size: Wide,
+                                on_click: Message::PlayMediaWithId(ferrex_core::MediaID::Episode(e.id)),
+                                on_play: Message::PlayMediaWithId(ferrex_core::MediaID::Episode(e.id)),
+                                hover_icon: lucide_icons::Icon::Play,
+                                is_hovered: false,
+                            }
+                        }
+                    })
+                },
+            );
+            content = content.push(ep_section);
+        }
+    }
+
+    // Create the main content container
+    let content_container = container(content).width(Length::Fill);
+
+    // Calculate backdrop dimensions
+    let window_width = state.window_size.width;
+    let window_height = state.window_size.height;
+    let display_aspect = state
+        .domains
+        .ui
+        .state
+        .background_shader_state
+        .calculate_display_aspect(window_width, window_height);
+    let backdrop_height = window_width / display_aspect;
+
+    // Create aspect ratio toggle button
+    let aspect_button = crate::domains::ui::components::create_backdrop_aspect_button(state);
+
+    // Position the button at bottom-right of backdrop with small margin
+    let button_container = container(aspect_button)
+        .padding([0, 20])
+        .width(Length::Fill)
+        .height(Length::Fixed(backdrop_height - 22.5))
+        .align_x(iced::alignment::Horizontal::Right)
+        .align_y(iced::alignment::Vertical::Bottom);
+
+    // Layer the button over the content using Stack
+    return Stack::new()
+        .push(content_container)
+        .push(button_container)
+        .into();
+
+    // Create the main content container
+
 
     // Create the main content container
     let content_container = container(content).width(Length::Fill);
@@ -831,7 +761,53 @@ pub fn view_episode_detail<'a>(
     state: &'a State,
     episode_id: &'a EpisodeID,
 ) -> Element<'a, Message> {
-    //let mut content = column![].spacing(20).padding(20);
+    // Try to get episode yoke from cache or fetch on-demand
+    let ep_uuid = episode_id.to_uuid();
+    let episode_yoke_arc = match state
+        .domains
+        .ui
+        .state
+        .episode_yoke_cache
+        .peek_ref(&ep_uuid)
+    {
+        Some(arc) => arc,
+        _ => match state
+            .domains
+            .ui
+            .state
+            .repo_accessor
+            .get_episode_yoke(&ferrex_core::MediaID::Episode(*episode_id))
+        {
+            Ok(yoke) => {
+                let arc = std::sync::Arc::new(yoke);
+                state
+                    .domains
+                    .ui
+                    .state
+                    .episode_yoke_cache
+                    .insert(ep_uuid, arc.clone());
+                arc
+            }
+            Err(e) => {
+                log::warn!("[TV] Failed to fetch episode yoke for {}: {:?}", ep_uuid, e);
+                return container(
+                    column![
+                        text("Media Not Found").size(24).color(theme::MediaServerTheme::TEXT_SECONDARY),
+                        Space::with_height(10),
+                        text("Repository error:").size(16).color(theme::MediaServerTheme::TEXT_SUBDUED),
+                    ]
+                    .spacing(10)
+                    .align_x(iced::Alignment::Center),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into();
+            }
+        },
+    };
+    let episode = episode_yoke_arc.get();
 
     // Add dynamic spacing at the top based on backdrop dimensions
     let window_width = state.window_size.width;
@@ -842,222 +818,89 @@ pub fn view_episode_detail<'a>(
         .state
         .background_shader_state
         .calculate_content_offset_with_height(window_width, window_height);
-    //content = content.push(Space::with_height(Length::Fixed(content_offset)));
 
-    /*
+    let mut content = column![].spacing(20).padding(20);
+    content = content.push(Space::with_height(Length::Fixed(content_offset)));
 
-    // NEW ARCHITECTURE: Find the episode from MediaStore
-    let (episode_ref, series_name) = if let Ok(store) = state.domains.media.state.media_store.read()
-    {
-        let episode = if let Some(Media::Episode(ep)) =
-            store.get(&MediaID::Episode(episode_id.clone()))
-        {
-            Some(ep.clone())
-        } else {
-            None
-        };
+    // Episode still image
+    let still_element: Element<Message> = image_for(episode.id.to_uuid())
+        .size(ImageSize::Thumbnail)
+        .width(Length::Fixed(640.0))
+        .height(Length::Fixed(360.0))
+        .priority(Priority::Visible)
+        .into();
 
-        let series_name = if let Some(ref ep) = episode {
-            if let Ok(series_id) = SeriesID::new(ep.series_id.as_str().to_string()) {
-                if let Some(Media::Series(series)) = store.get(&MediaID::Series(series_id))
-                {
-                    series.title.as_str().to_string()
-                } else {
-                    "Unknown Series".to_string()
-                }
-            } else {
-                "Unknown Series".to_string()
-            }
-        } else {
-            "Unknown Series".to_string()
-        };
+    // Details column
+    let mut details = column![].spacing(15).padding(20).width(Length::Fill);
 
-        (episode, series_name)
+    // Title and info
+    let (ep_name, overview, air_date, runtime, vote_average) = if let Some(d) = episode.details() {
+        (
+            Some(d.name.to_string()),
+            d.overview.as_ref(),
+            d.air_date.as_ref(),
+            d.runtime.as_ref(),
+            d.vote_average.as_ref(),
+        )
     } else {
-        (None, "Unknown Series".to_string())
+        (None, None, None, None, None)
     };
 
-    if let Some(episode) = episode_ref {
-        // Get watch progress for this episode
-        let watch_progress = state
-            .domains
-            .media
-            .state
-            .get_media_progress(&MediaID::Episode(episode_id.to_owned()));
-
-        // Episode still/thumbnail using unified image system
-        let mut episode_still = image_for(MediaID::Episode(episode_id.to_owned()))
-            .size(ImageSize::Thumbnail)
-            .width(Length::Fixed(640.0))
-            .height(Length::Fixed(360.0))
-            .priority(Priority::Visible);
-
-        // Add watch progress - default to unwatched (0.0) if no watch state
-        let progress = watch_progress.unwrap_or(0.0);
-        episode_still = episode_still.progress(progress);
-
-        let still_element: Element<Message> = episode_still.into();
-
-        // Details column
-        let mut details = column![].spacing(15).padding(20).width(Length::Fill);
-
-        // Extract episode details
-        let (episode_name, overview, air_date, runtime, vote_average) = match &episode.details {
-            crate::infrastructure::api_types::MediaDetailsOption::Details(
-                crate::infrastructure::api_types::TmdbDetails::Episode(details),
-            ) => (
-                Some(details.name.clone()),
-                details.overview.clone(),
-                details.air_date.clone(),
-                details.runtime,
-                details.vote_average,
-            ),
-            _ => (None, None, None, None, None),
-        };
-
-        // Title
-        let title =
-            episode_name.unwrap_or_else(|| format!("Episode {}", episode.episode_number.value()));
-        details = details.push(
-            text(format!(
-                "{} - S{:02}E{:02}: {}",
-                series_name,
-                episode.season_number.value(),
-                episode.episode_number.value(),
-                title
-            ))
+    let (season_number, ep_number) = if let Some(d) = episode.details() {
+        (d.season_number, d.episode_number)
+    } else {
+        (0, 0)
+    };
+    let title = ep_name.unwrap_or_else(|| format!("Episode {}", ep_number));
+    details = details.push(
+        text(format!("S{:02}E{:02}: {}", season_number, ep_number, title))
             .size(28)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        );
+    );
 
-        // Episode info
-        let mut info_parts = Vec::new();
-        if let Some(date) = air_date {
-            info_parts.push(date);
-        }
-        if let Some(runtime) = runtime {
-            info_parts.push(format!("{} min", runtime));
-        }
-
-        // Add watch status
-        if let Some(progress) = watch_progress {
-            if state
-                .domains
-                .media
-                .state
-                .is_watched(&MediaID::Episode(episode_id.to_owned()))
-            {
-                info_parts.push("✓ Watched".to_string());
-            } else if progress > 0.0 {
-                let percentage = (progress * 100.0) as u32;
-                info_parts.push(format!("{}% watched", percentage));
-            }
-        }
-
-        if let Some(rating) = vote_average {
-            info_parts.push(format!("★ {:.1}", rating));
-        }
-
-        if !info_parts.is_empty() {
-            details = details.push(
-                text(info_parts.join(" • "))
-                    .size(16)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            );
-        }
-
-        // File info
-        if let Some(metadata) = &episode.file.media_file_metadata {
-            let mut file_info = vec![format!("File: {}", episode.file.filename)];
-
-            if let Some(duration) = metadata.duration {
-                let minutes = (duration / 60.0) as u32;
-                file_info.push(format!("Duration: {} min", minutes));
-            }
-
-            if let Some(width) = metadata.width {
-                if let Some(height) = metadata.height {
-                    file_info.push(format!("Resolution: {}x{}", width, height));
-                }
-            }
-
-            details = details.push(Space::with_height(10));
-            details = details.push(
-                text(file_info.join(" • "))
-                    .size(14)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            );
-        }
-
-        // Play button - convert to legacy MediaFile for playback
-        let series_details = if let Ok(store) = state.domains.media.state.media_store.read() {
-            if let Ok(series_id) = SeriesID::new(episode.series_id.as_str().to_string()) {
-                if let Some(Media::Series(series)) = store.get(&MediaID::Series(series_id))
-                {
-                    match &series.details {
-                        crate::infrastructure::api_types::MediaDetailsOption::Details(
-                            crate::infrastructure::api_types::TmdbDetails::Series(details),
-                        ) => Some(details.clone()),
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let button_row = crate::domains::ui::components::create_action_button_row(
-            Message::PlayMediaWithId(
-                episode.file,
-                ferrex_core::MediaID::Episode(episode.id.clone()),
-            ),
-            vec![], // No additional buttons yet
-        );
-        details = details.push(Space::with_height(10));
-        details = details.push(button_row);
-
-        // Overview/Description
-        if let Some(desc) = overview {
-            details = details.push(Space::with_height(20));
-            details = details.push(
-                container(
-                    text(desc)
-                        .size(14)
-                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
-                )
-                .width(Length::Fill)
-                .padding(10),
-            );
-        }
-
-        // Content layout
-        content = content.push(column![still_element, Space::with_height(20), details].spacing(10));
-    } else {
-        // Episode not found
-        content = content.push(
-            container(
-                column![
-                    text("❌").size(48),
-                    text("Episode not found")
-                        .size(16)
-                        .color(theme::MediaServerTheme::ERROR)
-                ]
-                .spacing(10),
-            )
-            .padding(100),
+    let mut info_parts = Vec::new();
+    if let Some(date) = air_date {
+        info_parts.push(date.to_string());
+    }
+    if let Some(rt) = runtime {
+        info_parts.push(format!("{} min", rt));
+    }
+    if let Some(rating) = vote_average {
+        info_parts.push(format!("★ {:.1}", rating));
+    }
+    if !info_parts.is_empty() {
+        details = details.push(
+            text(info_parts.join(" • "))
+                .size(16)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
         );
     }
+
+    // Play button
+    let button_row = components::create_action_button_row(
+        Message::PlayMediaWithId(MediaID::Episode(EpisodeID(episode.id.to_uuid()))),
+        vec![],
+    );
+    details = details.push(Space::with_height(10));
+    details = details.push(button_row);
+
+    // Overview
+    if let Some(desc) = overview {
+        details = details.push(Space::with_height(20));
+        details = details.push(
+            container(text(desc.to_string()).size(14).color(theme::MediaServerTheme::TEXT_PRIMARY))
+                .width(Length::Fill)
+                .padding(10),
+        );
+    }
+
+    // Layout
+    content = content.push(column![still_element, Space::with_height(20), details].spacing(10));
 
     // Create the main content container
     let content_container = container(content).width(Length::Fill);
 
     // Calculate backdrop dimensions
-    let window_width = state.window_size.width;
-    let window_height = state.window_size.height;
     let display_aspect = state
         .domains
         .ui
@@ -1077,27 +920,8 @@ pub fn view_episode_detail<'a>(
         .align_x(iced::alignment::Horizontal::Right)
         .align_y(iced::alignment::Vertical::Bottom);
 
-    // Layer the button over the content using Stack
     Stack::new()
         .push(content_container)
         .push(button_container)
-        .into() */
-    container(
-        column![
-            text("Media Not Found")
-                .size(24)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            Space::with_height(10),
-            text(format!("Repository error:"))
-                .size(16)
-                .color(theme::MediaServerTheme::TEXT_SUBDUED),
-        ]
-        .spacing(10)
-        .align_x(iced::Alignment::Center),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .center_x(Length::Fill)
-    .center_y(Length::Fill)
-    .into()
+        .into()
 }

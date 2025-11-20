@@ -18,6 +18,10 @@ impl HasField<ReleaseDateField> for MovieFieldSet {}
 impl HasField<RatingField> for MovieFieldSet {}
 impl HasField<PopularityField> for MovieFieldSet {}
 impl HasField<RuntimeField> for MovieFieldSet {}
+impl HasField<FileSizeField> for MovieFieldSet {}
+impl HasField<ResolutionField> for MovieFieldSet {}
+impl HasField<BitrateField> for MovieFieldSet {}
+impl HasField<ContentRatingField> for MovieFieldSet {}
 impl HasField<LastWatchedField> for MovieFieldSet {}
 impl HasField<WatchProgressField> for MovieFieldSet {}
 
@@ -46,6 +50,9 @@ impl HasField<DateAddedField> for EpisodeFieldSet {}
 impl HasField<ReleaseDateField> for EpisodeFieldSet {} // Air date
 impl HasField<RatingField> for EpisodeFieldSet {}
 impl HasField<RuntimeField> for EpisodeFieldSet {}
+impl HasField<FileSizeField> for EpisodeFieldSet {}
+impl HasField<ResolutionField> for EpisodeFieldSet {}
+impl HasField<BitrateField> for EpisodeFieldSet {}
 impl HasField<LastWatchedField> for EpisodeFieldSet {}
 impl HasField<WatchProgressField> for EpisodeFieldSet {}
 // Note: Episodes don't have popularity field typically

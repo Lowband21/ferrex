@@ -28,8 +28,9 @@ impl PlayerDomainState {
     /// Select an audio track by index
     pub fn select_audio_track(&mut self, index: i32) -> Result<(), String> {
         if let Some(video) = &mut self.video_opt {
-            // TODO: Reenable audio track selection
-            //video.set_audio_track(index);
+            if let Err(e) = video.select_audio_track(index) {
+                return Err(format!("Failed to select audio track {}: {}", index, e));
+            }
             self.current_audio_track = index;
 
             // Show notification
@@ -60,19 +61,23 @@ impl PlayerDomainState {
                 }
             }
 
-            // TODO: Reenable subtitle track selection
-            //video.set_subtitle_track(index);
+            if let Err(e) = video.select_subtitle_track(index) {
+                return Err(format!("Failed to select subtitle track {:?}: {}", index, e));
+            }
             self.current_subtitle_track = index;
 
-            // Update subtitle enabled state based on selection
-            if index.is_some() {
-                self.subtitles_enabled = true;
-                video.set_subtitles_enabled(true);
+            // Update subtitle enabled state based on selection without sending a second SelectStreams
+            // event. select_subtitle_track() already applied the change at the backend.
+            self.subtitles_enabled = index.is_some();
+            if self.subtitles_enabled {
                 log::info!("Subtitles Enabled for track {:?}", index);
             } else {
-                self.subtitles_enabled = false;
-                video.set_subtitles_enabled(false);
                 log::info!("Subtitles Disabled");
+            }
+
+            // Keep overlay (if present) in sync for Wayland backend
+            if let Some(overlay) = self.overlay.as_ref() {
+                overlay.select_subtitle_index(index);
             }
 
             // Show notification
@@ -93,22 +98,32 @@ impl PlayerDomainState {
     /// Toggle subtitles on/off
     pub fn toggle_subtitles(&mut self) -> Result<(), String> {
         if let Some(video) = &mut self.video_opt {
-            self.subtitles_enabled = !self.subtitles_enabled;
-            video.set_subtitles_enabled(self.subtitles_enabled);
-
-            // Show notification
-            let message = if self.subtitles_enabled {
-                if let Some(idx) = self.current_subtitle_track {
-                    let track_name = self.format_subtitle_track(idx);
-                    format!("Subtitles: {}", track_name)
+            let enable = !self.subtitles_enabled;
+            if enable {
+                // When enabling via toggle, ensure a concrete track is selected for reliable behavior
+                let target_index = if let Some(cur) = self.current_subtitle_track {
+                    Some(cur)
+                } else if !self.available_subtitle_tracks.is_empty() {
+                    Some(0)
                 } else {
-                    "Subtitles: On".to_string()
+                    None
+                };
+
+                if let Some(idx) = target_index {
+                    // This updates backend and UI state, and shows the toast
+                    self.select_subtitle_track(Some(idx))?;
+                } else {
+                    // No tracks, just set enabled flag
+                    self.subtitles_enabled = true;
+                    video.set_subtitles_enabled(true);
+                    self.show_track_notification("Subtitles: On".to_string());
                 }
             } else {
-                "Subtitles: Off".to_string()
-            };
-            self.show_track_notification(message);
-
+                // Disable reliably by selecting None (updates backend and UI state)
+                self.select_subtitle_track(None)?;
+                // Drop overlay when disabling; creation handled elsewhere if needed
+                self.overlay = None;
+            }
             Ok(())
         } else {
             Err("No video loaded".to_string())

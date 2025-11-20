@@ -5,7 +5,7 @@
 
 use super::{
     DateAddedField, HasField, MovieFieldSet, OptionalDateKey, OptionalFloatKey, OptionalU32Key,
-    SeriesFieldSet, SortFieldMarker, SortKey, SortableEntity, StringKey,
+    OptionalU64Key, SeriesFieldSet, SortFieldMarker, SortKey, SortableEntity, StringKey,
 };
 
 use crate::{Media, MediaDetailsOption, MovieReference, SeriesReference, TmdbDetails};
@@ -85,6 +85,28 @@ impl SortableEntity for MovieReference {
                 _ => None,
             };
             let key = OptionalU32Key::new(runtime);
+            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+        } else if F::ID == "file_size" {
+            let key = OptionalU64Key::new(Some(self.file.size));
+            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+        } else if F::ID == "resolution" {
+            let height = self
+                .file
+                .media_file_metadata
+                .as_ref()
+                .and_then(|meta| meta.height);
+            let key = OptionalU32Key::new(height);
+            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+        } else if F::ID == "bitrate" {
+            let bitrate = self
+                .file
+                .media_file_metadata
+                .as_ref()
+                .and_then(|meta| meta.bitrate);
+            let key = OptionalU64Key::new(bitrate);
+            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+        } else if F::ID == "content_rating" {
+            let key = StringKey::missing();
             *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
         } else if F::ID == "last_watched" {
             // Last watched requires user context and watch status data

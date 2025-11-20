@@ -37,15 +37,15 @@ pub enum MediaTypeFilter {
 /// Sort criteria for queries
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SortCriteria {
-    pub primary: SortField,
+    pub primary: SortBy,
     pub order: SortOrder,
-    pub secondary: Option<SortField>, // For stable sorting
+    pub secondary: Option<SortBy>, // For stable sorting
 }
 
 impl Default for SortCriteria {
     fn default() -> Self {
         Self {
-            primary: SortField::Title,
+            primary: SortBy::Title,
             order: SortOrder::Ascending,
             secondary: None,
         }
@@ -55,7 +55,7 @@ impl Default for SortCriteria {
 /// Fields available for sorting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SortField {
+pub enum SortBy {
     Title,
     DateAdded,
     ReleaseDate,
@@ -63,6 +63,11 @@ pub enum SortField {
     WatchProgress, // Requires user context
     Rating,
     Runtime,
+    Popularity,
+    Bitrate,
+    FileSize,
+    ContentRating,
+    Resolution,
 }
 
 /// Sort order

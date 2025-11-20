@@ -425,15 +425,27 @@ pub fn update_player(
         }
 
         Message::NewFrame => {
+            // Also advance transient notifications (e.g., track toast)
+            state.update_track_notification();
+            let mut update_tks = false;
             if let Some(video) = &mut state.video_opt {
                 if state.is_loading_video {
                     state.is_loading_video = false;
                 }
+
+                let num_aud_tks = state.available_audio_tracks.len();
+                let num_sub_tks = state.available_subtitle_tracks.len();
+
+                if num_aud_tks <= 0 || num_sub_tks <=0 {
+                    update_tks = true;
+                }
+
+
                 // Check for seek timeout (500ms)
                 if state.seeking {
                     if let Some(start_time) = state.seek_started_time {
-                        if start_time.elapsed() > Duration::from_millis(500) {
-                            log::warn!("Seek timeout: clearing seeking flag after 500ms");
+                        if start_time.elapsed() > Duration::from_millis(1000) {
+                            log::warn!("Seek timeout: clearing seeking flag after 1s");
                             state.seeking = false;
                             state.seek_started_time = None;
                         }
@@ -494,6 +506,9 @@ pub fn update_player(
                         state.seeking
                     );
                 }
+            }
+            if update_tks {
+                state.update_available_tracks();
             }
             DomainUpdateResult::task(Task::none())
         }
@@ -737,6 +752,8 @@ pub fn update_player(
         }
 
         Message::CheckControlsVisibility => {
+            // Periodically clear notifications and hide controls if idle
+            state.update_track_notification();
             if state.controls && state.controls_time.elapsed() > Duration::from_secs(3) {
                 state.controls = false;
             }
@@ -828,9 +845,6 @@ pub fn update_player(
                 }
             }
         }
-
-        // TODO
-        Message::LoadTrack(media_id) => DomainUpdateResult::task(Task::none()),
 
         // External MPV player messages
         Message::ExternalPlaybackStarted => {

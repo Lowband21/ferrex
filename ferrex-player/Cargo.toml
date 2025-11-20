@@ -27,9 +27,10 @@ iced = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature
     "web-colors",
     "high-refresh-rate",
     "batch",
-    "hot"
+    "lazy"
 ] }
 iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", branch = "feature/batched_primitives", features = ["image", "batch"] }
+#iced_aw = { version = "0.12.2", default-features = false, features = ["menu", "quad"] }
 
 # Icons
 lucide-icons = { path = "../../../lucide_icons_iced_0.14", features = ["iced"] }
@@ -37,6 +38,7 @@ lucide-icons = { path = "../../../lucide_icons_iced_0.14", features = ["iced"] }
 # Unified video abstraction based on subwave
 subwave_unified = { path = "../../../subwave/subwave_unified" }
 subwave_core = { path = "../../../subwave/subwave_core" }
+subwave_overlay = { path = "../../../subwave/subwave_overlay" }
 
 # Async runtime
 tokio.workspace = true

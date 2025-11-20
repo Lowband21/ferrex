@@ -12,7 +12,7 @@ use crate::domains::ui::views::library::view_library;
 use crate::domains::ui::views::library_controls_bar::view_library_controls_bar;
 use crate::domains::ui::views::movies::view_movie_detail;
 use crate::domains::ui::views::settings::view_user_settings;
-use crate::domains::ui::views::tv::{view_episode_detail, view_season_detail, view_tv_show_detail};
+use crate::domains::ui::views::tv::{view_episode_detail, view_season_detail, view_series_detail};
 use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::{BackgroundEffect, background_shader};
 use crate::domains::{player, ui};
@@ -65,7 +65,7 @@ pub fn view(state: &State) -> Element<DomainMessage> {
             view_movie_detail(state, *movie_id).map(DomainMessage::from)
         }
         ViewState::SeriesDetail { series_id, .. } => {
-            view_tv_show_detail(state, *series_id).map(DomainMessage::from)
+            view_series_detail(state, *series_id).map(DomainMessage::from)
         }
         ViewState::SeasonDetail {
             series_id,

@@ -259,7 +259,26 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::M
             // Store and start playback
             state.domains.player.state.video_opt = Some(video);
             if let Some(video) = &mut state.domains.player.state.video_opt {
+                // Start playback
                 video.set_paused(false);
+                // If Wayland backend and subtitles enabled, create overlay
+                if video.backend() == subwave_unified::video::BackendPreference::ForceWayland
+                    && video.subtitles_enabled()
+                {
+                    // Use window size for overlay; can refine to video size later
+                    let (w, h) = (state.window_size.width as i32, state.window_size.height as i32);
+                    if let Ok(mut overlay) = subwave_overlay::SubtitleOverlay::new(&url, w.max(1), h.max(1)) {
+                        // Share clock from main pipeline for rough sync
+                        let main_pipe = video.pipeline();
+                        overlay.adopt_clock_from(&main_pipe);
+                        // Apply current subtitle index if any
+                        overlay.select_subtitle_index(video.current_subtitle_track());
+                        let _ = overlay.start();
+                        state.domains.player.state.overlay = Some(overlay);
+                    }
+                } else {
+                    state.domains.player.state.overlay = None;
+                }
             }
             state.domains.player.state.is_loading_video = false;
             state.domains.ui.state.view = ViewState::Player;

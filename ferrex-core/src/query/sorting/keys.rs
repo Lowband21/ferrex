@@ -161,6 +161,43 @@ impl SortKey for OptionalU32Key {
     }
 }
 
+/// Unsigned integer key for large numeric values (file size, bitrate)
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OptionalU64Key(Option<u64>);
+
+impl OptionalU64Key {
+    pub fn new(value: Option<u64>) -> Self {
+        OptionalU64Key(value)
+    }
+}
+
+impl Ord for OptionalU64Key {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (&self.0, &other.0) {
+            (Some(a), Some(b)) => a.cmp(b),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        }
+    }
+}
+
+impl PartialOrd for OptionalU64Key {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl SortKey for OptionalU64Key {
+    fn missing() -> Self {
+        OptionalU64Key(None)
+    }
+
+    fn is_missing(&self) -> bool {
+        self.0.is_none()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,6 +223,11 @@ mod tests {
         let u32_present = OptionalU32Key::new(Some(42));
         let u32_missing = OptionalU32Key::missing();
         assert!(u32_present < u32_missing);
+
+        // U64 keys
+        let u64_present = OptionalU64Key::new(Some(42));
+        let u64_missing = OptionalU64Key::missing();
+        assert!(u64_present < u64_missing);
     }
 
     #[test]

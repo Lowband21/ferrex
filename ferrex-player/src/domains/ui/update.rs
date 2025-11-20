@@ -11,7 +11,8 @@ use crate::{
     state_refactored::State,
 };
 use ferrex_core::{
-    EpisodeLike, ImageSize, ImageType, Media, MediaIDLike, MediaLike, MediaType, MovieLike,
+    EpisodeLike, ImageSize, ImageType, Media, MediaIDLike, MediaLike, MediaType, MovieLike, SortBy,
+    SortOrder,
 };
 use iced::Task;
 
@@ -155,63 +156,231 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
         ui::Message::SetSortBy(sort_by) => {
             state.domains.ui.state.sort_by = sort_by;
 
-            // Use SortingService for optimized parallel sorting on background threads
-            //let media_store = Arc::clone(&state.domains.media.state.media_store);
-            let sort_order = state.domains.ui.state.sort_order;
+            // Kick off server-backed sorted index fetch for active library (movies-only for now)
+            let api = state.api_service.clone();
+            let active_lib = state.tab_manager.active_tab_id().library_id();
+            if let Some(lib_id) = active_lib {
+                let core_sort = sort_by;
+                let core_order = state.domains.ui.state.sort_order;
 
-            /* TODO: Reimplement sorting logic
-            DomainUpdateResult::task(
-                Task::perform(
+                let task = Task::perform(
                     async move {
-                        let sorting_service =
-                            crate::domains::media::store::SortingService::new(media_store);
-
-                        // Sort movies and series in parallel on background threads
-                        if let Err(e) = sorting_service.sort_all_async(sort_by, sort_order).await {
-                            log::error!("Failed to sort media: {}", e);
+                        match api
+                            .fetch_sorted_indices(lib_id.as_uuid(), core_sort, core_order)
+                            .await
+                        {
+                            Ok(positions) => ui::Message::ApplySortedPositions(lib_id, positions),
+                            Err(e) => ui::Message::SortedIndexFailed(e.to_string()),
                         }
                     },
-                    |_| ui::Message::RefreshViewModels,
-                )
-                .map(DomainMessage::Ui),
-            ) */
-            DomainUpdateResult::task(Task::none())
+                    |msg| DomainMessage::Ui(msg),
+                );
+                DomainUpdateResult::task(task)
+            } else {
+                DomainUpdateResult::task(Task::none())
+            }
         }
         ui::Message::ToggleSortOrder => {
             state.domains.ui.state.sort_order = match state.domains.ui.state.sort_order {
-                crate::domains::ui::types::SortOrder::Ascending => {
-                    crate::domains::ui::types::SortOrder::Descending
-                }
-                crate::domains::ui::types::SortOrder::Descending => {
-                    crate::domains::ui::types::SortOrder::Ascending
-                }
+                SortOrder::Ascending => SortOrder::Descending,
+                SortOrder::Descending => SortOrder::Ascending,
             };
 
-            // Use SortingService for optimized parallel sorting on background threads
-            //let media_store = Arc::clone(&state.domains.media.state.media_store);
-            let sort_order = state.domains.ui.state.sort_order;
-            let sort_by = state.domains.ui.state.sort_by;
-
-            /*
-            DomainUpdateResult::task(
-                Task::perform(
+            // Kick off server-backed sorted index fetch for active library
+            let api = state.api_service.clone();
+            let active_lib = state.tab_manager.active_tab_id().library_id();
+            if let Some(lib_id) = active_lib {
+                let sort = state.domains.ui.state.sort_by;
+                let order = state.domains.ui.state.sort_order;
+                let task = Task::perform(
                     async move {
-                        let sorting_service =
-                            crate::domains::media::store::SortingService::new(media_store);
-
-                        // Sort movies and series in parallel on background threads
-                        if let Err(e) = sorting_service.sort_all_async(sort_by, sort_order).await {
-                            log::error!("Failed to sort media: {}", e);
+                        match api
+                            .fetch_sorted_indices(lib_id.as_uuid(), sort, order)
+                            .await
+                        {
+                            Ok(positions) => ui::Message::ApplySortedPositions(lib_id, positions),
+                            Err(e) => ui::Message::SortedIndexFailed(e.to_string()),
                         }
                     },
-                    |_| ui::Message::RefreshViewModels,
-                )
-                .map(DomainMessage::Ui),
-            ) */
+                    |msg| DomainMessage::Ui(msg),
+                );
+                DomainUpdateResult::task(task)
+            } else {
+                DomainUpdateResult::task(Task::none())
+            }
+        }
+        ui::Message::ApplyFilteredPositions(library_id, positions) => {
+            if let Some(tab) = state
+                .tab_manager
+                .get_tab_mut(crate::domains::ui::tabs::TabId::Library(library_id))
+            {
+                if let crate::domains::ui::tabs::TabState::Library(lib_state) = tab {
+                    lib_state.apply_sorted_positions(&positions);
+                }
+            }
+            state.tab_manager.refresh_active_tab();
+            DomainUpdateResult::task(Task::none())
+        }
+        ui::Message::RequestFilteredPositions => {
+            // Build a FilterIndicesRequest from current UI filters (Phase 1: movies only)
+            use ferrex_core::FilterIndicesRequest;
+            use ferrex_core::query::types::MediaTypeFilter;
+            let api = state.api_service.clone();
+            let active_lib = state.tab_manager.active_tab_id().library_id();
+            let active_type = state.tab_manager.active_tab_type().cloned();
+            if let (Some(lib_id), Some(lib_type)) = (active_lib, active_type) {
+                if matches!(
+                    lib_type,
+                    crate::infrastructure::api_types::LibraryType::Movies
+                ) {
+                    // Use core sort directly
+                    let core_sort = state.domains.ui.state.sort_by;
+                    let core_order = match state.domains.ui.state.sort_order {
+                        SortOrder::Ascending => SortOrder::Ascending,
+                        SortOrder::Descending => SortOrder::Descending,
+                    };
+                    let search = if state.domains.ui.state.search_query.is_empty() {
+                        None
+                    } else {
+                        Some(state.domains.ui.state.search_query.trim().to_string())
+                    };
+                    let genres: Vec<String> = state
+                        .domains
+                        .ui
+                        .state
+                        .selected_genres
+                        .iter()
+                        .map(|g| g.api_name().to_string())
+                        .collect();
+
+                    let year_range = state.domains.ui.state.selected_decade.map(|d| {
+                        let start = d.start_year();
+                        let end = start.saturating_add(9);
+                        (start, end)
+                    });
+
+                    // Resolution and watch status are not yet supported server-side
+                    // rating_range omitted
+                    let spec = FilterIndicesRequest {
+                        media_type: Some(MediaTypeFilter::Movie),
+                        genres,
+                        year_range,
+                        rating_range: None,
+                        search,
+                        sort: Some(core_sort),
+                        order: Some(core_order),
+                    };
+                    let task = Task::perform(
+                        async move {
+                            match api.fetch_filtered_indices(lib_id.as_uuid(), &spec).await {
+                                Ok(positions) => {
+                                    ui::Message::ApplyFilteredPositions(lib_id, positions)
+                                }
+                                Err(e) => ui::Message::SortedIndexFailed(e.to_string()),
+                            }
+                        },
+                        |msg| DomainMessage::Ui(msg),
+                    );
+                    DomainUpdateResult::task(task)
+                } else {
+                    // Series: do nothing in Phase 1
+                    DomainUpdateResult::task(Task::none())
+                }
+            } else {
+                DomainUpdateResult::task(Task::none())
+            }
+        }
+        ui::Message::ToggleFilterPanel => {
+            state.domains.ui.state.show_filter_panel = !state.domains.ui.state.show_filter_panel;
+            DomainUpdateResult::task(Task::none())
+        }
+        ui::Message::ToggleFilterGenre(g) => {
+            if let Some(pos) = state
+                .domains
+                .ui
+                .state
+                .selected_genres
+                .iter()
+                .position(|x| x == &g)
+            {
+                state.domains.ui.state.selected_genres.remove(pos);
+            } else {
+                state.domains.ui.state.selected_genres.push(g);
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+        ui::Message::SetFilterDecade(d) => {
+            state.domains.ui.state.selected_decade = Some(d);
+            DomainUpdateResult::task(Task::none())
+        }
+        ui::Message::ClearFilterDecade => {
+            state.domains.ui.state.selected_decade = None;
+            DomainUpdateResult::task(Task::none())
+        }
+        ui::Message::SetFilterResolution(r) => {
+            state.domains.ui.state.selected_resolution = r;
+            DomainUpdateResult::task(Task::none())
+        }
+        ui::Message::SetFilterWatchStatus(ws) => {
+            state.domains.ui.state.selected_watch_status = ws;
+            DomainUpdateResult::task(Task::none())
+        }
+        ui::Message::ApplyFilters => {
+            // Reuse RequestFilteredPositions path; it will read current UI fields
+            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                ui::Message::RequestFilteredPositions,
+            )))
+        }
+        ui::Message::ClearFilters => {
+            state.domains.ui.state.selected_genres.clear();
+            state.domains.ui.state.selected_decade = None;
+            state.domains.ui.state.selected_resolution = ferrex_core::UiResolution::Any;
+            state.domains.ui.state.selected_watch_status = ferrex_core::UiWatchStatus::Any;
             DomainUpdateResult::task(Task::none())
         }
         ui::Message::ShowAdminDashboard => {
             state.domains.ui.state.view = ViewState::AdminDashboard;
+            DomainUpdateResult::task(Task::none())
+        }
+        ui::Message::ApplySortedPositions(library_id, positions) => {
+            // Update the active Library tab: apply positions -> reorder ID index and refresh
+            if let Some(tab) = state
+                .tab_manager
+                .get_tab_mut(crate::domains::ui::tabs::TabId::Library(library_id))
+            {
+                if let crate::domains::ui::tabs::TabState::Library(lib_state) = tab {
+                    let count = positions.len();
+                    let first = positions.get(0).copied();
+                    let last = positions.last().copied();
+                    log::debug!(
+                        "ApplySortedPositions: library {} received {} positions (first={:?}, last={:?})",
+                        library_id,
+                        count,
+                        first,
+                        last
+                    );
+                    lib_state.apply_sorted_positions(&positions);
+                }
+            }
+            state.tab_manager.refresh_active_tab();
+            DomainUpdateResult::task(Task::none())
+        }
+        ui::Message::ApplySortedIndex(library_id, ids) => {
+            use std::collections::HashMap;
+            // Update MediaRepo.sorted_indices for the library and refresh tab
+            if let Some(repo) = state.media_repo.write().as_mut() {
+                // Use Accessor API to store sorted indices if/when exposed; for now, compute immediately
+                // and store on-demand in the UI layer or refresh the tab which will request indices again.
+                // Placeholder: no direct repo mutation here to avoid private field access.
+            }
+            // Mark and refresh the specific library tab
+            let tab_id = crate::domains::ui::tabs::TabId::Library(library_id);
+            state.tab_manager.mark_tab_needs_refresh(tab_id);
+            state.tab_manager.refresh_active_tab();
+            DomainUpdateResult::task(Task::none())
+        }
+        ui::Message::SortedIndexFailed(err) => {
+            log::warn!("Sorted index fetch failed: {}", err);
             DomainUpdateResult::task(Task::none())
         }
         ui::Message::HideAdminDashboard => {
@@ -1159,23 +1328,6 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 library::messages::Message::SubmitLibraryForm,
             )))
         }
-
-        // TV show loaded
-        //ui::Message::TvShowLoaded(series_id, result) => {
-        //    match result {
-        //        Ok(details) => {
-        //            log::info!("TV show details loaded for series: {}", series_id);
-        //            // TV show details are already stored in state by the library domain
-        //            DomainUpdateResult::task(Task::none())
-        //        }
-        //        Err(e) => {
-        //            log::error!("Failed to load TV show details for {}: {}", series_id, e);
-        //            state.domains.ui.state.error_message =
-        //                Some(format!("Failed to load TV show: {}", e));
-        //            DomainUpdateResult::task(Task::none())
-        //        }
-        //    }
-        //}
 
         // Aggregate all libraries
         ui::Message::AggregateAllLibraries => {

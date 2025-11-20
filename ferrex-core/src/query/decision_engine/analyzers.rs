@@ -1,7 +1,7 @@
 //! Analyzers for data completeness and query complexity
 
 use crate::query::decision_engine::types::QueryContext;
-use crate::query::types::{MediaQuery, SortField};
+use crate::query::types::{MediaQuery, SortBy};
 use crate::{Media, MediaDetailsOption, MovieReference, SeriesReference};
 
 /// Levels of data completeness
@@ -135,7 +135,7 @@ impl DataCompletenessAnalyzer {
         // Check sort fields
         let sort_needs_metadata = matches!(
             query.sort.primary,
-            SortField::ReleaseDate | SortField::Rating | SortField::Runtime
+            SortBy::ReleaseDate | SortBy::Rating | SortBy::Runtime
         );
 
         // Check filters
@@ -157,9 +157,9 @@ impl QueryComplexityAnalyzer {
 
         // Check sort complexity
         complexity_score += match query.sort.primary {
-            SortField::Title | SortField::DateAdded => 1,
-            SortField::ReleaseDate | SortField::Rating => 2,
-            SortField::LastWatched | SortField::WatchProgress => 3,
+            SortBy::Title | SortBy::DateAdded => 1,
+            SortBy::ReleaseDate | SortBy::Rating => 2,
+            SortBy::LastWatched | SortBy::WatchProgress => 3,
             _ => 2,
         };
 
@@ -211,7 +211,7 @@ impl QueryComplexityAnalyzer {
         // Queries with LastWatched or WatchProgress sort need server
         if matches!(
             query.sort.primary,
-            SortField::LastWatched | SortField::WatchProgress
+            SortBy::LastWatched | SortBy::WatchProgress
         ) {
             return false;
         }
@@ -289,7 +289,7 @@ mod tests {
             (0..10).map(|_| create_test_movie(false)).collect();
 
         let mut query_needs_metadata = MediaQuery::default();
-        query_needs_metadata.sort.primary = SortField::Rating;
+        query_needs_metadata.sort.primary = SortBy::Rating;
 
         let completeness = DataCompletenessAnalyzer::analyze_movies(
             &movies_without_details,
@@ -319,7 +319,7 @@ mod tests {
 
         // Moderate query
         let mut moderate_query = MediaQuery::default();
-        moderate_query.sort.primary = SortField::Title;
+        moderate_query.sort.primary = SortBy::Title;
         moderate_query.filters.library_ids = vec![Uuid::new_v4()];
         moderate_query.filters.media_type = Some(crate::query::types::MediaTypeFilter::Movie);
 

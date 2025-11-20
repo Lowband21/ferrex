@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod ui_widgets_tests {
+    use ferrex_core::{SortBy, SortOrder};
+    use ferrex_player::domains::ui::messages::Message;
     use ferrex_player::domains::ui::widgets::{filter_button, sort_dropdown, sort_order_toggle};
-    use ferrex_player::domains::ui::{SortBy, SortOrder, messages::Message};
     use iced::Element;
 
     #[test]
@@ -10,7 +11,7 @@ mod ui_widgets_tests {
         let sort_options = vec![
             SortBy::DateAdded,
             SortBy::Title,
-            SortBy::Year,
+            SortBy::ReleaseDate,
             SortBy::Rating,
         ];
 

@@ -90,6 +90,10 @@ pub mod providers;
 /// Advanced media query system with filtering and sorting
 pub mod query;
 
+/// Sorted indices for efficient media sorting
+#[cfg(feature = "database")]
+pub mod indices;
+
 /// Role-Based Access Control (RBAC) system
 pub mod rbac;
 

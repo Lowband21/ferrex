@@ -70,6 +70,14 @@ impl TabState {
             }
         }
     }
+
+    /// Get the visible positions for this tab (movie libraries). Returns None if not a library tab.
+    pub fn get_visible_positions(&self) -> Option<(LibraryID, Vec<u32>)> {
+        match self {
+            TabState::Library(state) => Some(state.get_visible_positions()),
+            _ => None,
+        }
+    }
 }
 
 /// State for the "All" tab showing curated content
@@ -111,6 +119,9 @@ pub struct LibraryTabState {
 
     /// Cached sorted index of visible top-level items (movie/series) for this library
     pub cached_index_ids: Vec<Uuid>,
+
+    /// Cached server-provided positions into archived slice (movies only, Phase 1)
+    pub cached_positions: Option<Vec<u32>>,
 
     /// Cached media items for this library
     /// This is an enum to support both movie and TV libraries
@@ -178,6 +189,7 @@ impl LibraryTabState {
             library_type,
             grid_state,
             cached_index_ids: Vec::new(),
+            cached_positions: None,
             cached_media,
             needs_refresh: true,
             navigation_history: Vec::new(),
@@ -188,6 +200,49 @@ impl LibraryTabState {
         state.refresh_from_repo();
 
         state
+    }
+
+    /// Apply server-provided sorted positions to reorder the current grid
+    pub fn apply_sorted_positions(&mut self, positions: &[u32]) {
+        // Cache positions
+        self.cached_positions = Some(positions.to_vec());
+
+        if !self.accessor.is_initialized() {
+            // Still update counts so grid knows length
+            self.grid_state.total_items = positions.len();
+            self.grid_state.calculate_visible_range();
+            return;
+        }
+
+        // Map positions to movie IDs from the archived library slice
+        let lib_uuid = self.library_id.as_uuid();
+        let yoke_opt = self
+            .accessor
+            .get_archived_library_yoke(&lib_uuid)
+            .ok()
+            .flatten();
+        if let Some(yoke) = yoke_opt {
+            let lib = yoke.get();
+            let slice = lib.media_as_slice();
+            let mut ids: Vec<Uuid> = Vec::with_capacity(positions.len());
+            for &pos in positions {
+                let idx = pos as usize;
+                if let Some(m) = slice.get(idx) {
+                    if let ferrex_core::ArchivedMedia::Movie(movie) = m {
+                        ids.push(Uuid::from_bytes(movie.id.0));
+                    }
+                }
+            }
+            self.cached_index_ids = ids;
+            self.grid_state.total_items = self.cached_index_ids.len();
+            self.grid_state.calculate_visible_range();
+        } else {
+            // Could not get archived yoke; just update count and visible range
+            self.grid_state.total_items = positions.len();
+            self.grid_state.calculate_visible_range();
+        }
+
+        self.needs_refresh = false;
     }
 
     /// Refresh cached media from the repo
@@ -252,6 +307,15 @@ impl LibraryTabState {
         }
     }
 
+    /// Compute visible positions for the archived slice (Phase 1, movies: filter top-level by library type)
+    pub fn get_visible_positions(&self) -> (LibraryID, Vec<u32>) {
+        let range = self.grid_state.visible_range.clone();
+        // Positions are simply the indices inside the filtered top-level slice range
+        // Align with how get_visible_items filters by media type
+        let lib_uuid = self.library_id;
+        (lib_uuid, (range.start as u32..range.end as u32).collect())
+    }
+
     /// Get the currently visible media items based on the grid's visible range
     pub fn get_visible_items(&self) -> Vec<ArchivedMediaID> {
         let range = self.grid_state.visible_range.clone();
@@ -272,7 +336,19 @@ impl LibraryTabState {
         let lib = yoke.get();
         let slice = lib.media_as_slice();
 
-        // Filter top-level media according to library type
+        // If we have server-provided positions (movies Phase 1), use them to compute visible IDs
+        if matches!(self.library_type, LibraryType::Movies) {
+            if let Some(pos) = &self.cached_positions {
+                let visible_positions = pos.get(range.clone()).unwrap_or(&[]);
+                return visible_positions
+                    .iter()
+                    .filter_map(|p| slice.get(*p as usize))
+                    .map(|m| m.id())
+                    .collect();
+            }
+        }
+
+        // Fallback: filter top-level media according to library type and slice by visible range
         let filtered: Vec<&ferrex_core::ArchivedMedia> = match self.library_type {
             LibraryType::Movies => slice
                 .iter()

@@ -20,6 +20,11 @@ impl PostgresDatabase {
             return self.query_media_by_watch_status(query, watch_filter).await;
         }
 
+        // Check if we can use presorted indices for single library queries
+        if query.filters.library_ids.len() == 1 && query.search.is_none() {
+            // TODO: Potentially use precomputed indices here in the future
+        }
+
         // Build the main SQL query
         let mut results = match query.filters.media_type {
             Some(MediaTypeFilter::Movie) => self.query_movies_optimized(query).await?,
@@ -482,11 +487,11 @@ impl PostgresDatabase {
         sql_builder.push(" ORDER BY ");
 
         let (field, null_position) = match sort.primary {
-            SortField::Title => ("LOWER(mr.title)", "LAST"),
-            SortField::DateAdded => ("mf.created_at", "LAST"),
-            SortField::ReleaseDate => ("mm.release_date", "LAST"),
-            SortField::Rating => ("mm.vote_average", "LAST"),
-            SortField::Runtime => ("mm.runtime", "LAST"),
+            SortBy::Title => ("LOWER(mr.title)", "LAST"),
+            SortBy::DateAdded => ("mf.created_at", "LAST"),
+            SortBy::ReleaseDate => ("mm.release_date", "LAST"),
+            SortBy::Rating => ("mm.vote_average", "LAST"),
+            SortBy::Runtime => ("mm.runtime", "LAST"),
             _ => ("mf.created_at", "LAST"), // Default to date added
         };
 
@@ -507,10 +512,10 @@ impl PostgresDatabase {
         sql_builder.push(" ORDER BY ");
 
         let (field, null_position) = match sort.primary {
-            SortField::Title => ("LOWER(sd.title)", "LAST"),
-            SortField::DateAdded => ("file_created_at", "LAST"),
-            SortField::ReleaseDate => ("sd.first_air_date", "LAST"),
-            SortField::Rating => ("sd.vote_average", "LAST"),
+            SortBy::Title => ("LOWER(sd.title)", "LAST"),
+            SortBy::DateAdded => ("file_created_at", "LAST"),
+            SortBy::ReleaseDate => ("sd.first_air_date", "LAST"),
+            SortBy::Rating => ("sd.vote_average", "LAST"),
             _ => ("file_created_at", "LAST"),
         };
 
@@ -527,12 +532,12 @@ impl PostgresDatabase {
     }
 
     fn sort_combined_results(&self, results: &mut Vec<MediaWithStatus>, sort: &SortCriteria) {
-        use crate::query::{SortField, SortOrder};
+        use crate::query::{SortBy, SortOrder};
 
         results.sort_by(|a, b| {
             // Extract sort values based on the sort field
             let (a_value, b_value) = match sort.primary {
-                SortField::Title => {
+                SortBy::Title => {
                     let a_title = match &a.media {
                         Media::Movie(m) => m.title.as_str(),
                         Media::Series(s) => s.title.as_str(),
@@ -547,7 +552,7 @@ impl PostgresDatabase {
                     };
                     (a_title, b_title)
                 }
-                SortField::DateAdded => {
+                SortBy::DateAdded => {
                     // For DateAdded, we need to get the file created_at
                     // Since we don't have direct access to file data here,
                     // we'll use the ID comparison as a proxy (newer IDs = newer files)
@@ -568,7 +573,7 @@ impl PostgresDatabase {
                         SortOrder::Descending => b_id.cmp(&a_id),
                     };
                 }
-                SortField::ReleaseDate => {
+                SortBy::ReleaseDate => {
                     // Extract release dates from details if available
                     let a_date = extract_release_date(&a.media);
                     let b_date = extract_release_date(&b.media);
@@ -585,7 +590,7 @@ impl PostgresDatabase {
                         (None, None) => return std::cmp::Ordering::Equal,
                     }
                 }
-                SortField::Rating => {
+                SortBy::Rating => {
                     // Extract ratings from details if available
                     let a_rating = extract_rating(&a.media);
                     let b_rating = extract_rating(&b.media);
@@ -603,7 +608,7 @@ impl PostgresDatabase {
                         (None, None) => return std::cmp::Ordering::Equal,
                     }
                 }
-                SortField::Runtime => {
+                SortBy::Runtime => {
                     // Extract runtime from details if available
                     let a_runtime = extract_runtime(&a.media);
                     let b_runtime = extract_runtime(&b.media);
@@ -620,11 +625,93 @@ impl PostgresDatabase {
                         (None, None) => return std::cmp::Ordering::Equal,
                     }
                 }
-                SortField::LastWatched | SortField::WatchProgress => {
+                SortBy::Popularity => {
+                    let a_popularity = extract_popularity(&a.media);
+                    let b_popularity = extract_popularity(&b.media);
+
+                    match (a_popularity, b_popularity) {
+                        (Some(a), Some(b)) => {
+                            let ordering = a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal);
+                            return match sort.order {
+                                SortOrder::Ascending => ordering,
+                                SortOrder::Descending => ordering.reverse(),
+                            };
+                        }
+                        (Some(_), None) => return std::cmp::Ordering::Less,
+                        (None, Some(_)) => return std::cmp::Ordering::Greater,
+                        (None, None) => return std::cmp::Ordering::Equal,
+                    }
+                }
+                SortBy::FileSize => {
+                    let a_size = extract_file_size(&a.media);
+                    let b_size = extract_file_size(&b.media);
+
+                    match (a_size, b_size) {
+                        (Some(a), Some(b)) => {
+                            return match sort.order {
+                                SortOrder::Ascending => a.cmp(&b),
+                                SortOrder::Descending => b.cmp(&a),
+                            };
+                        }
+                        (Some(_), None) => return std::cmp::Ordering::Less,
+                        (None, Some(_)) => return std::cmp::Ordering::Greater,
+                        (None, None) => return std::cmp::Ordering::Equal,
+                    }
+                }
+                SortBy::Resolution => {
+                    let a_res = extract_resolution(&a.media);
+                    let b_res = extract_resolution(&b.media);
+
+                    match (a_res, b_res) {
+                        (Some(a), Some(b)) => {
+                            return match sort.order {
+                                SortOrder::Ascending => a.cmp(&b),
+                                SortOrder::Descending => b.cmp(&a),
+                            };
+                        }
+                        (Some(_), None) => return std::cmp::Ordering::Less,
+                        (None, Some(_)) => return std::cmp::Ordering::Greater,
+                        (None, None) => return std::cmp::Ordering::Equal,
+                    }
+                }
+                SortBy::Bitrate => {
+                    let a_bitrate = extract_bitrate(&a.media);
+                    let b_bitrate = extract_bitrate(&b.media);
+
+                    match (a_bitrate, b_bitrate) {
+                        (Some(a), Some(b)) => {
+                            return match sort.order {
+                                SortOrder::Ascending => a.cmp(&b),
+                                SortOrder::Descending => b.cmp(&a),
+                            };
+                        }
+                        (Some(_), None) => return std::cmp::Ordering::Less,
+                        (None, Some(_)) => return std::cmp::Ordering::Greater,
+                        (None, None) => return std::cmp::Ordering::Equal,
+                    }
+                }
+                SortBy::ContentRating => {
+                    let a_rating = extract_content_rating(&a.media);
+                    let b_rating = extract_content_rating(&b.media);
+
+                    match (a_rating, b_rating) {
+                        (Some(a), Some(b)) => {
+                            return match sort.order {
+                                SortOrder::Ascending => a.cmp(&b),
+                                SortOrder::Descending => b.cmp(&a),
+                            };
+                        }
+                        (Some(_), None) => return std::cmp::Ordering::Less,
+                        (None, Some(_)) => return std::cmp::Ordering::Greater,
+                        (None, None) => return std::cmp::Ordering::Equal,
+                    }
+                }
+                SortBy::LastWatched | SortBy::WatchProgress => {
                     // These require user context and watch status
                     // For now, maintain original order
                     return std::cmp::Ordering::Equal;
                 }
+                _ => ("", ""),
             };
 
             // For string comparisons (Title)
@@ -687,6 +774,57 @@ impl PostgresDatabase {
                 // TV series don't have a single runtime, so we skip them
                 _ => None,
             }
+        }
+
+        fn extract_popularity(media: &Media) -> Option<f32> {
+            match media {
+                Media::Movie(m) => {
+                    if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) = &m.details {
+                        details.popularity
+                    } else {
+                        None
+                    }
+                }
+                Media::Series(s) => {
+                    if let MediaDetailsOption::Details(TmdbDetails::Series(details)) = &s.details {
+                        details.popularity
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }
+
+        fn extract_file_size(media: &Media) -> Option<u64> {
+            match media {
+                Media::Movie(m) => Some(m.file.size),
+                Media::Episode(e) => Some(e.file.size),
+                _ => None,
+            }
+        }
+
+        fn extract_resolution(media: &Media) -> Option<u32> {
+            let metadata = match media {
+                Media::Movie(m) => m.file.media_file_metadata.as_ref(),
+                Media::Episode(e) => e.file.media_file_metadata.as_ref(),
+                _ => None,
+            };
+            metadata.and_then(|meta| meta.height)
+        }
+
+        fn extract_bitrate(media: &Media) -> Option<u64> {
+            let metadata = match media {
+                Media::Movie(m) => m.file.media_file_metadata.as_ref(),
+                Media::Episode(e) => e.file.media_file_metadata.as_ref(),
+                _ => None,
+            };
+            metadata.and_then(|meta| meta.bitrate)
+        }
+
+        fn extract_content_rating(_media: &Media) -> Option<String> {
+            // TODO: populate from TMDB content ratings when available
+            None
         }
     }
 

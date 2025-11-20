@@ -1,12 +1,12 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT media_id_json, position, duration, last_watched\n            FROM user_watch_progress\n            WHERE user_id = $1\n            ORDER BY last_watched DESC\n            LIMIT $2\n            ",
+  "query": "\n            SELECT media_uuid, position, duration, last_watched\n            FROM user_watch_progress\n            WHERE user_id = $1\n            ORDER BY last_watched DESC\n            LIMIT $2\n            ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "media_id_json",
-        "type_info": "Jsonb"
+        "name": "media_uuid",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 1,
@@ -37,5 +37,5 @@
       false
     ]
   },
-  "hash": "bbc8e3339acc27d6d15d4ed6589033fe68c7e368ffb75e15f8aa6c113a4ee3a3"
+  "hash": "0ff387e6a9e9f7bac9676a75a964ec9f4fb9a4142c64b8ddabc67058a8f1176d"
 }

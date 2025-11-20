@@ -12,15 +12,20 @@ use uuid::Uuid;
 
 use crate::infrastructure::ApiClient;
 use crate::infrastructure::api_client::SetupStatus;
-use crate::infrastructure::constants::routes;
-use crate::infrastructure::constants::routes::utils::replace_param;
+use crate::infrastructure::constants::{
+    routes,
+    routes::{libraries::GET_SORTED_INDICES, utils::replace_param},
+};
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::api::ApiService;
 use ferrex_core::auth::device::AuthenticatedDevice;
 use ferrex_core::types::library::Library;
 use ferrex_core::user::{AuthToken, User};
 use ferrex_core::watch_status::{UpdateProgressRequest, UserWatchState};
-use ferrex_core::{LibraryID, Media, ScanRequest, ScanResponse};
+use ferrex_core::{
+    FilterIndicesRequest, IndicesResponse, LibraryID, Media, MediaIDLike, ScanRequest,
+    ScanResponse, SortBy, SortOrder,
+};
 
 /// Adapter that implements ApiService using the existing ApiClient
 #[derive(Debug, Clone)]
@@ -31,6 +36,126 @@ pub struct ApiClientAdapter {
 impl ApiClientAdapter {
     pub fn new(client: Arc<ApiClient>) -> Self {
         Self { client }
+    }
+
+    /// Fetch all presorted IDs for a library by paging through /libraries/{id}/sorted-ids
+    pub async fn fetch_sorted_ids(
+        &self,
+        library_id: Uuid,
+        sort: &str,
+        order: &str,
+    ) -> RepositoryResult<Vec<Uuid>> {
+        #[derive(Debug, Deserialize)]
+        struct SortedIdsResponse {
+            total: usize,
+            offset: usize,
+            limit: usize,
+            ids: Vec<ferrex_core::MediaID>,
+        }
+
+        let mut all_ids: Vec<Uuid> = Vec::new();
+        let mut offset: usize = 0;
+        let page_size: usize = 500;
+        let base = routes::utils::replace_param(
+            routes::libraries::SORTED_IDS,
+            ":id",
+            library_id.to_string(),
+        );
+
+        loop {
+            let path = format!(
+                "{}?sort={}&order={}&offset={}&limit={}",
+                base, sort, order, offset, page_size
+            );
+
+            let result: Result<SortedIdsResponse, _> = self
+                .client
+                .get(&path)
+                .await
+                .map_err(|e| RepositoryError::QueryFailed(e.to_string()));
+
+            let resp = match result {
+                Ok(r) => r,
+                Err(e) => return Err(e),
+            };
+
+            // Map MediaID to raw UUIDs (movies-only for now)
+            for mid in resp.ids {
+                match mid {
+                    ferrex_core::MediaID::Movie(m) => all_ids.push(m.to_uuid()),
+                    // Ignore non-movie entries for now
+                    _ => {}
+                }
+            }
+
+            offset = resp.offset + resp.limit;
+            if all_ids.len() >= resp.total || resp.limit == 0 {
+                break;
+            }
+        }
+
+        Ok(all_ids)
+    }
+}
+
+impl ApiClientAdapter {
+    // Public wrappers to call from UI code
+    pub async fn fetch_sorted_indices(
+        &self,
+        library_id: Uuid,
+        sort: SortBy,
+        order: SortOrder,
+    ) -> RepositoryResult<Vec<u32>> {
+        let path = replace_param(GET_SORTED_INDICES, ":id", library_id.to_string());
+        // Pass sort/order as query string (snake_case for sort field)
+        let sort_str = match sort {
+            SortBy::Title => "title",
+            SortBy::DateAdded => "date_added",
+            SortBy::ReleaseDate => "release_date",
+            SortBy::LastWatched => "last_watched",
+            SortBy::WatchProgress => "watch_progress",
+            SortBy::Rating => "rating",
+            SortBy::Runtime => "runtime",
+            SortBy::Popularity => "popularity",
+            SortBy::Bitrate => "bitrate",
+            SortBy::FileSize => "file_size",
+            SortBy::ContentRating => "content_rating",
+            SortBy::Resolution => "resolution",
+        };
+        let order_str = match order {
+            ferrex_core::query::types::SortOrder::Ascending => "asc",
+            ferrex_core::query::types::SortOrder::Descending => "desc",
+        };
+        let url = format!("{}?sort={}&order={}", path, sort_str, order_str);
+        let aligned = self
+            .client
+            .get_rkyv(&url, None)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
+        let decoded: IndicesResponse = rkyv::from_bytes::<IndicesResponse, Error>(&aligned)
+            .map_err(|e| RepositoryError::QueryFailed(format!("rkyv decode: {:?}", e)))?;
+        Ok(decoded.indices)
+    }
+
+    pub async fn fetch_filtered_indices(
+        &self,
+        library_id: Uuid,
+        spec: &FilterIndicesRequest,
+    ) -> RepositoryResult<Vec<u32>> {
+        use crate::infrastructure::constants::routes::libraries::POST_FILTER_INDICES;
+        use crate::infrastructure::constants::routes::utils::replace_param;
+        let path = replace_param(POST_FILTER_INDICES, ":id", library_id.to_string());
+        let url = self.client.build_url(&path, false);
+        let req = self.client.client.post(&url).json(spec);
+        let req = self.client.build_request(req).await;
+        let bytes = self
+            .client
+            .execute_rkyv_request(req)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
+        let decoded: IndicesResponse = rkyv::from_bytes::<IndicesResponse, Error>(&bytes)
+            .map_err(|e| RepositoryError::QueryFailed(format!("rkyv decode: {:?}", e)))?;
+        Ok(decoded.indices)
     }
 }
 
@@ -247,5 +372,40 @@ impl ApiService for ApiClientAdapter {
 
     async fn get_token(&self) -> Option<AuthToken> {
         self.client.get_token().await
+    }
+
+    async fn create_library(
+        &self,
+        request: ferrex_core::api_types::CreateLibraryRequest,
+    ) -> RepositoryResult<LibraryID> {
+        use crate::infrastructure::constants::routes::libraries;
+        self.client
+            .post(libraries::CREATE, &request)
+            .await
+            .map_err(|e| RepositoryError::CreateFailed(e.to_string()))
+    }
+
+    async fn update_library(
+        &self,
+        id: LibraryID,
+        request: ferrex_core::api_types::UpdateLibraryRequest,
+    ) -> RepositoryResult<()> {
+        let path = format!("/libraries/{}", id.as_uuid());
+        let _: String = self
+            .client
+            .put(&path, &request)
+            .await
+            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn delete_library(&self, id: LibraryID) -> RepositoryResult<()> {
+        let path = format!("/libraries/{}", id.as_uuid());
+        let _: String = self
+            .client
+            .delete(&path)
+            .await
+            .map_err(|e| RepositoryError::DeleteFailed(e.to_string()))?;
+        Ok(())
     }
 }

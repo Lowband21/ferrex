@@ -154,10 +154,15 @@ impl QueryComplexityGuard {
 
         // Sort complexity
         score += match query.sort.primary {
-            crate::query::SortField::Title | crate::query::SortField::DateAdded => 1,
-            crate::query::SortField::ReleaseDate | crate::query::SortField::Rating => 2,
-            crate::query::SortField::Runtime => 2,
-            crate::query::SortField::LastWatched | crate::query::SortField::WatchProgress => 5,
+            crate::query::SortBy::Title | crate::query::SortBy::DateAdded => 1,
+            crate::query::SortBy::ReleaseDate | crate::query::SortBy::Rating => 2,
+            crate::query::SortBy::Runtime => 2,
+            crate::query::SortBy::LastWatched | crate::query::SortBy::WatchProgress => 5,
+            crate::query::SortBy::Popularity
+            | crate::query::SortBy::Bitrate
+            | crate::query::SortBy::FileSize
+            | crate::query::SortBy::ContentRating
+            | crate::query::SortBy::Resolution => 3,
         };
 
         if query.sort.secondary.is_some() {
@@ -245,7 +250,7 @@ mod tests {
         let query = MediaQuery {
             filters: MediaFilters::default(),
             sort: SortCriteria {
-                primary: SortField::Title,
+                primary: SortBy::Title,
                 order: SortOrder::Ascending,
                 secondary: None,
             },
@@ -280,9 +285,9 @@ mod tests {
                 ..Default::default()
             },
             sort: SortCriteria {
-                primary: SortField::LastWatched,
+                primary: SortBy::LastWatched,
                 order: SortOrder::Descending,
-                secondary: Some(SortField::Rating),
+                secondary: Some(SortBy::Rating),
             },
             search: Some(SearchQuery {
                 text: "test".to_string(),
@@ -346,9 +351,9 @@ mod tests {
                 ..Default::default()
             },
             sort: SortCriteria {
-                primary: SortField::Title,
+                primary: SortBy::Title,
                 order: SortOrder::Ascending,
-                secondary: Some(SortField::Rating),
+                secondary: Some(SortBy::Rating),
             },
             search: Some(SearchQuery {
                 text: "test".to_string(),

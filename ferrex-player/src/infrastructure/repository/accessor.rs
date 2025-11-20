@@ -4,6 +4,7 @@ use std::sync::Arc;
 use ferrex_core::{
     ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, Library, LibraryID, Media,
     MediaDetailsOption, MediaID, MediaIDLike, MediaLike, MediaOps, SeasonID, SeasonLike,
+    SeasonReference, SeriesID,
 };
 use parking_lot::RwLock;
 use rkyv::{util::AlignedVec, vec::ArchivedVec};
@@ -12,7 +13,9 @@ use yoke::Yoke;
 
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 
-use super::{LibraryYoke, MediaYoke, MovieYoke, SeriesYoke, repository::MediaRepo};
+use super::{
+    LibraryYoke, MediaYoke, MovieYoke, SeasonYoke, SeriesYoke, EpisodeYoke, repository::MediaRepo,
+};
 
 /// Marker types for capability roles
 #[derive(Debug, Clone, Copy)]
@@ -124,6 +127,14 @@ impl<R: ReadCap> Accessor<R> {
         self.with_repo(|repo| repo.get_series_yoke_internal(id))
     }
 
+    pub fn get_season_yoke(&self, id: &impl MediaIDLike) -> RepositoryResult<SeasonYoke> {
+        self.with_repo(|repo| repo.get_season_yoke_internal(id))
+    }
+
+    pub fn get_episode_yoke(&self, id: &impl MediaIDLike) -> RepositoryResult<EpisodeYoke> {
+        self.with_repo(|repo| repo.get_episode_yoke_internal(id))
+    }
+
     /// Get all media from a library
     pub fn get_library_media(&self, library_id: &LibraryID) -> RepositoryResult<Vec<Media>> {
         self.with_repo(|repo| repo.get_library_media_internal(library_id))
@@ -141,6 +152,36 @@ impl<R: ReadCap> Accessor<R> {
     /// Get multiple items by IDs
     pub fn get_batch<I: MediaIDLike>(&self, ids: &[I]) -> RepositoryResult<Vec<Media>> {
         self.with_repo(|repo| ids.iter().map(|id| repo.get_internal(id)).collect())
+    }
+
+    /// Get items by positions into the archived library media slice (index-based access)
+    pub fn get_by_positions(
+        &self,
+        library_id: &LibraryID,
+        positions: &[u32],
+    ) -> RepositoryResult<Vec<Media>> {
+        self.with_repo(|repo| {
+            let lib_uuid = library_id.as_uuid();
+            let yoke = repo.get_archived_library_yoke_internal(&lib_uuid).ok_or(
+                RepositoryError::NotFound {
+                    entity_type: "Library".into(),
+                    id: library_id.to_string(),
+                },
+            )?;
+            let archived = yoke.get();
+            let slice = archived.media_as_slice();
+
+            let mut out = Vec::with_capacity(positions.len());
+            for &pos in positions {
+                let idx = pos as usize;
+                if let Some(media_ref) = slice.get(idx) {
+                    let owned = rkyv::deserialize::<Media, rkyv::rancor::Error>(media_ref)
+                        .map_err(|e| RepositoryError::DeserializationError(e.to_string()))?;
+                    out.push(owned);
+                }
+            }
+            Ok(out)
+        })
     }
 
     /// Count total items (excluding deleted)
@@ -259,9 +300,22 @@ impl<R: ReadCap> Accessor<R> {
         })
     }
 
-    /// Get all media from all libraries
+    /// Get all media from a library
     pub fn get_all_media(&self) -> RepositoryResult<Vec<Media>> {
         self.with_repo(|repo| Ok(repo.get_all_media_internal()))
+    }
+
+    /// Get all seasons for a series
+    pub fn get_series_seasons(&self, series_id: &SeriesID) -> RepositoryResult<Vec<SeasonReference>> {
+        self.with_repo(|repo| repo.get_series_seasons_internal(series_id))
+    }
+
+    /// Get all episodes for a season
+    pub fn get_season_episodes(
+        &self,
+        season_id: &SeasonID,
+    ) -> RepositoryResult<Vec<ferrex_core::EpisodeReference>> {
+        self.with_repo(|repo| repo.get_season_episodes_internal(season_id))
     }
 
     /// Get season episode count (kept from previous UI accessor API)

@@ -4,21 +4,16 @@ use std::sync::Arc;
 
 use ferrex_core::{
     ArchivedLibrary, ArchivedLibraryExt, ArchivedLibraryID, ArchivedMedia, ArchivedMediaID,
-    LibraryID, Media, MediaID, MediaIDLike, MediaLike, MediaType, SeriesID,
+    LibraryID, Media, MediaID, MediaIDLike, MediaLike, MediaType, EpisodeReference, SeasonID,
+    SeasonReference, SeriesID, SortBy, SortOrder,
 };
 use rkyv::{Archived, deserialize, rancor::Error, util::AlignedVec, vec::ArchivedVec};
 use uuid::Uuid;
 use yoke::Yoke;
 
-use crate::{
-    domains::{
-        //media::store::MediaChangeEvent,
-        ui::{SortBy, SortOrder},
-    },
-    infrastructure::repository::{RepositoryError, RepositoryResult},
-};
+use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 
-use super::{LibraryYoke, MediaYoke, MovieYoke, SeriesYoke};
+use super::{EpisodeYoke, LibraryYoke, MediaYoke, MovieYoke, SeasonYoke, SeriesYoke};
 
 /// Runtime modifications layer for managing changes during application runtime
 /// Resets on application restart
@@ -335,6 +330,90 @@ impl MediaRepo {
         }
     }
 
+    pub(super) fn get_season_yoke_internal(
+        &self,
+        id: &impl MediaIDLike,
+    ) -> RepositoryResult<SeasonYoke> {
+        let uuid = id.as_uuid();
+        if self.modifications.is_deleted(&uuid) {
+            return Err(RepositoryError::NotFound {
+                entity_type: "media".to_string(),
+                id: uuid.to_string(),
+            });
+        }
+
+        if let Some(&library_id) = self.media_id_index.get(&uuid) {
+            let media_type = id.media_type();
+            return Ok(SeasonYoke::attach_to_cart(
+                Arc::clone(&self.libraries_buffer),
+                |data: &AlignedVec| unsafe {
+                    let archived_libraries = rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&data);
+                    match archived_libraries
+                        .iter()
+                        .find(|l| l.get_id().as_uuid() == library_id)
+                        .unwrap()
+                        .media()
+                        .unwrap()
+                        .iter()
+                        .filter(|m| m.media_type() == media_type)
+                        .find(|m| m.archived_media_id().as_uuid() == uuid)
+                        .unwrap()
+                    {
+                        ArchivedMedia::Season(season) => season,
+                        _ => unreachable!("We just filtered by media type Season"),
+                    }
+                },
+            ));
+        }
+
+        Err(RepositoryError::NotFound {
+            entity_type: "media".to_string(),
+            id: uuid.to_string(),
+        })
+    }
+
+    pub(super) fn get_episode_yoke_internal(
+        &self,
+        id: &impl MediaIDLike,
+    ) -> RepositoryResult<EpisodeYoke> {
+        let uuid = id.as_uuid();
+        if self.modifications.is_deleted(&uuid) {
+            return Err(RepositoryError::NotFound {
+                entity_type: "media".to_string(),
+                id: uuid.to_string(),
+            });
+        }
+
+        if let Some(&library_id) = self.media_id_index.get(&uuid) {
+            let media_type = id.media_type();
+            return Ok(EpisodeYoke::attach_to_cart(
+                Arc::clone(&self.libraries_buffer),
+                |data: &AlignedVec| unsafe {
+                    let archived_libraries = rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&data);
+                    match archived_libraries
+                        .iter()
+                        .find(|l| l.get_id().as_uuid() == library_id)
+                        .unwrap()
+                        .media()
+                        .unwrap()
+                        .iter()
+                        .filter(|m| m.media_type() == media_type)
+                        .find(|m| m.archived_media_id().as_uuid() == uuid)
+                        .unwrap()
+                    {
+                        ArchivedMedia::Episode(ep) => ep,
+                        _ => unreachable!("We just filtered by media type Episode"),
+                    }
+                },
+            ));
+        }
+
+        Err(RepositoryError::NotFound {
+            entity_type: "media".to_string(),
+            id: uuid.to_string(),
+        })
+    }
+
     /// Internal method to get all media from a library
     pub(super) fn get_library_media_internal(
         &self,
@@ -599,5 +678,161 @@ impl MediaRepo {
         }
 
         results
+    }
+
+    /// Get all seasons for a given series
+    pub(super) fn get_series_seasons_internal(
+        &self,
+        series_id: &SeriesID,
+    ) -> RepositoryResult<Vec<SeasonReference>> {
+        let series_uuid = series_id.as_uuid();
+
+        // Determine which library this series belongs to
+        let &library_id = self.media_id_index.get(series_uuid).ok_or_else(|| {
+            RepositoryError::NotFound {
+                entity_type: "Series".to_string(),
+                id: series_uuid.to_string(),
+            }
+        })?;
+
+        let mut results: Vec<SeasonReference> = Vec::new();
+
+        // Access archived data for the library
+        let archived_libraries = unsafe {
+            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&self.libraries_buffer)
+        };
+
+        if let Some(library) = archived_libraries
+            .iter()
+            .find(|l| l.get_id().as_uuid() == library_id)
+        {
+            if let Some(media_list) = library.media() {
+                for media_ref in media_list.iter() {
+                    // Skip if deleted via runtime overlay
+                    let media_uuid = media_ref.archived_media_id().to_uuid();
+                    if self.modifications.is_deleted(&media_uuid) {
+                        continue;
+                    }
+
+                    match media_ref {
+                        ArchivedMedia::Season(season) => {
+                            // Match parent series
+                            if season.series_id.as_uuid() == series_uuid {
+                                // Prefer runtime modified version if present
+                                if let Some(modified) = self.modifications.get_modified(&media_uuid) {
+                                    if let Some(s) = modified.clone().to_season() {
+                                        results.push(s);
+                                    } else if let Ok(Media::Season(s)) =
+                                        deserialize::<Media, Error>(media_ref)
+                                    {
+                                        results.push(s);
+                                    }
+                                } else if let Ok(Media::Season(s)) =
+                                    deserialize::<Media, Error>(media_ref)
+                                {
+                                    results.push(s);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Include runtime-added media in this library that match the series
+        if let Some(ids) = self.modifications.added_by_library.get(&library_id) {
+            for id in ids {
+                if let Some(media) = self.modifications.added.get(id) {
+                    if let Some(season) = media.clone().to_season() {
+                        if &season.series_id == series_id {
+                            results.push(season);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort by season number ascending
+        results.sort_by_key(|s| s.season_number.value());
+
+        Ok(results)
+    }
+
+    /// Get all episodes for a given season
+    pub(super) fn get_season_episodes_internal(
+        &self,
+        season_id: &SeasonID,
+    ) -> RepositoryResult<Vec<EpisodeReference>> {
+        let season_uuid = season_id.as_uuid();
+
+        // Determine which library this season belongs to
+        let &library_id = self.media_id_index.get(season_uuid).ok_or_else(|| {
+            RepositoryError::NotFound {
+                entity_type: "Season".to_string(),
+                id: season_uuid.to_string(),
+            }
+        })?;
+
+        let mut results: Vec<EpisodeReference> = Vec::new();
+
+        // Access archived data for the library
+        let archived_libraries = unsafe {
+            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&self.libraries_buffer)
+        };
+
+        if let Some(library) = archived_libraries
+            .iter()
+            .find(|l| l.get_id().as_uuid() == library_id)
+        {
+            if let Some(media_list) = library.media() {
+                for media_ref in media_list.iter() {
+                    // Skip if deleted via runtime overlay
+                    let media_uuid = media_ref.archived_media_id().to_uuid();
+                    if self.modifications.is_deleted(&media_uuid) {
+                        continue;
+                    }
+
+                    match media_ref {
+                        ArchivedMedia::Episode(ep) => {
+                            if ep.season_id.as_uuid() == season_uuid {
+                                if let Some(modified) = self.modifications.get_modified(&media_uuid) {
+                                    if let Some(e) = modified.clone().to_episode() {
+                                        results.push(e);
+                                    } else if let Ok(Media::Episode(e)) =
+                                        deserialize::<Media, Error>(media_ref)
+                                    {
+                                        results.push(e);
+                                    }
+                                } else if let Ok(Media::Episode(e)) =
+                                    deserialize::<Media, Error>(media_ref)
+                                {
+                                    results.push(e);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Include runtime-added media in this library that match the season
+        if let Some(ids) = self.modifications.added_by_library.get(&library_id) {
+            for id in ids {
+                if let Some(media) = self.modifications.added.get(id) {
+                    if let Some(ep) = media.clone().to_episode() {
+                        if &ep.season_id == season_id {
+                            results.push(ep);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort by episode number
+        results.sort_by_key(|e| e.episode_number.value());
+
+        Ok(results)
     }
 }

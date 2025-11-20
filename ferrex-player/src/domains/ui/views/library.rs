@@ -1,3 +1,4 @@
+use super::library_filter_panel::library_filter_panel;
 use crate::{
     domains::ui::{
         DisplayMode,
@@ -190,14 +191,23 @@ pub fn view_library(state: &State) -> Element<Message> {
                 }
             };
 
+            let filter_panel: Option<Element<Message>> = if state.domains.ui.state.show_filter_panel
+            {
+                Some(library_filter_panel(state))
+            } else {
+                None
+            };
+
             // Create main content with proper spacing
-            let main_content = column![
-                error_section,
-                scan_progress_section,
+            let mut main_col = column![error_section, scan_progress_section,];
+            if let Some(panel) = filter_panel {
+                main_col = main_col.push(panel);
+            }
+            let main_content = main_col.push(
                 container(library_content)
                     .width(Length::Fill)
-                    .height(Length::Fill)
-            ];
+                    .height(Length::Fill),
+            );
 
             // Add scan progress overlay if visible
             if state.domains.library.state.show_scan_progress

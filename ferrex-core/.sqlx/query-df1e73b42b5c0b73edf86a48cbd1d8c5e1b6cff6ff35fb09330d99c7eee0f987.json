@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO user_completed_media (user_id, media_uuid, media_type, completed_at)\n                VALUES ($1, $2, $3, $4)\n                ON CONFLICT (user_id, media_uuid) DO NOTHING\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int2",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "df1e73b42b5c0b73edf86a48cbd1d8c5e1b6cff6ff35fb09330d99c7eee0f987"
+}

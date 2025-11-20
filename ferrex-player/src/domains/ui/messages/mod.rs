@@ -1,7 +1,10 @@
 pub mod subscriptions;
 
-use crate::domains::ui::{DisplayMode, SortBy, views::carousel::CarouselMessage};
-use ferrex_core::{LibraryID, MediaFile, MediaID, MediaIDLike, MovieID, MovieLike, MovieReference};
+use crate::domains::ui::{DisplayMode, views::carousel::CarouselMessage};
+use ferrex_core::{
+    EpisodeID, LibraryID, MediaFile, MediaID, MediaIDLike, MovieID, MovieLike, MovieReference,
+    SeasonID, SeriesID, SortBy, UiDecade, UiGenre, UiResolution, UiWatchStatus,
+};
 use iced::Size;
 use iced::widget::scrollable;
 use uuid::Uuid;
@@ -13,13 +16,27 @@ pub enum Message {
     SelectLibraryAndMode(LibraryID), // Select library and set to Library display mode
     ViewDetails(MediaID),
     ViewMovieDetails(MovieID),
-    ViewTvShow(ferrex_core::SeriesID), // series_id
-    ViewSeason(ferrex_core::SeriesID, ferrex_core::SeasonID), // series_id, season_id
-    ViewEpisode(ferrex_core::EpisodeID), // episode_id
+    ViewTvShow(SeriesID),
+    ViewSeason(SeriesID, SeasonID),
+    ViewEpisode(EpisodeID),
 
     // Sorting
-    SetSortBy(SortBy), // Change sort field
-    ToggleSortOrder,   // Toggle ascending/descending
+    SetSortBy(SortBy),                            // Change sort field
+    ToggleSortOrder,                              // Toggle ascending/descending
+    ApplySortedIndex(LibraryID, Vec<uuid::Uuid>), // Apply fetched sorted IDs for a library (legacy)
+    ApplySortedPositions(LibraryID, Vec<u32>), // Apply fetched position indices for a library (Phase 1)
+    ApplyFilteredPositions(LibraryID, Vec<u32>), // Apply fetched filtered position indices (Phase 1)
+    RequestFilteredPositions, // Trigger fetching filtered positions for active library
+    // Filter panel interactions
+    ToggleFilterPanel,          // Open/close the filter panel
+    ToggleFilterGenre(UiGenre), // Toggle a genre chip
+    SetFilterDecade(UiDecade),  // Set a decade
+    ClearFilterDecade,          // Clear decade selection
+    SetFilterResolution(UiResolution),
+    SetFilterWatchStatus(UiWatchStatus),
+    ApplyFilters, // Build spec from UI inputs and request filtered positions
+    ClearFilters, // Clear UI inputs and reset filters
+    SortedIndexFailed(String), // Report fetch failure
 
     // Admin views
     ShowAdminDashboard,
@@ -158,6 +175,19 @@ impl Message {
             // Sorting
             Self::SetSortBy(_) => "UI::SetSortBy",
             Self::ToggleSortOrder => "UI::ToggleSortOrder",
+            Self::ApplySortedIndex(_, _) => "UI::ApplySortedIndex",
+            Self::ApplySortedPositions(_, _) => "UI::ApplySortedPositions",
+            Self::ApplyFilteredPositions(_, _) => "UI::ApplyFilteredPositions",
+            Self::RequestFilteredPositions => "UI::RequestFilteredPositions",
+            Self::ToggleFilterPanel => "UI::ToggleFilterPanel",
+            Self::ToggleFilterGenre(_) => "UI::ToggleFilterGenre",
+            Self::SetFilterDecade(_) => "UI::SetFilterDecade",
+            Self::ClearFilterDecade => "UI::ClearFilterDecade",
+            Self::SetFilterResolution(_) => "UI::SetFilterResolution",
+            Self::SetFilterWatchStatus(_) => "UI::SetFilterWatchStatus",
+            Self::ApplyFilters => "UI::ApplyFilters",
+            Self::ClearFilters => "UI::ClearFilters",
+            Self::SortedIndexFailed(_) => "UI::SortedIndexFailed",
 
             // Admin views
             Self::ShowAdminDashboard => "UI::ShowAdminDashboard",
@@ -297,6 +327,19 @@ impl std::fmt::Debug for Message {
             Self::ViewEpisode(id) => write!(f, "UI::ViewEpisode({})", id),
             Self::SetSortBy(sort) => write!(f, "UI::SetSortBy({:?})", sort),
             Self::ToggleSortOrder => write!(f, "UI::ToggleSortOrder"),
+            Self::ApplySortedIndex(_, _) => write!(f, "UI::ApplySortedIndex"),
+            Self::ApplySortedPositions(_, _) => write!(f, "UI::ApplySortedPositions"),
+            Self::ApplyFilteredPositions(_, _) => write!(f, "UI::ApplyFilteredPositions"),
+            Self::RequestFilteredPositions => write!(f, "UI::RequestFilteredPositions"),
+            Self::ToggleFilterPanel => write!(f, "UI::ToggleFilterPanel"),
+            Self::ToggleFilterGenre(_) => write!(f, "UI::ToggleFilterGenre"),
+            Self::SetFilterDecade(_) => write!(f, "UI::SetFilterDecade"),
+            Self::ClearFilterDecade => write!(f, "UI::ClearFilterDecade"),
+            Self::SetFilterResolution(_) => write!(f, "UI::SetFilterResolution"),
+            Self::SetFilterWatchStatus(_) => write!(f, "UI::SetFilterWatchStatus"),
+            Self::ApplyFilters => write!(f, "UI::ApplyFilters"),
+            Self::ClearFilters => write!(f, "UI::ClearFilters"),
+            Self::SortedIndexFailed(_) => write!(f, "UI::SortedIndexFailed"),
             Self::ShowAdminDashboard => write!(f, "UI::ShowAdminDashboard"),
             Self::HideAdminDashboard => write!(f, "UI::HideAdminDashboard"),
             Self::ShowLibraryManagement => write!(f, "UI::ShowLibraryManagement"),

@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        INSERT INTO series_references (id, library_id, tmdb_id, title, theme_color, created_at, updated_at)\n                        VALUES ($1, $2, $3, $4, $5, $6, NOW())\n                        ON CONFLICT (id) DO UPDATE SET\n                            library_id = EXCLUDED.library_id,\n                            tmdb_id = EXCLUDED.tmdb_id,\n                            title = EXCLUDED.title,\n                            theme_color = EXCLUDED.theme_color,\n                            updated_at = NOW()\n                        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a6a6b1a771ad166eb6f3cc900af9d04fbf07af8eead7beaf2df33f006fb6d021"
+}

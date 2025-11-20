@@ -82,11 +82,15 @@ impl ApiClient {
 
     /// Build a versioned API URL
     pub fn build_url(&self, path: impl AsRef<str>, legacy: bool) -> String {
-        if path.as_ref().contains("api/v1/") {
-            let path = path.as_ref().trim_start_matches('/');
+        let p = path.as_ref();
+        if p.starts_with("http://") || p.starts_with("https://") {
+            return p.to_string();
+        }
+        if p.contains("api/v1/") {
+            let path = p.trim_start_matches('/');
             format!("{}/{}", self.base_url, path)
         } else {
-            let path = path.as_ref().trim_start_matches('/');
+            let path = p.trim_start_matches('/');
             format!("{}/api/{}/{}", self.base_url, self.api_version, path)
         }
     }
@@ -222,7 +226,7 @@ impl ApiClient {
     }
 
     /// Execute a request that returns rkyv binary data
-    pub async fn execute_rkyv_request<T>(&self, request: RequestBuilder) -> Result<Vec<u8>> {
+    pub async fn execute_rkyv_request(&self, request: RequestBuilder) -> Result<Vec<u8>> {
         // Add Accept header for rkyv format
         let request = request.header("Accept", "application/octet-stream");
         let response = request.send().await?;

@@ -50,7 +50,7 @@ impl MediaQueryBuilder {
     /// Convenience method for "continue watching"
     pub fn watching(mut self) -> Self {
         self.query.filters.watch_status = Some(WatchStatusFilter::InProgress);
-        self.sort_by(SortField::LastWatched, SortOrder::Descending)
+        self.sort_by(SortBy::LastWatched, SortOrder::Descending)
     }
 
     /// Filter by genre
@@ -124,14 +124,14 @@ impl MediaQueryBuilder {
     // === Sort methods ===
 
     /// Set primary sort field and order
-    pub fn sort_by(mut self, field: SortField, order: SortOrder) -> Self {
+    pub fn sort_by(mut self, field: SortBy, order: SortOrder) -> Self {
         self.query.sort.primary = field;
         self.query.sort.order = order;
         self
     }
 
     /// Add secondary sort for stable sorting
-    pub fn then_by(mut self, field: SortField) -> Self {
+    pub fn then_by(mut self, field: SortBy) -> Self {
         self.query.sort.secondary = Some(field);
         self
     }

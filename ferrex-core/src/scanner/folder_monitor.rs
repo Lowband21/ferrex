@@ -158,7 +158,7 @@ impl FolderMonitor {
         Ok(())
     }
 
-    /// Run a single inventory cycle for all libraries
+    /// Run a single folder inventory cycle for all libraries, no processing
     async fn run_inventory_cycle(&self) -> Result<()> {
         let libraries = self.libraries.read().await.clone();
 
@@ -191,14 +191,6 @@ impl FolderMonitor {
                         library.name, library.id
                     );
                 }
-            }
-
-            // Process folders needing scan
-            if let Err(e) = self.process_pending_folders(&library).await {
-                error!(
-                    "Failed to process pending folders for library {} (ID: {}): {}",
-                    library.name, library.id, e
-                );
             }
 
             // Cleanup stale folders
@@ -319,15 +311,17 @@ impl FolderMonitor {
                 FolderType::Extra
             };
 
-            // Compute aggregate stats
-            let total_size: i64 = video_files.iter().map(|(_, size, _)| *size as i64).sum();
-            let file_types: HashSet<String> = video_files
+            // Compute aggregate stats for this folder
+            let mut total_size: i64 = video_files.iter().map(|(_, size, _)| *size as i64).sum();
+            let mut file_types: HashSet<String> = video_files
                 .iter()
                 .filter_map(|(path, _, _)| path.extension())
                 .map(|ext| ext.to_string_lossy().to_lowercase())
                 .collect();
-            // Compute max modified time across video files
-            let max_mtime = video_files.iter().filter_map(|(_, _, m)| *m).max();
+
+            // Compute max modified time across video files in this folder
+            let mut max_mtime = video_files.iter().filter_map(|(_, _, m)| *m).max();
+
             let max_mtime_utc = max_mtime.and_then(|t| {
                 let dur = t.duration_since(std::time::UNIX_EPOCH).ok()?;
                 chrono::DateTime::<chrono::Utc>::from_timestamp(
@@ -511,15 +505,59 @@ impl FolderMonitor {
                 _ => FolderType::Extra,
             };
 
-            // Compute aggregate stats
-            let total_size: i64 = video_files.iter().map(|(_, size, _)| *size as i64).sum();
-            let file_types: HashSet<String> = video_files
+            // Compute aggregate stats for this folder
+            let mut total_size: i64 = video_files.iter().map(|(_, size, _)| *size as i64).sum();
+            let mut file_types: HashSet<String> = video_files
                 .iter()
                 .filter_map(|(path, _, _)| path.extension())
                 .map(|ext| ext.to_string_lossy().to_lowercase())
                 .collect();
-            // Compute max modified time across video files
-            let max_mtime = video_files.iter().filter_map(|(_, _, m)| *m).max();
+
+            // Compute max modified time across video files in this folder
+            let mut max_mtime = video_files.iter().filter_map(|(_, _, m)| *m).max();
+
+            if depth == 1 {
+                for subdir in &subdirs {
+                    // Read one level down (season folder)
+                    let mut season_entries = self.fs.read_dir(subdir).await.map_err(|e| {
+                        MediaError::Internal(format!(
+                            "Failed to read season directory {:?}: {}",
+                            subdir, e
+                        ))
+                    })?;
+
+                    while let Some(ep_path) = season_entries
+                        .next_entry()
+                        .await
+                        .map_err(|e| MediaError::Internal(format!("Failed to read entry: {}", e)))?
+                    {
+                        let md = self.fs.metadata(&ep_path).await.map_err(|e| {
+                            MediaError::Internal(format!("Failed to get metadata: {}", e))
+                        })?;
+
+                        if md.is_file {
+                            if let Some(ext) = ep_path.extension() {
+                                let ext_str = ext.to_string_lossy().to_lowercase();
+                                if is_video_extension(&ext_str) {
+                                    total_size += md.len as i64;
+                                    file_types.insert(ext_str);
+                                    if let Some(m) = md.modified {
+                                        if let Some(curr) = max_mtime {
+                                            if m > curr {
+                                                max_mtime = Some(m);
+                                            }
+                                        } else {
+                                            max_mtime = Some(m);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Convert max_mtime to UTC
             let max_mtime_utc = max_mtime.and_then(|t| {
                 let dur = t.duration_since(std::time::UNIX_EPOCH).ok()?;
                 chrono::DateTime::<chrono::Utc>::from_timestamp(
@@ -633,6 +671,7 @@ impl FolderMonitor {
     }
 
     /// Process folders that need scanning
+    #[allow(dead_code)]
     async fn process_pending_folders(&self, library: &Library) -> Result<()> {
         let filters = FolderScanFilters {
             library_id: Some(library.id),

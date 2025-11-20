@@ -16,7 +16,6 @@ fn init_logger() {
         .target(Target::Stdout)
         .filter_level(LevelFilter::Warn) // Warn level for dependencies
         .filter_module("ferrex-player", LevelFilter::Debug)
-        .filter_module("subwave_unified", LevelFilter::Debug)
         .init();
 }
 
@@ -161,7 +160,7 @@ fn main() -> iced::Result {
     .subscription(subscriptions::subscription)
     .font(lucide_font_bytes())
     .theme(|_| theme::MediaServerTheme::theme())
-    .present_mode(iced::PresentMode::Mailbox) // Enable 120fps+ with no VSync
+    .present_mode(iced::PresentMode::AutoNoVsync)
     .window(iced::window::Settings {
         size: iced::Size::new(1280.0, 720.0),
         resizable: true,

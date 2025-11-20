@@ -16,12 +16,18 @@ use crate::domains::settings::SettingsDomainState;
 use crate::domains::streaming::StreamingDomainState;
 use crate::domains::ui::UIDomainState;
 use crate::domains::ui::tabs::{TabId, TabManager};
+use crate::domains::ui::types::DisplayMode;
 use crate::domains::ui::views::carousel::CarouselState;
+use crate::domains::ui::widgets::AnimationType;
+use crate::domains::ui::yoke_cache::YokeCache;
 use crate::domains::user_management::UserManagementDomainState;
 use crate::infrastructure::ServiceBuilder;
 use crate::infrastructure::adapters::ApiClientAdapter;
 use crate::infrastructure::adapters::AuthManagerAdapter;
 use crate::infrastructure::api_client::ApiClient;
+use crate::infrastructure::constants::animation::DEFAULT_DURATION_MS;
+use crate::infrastructure::constants::animation::DEFAULT_POSTER_ANIMATION;
+use crate::infrastructure::constants::animation::PosterAnimationKind;
 use crate::infrastructure::repository::{
     accessor::{Accessor, ReadOnly, ReadWrite},
     repository::MediaRepo,
@@ -30,6 +36,8 @@ use crate::infrastructure::services::settings::SettingsApiAdapter;
 use crate::infrastructure::services::streaming::StreamingApiAdapter;
 use crate::infrastructure::services::user_management::UserAdminApiAdapter;
 use ferrex_core::LibraryID;
+use ferrex_core::SortBy;
+use ferrex_core::SortOrder;
 use parking_lot::RwLock as StdRwLock;
 use std::sync::Arc;
 
@@ -109,29 +117,27 @@ impl State {
             view: crate::domains::ui::types::ViewState::Library,
             // Resolve default widget animation from constants
             default_widget_animation: {
-                use crate::domains::ui::widgets::AnimationType as WidgetAnim;
-                use crate::infrastructure::constants::animation::{
-                    DEFAULT_DURATION_MS, DEFAULT_POSTER_ANIMATION, PosterAnimationKind,
-                };
                 match DEFAULT_POSTER_ANIMATION {
-                    PosterAnimationKind::None => WidgetAnim::None,
-                    PosterAnimationKind::Fade => WidgetAnim::Fade {
+                    PosterAnimationKind::None => AnimationType::None,
+                    PosterAnimationKind::Fade => AnimationType::Fade {
                         duration: std::time::Duration::from_millis(DEFAULT_DURATION_MS),
                     },
-                    PosterAnimationKind::Flip => WidgetAnim::flip(),
+                    PosterAnimationKind::Flip => AnimationType::flip(),
                 }
             },
             repo_accessor: ui_accessor.clone(),
             // New zero-copy fields
             movie_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(2048),
             series_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(256),
+            season_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(512),
+            episode_yoke_cache: crate::domains::ui::yoke_cache::YokeCache::new(2048),
 
             movies_carousel: CarouselState::new(0),
             tv_carousel: CarouselState::new(0),
 
-            display_mode: crate::domains::ui::types::DisplayMode::Curated,
-            sort_by: crate::domains::ui::SortBy::Title,
-            sort_order: crate::domains::ui::SortOrder::Ascending,
+            display_mode: DisplayMode::Curated,
+            sort_by: SortBy::Title,
+            sort_order: SortOrder::Ascending,
             loading: false,
             error_message: None,
             window_size: iced::Size::new(1280.0, 720.0),
@@ -150,6 +156,11 @@ impl State {
             show_library_menu: false,
             library_menu_target: None,
             is_fullscreen: false,
+            show_filter_panel: false,
+            selected_genres: Vec::new(),
+            selected_decade: None,
+            selected_resolution: ferrex_core::UiResolution::Any,
+            selected_watch_status: ferrex_core::UiWatchStatus::Any,
             show_seasons_carousel: None,
             season_episodes_carousel: None,
             show_clear_database_confirm: false,

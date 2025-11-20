@@ -32,27 +32,33 @@ pub fn view_library_controls_bar<'a>(
     }
 
     // Get current sort settings from state
-    let current_sort = state.domains.ui.state.sort_by;
-    let current_order = state.domains.ui.state.sort_order;
+    let ui_state = &state.domains.ui.state;
+    let current_sort = ui_state.sort_by;
+    let current_order = ui_state.sort_order;
 
-    // TODO: Get active filter count from state when filters are implemented
-    let active_filter_count = 0;
-    let is_filter_open = false;
+    let active_filter_count = ui_state.selected_genres.len()
+        + ui_state.selected_decade.iter().count()
+        + if ui_state.selected_resolution != ferrex_core::UiResolution::Any {
+            1
+        } else {
+            0
+        }
+        + if ui_state.selected_watch_status != ferrex_core::UiWatchStatus::Any {
+            1
+        } else {
+            0
+        };
+    let is_filter_open = ui_state.show_filter_panel;
 
     // Create the controls row
     let controls = row![
-        // Sort dropdown
         sort_dropdown(current_sort),
-        Space::with_width(8),
-        // Sort order toggle
         sort_order_toggle(current_order),
-        Space::with_width(24),
-        // Filter button
         filter_button(active_filter_count, is_filter_open),
-        // Spacer to push any future controls to the right
         Space::with_width(Length::Fill),
     ]
-    .padding([0, 20])
+    .spacing(12)
+    .padding([0, 16])
     .align_y(iced::Alignment::Center);
 
     Some(

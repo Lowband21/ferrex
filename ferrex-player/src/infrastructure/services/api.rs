@@ -5,6 +5,7 @@
 
 use crate::infrastructure::repository::RepositoryResult;
 use async_trait::async_trait;
+use ferrex_core::api_types::{CreateLibraryRequest, UpdateLibraryRequest};
 use ferrex_core::auth::device::AuthenticatedDevice;
 use ferrex_core::types::library::Library;
 use ferrex_core::user::AuthToken;
@@ -54,6 +55,18 @@ pub trait ApiService: Send + Sync {
 
     /// Fetch media for a specific library
     async fn fetch_library_media(&self, library_id: Uuid) -> RepositoryResult<Vec<Media>>;
+
+    // === Library management ===
+    /// Create a library on the server
+    async fn create_library(&self, request: CreateLibraryRequest) -> RepositoryResult<LibraryID>;
+    /// Update a library on the server
+    async fn update_library(
+        &self,
+        id: LibraryID,
+        request: UpdateLibraryRequest,
+    ) -> RepositoryResult<()>;
+    /// Delete a library on the server
+    async fn delete_library(&self, id: LibraryID) -> RepositoryResult<()>;
 
     /// Start a library scan
     async fn scan_library(

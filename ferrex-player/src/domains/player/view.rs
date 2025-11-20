@@ -56,13 +56,31 @@ impl PlayerDomainState {
             // Create the clickable video
             let clickable_video = self.video_view(video);
 
-            // Create overlay if controls are visible
+            // Build subtitle overlay element (between video and controls) when present
+            let subtitle_overlay: Option<iced::Element<Message, Theme, iced_wgpu::Renderer>> =
+                self.overlay.as_ref().map(|ov| {
+                    subwave_overlay::overlay::overlay_element::<Message, Theme>(
+                        ov,
+                        Length::Fill,
+                        Length::Fill,
+                        self.content_fit,
+                    )
+                });
+
+            // Create overlay stack: video, maybe subtitle overlay, then controls
             let player_with_overlay: iced::Element<Message, Theme> = if self.controls {
                 let controls = self.controls_overlay();
-                // Use Into trait to convert
-                iced::widget::Stack::with_children(vec![clickable_video, controls]).into()
+                let mut children: Vec<iced::Element<Message, Theme, iced_wgpu::Renderer>> =
+                    vec![clickable_video];
+                if let Some(ov) = subtitle_overlay { children.push(ov); }
+                children.push(controls);
+                iced::widget::Stack::with_children(children).into()
             } else {
-                clickable_video
+                if let Some(ov) = subtitle_overlay {
+                    iced::widget::Stack::with_children(vec![clickable_video, ov]).into()
+                } else {
+                    clickable_video
+                }
             };
 
             // Add settings panel if visible

@@ -1,56 +1,8 @@
 // Re-export types from ferrex-core for use in the player
 pub use ferrex_core::{
-    //CastMember,
-    //CrewMember,
-    EnhancedMovieDetails,
-    EnhancedSeriesDetails,
-    //EpisodeDetails,
-    EpisodeID,
-
-    //EpisodeNumber,
-    EpisodeReference,
-
-    //EpisodeTitle,
-
-    //EpisodeURL,
-
-    //ExternalIds,
-
-    // Library types
-    LibraryReference,
-
-    //Video,
-    // Supporting types
-    //MediaImages,
-    // References
-    Media,
-    // Details
-    MediaDetailsOption,
-    // File types (still needed for playback)
-    MediaFile,
-    MediaFileMetadata,
-    MediaID,
-    // IDs
-    MovieID,
-    MovieReference,
-    // Titles
-    //MovieTitle,
-    // URLs
-    //MovieURL,
-    //ParsedEpisodeInfo,
-    ParsedMediaInfo,
-    //ParsedMovieInfo,
-    //SeasonDetails,
-    SeasonID,
-    // Numbers
-    //SeasonNumber,
-    SeasonReference,
-    //SeasonURL,
-    SeriesID,
-    SeriesReference,
-    //SeriesTitle,
-    //SeriesURL,
-    TmdbDetails,
+    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeID, EpisodeReference, LibraryReference,
+    Media, MediaDetailsOption, MediaFile, MediaFileMetadata, MediaID, MovieID, MovieReference,
+    ParsedMediaInfo, SeasonID, SeasonReference, SeriesID, SeriesReference, SortOrder, TmdbDetails,
 };
 
 pub use ferrex_core::api_types::{

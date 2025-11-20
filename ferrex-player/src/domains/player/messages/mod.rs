@@ -35,7 +35,6 @@ pub enum Message {
     // Playlist control (NEW - for Phase 2 direct commands)
     ToggleShuffle,
     ToggleRepeat,
-    LoadTrack(ferrex_core::MediaID),
 
     // Video events
     VideoLoaded(bool), // Success flag
@@ -116,7 +115,6 @@ impl fmt::Debug for Message {
             // Playlist control
             Message::ToggleShuffle => write!(f, "ToggleShuffle"),
             Message::ToggleRepeat => write!(f, "ToggleRepeat"),
-            Message::LoadTrack(id) => write!(f, "LoadTrack({:?})", id),
 
             // Video events
             Message::VideoLoaded(success) => write!(f, "VideoLoaded({})", success),

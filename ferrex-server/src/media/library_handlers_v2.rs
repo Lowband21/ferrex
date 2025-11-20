@@ -1,10 +1,11 @@
 use crate::AppState;
 use axum::{
     body::Bytes,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Json},
 };
+use ferrex_core::LibraryType;
 use ferrex_core::ManualMatchRequest;
 use ferrex_core::Media;
 use ferrex_core::MediaDetailsOption;
@@ -12,11 +13,18 @@ use ferrex_core::MediaEvent;
 use ferrex_core::MediaIDLike;
 use ferrex_core::ParsedMediaInfo;
 use ferrex_core::TmdbDetails;
+use ferrex_core::indices::IndexManager;
+use ferrex_core::query::types::{SortBy, SortOrder};
 use ferrex_core::{
     database::traits::MediaFilters, ApiResponse, CreateLibraryRequest, EnhancedMovieDetails,
     EnhancedSeriesDetails, FetchMediaRequest, Library, LibraryID, LibraryMediaResponse,
     LibraryReference, MediaID, UpdateLibraryRequest,
 };
+use ferrex_core::{FilterIndicesRequest, IndicesResponse};
+use rkyv::rancor::Error as RkyvError;
+use serde::Deserialize;
+use sqlx::Row;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -108,6 +116,290 @@ pub async fn get_libraries_with_media_handler(State(state): State<AppState>) -> 
         }
         Err(e) => {
             error!("Failed to get libraries: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SortedIdsQuery {
+    pub sort: Option<String>,
+    pub order: Option<String>,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+fn parse_sort_field(s: &str) -> Option<SortBy> {
+    match s.to_lowercase().as_str() {
+        "title" => Some(SortBy::Title),
+        "date_added" | "added" => Some(SortBy::DateAdded),
+        "release_date" | "year" => Some(SortBy::ReleaseDate),
+        "rating" => Some(SortBy::Rating),
+        "popularity" => Some(SortBy::Popularity),
+        "runtime" | "duration" => Some(SortBy::Runtime),
+        "file_size" | "size" => Some(SortBy::FileSize),
+        "resolution" => Some(SortBy::Resolution),
+        "bitrate" => Some(SortBy::Bitrate),
+        _ => None,
+    }
+}
+
+fn parse_sort_order(s: &str) -> Option<SortOrder> {
+    match s.to_lowercase().as_str() {
+        "asc" | "ascending" => Some(SortOrder::Ascending),
+        "desc" | "descending" => Some(SortOrder::Descending),
+        _ => None,
+    }
+}
+
+/// Get presorted media indices for a library (movie libraries supported)
+pub async fn get_library_sorted_indices_handler(
+    State(state): State<AppState>,
+    Path(library_id): Path<Uuid>,
+    Query(params): Query<SortedIdsQuery>,
+) -> impl IntoResponse {
+    info!("Getting presorted IDs for library: {}", library_id);
+
+    // Lookup library reference to get library type
+    let library_ref = match state.db.backend().get_library_reference(library_id).await {
+        Ok(lib) => lib,
+        Err(e) => {
+            error!("Failed to get library reference: {}", e);
+            return Err(StatusCode::NOT_FOUND);
+        }
+    };
+
+    // Map sort and order with sensible defaults (default: title asc)
+    let sort_field = params
+        .sort
+        .as_deref()
+        .and_then(parse_sort_field)
+        .unwrap_or(SortBy::Title);
+    let sort_order = params
+        .order
+        .as_deref()
+        .and_then(parse_sort_order)
+        .unwrap_or(SortOrder::Ascending);
+
+    let _offset = params.offset.unwrap_or(0);
+    let _limit = params.limit.unwrap_or(60).min(500);
+
+    // Only support Movie libraries initially; return 501 for others
+    let lib_type = library_ref.library_type;
+    if lib_type != LibraryType::Movies {
+        warn!(
+            "Sorted IDs endpoint currently supports movies only; library {:?} not supported",
+            lib_type
+        );
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+
+    // Build sorted IDs using core index manager (in-memory sort for now)
+    let index_mgr = IndexManager::new(state.db.clone());
+    let sorted_ids = match index_mgr
+        .sort_media_ids_for_library(library_ref.id, lib_type, sort_field, sort_order)
+        .await
+    {
+        Ok(ids) => ids,
+        Err(e) => {
+            error!("Failed to sort media for library {}: {}", library_id, e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Persist indices for static sorts for faster future reuse
+    // Note: persistence of indices is removed in Phase 1 simplified design
+
+    // Build base-order map (by title asc) to translate UUID -> position
+    let pool = state
+        .db
+        .backend()
+        .as_any()
+        .downcast_ref::<ferrex_core::database::postgres::PostgresDatabase>()
+        .expect("Postgres backend")
+        .pool();
+    let base_ids: Vec<Uuid> = match sqlx::query_scalar!(
+        r#"SELECT mr.id FROM movie_references mr WHERE mr.library_id=$1 ORDER BY mr.title"#,
+        library_ref.id.as_uuid()
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            error!("Failed to get base order for library {}: {}", library_id, e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    let mut pos_map = HashMap::with_capacity(base_ids.len());
+    for (i, id) in base_ids.iter().enumerate() {
+        pos_map.insert(*id, i as u32);
+    }
+
+    let mut positions: Vec<u32> = Vec::with_capacity(sorted_ids.len());
+    for id in sorted_ids.into_iter() {
+        if let Some(p) = pos_map.get(&id) {
+            positions.push(*p);
+        }
+    }
+
+    // Compose rkyv response
+    let response = IndicesResponse {
+        content_version: 1,
+        indices: positions,
+    };
+
+    match rkyv::to_bytes::<RkyvError>(&response) {
+        Ok(bytes) => Ok::<_, StatusCode>((
+            [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+            Bytes::from(bytes.into_vec()),
+        )),
+        Err(e) => {
+            error!("Failed to serialize indices response: {:?}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// Filter indices (movies Phase 1)
+pub async fn post_library_filtered_indices_handler(
+    State(state): State<AppState>,
+    Path(library_id): Path<Uuid>,
+    Json(spec): Json<FilterIndicesRequest>,
+) -> impl IntoResponse {
+    info!("Getting filtered indices for library: {}", library_id);
+
+    // Resolve library
+    let library_ref = match state.db.backend().get_library_reference(library_id).await {
+        Ok(lib) => lib,
+        Err(e) => {
+            error!("Failed to get library reference: {}", e);
+            return Err(StatusCode::NOT_FOUND);
+        }
+    };
+
+    if library_ref.library_type != LibraryType::Movies {
+        warn!("Filtered indices currently supports movies only");
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+
+    // Build base order map (title asc) for positions
+    let pool = state
+        .db
+        .backend()
+        .as_any()
+        .downcast_ref::<ferrex_core::database::postgres::PostgresDatabase>()
+        .expect("Postgres backend")
+        .pool();
+    let base_ids: Vec<Uuid> = match sqlx::query_scalar!(
+        r#"SELECT mr.id FROM movie_references mr WHERE mr.library_id=$1 ORDER BY mr.title"#,
+        library_ref.id.as_uuid()
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            error!("Failed to get base order for library {}: {}", library_id, e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    let mut pos_map = HashMap::with_capacity(base_ids.len());
+    for (i, id) in base_ids.iter().enumerate() {
+        pos_map.insert(*id, i as u32);
+    }
+
+    // Build filtered id list using optimized SQL inlined here (Phase 1: genres, year_range, rating_range, search, sort)
+    use sqlx::{Postgres, QueryBuilder};
+    let mut qb = QueryBuilder::<Postgres>::new(
+        r#"
+        SELECT mr.id
+        FROM movie_references mr
+        JOIN media_files mf ON mr.file_id = mf.id
+        LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id
+        WHERE mr.library_id =
+        "#,
+    );
+    qb.push_bind(library_ref.id.as_uuid());
+
+    // genres filter
+    if !spec.genres.is_empty() {
+        qb.push(" AND mm.genre_names && ");
+        qb.push_bind(&spec.genres);
+    }
+
+    // year range
+    if let Some((min_y, max_y)) = spec.year_range {
+        qb.push(" AND mm.release_year BETWEEN ");
+        qb.push_bind(min_y as i32);
+        qb.push(" AND ");
+        qb.push_bind(max_y as i32);
+    }
+
+    // rating range
+    if let Some((min_r, max_r)) = spec.rating_range {
+        use std::str::FromStr;
+        qb.push(" AND mm.vote_average BETWEEN ");
+        qb.push_bind(sqlx::types::BigDecimal::from_str(&min_r.to_string()).unwrap());
+        qb.push(" AND ");
+        qb.push_bind(sqlx::types::BigDecimal::from_str(&max_r.to_string()).unwrap());
+    }
+
+    // search (ILIKE simple)
+    if let Some(text) = &spec.search {
+        qb.push(" AND (mr.title ILIKE ");
+        qb.push_bind(format!("%{}%", text));
+        qb.push(" OR mm.overview ILIKE ");
+        qb.push_bind(format!("%{}%", text));
+        qb.push(")");
+    }
+
+    // sorting
+    let sort_field = spec.sort.unwrap_or(SortBy::Title);
+    let sort_order = spec.order.unwrap_or(SortOrder::Ascending);
+    qb.push(" ORDER BY ");
+    qb.push(match sort_field {
+        SortBy::Title => "LOWER(mr.title)",
+        SortBy::DateAdded => "mf.created_at",
+        SortBy::ReleaseDate => "mm.release_date",
+        SortBy::Rating => "mm.vote_average",
+        SortBy::Runtime => "mm.runtime",
+        SortBy::Popularity => "mm.popularity",
+        _ => "LOWER(mr.title)",
+    });
+    qb.push(match sort_order {
+        SortOrder::Ascending => " ASC NULLS LAST",
+        SortOrder::Descending => " DESC NULLS LAST",
+    });
+
+    let rows = match qb.build().fetch_all(pool).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!("Failed to execute filtered indices query: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Map ids -> positions
+    let mut positions: Vec<u32> = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id: Uuid = row.get("id");
+        if let Some(p) = pos_map.get(&id) {
+            positions.push(*p);
+        }
+    }
+
+    let response = IndicesResponse {
+        content_version: 1,
+        indices: positions,
+    };
+    match rkyv::to_bytes::<RkyvError>(&response) {
+        Ok(bytes) => Ok::<_, StatusCode>((
+            [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+            Bytes::from(bytes.into_vec()),
+        )),
+        Err(e) => {
+            error!("Failed to serialize indices response: {:?}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }

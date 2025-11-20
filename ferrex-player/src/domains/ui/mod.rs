@@ -16,9 +16,7 @@ pub mod view_models;
 pub mod views;
 pub mod widgets;
 pub mod yoke_cache;
-// pub mod shaders; // Removed - shaders are part of widgets module
 
-pub use self::types::{SortBy, SortOrder};
 use self::views::carousel::CarouselState;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::domains::ui::background_state::BackgroundShaderState;
@@ -26,8 +24,8 @@ use crate::domains::ui::messages::Message as UIMessage;
 use crate::domains::ui::scroll_manager::ScrollPositionManager;
 use crate::domains::ui::types::{DisplayMode, ViewState};
 use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
-use crate::infrastructure::repository::{MovieYoke, SeriesYoke};
-use ferrex_core::LibraryID;
+use crate::infrastructure::repository::{EpisodeYoke, MovieYoke, SeasonYoke, SeriesYoke};
+use ferrex_core::{LibraryID, SortBy, SortOrder, UiGenre};
 use iced::Task;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -37,17 +35,16 @@ use yoke_cache::YokeCache;
 /// UI domain state - moved from monolithic State
 #[derive(Debug)]
 pub struct UIDomainState {
-    // From State struct:
     pub view: ViewState,
 
-    /// Default widget animation resolved at UI init from constants
     pub default_widget_animation: crate::domains::ui::widgets::AnimationType,
 
     pub repo_accessor: Accessor<ReadOnly>,
 
-    // Minimal PoC: yoke cache for visible movie items in grid + prefetch band
     pub movie_yoke_cache: YokeCache<MovieYoke>,
     pub series_yoke_cache: YokeCache<SeriesYoke>,
+    pub season_yoke_cache: YokeCache<SeasonYoke>,
+    pub episode_yoke_cache: YokeCache<EpisodeYoke>,
 
     pub movies_carousel: CarouselState,
     pub tv_carousel: CarouselState,
@@ -61,17 +58,14 @@ pub struct UIDomainState {
     pub expanded_shows: HashSet<String>,
     pub hovered_media_id: Option<Uuid>,
 
-    /// Cached theme colors by media UUID to avoid parsing on every render
     pub theme_color_cache: parking_lot::RwLock<HashMap<Uuid, iced::Color>>,
 
-    // Library filtering
     pub current_library_id: Option<LibraryID>,
 
-    // Scroll-related state
     pub last_scroll_position: f32,
     pub scroll_stopped_time: Option<Instant>,
     pub last_scroll_time: Option<Instant>,
-    pub last_check_task_created: Option<Instant>, // Rate-limit CheckScrollStopped task creation
+    pub last_check_task_created: Option<Instant>,
     pub scroll_manager: ScrollPositionManager,
 
     // Background and visual state
@@ -82,6 +76,13 @@ pub struct UIDomainState {
     pub show_library_menu: bool,
     pub library_menu_target: Option<Uuid>,
     pub is_fullscreen: bool,
+
+    // Filter panel state (enum-based)
+    pub show_filter_panel: bool,
+    pub selected_genres: Vec<UiGenre>,
+    pub selected_decade: Option<ferrex_core::UiDecade>,
+    pub selected_resolution: ferrex_core::UiResolution,
+    pub selected_watch_status: ferrex_core::UiWatchStatus,
 
     // Carousel states
     pub show_seasons_carousel: Option<CarouselState>,

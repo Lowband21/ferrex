@@ -7,8 +7,9 @@ pub use repository::*;
 use std::sync::Arc;
 
 use ferrex_core::{
-    ArchivedLibrary, ArchivedMedia, ArchivedMovieReference, ArchivedSeasonReference,
-    ArchivedSeriesReference, Media, MediaOps, MovieReference, SeriesReference,
+    ArchivedEpisodeReference, ArchivedLibrary, ArchivedMedia, ArchivedMovieReference,
+    ArchivedSeasonReference, ArchivedSeriesReference, Media, MediaOps, MovieReference,
+    SeriesReference,
 };
 use rkyv::util::AlignedVec;
 use yoke::Yoke;
@@ -50,6 +51,7 @@ pub type ArcSeriesYoke = Arc<Yoke<&'static ArchivedSeriesReference, Arc<AlignedV
 pub type SeriesYoke = Yoke<&'static ArchivedSeriesReference, Arc<AlignedVec>>;
 
 pub type SeasonYoke = Yoke<&'static ArchivedSeasonReference, Arc<AlignedVec>>;
+pub type EpisodeYoke = Yoke<&'static ArchivedEpisodeReference, Arc<AlignedVec>>;
 
 impl MaybeYoked for MovieYoke {
     type InnerRef = ArchivedMovieReference;

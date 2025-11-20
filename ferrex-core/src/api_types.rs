@@ -244,3 +244,36 @@ pub struct ImageData {
     /// Optional height hint
     pub height: Option<u32>,
 }
+
+// ===== Index-based Sorting/Filtering Types =====
+
+use crate::query::types::{MediaTypeFilter, SortBy, SortOrder};
+
+/// Compact response for index-based sorting/filtering
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+pub struct IndicesResponse {
+    /// Version of the library content used to compute indices (for cache/mismatch detection)
+    pub content_version: u32,
+    /// Positions into the client's archived media slice for the target library
+    pub indices: Vec<u32>,
+}
+
+/// Request payload for index-based filtering
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilterIndicesRequest {
+    /// Optional media type filter; Phase 1 supports Movie only
+    pub media_type: Option<MediaTypeFilter>,
+    /// Filter by genre names
+    #[serde(default)]
+    pub genres: Vec<String>,
+    /// Filter by inclusive year range (release year)
+    pub year_range: Option<(u16, u16)>,
+    /// Filter by inclusive rating range (vote_average)
+    pub rating_range: Option<(f32, f32)>,
+    /// Optional simple search text (applied to title/overview)
+    pub search: Option<String>,
+    /// Optional sort field (snake_case per SortBy serde)
+    pub sort: Option<SortBy>,
+    /// Optional sort order ("asc"/"desc")
+    pub order: Option<SortOrder>,
+}

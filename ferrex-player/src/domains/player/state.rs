@@ -89,6 +89,9 @@ pub struct PlayerDomainState {
     // External MPV player support
     pub external_mpv_handle: Option<Box<super::external_mpv::ExternalMpvHandle>>,
     pub external_mpv_active: bool,
+
+    // Subtitle overlay (appsink RGBA) to layer over the video when Wayland backend is active
+    pub overlay: Option<subwave_overlay::SubtitleOverlay>,
 }
 
 #[derive(Debug, Clone)]
@@ -144,6 +147,7 @@ impl Default for PlayerDomainState {
             source_duration: None,
             external_mpv_handle: None,
             external_mpv_active: false,
+            overlay: None,
         }
     }
 }

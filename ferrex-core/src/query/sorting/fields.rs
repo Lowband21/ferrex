@@ -3,7 +3,7 @@
 //! These zero-sized types represent different fields that can be used for sorting.
 //! Each field marker implements the SortFieldMarker trait to specify its key type.
 
-use super::keys::{OptionalDateKey, OptionalFloatKey, OptionalU32Key, StringKey};
+use super::keys::{OptionalDateKey, OptionalFloatKey, OptionalU32Key, OptionalU64Key, StringKey};
 use super::traits::SortFieldMarker;
 use uuid::Uuid;
 
@@ -87,4 +87,44 @@ impl SortFieldMarker for WatchProgressField {
     type Key = OptionalFloatKey; // Percentage 0.0-1.0
     const ID: &'static str = "watch_progress";
     const REQUIRES_FETCH: bool = true; // Requires watch status data
+}
+
+/// Sort by bitrate (bits per second)
+#[derive(Copy, Clone, Debug)]
+pub struct BitrateField;
+
+impl SortFieldMarker for BitrateField {
+    type Key = OptionalU64Key;
+    const ID: &'static str = "bitrate";
+    const REQUIRES_FETCH: bool = false; // Available in media file metadata
+}
+
+/// Sort by file size (in bytes)
+#[derive(Copy, Clone, Debug)]
+pub struct FileSizeField;
+
+impl SortFieldMarker for FileSizeField {
+    type Key = OptionalU64Key;
+    const ID: &'static str = "file_size";
+    const REQUIRES_FETCH: bool = false; // Available in media file
+}
+
+/// Sort by content rating (e.g., PG, PG-13, R)
+#[derive(Copy, Clone, Debug)]
+pub struct ContentRatingField;
+
+impl SortFieldMarker for ContentRatingField {
+    type Key = StringKey;
+    const ID: &'static str = "content_rating";
+    const REQUIRES_FETCH: bool = true; // Requires TMDB data
+}
+
+/// Sort by resolution (height in pixels)
+#[derive(Copy, Clone, Debug)]
+pub struct ResolutionField;
+
+impl SortFieldMarker for ResolutionField {
+    type Key = OptionalU32Key;
+    const ID: &'static str = "resolution";
+    const REQUIRES_FETCH: bool = false; // Available in media file metadata
 }

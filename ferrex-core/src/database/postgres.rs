@@ -146,10 +146,10 @@ impl PostgresDatabase {
         let actual_id = sqlx::query_scalar!(
             r#"
             INSERT INTO media_files (
-                id, library_id, file_path, filename, file_size,
+                id, library_id, file_path, filename, file_size, created_at,
                 technical_metadata, parsed_info
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (file_path) DO UPDATE SET
                 filename = EXCLUDED.filename,
                 file_size = EXCLUDED.file_size,
@@ -163,6 +163,7 @@ impl PostgresDatabase {
             file_path_str,
             media_file.filename,
             media_file.size as i64,
+            media_file.created_at,
             technical_metadata,
             parsed_info
         )
@@ -4538,7 +4539,7 @@ impl PostgresDatabase {
             sqlx::query!(
                 r#"
                 INSERT INTO series_references (id, library_id, tmdb_id, title, theme_color, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, NOW())
                 ON CONFLICT (id) DO UPDATE SET
                     library_id = EXCLUDED.library_id,
                     title = EXCLUDED.title,
@@ -4549,7 +4550,8 @@ impl PostgresDatabase {
                 series.library_id.as_uuid(),
                 tmdb_id,
                 series.title.as_str(),
-                series.theme_color.as_deref()
+                series.theme_color.as_deref(),
+                series.created_at
             )
             .execute(&mut *tx)
             .await
@@ -4595,7 +4597,7 @@ impl PostgresDatabase {
                     sqlx::query!(
                         r#"
                         INSERT INTO series_references (id, library_id, tmdb_id, title, theme_color, created_at, updated_at)
-                        VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+                        VALUES ($1, $2, $3, $4, $5, $6, NOW())
                         ON CONFLICT (id) DO UPDATE SET
                             library_id = EXCLUDED.library_id,
                             tmdb_id = EXCLUDED.tmdb_id,
@@ -4607,7 +4609,8 @@ impl PostgresDatabase {
                         series.library_id.as_uuid(),
                         tmdb_id,
                         series.title.as_str(),
-                        series.theme_color.as_deref()
+                        series.theme_color.as_deref(),
+                        series.created_at
                     )
                     .execute(&mut *tx)
                     .await

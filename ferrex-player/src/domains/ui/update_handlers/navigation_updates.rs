@@ -12,8 +12,8 @@ use crate::{
     state_refactored::State,
 };
 use ferrex_core::{
-    EpisodeID, ImageSize, ImageType, MediaFile, MediaID, MediaIDLike, MovieID, MovieLike, SeasonID,
-    SeriesID, SeriesLike,
+    EpisodeID, ImageSize, ImageType, MediaFile, MediaID, MediaIDLike, MediaOps, MovieID, MovieLike,
+    SeasonID, SeasonLike, SeriesID, SeriesLike,
 };
 
 /// Updates background shader depth regions when transitioning to a detail view
@@ -303,8 +303,11 @@ pub fn handle_view_series(state: &mut State, series_id: SeriesID) -> Task<Messag
         // Queue request if not in cache
         if let Some(details) = series.details() {
             if details.backdrop_path.is_some() {
-                let request =
-                    ImageRequest::new(series.id.to_uuid(), ImageSize::Backdrop, ImageType::Series);
+                let request = ImageRequest::new(
+                    series.id.to_uuid(),
+                    ImageSize::Backdrop,
+                    ImageType::Series,
+                );
                 if state.image_service.get(&request).is_none() {
                     state.image_service.request_image(request);
                 }
@@ -316,6 +319,18 @@ pub fn handle_view_series(state: &mut State, series_id: SeriesID) -> Task<Messag
         }
         // Finally change the view state
         state.domains.ui.state.view = new_view;
+
+        let total_seasons = state
+            .domains
+            .ui
+            .state
+            .repo_accessor
+            .get_series_seasons(&series_id)
+            .map(|v| v.len())
+            .unwrap_or(0);
+        let mut cs = CarouselState::new(total_seasons);
+        cs.update_items_per_page(state.window_size.width);
+        state.domains.ui.state.show_seasons_carousel = Some(cs);
 
         state
             .domains
@@ -353,28 +368,95 @@ pub fn handle_view_season(
     // Save current scroll position before navigating away
     save_current_scroll_state(state);
 
-    // Clear previous season details
-    state.domains.media.state.current_season_details = None;
+    let season_uuid = season_id.to_uuid();
+    if let Ok(yoke) = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_season_yoke(&MediaID::Season(season_id))
+    {
+        let season = *yoke.get();
 
-    // Save current scroll position if navigating from library view
-    if matches!(state.domains.ui.state.view, ViewState::Library) {}
+        let new_view = ViewState::SeasonDetail {
+            series_id,
+            season_id: season.id(),
+            backdrop_handle: None,
+        };
 
-    // Create the new view state
-    let new_view = ViewState::SeasonDetail {
-        series_id: series_id.clone(),
-        season_id: season_id.clone(),
-        backdrop_handle: None,
-    };
 
-    // Update depth regions for season detail view (uses same regions as movie/series for now)
-    // TODO: Add season-specific depth regions in the future
-    prepare_depth_regions_for_transition(state, &new_view);
+        prepare_depth_regions_for_transition(state, &new_view);
 
-    // Change the view state
-    state.domains.ui.state.view = new_view;
+        if let Some(hex) = season.theme_color() {
+            if let Ok(color) = macros::parse_hex_color(hex) {
+                let r = color.r * 0.2;
+                let g = color.g * 0.2;
+                let b = color.b * 0.2;
+                let primary_dark = iced::Color::from_rgb(r, g, b);
+                let secondary = iced::Color::from_rgb(
+                    (color.r * 0.8).min(1.0),
+                    (color.g * 0.8).min(1.0),
+                    (color.b * 0.8).min(1.0),
+                );
+                state
+                    .domains
+                    .ui
+                    .state
+                    .background_shader_state
+                    .color_transitions
+                    .transition_to(primary_dark, secondary);
+            }
+        }
 
-    // Return the fetch task converted to ui::Message
-    //fetch_task.map(|_| Message::NoOp)
+        // Queue season backdrop request if details include one
+
+        if let Some(details) = season.details() {
+            if details.poster_path.is_some() || details.name.len() > 0 {
+                let request = ImageRequest::new(season.id().to_uuid(), ImageSize::Backdrop, ImageType::Season);
+                if state.image_service.get(&request).is_none() {
+                    state.image_service.request_image(request);
+                }
+            }
+        }
+
+
+        state.domains.ui.state.view = new_view;
+
+        // Initialize episodes carousel for this season
+        let total_eps = state
+            .domains
+            .ui
+            .state
+            .repo_accessor
+            .get_season_episodes(&season.id())
+            .map(|v| v.len())
+            .unwrap_or(0);
+        // Episodes are typically wide (16:9); use a wider item width
+        let mut ep_cs = crate::domains::ui::views::carousel::CarouselState::new_with_dimensions(
+            total_eps,
+            400.0,
+            15.0,
+        );
+        ep_cs.update_items_per_page(state.window_size.width);
+        state.domains.ui.state.season_episodes_carousel = Some(ep_cs);
+
+        state
+            .domains
+            .ui
+            .state
+            .season_yoke_cache
+            .insert(season_uuid, std::sync::Arc::new(yoke));
+    } else {
+
+        let new_view = ViewState::SeasonDetail {
+            series_id,
+            season_id,
+            backdrop_handle: None,
+        };
+        prepare_depth_regions_for_transition(state, &new_view);
+        state.domains.ui.state.view = new_view;
+    }
+
     Task::none()
 }
 
@@ -401,21 +483,39 @@ pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Mes
     // Save current scroll position before navigating away
     save_current_scroll_state(state);
 
-    // Create the new view state
-    let new_view = ViewState::EpisodeDetail {
-        episode_id: episode_id,
-        backdrop_handle: None,
-    };
 
-    // Update depth regions for episode detail view (uses same regions as movie/series for now)
-    // TODO: Add episode-specific depth regions in the future
-    prepare_depth_regions_for_transition(state, &new_view);
+    let episode_uuid = episode_id.to_uuid();
+    if let Ok(yoke) = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_episode_yoke(&MediaID::Episode(episode_id))
+    {
+        let new_view = ViewState::EpisodeDetail {
+            episode_id: yoke.get().id(),
+            backdrop_handle: None,
+        };
 
-    // Change the view state
-    state.domains.ui.state.view = new_view;
+        prepare_depth_regions_for_transition(state, &new_view);
 
-    // Convert DomainMessage task to ui::Message task
-    //fetch_task.map(|_| Message::NoOp)
+
+        state.domains.ui.state.view = new_view;
+        state
+            .domains
+            .ui
+            .state
+            .episode_yoke_cache
+            .insert(episode_uuid, std::sync::Arc::new(yoke));
+    } else {
+        let new_view = ViewState::EpisodeDetail {
+            episode_id,
+            backdrop_handle: None,
+        };
+        prepare_depth_regions_for_transition(state, &new_view);
+        state.domains.ui.state.view = new_view;
+    }
+
     Task::none()
 }
 
@@ -431,10 +531,6 @@ pub fn handle_navigate_home(state: &mut State) -> Task<Message> {
     state.domains.ui.state.view = ViewState::Library;
 
     state.domains.library.state.current_library_id = None;
-
-    // Clear detail view data
-    // REMOVED: No longer clearing duplicate state fields
-    // MediaStore is the single source of truth
 
     // Refresh media to show all libraries
     Task::done(Message::AggregateAllLibraries)

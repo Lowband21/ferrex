@@ -361,10 +361,6 @@ impl MediaOps for SeasonReference {
 }
 
 impl SeasonReference {
-    pub fn details(&self) -> &(impl MediaDetailsOptionLike + use<>) {
-        &self.details
-    }
-
     /// Get release/air year if available
     pub fn year(&self) -> Option<u16> {
         match &self.details {
@@ -445,9 +441,6 @@ impl MediaOps for EpisodeReference {
 }
 
 impl EpisodeReference {
-    pub fn details(&self) -> &(impl MediaDetailsOptionLike + use<>) {
-        &self.details
-    }
     /// Get release/air year if available
     pub fn year(&self) -> Option<u16> {
         match &self.details {
@@ -530,66 +523,6 @@ impl MediaOps for ArchivedMovieReference {
     }
 }
 
-/*
-impl ArchivedMovieReference {
-    pub fn details(&self) -> &impl MediaDetailsOptionLike {
-        &self.details
-    }
-
-    /// Get genres if available
-    pub fn genres(&self) -> Option<&ArchivedVec<ArchivedString>> {
-        match &self.details {
-            ArchivedMediaDetailsOption::Details(details) => match details {
-                ArchivedTmdbDetails::Movie(movie) => Some(&movie.genres),
-                ArchivedTmdbDetails::Series(series) => Some(&series.genres),
-                _ => None, // Episodes and seasons don't have their own genres
-            },
-            _ => None,
-        }
-    }
-
-    /// Get release/air year if available
-    pub fn year(&self) -> Option<u16> {
-        match &self.details {
-            ArchivedMediaDetailsOption::Details(details) => match details {
-                ArchivedTmdbDetails::Movie(movie) => movie
-                    .release_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                ArchivedTmdbDetails::Series(series) => series
-                    .first_air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                ArchivedTmdbDetails::Season(season) => season
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                ArchivedTmdbDetails::Episode(episode) => episode
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-            },
-            _ => None,
-        }
-    }
-
-    /// Get rating if available
-    pub fn rating(&self) -> ArchivedOption<f32_le> {
-        match &self.details {
-            ArchivedMediaDetailsOption::Details(details) => match details {
-                ArchivedTmdbDetails::Movie(movie) => movie.vote_average,
-                ArchivedTmdbDetails::Series(series) => series.vote_average,
-                ArchivedTmdbDetails::Episode(episode) => episode.vote_average,
-                ArchivedTmdbDetails::Season(_) => ArchivedOption::None, // Seasons don't have ratings
-            },
-            _ => ArchivedOption::None,
-        }
-    }
-} */
 
 impl MediaOps for ArchivedSeriesReference {
     type Id = SeriesID;
@@ -614,66 +547,6 @@ impl MediaOps for ArchivedSeriesReference {
     }
 }
 
-/*
-impl ArchivedSeriesReference {
-    pub fn details(&self) -> &impl MediaDetailsOptionLike {
-        &self.details
-    }
-
-    /// Get genres if available
-    pub fn genres(&self) -> Option<&ArchivedVec<ArchivedString>> {
-        match &self.details {
-            ArchivedMediaDetailsOption::Details(details) => match details {
-                ArchivedTmdbDetails::Movie(movie) => Some(&movie.genres),
-                ArchivedTmdbDetails::Series(series) => Some(&series.genres),
-                _ => None, // Episodes and seasons don't have their own genres
-            },
-            _ => None,
-        }
-    }
-
-    /// Get release/air year if available
-    pub fn year(&self) -> Option<u16> {
-        match &self.details {
-            ArchivedMediaDetailsOption::Details(details) => match details {
-                ArchivedTmdbDetails::Movie(movie) => movie
-                    .release_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                ArchivedTmdbDetails::Series(series) => series
-                    .first_air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                ArchivedTmdbDetails::Season(season) => season
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                ArchivedTmdbDetails::Episode(episode) => episode
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-            },
-            _ => None,
-        }
-    }
-
-    /// Get rating if available
-    pub fn rating(&self) -> ArchivedOption<f32_le> {
-        match &self.details {
-            ArchivedMediaDetailsOption::Details(details) => match details {
-                ArchivedTmdbDetails::Movie(movie) => movie.vote_average,
-                ArchivedTmdbDetails::Series(series) => series.vote_average,
-                ArchivedTmdbDetails::Episode(episode) => episode.vote_average,
-                ArchivedTmdbDetails::Season(_) => ArchivedOption::None, // Seasons don't have ratings
-            },
-            _ => ArchivedOption::None,
-        }
-    }
-}*/
 impl MediaOps for ArchivedSeasonReference {
     type Id = SeasonID;
 
@@ -697,39 +570,6 @@ impl MediaOps for ArchivedSeasonReference {
     }
 }
 
-impl ArchivedSeasonReference {
-    pub fn details(&self) -> &(impl MediaDetailsOptionLike + use<>) {
-        &self.details
-    }
-    /// Get release/air year if available
-    pub fn year(&self) -> Option<u16> {
-        match &self.details {
-            ArchivedMediaDetailsOption::Details(details) => match details {
-                ArchivedTmdbDetails::Movie(movie) => movie
-                    .release_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                ArchivedTmdbDetails::Series(series) => series
-                    .first_air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                ArchivedTmdbDetails::Season(season) => season
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                ArchivedTmdbDetails::Episode(episode) => episode
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-            },
-            _ => None,
-        }
-    }
-}
 impl MediaOps for ArchivedEpisodeReference {
     type Id = EpisodeID;
 
@@ -748,90 +588,6 @@ impl MediaOps for ArchivedEpisodeReference {
 
     fn endpoint(&self) -> String {
         self.endpoint.to_string()
-    }
-}
-
-impl ArchivedEpisodeReference {
-    pub fn details(&self) -> &(impl MediaDetailsOptionLike + use<>) {
-        &self.details
-    }
-
-    /// Get genres if available
-    pub fn genres(&self) -> Option<&ArchivedVec<ArchivedString>> {
-        match &self.details {
-            ArchivedMediaDetailsOption::Details(details) => match details {
-                ArchivedTmdbDetails::Movie(movie) => Some(&movie.genres),
-                ArchivedTmdbDetails::Series(series) => Some(&series.genres),
-                _ => None, // Episodes and seasons don't have their own genres
-            },
-            _ => None,
-        }
-    }
-
-    /// Get release/air year if available
-    pub fn year(&self) -> Option<u16> {
-        match &self.details {
-            ArchivedMediaDetailsOption::Details(details) => match details {
-                ArchivedTmdbDetails::Movie(movie) => movie
-                    .release_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                ArchivedTmdbDetails::Series(series) => series
-                    .first_air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                ArchivedTmdbDetails::Season(season) => season
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                ArchivedTmdbDetails::Episode(episode) => episode
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-            },
-            _ => None,
-        }
-    }
-
-    /// Get rating if available
-    pub fn rating(&self) -> Option<f32> {
-        match &self.details {
-            ArchivedMediaDetailsOption::Details(details) => match details {
-                ArchivedTmdbDetails::Movie(movie) => {
-                    match deserialize::<Option<f32>, rancor::Error>(&movie.vote_average) {
-                        Ok(rating) => rating,
-                        Err(e) => {
-                            log::error!("Failed to deserialize movie rating: {}", e);
-                            None
-                        }
-                    }
-                }
-                ArchivedTmdbDetails::Series(series) => {
-                    match deserialize::<Option<f32>, rancor::Error>(&series.vote_average) {
-                        Ok(rating) => rating,
-                        Err(e) => {
-                            log::error!("Failed to deserialize movie rating: {}", e);
-                            None
-                        }
-                    }
-                }
-                ArchivedTmdbDetails::Episode(episode) => {
-                    match deserialize::<Option<f32>, rancor::Error>(&episode.vote_average) {
-                        Ok(rating) => rating,
-                        Err(e) => {
-                            log::error!("Failed to deserialize movie rating: {}", e);
-                            None
-                        }
-                    }
-                }
-                ArchivedTmdbDetails::Season(_) => None, // Seasons don't have ratings
-            },
-            _ => None,
-        }
     }
 }
 

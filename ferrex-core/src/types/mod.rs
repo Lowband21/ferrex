@@ -2,6 +2,7 @@
 
 pub mod details;
 pub mod files;
+pub mod filter_types;
 pub mod ids;
 pub mod image;
 pub mod library;
@@ -17,6 +18,7 @@ pub mod util_types;
 // Re-export everything from submodules
 pub use details::*;
 pub use files::*;
+pub use filter_types::*;
 pub use ids::*;
 pub use image::*;
 pub use library::*;

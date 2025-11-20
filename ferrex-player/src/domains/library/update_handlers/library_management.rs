@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use crate::domains::library::messages::Message;
 use crate::infrastructure::api_types::Library;
 use crate::state_refactored::State;
+use crate::{domains::library::messages::Message, infrastructure::services::api::ApiService};
 
 use chrono::Utc;
 use ferrex_core::{LibraryID, LibraryType};
@@ -12,35 +12,40 @@ use uuid::Uuid;
 pub fn handle_create_library(
     state: &mut State,
     library: Library,
-    server_url: String,
+    _server_url: String,
 ) -> Task<Message> {
-    /*
+    let req = ferrex_core::api_types::CreateLibraryRequest {
+        name: library.name.clone(),
+        library_type: library.library_type,
+        paths: library
+            .paths
+            .iter()
+            .filter_map(|p| p.to_str().map(|s| s.to_string()))
+            .collect(),
+        scan_interval_minutes: library.scan_interval_minutes,
+        enabled: library.enabled,
+    };
+
+    let api = state.api_service.clone();
     Task::perform(
-        crate::domains::media::library::create_library(server_url, library),
+        async move { api.create_library(req).await.map_err(|e| e.to_string()) },
         |result| match result {
-            Ok(created_library) => Message::LibraryCreated(Ok(created_library)),
-            Err(e) => Message::LibraryCreated(Err(e.to_string())),
+            Ok(_id) => Message::LibraryCreated(Ok(library)),
+            Err(e) => Message::LibraryCreated(Err(e)),
         },
-    ) */
-    Task::none()
+    )
 }
 
 pub fn handle_library_created(state: &mut State, result: Result<Library, String>) -> Task<Message> {
     match result {
-        Ok(library) => {
-            log::info!("Created library: {}", library.name);
-
-            // TODO: Update library in ArchivedLibraryStore
-            /*
-            state.domains.library.state.libraries.push(library);
-            */
-
-            // Update TabManager with new library
-            state.update_tab_manager_libraries();
-            log::info!("Updated TabManager after creating library");
-
+        Ok(_library) => {
+            log::info!("Created library successfully; refreshing libraries");
             state.domains.library.state.library_form_data = None; // Close form on success
             state.domains.library.state.library_form_errors.clear();
+            Task::perform(
+                super::library_loaded::fetch_libraries(state.api_service.clone()),
+                |res| Message::LibrariesLoaded(res.map_err(|e| e.to_string())),
+            )
         }
         Err(e) => {
             log::error!("Failed to create library: {}", e);
@@ -51,50 +56,51 @@ pub fn handle_library_created(state: &mut State, result: Result<Library, String>
                 .state
                 .library_form_errors
                 .push(format!("Failed to create library: {}", e));
+            Task::none()
         }
     }
-    Task::none()
 }
 
 pub fn handle_update_library(
     state: &mut State,
     library: Library,
-    server_url: String,
+    _server_url: String,
 ) -> Task<Message> {
-    /*
+    let req = ferrex_core::api_types::UpdateLibraryRequest {
+        name: Some(library.name.clone()),
+        paths: Some(
+            library
+                .paths
+                .iter()
+                .filter_map(|p| p.to_str().map(|s| s.to_string()))
+                .collect(),
+        ),
+        scan_interval_minutes: Some(library.scan_interval_minutes),
+        enabled: Some(library.enabled),
+    };
+
+    let api = state.api_service.clone();
+    let id = library.id;
     Task::perform(
-        crate::domains::media::library::update_library(server_url, library),
-        |result| match result {
-            Ok(updated_library) => Message::LibraryUpdated(Ok(updated_library)),
-            Err(e) => Message::LibraryUpdated(Err(e.to_string())),
+        async move { api.update_library(id, req).await.map_err(|e| e.to_string()) },
+        move |result| match result {
+            Ok(()) => Message::LibraryUpdated(Ok(library)),
+            Err(e) => Message::LibraryUpdated(Err(e)),
         },
-    ) */
-    Task::none()
+    )
 }
 
 pub fn handle_library_updated(state: &mut State, result: Result<Library, String>) -> Task<Message> {
     match result {
         Ok(library) => {
-            log::info!("Updated library: {}", library.name);
-
-            /* TODO: Update library in ArchivedLibraryStore
-            if let Some(index) = state
-                .domains
-                .library
-                .state
-                .libraries
-                .iter()
-                .position(|l| l.id == library.id)
-            {
-                state.domains.library.state.libraries[index] = library;
-            } */
-
-            // Update TabManager with updated library
-            state.update_tab_manager_libraries();
-            log::info!("Updated TabManager after updating library");
-
+            log::info!("Updated library: {} - refreshing libraries", library.name);
             state.domains.library.state.library_form_data = None; // Close form on success
             state.domains.library.state.library_form_errors.clear();
+            // Trigger reload of libraries
+            Task::perform(
+                super::library_loaded::fetch_libraries(state.api_service.clone()),
+                |res| Message::LibrariesLoaded(res.map_err(|e| e.to_string())),
+            )
         }
         Err(e) => {
             log::error!("Failed to update library: {}", e);
@@ -105,26 +111,28 @@ pub fn handle_library_updated(state: &mut State, result: Result<Library, String>
                 .state
                 .library_form_errors
                 .push(format!("Failed to update library: {}", e));
+            Task::none()
         }
     }
-    Task::none()
 }
 
 pub fn handle_delete_library(
     state: &mut State,
     library_id: LibraryID,
-    server_url: String,
+    _server_url: String,
 ) -> Task<Message> {
-    let id_for_response = library_id.clone();
-    /*
+    let api = state.api_service.clone();
     Task::perform(
-        crate::domains::media::library::delete_library(server_url, library_id),
-        move |result| match result {
-            Ok(()) => Message::LibraryDeleted(Ok(id_for_response)),
-            Err(e) => Message::LibraryDeleted(Err(e.to_string())),
+        async move {
+            api.delete_library(library_id)
+                .await
+                .map_err(|e| e.to_string())
         },
-    ) */
-    Task::none()
+        move |result| match result {
+            Ok(()) => Message::LibraryDeleted(Ok(library_id)),
+            Err(e) => Message::LibraryDeleted(Err(e)),
+        },
+    )
 }
 
 pub fn handle_library_deleted(
@@ -133,46 +141,22 @@ pub fn handle_library_deleted(
 ) -> Task<Message> {
     match result {
         Ok(library_id) => {
-            log::info!("Deleted library: {}", library_id);
-
-            // TODO: Implement library deletion in ArchivedLibraryStore
-            //state.domains.library.state.libraries.delete(library_id);
-
-            // Update TabManager to remove deleted library
-            state.update_tab_manager_libraries();
-            log::info!("Updated TabManager after deleting library");
-
-            // If we deleted the current library, clear selection
+            log::info!("Deleted library: {} - refreshing libraries", library_id);
             if state.domains.library.state.current_library_id.as_ref() == Some(&library_id) {
                 state.domains.library.state.current_library_id = None;
-
-                // TODO: Properly communicate with the server about library deletion
-                /*
-                state
-                    .domains
-                    .library
-                    .state
-                    .repo_accessor
-                    .clear_library(library_id); */
             }
-
-            // Remove from cache
-            //state
-            //    .domains
-            //    .library
-            //    .state
-            //    .library_media_cache
-            //    .remove(&library_id);
+            Task::perform(
+                super::library_loaded::fetch_libraries(state.api_service.clone()),
+                |res| Message::LibrariesLoaded(res.map_err(|e| e.to_string())),
+            )
         }
         Err(e) => {
             log::error!("Failed to delete library: {}", e);
-            // Error handling moved to higher level
+            Task::none()
         }
     }
-    Task::none()
 }
 
-// Library form management
 pub fn handle_show_library_form(state: &mut State, library: Option<Library>) -> Task<Message> {
     state.domains.library.state.library_form_errors.clear();
     state.domains.library.state.library_form_data = Some(match library {
@@ -334,11 +318,25 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
             updated_at: Utc::now(),
         };
 
-        /*
         if form_data.editing {
             // Update existing library
+            let api = state.api_service.clone();
             Task::perform(
-                crate::domains::media::library::update_library(state.server_url.clone(), library),
+                async move {
+                    let req = ferrex_core::api_types::UpdateLibraryRequest {
+                        name: Some(library.name.clone()),
+                        paths: Some(
+                            library
+                                .paths
+                                .iter()
+                                .filter_map(|p| p.to_str().map(|s| s.to_string()))
+                                .collect(),
+                        ),
+                        scan_interval_minutes: Some(library.scan_interval_minutes),
+                        enabled: Some(library.enabled),
+                    };
+                    api.update_library(library.id, req).await.map(|_| library)
+                },
                 |result| match result {
                     Ok(updated_library) => Message::LibraryUpdated(Ok(updated_library)),
                     Err(e) => Message::LibraryUpdated(Err(e.to_string())),
@@ -346,15 +344,28 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
             )
         } else {
             // Create new library
+            let api = state.api_service.clone();
             Task::perform(
-                crate::domains::media::library::create_library(state.server_url.clone(), library),
+                async move {
+                    let req = ferrex_core::api_types::CreateLibraryRequest {
+                        name: library.name.clone(),
+                        library_type: library.library_type,
+                        paths: library
+                            .paths
+                            .iter()
+                            .filter_map(|p| p.to_str().map(|s| s.to_string()))
+                            .collect(),
+                        scan_interval_minutes: library.scan_interval_minutes,
+                        enabled: library.enabled,
+                    };
+                    api.create_library(req).await.map(|_| library)
+                },
                 |result| match result {
                     Ok(created_library) => Message::LibraryCreated(Ok(created_library)),
                     Err(e) => Message::LibraryCreated(Err(e.to_string())),
                 },
             )
-        } */
-        Task::none()
+        }
     } else {
         Task::none()
     }

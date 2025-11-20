@@ -135,30 +135,6 @@ pub enum DisplayMode {
     ContinueWatching,
 }
 
-/// Sort criteria for media content
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SortBy {
-    #[default]
-    DateAdded,
-    Title,
-    Year,
-    Rating,
-    Runtime,
-    FileSize,
-    Resolution,
-    LastWatched,
-    Genre,
-    Popularity,
-}
-
-/// Sort order direction
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum SortOrder {
-    #[default]
-    Descending,
-    Ascending,
-}
-
 /// Backdrop aspect ratio mode
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BackdropAspectMode {

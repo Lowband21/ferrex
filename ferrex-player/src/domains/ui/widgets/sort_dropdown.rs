@@ -1,12 +1,15 @@
 pub use self::sort_option::SortOption;
 
-use crate::domains::ui::{SortBy, messages::Message, theme::MediaServerTheme};
+use crate::domains::ui::{messages::Message, theme::MediaServerTheme};
+use ferrex_core::SortBy;
 use iced::{
     Background, Border, Color, Element, Length,
     widget::{Container, container, pick_list},
 };
 
 mod sort_option {
+    use ferrex_core::SortBy;
+
     use super::*;
 
     /// Display labels for sort options
@@ -27,7 +30,7 @@ mod sort_option {
                 label: "Title",
             },
             SortOption {
-                value: SortBy::Year,
+                value: SortBy::ReleaseDate,
                 label: "Release Year",
             },
             SortOption {
@@ -49,10 +52,6 @@ mod sort_option {
             SortOption {
                 value: SortBy::LastWatched,
                 label: "Last Watched",
-            },
-            SortOption {
-                value: SortBy::Genre,
-                label: "Genre",
             },
             SortOption {
                 value: SortBy::Popularity,

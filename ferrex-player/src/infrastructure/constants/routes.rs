@@ -224,6 +224,12 @@ pub mod libraries {
     pub const SCAN: &str = "/libraries/:id/scan";
     /// Get library media (requires library_id parameter)
     pub const GET_MEDIA: &str = "/libraries/:id/media";
+    /// Get presorted IDs for a library (requires library_id parameter)
+    pub const SORTED_IDS: &str = "/libraries/:id/sorted-ids";
+    /// Get presorted indices for a library (binary rkyv)
+    pub const GET_SORTED_INDICES: &str = "/libraries/:id/indices/sorted";
+    /// Post filter to get indices (binary rkyv)
+    pub const POST_FILTER_INDICES: &str = "/libraries/:id/indices/filter";
 
     /// Library events SSE endpoint
     pub const EVENTS_SSE: &str = "/library/events/sse";

@@ -7,6 +7,7 @@ pub mod grid;
 pub mod header;
 pub mod library;
 pub mod library_controls_bar;
+pub mod library_filter_panel;
 pub mod loading;
 pub mod movies;
 pub mod password_login;

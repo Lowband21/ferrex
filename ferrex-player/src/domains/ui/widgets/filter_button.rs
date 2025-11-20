@@ -34,7 +34,7 @@ pub fn filter_button<'a>(active_filter_count: usize, is_open: bool) -> Element<'
                 .padding([0, 12])
                 .center_y(Length::Fill),
         )
-        .on_press(Message::NoOp) // TODO: Replace with ToggleFilterPanel when implemented
+        .on_press(Message::ToggleFilterPanel)
         .style(button_style)
         .height(Length::Fixed(36.0)),
     )
