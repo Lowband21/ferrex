@@ -95,7 +95,6 @@ impl<Message> Program<Message, Theme, Renderer> for RoundedImage {
 
             // Now mask the corners by drawing the inverse of rounded corners
             // This creates the rounded effect by covering the corners with the background color
-            let bg_color = MediaServerTheme::BLACK;
 
             // Simple test: Just draw colored squares at corners to verify masking works
             let corner_size = self.radius;

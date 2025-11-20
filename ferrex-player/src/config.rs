@@ -19,17 +19,34 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> Self {
+        // First check for environment variable
+        let mut config = if let Ok(server_url) = std::env::var("FERREX_SERVER_URL") {
+            Self {
+                server_url,
+                ..Self::default()
+            }
+        } else {
+            Self::default()
+        };
+        
+        // Then load from config file (which can override env var)
         if let Some(config_dir) = dirs::config_dir() {
             let config_path = config_dir.join("ferrex-player").join("config.json");
             if config_path.exists() {
                 if let Ok(content) = std::fs::read_to_string(&config_path) {
-                    if let Ok(config) = serde_json::from_str(&content) {
-                        return config;
+                    if let Ok(loaded_config) = serde_json::from_str::<Config>(&content) {
+                        config = loaded_config;
                     }
                 }
             }
         }
-        Self::default()
+        
+        // Allow env var to override config file for server URL
+        if let Ok(server_url) = std::env::var("FERREX_SERVER_URL") {
+            config.server_url = server_url;
+        }
+        
+        config
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {

@@ -30,10 +30,13 @@ pub struct ScanProgress {
     pub scan_id: String,
     pub status: ScanStatus,
     pub path: String,
+    pub library_name: Option<String>, // Name of the library being scanned
+    pub library_id: Option<String>,   // ID of the library being scanned
     pub total_files: usize,
     pub scanned_files: usize,
     pub stored_files: usize,
     pub metadata_fetched: usize,
+    pub skipped_samples: usize,      // Number of sample files skipped
     pub errors: Vec<String>,
     pub current_file: Option<String>,
     pub started_at: chrono::DateTime<chrono::Utc>,
@@ -139,6 +142,9 @@ pub struct State {
     pub active_scan_id: Option<String>,
     pub scan_progress: Option<ScanProgress>,
     pub show_scan_progress: bool, // Show scan progress overlay
+    
+    // Database maintenance
+    pub show_clear_database_confirm: bool, // Show confirmation dialog for database clearing
 
     // Image caches
     pub poster_cache: PosterCache,
@@ -461,6 +467,7 @@ impl Default for State {
             active_scan_id: None,
             scan_progress: None,
             show_scan_progress: false,
+            show_clear_database_confirm: false,
             poster_cache: PosterCache::new(),
             image_cache: ImageCache::new(),
             metadata_cache: MetadataCache::new(60), // 60 minute TTL

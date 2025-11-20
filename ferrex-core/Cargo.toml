@@ -25,15 +25,15 @@ chrono.workspace = true
 uuid.workspace = true
 
 # Database
-surrealdb.workspace = true
-sqlx.workspace = true
-redis.workspace = true
+surrealdb = { workspace = true, optional = true }
+sqlx = { workspace = true, optional = true }
+redis = { workspace = true, optional = true }
 
 # File system
 walkdir.workspace = true
 
 # Media processing
-ffmpeg-next.workspace = true
+ffmpeg-next = { workspace = true, optional = true }
 
 # Regex
 regex.workspace = true
@@ -48,6 +48,11 @@ async-trait.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 futures.workspace = true
+
+[features]
+default = ["ffmpeg", "database"]
+ffmpeg = ["dep:ffmpeg-next"]
+database = ["dep:sqlx", "dep:surrealdb", "dep:redis"]
 
 [dev-dependencies]
 tempfile.workspace = true

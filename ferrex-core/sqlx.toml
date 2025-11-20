@@ -1,0 +1,5 @@
+[database]
+url = "postgresql://postgres:password@localhost/rusty_media_server"
+
+[migrations]
+table_name = "_sqlx_migrations"

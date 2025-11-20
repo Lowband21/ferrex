@@ -41,6 +41,11 @@ pub struct MediaMetadata {
     pub bitrate: Option<u64>,
     pub framerate: Option<f32>,
     pub file_size: u64,
+    // HDR metadata
+    pub color_primaries: Option<String>,
+    pub color_transfer: Option<String>,
+    pub color_space: Option<String>,
+    pub bit_depth: Option<u32>,
     pub parsed_info: Option<ParsedInfo>,
     pub external_info: Option<ExternalInfo>,
 }
@@ -79,6 +84,74 @@ pub struct ExternalInfo {
 }
 
 impl MediaFile {
+    pub fn is_hdr(&self) -> bool {
+        if let Some(metadata) = &self.metadata {
+            // Check color transfer for HDR indicators
+            if let Some(transfer) = &metadata.color_transfer {
+                // PQ (SMPTE 2084) is HDR10/Dolby Vision
+                // HLG (ARIB STD-B67) is Hybrid Log-Gamma
+                if transfer == "smpte2084" || transfer == "arib-std-b67" {
+                    return true;
+                }
+            }
+
+            // Check color space for Dolby Vision
+            if let Some(space) = &metadata.color_space {
+                if space == "ictcp" {
+                    return true;
+                }
+            }
+
+            // DO NOT check bit depth alone - 10-bit doesn't mean HDR
+            // We already checked for HDR transfer functions above
+            // Any other case is SDR, even if it's 10-bit with BT.2020
+
+            // DO NOT guess HDR based on resolution or filename
+            // This causes false positives when server hasn't extracted metadata
+        }
+
+        false
+    }
+
+    pub fn get_video_info(&self) -> String {
+        let mut info = Vec::new();
+
+        if let Some(metadata) = &self.metadata {
+            // Video codec
+            if let Some(codec) = &metadata.video_codec {
+                info.push(codec.to_uppercase());
+            }
+
+            // Resolution
+            if let (Some(width), Some(height)) = (metadata.width, metadata.height) {
+                info.push(format!("{}x{}", width, height));
+            }
+
+            // HDR info
+            if self.is_hdr() {
+                if let Some(transfer) = &metadata.color_transfer {
+                    if transfer == "smpte2084" {
+                        info.push("HDR10".to_string());
+                    } else if transfer == "arib-std-b67" {
+                        info.push("HLG".to_string());
+                    }
+                }
+                if let Some(space) = &metadata.color_space {
+                    if space == "ictcp" {
+                        info.push("Dolby Vision".to_string());
+                    }
+                }
+            }
+
+            // Bit depth
+            if let Some(depth) = metadata.bit_depth {
+                info.push(format!("{}-bit", depth));
+            }
+        }
+
+        info.join(" • ")
+    }
+
     pub fn is_tv_episode(&self) -> bool {
         if let Some(metadata) = &self.metadata {
             if let Some(parsed) = &metadata.parsed_info {
@@ -90,23 +163,26 @@ impl MediaFile {
                     || media_type_lower == "episode";
             }
         }
-        
+
         // Fallback: Check filename for common TV episode patterns when no metadata
         let filename_lower = self.filename.to_lowercase();
-        
+
         // Common TV episode patterns: S##E##, #x##, Episode ##
         let tv_patterns = [
             r"s\d{1,2}e\d{1,2}", // S01E01, S1E1
             r"\d{1,2}x\d{1,2}",  // 1x01, 10x05
-            r"episode\s*\d+",     // Episode 1, Episode 10
+            r"episode\s*\d+",    // Episode 1, Episode 10
         ];
-        
+
         for pattern in &tv_patterns {
-            if regex::Regex::new(pattern).unwrap().is_match(&filename_lower) {
+            if regex::Regex::new(pattern)
+                .unwrap()
+                .is_match(&filename_lower)
+            {
                 return true;
             }
         }
-        
+
         false
     }
 
@@ -116,29 +192,31 @@ impl MediaFile {
                 return parsed.show_name.clone();
             }
         }
-        
+
         // Fallback: Try to extract show name from filename
         if self.is_tv_episode() {
             let filename = &self.filename;
-            
+
             // Try to extract show name before episode pattern
             // Remove file extension first
-            let name_without_ext = filename.rsplit_once('.')
+            let name_without_ext = filename
+                .rsplit_once('.')
                 .map(|(name, _)| name)
                 .unwrap_or(filename);
-            
+
             // Common patterns to find where show name ends
             let episode_patterns = [
                 regex::Regex::new(r"[Ss]\d{1,2}[Ee]\d{1,2}").unwrap(), // S01E01
-                regex::Regex::new(r"\d{1,2}x\d{1,2}").unwrap(),       // 1x01
+                regex::Regex::new(r"\d{1,2}x\d{1,2}").unwrap(),        // 1x01
                 regex::Regex::new(r"[Ee]pisode\s*\d+").unwrap(),       // Episode 1
             ];
-            
+
             for pattern in &episode_patterns {
                 if let Some(match_) = pattern.find(name_without_ext) {
                     let show_name = &name_without_ext[..match_.start()];
                     // Clean up the show name (remove trailing dots, dashes, spaces)
-                    let cleaned = show_name.trim_end_matches(|c: char| c == '.' || c == '-' || c == ' ');
+                    let cleaned =
+                        show_name.trim_end_matches(|c: char| c == '.' || c == '-' || c == ' ');
                     if !cleaned.is_empty() {
                         // Replace dots with spaces for better formatting
                         return Some(cleaned.replace('.', " "));
@@ -146,7 +224,7 @@ impl MediaFile {
                 }
             }
         }
-        
+
         None
     }
 
@@ -185,6 +263,11 @@ impl MediaFile {
                 info.push(format!("{}m", minutes));
             }
 
+            // Video codec
+            if let Some(codec) = &metadata.video_codec {
+                info.push(codec.to_uppercase());
+            }
+
             // Resolution
             if let Some(parsed) = &metadata.parsed_info {
                 if let Some(res) = &parsed.resolution {
@@ -192,6 +275,22 @@ impl MediaFile {
                 }
             } else if let (Some(w), Some(h)) = (metadata.width, metadata.height) {
                 info.push(format!("{}x{}", w, h));
+            }
+
+            // HDR info
+            if self.is_hdr() {
+                if let Some(transfer) = &metadata.color_transfer {
+                    if transfer == "smpte2084" {
+                        info.push("HDR10".to_string());
+                    } else if transfer == "arib-std-b67" {
+                        info.push("HLG".to_string());
+                    }
+                }
+                if let Some(space) = &metadata.color_space {
+                    if space == "ictcp" {
+                        info.push("DV".to_string());
+                    }
+                }
             }
 
             // Year
@@ -562,7 +661,10 @@ pub async fn fetch_season_details(
 pub async fn fetch_libraries(server_url: String) -> anyhow::Result<Vec<Library>> {
     log::info!("Fetching libraries from: {}/libraries", server_url);
     let client = reqwest::Client::new();
-    let response = client.get(format!("{}/libraries", server_url)).send().await?;
+    let response = client
+        .get(format!("{}/libraries", server_url))
+        .send()
+        .await?;
 
     if !response.status().is_success() {
         return Err(anyhow::anyhow!(
@@ -572,7 +674,7 @@ pub async fn fetch_libraries(server_url: String) -> anyhow::Result<Vec<Library>>
     }
 
     let json: serde_json::Value = response.json().await?;
-    
+
     if let Some(libraries) = json.get("libraries") {
         let library_list: Vec<Library> = serde_json::from_value(libraries.clone())?;
         log::info!("Fetched {} libraries", library_list.len());
@@ -585,11 +687,15 @@ pub async fn fetch_libraries(server_url: String) -> anyhow::Result<Vec<Library>>
 }
 
 /// Create a new library
-pub async fn create_library(
-    server_url: String,
-    library: Library,
-) -> anyhow::Result<Library> {
+pub async fn create_library(server_url: String, library: Library) -> anyhow::Result<Library> {
     log::info!("Creating library: {}", library.name);
+
+    // Log the JSON being sent
+    match serde_json::to_string_pretty(&library) {
+        Ok(json_str) => log::debug!("Sending library JSON: {}", json_str),
+        Err(e) => log::error!("Failed to serialize library for logging: {}", e),
+    }
+
     let client = reqwest::Client::new();
     let response = client
         .post(format!("{}/libraries", server_url))
@@ -605,7 +711,56 @@ pub async fn create_library(
     }
 
     let json: serde_json::Value = response.json().await?;
-    
+
+    // Debug log the entire response
+    log::debug!(
+        "Server response JSON: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_else(|_| "Failed to serialize".to_string())
+    );
+
+    // Check if this is the newer API format that returns just the ID
+    if let Some(id) = json.get("id").and_then(|v| v.as_str()) {
+        if json.get("status").and_then(|v| v.as_str()) == Some("success") {
+            // Server returned just the ID, we need to fetch the full library
+            log::info!("Library created with ID: {}, fetching full details", id);
+
+            // Fetch the created library by ID
+            let fetch_response = client
+                .get(format!("{}/libraries/{}", server_url, id))
+                .send()
+                .await?;
+
+            if !fetch_response.status().is_success() {
+                return Err(anyhow::anyhow!(
+                    "Failed to fetch created library: {}",
+                    fetch_response.status()
+                ));
+            }
+
+            let fetch_json: serde_json::Value = fetch_response.json().await?;
+
+            if let Some(library_data) = fetch_json.get("library") {
+                let library: Library = serde_json::from_value(library_data.clone())?;
+                log::info!("Successfully fetched created library: {}", library.name);
+                return Ok(library);
+            } else {
+                // Try to reconstruct the library from what we have
+                let created_library = Library {
+                    id: id.to_string(),
+                    name: library.name,
+                    library_type: library.library_type,
+                    paths: library.paths,
+                    scan_interval_minutes: library.scan_interval_minutes,
+                    last_scan: None,
+                    enabled: library.enabled,
+                };
+                log::info!("Reconstructed library from request data");
+                return Ok(created_library);
+            }
+        }
+    }
+
+    // Try the old format where the server returns the full library
     if let Some(created_library) = json.get("library") {
         let library: Library = serde_json::from_value(created_library.clone())?;
         log::info!("Created library: {}", library.name);
@@ -613,15 +768,23 @@ pub async fn create_library(
     } else if let Some(error) = json.get("error") {
         Err(anyhow::anyhow!("Server error: {}", error))
     } else {
-        Err(anyhow::anyhow!("Invalid response from server"))
+        // Log what fields are present in the response
+        let fields: Vec<String> = json
+            .as_object()
+            .map(|obj| obj.keys().cloned().collect())
+            .unwrap_or_default();
+        log::error!(
+            "Unexpected response structure. Fields present: {:?}",
+            fields
+        );
+        Err(anyhow::anyhow!(
+            "Invalid response from server - expected 'library' or 'id' field"
+        ))
     }
 }
 
 /// Update an existing library
-pub async fn update_library(
-    server_url: String,
-    library: Library,
-) -> anyhow::Result<Library> {
+pub async fn update_library(server_url: String, library: Library) -> anyhow::Result<Library> {
     log::info!("Updating library: {}", library.name);
     let client = reqwest::Client::new();
     let response = client
@@ -638,7 +801,7 @@ pub async fn update_library(
     }
 
     let json: serde_json::Value = response.json().await?;
-    
+
     if let Some(updated_library) = json.get("library") {
         let library: Library = serde_json::from_value(updated_library.clone())?;
         log::info!("Updated library: {}", library.name);
@@ -676,14 +839,18 @@ pub async fn scan_library(
     library_id: String,
     streaming: bool,
 ) -> anyhow::Result<String> {
-    log::info!("Starting scan for library: {} (streaming: {})", library_id, streaming);
+    log::info!(
+        "Starting scan for library: {} (streaming: {})",
+        library_id,
+        streaming
+    );
     let client = reqwest::Client::new();
-    
+
     let mut url = format!("{}/libraries/{}/scan", server_url, library_id);
     if streaming {
         url.push_str("?streaming=true");
     }
-    
+
     let response = client.post(&url).send().await?;
 
     if !response.status().is_success() {
@@ -694,7 +861,7 @@ pub async fn scan_library(
     }
 
     let json: serde_json::Value = response.json().await?;
-    
+
     if let Some(scan_id) = json.get("scan_id").and_then(|id| id.as_str()) {
         log::info!("Started scan with ID: {}", scan_id);
         Ok(scan_id.to_string())
@@ -718,7 +885,7 @@ pub async fn fetch_library_media(
         .build()?;
 
     let response = client
-        .get(format!("{}/libraries/{}/media", server_url, library_id))
+        .get(format!("{}/library?library_id={}", server_url, library_id))
         .send()
         .await?;
 

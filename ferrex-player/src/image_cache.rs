@@ -46,6 +46,10 @@ impl ImageCache {
     pub fn set_failed(&self, key: String) {
         self.cache.lock().unwrap().insert(key, ImageState::Failed);
     }
+    
+    pub fn clear(&self) {
+        self.cache.lock().unwrap().clear();
+    }
 }
 
 /// Fetch an image from a URL

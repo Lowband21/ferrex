@@ -29,6 +29,8 @@ impl MediaServerTheme {
     pub const SUCCESS: Color = Color::from_rgb(0.0, 0.8, 0.4); // #00CC66
     pub const WARNING: Color = Color::from_rgb(1.0, 0.6, 0.0); // #FF9900
     pub const ERROR: Color = Color::from_rgb(1.0, 0.2, 0.2); // #FF3333
+    pub const ERROR_COLOR: Color = Color::from_rgb(1.0, 0.2, 0.2); // #FF3333 - alias for forms
+    pub const DESTRUCTIVE: Color = Color::from_rgb(1.0, 0.2, 0.2); // #FF3333 - for destructive actions
 
     pub fn theme() -> Theme {
         let mut palette = theme::Palette::DARK;
@@ -55,6 +57,9 @@ pub enum Container {
     Badge,
     Header,
     RoundedImage,
+    ErrorBox,
+    Modal,
+    ModalOverlay,
 }
 
 impl Container {
@@ -182,6 +187,39 @@ impl Container {
                     width: 0.0,
                     radius: 8.0.into(),
                 },
+                shadow: Shadow::default(),
+                snap: false,
+            },
+            Container::ErrorBox => |_| container::Style {
+                text_color: Some(MediaServerTheme::ERROR_COLOR),
+                background: Some(Background::Color(Color::from_rgba(1.0, 0.2, 0.2, 0.1))),
+                border: Border {
+                    color: MediaServerTheme::ERROR_COLOR,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                shadow: Shadow::default(),
+                snap: false,
+            },
+            Container::Modal => |_| container::Style {
+                text_color: Some(MediaServerTheme::TEXT_PRIMARY),
+                background: Some(Background::Color(MediaServerTheme::CARD_BG)),
+                border: Border {
+                    color: MediaServerTheme::BORDER_COLOR,
+                    width: 1.0,
+                    radius: 12.0.into(),
+                },
+                shadow: Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.8),
+                    offset: iced::Vector::new(0.0, 4.0),
+                    blur_radius: 20.0,
+                },
+                snap: false,
+            },
+            Container::ModalOverlay => |_| container::Style {
+                text_color: None,
+                background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.7))),
+                border: Border::default(),
                 shadow: Shadow::default(),
                 snap: false,
             },

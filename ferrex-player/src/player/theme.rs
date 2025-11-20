@@ -109,6 +109,18 @@ pub fn container_subtle(_theme: &iced::Theme) -> container::Style {
     }
 }
 
+pub fn container_hdr_badge(_theme: &iced::Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.6))),
+        border: Border {
+            color: Color::from_rgba(1.0, 0.8, 0.0, 0.5),
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
 // Seek bar container styles
 pub fn container_seek_bar_background(_theme: &iced::Theme) -> container::Style {
     container::Style {

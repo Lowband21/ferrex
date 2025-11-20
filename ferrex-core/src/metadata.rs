@@ -2,7 +2,7 @@ use crate::{MediaError, MediaMetadata, MediaType, ParsedMediaInfo, Result, TvPar
 use ffmpeg_next as ffmpeg;
 use regex::Regex;
 use std::path::Path;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 pub struct MetadataExtractor {
     /// Whether FFmpeg has been initialized
@@ -112,6 +112,11 @@ impl MetadataExtractor {
             bitrate: technical_metadata.bitrate,
             framerate: technical_metadata.framerate,
             file_size,
+            // HDR metadata
+            color_primaries: technical_metadata.color_primaries,
+            color_transfer: technical_metadata.color_transfer,
+            color_space: technical_metadata.color_space,
+            bit_depth: technical_metadata.bit_depth,
             parsed_info,
             external_info: None, // Will be populated by future database lookup
         })
@@ -209,14 +214,35 @@ impl MetadataExtractor {
                 technical.video_codec = Some(codec.name().to_string());
             }
 
+            // Extract HDR metadata using ffprobe if available
+            match self.extract_hdr_metadata_with_ffprobe(file_path) {
+                Ok(hdr_info) => {
+                    info!("HDR metadata extracted via ffprobe: {:?}", hdr_info);
+                    technical.bit_depth = hdr_info.bit_depth;
+                    technical.color_primaries = hdr_info.color_primaries;
+                    technical.color_transfer = hdr_info.color_transfer;
+                    technical.color_space = hdr_info.color_space;
+                }
+                Err(e) => {
+                    warn!("Failed to extract HDR metadata via ffprobe: {}", e);
+                    // DO NOT guess HDR metadata - this causes false positives
+                    // If we can't extract proper metadata, assume SDR
+                    technical.bit_depth = Some(8); // Default to 8-bit
+                    technical.color_primaries = None;
+                    technical.color_transfer = None;
+                    technical.color_space = None;
+                }
+            }
+
             debug!(
-                "Selected video stream: {}x{} {}",
+                "Selected video stream: {}x{} {} {} bit, color: {:?}/{:?}/{:?}",
                 video.width(),
                 video.height(),
-                technical
-                    .video_codec
-                    .as_ref()
-                    .unwrap_or(&"unknown".to_string())
+                technical.video_codec.as_ref().unwrap_or(&"unknown".to_string()),
+                technical.bit_depth.unwrap_or(8),
+                technical.color_primaries,
+                technical.color_transfer,
+                technical.color_space
             );
         }
 
@@ -504,6 +530,86 @@ impl MetadataExtractor {
         None
     }
 
+    /// Extract HDR metadata using ffprobe command
+    fn extract_hdr_metadata_with_ffprobe<P: AsRef<Path>>(&self, file_path: P) -> Result<HdrInfo> {
+        use std::process::Command;
+        
+        let file_path = file_path.as_ref();
+        let mut hdr_info = HdrInfo::default();
+        
+        // Run ffprobe to get stream information in JSON format
+        let output = Command::new("ffprobe")
+            .args(&[
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_streams",
+                "-select_streams", "v:0", // First video stream
+                file_path.to_str().ok_or_else(|| MediaError::InvalidMedia("Invalid file path".to_string()))?
+            ])
+            .output()
+            .map_err(|e| MediaError::Io(e))?;
+            
+        if !output.status.success() {
+            return Err(MediaError::InvalidMedia("ffprobe failed".to_string()));
+        }
+        
+        // Parse JSON output
+        let json_str = std::str::from_utf8(&output.stdout)
+            .map_err(|_| MediaError::InvalidMedia("Invalid ffprobe output".to_string()))?;
+            
+        let json: serde_json::Value = serde_json::from_str(json_str)
+            .map_err(|_| MediaError::InvalidMedia("Failed to parse ffprobe JSON".to_string()))?;
+            
+        // Extract stream information
+        if let Some(streams) = json["streams"].as_array() {
+            if let Some(stream) = streams.first() {
+                // Bit depth from pix_fmt (e.g., yuv420p10le -> 10 bit)
+                if let Some(pix_fmt) = stream["pix_fmt"].as_str() {
+                    if pix_fmt.contains("p10") || pix_fmt.contains("10le") || pix_fmt.contains("10be") {
+                        hdr_info.bit_depth = Some(10);
+                    } else if pix_fmt.contains("p12") || pix_fmt.contains("12le") || pix_fmt.contains("12be") {
+                        hdr_info.bit_depth = Some(12);
+                    } else {
+                        hdr_info.bit_depth = Some(8);
+                    }
+                }
+                
+                // Color information
+                if let Some(color_primaries) = stream["color_primaries"].as_str() {
+                    hdr_info.color_primaries = Some(color_primaries.to_string());
+                }
+                
+                if let Some(color_transfer) = stream["color_transfer"].as_str() {
+                    hdr_info.color_transfer = Some(color_transfer.to_string());
+                }
+                
+                if let Some(color_space) = stream["color_space"].as_str() {
+                    hdr_info.color_space = Some(color_space.to_string());
+                }
+                
+                // Also check side_data_list for HDR metadata
+                if let Some(side_data_list) = stream["side_data_list"].as_array() {
+                    for side_data in side_data_list {
+                        if let Some(side_data_type) = side_data["side_data_type"].as_str() {
+                            if side_data_type.contains("Mastering display metadata") || 
+                               side_data_type.contains("Content light level metadata") {
+                                // This indicates HDR content
+                                if hdr_info.color_transfer.is_none() {
+                                    hdr_info.color_transfer = Some("smpte2084".to_string());
+                                }
+                                if hdr_info.color_primaries.is_none() {
+                                    hdr_info.color_primaries = Some("bt2020".to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(hdr_info)
+    }
+    
     /// Force parse as movie (used when we know from folder structure)
     fn parse_as_movie(&self, filename: &str, file_path: &Path) -> Option<ParsedMediaInfo> {
         // First, try to parse the parent folder name
@@ -1192,6 +1298,19 @@ struct TechnicalMetadata {
     pub audio_codec: Option<String>,
     pub bitrate: Option<u64>,
     pub framerate: Option<f64>,
+    // HDR metadata
+    pub color_primaries: Option<String>,
+    pub color_transfer: Option<String>,
+    pub color_space: Option<String>,
+    pub bit_depth: Option<u32>,
+}
+
+#[derive(Debug, Default)]
+struct HdrInfo {
+    pub bit_depth: Option<u32>,
+    pub color_primaries: Option<String>,
+    pub color_transfer: Option<String>,
+    pub color_space: Option<String>,
 }
 
 #[cfg(test)]

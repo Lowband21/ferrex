@@ -184,6 +184,25 @@ impl MetadataCache {
             true
         }
     }
+    
+    /// Clear all entries from the cache
+    pub async fn clear(&self) {
+        self.cache.write().await.clear();
+        
+        // Also clear disk cache if it exists
+        if let Some(ref dir) = self.disk_cache_dir {
+            if dir.exists() {
+                // Remove all files in the cache directory
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                            let _ = std::fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -504,7 +504,8 @@ impl Primitive for RoundedImagePrimitive {
         }
 
         // Create instance data for this primitive
-        // Use the bounds parameter which includes scroll transformation
+        // IMPORTANT: The bounds parameter might already be in screen space
+        // Check if we need to adjust for viewport offset
         
         // Calculate animation values based on animation type
         let (actual_opacity, rotation_y, animation_progress) = match self.animation {
@@ -531,10 +532,13 @@ impl Primitive for RoundedImagePrimitive {
             }
         };
         
+        // The bounds parameter is provided by the renderer and should be correct for the current viewport
+        // However, if there's a mismatch, it might be because we're not accounting for something
+        
         let instance = Instance {
             position: [bounds.x, bounds.y],
             size: [bounds.width, bounds.height],
-            radius: self.radius,
+            radius: self.radius, // Note: radius is in logical pixels, scaling handled by transform
             opacity: actual_opacity,
             rotation_y,
             animation_progress,
@@ -563,7 +567,17 @@ impl Primitive for RoundedImagePrimitive {
         );
         state.prepared_primitives.insert(key);
 
-        //log::info!("Prepare: primitive {:p} using bounds = {:?} (was self.bounds = {:?}), viewport scale = {}", self, bounds, self.bounds, viewport.scale_factor());
+        //log::info!("Prepare: primitive {:p}", self);
+        //log::info!("  - bounds param: {:?}", bounds);
+        //log::info!("  - self.bounds: {:?}", self.bounds);
+        //log::info!("  - viewport scale: {}", viewport.scale_factor());
+        //log::info!("  - viewport logical_size: {:?}", viewport.logical_size());
+        //log::info!("  - viewport physical_size: {:?}", viewport.physical_size());
+        //let transform: [f32; 16] = viewport.projection().into();
+        //log::info!("  - transform matrix: [{:.3}, {:.3}, {:.3}, {:.3}]", transform[0], transform[1], transform[2], transform[3]);
+        //log::info!("                      [{:.3}, {:.3}, {:.3}, {:.3}]", transform[4], transform[5], transform[6], transform[7]);
+        //log::info!("                      [{:.3}, {:.3}, {:.3}, {:.3}]", transform[8], transform[9], transform[10], transform[11]);
+        //log::info!("                      [{:.3}, {:.3}, {:.3}, {:.3}]", transform[12], transform[13], transform[14], transform[15]);
     }
 
     fn render(

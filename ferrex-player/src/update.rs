@@ -9,22 +9,7 @@ use iced::{
 };
 
 use crate::{
-    carousel::{CarouselMessage, CarouselState},
-    check_media_availability, close_video, fetch_metadata_for_media,
-    image_cache::{self, ImageSource},
-    load_video, media_library,
-    message::Message,
-    models::{MediaOrganizer, TvShow},
-    player::PlayerMessage,
-    poster_cache::{self, PosterState},
-    poster_monitor::PosterMonitor,
-    profiling::PROFILER,
-    start_media_scan, start_library_scan,
-    state::{ScanStatus, SortBy, SortOrder, State, ViewMode, ViewState},
-    util::{sort_media, trigger_metadata_fetch},
-    virtual_list::VirtualGridState,
-    MediaEvent,
-    performance_config::posters,
+    carousel::{CarouselMessage, CarouselState}, close_video, fetch_metadata_for_media, image_cache::{self, ImageSource}, load_video, media_library, message::Message, models::{MediaOrganizer, TvShow}, performance_config::posters, player::PlayerMessage, poster_cache::{self, PosterState}, poster_monitor::PosterMonitor, profiling::PROFILER, start_library_scan, start_media_scan, state::{ScanStatus, SortBy, SortOrder, State, ViewMode, ViewState}, util::{sort_media, trigger_metadata_fetch}, virtual_list::VirtualGridState, MediaEvent
 };
 
 // Scrolling performance constants - tune these based on profiling
@@ -79,6 +64,24 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     let missing_posters = missing_poster_ids.len();
                     log::info!("Found {} items missing posters in {:?}", missing_posters, count_start.elapsed());
 
+                    // Check for ALL files missing color metadata (needed for HDR detection)
+                    let missing_color_metadata: Vec<String> = files
+                        .iter()
+                        .filter(|f| {
+                            // Check if color metadata is missing
+                            if let Some(metadata) = &f.metadata {
+                                // If any of these fields are missing, we need to fetch metadata
+                                metadata.color_transfer.is_none() 
+                                    || metadata.color_space.is_none() 
+                                    || metadata.color_primaries.is_none()
+                                    || metadata.bit_depth.is_none()
+                            } else {
+                                true // No metadata at all
+                            }
+                        })
+                        .map(|f| f.id.clone())
+                        .collect();
+                    
                     // Always set library files
                     let set_files_start = std::time::Instant::now();
                     state.library.set_server_url(state.server_url.clone());
@@ -210,27 +213,40 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     // Check if we need to fetch missing posters
                     if missing_posters > 0 {
                         log::warn!(
-                            "{} items missing posters! Triggering metadata refresh.",
+                            "{} items missing posters! Manual metadata refresh may be needed.",
                             missing_posters
                         );
-                        
-                        // Trigger metadata refresh for all items missing posters
-                        let server_url_clone = state.server_url.clone();
-                        let missing_ids_clone = missing_poster_ids.clone();
-                        tasks.push(Task::perform(
-                            async move {
-                                log::info!("Starting metadata refresh for {} items", missing_ids_clone.len());
-                                if let Err(e) = trigger_metadata_fetch(server_url_clone, missing_ids_clone).await {
-                                    log::error!("Failed to trigger metadata refresh: {}", e);
-                                } else {
-                                    log::info!("Successfully triggered metadata refresh for missing posters");
-                                }
-                            },
-                            |_| Message::NoOp,
-                        ));
                     }
+                    
+                    /*
+                    if !missing_color_metadata.is_empty() {
+                        log::info!(
+                            "Found {} files missing color metadata. Queueing metadata fetch for HDR detection.",
+                            missing_color_metadata.len()
+                        );
+                        
+                        // Batch the metadata fetches to avoid overwhelming the server
+                        const BATCH_SIZE: usize = 50;
+                        for chunk in missing_color_metadata.chunks(BATCH_SIZE) {
+                            let server_url_clone = state.server_url.clone();
+                            let chunk_ids = chunk.to_vec();
+                            tasks.push(Task::perform(
+                                async move {
+                                    log::info!("Fetching metadata batch of {} items", chunk_ids.len());
+                                    if let Err(e) = trigger_metadata_fetch(server_url_clone, chunk_ids.clone()).await {
+                                        log::error!("Failed to trigger metadata refresh: {}", e);
+                                    } else {
+                                        log::info!("Successfully triggered metadata refresh for batch");
+                                    }
+                                },
+                                |_| Message::NoOp,
+                            ));
+                        }
+                    } else {
+                        log::info!("All files have color metadata - HDR detection ready");
+                    }
+                    */
 
-                    // Load only a few posters initially to keep UI responsive
                     for file in state.library.files.iter().take(3) {
                         if state.poster_cache.get(&file.id).is_none() {
                             state.poster_cache.set_loading(file.id.clone());
@@ -284,24 +300,31 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         
         // Library Management Messages
         Message::LibrariesLoaded(result) => {
+            let mut tasks: Vec<Task<Message>> = vec![];
             match result {
                 Ok(libraries) => {
                     log::info!("Loaded {} libraries", libraries.len());
                     state.libraries = libraries;
                     
-                    // If we have libraries but no current library selected, select the first enabled one
-                    if state.current_library_id.is_none() {
-                        if let Some(library) = state.libraries.iter().find(|l| l.enabled) {
+                    if state.libraries.is_empty() {
+                        // No libraries configured - don't try to load media
+                        log::info!("No libraries configured, skipping media loading");
+                        state.loading = false;
+                        return Task::none();
+                    } else if state.current_library_id.is_none() {
+                        // Libraries exist but none selected - select the first enabled one
+
+                       for library in state.libraries.clone().into_iter() {
                             let library_id = library.id.clone();
                             let server_url = state.server_url.clone();
-                            return Task::perform(
+                            tasks.push(Task::perform(
                                 media_library::fetch_library_media(server_url, library_id.clone()),
                                 move |result| match result {
                                     Ok(files) => Message::LibrarySelected(library_id.clone(), Ok(files)),
                                     Err(e) => Message::LibrarySelected(library_id.clone(), Err(e.to_string())),
                                 },
-                            );
-                        }
+                            ));
+                       } 
                     }
                     
                     state.error_message = None;
@@ -309,9 +332,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 Err(e) => {
                     log::error!("Failed to load libraries: {}", e);
                     state.error_message = Some(format!("Failed to load libraries: {}", e));
+                    
+                    // Don't fall back to legacy loading - just show the error
+                    state.loading = false;
+                    return Task::none();
                 }
             }
-            Task::none()
+            Task::batch(tasks)
         }
         
         Message::LoadLibraries => {
@@ -423,17 +450,63 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         
         Message::SelectLibrary(library_id) => {
             log::info!("Selecting library: {}", library_id);
-            state.current_library_id = Some(library_id.clone());
-            state.loading = true;
             
             let server_url = state.server_url.clone();
-            Task::perform(
-                media_library::fetch_library_media(server_url, library_id.clone()),
-                move |result| match result {
-                    Ok(files) => Message::LibrarySelected(library_id.clone(), Ok(files)),
-                    Err(e) => Message::LibrarySelected(library_id.clone(), Err(e.to_string())),
-                },
-            )
+            
+            if library_id == "all" {
+                // Special case: show all media files from all libraries
+                state.current_library_id = None;
+                // Switch to All view mode to show carousel
+                state.view_mode = ViewMode::All;
+                
+                // Check if we already have media loaded
+                if !state.movies.is_empty() || !state.tv_shows.is_empty() {
+                    log::info!("Media already loaded, just switching view");
+                    return Task::none();
+                }
+                
+                // Only load if we don't have any media yet
+                state.loading = true;
+                Task::perform(
+                    media_library::fetch_library(server_url), // Legacy function loads all media
+                    move |result| match result {
+                        Ok(files) => Message::LibrarySelected("all".to_string(), Ok(files)),
+                        Err(e) => Message::LibrarySelected("all".to_string(), Err(e.to_string())),
+                    },
+                )
+            } else {
+                // Select specific library
+                state.current_library_id = Some(library_id.clone());
+                
+                // Check library type and set appropriate view mode for grid view
+                if let Some(library) = state.libraries.iter().find(|l| l.id == library_id) {
+                    match library.library_type.as_str() {
+                        "Movies" => state.view_mode = ViewMode::Movies,
+                        "TV Shows" | "TvShows" => state.view_mode = ViewMode::TvShows,
+                        _ => {
+                            // Default to All view if library type is unknown
+                            log::warn!("Unknown library type: {}", library.library_type);
+                            state.view_mode = ViewMode::All;
+                        }
+                    }
+                }
+                
+                // Check if we already have media loaded
+                if !state.movies.is_empty() || !state.tv_shows.is_empty() {
+                    log::info!("Media already loaded for library {}, just switching view", library_id);
+                    return Task::none();
+                }
+                
+                // Only load if we don't have any media yet
+                state.loading = true;
+                Task::perform(
+                    media_library::fetch_library_media(server_url, library_id.clone()),
+                    move |result| match result {
+                        Ok(files) => Message::LibrarySelected(library_id.clone(), Ok(files)),
+                        Err(e) => Message::LibrarySelected(library_id.clone(), Err(e.to_string())),
+                    },
+                )
+            }
         }
         
         Message::LibrarySelected(library_id, result) => {
@@ -441,6 +514,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             match result {
                 Ok(files) => {
                     log::info!("Selected library {} with {} files", library_id, files.len());
+                    
+                    // Update the current library ID
+                    if library_id == "all" {
+                        state.current_library_id = None;
+                    } else {
+                        state.current_library_id = Some(library_id.clone());
+                    }
                     
                     // Update the library with new files
                     state.library.set_files(files.clone());
@@ -520,6 +600,133 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::HideAdminDashboard => {
             state.view = ViewState::Library;
             Task::none()
+        }
+        
+        Message::ShowClearDatabaseConfirm => {
+            state.show_clear_database_confirm = true;
+            Task::none()
+        }
+        
+        Message::HideClearDatabaseConfirm => {
+            state.show_clear_database_confirm = false;
+            Task::none()
+        }
+        
+        Message::ClearDatabase => {
+            log::info!("Clearing all database contents");
+            state.show_clear_database_confirm = false; // Hide confirmation dialog
+            let server_url = state.server_url.clone();
+            Task::perform(
+                async move {
+                    let client = reqwest::Client::new();
+                    let url = format!("{}/maintenance/clear-database", server_url);
+                    
+                    match client.post(&url).send().await {
+                        Ok(response) => {
+                            if response.status().is_success() {
+                                Ok(())
+                            } else {
+                                Err(format!("Server error: {}", response.status()))
+                            }
+                        }
+                        Err(e) => Err(format!("Request failed: {}", e))
+                    }
+                },
+                Message::DatabaseCleared
+            )
+        }
+        
+        Message::DatabaseCleared(result) => {
+            match result {
+                Ok(()) => {
+                    log::info!("Database cleared successfully");
+                    
+                    // Clear all media data
+                    state.library.files.clear();
+                    state.movies.clear();
+                    state.tv_shows.clear();
+                    state.tv_shows_sorted.clear();
+                    
+                    // Clear all caches
+                    state.poster_cache.clear();
+                    state.image_cache.clear();
+                    // Note: metadata_cache.clear() is async, so we'll spawn a task for it
+                    let metadata_cache = state.metadata_cache.clone();
+                    tokio::spawn(async move {
+                        metadata_cache.clear().await;
+                    });
+                    
+                    // Clear library data
+                    state.libraries.clear();
+                    state.current_library_id = None;
+                    state.library_form_data = None;
+                    state.library_form_errors.clear();
+                    
+                    // Reset scan state
+                    state.scanning = false;
+                    state.loading = false;
+                    state.active_scan_id = None;
+                    state.scan_progress = None;
+                    state.show_scan_progress = false;
+                    
+                    // Clear poster loading state
+                    state.posters_to_load.clear();
+                    state.loading_posters.clear();
+                    state.poster_mark_progress = 0;
+                    state.poster_animation_states.clear();
+                    state.poster_animation_types.clear();
+                    state.poster_monitor = None;
+                    
+                    // Clear detail view data
+                    state.current_show_details = None;
+                    state.current_season_details = None;
+                    state.expanded_shows.clear();
+                    state.show_seasons_carousel = None;
+                    state.season_episodes_carousel = None;
+                    
+                    // Clear UI state
+                    state.hovered_media_id = None;
+                    state.error_message = None;
+                    
+                    // Reset scroll positions
+                    state.movies_scroll_position = None;
+                    state.tv_shows_scroll_position = None;
+                    state.last_scroll_position = 0.0;
+                    state.scroll_velocity = 0.0;
+                    state.fast_scrolling = false;
+                    state.scroll_stopped_time = None;
+                    state.scroll_samples.clear();
+                    
+                    // Update carousel counts
+                    state.movies_carousel.set_total_items(0);
+                    state.tv_shows_carousel.set_total_items(0);
+                    
+                    // Reset grid states
+                    state.movies_grid_state.total_items = 0;
+                    state.tv_shows_grid_state.total_items = 0;
+                    
+                    // Reset view to library (in case user was in detail view)
+                    state.view = ViewState::Library;
+                    state.view_mode = ViewMode::All;
+                    
+                    log::info!("All local state cleared and reset");
+                    
+                    // Refresh libraries list to get fresh data from server
+                    let server_url = state.server_url.clone();
+                    Task::perform(
+                        media_library::fetch_libraries(server_url),
+                        |result| match result {
+                            Ok(libraries) => Message::LibrariesLoaded(Ok(libraries)),
+                            Err(e) => Message::LibrariesLoaded(Err(e.to_string())),
+                        },
+                    )
+                }
+                Err(e) => {
+                    log::error!("Failed to clear database: {}", e);
+                    state.error_message = Some(format!("Failed to clear database: {}", e));
+                    Task::none()
+                }
+            }
         }
         
         // Library form management
@@ -663,7 +870,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.scan_progress = None;
             let server_url = state.server_url.clone();
 
-            Task::perform(start_media_scan(server_url, false), |result| match result {
+            Task::perform(start_media_scan(server_url, false, true), |result| match result {
                 Ok(scan_id) => Message::ScanStarted(Ok(scan_id)),
                 Err(e) => Message::ScanStarted(Err(e.to_string())),
             })
@@ -675,7 +882,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.scan_progress = None;
             let server_url = state.server_url.clone();
 
-            Task::perform(start_media_scan(server_url, true), |result| match result {
+            Task::perform(start_media_scan(server_url, true, true), |result| match result {
                 Ok(scan_id) => Message::ScanStarted(Ok(scan_id)),
                 Err(e) => Message::ScanStarted(Err(e.to_string())),
             })
@@ -931,7 +1138,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                                 state.movies[movie_index] = media.clone();
                             }
                         }
-
+                        
                         // Load poster if it's newly available or metadata was updated
                         if media.has_poster() {
                             match state.poster_cache.get(&media.id) {
@@ -1041,10 +1248,88 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 movies.len(),
                 tv_shows.len()
             );
+            
+            // Log sample media for debugging
+            if !movies.is_empty() {
+                log::info!("Sample movie: {}", movies[0].display_title());
+                // Log first few movies with their media types
+                for (i, movie) in movies.iter().take(3).enumerate() {
+                    log::debug!("Movie[{}]: {} - type: {}", i, movie.filename,
+                        movie.metadata.as_ref()
+                            .and_then(|m| m.parsed_info.as_ref())
+                            .map(|p| &p.media_type)
+                            .unwrap_or(&"no type".to_string()));
+                }
+            } else {
+                log::warn!("No movies found after organization!");
+            }
+            
+            if !tv_shows.is_empty() {
+                let first_show = tv_shows.values().next().unwrap();
+                log::info!("Sample TV show: {}", first_show.name);
+            } else {
+                log::warn!("No TV shows found after organization!");
+            }
 
-            // Update state with organized media (already sorted in background)
-            state.movies = movies;
-            state.tv_shows = tv_shows;
+            // Merge new media with existing media instead of replacing
+            // This preserves media already loaded while adding new ones from scans
+            for movie in movies {
+                // Check if movie already exists by ID
+                if !state.movies.iter().any(|m| m.id == movie.id) {
+                    state.movies.push(movie);
+                }
+            }
+            
+            // Merge TV shows
+            for (show_name, new_show) in tv_shows {
+                match state.tv_shows.get_mut(&show_name) {
+                    Some(existing_show) => {
+                        // Merge episodes from new show into existing show
+                        for (season_num, new_season) in new_show.seasons {
+                            match existing_show.seasons.get_mut(&season_num) {
+                                Some(existing_season) => {
+                                    // Merge episodes
+                                    for (ep_num, episode) in new_season.episodes {
+                                        existing_season.episodes.insert(ep_num, episode);
+                                    }
+                                }
+                                None => {
+                                    // Add new season
+                                    existing_show.seasons.insert(season_num, new_season);
+                                }
+                            }
+                        }
+                        // Update metadata if newer
+                        if new_show.poster_url.is_some() && existing_show.poster_url.is_none() {
+                            existing_show.poster_url = new_show.poster_url;
+                        }
+                        // Update other metadata fields if they exist
+                        if new_show.description.is_some() && existing_show.description.is_none() {
+                            existing_show.description = new_show.description;
+                        }
+                        if new_show.tmdb_id.is_some() && existing_show.tmdb_id.is_none() {
+                            existing_show.tmdb_id = new_show.tmdb_id;
+                        }
+                    }
+                    None => {
+                        // Add new show
+                        state.tv_shows.insert(show_name, new_show);
+                    }
+                }
+            }
+            
+            // Sort movies by title for consistent ordering
+            state.movies.sort_by(|a, b| {
+                let title_a = a.metadata.as_ref()
+                    .and_then(|m| m.parsed_info.as_ref())
+                    .map(|p| &p.title)
+                    .unwrap_or(&a.filename);
+                let title_b = b.metadata.as_ref()
+                    .and_then(|m| m.parsed_info.as_ref())
+                    .map(|p| &p.title)
+                    .unwrap_or(&b.filename);
+                title_a.cmp(title_b)
+            });
             
             // Create sorted TV shows vector for grid view
             let mut tv_shows_sorted: Vec<_> = state.tv_shows.values().cloned().collect();
@@ -1638,10 +1923,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let current_loading = state.loading_posters.len();
             let max_concurrent = 3usize;
 
-            log::debug!(
-                "PosterMonitorTick: {} posters currently loading",
-                current_loading
-            );
+            //log::debug!(
+            //    "PosterMonitorTick: {} posters currently loading",
+            //    current_loading
+            //);
 
             if current_loading < max_concurrent && !state.posters_to_load.is_empty() {
                 // Find ONE poster marked as loading that isn't actively being loaded
@@ -1839,64 +2124,185 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             
             state.player.current_media = Some(media.clone());
 
-            // First check media availability
-            let server_url = state.server_url.clone();
-            let media_id = media.id.clone();
-            let media_clone = media.clone();
-
-            Task::perform(
-                async move {
-                    // Check if media is available
-                    match check_media_availability(&server_url, &media_id).await {
-                        Ok(availability) => {
-                            if availability.available {
-                                Ok(media_clone)
-                            } else {
-                                Err((availability.reason, availability.message))
-                            }
-                        }
-                        Err(e) => {
-                            // If we can't check availability, try to play anyway
-                            log::warn!("Failed to check media availability: {}", e);
-                            Ok(media_clone)
-                        }
+            // Check if this is HDR content
+            let is_hdr_content = if let Some(metadata) = &media.metadata {
+                // Check bit depth
+                if let Some(bit_depth) = metadata.bit_depth {
+                    if bit_depth > 8 {
+                        log::info!("HDR detected: bit depth = {}", bit_depth);
+                        true
+                    } else {
+                        false
                     }
-                },
-                |result| match result {
-                    Ok(media) => Message::MediaAvailabilityChecked(media),
-                    Err((reason, message)) => Message::MediaUnavailable(reason, message),
-                },
-            )
-        }
-
-        Message::MediaAvailabilityChecked(media) => {
-            // Media is available, proceed with playing
-            log::info!("Media is available, proceeding to play");
-
-            // Create video URL - always use streaming endpoint for better compatibility
-            let video_url = if media.path.starts_with("http") {
-                media.path.clone()
+                } else if let Some(color_transfer) = &metadata.color_transfer {
+                    // Check color transfer characteristics
+                    let hdr_transfers = ["smpte2084", "arib-std-b67", "smpte2086"];
+                    let is_hdr = hdr_transfers.iter().any(|&t| color_transfer.contains(t));
+                    if is_hdr {
+                        log::info!("HDR detected: color transfer = {}", color_transfer);
+                    }
+                    is_hdr
+                } else if let Some(color_primaries) = &metadata.color_primaries {
+                    // Check color primaries
+                    let is_hdr = color_primaries.contains("bt2020");
+                    if is_hdr {
+                        log::info!("HDR detected: color primaries = {}", color_primaries);
+                    }
+                    is_hdr
+                } else {
+                    false
+                }
             } else {
-                // Always use streaming endpoint for local files
-                // This ensures proper handling of complex codecs (HDR, x265, etc)
-                let stream_url = format!("{}/stream/{}", state.server_url, media.id);
-                log::info!("Constructed stream URL: {}", stream_url);
-                stream_url
+                // Fallback to filename detection if no metadata
+                let filename_suggests_hdr = media.filename.contains("2160p") || 
+                                          media.filename.contains("UHD") ||
+                                          media.filename.contains("HDR") ||
+                                          media.filename.contains("DV");
+                if filename_suggests_hdr {
+                    log::info!("HDR suggested by filename: {}", media.filename);
+                }
+                filename_suggests_hdr
+            };
+            
+            // Determine if we should use adaptive streaming
+            // Use HLS for HDR content that requires transcoding
+            let use_adaptive_streaming = false; // Only use adaptive for HDR content
+            
+            // Initialize HLS client if using adaptive streaming
+            if use_adaptive_streaming {
+                state.player.hls_client = Some(crate::hls::HlsClient::new(state.server_url.clone()));
+                state.player.using_hls = true;
+            }
+            
+            let (video_url, start_transcoding_task) = if media.path.starts_with("http") {
+                (media.path.clone(), None)
+            } else if use_adaptive_streaming && is_hdr_content {
+                // Use adaptive streaming for all content
+                log::info!("Using adaptive streaming for media: {}", media.id);
+                
+                // Store transcoding state
+                state.player.is_hdr_content = is_hdr_content;
+                state.player.using_hls = true;
+                state.player.transcoding_status = Some(crate::player::state::TranscodingStatus::Pending);
+                
+                // Create HLS client
+                let hls_client = crate::hls::HlsClient::new(state.server_url.clone());
+                state.player.hls_client = Some(hls_client);
+                
+                // Use master playlist URL for HLS playback
+                log::debug!("Building master URL - server: {}, media.id: {}", state.server_url, media.id);
+                log::debug!("Media ID bytes: {:?}", media.id.as_bytes());
+                // Percent-encode the media ID to handle special characters
+                let encoded_media_id = urlencoding::encode(&media.id);
+                let master_url = format!("{}/transcode/{}/master.m3u8", state.server_url, encoded_media_id);
+                log::debug!("Encoded media ID: {}", encoded_media_id);
+                log::debug!("Constructed master URL: {}", master_url);
+                log::debug!("Master URL bytes: {:?}", master_url.as_bytes());
+                
+                // Create task to start transcoding only if we don't already have a job
+                let start_task = if state.player.transcoding_job_id.is_none() {
+                    let server_url = state.server_url.clone();
+                    let media_id = media.id.clone();
+                    
+                    log::info!("Starting new adaptive transcoding for media: {}", media_id);
+                    log::info!("Current transcoding status: {:?}", state.player.transcoding_status);
+                    
+                    Some(Task::perform(
+                        async move {
+                            let client = crate::hls::HlsClient::new(server_url);
+                            // Use retry logic with 3 retries
+                            match client.start_adaptive_transcoding_with_retry(&media_id, 3).await {
+                                Ok(job_id) => {
+                                    log::info!("Adaptive transcoding started successfully with master job ID: {}", job_id);
+                                    Ok(job_id)
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to start adaptive transcoding: {}", e);
+                                    Err(e)
+                                }
+                            }
+                        },
+                        Message::TranscodingStarted
+                    ))
+                } else {
+                    log::warn!("Transcoding job already exists: {:?}, skipping duplicate start request", state.player.transcoding_job_id);
+                    log::warn!("Current transcoding status: {:?}", state.player.transcoding_status);
+                    None
+                };
+                
+                (master_url, start_task)
+            } else {
+                // Fallback to direct streaming (old behavior)
+                let video_url = if is_hdr_content {
+                    let profile = if let Some(metadata) = &media.metadata {
+                        if let Some(height) = metadata.height {
+                            if height >= 2160 { "hdr_to_sdr_4k" } else { "hdr_to_sdr_1080p" }
+                        } else {
+                            "hdr_to_sdr_1080p"
+                        }
+                    } else {
+                        "hdr_to_sdr_1080p"
+                    };
+                    
+                    let encoded_media_id = urlencoding::encode(&media.id);
+                    let transcode_url = format!("{}/stream/{}", state.server_url, encoded_media_id);
+                    log::info!("Using direct transcode stream: {}", transcode_url);
+                    
+                    state.player.is_hdr_content = true;
+                    state.player.using_hls = false;
+                    state.player.transcoding_status = Some(crate::player::state::TranscodingStatus::Processing { progress: 0.0 });
+                    
+                    transcode_url
+                } else {
+                    let encoded_media_id = urlencoding::encode(&media.id);
+                    let stream_url = format!("{}/stream/{}", state.server_url, encoded_media_id);
+                    log::info!("Using direct stream: {}", stream_url);
+                    
+                    state.player.is_hdr_content = false;
+                    state.player.using_hls = false;
+                    state.player.transcoding_status = None;
+                    
+                    stream_url
+                };
+                
+                // For direct playback, we'll get duration from the video object itself
+                // This ensures we have the actual playable duration, not just metadata
+                
+                (video_url, None)
             };
 
             log::info!("Final video URL: {}", video_url);
+            
+            // Check for UTF-8 validity before parsing
+            if let Err(e) = std::str::from_utf8(video_url.as_bytes()) {
+                log::error!("Video URL contains invalid UTF-8: {:?}", e);
+                log::error!("URL bytes: {:?}", video_url.as_bytes());
+            }
 
-            // Parse URL
+            // Parse URL and load video
             match url::Url::parse(&video_url) {
                 Ok(url) => {
-                    state.player.current_url = Some(url.clone());
-                    // Set loading state immediately
+                    state.player.current_url = Some(url);
+                    // Set loading state
                     state.view = ViewState::LoadingVideo {
                         url: video_url.clone(),
                     };
                     state.error_message = None;
-                    // Load the video
-                    load_video(state)
+                    
+                    // If we're using adaptive streaming, don't load video yet
+                    // Wait for transcoding to be ready first
+                    if use_adaptive_streaming && is_hdr_content {
+                        match start_transcoding_task {
+                            Some(transcode_task) => transcode_task,
+                            None => {
+                                log::error!("No transcoding task for adaptive streaming!");
+                                Task::none()
+                            }
+                        }
+                    } else {
+                        // For direct streaming, load video immediately
+                        load_video(state)
+                    }
                 }
                 Err(e) => {
                     state.error_message = Some(format!("Invalid URL: {}", e));
@@ -2006,6 +2412,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::SetViewMode(mode) => {
             log::info!("Setting view mode to: {:?}", mode);
+            log::info!("Current state: {} movies, {} TV shows, {} libraries", 
+                state.movies.len(), 
+                state.tv_shows.len(), 
+                state.libraries.len()
+            );
             
             // Save current scroll position for the old view mode
             state.save_scroll_position();
@@ -2365,21 +2776,36 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
             // Update position and duration from video if not dragging
             if let Some(video) = &state.player.video_opt {
-                // Update duration if it wasn't available during load
-                if state.player.duration <= 0.0 {
+                // For direct streams, always get duration from video object
+                // For HLS, only update if we don't have duration yet
+                if !state.player.using_hls || state.player.duration <= 0.0 {
                     let new_duration = video.duration().as_secs_f64();
-                    if new_duration > 0.0 {
-                        log::info!("Duration now available in tick: {} seconds", new_duration);
+                    if new_duration > 0.0 && (state.player.duration <= 0.0 || !state.player.using_hls) {
+                        if (new_duration - state.player.duration).abs() > 0.1 {
+                            log::info!("Duration updated: {} -> {} seconds (using_hls: {})", 
+                                state.player.duration, new_duration, state.player.using_hls);
+                        }
                         state.player.duration = new_duration;
+                        
+                        // Also update source_duration if not set
+                        if state.player.source_duration.is_none() {
+                            state.player.source_duration = Some(new_duration);
+                        }
                     }
                 }
 
+                // Always update position when not dragging/seeking
                 if !state.player.dragging && !state.player.seeking {
                     let new_position = video.position().as_secs_f64();
-                    // Only update if position changed significantly
-                    if (new_position - state.player.position).abs() >= 0.5 {
-                        state.player.position = new_position;
+                    
+                    // Log position changes for debugging
+                    if (new_position - state.player.position).abs() > 0.1 {
+                        log::debug!("Position update: {:.1}s -> {:.1}s (duration: {:.1}s, using_hls: {})",
+                            state.player.position, new_position, state.player.duration, state.player.using_hls);
                     }
+                    
+                    // Update position for smooth seek bar movement
+                    state.player.position = new_position;
                 }
             }
 
@@ -2389,8 +2815,574 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
 
-        Message::VideoLoaded(_success) => {
-            // This message is not used in current implementation
+        Message::VideoLoaded(success) => {
+            if success {
+                log::info!("Video loaded successfully - using_hls: {}, duration: {}, source_duration: {:?}", 
+                    state.player.using_hls, state.player.duration, state.player.source_duration);
+                
+                // For HLS streams, fetch the master playlist to get available quality options
+                // Note: We should NOT call load_video here as it's already been loaded
+                if state.player.using_hls && state.player.video_opt.is_some() {
+                    // Fetch the master playlist to populate quality options
+                    if let Some(ref media) = state.player.current_media {
+                        if let Some(ref client) = state.player.hls_client {
+                            let client = client.clone();
+                            let media_id = media.id.clone();
+                            
+                            Task::perform(
+                                async move {
+                                    match client.fetch_master_playlist(&media_id).await {
+                                        Ok(playlist) => {
+                                            log::info!("Master playlist fetched with {} variants", playlist.variants.len());
+                                            Some(playlist)
+                                        }
+                                        Err(e) => {
+                                            log::error!("Failed to fetch master playlist: {}", e);
+                                            None
+                                        }
+                                    }
+                                },
+                                |playlist| Message::MasterPlaylistLoaded(playlist)
+                            )
+                        } else {
+                            Task::none()
+                        }
+                    } else {
+                        Task::none()
+                    }
+                } else if state.player.using_hls && state.player.transcoding_job_id.is_some() {
+                    // Continue checking transcoding status if still needed
+                    Task::perform(
+                        async {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        },
+                        |_| Message::CheckTranscodingStatus
+                    )
+                } else {
+                    Task::none()
+                }
+            } else {
+                log::error!("Video loading failed");
+                
+                let error_msg = "Failed to load video. Please check the server connection and try again.".to_string();
+                state.error_message = Some(error_msg.clone());
+                state.view = ViewState::VideoError { message: error_msg };
+                
+                Task::none()
+            }
+        }
+        
+        Message::VideoCreated(result) => {
+            match result {
+                Ok(()) => {
+                    // Retrieve the video from global storage
+                    let video_opt = crate::TEMP_VIDEO_STORAGE.lock().unwrap().take();
+                    
+                    if let Some(mut video) = video_opt {
+                        log::info!("Video object created successfully");
+                        
+                        // Get duration - use transcoding duration as fallback for HLS streams
+                        let video_duration = video.duration().as_secs_f64();
+                        log::info!("Initial video duration from GStreamer: {} seconds", video_duration);
+                        
+                        // Validate and determine the best duration source
+                        let duration = match (video_duration, state.player.transcoding_duration) {
+                            // Video has valid duration - use it
+                            (vd, _) if vd > 0.0 && vd.is_finite() => {
+                                log::info!("Using video-reported duration: {} seconds", vd);
+                                vd
+                            }
+                            // Video duration invalid but we have transcoding duration
+                            (vd, Some(td)) if td > 0.0 && td.is_finite() => {
+                                log::info!("Using transcoding duration: {} seconds (video reported {})", td, vd);
+                                td
+                            }
+                            // Neither source has valid duration
+                            _ => {
+                                log::warn!("No valid duration available (video: {}, transcoding: {:?})", 
+                                    video_duration, state.player.transcoding_duration);
+                                // For HLS streams, duration might become available later
+                                if state.player.using_hls {
+                                    log::info!("HLS stream - duration may update during playback");
+                                }
+                                0.0
+                            }
+                        };
+                        
+                        state.player.duration = duration;
+                        if duration > 0.0 {
+                            log::info!("Playback duration set to: {} seconds ({:.1} minutes)", 
+                                duration, duration / 60.0);
+                            
+                            // Store source duration if not already set
+                            if state.player.source_duration.is_none() {
+                                state.player.source_duration = Some(duration);
+                                log::info!("Source duration initialized from video/transcoding metadata");
+                            }
+                        }
+                        
+                        // Reset seeking state
+                        state.player.position = 0.0;
+                        state.player.dragging = false;
+                        
+                        // Start playing immediately
+                        video.set_paused(false);
+                        
+                        // Initialize volume and mute state
+                        video.set_volume(state.player.volume);
+                        video.set_muted(state.player.is_muted);
+                        
+                        state.player.video_opt = Some(video);
+                        state.player.is_loading_video = false; // Clear loading flag
+                        state.error_message = None;
+                        
+                        log::info!("Video loaded - duration: {}, source_duration: {:?}, using_hls: {}", 
+                            state.player.duration, state.player.source_duration, state.player.using_hls);
+                        
+                        // Query available tracks after loading
+                        state.player.update_available_tracks();
+                        
+                        state.player.update_controls(true);
+                        
+                        // Send VideoLoaded message to trigger further processing (like fetching HLS playlists)
+                        Task::done(Message::VideoLoaded(true))
+                    } else {
+                        log::error!("Video creation succeeded but video object not found in storage");
+                        state.player.is_loading_video = false;
+                        state.error_message = Some("Failed to retrieve video object".to_string());
+                        state.view = ViewState::VideoError { message: "Failed to retrieve video object".to_string() };
+                        Task::none()
+                    }
+                }
+                Err(e) => {
+                    log::error!("=== VIDEO LOADING FAILED ===");
+                    log::error!("Error: {}", e);
+                    
+                    // Provide more helpful error message
+                    let error_msg = if e.contains("StateChange") {
+                        "Failed to start video pipeline. This usually means:\n\n• The media format is not supported\n• Required GStreamer plugins are missing\n• The server is not responding correctly\n\nTry checking the server logs for more details.".to_string()
+                    } else {
+                        format!("Video loading error: {}", e)
+                    };
+                    
+                    state.player.is_loading_video = false; // Clear loading flag on error
+                    state.error_message = Some(error_msg.clone());
+                    state.view = ViewState::VideoError { message: error_msg };
+                    
+                    Task::none()
+                }
+            }
+        }
+        
+        Message::TranscodingStarted(result) => {
+            match result {
+                Ok(job_id) => {
+                    log::info!("Transcoding started successfully with job ID: {}", job_id);
+                    
+                    // Check if this is a cached response
+                    if job_id.starts_with("cached_") {
+                        log::info!("Media is already cached, marking as ready immediately");
+                        state.player.transcoding_job_id = None; // No job to track
+                        state.player.transcoding_status = Some(crate::player::state::TranscodingStatus::Completed);
+                        
+                        // Load video immediately
+                        if state.player.video_opt.is_none() && state.player.using_hls {
+                            return load_video(state);
+                        } else {
+                            return Task::none();
+                        }
+                    }
+                    
+                    // Normal transcoding job
+                    state.player.transcoding_job_id = Some(job_id);
+                    state.player.transcoding_status = Some(crate::player::state::TranscodingStatus::Processing { progress: 0.0 });
+                    state.player.transcoding_check_count = 0; // Reset check count
+                    
+                    // Start checking status immediately
+                    Task::perform(
+                        async {},
+                        |_| Message::CheckTranscodingStatus
+                    )
+                }
+                Err(e) => {
+                    log::error!("Failed to start transcoding: {}", e);
+                    state.player.transcoding_status = Some(crate::player::state::TranscodingStatus::Failed { error: e.clone() });
+                    
+                    // Show error to user
+                    state.error_message = Some(format!("Transcoding failed: {}", e));
+                    
+                    Task::none()
+                }
+            }
+        }
+        
+        Message::CheckTranscodingStatus => {
+            if let Some(ref job_id) = state.player.transcoding_job_id {
+                if let Some(ref client) = state.player.hls_client {
+                    // Increment check count
+                    state.player.transcoding_check_count += 1;
+                    
+                    // If we've checked too many times (30 checks = ~1 minute), give up and load video
+                    if state.player.transcoding_check_count > 30 {
+                        log::warn!("Transcoding status checks exceeded limit - loading video anyway");
+                        state.player.transcoding_status = Some(crate::player::state::TranscodingStatus::Completed);
+                        state.player.transcoding_job_id = None;
+                        
+                        if state.player.video_opt.is_none() && state.player.using_hls {
+                            return load_video(state);
+                        } else {
+                            return Task::none();
+                        }
+                    }
+                    
+                    let client = client.clone();
+                    let job_id = job_id.clone();
+                    
+                    Task::perform(
+                        async move {
+                            match client.check_transcoding_status(&job_id).await {
+                                Ok(job) => {
+                                    // Status is already deserialized from the shared enum
+                                    let status = job.status.clone();
+                                    
+                                    // Use duration from job if available
+                                    let duration = job.duration;
+                                    
+                                    // Log job details for debugging
+                                    log::info!("Transcoding job details: id={}, media_id={}, playlist_path={:?}", 
+                                        job.id, job.media_id, job.playlist_path);
+                                    
+                                    // Log progress details if processing
+                                    let playlist_path = match &status {
+                                        ferrex_core::TranscodingStatus::Processing { progress } => {
+                                            if let Some(details) = &job.progress_details {
+                                                log::info!("Transcoding progress: {:.1}%, FPS: {:.0}, ETA: {:.0}s",
+                                                    details.percentage,
+                                                    details.current_fps.unwrap_or(0.0),
+                                                    details.estimated_time_remaining.unwrap_or(0.0)
+                                                );
+                                            } else {
+                                                log::info!("Transcoding progress: {:.5}%", progress * 100.0);
+                                                log::info!("Raw transcoding progress: {}%", progress);
+                                            }
+                                            None
+                                        }
+                                        ferrex_core::TranscodingStatus::Failed { error } => {
+                                            log::error!("Transcoding failed: {}", error);
+                                            None
+                                        }
+                                        ferrex_core::TranscodingStatus::Pending => {
+                                            log::info!("Transcoding is pending");
+                                            None
+                                        }
+                                        ferrex_core::TranscodingStatus::Queued => {
+                                            log::info!("Transcoding is queued");
+                                            None
+                                        }
+                                        ferrex_core::TranscodingStatus::Cancelled => {
+                                            log::warn!("Transcoding was cancelled");
+                                            None
+                                        }
+                                        ferrex_core::TranscodingStatus::Completed => {
+                                            if let Some(ref path) = job.playlist_path {
+                                                Some(path.clone())
+                                            } else {
+                                                None
+                                            }
+                                        }
+                                    };
+                                    
+                                    Ok((status, duration, playlist_path))
+                                }
+                                Err(e) => Err(e),
+                            }
+                        },
+                        Message::TranscodingStatusUpdate
+                    )
+                } else {
+                    Task::none()
+                }
+            } else {
+                Task::none()
+            }
+        }
+        
+        Message::TranscodingStatusUpdate(result) => {
+            match result {
+                Ok((status, duration, playlist_path)) => {
+                    let should_continue_checking = match &status {
+                        crate::player::state::TranscodingStatus::Pending |
+                        crate::player::state::TranscodingStatus::Queued => true,
+                        crate::player::state::TranscodingStatus::Processing { progress } => {
+                            // For HLS, we can start playback once we have enough segments
+                            // Continue checking if video not loaded yet or progress < 100%
+                            state.player.video_opt.is_none() || *progress < 1.0
+                        },
+                        _ => false,
+                    };
+                    
+                    state.player.transcoding_status = Some(status.clone());
+                    
+                    // Store duration from transcoding job if available and valid
+                    if let Some(dur) = duration {
+                        if dur > 0.0 && dur.is_finite() {
+                            state.player.transcoding_duration = Some(dur);
+                            
+                            // Store source duration separately - this is the full media duration
+                            if state.player.source_duration.is_none() {
+                                state.player.source_duration = Some(dur);
+                                log::info!("Stored source duration: {} seconds ({:.1} minutes)", 
+                                    dur, dur / 60.0);
+                            }
+                            
+                            // Update player duration if video is already loaded but had no duration
+                            if state.player.duration <= 0.0 && state.player.video_opt.is_some() {
+                                state.player.duration = dur;
+                                log::info!("Updated player duration from transcoding job");
+                            }
+                        } else {
+                            log::warn!("Invalid duration from transcoding job: {}", dur);
+                        }
+                    }
+                    
+                    // Update playlist URL if provided (when transcoding is ready)
+                    if let Some(playlist_path) = playlist_path {
+                        let playlist_url = if playlist_path.starts_with("http") {
+                            playlist_path
+                        } else {
+                            format!("{}{}", state.server_url, playlist_path)
+                        };
+                        log::info!("Updating playlist URL from job: {}", playlist_url);
+                        
+                        // Update the URL to the actual playlist path
+                        if let Ok(url) = url::Url::parse(&playlist_url) {
+                            state.player.current_url = Some(url);
+                        }
+                    }
+                    
+                    // For HLS streaming, try to start playback during processing if we have segments
+                    let should_try_playback = match &status {
+                        crate::player::state::TranscodingStatus::Processing { progress } => {
+                            // Start playback when we have at least 1% transcoded (ensures initial segments exist)
+                            // With 4-second segments, 2 segments = 8 seconds, which is <1% of most videos
+                            *progress >= 0.01 && state.player.video_opt.is_none() && state.player.using_hls
+                        },
+                        crate::player::state::TranscodingStatus::Completed => {
+                            // Also try when completed if not already playing
+                            state.player.video_opt.is_none() && state.player.using_hls
+                        },
+                        _ => false,
+                    };
+                    
+                    let mut tasks = Vec::new();
+                    
+                    if should_continue_checking {
+                        // Continue checking every 2 seconds
+                        tasks.push(Task::perform(
+                            async {
+                                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                            },
+                            |_| Message::CheckTranscodingStatus
+                        ));
+                    }
+                    
+                    if should_try_playback {
+                        log::info!("Attempting to start HLS playback (status: {:?})...", status);
+                        // Load video now that we have segments ready
+                        if state.player.video_opt.is_none() && state.player.using_hls {
+                            // First check if master playlist exists before trying to load
+                            let check_playlist_task = if let Some(ref media) = state.player.current_media {
+                            if let Some(ref client) = state.player.hls_client {
+                                let client = client.clone();
+                                let media_id = media.id.clone();
+                                            
+                                            Some(Task::perform(
+                                                async move {
+                                                    // Small delay to ensure playlist files are written
+                                                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                                                    
+                                                    match client.fetch_master_playlist(&media_id).await {
+                                                        Ok(playlist) => {
+                                                            log::info!("Master playlist fetched with {} variants", playlist.variants.len());
+                                                            Some(playlist)
+                                                        }
+                                                        Err(e) => {
+                                                            log::error!("Failed to fetch master playlist: {}", e);
+                                                            None
+                                                        }
+                                                    }
+                                                },
+                                                |playlist| Message::MasterPlaylistReady(playlist)
+                                            ))
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    };
+                                    
+                                    // Only check for playlist first, don't load video yet
+                                    if let Some(playlist_task) = check_playlist_task {
+                                        tasks.push(playlist_task);
+                                    } else {
+                                        // Fallback to direct loading if no HLS client
+                                        tasks.push(load_video(state));
+                                    }
+                        }
+                    }
+                    
+                    // Handle transcoding failures
+                    match &status {
+                        crate::player::state::TranscodingStatus::Failed { error } => {
+                            log::error!("Transcoding failed: {}", error);
+                            state.error_message = Some(format!("Transcoding failed: {}", error));
+                            state.view = ViewState::VideoError {
+                                message: format!("Transcoding failed: {}", error),
+                            };
+                        }
+                        crate::player::state::TranscodingStatus::Cancelled => {
+                            log::warn!("Transcoding was cancelled");
+                            state.error_message = Some("Transcoding was cancelled".to_string());
+                        }
+                        _ => {}
+                    }
+                    
+                    // Return appropriate task
+                    if tasks.is_empty() {
+                        Task::none()
+                    } else if tasks.len() == 1 {
+                        tasks.into_iter().next().unwrap()
+                    } else {
+                        Task::batch(tasks)
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to check transcoding status: {}", e);
+                    
+                    // Special handling for "Job not found" - the job might have completed or expired
+                    if e.contains("Job not found") || e.contains("not found") {
+                        log::info!("Transcoding job not found - this could mean the job completed or the master playlist is ready");
+                        
+                        // For adaptive streaming, check if the master playlist exists
+                        if state.player.using_hls && state.player.video_opt.is_none() {
+                            if let Some(ref media) = state.player.current_media {
+                                log::info!("Checking if master playlist is available for media {}", media.id);
+                                
+                                // Try to load the video directly - if the playlist exists, it will work
+                                state.player.transcoding_status = Some(crate::player::state::TranscodingStatus::Completed);
+                                state.player.transcoding_job_id = None;
+                                
+                                // Load video and fetch master playlist
+                                let fetch_playlist_task = if let Some(ref client) = state.player.hls_client {
+                                    let client = client.clone();
+                                    let media_id = media.id.clone();
+                                    
+                                    Some(Task::perform(
+                                        async move {
+                                            match client.fetch_master_playlist(&media_id).await {
+                                                Ok(playlist) => {
+                                                    log::info!("Master playlist fetched with {} variants", playlist.variants.len());
+                                                    Some(playlist)
+                                                }
+                                                Err(e) => {
+                                                    log::error!("Failed to fetch master playlist: {}", e);
+                                                    None
+                                                }
+                                            }
+                                        },
+                                        |playlist| Message::MasterPlaylistLoaded(playlist)
+                                    ))
+                                } else {
+                                    None
+                                };
+                                
+                                if let Some(playlist_task) = fetch_playlist_task {
+                                    Task::batch([load_video(state), playlist_task])
+                                } else {
+                                    load_video(state)
+                                }
+                            } else {
+                                Task::none()
+                            }
+                        } else {
+                            Task::none()
+                        }
+                    } else {
+                        // Other errors - retry after 5 seconds
+                        Task::perform(
+                            async {
+                                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                            },
+                            |_| Message::CheckTranscodingStatus
+                        )
+                    }
+                }
+            }
+        }
+
+        Message::StartSegmentPrefetch(_segment_index) => {
+            // TODO: Implement segment prefetching when needed
+            // For now, GStreamer handles buffering internally
+            Task::none()
+        }
+        
+        Message::SegmentPrefetched(_index, _result) => {
+            // TODO: Handle prefetched segment data
+            Task::none()
+        }
+        
+        Message::QualityVariantSelected(profile) => {
+            // Close the quality menu
+            state.player.show_quality_menu = false;
+            
+            if let Some(ref _hls_client) = state.player.hls_client {
+                if let Some(ref master_playlist) = state.player.master_playlist {
+                    // Empty string means "Auto" mode
+                    if profile.is_empty() {
+                        state.player.current_quality_profile = None;
+                        log::info!("Switched to automatic quality selection");
+                    } else {
+                        // Find the selected variant
+                        if let Some(variant) = master_playlist.variants.iter().find(|v| v.profile == profile) {
+                            state.player.current_quality_profile = Some(profile.clone());
+                            log::info!("Selected quality profile: {} ({}p, {:.1} Mbps)", 
+                                profile, 
+                                variant.resolution.map(|(_, h)| h).unwrap_or(0),
+                                variant.bandwidth as f64 / 1_000_000.0
+                            );
+                            
+                            // TODO: Implement actual variant switching in the HLS client
+                            // For now, we just update the UI state
+                            // In a full implementation, this would:
+                            // 1. Stop fetching current variant segments
+                            // 2. Switch to the new variant playlist
+                            // 3. Calculate the appropriate segment to continue from
+                            // 4. Start fetching from the new variant
+                        }
+                    }
+                    
+                    // Update quality switch count for metrics
+                    state.player.quality_switch_count += 1;
+                }
+            }
+            
+            Task::none()
+        }
+        
+        Message::BandwidthMeasured(bandwidth) => {
+            log::debug!("Bandwidth measured: {} bps", bandwidth);
+            state.player.last_bandwidth_measurement = Some(bandwidth);
+            
+            // Check if we should switch quality based on bandwidth
+            if let Some(ref mut hls_client) = state.player.hls_client {
+                if let Some(ref master_playlist) = state.player.master_playlist {
+                    if let Some(new_variant) = hls_client.should_switch_variant(master_playlist) {
+                        log::info!("Switching to quality variant: {}", new_variant.profile);
+                        // TODO: Implement automatic quality switching
+                    }
+                }
+            }
+            
             Task::none()
         }
 
@@ -2653,7 +3645,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             // Calculate seek position based on window width
             // Assume seek bar spans full window width
             let percentage = (point.x / state.window_size.width).clamp(0.0, 1.0) as f64;
-            let seek_position = percentage * state.player.duration;
+            
+            // Use source duration if available (for HLS this is the full media duration)
+            let duration = state.player.source_duration.unwrap_or(state.player.duration);
+            let seek_position = percentage * duration;
 
             // Always store the position for potential clicks
             state.player.last_seek_position = Some(seek_position);
@@ -2788,6 +3783,61 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::MediaUnhovered => {
             state.hovered_media_id = None;
             Task::none()
+        }
+        
+        Message::ToggleQualityMenu => {
+            state.player.show_quality_menu = !state.player.show_quality_menu;
+            // Close other menus if opening quality menu
+            if state.player.show_quality_menu {
+                state.player.show_settings = false;
+                state.player.show_subtitle_menu = false;
+            }
+            Task::none()
+        }
+        
+        Message::MasterPlaylistLoaded(playlist_opt) => {
+            if let Some(playlist) = playlist_opt {
+                log::info!("Master playlist loaded with {} quality variants", playlist.variants.len());
+                for variant in &playlist.variants {
+                    log::info!("  - {} ({}p, {:.1} Mbps)", 
+                        variant.profile,
+                        variant.resolution.map(|(_, h)| h).unwrap_or(0),
+                        variant.bandwidth as f64 / 1_000_000.0
+                    );
+                }
+                state.player.master_playlist = Some(playlist);
+            }
+            Task::none()
+        }
+        
+        Message::MasterPlaylistReady(playlist_opt) => {
+            if let Some(playlist) = playlist_opt {
+                log::info!("Master playlist is ready - loading video with {} quality variants", playlist.variants.len());
+                state.player.master_playlist = Some(playlist);
+                
+                // Now that we confirmed the playlist exists, load the video
+                load_video(state)
+            } else {
+                log::error!("Master playlist check failed - retrying in 2 seconds");
+                // Retry checking after a delay
+                Task::perform(
+                    async {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    },
+                    |_| Message::CheckTranscodingStatus
+                )
+            }
+        }
+
+        Message::ExitFullscreen => {
+            // Only exit fullscreen if we're actually in fullscreen
+            if state.player.is_fullscreen {
+                state.player.is_fullscreen = false;
+                let mode = iced::window::Mode::Windowed;
+                iced::window::get_latest().and_then(move |id| iced::window::set_mode(id, mode))
+            } else {
+                Task::none()
+            }
         }
 
         _ => {

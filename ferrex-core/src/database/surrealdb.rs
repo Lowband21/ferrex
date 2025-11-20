@@ -563,6 +563,20 @@ impl MediaDatabaseTrait for SurrealDatabase {
     }
 
     async fn delete_library(&self, id: &str) -> Result<()> {
+        // First, delete all media files associated with this library
+        let query = r#"
+            DELETE FROM media WHERE library_id = $library_id;
+        "#;
+        
+        let vars = [("library_id", id)];
+        
+        self.db
+            .query(query)
+            .bind(vars)
+            .await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to delete media files: {e}")))?;
+        
+        // Then delete the library itself
         self.db
             .delete::<Option<serde_json::Value>>(("libraries", id))
             .await

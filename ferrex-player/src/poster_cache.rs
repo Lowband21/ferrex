@@ -110,6 +110,10 @@ impl PosterCache {
             })
             .collect()
     }
+    
+    pub fn clear(&self) {
+        self.cache.lock().unwrap().clear();
+    }
 }
 
 pub async fn fetch_poster(server_url: String, media_id: String) -> Result<Vec<u8>, anyhow::Error> {

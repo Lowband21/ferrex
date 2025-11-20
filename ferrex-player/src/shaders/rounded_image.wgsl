@@ -7,6 +7,7 @@ struct Globals {
     _padding: vec3<f32>, // Padding to align to 16 bytes
 }
 
+
 struct VertexInput {
     @builtin(vertex_index) vertex_index: u32,
     // Instance attributes
@@ -21,12 +22,9 @@ struct VertexInput {
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) tex_coord: vec2<f32>,
-    @location(1) screen_position: vec2<f32>, // Position in screen space for SDF calculation
-    @location(2) bounds_center: vec2<f32>,   // Center of the bounds for SDF
-    @location(3) bounds_half_size: vec2<f32>, // Half size for SDF
-    @location(4) corner_radius: f32,         // Pass radius to fragment shader
-    @location(5) opacity: f32,               // Pass opacity to fragment shader
-    @location(6) is_backface: f32,           // 1.0 if showing back of card, 0.0 if front
+    @location(1) corner_radius_normalized: f32, // Corner radius as fraction of size
+    @location(2) opacity: f32,                  // Pass opacity to fragment shader
+    @location(3) is_backface: f32,              // 1.0 if showing back of card, 0.0 if front
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -67,33 +65,49 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     let vertex_pos = vertex_position(input.vertex_index);
     
     // Calculate position within bounds using instance data
+    // These positions are in logical pixels
     let position = input.position + vertex_pos * input.size;
     let center = input.position + input.size * 0.5;
     
     // Apply flip rotation if needed
-    var transformed_pos: vec4<f32>;
+    var final_pos: vec2<f32>;
     if input.rotation_y > 0.0 {
         let rotated_3d = apply_flip_rotation(position, center, input.rotation_y);
         // Apply perspective scaling based on Z
         let perspective_scale = 1.0 / (1.0 + rotated_3d.z * 0.001);
-        transformed_pos = vec4<f32>(rotated_3d.x, rotated_3d.y, 0.0, 1.0);
-        transformed_pos.x = center.x + (transformed_pos.x - center.x) * perspective_scale;
+        final_pos = vec2<f32>(
+            center.x + (rotated_3d.x - center.x) * perspective_scale,
+            rotated_3d.y
+        );
     } else {
-        transformed_pos = vec4<f32>(position, 0.0, 1.0);
+        final_pos = position;
     }
     
-    // Transform to clip space
-    output.clip_position = globals.transform * transformed_pos;
+    // The projection matrix has an unusual last row: [-1, 1, 0, 1]
+    // This is causing issues with the transformation
+    // Let's manually apply a corrected orthographic projection
+    
+    // Extract viewport dimensions from the projection matrix scale
+    let viewport_width = 2.0 / globals.transform[0][0];
+    let viewport_height = 2.0 / abs(globals.transform[1][1]);
+    
+    // Convert logical positions to physical pixels
+    let physical_pos = final_pos * globals.scale_factor;
+    
+    // Apply standard orthographic projection
+    // Map [0, viewport_width] to [-1, 1] and [0, viewport_height] to [1, -1] (Y is flipped)
+    let clip_x = (physical_pos.x / viewport_width) * 2.0 - 1.0;
+    let clip_y = 1.0 - (physical_pos.y / viewport_height) * 2.0;
+    
+    output.clip_position = vec4<f32>(clip_x, clip_y, 0.0, 1.0);
     
     // Pass texture coordinates (flip horizontally if showing back)
     let is_backface = f32(input.rotation_y > 1.5708); // > PI/2 means showing back
     output.tex_coord = vec2<f32>(mix(vertex_pos.x, 1.0 - vertex_pos.x, is_backface), vertex_pos.y);
     
-    // Pass data for SDF calculation in fragment shader
-    output.screen_position = position;
-    output.bounds_center = center;
-    output.bounds_half_size = input.size * 0.5;
-    output.corner_radius = input.radius;
+    // Pass normalized corner radius (as fraction of smaller dimension)
+    let min_dimension = min(input.size.x, input.size.y);
+    output.corner_radius_normalized = input.radius / min_dimension;
     output.opacity = input.opacity;
     output.is_backface = is_backface;
     
@@ -110,10 +124,11 @@ fn linear_to_srgb(color: vec3<f32>) -> vec3<f32> {
     return pow(color, vec3<f32>(1.0 / 2.2));
 }
 
-// Signed distance function for rounded rectangle
-fn rounded_rect_sdf(p: vec2<f32>, center: vec2<f32>, half_size: vec2<f32>, radius: f32) -> f32 {
-    let d = abs(p - center) - half_size + vec2<f32>(radius);
-    return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - radius;
+// Signed distance function for rounded rectangle in normalized coordinates (0-1)
+fn rounded_rect_sdf_normalized(p: vec2<f32>, radius_normalized: f32) -> f32 {
+    // p is in range 0-1, with (0.5, 0.5) at center
+    let d = abs(p - vec2<f32>(0.5)) - vec2<f32>(0.5 - radius_normalized);
+    return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - radius_normalized;
 }
 
 @fragment
@@ -130,18 +145,13 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         linear_rgb = linear_rgb * 0.7;
     }
     
-    // Calculate signed distance to rounded rectangle edge
-    let dist = rounded_rect_sdf(
-        input.screen_position, 
-        input.bounds_center, 
-        input.bounds_half_size, 
-        input.corner_radius
-    );
+    // Use texture coordinates for SDF (already in 0-1 range)
+    let dist_normalized = rounded_rect_sdf_normalized(input.tex_coord, input.corner_radius_normalized);
     
     // Anti-aliased alpha using smoothstep
-    // Negative distance = inside, positive = outside
-    // We use a 2-pixel smooth transition for better anti-aliasing
-    let alpha = 1.0 - smoothstep(-2.0, 2.0, dist);
+    // Use fwidth for screen-space derivatives to get proper anti-aliasing
+    let fw = length(fwidth(input.tex_coord));
+    let alpha = 1.0 - smoothstep(-fw, fw, dist_normalized);
     
     // Apply alpha clipping and opacity
     let final_alpha = sampled_color.a * alpha * input.opacity;

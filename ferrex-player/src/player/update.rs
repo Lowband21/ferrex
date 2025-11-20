@@ -67,15 +67,19 @@ impl PlayerState {
                         self.pending_seek_position.or(self.last_seek_position);
 
                     if let Some(seek_position) = final_seek_position {
+                        log::debug!("Starting seek to position: {:.2}s", seek_position);
                         self.seeking = true;
+                        self.seek_started_time = Some(std::time::Instant::now());
                         let duration =
                             Duration::try_from_secs_f64(seek_position).unwrap_or_default();
                         if let Err(e) = video.seek(duration, false) {
                             log::error!("Seek failed: {:?}", e);
                             self.seeking = false;
+                            self.seek_started_time = None;
                         } else {
                             // Update position immediately for better UX
                             self.position = seek_position;
+                            log::debug!("Seek initiated, position set to: {:.2}s", seek_position);
                         }
                     }
 
@@ -106,6 +110,20 @@ impl PlayerState {
                 // SeekBarMoved is handled in main.rs where we have access to window width
                 Task::none()
             }
+            
+            PlayerMessage::SeekDone => {
+                // Seek operation completed, clear seeking flag
+                if let Some(video) = &self.video_opt {
+                    let video_pos = video.position().as_secs_f64();
+                    log::debug!("SeekDone: Clearing seeking flag. Video position: {:.2}s, UI position: {:.2}s", 
+                        video_pos, self.position);
+                } else {
+                    log::debug!("SeekDone: Clearing seeking flag (no video)");
+                }
+                self.seeking = false;
+                self.seek_started_time = None;
+                Task::none()
+            }
 
             PlayerMessage::SeekRelative(secs) => {
                 // Relative seek implementation
@@ -114,17 +132,21 @@ impl PlayerState {
                     self.position = video.position().as_secs_f64();
 
                     // Calculate new position with bounds
+                    // Use source duration if available (for HLS this is the full media duration)
+                    let duration = self.source_duration.unwrap_or(self.duration);
                     let mut new_position = (self.position + secs).max(0.0);
-                    if self.duration > 0.0 {
-                        new_position = new_position.min(self.duration);
+                    if duration > 0.0 {
+                        new_position = new_position.min(duration);
                     }
 
                     // Perform the seek
                     self.seeking = true;
+                    self.seek_started_time = Some(std::time::Instant::now());
                     let duration = Duration::try_from_secs_f64(new_position).unwrap_or_default();
                     if let Err(e) = video.seek(duration, false) {
                         log::error!("Relative seek failed: {:?}", e);
                         self.seeking = false;
+                        self.seek_started_time = None;
                     } else {
                         // Update position immediately for better UX
                         self.position = new_position;
@@ -178,12 +200,25 @@ impl PlayerState {
 
             PlayerMessage::NewFrame => {
                 if let Some(video) = &self.video_opt {
+                    // Check for seek timeout (500ms)
+                    if self.seeking {
+                        if let Some(start_time) = self.seek_started_time {
+                            if start_time.elapsed() > Duration::from_millis(500) {
+                                log::warn!("Seek timeout: clearing seeking flag after 500ms");
+                                self.seeking = false;
+                                self.seek_started_time = None;
+                            }
+                        }
+                    }
+                    
                     // Update duration if it wasn't available during load
                     if self.duration <= 0.0 {
                         let new_duration = video.duration().as_secs_f64();
                         if new_duration > 0.0 {
                             log::info!("Duration now available: {} seconds", new_duration);
                             self.duration = new_duration;
+                        } else {
+                            log::debug!("NewFrame: Duration still not available from video");
                         }
                     }
 
@@ -191,10 +226,29 @@ impl PlayerState {
                     if !self.dragging && !self.seeking {
                         // Normal position update
                         let new_position = video.position().as_secs_f64();
+                        let old_position = self.position;
+                        
                         // Only update if we got a valid position
                         if new_position > 0.0 || self.position == 0.0 {
                             self.position = new_position;
+                            
+                            // Log significant position changes
+                            if (new_position - old_position).abs() > 0.5 {
+                                log::debug!("NewFrame: Position updated from {:.2}s to {:.2}s (duration: {:.2}s, source_duration: {:?})",
+                                    old_position, new_position, self.duration, self.source_duration);
+                            }
+                        } else {
+                            log::trace!("NewFrame: No valid position update (current: {:.2}s, new: {:.2}s)", 
+                                self.position, new_position);
                         }
+                    } else {
+                        if self.seeking {
+                            let video_pos = video.position().as_secs_f64();
+                            log::debug!("NewFrame during seek: video reports {:.2}s, UI shows {:.2}s", 
+                                video_pos, self.position);
+                        }
+                        log::trace!("NewFrame: Skipping position update (dragging: {}, seeking: {})", 
+                            self.dragging, self.seeking);
                     }
                 }
                 Task::none()
@@ -212,7 +266,15 @@ impl PlayerState {
 
             PlayerMessage::ToggleFullscreen => {
                 self.is_fullscreen = !self.is_fullscreen;
-                iced::window::get_latest().and_then(|id| iced::window::toggle_maximize(id))
+                let mode = if self.is_fullscreen {
+                    iced::window::Mode::Fullscreen
+                } else {
+                    iced::window::Mode::Windowed
+                };
+                // Use toggle_maximize for now as change_mode might not be available in this Iced version
+                // TODO: Update to use proper fullscreen mode when Iced is updated
+                //iced::Settings::fullscreen;
+                iced::window::get_latest().and_then(move |id| iced::window::set_mode(id, mode))
             }
 
             PlayerMessage::ToggleSettings => {

@@ -270,14 +270,13 @@ impl MediaOrganizer {
                         );
                     }
 
-                    // Use case-insensitive matching for media type  
                     // MediaType enum gets serialized as PascalCase strings
-                    let media_type_lower = parsed.media_type.to_lowercase();
-                    match media_type_lower.as_str() {
-                        "movie" => {
+                    // Match against the actual PascalCase values
+                    match parsed.media_type.as_str() {
+                        "Movie" => {
                             movies.push(file.clone());
                         }
-                        "tvepisode" | "tv_episode" | "episode" => {
+                        "TvEpisode" => {
                             log::debug!(
                                 "Found TV episode: {} - show_name: {:?}, S{:?}E{:?}",
                                 file.filename,
@@ -297,8 +296,15 @@ impl MediaOrganizer {
                                 log::warn!("TV episode without show name: {}", file.filename);
                             }
                         }
+                        "Extra" => {
+                            // Handle extras separately if needed
+                            log::debug!("Found extra content: {}", file.filename);
+                        }
+                        "Unknown" => {
+                            log::warn!("Unknown media type for file: {}", file.filename);
+                        }
                         other => {
-                            log::warn!("Unknown media type '{}' for file: {}", other, file.filename);
+                            log::warn!("Unrecognized media type '{}' for file: {}", other, file.filename);
                         }
                     }
                 } else {

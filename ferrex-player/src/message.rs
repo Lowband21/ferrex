@@ -100,6 +100,7 @@ pub enum Message {
     SeekRelease,
     SeekBarPressed,
     SeekBarMoved(Point),
+    SeekDone,
     SetVolume(f64),
     EndOfStream,
     // MissingPlugin(gstreamer::Message), // Not available in standard iced_video_player
@@ -110,6 +111,7 @@ pub enum Message {
     // New player controls
     Stop,
     ToggleFullscreen,
+    ExitFullscreen,
     ToggleMute,
     SetPlaybackSpeed(f64),
     ToggleSettings,
@@ -128,6 +130,7 @@ pub enum Message {
     NoOp,
     ToggleSubtitles,
     ToggleSubtitleMenu,
+    ToggleQualityMenu,
     CycleAudioTrack,
     CycleSubtitleTrack,
     CycleSubtitleSimple, // New: Simple subtitle cycling for left-click
@@ -142,7 +145,19 @@ pub enum Message {
     MediaUnavailable(String, String), // reason, message
 
     // Video loading
-    VideoLoaded(bool), // Success flag - video is stored in state
+    VideoLoaded(bool), // Success flag - video is stored in state temporarily
+    VideoCreated(Result<(), String>), // Async video creation result (video stored in temporary state)
+    
+    // Transcoding and streaming
+    TranscodingStarted(Result<String, String>), // job_id or error
+    TranscodingStatusUpdate(Result<(crate::player::state::TranscodingStatus, Option<f64>, Option<String>), String>),
+    CheckTranscodingStatus, // Periodic check for transcoding status
+    StartSegmentPrefetch(usize), // Start prefetching segment at index
+    SegmentPrefetched(usize, Result<Vec<u8>, String>), // segment index, data or error
+    QualityVariantSelected(String), // profile name
+    BandwidthMeasured(u64), // bits per second
+    MasterPlaylistLoaded(Option<crate::hls::MasterPlaylist>), // Master playlist from server
+    MasterPlaylistReady(Option<crate::hls::MasterPlaylist>), // Master playlist exists and ready for playback
 
     // Poster loading
     PosterLoaded(String, Result<Vec<u8>, String>), // media_id, result
@@ -171,6 +186,12 @@ pub enum Message {
     // Hover events
     MediaHovered(String),  // media_id
     MediaUnhovered,
+    
+    // Database maintenance
+    ShowClearDatabaseConfirm,
+    HideClearDatabaseConfirm,
+    ClearDatabase,
+    DatabaseCleared(Result<(), String>),
 }
 
 impl Message {
@@ -263,6 +284,7 @@ impl Message {
             Message::SeekRelease => "SeekRelease",
             Message::SeekBarPressed => "SeekBarPressed",
             Message::SeekBarMoved(_) => "SeekBarMoved",
+            Message::SeekDone => "SeekDone",
             Message::SetVolume(_) => "SetVolume",
             Message::EndOfStream => "EndOfStream",
             Message::NewFrame => "NewFrame",
@@ -272,6 +294,7 @@ impl Message {
             // New player controls
             Message::Stop => "Stop",
             Message::ToggleFullscreen => "ToggleFullscreen",
+            Message::ExitFullscreen => "ExitFullscreen",
             Message::ToggleMute => "ToggleMute",
             Message::SetPlaybackSpeed(_) => "SetPlaybackSpeed",
             Message::ToggleSettings => "ToggleSettings",
@@ -290,6 +313,7 @@ impl Message {
             Message::NoOp => "NoOp",
             Message::ToggleSubtitles => "ToggleSubtitles",
             Message::ToggleSubtitleMenu => "ToggleSubtitleMenu",
+            Message::ToggleQualityMenu => "ToggleQualityMenu",
             Message::CycleAudioTrack => "CycleAudioTrack",
             Message::CycleSubtitleTrack => "CycleSubtitleTrack",
             Message::CycleSubtitleSimple => "CycleSubtitleSimple",
@@ -305,6 +329,18 @@ impl Message {
 
             // Video loading
             Message::VideoLoaded(_) => "VideoLoaded",
+            Message::VideoCreated(_) => "VideoCreated",
+            
+            // Transcoding and streaming
+            Message::TranscodingStarted(_) => "TranscodingStarted",
+            Message::TranscodingStatusUpdate(_) => "TranscodingStatusUpdate",
+            Message::CheckTranscodingStatus => "CheckTranscodingStatus",
+            Message::StartSegmentPrefetch(_) => "StartSegmentPrefetch",
+            Message::SegmentPrefetched(_, _) => "SegmentPrefetched",
+            Message::QualityVariantSelected(_) => "QualityVariantSelected",
+            Message::BandwidthMeasured(_) => "BandwidthMeasured",
+            Message::MasterPlaylistLoaded(_) => "MasterPlaylistLoaded",
+            Message::MasterPlaylistReady(_) => "MasterPlaylistReady",
 
             // Poster loading
             Message::PosterLoaded(_, _) => "PosterLoaded",
@@ -334,6 +370,12 @@ impl Message {
             // Hover events
             Message::MediaHovered(_) => "MediaHovered",
             Message::MediaUnhovered => "MediaUnhovered",
+            
+            // Database maintenance
+            Message::ShowClearDatabaseConfirm => "ShowClearDatabaseConfirm",
+            Message::HideClearDatabaseConfirm => "HideClearDatabaseConfirm",
+            Message::ClearDatabase => "ClearDatabase",
+            Message::DatabaseCleared(_) => "DatabaseCleared",
         }
     }
 }
@@ -444,6 +486,7 @@ impl std::fmt::Debug for Message {
             Message::SeekRelease => f.write_str("SeekRelease"),
             Message::SeekBarPressed => f.write_str("SeekBarPressed"),
             Message::SeekBarMoved(p) => f.debug_tuple("SeekBarMoved").field(p).finish(),
+            Message::SeekDone => f.write_str("SeekDone"),
             Message::SetVolume(v) => f.debug_tuple("SetVolume").field(v).finish(),
             Message::EndOfStream => f.write_str("EndOfStream"),
             Message::NewFrame => f.write_str("NewFrame"),
@@ -451,6 +494,7 @@ impl std::fmt::Debug for Message {
             Message::ShowControls => f.write_str("ShowControls"),
             Message::Stop => f.write_str("Stop"),
             Message::ToggleFullscreen => f.write_str("ToggleFullscreen"),
+            Message::ExitFullscreen => f.write_str("ExitFullscreen"),
             Message::ToggleMute => f.write_str("ToggleMute"),
             Message::SetPlaybackSpeed(s) => f.debug_tuple("SetPlaybackSpeed").field(s).finish(),
             Message::ToggleSettings => f.write_str("ToggleSettings"),
@@ -465,6 +509,7 @@ impl std::fmt::Debug for Message {
             Message::NoOp => f.write_str("NoOp"),
             Message::ToggleSubtitles => f.write_str("ToggleSubtitles"),
             Message::ToggleSubtitleMenu => f.write_str("ToggleSubtitleMenu"),
+            Message::ToggleQualityMenu => f.write_str("ToggleQualityMenu"),
             Message::CycleAudioTrack => f.write_str("CycleAudioTrack"),
             Message::CycleSubtitleTrack => f.write_str("CycleSubtitleTrack"),
             Message::CycleSubtitleSimple => f.write_str("CycleSubtitleSimple"),
@@ -474,6 +519,22 @@ impl std::fmt::Debug for Message {
             Message::MediaAvailabilityChecked(m) => f.debug_tuple("MediaAvailabilityChecked").field(m).finish(),
             Message::MediaUnavailable(r, m) => f.debug_tuple("MediaUnavailable").field(r).field(m).finish(),
             Message::VideoLoaded(s) => f.debug_tuple("VideoLoaded").field(s).finish(),
+            Message::VideoCreated(r) => f.debug_tuple("VideoCreated").field(r).finish(),
+            Message::TranscodingStarted(r) => f.debug_tuple("TranscodingStarted").field(r).finish(),
+            Message::TranscodingStatusUpdate(r) => f.debug_tuple("TranscodingStatusUpdate").field(&match r {
+                Ok((status, duration, path)) => format!("Ok({:?}, {:?}, {:?})", status, duration, path),
+                Err(e) => format!("Err({})", e),
+            }).finish(),
+            Message::CheckTranscodingStatus => f.write_str("CheckTranscodingStatus"),
+            Message::StartSegmentPrefetch(idx) => f.debug_tuple("StartSegmentPrefetch").field(idx).finish(),
+            Message::SegmentPrefetched(idx, r) => f.debug_tuple("SegmentPrefetched").field(idx).field(&match r {
+                Ok(data) => format!("Ok({} bytes)", data.len()),
+                Err(e) => format!("Err({})", e),
+            }).finish(),
+            Message::QualityVariantSelected(p) => f.debug_tuple("QualityVariantSelected").field(p).finish(),
+            Message::BandwidthMeasured(bw) => f.debug_tuple("BandwidthMeasured").field(bw).finish(),
+            Message::MasterPlaylistLoaded(p) => f.debug_tuple("MasterPlaylistLoaded").field(p).finish(),
+            Message::MasterPlaylistReady(p) => f.debug_tuple("MasterPlaylistReady").field(p).finish(),
             Message::ProcessPosterQueue => f.write_str("ProcessPosterQueue"),
             Message::AnimatePoster(id) => f.debug_tuple("AnimatePoster").field(id).finish(),
             Message::MarkPostersForLoading(ids, pos) => f.debug_tuple("MarkPostersForLoading").field(ids).field(pos).finish(),
@@ -500,6 +561,12 @@ impl std::fmt::Debug for Message {
             // Admin dashboard messages
             Message::ShowAdminDashboard => f.write_str("ShowAdminDashboard"),
             Message::HideAdminDashboard => f.write_str("HideAdminDashboard"),
+            
+            // Database maintenance
+            Message::ShowClearDatabaseConfirm => f.write_str("ShowClearDatabaseConfirm"),
+            Message::HideClearDatabaseConfirm => f.write_str("HideClearDatabaseConfirm"),
+            Message::ClearDatabase => f.write_str("ClearDatabase"),
+            Message::DatabaseCleared(r) => f.debug_tuple("DatabaseCleared").field(r).finish(),
         }
     }
 }

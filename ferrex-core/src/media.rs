@@ -26,6 +26,12 @@ pub struct MediaMetadata {
     pub framerate: Option<f64>,
     pub file_size: u64,
 
+    // HDR metadata
+    pub color_primaries: Option<String>,
+    pub color_transfer: Option<String>,
+    pub color_space: Option<String>,
+    pub bit_depth: Option<u32>,
+
     // Parsed from filename
     pub parsed_info: Option<ParsedMediaInfo>,
 
@@ -196,6 +202,7 @@ impl MediaFile {
     }
 
     /// Extract full metadata for this media file
+    #[cfg(feature = "ffmpeg")]
     pub fn extract_metadata(&mut self) -> crate::Result<()> {
         let mut extractor = crate::MetadataExtractor::new();
         let metadata = extractor.extract_metadata(&self.path)?;

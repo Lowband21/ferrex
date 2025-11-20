@@ -120,7 +120,7 @@ pub async fn trigger_metadata_fetch(
 
         // Small delay between requests to avoid overwhelming the server
         if i < media_ids.len() - 1 {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
     }
 

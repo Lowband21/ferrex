@@ -288,19 +288,13 @@ impl TvParser {
         // If library type is specified, use it as a strong hint
         match library_type {
             Some(crate::LibraryType::TvShows) => {
-                // In a TV library, assume episodes unless proven otherwise
-                if Self::parse_episode(path).is_some() {
-                    return MediaType::TvEpisode;
-                }
-                // Could be a TV special or extra
-                return MediaType::Movie; // Default for now
+                // In a TV library, default to TV episode
+                // Even if we can't parse episode info, it's still TV content
+                return MediaType::TvEpisode;
             }
             Some(crate::LibraryType::Movies) => {
-                // In a movie library, assume movies unless clearly in TV structure
-                if Self::is_in_tv_structure(path) && Self::parse_episode(path).is_some() {
-                    // This is likely a misplaced TV episode
-                    return MediaType::TvEpisode;
-                }
+                // In a movie library, ALWAYS return Movie type
+                // Library type should be authoritative
                 return MediaType::Movie;
             }
             None => {

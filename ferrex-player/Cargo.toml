@@ -11,6 +11,7 @@ opt-level = 3
 
 
 [dependencies]
+ferrex-core = { path = "../ferrex-core", default-features = false }
 # Core GUI framework
 #iced = { version = "0.13.1", features = ["tokio", "debug", "image", "canvas", "advanced", "wgpu"] }
 iced = { git = "https://github.com/iced-rs/iced.git", features = ["tokio", "debug", "image", "canvas", "advanced", "wgpu"] }
@@ -19,7 +20,8 @@ iced = { git = "https://github.com/iced-rs/iced.git", features = ["tokio", "debu
 lucide-icons = { path = "../lucide_icons_iced_0.14", features = ["iced"] }
 
 # Video playback
-#iced_video_player = { git = "https://github.com/Lowband21/iced_video_player", branch = "http-seeking-pitch-correction" }
+#iced_video_player = { git = "https://github.com/Lowband21/iced_video_player", branch = "http-seeking-pitch-correction", rev = "c8f47a8" }
+#iced_video_player = { git = "https://github.com/Lowband21/iced_video_player", rev = "c8f47a8" }
 iced_video_player = { path = "../iced_video_player" }
 gstreamer = "0.23"
 gstreamer-app = "0.23"
@@ -28,6 +30,9 @@ glib = "0.20"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+
+# Concurrency utilities
+once_cell = "1.19"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -41,6 +46,7 @@ futures = "0.3"
 
 # URL handling
 url = "2"
+urlencoding = "2.1"
 
 # Logging
 log = "0.4"

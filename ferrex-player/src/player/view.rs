@@ -10,6 +10,9 @@ use iced_video_player::VideoPlayer;
 impl PlayerState {
     /// Build the main player view
     pub fn view(&self) -> Element<Message> {
+        log::trace!("PlayerState::view() called - position: {:.2}s, duration: {:.2}s, source_duration: {:?}, controls: {}",
+            self.position, self.duration, self.source_duration, self.controls);
+            
         if let Some(video) = &self.video_opt {
             // Create the clickable video
             let clickable_video = self.video_view(video);
@@ -48,7 +51,9 @@ impl PlayerState {
             };
 
             // Add subtitle menu if visible
-            let player_with_subtitle_menu = if self.show_subtitle_menu {
+            let player_with_menus = if self.show_quality_menu {
+                stack![player_with_settings, self.quality_menu_overlay()].into()
+            } else if self.show_subtitle_menu {
                 stack![player_with_settings, self.subtitle_menu_overlay()].into()
             } else {
                 player_with_settings
@@ -57,12 +62,12 @@ impl PlayerState {
             // Add track notification overlay if present
             let player_with_notification = if let Some(notification) = &self.track_notification {
                 stack![
-                    player_with_subtitle_menu,
+                    player_with_menus,
                     self.notification_overlay(notification)
                 ]
                 .into()
             } else {
-                player_with_subtitle_menu
+                player_with_menus
             };
 
             // Wrap with mouse movement detection
@@ -72,8 +77,27 @@ impl PlayerState {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into()
+        } else if self.is_loading_video {
+            // Show loading spinner in player view
+            let loading_content = column![
+                // Static loading icon for now - can be animated later
+                text("⟳").size(64), // Using a refresh/loading unicode symbol
+                Space::with_height(Length::Fixed(20.0)),
+                text("Loading video...").size(18).color(iced::Color::from_rgb(0.7, 0.7, 0.7)),
+            ]
+            .align_x(iced::Alignment::Center)
+            .spacing(10);
+
+            // Full screen player-style container with loading spinner
+            container(loading_content)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .style(theme::container_player)
+                .into()
         } else {
-            // No video loaded
+            // No video loaded and not loading
             container(
                 column![
                     text("No video loaded").size(24),
@@ -99,7 +123,8 @@ impl PlayerState {
         let player = VideoPlayer::new(video)
             .width(Length::Fill)
             .height(Length::Fill)
-            .on_new_frame(Message::NewFrame);
+            .on_new_frame(Message::NewFrame)
+            .on_seek_done(Message::SeekDone);
 
         let player = match self.aspect_ratio {
             AspectRatio::Fill => player.content_fit(ContentFit::Cover),
@@ -147,6 +172,25 @@ impl PlayerState {
     }
 
     /// Build the subtitle menu overlay
+    fn quality_menu_overlay(&self) -> Element<Message> {
+        // Position the menu near the quality button (bottom right)
+        container(row![
+            Space::with_width(Length::Fill),
+            container(self.build_quality_menu()).style(theme::container_subtitle_menu_wrapper),
+            Space::with_width(Length::Fixed(200.0)), // Offset from right edge
+        ])
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_y(iced::alignment::Vertical::Bottom)
+        .padding(iced::Padding {
+            top: 0.0,
+            right: 0.0,
+            bottom: 100.0,
+            left: 0.0,
+        }) // Position above controls
+        .into()
+    }
+    
     fn subtitle_menu_overlay(&self) -> Element<Message> {
         // Position the menu near the subtitle button (bottom right)
         container(row![
@@ -172,7 +216,8 @@ impl PlayerState {
             let player = VideoPlayer::new(video)
                 .width(Length::Fill)
                 .height(Length::Fixed(200.0))
-                .on_new_frame(Message::NewFrame);
+                .on_new_frame(Message::NewFrame)
+                .on_seek_done(Message::SeekDone);
 
             container(player)
                 .width(Length::Fill)

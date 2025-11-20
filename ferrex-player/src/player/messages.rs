@@ -22,6 +22,7 @@ pub enum PlayerMessage {
     SeekBarMoved(Point),
     SeekForward,  // +15s
     SeekBackward, // -15s
+    SeekDone,     // Seek operation completed
 
     // Volume
     SetVolume(f64),
@@ -73,6 +74,7 @@ impl PlayerMessage {
             crate::Message::SeekRelease |
             crate::Message::SeekBarPressed |
             //crate::Message::SeekBarMoved(_) |
+            crate::Message::SeekDone |
             crate::Message::SeekForward |
             crate::Message::SeekBackward |
             crate::Message::SetVolume(_) |
@@ -114,6 +116,7 @@ impl PlayerMessage {
             crate::Message::SeekRelease => Some(PlayerMessage::SeekRelease),
             crate::Message::SeekBarPressed => Some(PlayerMessage::SeekBarPressed),
             //crate::Message::SeekBarMoved(point) => Some(PlayerMessage::SeekBarMoved(point)),
+            crate::Message::SeekDone => Some(PlayerMessage::SeekDone),
             crate::Message::SeekForward => Some(PlayerMessage::SeekForward),
             crate::Message::SeekBackward => Some(PlayerMessage::SeekBackward),
             crate::Message::SetVolume(vol) => Some(PlayerMessage::SetVolume(vol)),

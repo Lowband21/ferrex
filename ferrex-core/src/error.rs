@@ -5,6 +5,7 @@ pub enum MediaError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[cfg(feature = "ffmpeg")]
     #[error("FFmpeg error: {0}")]
     Ffmpeg(#[from] ffmpeg_next::Error),
 

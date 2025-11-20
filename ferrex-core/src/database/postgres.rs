@@ -2,7 +2,7 @@ use super::traits::*;
 use crate::{MediaError, MediaFile, MediaMetadata, Result};
 use async_trait::async_trait;
 use serde_json;
-use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use sqlx::{postgres::PgPoolOptions, PgPool, Row, Connection};
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -80,6 +80,11 @@ impl PostgresDatabase {
                 bitrate: None,
                 framerate: None,
                 file_size: r.get::<i64, _>("file_size") as u64,
+                // HDR metadata
+                color_primaries: r.try_get("color_primaries").ok(),
+                color_transfer: r.try_get("color_transfer").ok(),
+                color_space: r.try_get("color_space").ok(),
+                bit_depth: r.try_get::<Option<i32>, _>("bit_depth").unwrap_or(None).map(|b| b as u32),
                 parsed_info,
                 external_info,
             })
@@ -101,6 +106,12 @@ impl PostgresDatabase {
     pub async fn new(connection_string: &str) -> Result<Self> {
         info!("Connecting to PostgreSQL database");
 
+        // First, try to ensure the database exists
+        if let Err(e) = Self::ensure_database_exists(connection_string).await {
+            warn!("Could not ensure database exists: {}", e);
+            // Continue anyway - maybe it already exists
+        }
+
         let pool = PgPoolOptions::new()
             .max_connections(20)
             .connect(connection_string)
@@ -112,6 +123,51 @@ impl PostgresDatabase {
         info!("Successfully connected to PostgreSQL");
 
         Ok(Self { pool })
+    }
+
+    async fn ensure_database_exists(connection_string: &str) -> Result<()> {
+        // Parse the connection string to extract database name
+        let parts: Vec<&str> = connection_string.split('/').collect();
+        if parts.len() < 2 {
+            return Err(MediaError::InvalidMedia("Invalid connection string".to_string()));
+        }
+        
+        let db_name = parts.last().unwrap().split('?').next().unwrap();
+        let base_url = parts[..parts.len()-1].join("/");
+        
+        // Connect to postgres database to create our database
+        let maintenance_url = format!("{}/postgres", base_url);
+        
+        debug!("Connecting to postgres database to ensure {} exists", db_name);
+        
+        match sqlx::postgres::PgConnection::connect(&maintenance_url).await {
+            Ok(mut conn) => {
+                // Check if database exists
+                let exists: bool = sqlx::query_scalar(&format!(
+                    "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = '{}')",
+                    db_name
+                ))
+                .fetch_one(&mut conn)
+                .await
+                .unwrap_or(false);
+                
+                if !exists {
+                    info!("Creating database: {}", db_name);
+                    sqlx::query(&format!("CREATE DATABASE \"{}\"", db_name))
+                        .execute(&mut conn)
+                        .await
+                        .map_err(|e| MediaError::InvalidMedia(format!("Failed to create database: {e}")))?;
+                    info!("Database {} created successfully", db_name);
+                } else {
+                    debug!("Database {} already exists", db_name);
+                }
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Could not connect to postgres database: {}", e);
+                Err(MediaError::InvalidMedia(format!("Failed to connect to postgres database: {e}")))
+            }
+        }
     }
 
     async fn run_migrations(pool: &sqlx::PgPool) -> Result<()> {
@@ -228,6 +284,10 @@ impl PostgresDatabase {
                 bitrate BIGINT,
                 frame_rate DOUBLE PRECISION,
                 parsed_info JSONB,
+                bit_depth INTEGER,
+                color_transfer TEXT,
+                color_space TEXT,
+                color_primaries TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 UNIQUE(media_file_id)
@@ -265,6 +325,20 @@ impl PostgresDatabase {
         .execute(pool)
         .await
         .map_err(|e| MediaError::InvalidMedia(format!("Failed to create table: {e}")))?;
+
+        // Add HDR metadata columns if they don't exist (for existing installations)
+        sqlx::query(
+            r#"
+            ALTER TABLE media_metadata 
+            ADD COLUMN IF NOT EXISTS bit_depth INTEGER,
+            ADD COLUMN IF NOT EXISTS color_transfer TEXT,
+            ADD COLUMN IF NOT EXISTS color_space TEXT,
+            ADD COLUMN IF NOT EXISTS color_primaries TEXT
+            "#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| MediaError::InvalidMedia(format!("Failed to add HDR columns: {e}")))?;
 
         info!("Database migrations completed successfully");
         Ok(())
@@ -334,14 +408,19 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 r#"
                 INSERT INTO media_metadata (
                     media_file_id, duration_seconds, width, height,
-                    video_codec, audio_codec, bitrate, frame_rate, parsed_info
+                    video_codec, audio_codec, bitrate_bps, framerate, parsed_info,
+                    bit_depth, color_transfer, color_space, color_primaries
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 ON CONFLICT (media_file_id) DO UPDATE
                 SET duration_seconds = EXCLUDED.duration_seconds,
                     width = EXCLUDED.width,
                     height = EXCLUDED.height,
                     parsed_info = EXCLUDED.parsed_info,
+                    bit_depth = EXCLUDED.bit_depth,
+                    color_transfer = EXCLUDED.color_transfer,
+                    color_space = EXCLUDED.color_space,
+                    color_primaries = EXCLUDED.color_primaries,
                     updated_at = NOW()
                 "#,
                 id.0,
@@ -352,7 +431,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 metadata.audio_codec.as_deref(),
                 metadata.bitrate.map(|b| b as i64),
                 metadata.framerate,
-                parsed_info_json
+                parsed_info_json,
+                metadata.bit_depth.map(|b| b as i32),
+                metadata.color_transfer.as_deref(),
+                metadata.color_space.as_deref(),
+                metadata.color_primaries.as_deref()
             )
             .execute(&self.pool)
             .await
@@ -382,7 +465,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             SELECT 
                 mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at, mf.library_id, mf.parent_media_id,
                 mm.duration_seconds, mm.width, mm.height, mm.video_codec, mm.audio_codec,
-                mm.parsed_info,
+                mm.parsed_info, mm.bit_depth, mm.color_transfer, mm.color_space, mm.color_primaries,
                 em.external_id, em.title, em.overview, em.release_date,
                 em.vote_average, em.poster_path, em.backdrop_path, em.genres,
                 em.show_description, em.show_poster_path, em.season_poster_path, em.episode_still_path
@@ -421,7 +504,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             SELECT 
                 mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at, mf.library_id, mf.parent_media_id,
                 mm.duration_seconds, mm.width, mm.height, mm.video_codec, mm.audio_codec,
-                mm.parsed_info,
+                mm.parsed_info, mm.bit_depth, mm.color_transfer, mm.color_space, mm.color_primaries,
                 em.external_id, em.title, em.overview, em.release_date,
                 em.vote_average, em.poster_path, em.backdrop_path, em.genres,
                 em.show_description, em.show_poster_path, em.season_poster_path, em.episode_still_path
@@ -447,7 +530,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             SELECT 
                 mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at, mf.media_type, mf.library_id, mf.parent_media_id,
                 mm.duration_seconds, mm.width, mm.height, mm.video_codec, mm.audio_codec,
-                mm.parsed_info,
+                mm.parsed_info, mm.bit_depth, mm.color_transfer, mm.color_space, mm.color_primaries,
                 em.external_id, em.title, em.overview, em.release_date,
                 em.vote_average, em.poster_path, em.backdrop_path, em.genres,
                 em.show_description, em.show_poster_path, em.season_poster_path, em.episode_still_path
@@ -585,6 +668,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
                     bitrate: None,
                     framerate: None,
                     file_size: row.get::<i64, _>("file_size") as u64,
+                    // HDR metadata
+                    color_primaries: row.try_get("color_primaries").ok(),
+                    color_transfer: row.try_get("color_transfer").ok(),
+                    color_space: row.try_get("color_space").ok(),
+                    bit_depth: row.try_get::<Option<i32>, _>("bit_depth").unwrap_or(None).map(|b| b as u32),
                     parsed_info,
                     external_info,
                 })
@@ -626,7 +714,9 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let mut by_type = HashMap::new();
         for row in type_rows {
-            by_type.insert(row.media_type, row.count.unwrap_or(0) as u64);
+            if let Some(media_type) = row.media_type {
+                by_type.insert(media_type, row.count.unwrap_or(0) as u64);
+            }
         }
 
         Ok(MediaStats {
@@ -741,7 +831,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             RETURNING id
             "#,
             show_info.id,
-            show_info.tmdb_id,
+            show_info.tmdb_id.parse::<i32>().ok(),
             show_info.name,
             show_info.overview.as_deref(),
             show_info.poster_path.as_deref(),
@@ -777,9 +867,12 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_tv_show(&self, tmdb_id: &str) -> Result<Option<TvShowInfo>> {
+        let tmdb_id_int = tmdb_id.parse::<i32>()
+            .map_err(|_| MediaError::InvalidMedia(format!("Invalid TMDB ID: {}", tmdb_id)))?;
+        
         let show_row = sqlx::query!(
             "SELECT id, tmdb_id, name, overview, poster_path, backdrop_path FROM tv_shows WHERE tmdb_id = $1",
-            tmdb_id
+            tmdb_id_int
         )
         .fetch_optional(&self.pool)
         .await
@@ -805,7 +898,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
             Ok(Some(TvShowInfo {
                 id: show.id,
-                tmdb_id: show.tmdb_id,
+                tmdb_id: show.tmdb_id.map(|id| id.to_string()).unwrap_or_default(),
                 name: show.name,
                 overview: show.overview,
                 poster_path: show.poster_path,
@@ -835,17 +928,20 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         let file_uuid = Uuid::parse_str(uuid_str)
             .map_err(|e| MediaError::InvalidMedia(format!("Invalid file UUID: {e}")))?;
+        
+        let tmdb_id_int = show_tmdb_id.parse::<i32>()
+            .map_err(|_| MediaError::InvalidMedia(format!("Invalid TMDB ID: {}", show_tmdb_id)))?;
 
         sqlx::query!(
             r#"
             UPDATE tv_episodes
             SET media_file_id = $1
             WHERE tv_show_id = (SELECT id FROM tv_shows WHERE tmdb_id = $2)
-              AND season_id = (SELECT id FROM tv_seasons WHERE tv_show_id = (SELECT id FROM tv_shows WHERE tmdb_id = $2) AND season_number = $3)
+              AND season_number = $3
               AND episode_number = $4
             "#,
             file_uuid,
-            show_tmdb_id,
+            tmdb_id_int,
             season,
             episode
         )
@@ -881,7 +977,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             SELECT 
                 mf.id, mf.file_path, mf.file_name, mf.file_size, mf.created_at, mf.library_id, mf.parent_media_id,
                 mm.duration_seconds, mm.width, mm.height, mm.video_codec, mm.audio_codec,
-                mm.parsed_info,
+                mm.parsed_info, mm.bit_depth, mm.color_transfer, mm.color_space, mm.color_primaries,
                 em.external_id, em.title, em.overview, em.release_date,
                 em.vote_average, em.poster_path, em.backdrop_path, em.genres,
                 em.show_description, em.show_poster_path, em.season_poster_path, em.episode_still_path
@@ -1049,11 +1145,27 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let uuid = Uuid::parse_str(id)
             .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {e}")))?;
 
+        // Start a transaction to ensure both operations succeed or fail together
+        let mut tx = self.pool.begin().await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to start transaction: {e}")))?;
+
+        // First, delete all media files associated with this library
+        sqlx::query("DELETE FROM media_files WHERE library_id = $1")
+            .bind(uuid)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to delete media files: {e}")))?;
+
+        // Then delete the library itself
         sqlx::query("DELETE FROM libraries WHERE id = $1")
             .bind(uuid)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| MediaError::InvalidMedia(format!("Failed to delete library: {e}")))?;
+
+        // Commit the transaction
+        tx.commit().await
+            .map_err(|e| MediaError::InvalidMedia(format!("Failed to commit transaction: {e}")))?;
 
         Ok(())
     }

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, RwLock, Semaphore};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,6 +16,8 @@ pub struct ScanProgress {
     pub scan_id: String,
     pub status: ScanStatus,
     pub path: String,
+    pub library_name: Option<String>, // Name of the library being scanned
+    pub library_id: Option<String>,   // ID of the library being scanned
     pub total_files: usize,
     pub scanned_files: usize,
     pub stored_files: usize,
@@ -105,13 +107,20 @@ impl ScanManager {
 
         // Determine paths to scan
         let paths = if let Some(paths) = request.paths.clone() {
+            if paths.is_empty() {
+                // Empty paths array means no libraries configured
+                return Err(anyhow::anyhow!("No library paths configured. Please add a library first."));
+            }
             paths
         } else if let Some(path) = request.path.clone() {
             vec![path]
         } else {
-            // Use MEDIA_ROOT if no paths provided
+            // Use MEDIA_ROOT if no paths provided (legacy behavior)
             match std::env::var("MEDIA_ROOT") {
-                Ok(path) => vec![path],
+                Ok(path) => {
+                    warn!("No paths provided, falling back to MEDIA_ROOT: {}", path);
+                    vec![path]
+                },
                 Err(_) => return Err(anyhow::anyhow!("No paths provided and MEDIA_ROOT not set")),
             }
         };
@@ -121,6 +130,8 @@ impl ScanManager {
             scan_id: scan_id.clone(),
             status: ScanStatus::Pending,
             path: paths.join(", "),
+            library_name: None, // Will be set if this is a library scan
+            library_id: request.library_id.as_ref().map(|id| id.to_string()),
             total_files: 0,
             scanned_files: 0,
             stored_files: 0,
@@ -179,6 +190,8 @@ impl ScanManager {
             scan_id: scan_id.clone(),
             status: ScanStatus::Pending,
             path: library.paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "),
+            library_name: Some(library.name.clone()),
+            library_id: Some(library.id.to_string()),
             total_files: 0,
             scanned_files: 0,
             stored_files: 0,
@@ -484,6 +497,19 @@ impl ScanManager {
                                 .await;
                             drop(_db_permit); // Release early
 
+                            // Log media type before sending event
+                            let media_type = media_file
+                                .metadata
+                                .as_ref()
+                                .and_then(|m| m.parsed_info.as_ref())
+                                .map(|p| format!("{:?}", p.media_type))
+                                .unwrap_or_else(|| "Unknown".to_string());
+                            
+                            debug!(
+                                "Sending MediaAdded event for {} with type: {}",
+                                media_file.filename, media_type
+                            );
+                            
                             // Send media event
                             scan_manager
                                 .send_media_event(MediaEvent::MediaAdded {
@@ -545,6 +571,19 @@ impl ScanManager {
                                                 }
                                             }
 
+                                            // Log media type before sending update event
+                                            let media_type = updated_media
+                                                .metadata
+                                                .as_ref()
+                                                .and_then(|m| m.parsed_info.as_ref())
+                                                .map(|p| format!("{:?}", p.media_type))
+                                                .unwrap_or_else(|| "Unknown".to_string());
+                                            
+                                            debug!(
+                                                "Sending MediaUpdated event for {} with type: {}",
+                                                updated_media.filename, media_type
+                                            );
+                                            
                                             // Send media updated event
                                             scan_manager
                                                 .send_media_event(MediaEvent::MediaUpdated {
