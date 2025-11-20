@@ -88,7 +88,7 @@ impl DeviceSession {
     /// Create a new device session
     pub fn new(user_id: Uuid, device_fingerprint: DeviceFingerprint, device_name: String) -> Self {
         let now = Utc::now();
-        let id = Uuid::new_v4();
+        let id = Uuid::now_v7();
 
         let mut session = Self {
             id,
@@ -330,7 +330,7 @@ mod tests {
         .unwrap();
 
         let mut session =
-            DeviceSession::new(Uuid::new_v4(), fingerprint, "Test Device".to_string());
+            DeviceSession::new(Uuid::now_v7(), fingerprint, "Test Device".to_string());
 
         // Initially pending
         assert_eq!(session.status(), DeviceStatus::Pending);

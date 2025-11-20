@@ -10,6 +10,8 @@ use argon2::{
 use chrono::Utc;
 use ferrex_core::{
     MediaError,
+    database::PostgresDatabase,
+    rbac::{PermissionCategory, permissions, roles},
     user::{AuthToken, User},
 };
 use std::fmt;
@@ -101,6 +103,331 @@ impl<'a> UserService<'a> {
     /// Create a new user service instance
     pub fn new(state: &'a AppState) -> Self {
         Self { state }
+    }
+
+    /// Ensure the built-in roles and their default permissions exist.
+    ///
+    /// Consolidated schema migrations removed the original RBAC seed data.
+    /// This guard re-creates the default roles (admin, user, guest), ensures
+    /// the well-known permission set exists, and assigns the expected
+    /// permissions to each role so the UI behaves correctly for admins.
+    pub async fn ensure_admin_role_exists(&self) -> AppResult<()> {
+        // Access the underlying Postgres pool
+        let postgres_db = self
+            .state
+            .db
+            .backend()
+            .as_any()
+            .downcast_ref::<PostgresDatabase>()
+            .ok_or_else(|| AppError::internal("Database backend is not PostgreSQL"))?;
+
+        let mut tx =
+            postgres_db.pool().begin().await.map_err(|e| {
+                AppError::internal(format!("Failed to start RBAC bootstrap: {}", e))
+            })?;
+
+        // Keep UUIDs stable to preserve compatibility with existing references
+        let admin_role_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001")
+            .expect("Invalid admin role UUID");
+        let user_role_id = Uuid::parse_str("00000000-0000-0000-0000-000000000002")
+            .expect("Invalid user role UUID");
+        let guest_role_id = Uuid::parse_str("00000000-0000-0000-0000-000000000003")
+            .expect("Invalid guest role UUID");
+
+        let system_roles = [
+            (
+                admin_role_id,
+                roles::ADMIN,
+                "Full system administrator with all permissions",
+                true,
+            ),
+            (
+                user_role_id,
+                roles::USER,
+                "Standard user with media access",
+                true,
+            ),
+            (
+                guest_role_id,
+                roles::GUEST,
+                "Limited guest access (no persistent data)",
+                true,
+            ),
+        ];
+
+        for (id, name, description, is_system) in system_roles {
+            sqlx::query!(
+                r#"
+                INSERT INTO roles (id, name, description, is_system)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (name) DO UPDATE
+                SET description = EXCLUDED.description,
+                    is_system = EXCLUDED.is_system
+                "#,
+                id,
+                name,
+                description,
+                is_system
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppError::internal(format!("Failed to upsert role '{}': {}", name, e)))?;
+        }
+
+        struct PermissionSeed {
+            name: &'static str,
+            category: PermissionCategory,
+            description: &'static str,
+        }
+
+        let default_permissions = [
+            // User management
+            PermissionSeed {
+                name: permissions::USERS_READ,
+                category: PermissionCategory::Users,
+                description: "View user profiles and list users",
+            },
+            PermissionSeed {
+                name: permissions::USERS_CREATE,
+                category: PermissionCategory::Users,
+                description: "Create new user accounts",
+            },
+            PermissionSeed {
+                name: permissions::USERS_UPDATE,
+                category: PermissionCategory::Users,
+                description: "Modify user profiles and settings",
+            },
+            PermissionSeed {
+                name: permissions::USERS_DELETE,
+                category: PermissionCategory::Users,
+                description: "Delete user accounts",
+            },
+            PermissionSeed {
+                name: permissions::USERS_MANAGE_ROLES,
+                category: PermissionCategory::Users,
+                description: "Assign and remove user roles",
+            },
+            // Library management
+            PermissionSeed {
+                name: permissions::LIBRARIES_READ,
+                category: PermissionCategory::Libraries,
+                description: "View library information",
+            },
+            PermissionSeed {
+                name: permissions::LIBRARIES_CREATE,
+                category: PermissionCategory::Libraries,
+                description: "Create new libraries",
+            },
+            PermissionSeed {
+                name: permissions::LIBRARIES_UPDATE,
+                category: PermissionCategory::Libraries,
+                description: "Modify library settings",
+            },
+            PermissionSeed {
+                name: permissions::LIBRARIES_DELETE,
+                category: PermissionCategory::Libraries,
+                description: "Delete libraries",
+            },
+            PermissionSeed {
+                name: permissions::LIBRARIES_SCAN,
+                category: PermissionCategory::Libraries,
+                description: "Trigger library scans",
+            },
+            // Media access
+            PermissionSeed {
+                name: permissions::MEDIA_READ,
+                category: PermissionCategory::Media,
+                description: "View media information and browse",
+            },
+            PermissionSeed {
+                name: permissions::MEDIA_STREAM,
+                category: PermissionCategory::Media,
+                description: "Stream and playback media",
+            },
+            PermissionSeed {
+                name: permissions::MEDIA_DOWNLOAD,
+                category: PermissionCategory::Media,
+                description: "Download media files",
+            },
+            PermissionSeed {
+                name: permissions::MEDIA_UPDATE,
+                category: PermissionCategory::Media,
+                description: "Edit media metadata",
+            },
+            PermissionSeed {
+                name: permissions::MEDIA_DELETE,
+                category: PermissionCategory::Media,
+                description: "Delete media files",
+            },
+            // Server management
+            PermissionSeed {
+                name: permissions::SERVER_READ_SETTINGS,
+                category: PermissionCategory::Server,
+                description: "View server configuration",
+            },
+            PermissionSeed {
+                name: permissions::SERVER_UPDATE_SETTINGS,
+                category: PermissionCategory::Server,
+                description: "Modify server configuration",
+            },
+            PermissionSeed {
+                name: permissions::SERVER_READ_LOGS,
+                category: PermissionCategory::Server,
+                description: "View server logs",
+            },
+            PermissionSeed {
+                name: permissions::SERVER_MANAGE_TASKS,
+                category: PermissionCategory::Server,
+                description: "Run maintenance tasks",
+            },
+            // Sync sessions
+            PermissionSeed {
+                name: permissions::SYNC_CREATE,
+                category: PermissionCategory::Sync,
+                description: "Create synchronized playback sessions",
+            },
+            PermissionSeed {
+                name: permissions::SYNC_JOIN,
+                category: PermissionCategory::Sync,
+                description: "Join synchronized playback sessions",
+            },
+            PermissionSeed {
+                name: permissions::SYNC_MANAGE,
+                category: PermissionCategory::Sync,
+                description: "Force-end any sync session",
+            },
+            // Development utilities (admin-only)
+            PermissionSeed {
+                name: "server:reset_database",
+                category: PermissionCategory::Server,
+                description: "Reset the database during development",
+            },
+            PermissionSeed {
+                name: "server:seed_database",
+                category: PermissionCategory::Server,
+                description: "Seed the database with development fixtures",
+            },
+        ];
+
+        use std::collections::HashMap;
+        let mut permission_ids = HashMap::new();
+
+        for perm in default_permissions.iter() {
+            let record = sqlx::query!(
+                r#"
+                INSERT INTO permissions (name, category, description)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (name) DO UPDATE
+                SET category = EXCLUDED.category,
+                    description = EXCLUDED.description
+                RETURNING id
+                "#,
+                perm.name,
+                perm.category.as_str(),
+                perm.description
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| {
+                AppError::internal(format!(
+                    "Failed to upsert permission '{}': {}",
+                    perm.name, e
+                ))
+            })?;
+
+            permission_ids.insert(perm.name, record.id);
+        }
+
+        // Admin receives every seeded permission
+        let admin_permission_entries: Vec<(&'static str, Uuid)> = permission_ids
+            .iter()
+            .map(|(&name, &id)| (name, id))
+            .collect();
+
+        for (perm_name, permission_id) in admin_permission_entries {
+            sqlx::query!(
+                r#"
+                INSERT INTO role_permissions (role_id, permission_id)
+                VALUES ($1, $2)
+                ON CONFLICT (role_id, permission_id) DO NOTHING
+                "#,
+                admin_role_id,
+                permission_id
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                AppError::internal(format!(
+                    "Failed to assign permission '{}' to admin role: {}",
+                    perm_name, e
+                ))
+            })?;
+        }
+
+        // Standard user defaults
+        let user_defaults = [
+            permissions::USERS_READ,
+            permissions::LIBRARIES_READ,
+            permissions::MEDIA_READ,
+            permissions::MEDIA_STREAM,
+            permissions::SYNC_CREATE,
+            permissions::SYNC_JOIN,
+        ];
+        for perm_name in user_defaults.iter() {
+            if let Some(permission_id) = permission_ids.get(perm_name).copied() {
+                sqlx::query!(
+                    r#"
+                    INSERT INTO role_permissions (role_id, permission_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT (role_id, permission_id) DO NOTHING
+                    "#,
+                    user_role_id,
+                    permission_id
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    AppError::internal(format!(
+                        "Failed to assign permission '{}' to user role: {}",
+                        perm_name, e
+                    ))
+                })?;
+            }
+        }
+
+        // Guest defaults
+        let guest_defaults = [
+            permissions::LIBRARIES_READ,
+            permissions::MEDIA_READ,
+            permissions::MEDIA_STREAM,
+        ];
+        for perm_name in guest_defaults.iter() {
+            if let Some(permission_id) = permission_ids.get(perm_name).copied() {
+                sqlx::query!(
+                    r#"
+                    INSERT INTO role_permissions (role_id, permission_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT (role_id, permission_id) DO NOTHING
+                    "#,
+                    guest_role_id,
+                    permission_id
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    AppError::internal(format!(
+                        "Failed to assign permission '{}' to guest role: {}",
+                        perm_name, e
+                    ))
+                })?;
+            }
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| AppError::internal(format!("Failed to finalize RBAC bootstrap: {}", e)))?;
+
+        Ok(())
     }
 
     /// Validate a password against requirements
@@ -216,7 +543,7 @@ impl<'a> UserService<'a> {
         let password_hash = Self::hash_password(&params.password)?;
 
         // Create user
-        let user_id = Uuid::new_v4();
+        let user_id = Uuid::now_v7();
         let user = User {
             id: user_id,
             username: params.username.to_lowercase(),

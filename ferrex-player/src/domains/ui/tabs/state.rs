@@ -11,7 +11,7 @@ use ferrex_core::{
     SortOrder,
 };
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 /// State for an individual tab
@@ -187,6 +187,9 @@ pub struct LibraryTabState {
     /// Cached server-provided positions into archived slice (movies only, Phase 1)
     pub cached_positions: Option<Vec<u32>>,
 
+    /// Cache of server-provided position sets keyed by filter specification hash
+    cached_filter_positions: HashMap<u64, Vec<u32>>,
+
     /// Cached mapping of the currently active filtered/sorted positions into archived slice indices
     filtered_indices: Option<Vec<usize>>,
 
@@ -261,6 +264,7 @@ impl LibraryTabState {
             grid_state,
             cached_index_ids: Vec::new(),
             cached_positions: None,
+            cached_filter_positions: HashMap::new(),
             filtered_indices: None,
             cached_media,
             needs_refresh: true,
@@ -276,8 +280,12 @@ impl LibraryTabState {
     }
 
     /// Apply server-provided sorted positions to reorder the current grid
-    pub fn apply_sorted_positions(&mut self, positions: &[u32]) {
+    pub fn apply_sorted_positions(&mut self, positions: &[u32], cache_key: Option<u64>) {
         self.cached_positions = Some(positions.to_vec());
+        if let Some(hash) = cache_key {
+            self.cached_filter_positions
+                .insert(hash, positions.to_vec());
+        }
 
         if !matches!(self.library_type, LibraryType::Movies) {
             self.filtered_indices = None;
@@ -331,8 +339,31 @@ impl LibraryTabState {
         self.filtered_indices = Some(filtered_indices);
         self.cached_index_ids = ids;
         self.grid_state.total_items = self.cached_index_ids.len();
+        self.constrain_scroll_after_update();
         self.grid_state.calculate_visible_range();
         self.needs_refresh = false;
+    }
+
+    fn constrain_scroll_after_update(&mut self) {
+        if self.grid_state.total_items == 0 || self.grid_state.columns == 0 {
+            self.grid_state.scroll_position = 0.0;
+            return;
+        }
+
+        let total_rows = self
+            .grid_state
+            .total_items
+            .div_ceil(self.grid_state.columns);
+        let content_height = total_rows as f32 * self.grid_state.row_height;
+        let max_scroll = if content_height > self.grid_state.viewport_height {
+            content_height - self.grid_state.viewport_height
+        } else {
+            0.0
+        };
+
+        if self.grid_state.scroll_position > max_scroll {
+            self.grid_state.scroll_position = max_scroll;
+        }
     }
 
     fn reconcile_positions<F>(
@@ -366,6 +397,7 @@ impl LibraryTabState {
         }
 
         self.cached_positions = None;
+        self.cached_filter_positions.clear();
         self.filtered_indices = None;
 
         if self.accessor.is_initialized() {
@@ -484,6 +516,10 @@ impl LibraryTabState {
     /// Mark this tab as needing refresh
     pub fn mark_needs_refresh(&mut self) {
         self.needs_refresh = true;
+    }
+
+    pub fn cached_positions_for_hash(&self, hash: u64) -> Option<&Vec<u32>> {
+        self.cached_filter_positions.get(&hash)
     }
 
     /// Update the grid state's scroll position

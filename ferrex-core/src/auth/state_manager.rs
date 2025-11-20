@@ -315,8 +315,8 @@ impl AuthStateManager {
     /// Extract user ID from state (helper)
     fn extract_user_id(
         &self,
-        states: &HashMap<Uuid, BoxedStateMachine>,
-        device_id: Uuid,
+        _states: &HashMap<Uuid, BoxedStateMachine>,
+        _device_id: Uuid,
     ) -> Option<Uuid> {
         // This would need to be implemented based on the specific state type
         // For now, return None
@@ -405,26 +405,17 @@ fn get_state_type_name(state: &dyn std::any::Any) -> String {
 }
 
 /// Serialize a state machine to persistent format
-fn serialize_state_machine(state: &dyn std::any::Any) -> Result<SerializedAuthState> {
+fn serialize_state_machine(_state: &dyn std::any::Any) -> Result<SerializedAuthState> {
     // This would need to check each state type and serialize appropriately
     // For now, return a placeholder
     Ok(SerializedAuthState::Unauthenticated)
 }
 
 /// Reconstruct a state machine from serialized data
-fn reconstruct_state_machine(data: SerializedAuthState) -> Result<BoxedStateMachine> {
+fn reconstruct_state_machine(_data: SerializedAuthState) -> Result<BoxedStateMachine> {
     // This would need to reconstruct the appropriate state machine type
     // For now, return a default unauthenticated state
     Ok(Box::new(AuthStateMachine::<Unauthenticated, 3, 300>::new()))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_state_manager_creation() {
-        // This would need a test database connection
-        // For now, we'll skip the actual test
-    }
-}
+// TODO: Test auth state machine

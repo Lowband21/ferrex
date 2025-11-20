@@ -193,6 +193,7 @@ impl<'a> TmdbMetadataRepository<'a> {
         let tmdb_id: Option<i64> = row.try_get("tmdb_id")?;
         let title: String = row.try_get("title")?;
         let theme_color: Option<String> = row.try_get("theme_color")?;
+        let discovered_at: chrono::DateTime<chrono::Utc> = row.try_get("discovered_at")?;
         let created_at: chrono::DateTime<chrono::Utc> = row.try_get("created_at")?;
 
         let details = load_series_details(self.db, series_id).await?;
@@ -208,6 +209,7 @@ impl<'a> TmdbMetadataRepository<'a> {
                 .map(|d| MediaDetailsOption::Details(TmdbDetails::Series(d)))
                 .unwrap_or_else(|| MediaDetailsOption::Endpoint(format!("/series/{}", series_id))),
             endpoint: SeriesURL::from_string(format!("/series/{}", series_id)),
+            discovered_at,
             created_at,
             theme_color,
         })
@@ -219,6 +221,7 @@ impl<'a> TmdbMetadataRepository<'a> {
         let library_id = row.try_get::<Uuid, _>("library_id")?;
         let season_number = row.try_get::<i16, _>("season_number")? as u8;
         let tmdb_series_id: i64 = row.try_get("tmdb_series_id")?;
+        let discovered_at: chrono::DateTime<chrono::Utc> = row.try_get("discovered_at")?;
         let created_at: chrono::DateTime<chrono::Utc> = row.try_get("created_at")?;
         let theme_color = row
             .try_get::<Option<String>, _>("theme_color")
@@ -237,6 +240,7 @@ impl<'a> TmdbMetadataRepository<'a> {
             tmdb_series_id: tmdb_series_id as u64,
             details: details_option,
             endpoint: SeasonURL::from_string(format!("/media/{}", season_id)),
+            discovered_at,
             created_at,
             theme_color,
         })
@@ -249,6 +253,13 @@ impl<'a> TmdbMetadataRepository<'a> {
         let episode_number = row.try_get::<i16, _>("episode_number")? as u8;
         let season_number = row.try_get::<i16, _>("season_number")? as u8;
         let tmdb_series_id: i64 = row.try_get("tmdb_series_id")?;
+        // Episode-level timestamps (distinct from media file timestamps)
+        let discovered_at: chrono::DateTime<chrono::Utc> = row
+            .try_get("episode_discovered_at")
+            .unwrap_or_else(|_| chrono::Utc::now());
+        let created_at: chrono::DateTime<chrono::Utc> = row
+            .try_get("episode_created_at")
+            .unwrap_or_else(|_| chrono::Utc::now());
 
         let media_file = hydrate_media_file_row(&row)?;
 
@@ -268,6 +279,8 @@ impl<'a> TmdbMetadataRepository<'a> {
             details: details_option,
             endpoint: EpisodeURL::from_string(format!("/stream/{}", media_file.id)),
             file: media_file,
+            discovered_at,
+            created_at,
         })
     }
 }
@@ -899,7 +912,7 @@ async fn sync_movie_child_tables(
         sqlx::query!(
             r#"INSERT INTO movie_alternative_titles (movie_id, iso_3166_1, title, title_type)
                VALUES ($1, $2, $3, $4)
-               ON CONFLICT ON CONSTRAINT movie_alternative_titles_pkey DO NOTHING"#,
+               ON CONFLICT DO NOTHING"#,
             movie_id,
             iso.as_deref(),
             &title_value,
@@ -2204,6 +2217,7 @@ fn hydrate_media_file_row(row: &PgRow) -> Result<MediaFile> {
         path: std::path::PathBuf::from(row.try_get::<String, _>("file_path")?),
         filename: row.try_get("filename")?,
         size: row.try_get::<i64, _>("file_size")? as u64,
+        discovered_at: row.try_get("file_discovered_at")?,
         created_at: row.try_get("file_created_at")?,
         media_file_metadata: parsed,
         library_id,

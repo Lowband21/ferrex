@@ -153,7 +153,9 @@ impl QueryComplexityGuard {
 
         // Sort complexity
         score += match query.sort.primary {
-            crate::query::SortBy::Title | crate::query::SortBy::DateAdded => 1,
+            crate::query::SortBy::Title
+            | crate::query::SortBy::DateAdded
+            | crate::query::SortBy::CreatedAt => 1,
             crate::query::SortBy::ReleaseDate | crate::query::SortBy::Rating => 2,
             crate::query::SortBy::Runtime => 2,
             crate::query::SortBy::LastWatched | crate::query::SortBy::WatchProgress => 5,
@@ -297,7 +299,7 @@ mod tests {
                 offset: 5000,
                 limit: 100,
             },
-            user_context: Some(Uuid::new_v4()),
+            user_context: Some(Uuid::now_v7()),
         };
 
         assert!(guard.check_query(&query).is_err());

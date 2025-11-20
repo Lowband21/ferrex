@@ -108,7 +108,7 @@ impl AuthService {
             return Err(AuthError::UserAlreadyExists(username));
         }
 
-        let user_id = Uuid::new_v4();
+        let user_id = Uuid::now_v7();
         let _is_first_user = users.is_empty();
 
         let user = User {
@@ -145,7 +145,7 @@ impl AuthService {
         if is_first_user {
             // First user gets admin role
             roles.push(Role {
-                id: Uuid::new_v4(),
+                id: Uuid::now_v7(),
                 name: "admin".to_string(),
                 description: Some("Administrator role".to_string()),
                 is_system: true,
@@ -448,9 +448,9 @@ impl AuthService {
 
         // Create a device registration with 30-day expiry
         let registration = DeviceRegistration {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             user_id,
-            device_id: Uuid::new_v4(), // For now, create new UUID
+            device_id: Uuid::now_v7(), // For now, create new UUID
             device_name: device_id.clone(),
             platform: Platform::Unknown,
             app_version: "1.0.0".to_string(),

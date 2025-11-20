@@ -8,6 +8,7 @@ use crate::{
             views::carousel::CarouselMessage,
         },
     },
+    infrastructure::api_types::LibraryType,
     state_refactored::State,
 };
 use ferrex_core::{EpisodeLike, Media, MediaIDLike, MediaLike, MediaType, MovieLike, SortOrder};
@@ -164,15 +165,23 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
         ui::Message::SetSortBy(sort_by) => {
+            // Update UI sort state and immediately refresh the active tab
+            // to keep the grid populated while filtered indices are fetched.
             state.domains.ui.state.sort_by = sort_by;
             state
                 .tab_manager
                 .set_active_sort(sort_by, state.domains.ui.state.sort_order);
+
+            // Ensure the grid reflects the new sort right away
+            state.tab_manager.refresh_active_tab();
+
+            // Then request server-provided filtered indices (movies-only) asynchronously
             DomainUpdateResult::task(Task::done(DomainMessage::Ui(
                 ui::Message::RequestFilteredPositions,
             )))
         }
         ui::Message::ToggleSortOrder => {
+            // Toggle sort order and refresh the active tab immediately so the grid stays visible.
             state.domains.ui.state.sort_order = match state.domains.ui.state.sort_order {
                 SortOrder::Ascending => SortOrder::Descending,
                 SortOrder::Descending => SortOrder::Ascending,
@@ -181,35 +190,59 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 state.domains.ui.state.sort_by,
                 state.domains.ui.state.sort_order,
             );
+
+            // Keep the current grid populated while we fetch filtered indices
+            state.tab_manager.refresh_active_tab();
+
+            // Then kick off filtered indices request (movies-only)
             DomainUpdateResult::task(Task::done(DomainMessage::Ui(
                 ui::Message::RequestFilteredPositions,
             )))
         }
-        ui::Message::ApplyFilteredPositions(library_id, positions) => {
+        ui::Message::ApplyFilteredPositions(library_id, cache_key, positions) => {
+            // Apply server-provided positions directly to the active library tab.
+            // Do NOT call refresh_active_tab() here; it would clear the applied positions
+            // and briefly reset the grid, causing it to appear empty.
             if let Some(tab) = state
                 .tab_manager
                 .get_tab_mut(crate::domains::ui::tabs::TabId::Library(library_id))
                 && let crate::domains::ui::tabs::TabState::Library(lib_state) = tab
             {
-                lib_state.apply_sorted_positions(&positions);
+                lib_state.apply_sorted_positions(&positions, Some(cache_key));
             }
-            state.tab_manager.refresh_active_tab();
             DomainUpdateResult::task(Task::none())
         }
         ui::Message::RequestFilteredPositions => {
             // Build a FilterIndicesRequest from current UI filters (Phase 1: movies only)
             use ferrex_core::query::{
-                filtering::{FilterRequestParams, build_filter_indices_request},
+                filtering::{FilterRequestParams, build_filter_indices_request, hash_filter_spec},
                 types::MediaTypeFilter,
             };
             let api = state.api_service.clone();
             let active_lib = state.tab_manager.active_tab_id().library_id();
             let active_type = state.tab_manager.active_tab_type().cloned();
             if let (Some(lib_id), Some(lib_type)) = (active_lib, active_type) {
-                if matches!(
-                    lib_type,
-                    crate::infrastructure::api_types::LibraryType::Movies
-                ) {
+                if matches!(lib_type, LibraryType::Movies) {
+                    // If no filters are active and search is empty, skip the server call.
+                    // Local repo already applied the new sort via refresh_active_tab().
+                    let has_active_filters = {
+                        let ui = &state.domains.ui.state;
+                        let has_genres = !ui.selected_genres.is_empty();
+                        let has_decade = ui.selected_decade.is_some();
+                        let has_resolution = ui.selected_resolution
+                            != ferrex_core::UiResolution::Any;
+                        let has_watch =
+                            ui.selected_watch_status != ferrex_core::UiWatchStatus::Any;
+                        let has_search = !ui.search_query.trim().is_empty();
+                        has_genres || has_decade || has_resolution || has_watch || has_search
+                    };
+                    if !has_active_filters {
+                        log::debug!(
+                            "RequestFilteredPositions: no active filters; using local sort only"
+                        );
+                        return DomainUpdateResult::task(Task::none());
+                    }
+
                     // Use core sort directly
                     let core_sort = state.domains.ui.state.sort_by;
                     let core_order = state.domains.ui.state.sort_order;
@@ -243,12 +276,33 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                         order: core_order,
                     };
                     let spec = build_filter_indices_request(params);
+                    let spec_hash = hash_filter_spec(&spec);
+                    let spec_for_request = spec.clone();
+
+                    if let crate::domains::ui::tabs::TabState::Library(lib_state) =
+                        state.tab_manager.get_active_tab()
+                    {
+                        if let Some(cached) = lib_state.cached_positions_for_hash(spec_hash) {
+                            let cached_positions = cached.clone();
+                            return DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                                ui::Message::ApplySortedPositions(
+                                    lib_id,
+                                    Some(spec_hash),
+                                    cached_positions,
+                                ),
+                            )));
+                        }
+                    }
+
                     let task = Task::perform(
                         async move {
-                            match api.fetch_filtered_indices(lib_id.as_uuid(), &spec).await {
-                                Ok(positions) => {
-                                    ui::Message::ApplyFilteredPositions(lib_id, positions)
-                                }
+                            match api
+                                .fetch_filtered_indices(lib_id.as_uuid(), &spec_for_request)
+                                .await
+                            {
+                                Ok(positions) => ui::Message::ApplyFilteredPositions(
+                                    lib_id, spec_hash, positions,
+                                ),
                                 Err(e) => ui::Message::SortedIndexFailed(e.to_string()),
                             }
                         },
@@ -320,7 +374,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             state.domains.ui.state.view = ViewState::AdminDashboard;
             DomainUpdateResult::task(Task::none())
         }
-        ui::Message::ApplySortedPositions(library_id, positions) => {
+        ui::Message::ApplySortedPositions(library_id, cache_key, positions) => {
             // Update the active Library tab: apply positions -> reorder ID index and refresh
             if let Some(tab) = state
                 .tab_manager
@@ -337,13 +391,15 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                     first,
                     last
                 );
-                lib_state.apply_sorted_positions(&positions);
+                lib_state.apply_sorted_positions(&positions, cache_key);
             }
-            state.tab_manager.refresh_active_tab();
+            // Do not refresh here; keep applied positions intact.
             DomainUpdateResult::task(Task::none())
         }
         ui::Message::SortedIndexFailed(err) => {
             log::warn!("Sorted index fetch failed: {}", err);
+            state.domains.ui.state.error_message =
+                Some(format!("Unable to apply sort/filter: {}", err));
             DomainUpdateResult::task(Task::none())
         }
         ui::Message::HideAdminDashboard => {

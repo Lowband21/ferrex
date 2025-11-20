@@ -110,7 +110,7 @@ impl AuthState {
                         (new_state, TransitionResult::Success)
                     }
                     _ => {
-                        let device_id = Uuid::new_v4();
+                        let device_id = Uuid::now_v7();
                         let new_state = AuthState::AwaitingPassword {
                             user_id: *user_id,
                             device_id,
@@ -122,7 +122,10 @@ impl AuthState {
 
             // From AwaitingPassword
             (
-                AuthState::AwaitingPassword { user_id, device_id },
+                AuthState::AwaitingPassword {
+                    user_id,
+                    device_id: _device_id,
+                },
                 AuthEvent::PasswordAuthSuccess {
                     session_token,
                     device_id: auth_device_id,
@@ -275,8 +278,8 @@ mod tests {
     #[test]
     fn test_basic_password_flow() {
         let mut state = AuthState::Unauthenticated;
-        let user_id = Uuid::new_v4();
-        let device_id = Uuid::new_v4();
+        let user_id = Uuid::now_v7();
+        let device_id = Uuid::now_v7();
 
         // Select user
         // TODO: Replace with proper domain transition
@@ -310,12 +313,12 @@ mod tests {
     #[test]
     fn test_pin_flow() {
         let mut state = AuthState::Unauthenticated;
-        let user_id = Uuid::new_v4();
-        let device_id = Uuid::new_v4();
+        let user_id = Uuid::now_v7();
+        let device_id = Uuid::now_v7();
 
         // Create a device registration with PIN
         let mut device_reg = DeviceRegistration {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             user_id,
             device_id,
             device_name: "Test Device".to_string(),

@@ -131,7 +131,7 @@ pub async fn create_user(
 
     // Placeholder response
     let user_response = UserResponse {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         username: "placeholder".to_string(),
         display_name: "Placeholder User".to_string(),
         email: None,
@@ -174,7 +174,7 @@ pub async fn update_user(
 
     // Placeholder response
     let user_response = UserResponse {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         username: "placeholder".to_string(),
         display_name: "Updated User".to_string(),
         email: None,

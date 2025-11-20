@@ -30,7 +30,7 @@ impl FixtureGenerator {
 
     /// Generate a unique ID
     pub fn unique_id(&mut self) -> Uuid {
-        Uuid::new_v4()
+        Uuid::now_v7()
     }
 
     /// Generate a unique string with a prefix
@@ -253,7 +253,7 @@ pub mod examples {
 
         fn typical() -> Self {
             Self {
-                id: Uuid::new_v4(),
+                id: Uuid::now_v7(),
                 name: "John Doe".to_string(),
                 email: "john.doe@example.com".to_string(),
                 is_admin: false,
@@ -263,7 +263,7 @@ pub mod examples {
 
         fn complex() -> Self {
             Self {
-                id: Uuid::new_v4(),
+                id: Uuid::now_v7(),
                 name: "Admin User With Long Name".to_string(),
                 email: "admin.user.with.long.email@subdomain.example.com".to_string(),
                 is_admin: true,

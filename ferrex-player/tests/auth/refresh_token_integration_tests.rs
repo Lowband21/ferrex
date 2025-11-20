@@ -18,7 +18,7 @@ use std::path::PathBuf;
 
 fn create_test_user() -> User {
     User {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         username: "test_user".to_string(),
         display_name: "Test User".to_string(),
         avatar_url: None,
@@ -33,7 +33,7 @@ fn create_test_user() -> User {
 
 fn create_test_token(expires_in: i64, refresh_token: String) -> AuthToken {
     AuthToken {
-        access_token: format!("access_token_{}", Uuid::new_v4()),
+        access_token: format!("access_token_{}", Uuid::now_v7()),
         refresh_token,
         expires_in: expires_in.max(0) as u32, // Convert to u32, ensuring non-negative
     }

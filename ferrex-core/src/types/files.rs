@@ -16,6 +16,8 @@ pub struct MediaFile {
     pub filename: String,
     pub size: u64,
     #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
+    pub discovered_at: chrono::DateTime<chrono::Utc>,
+    #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub media_file_metadata: Option<MediaFileMetadata>,
     pub library_id: LibraryID,
@@ -24,10 +26,11 @@ pub struct MediaFile {
 impl Default for MediaFile {
     fn default() -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             path: PathBuf::new(),
             filename: String::new(),
             size: 0,
+            discovered_at: chrono::Utc::now(),
             created_at: chrono::Utc::now(),
             media_file_metadata: None,
             library_id: LibraryID(Uuid::nil()), // Use nil UUID for default
@@ -164,10 +167,13 @@ impl MediaFile {
             });
 
         Ok(Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             path,
             filename,
             size: metadata.len(),
+            // discovered_at represents when we discovered the file in the library (row creation time)
+            // DB provides a default NOW(); set it here for in-memory consistency
+            discovered_at: chrono::Utc::now(),
             created_at,
             media_file_metadata: None,
             library_id,

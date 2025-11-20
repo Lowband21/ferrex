@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn requests_ignore_priority_for_identity() {
-        let media_id = Uuid::new_v4();
+        let media_id = Uuid::now_v7();
         let base = ImageRequest::new(media_id, ImageSize::Poster, ImageType::Movie);
         let visible = base.clone().with_priority(Priority::Visible);
         let preload = base.clone().with_priority(Priority::Preload);
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn image_index_contributes_to_identity() {
-        let media_id = Uuid::new_v4();
+        let media_id = Uuid::now_v7();
         let base = ImageRequest::new(media_id, ImageSize::Poster, ImageType::Movie);
         let first = base.clone().with_index(0);
         let second = base.clone().with_index(1);
@@ -268,14 +268,14 @@ mod tests {
     #[test]
     #[should_panic(expected = "Invalid image size")]
     fn invalid_combinations_panic() {
-        let media_id = Uuid::new_v4();
+        let media_id = Uuid::now_v7();
         // Movie media cannot request a profile-sized image.
         let _ = ImageRequest::new(media_id, ImageSize::Profile, ImageType::Movie);
     }
 
     #[test]
     fn typed_constructors_produce_expected_mappings() {
-        let media_id = Uuid::new_v4();
+        let media_id = Uuid::now_v7();
 
         let poster = ImageRequest::poster(media_id, PosterKind::Movie, PosterSize::Original);
         assert_eq!(poster.image_type, ImageType::Movie);

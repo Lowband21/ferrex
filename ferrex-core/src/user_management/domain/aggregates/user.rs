@@ -38,7 +38,7 @@ impl UserAggregate {
         let now = Utc::now();
 
         Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             username,
             display_name,
             role,

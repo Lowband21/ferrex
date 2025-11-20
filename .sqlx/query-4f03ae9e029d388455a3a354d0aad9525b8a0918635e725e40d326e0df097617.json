@@ -1,0 +1,51 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            u.id,\n            u.username,\n            u.display_name,\n            u.avatar_url,\n            EXISTS(\n                SELECT 1 FROM auth_device_sessions ads\n                WHERE ads.user_id = u.id\n                AND ads.device_fingerprint = $1\n                AND ads.pin_hash IS NOT NULL\n            ) as has_pin_on_device\n        FROM users u\n        -- No soft delete check needed\n        ORDER BY u.username\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": {
+          "Custom": {
+            "name": "citext",
+            "kind": "Simple"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "avatar_url",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "has_pin_on_device",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "4f03ae9e029d388455a3a354d0aad9525b8a0918635e725e40d326e0df097617"
+}

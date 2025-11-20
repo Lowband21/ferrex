@@ -1050,7 +1050,7 @@ impl AuthManager {
         }
 
         // Create new device identity
-        let id = Uuid::new_v4();
+        let id = Uuid::now_v7();
         let fingerprint = generate_hardware_fingerprint().await.map_err(|e| {
             AuthError::Storage(StorageError::InitFailed(format!(
                 "Failed to get hardware fingerprint: {}",
@@ -1266,7 +1266,7 @@ impl AuthManager {
             .get_or_create_device_id()
             .await
             .map(|id| (id, ()))
-            .unwrap_or((Uuid::new_v4(), ()));
+            .unwrap_or((Uuid::now_v7(), ()));
 
         let device_info = DeviceInfo {
             device_id,

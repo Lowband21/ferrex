@@ -431,7 +431,7 @@ mod tests {
                 expires_in: 3600,
             },
             user: User {
-                id: Uuid::new_v4(),
+                id: Uuid::now_v7(),
                 username: "testuser".to_string(),
                 display_name: "Test User".to_string(),
                 avatar_url: None,

@@ -122,6 +122,7 @@ impl ApiClientAdapter {
         let sort_str = match sort {
             SortBy::Title => "title",
             SortBy::DateAdded => "date_added",
+            SortBy::CreatedAt => "created_at",
             SortBy::ReleaseDate => "release_date",
             SortBy::LastWatched => "last_watched",
             SortBy::WatchProgress => "watch_progress",

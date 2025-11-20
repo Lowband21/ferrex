@@ -42,7 +42,7 @@ impl fmt::Debug for Connection {
 impl Connection {
     pub fn new(user: User, sender: mpsc::Sender<SyncMessage>) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             user: Arc::new(user),
             room_code: Arc::new(RwLock::new(None)),
             sender,

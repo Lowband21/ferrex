@@ -82,7 +82,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, Message> {
     let mut has_row_2_content = false;
 
     // Library Management section (only if user can manage libraries)
-    if permissions.can_view_library_settings() {
+    if permissions.can_view_admin_dashboard() {
         sections_row_1 = sections_row_1.push(
             container(
                 column![

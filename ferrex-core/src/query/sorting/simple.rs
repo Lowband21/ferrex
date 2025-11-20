@@ -18,6 +18,7 @@ pub fn compare_media(
             Some(a_title.cmp(&b_title))
         }
         SortBy::DateAdded => Some(get_date_added(a).cmp(&get_date_added(b))),
+        SortBy::CreatedAt => Some(get_created_at(a).cmp(&get_created_at(b))),
         SortBy::ReleaseDate => Some(compare_optional(get_release_date(a), get_release_date(b))),
         SortBy::Rating => Some(compare_optional_partial(get_rating(a), get_rating(b))),
         SortBy::Runtime => Some(compare_optional(get_runtime(a), get_runtime(b))),
@@ -63,10 +64,19 @@ fn get_title(media: &Media) -> &str {
 
 fn get_date_added(media: &Media) -> DateTime<Utc> {
     match media {
+        Media::Movie(m) => m.file.discovered_at,
+        Media::Series(s) => s.discovered_at,
+        Media::Season(s) => s.discovered_at,
+        Media::Episode(e) => e.discovered_at,
+    }
+}
+
+fn get_created_at(media: &Media) -> DateTime<Utc> {
+    match media {
         Media::Movie(m) => m.file.created_at,
         Media::Series(s) => s.created_at,
         Media::Season(s) => s.created_at,
-        Media::Episode(e) => e.file.created_at,
+        Media::Episode(e) => e.created_at,
     }
 }
 

@@ -397,7 +397,7 @@ mod tests {
     fn test_user_authentication_flow() {
         let password_hash = hash_password("password123");
         let mut auth =
-            UserAuthentication::new(Uuid::new_v4(), "testuser".to_string(), password_hash, 5);
+            UserAuthentication::new(Uuid::now_v7(), "testuser".to_string(), password_hash, 5);
 
         // Test password authentication
         auth.authenticate_password("password123").unwrap();

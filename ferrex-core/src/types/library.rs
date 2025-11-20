@@ -10,7 +10,6 @@ use crate::types::Media;
 use super::{ArchivedLibraryID, ArchivedMedia, ArchivedMovieReference, LibraryID};
 
 /// Read-only operations for library-like types
-
 pub trait LibraryLike {
     fn needs_scan(&self) -> bool;
     fn get_id(&self) -> LibraryID;

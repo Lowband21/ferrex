@@ -96,6 +96,11 @@ impl IndexManager {
                     let b_date = Self::get_date_added(b.1);
                     a_date.cmp(&b_date)
                 }
+                SortBy::CreatedAt => {
+                    let a_date = Self::get_created_at(a.1);
+                    let b_date = Self::get_created_at(b.1);
+                    a_date.cmp(&b_date)
+                }
                 SortBy::FileSize => {
                     let a_size = Self::get_file_size(a.1);
                     let b_size = Self::get_file_size(b.1);
@@ -181,10 +186,19 @@ impl IndexManager {
 
     fn get_date_added(media: &Media) -> chrono::DateTime<chrono::Utc> {
         match media {
+            Media::Movie(m) => m.file.discovered_at,
+            Media::Series(s) => s.discovered_at,
+            Media::Season(s) => s.discovered_at,
+            Media::Episode(e) => e.discovered_at,
+        }
+    }
+
+    fn get_created_at(media: &Media) -> chrono::DateTime<chrono::Utc> {
+        match media {
             Media::Movie(m) => m.file.created_at,
             Media::Series(s) => s.created_at,
             Media::Season(s) => s.created_at,
-            Media::Episode(e) => e.file.created_at,
+            Media::Episode(e) => e.created_at,
         }
     }
 

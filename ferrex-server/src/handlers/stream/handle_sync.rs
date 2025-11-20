@@ -25,7 +25,7 @@ pub async fn create_sync_session_handler(
 
     // Create session
     let session = SyncSession {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         room_code: room_code.clone(),
         host_id: user.id,
         media_id: req.media_id.to_uuid(),

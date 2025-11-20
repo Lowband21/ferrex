@@ -245,7 +245,7 @@ mod tests {
     fn sample_progress_event() -> ScanProgressEvent {
         ScanProgressEvent {
             version: "1.0".to_string(),
-            scan_id: Uuid::new_v4(),
+            scan_id: Uuid::now_v7(),
             library_id: LibraryID::new(),
             status: "running".to_string(),
             completed_items: 10,
@@ -258,7 +258,7 @@ mod tests {
                 analyze: 2,
                 index: 3,
             },
-            correlation_id: Uuid::new_v4(),
+            correlation_id: Uuid::now_v7(),
             idempotency_key: "idem".to_string(),
             emitted_at: Utc::now(),
             retrying_items: Some(1),

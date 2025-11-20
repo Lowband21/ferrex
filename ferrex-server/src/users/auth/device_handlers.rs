@@ -57,7 +57,7 @@ fn extract_device_info(headers: &HeaderMap, body_device_info: Option<DeviceInfo>
     } else {
         // Generate device info from headers
         DeviceInfo {
-            device_id: Uuid::new_v4(),
+            device_id: Uuid::now_v7(),
             device_name: format!("{} Device", Platform::from_user_agent(user_agent).as_ref()),
             platform: Platform::from_user_agent(user_agent),
             app_version: "1.0.0".to_string(),
@@ -137,7 +137,7 @@ pub async fn device_login(
 
     // Log auth event
     let event = AuthEvent {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         user_id: Some(user.id),
         device_id: None,
         event_type: if password_valid {
@@ -260,7 +260,7 @@ pub async fn device_login(
         };
 
         let device = AuthenticatedDevice {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             fingerprint: fingerprint.clone(),
             name: device_info.device_name.clone(),
             platform: device_info.platform.clone(),
@@ -286,7 +286,7 @@ pub async fn device_login(
 
         // Log device registration
         let event = AuthEvent {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             user_id: Some(user.id),
             device_id: Some(device.id),
             event_type: AuthEventType::DeviceRegistered,
@@ -489,7 +489,7 @@ pub async fn pin_login(
 
     // Log auth event
     let event = AuthEvent {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         user_id: Some(request.user_id),
         device_id: Some(request.device_id),
         event_type: if pin_valid {
@@ -600,7 +600,7 @@ pub async fn set_device_pin(
 
     // Log event
     let event = AuthEvent {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         user_id: Some(user.id),
         device_id: Some(request.device_id),
         event_type: AuthEventType::PinSet,
@@ -791,7 +791,7 @@ pub async fn revoke_device(
 
     // Log event
     let event = AuthEvent {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         user_id: Some(user.id),
         device_id: Some(request.device_id),
         event_type: AuthEventType::DeviceRevoked,
@@ -869,7 +869,7 @@ pub async fn change_device_pin(
 
     // Log event
     let event = AuthEvent {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         user_id: Some(user.id),
         device_id: Some(device_id),
         event_type: AuthEventType::PinSet,

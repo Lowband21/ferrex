@@ -253,7 +253,7 @@ mod tests {
         permissions.insert("users:read".to_string(), true);
 
         let user_perms = UserPermissions {
-            user_id: Uuid::new_v4(),
+            user_id: Uuid::now_v7(),
             roles: vec![],
             permissions,
             permission_details: None,

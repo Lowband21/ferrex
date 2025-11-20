@@ -62,6 +62,7 @@ impl Default for SortCriteria {
 pub enum SortBy {
     Title,
     DateAdded,
+    CreatedAt,
     ReleaseDate,
     LastWatched,   // Requires user context
     WatchProgress, // Requires user context

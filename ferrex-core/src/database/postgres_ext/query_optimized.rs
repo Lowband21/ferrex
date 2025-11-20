@@ -1,7 +1,7 @@
 use crate::{
     EpisodeID, EpisodeNumber, EpisodeURL, LibraryID, MediaDetailsOption, MediaError, MediaFile,
     MediaIDLike, MovieID, MovieTitle, MovieURL, Result, SeasonID, SeasonNumber, SeasonURL,
-    SeriesID, SeriesTitle, SeriesURL, TmdbDetails, UrlLike,
+    SeriesID, SeriesTitle, SeriesURL, UrlLike,
     api_types::{RATING_DECIMAL_SCALE, RatingValue},
     database::{postgres::PostgresDatabase, traits::MediaDatabaseTrait},
     query::*,
@@ -26,7 +26,7 @@ impl PostgresDatabase {
         }
 
         // Build the main SQL query
-        let mut results = match query.filters.media_type {
+        let results = match query.filters.media_type {
             Some(MediaTypeFilter::Movie) => self.query_movies_optimized(query).await?,
             Some(MediaTypeFilter::Series) => self.query_tv_shows_optimized(query).await?,
             Some(MediaTypeFilter::Season) | Some(MediaTypeFilter::Episode) => {
@@ -34,17 +34,14 @@ impl PostgresDatabase {
                 self.query_tv_shows_optimized(query).await?
             }
             None => {
-                // Query both movies and TV shows
-                let mut combined = self.query_movies_optimized(query).await?;
-                combined.extend(self.query_tv_shows_optimized(query).await?);
-                combined
+                if query.search.is_some() {
+                    self.query_multi_type_search(query).await?
+                } else {
+                    // Default to movie listings when no media type is provided
+                    self.query_movies_optimized(query).await?
+                }
             }
         };
-
-        // Apply cross-media-type sorting if needed
-        if query.filters.media_type.is_none() {
-            self.sort_combined_results(&mut results, &query.sort);
-        }
 
         Ok(results)
     }
@@ -61,6 +58,7 @@ impl PostgresDatabase {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
+                mf.discovered_at AS file_discovered_at,
                 mf.created_at AS file_created_at,
                 mf.technical_metadata,
                 mf.library_id,
@@ -165,6 +163,7 @@ impl PostgresDatabase {
                     sr.tmdb_id,
                     sr.title,
                     sr.theme_color,
+                    sr.discovered_at,
                     sr.created_at,
                     sm.first_air_date,
                     sm.vote_average,
@@ -186,7 +185,7 @@ impl PostgresDatabase {
         // Add genre filter
         if !query.filters.genres.is_empty() {
             sql_builder.push(
-                " AND EXISTS (SELECT 1 FROM series_genres sg WHERE sg.series_id = sd.id AND sg.name = ANY("
+                " AND EXISTS (SELECT 1 FROM series_genres sg WHERE sg.series_id = sr.id AND sg.name = ANY("
             );
             sql_builder.push_bind(&query.filters.genres);
             sql_builder.push("))");
@@ -195,7 +194,7 @@ impl PostgresDatabase {
         // Add year range filter
         if let Some(range) = &query.filters.year_range {
             sql_builder.push(
-                " AND sd.first_air_date IS NOT NULL AND EXTRACT(YEAR FROM sd.first_air_date)::INT BETWEEN "
+                " AND sm.first_air_date IS NOT NULL AND EXTRACT(YEAR FROM sm.first_air_date)::INT BETWEEN "
             );
             sql_builder.push_bind(range.min as i32);
             sql_builder.push(" AND ");
@@ -210,6 +209,10 @@ impl PostgresDatabase {
             sql_builder.push_bind(rating_bound(range.max));
         }
 
+        if let Some(search) = &query.search {
+            self.add_series_search_clause(&mut sql_builder, search);
+        }
+
         sql_builder.push(
             r#"
             )
@@ -219,6 +222,7 @@ impl PostgresDatabase {
                 sd.tmdb_id AS series_tmdb_id,
                 sd.title AS series_title,
                 sd.theme_color AS series_theme_color,
+                sd.discovered_at AS series_discovered_at,
                 sd.created_at AS series_created_at,
                 sd.first_air_date AS series_first_air_date,
                 sd.vote_average AS series_vote_average,
@@ -226,6 +230,8 @@ impl PostgresDatabase {
                 sd.overview AS series_overview,
                 sn.id AS season_id,
                 sn.season_number,
+                sn.discovered_at AS season_discovered_at,
+                sn.created_at AS season_created_at,
                 ep.id AS episode_id,
                 ep.season_number AS ep_season,
                 ep.episode_number,
@@ -233,6 +239,7 @@ impl PostgresDatabase {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
+                mf.discovered_at AS file_discovered_at,
                 mf.created_at AS file_created_at,
                 mf.library_id AS file_library_id
             FROM series_data sd
@@ -273,6 +280,82 @@ impl PostgresDatabase {
         let end = (start + query.pagination.limit).min(results.len());
 
         Ok(results[start..end].to_vec())
+    }
+
+    async fn query_multi_type_search(&self, query: &MediaQuery) -> Result<Vec<MediaWithStatus>> {
+        let fetch_limit = query
+            .pagination
+            .offset
+            .saturating_add(query.pagination.limit);
+
+        if fetch_limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut base_query = query.clone();
+        base_query.pagination.offset = 0;
+        base_query.pagination.limit = fetch_limit;
+
+        let mut movie_query = base_query.clone();
+        movie_query.filters.media_type = Some(MediaTypeFilter::Movie);
+
+        let mut series_query = base_query;
+        series_query.filters.media_type = Some(MediaTypeFilter::Series);
+
+        let movies = self.query_movies_optimized(&movie_query).await?;
+        let series = self.query_tv_shows_optimized(&series_query).await?;
+
+        let mut movie_iter = movies.into_iter();
+        let mut series_iter = series.into_iter();
+        let mut combined = Vec::with_capacity(fetch_limit);
+
+        loop {
+            let mut added = false;
+
+            if let Some(movie) = movie_iter.next() {
+                combined.push(movie);
+                added = true;
+            }
+
+            if combined.len() >= fetch_limit {
+                break;
+            }
+
+            if let Some(series_item) = series_iter.next() {
+                combined.push(series_item);
+                added = true;
+            }
+
+            if combined.len() >= fetch_limit {
+                break;
+            }
+
+            if !added {
+                break;
+            }
+        }
+
+        if combined.len() < fetch_limit {
+            combined.extend(movie_iter);
+            if combined.len() < fetch_limit {
+                combined.extend(series_iter);
+            }
+        }
+
+        if combined.len() > fetch_limit {
+            combined.truncate(fetch_limit);
+        }
+
+        let skip = query.pagination.offset.min(combined.len());
+        if skip > 0 {
+            let _ = combined.drain(0..skip);
+        }
+
+        if combined.len() > query.pagination.limit {
+            combined.truncate(query.pagination.limit);
+        }
+
+        Ok(combined)
     }
 
     async fn query_media_by_watch_status(
@@ -538,11 +621,12 @@ impl PostgresDatabase {
 
         let (field, null_position) = match sort.primary {
             SortBy::Title => ("LOWER(mr.title)", "LAST"),
-            SortBy::DateAdded => ("mf.created_at", "LAST"),
+            SortBy::DateAdded => ("mf.discovered_at", "LAST"),
+            SortBy::CreatedAt => ("mf.created_at", "LAST"),
             SortBy::ReleaseDate => ("mm.release_date", "LAST"),
             SortBy::Rating => ("mm.vote_average", "LAST"),
             SortBy::Runtime => ("mm.runtime", "LAST"),
-            _ => ("mf.created_at", "LAST"), // Default to date added
+            _ => ("mf.discovered_at", "LAST"), // Default to date added
         };
 
         sql_builder.push(field);
@@ -563,10 +647,20 @@ impl PostgresDatabase {
 
         let (field, null_position) = match sort.primary {
             SortBy::Title => ("LOWER(series_title)", "LAST"),
-            SortBy::DateAdded => ("COALESCE(file_created_at, series_created_at)", "LAST"),
+            SortBy::DateAdded => (
+                "COALESCE(file_discovered_at, season_discovered_at, series_discovered_at)",
+                "LAST",
+            ),
+            SortBy::CreatedAt => (
+                "COALESCE(file_created_at, season_created_at, series_created_at)",
+                "LAST",
+            ),
             SortBy::ReleaseDate => ("series_first_air_date", "LAST"),
             SortBy::Rating => ("series_vote_average", "LAST"),
-            _ => ("COALESCE(file_created_at, series_created_at)", "LAST"),
+            _ => (
+                "COALESCE(file_discovered_at, season_discovered_at, series_discovered_at)",
+                "LAST",
+            ),
         };
 
         sql_builder.push(field);
@@ -581,319 +675,85 @@ impl PostgresDatabase {
         sql_builder.push(", sd.id, season_number, episode_number");
     }
 
-    fn sort_combined_results(&self, results: &mut Vec<MediaWithStatus>, sort: &SortCriteria) {
-        use crate::query::{SortBy, SortOrder};
+    fn add_series_search_clause(
+        &self,
+        sql_builder: &mut QueryBuilder<Postgres>,
+        search: &SearchQuery,
+    ) {
+        let include_title = search.fields.is_empty()
+            || search.fields.contains(&SearchField::All)
+            || search.fields.contains(&SearchField::Title);
+        let include_overview = search.fields.is_empty()
+            || search.fields.contains(&SearchField::All)
+            || search.fields.contains(&SearchField::Overview);
+        let include_cast = search.fields.is_empty()
+            || search.fields.contains(&SearchField::All)
+            || search.fields.contains(&SearchField::Cast);
 
-        results.sort_by(|a, b| {
-            // Extract sort values based on the sort field
-            let (a_value, b_value) = match sort.primary {
-                SortBy::Title => {
-                    let a_title = match &a.media {
-                        Media::Movie(m) => m.title.as_str(),
-                        Media::Series(s) => s.title.as_str(),
-                        Media::Season(_) => "",  // Seasons don't have titles
-                        Media::Episode(_) => "", // Episodes don't have titles
-                    };
-                    let b_title = match &b.media {
-                        Media::Movie(m) => m.title.as_str(),
-                        Media::Series(s) => s.title.as_str(),
-                        Media::Season(_) => "",  // Seasons don't have titles
-                        Media::Episode(_) => "", // Episodes don't have titles
-                    };
-                    (a_title, b_title)
-                }
-                SortBy::DateAdded => {
-                    // For DateAdded, we need to get the file created_at
-                    // Since we don't have direct access to file data here,
-                    // we'll use the ID comparison as a proxy (newer IDs = newer files)
-                    let a_id = match &a.media {
-                        Media::Movie(m) => m.file.created_at,
-                        Media::Series(s) => s.created_at,
-                        Media::Season(s) => s.created_at,
-                        Media::Episode(e) => e.file.created_at,
-                    };
-                    let b_id = match &b.media {
-                        Media::Movie(m) => m.file.created_at,
-                        Media::Series(s) => s.created_at,
-                        Media::Season(s) => s.created_at,
-                        Media::Episode(e) => e.file.created_at,
-                    };
-                    return match sort.order {
-                        SortOrder::Ascending => a_id.cmp(&b_id),
-                        SortOrder::Descending => b_id.cmp(&a_id),
-                    };
-                }
-                SortBy::ReleaseDate => {
-                    // Extract release dates from details if available
-                    let a_date = extract_release_date(&a.media);
-                    let b_date = extract_release_date(&b.media);
+        if !include_title && !include_overview && !include_cast {
+            return;
+        }
 
-                    match (a_date, b_date) {
-                        (Some(a), Some(b)) => {
-                            return match sort.order {
-                                SortOrder::Ascending => a.cmp(&b),
-                                SortOrder::Descending => b.cmp(&a),
-                            };
-                        }
-                        (Some(_), None) => return std::cmp::Ordering::Less,
-                        (None, Some(_)) => return std::cmp::Ordering::Greater,
-                        (None, None) => return std::cmp::Ordering::Equal,
-                    }
-                }
-                SortBy::Rating => {
-                    // Extract ratings from details if available
-                    let a_rating = extract_rating(&a.media);
-                    let b_rating = extract_rating(&b.media);
+        sql_builder.push(" AND (");
+        let mut has_clause = false;
 
-                    match (a_rating, b_rating) {
-                        (Some(a), Some(b)) => {
-                            let ordering = a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal);
-                            return match sort.order {
-                                SortOrder::Ascending => ordering,
-                                SortOrder::Descending => ordering.reverse(),
-                            };
-                        }
-                        (Some(_), None) => return std::cmp::Ordering::Less,
-                        (None, Some(_)) => return std::cmp::Ordering::Greater,
-                        (None, None) => return std::cmp::Ordering::Equal,
-                    }
-                }
-                SortBy::Runtime => {
-                    // Extract runtime from details if available
-                    let a_runtime = extract_runtime(&a.media);
-                    let b_runtime = extract_runtime(&b.media);
-
-                    match (a_runtime, b_runtime) {
-                        (Some(a), Some(b)) => {
-                            return match sort.order {
-                                SortOrder::Ascending => a.cmp(&b),
-                                SortOrder::Descending => b.cmp(&a),
-                            };
-                        }
-                        (Some(_), None) => return std::cmp::Ordering::Less,
-                        (None, Some(_)) => return std::cmp::Ordering::Greater,
-                        (None, None) => return std::cmp::Ordering::Equal,
-                    }
-                }
-                SortBy::Popularity => {
-                    let a_popularity = extract_popularity(&a.media);
-                    let b_popularity = extract_popularity(&b.media);
-
-                    match (a_popularity, b_popularity) {
-                        (Some(a), Some(b)) => {
-                            let ordering = a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal);
-                            return match sort.order {
-                                SortOrder::Ascending => ordering,
-                                SortOrder::Descending => ordering.reverse(),
-                            };
-                        }
-                        (Some(_), None) => return std::cmp::Ordering::Less,
-                        (None, Some(_)) => return std::cmp::Ordering::Greater,
-                        (None, None) => return std::cmp::Ordering::Equal,
-                    }
-                }
-                SortBy::FileSize => {
-                    let a_size = extract_file_size(&a.media);
-                    let b_size = extract_file_size(&b.media);
-
-                    match (a_size, b_size) {
-                        (Some(a), Some(b)) => {
-                            return match sort.order {
-                                SortOrder::Ascending => a.cmp(&b),
-                                SortOrder::Descending => b.cmp(&a),
-                            };
-                        }
-                        (Some(_), None) => return std::cmp::Ordering::Less,
-                        (None, Some(_)) => return std::cmp::Ordering::Greater,
-                        (None, None) => return std::cmp::Ordering::Equal,
-                    }
-                }
-                SortBy::Resolution => {
-                    let a_res = extract_resolution(&a.media);
-                    let b_res = extract_resolution(&b.media);
-
-                    match (a_res, b_res) {
-                        (Some(a), Some(b)) => {
-                            return match sort.order {
-                                SortOrder::Ascending => a.cmp(&b),
-                                SortOrder::Descending => b.cmp(&a),
-                            };
-                        }
-                        (Some(_), None) => return std::cmp::Ordering::Less,
-                        (None, Some(_)) => return std::cmp::Ordering::Greater,
-                        (None, None) => return std::cmp::Ordering::Equal,
-                    }
-                }
-                SortBy::Bitrate => {
-                    let a_bitrate = extract_bitrate(&a.media);
-                    let b_bitrate = extract_bitrate(&b.media);
-
-                    match (a_bitrate, b_bitrate) {
-                        (Some(a), Some(b)) => {
-                            return match sort.order {
-                                SortOrder::Ascending => a.cmp(&b),
-                                SortOrder::Descending => b.cmp(&a),
-                            };
-                        }
-                        (Some(_), None) => return std::cmp::Ordering::Less,
-                        (None, Some(_)) => return std::cmp::Ordering::Greater,
-                        (None, None) => return std::cmp::Ordering::Equal,
-                    }
-                }
-                SortBy::ContentRating => {
-                    let a_rating = extract_content_rating(&a.media);
-                    let b_rating = extract_content_rating(&b.media);
-
-                    match (a_rating, b_rating) {
-                        (Some(a), Some(b)) => {
-                            return match sort.order {
-                                SortOrder::Ascending => a.cmp(&b),
-                                SortOrder::Descending => b.cmp(&a),
-                            };
-                        }
-                        (Some(_), None) => return std::cmp::Ordering::Less,
-                        (None, Some(_)) => return std::cmp::Ordering::Greater,
-                        (None, None) => return std::cmp::Ordering::Equal,
-                    }
-                }
-                SortBy::LastWatched | SortBy::WatchProgress => {
-                    // These require user context and watch status
-                    // For now, maintain original order
-                    return std::cmp::Ordering::Equal;
-                }
-            };
-
-            // For string comparisons (Title)
-            match sort.order {
-                SortOrder::Ascending => a_value.cmp(b_value),
-                SortOrder::Descending => b_value.cmp(a_value),
+        if search.fuzzy {
+            if include_title {
+                sql_builder.push("sr.title % ");
+                sql_builder.push_bind(search.text.clone());
+                has_clause = true;
             }
-        });
 
-        // Helper functions to extract values from Media
-        fn extract_release_date(media: &Media) -> Option<String> {
-            match media {
-                Media::Movie(m) => {
-                    if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) = &m.details {
-                        details.release_date.clone()
-                    } else {
-                        None
-                    }
+            if include_overview {
+                if has_clause {
+                    sql_builder.push(" OR ");
                 }
-                Media::Series(s) => {
-                    if let MediaDetailsOption::Details(TmdbDetails::Series(details)) = &s.details {
-                        details.first_air_date.clone()
-                    } else {
-                        None
-                    }
+                sql_builder.push("sm.overview % ");
+                sql_builder.push_bind(search.text.clone());
+                has_clause = true;
+            }
+
+            if include_cast {
+                if has_clause {
+                    sql_builder.push(" OR ");
                 }
-                _ => None,
+                sql_builder.push(
+                    "EXISTS (SELECT 1 FROM series_cast search_sc JOIN persons search_p ON search_p.tmdb_id = search_sc.person_tmdb_id WHERE search_sc.series_id = sr.id AND search_p.name % "
+                );
+                sql_builder.push_bind(search.text.clone());
+                sql_builder.push(")");
+            }
+        } else {
+            let like_pattern = format!("%{}%", search.text);
+
+            if include_title {
+                sql_builder.push("sr.title ILIKE ");
+                sql_builder.push_bind(like_pattern.clone());
+                has_clause = true;
+            }
+
+            if include_overview {
+                if has_clause {
+                    sql_builder.push(" OR ");
+                }
+                sql_builder.push("sm.overview ILIKE ");
+                sql_builder.push_bind(like_pattern.clone());
+                has_clause = true;
+            }
+
+            if include_cast {
+                if has_clause {
+                    sql_builder.push(" OR ");
+                }
+                sql_builder.push(
+                    "EXISTS (SELECT 1 FROM series_cast search_sc JOIN persons search_p ON search_p.tmdb_id = search_sc.person_tmdb_id WHERE search_sc.series_id = sr.id AND search_p.name ILIKE "
+                );
+                sql_builder.push_bind(like_pattern);
+                sql_builder.push(")");
             }
         }
 
-        fn extract_rating(media: &Media) -> Option<f32> {
-            match media {
-                Media::Movie(m) => {
-                    if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) = &m.details {
-                        details.vote_average
-                    } else {
-                        None
-                    }
-                }
-                Media::Series(s) => {
-                    if let MediaDetailsOption::Details(TmdbDetails::Series(details)) = &s.details {
-                        details.vote_average
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            }
-        }
-
-        fn extract_runtime(media: &Media) -> Option<u32> {
-            match media {
-                Media::Movie(m) => {
-                    if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) = &m.details {
-                        details.runtime
-                    } else {
-                        None
-                    }
-                }
-                // TV series don't have a single runtime, so we skip them
-                _ => None,
-            }
-        }
-
-        fn extract_popularity(media: &Media) -> Option<f32> {
-            match media {
-                Media::Movie(m) => {
-                    if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) = &m.details {
-                        details.popularity
-                    } else {
-                        None
-                    }
-                }
-                Media::Series(s) => {
-                    if let MediaDetailsOption::Details(TmdbDetails::Series(details)) = &s.details {
-                        details.popularity
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            }
-        }
-
-        fn extract_file_size(media: &Media) -> Option<u64> {
-            match media {
-                Media::Movie(m) => Some(m.file.size),
-                Media::Episode(e) => Some(e.file.size),
-                _ => None,
-            }
-        }
-
-        fn extract_resolution(media: &Media) -> Option<u32> {
-            let metadata = match media {
-                Media::Movie(m) => m.file.media_file_metadata.as_ref(),
-                Media::Episode(e) => e.file.media_file_metadata.as_ref(),
-                _ => None,
-            };
-            metadata.and_then(|meta| meta.height)
-        }
-
-        fn extract_bitrate(media: &Media) -> Option<u64> {
-            let metadata = match media {
-                Media::Movie(m) => m.file.media_file_metadata.as_ref(),
-                Media::Episode(e) => e.file.media_file_metadata.as_ref(),
-                _ => None,
-            };
-            metadata.and_then(|meta| meta.bitrate)
-        }
-
-        fn extract_content_rating(media: &Media) -> Option<String> {
-            match media {
-                Media::Movie(m) => match &m.details {
-                    MediaDetailsOption::Details(TmdbDetails::Movie(details)) => details
-                        .content_rating
-                        .as_ref()
-                        .map(|s| s.trim())
-                        .filter(|s| !s.is_empty())
-                        .map(|s| s.to_string()),
-                    _ => None,
-                },
-                Media::Series(s) => match &s.details {
-                    MediaDetailsOption::Details(TmdbDetails::Series(details)) => details
-                        .content_rating
-                        .as_ref()
-                        .map(|s| s.trim())
-                        .filter(|s| !s.is_empty())
-                        .map(|s| s.to_string()),
-                    _ => None,
-                },
-                _ => None,
-            }
-        }
+        sql_builder.push(")");
     }
 
     fn row_to_movie_reference(&self, row: &sqlx::postgres::PgRow) -> Result<MovieReference> {
@@ -912,6 +772,7 @@ impl PostgresDatabase {
             path: std::path::PathBuf::from(row.get::<String, _>("file_path")),
             filename: row.get("filename"),
             size: row.get::<i64, _>("file_size") as u64,
+            discovered_at: row.get("file_discovered_at"),
             created_at: row.get("file_created_at"),
             media_file_metadata,
             library_id,
@@ -954,6 +815,9 @@ impl PostgresDatabase {
                     title: SeriesTitle::new(row.get("series_title"))?,
                     details: MediaDetailsOption::Endpoint(format!("/series/{}", series_id)),
                     endpoint: SeriesURL::from_string(format!("/series/{}", series_id)),
+                    discovered_at: row
+                        .try_get("series_discovered_at")
+                        .unwrap_or_else(|_| chrono::Utc::now()),
                     created_at: row
                         .try_get("series_created_at")
                         .unwrap_or_else(|_| chrono::Utc::now()),
@@ -992,6 +856,10 @@ impl PostgresDatabase {
                             "/series/{}/season/{}",
                             series_id, season_number
                         )),
+                        discovered_at: row
+                            .try_get("season_discovered_at")
+                            .or_else(|_| row.try_get("series_discovered_at"))
+                            .unwrap_or_else(|_| chrono::Utc::now()),
                         created_at: row
                             .try_get("series_created_at")
                             .unwrap_or_else(|_| chrono::Utc::now()),
@@ -1020,6 +888,7 @@ impl PostgresDatabase {
                     path: std::path::PathBuf::from(row.get::<String, _>("file_path")),
                     filename: row.get("filename"),
                     size: row.get::<i64, _>("file_size") as u64,
+                    discovered_at: row.get("file_discovered_at"),
                     created_at: row.get("file_created_at"),
                     media_file_metadata: None,
                     library_id: row
@@ -1042,6 +911,8 @@ impl PostgresDatabase {
                     )),
                     endpoint: EpisodeURL::from_string(format!("/stream/{}", file_id)),
                     file: media_file,
+                    discovered_at: row.get("file_discovered_at"),
+                    created_at: row.get("file_created_at"),
                 };
 
                 // Get watch status if user context provided

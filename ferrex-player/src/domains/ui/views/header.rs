@@ -322,6 +322,211 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 .height(HEIGHT)
                 .into()
         }
+        ViewState::AdminDashboard => {
+            // Generic header for admin dashboard with back/home and controls
+            let mut left_section_items = vec![];
+
+            // Home button
+            left_section_items.push(
+                button(
+                    container(icon_text_with_size(Icon::House, 16.0))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                )
+                .on_press(Message::NavigateHome)
+                .style(theme::Button::HeaderIcon.style())
+                .width(Length::Fixed(HEIGHT))
+                .height(HEIGHT)
+                .into(),
+            );
+
+            // Back button
+            left_section_items.push(
+                button(
+                    container(icon_text_with_size(Icon::ChevronLeft, 16.0))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                )
+                .on_press(Message::HideAdminDashboard)
+                .style(theme::Button::HeaderIcon.style())
+                .width(Length::Fixed(HEIGHT))
+                .height(HEIGHT)
+                .into(),
+            );
+
+            let left_section = row(left_section_items).align_y(iced::Alignment::Center);
+
+            // Right section - Controls
+            let mut right_section = row![
+                // Fullscreen toggle
+                button(
+                    container(icon_text_with_size(
+                        if state.is_fullscreen {
+                            Icon::Minimize
+                        } else {
+                            Icon::Maximize
+                        },
+                        16.0,
+                    ))
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill)
+                )
+                .on_press(Message::ToggleFullscreen)
+                .style(theme::Button::HeaderIcon.style())
+                .width(Length::Fixed(HEIGHT))
+                .height(HEIGHT),
+            ]
+            .align_y(iced::Alignment::Center);
+
+            // Library management (admin) button
+            right_section = right_section.push({
+                let element: Element<Message> =
+                    if state.permission_checker().can_view_admin_dashboard() {
+                        button(
+                            container(icon_text_with_size(Icon::Settings, 16.0))
+                                .center_x(Length::Fill)
+                                .center_y(Length::Fill),
+                        )
+                        .on_press(Message::ShowLibraryManagement)
+                        .style(theme::Button::HeaderIcon.style())
+                        .width(Length::Fixed(HEIGHT))
+                        .height(HEIGHT)
+                        .into()
+                    } else {
+                        Space::with_width(HEIGHT).into()
+                    };
+                element
+            });
+
+            // Profile button
+            right_section = right_section.push(
+                button(
+                    container(icon_text_with_size(Icon::UserPen, 16.0))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                )
+                .on_press(Message::ShowProfile)
+                .style(theme::Button::HeaderIcon.style())
+                .width(Length::Fixed(HEIGHT))
+                .height(HEIGHT),
+            );
+
+            Stack::new()
+                .push(
+                    // Base layer: centered title
+                    container(
+                        text("Admin Dashboard")
+                            .size(20)
+                            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                    )
+                    .width(Length::Fill)
+                    .height(HEIGHT)
+                    .align_x(iced::alignment::Horizontal::Center)
+                    .align_y(iced::alignment::Vertical::Center),
+                )
+                .push(
+                    // Top layer: left and right sections
+                    row![
+                        container(left_section)
+                            .padding([0, 15])
+                            .align_y(iced::alignment::Vertical::Center),
+                        Space::with_width(Length::Fill),
+                        container(right_section)
+                            .padding([0, 15])
+                            .align_y(iced::alignment::Vertical::Center),
+                    ]
+                    .width(Length::Fill)
+                    .height(HEIGHT),
+                )
+                .width(Length::Fill)
+                .height(HEIGHT)
+                .into()
+        }
+        ViewState::UserSettings => {
+            // Simple header for user settings view
+            let left_section = row![
+                button(
+                    container(icon_text_with_size(Icon::House, 16.0))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                )
+                .on_press(Message::NavigateHome)
+                .style(theme::Button::HeaderIcon.style())
+                .width(Length::Fixed(HEIGHT))
+                .height(HEIGHT),
+                button(
+                    container(icon_text_with_size(Icon::ChevronLeft, 16.0))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                )
+                .on_press(Message::NavigateBack)
+                .style(theme::Button::HeaderIcon.style())
+                .width(Length::Fixed(HEIGHT))
+                .height(HEIGHT),
+            ]
+            .align_y(iced::Alignment::Center);
+
+            let mut right_section = row![
+                button(
+                    container(icon_text_with_size(
+                        if state.is_fullscreen {
+                            Icon::Minimize
+                        } else {
+                            Icon::Maximize
+                        },
+                        16.0,
+                    ))
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill)
+                )
+                .on_press(Message::ToggleFullscreen)
+                .style(theme::Button::HeaderIcon.style())
+                .width(Length::Fixed(HEIGHT))
+                .height(HEIGHT),
+            ]
+            .align_y(iced::Alignment::Center);
+
+            right_section = right_section.push(
+                button(
+                    container(icon_text_with_size(Icon::UserPen, 16.0))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                )
+                .on_press(Message::ShowProfile)
+                .style(theme::Button::HeaderIcon.style())
+                .width(Length::Fixed(HEIGHT))
+                .height(HEIGHT),
+            );
+
+            Stack::new()
+                .push(
+                    container(
+                        text("User Settings")
+                            .size(20)
+                            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                    )
+                    .width(Length::Fill)
+                    .height(HEIGHT)
+                    .align_x(iced::alignment::Horizontal::Center)
+                    .align_y(iced::alignment::Vertical::Center),
+                )
+                .push(
+                    row![
+                        container(left_section)
+                            .padding([0, 15])
+                            .align_y(iced::alignment::Vertical::Center),
+                        Space::with_width(Length::Fill),
+                        container(right_section)
+                            .padding([0, 15])
+                            .align_y(iced::alignment::Vertical::Center),
+                    ]
+                    .width(Length::Fill)
+                    .height(HEIGHT),
+                )
+                .width(Length::Fill)
+                .height(HEIGHT)
+                .into()
+        }
         ViewState::LibraryManagement => {
             let mut left_section_items = vec![];
 

@@ -180,40 +180,6 @@ impl MediaOps for MovieReference {
     }
 }
 impl MovieReference {
-    /// Get the media details
-    //pub fn details(&self) -> &impl MediaDetailsOptionLike {
-    //    &self.details
-    //}
-
-    ///// Get release/air year if available
-    //pub fn year(&self) -> Option<u16> {
-    //    match &self.details {
-    //        MediaDetailsOption::Details(details) => match details {
-    //            TmdbDetails::Movie(movie) => movie
-    //                .release_date
-    //                .as_ref()
-    //                .and_then(|date| date.split('-').next())
-    //                .and_then(|year| year.parse().ok()),
-    //            TmdbDetails::Series(series) => series
-    //                .first_air_date
-    //                .as_ref()
-    //                .and_then(|date| date.split('-').next())
-    //                .and_then(|year| year.parse().ok()),
-    //            TmdbDetails::Season(season) => season
-    //                .air_date
-    //                .as_ref()
-    //                .and_then(|date| date.split('-').next())
-    //                .and_then(|year| year.parse().ok()),
-    //            TmdbDetails::Episode(episode) => episode
-    //                .air_date
-    //                .as_ref()
-    //                .and_then(|date| date.split('-').next())
-    //                .and_then(|year| year.parse().ok()),
-    //        },
-    //        _ => None,
-    //    }
-    //}
-
     /// Get rating if available
     pub fn rating(&self) -> Option<f32> {
         match &self.details {

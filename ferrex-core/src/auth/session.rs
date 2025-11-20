@@ -31,7 +31,7 @@ impl DeviceSession {
     ) -> Self {
         let now = Utc::now();
         Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             user_id,
             device_id,
             session_token: generate_session_token(),
@@ -182,8 +182,8 @@ mod tests {
     #[test]
     fn test_session_creation() {
         let session = DeviceSession::new(
-            Uuid::new_v4(),
-            Uuid::new_v4(),
+            Uuid::now_v7(),
+            Uuid::now_v7(),
             Some("192.168.1.1".to_string()),
             Some("Mozilla/5.0".to_string()),
             Duration::hours(24),
@@ -196,8 +196,8 @@ mod tests {
     #[test]
     fn test_session_expiration() {
         let mut session = DeviceSession::new(
-            Uuid::new_v4(),
-            Uuid::new_v4(),
+            Uuid::now_v7(),
+            Uuid::now_v7(),
             None,
             None,
             Duration::hours(24),
@@ -211,8 +211,8 @@ mod tests {
     #[test]
     fn test_session_revocation() {
         let mut session = DeviceSession::new(
-            Uuid::new_v4(),
-            Uuid::new_v4(),
+            Uuid::now_v7(),
+            Uuid::now_v7(),
             None,
             None,
             Duration::hours(24),

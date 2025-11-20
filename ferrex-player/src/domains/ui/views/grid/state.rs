@@ -103,12 +103,29 @@ impl VirtualGridState {
         }
 
         let total_rows = self.total_items.div_ceil(self.columns);
-        let first_visible_row = (self.scroll_position / self.row_height).floor() as usize;
+
+        let mut first_visible_row = (self.scroll_position / self.row_height).floor() as usize;
+        if first_visible_row >= total_rows {
+            first_visible_row = total_rows.saturating_sub(1);
+            let content_height = total_rows as f32 * self.row_height;
+            let max_scroll = if content_height > self.viewport_height {
+                content_height - self.viewport_height
+            } else {
+                0.0
+            };
+            self.scroll_position = self.scroll_position.min(max_scroll);
+        }
+
         let visible_rows = (self.viewport_height / self.row_height).ceil() as usize;
-        let last_visible_row = (first_visible_row + visible_rows).min(total_rows);
+        let mut last_visible_row = (first_visible_row + visible_rows).min(total_rows);
+        if last_visible_row <= first_visible_row {
+            last_visible_row = (first_visible_row + 1).min(total_rows);
+        }
 
         // Add overscan (configurable prefetch zone)
-        let start_row = first_visible_row.saturating_sub(self.overscan_rows_above);
+        let start_row = first_visible_row
+            .saturating_sub(self.overscan_rows_above)
+            .min(total_rows);
         let end_row = (last_visible_row + self.overscan_rows_below).min(total_rows);
 
         // Convert to item indices

@@ -138,7 +138,7 @@ mod tests {
         permissions_map.insert(permissions::USERS_READ.to_string(), true);
 
         let user_permissions = UserPermissions {
-            user_id: Uuid::new_v4(),
+            user_id: Uuid::now_v7(),
             roles: vec![],
             permissions: permissions_map,
             permission_details: None,

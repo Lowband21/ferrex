@@ -231,6 +231,7 @@ impl TmdbApiProvider {
                 title,
                 details: MediaDetailsOption::Endpoint(format!("/series/{}", item.inner.id)),
                 endpoint: SeriesURL::from_string(format!("/series/{}", item.inner.id)),
+                discovered_at: chrono::Utc::now(),
                 created_at: chrono::Utc::now(),
                 theme_color: None,
             };

@@ -53,9 +53,9 @@ mod ui_widgets_tests {
 
         // Test that SortOption displays correctly
         assert_eq!(SortOption::OPTIONS[0].label, "Date Added");
-        assert_eq!(SortOption::OPTIONS[1].label, "Title");
-        assert_eq!(SortOption::OPTIONS[2].label, "Release Year");
-        assert_eq!(SortOption::OPTIONS[3].label, "Rating");
+        assert_eq!(SortOption::OPTIONS[1].label, "File Created");
+        assert_eq!(SortOption::OPTIONS[2].label, "Title");
+        assert_eq!(SortOption::OPTIONS[3].label, "Release Year");
 
         // Test that display formatting works
         assert_eq!(format!("{}", SortOption::OPTIONS[0]), "Date Added");

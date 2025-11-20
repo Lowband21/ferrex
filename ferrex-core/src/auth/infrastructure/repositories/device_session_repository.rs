@@ -2,7 +2,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::PgPool;
 use std::fmt;
-use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::domain::aggregates::DeviceSession;
@@ -10,26 +9,24 @@ use crate::auth::domain::repositories::DeviceSessionRepository;
 use crate::auth::domain::value_objects::DeviceFingerprint;
 
 pub struct PostgresDeviceSessionRepository {
-    pool: Arc<PgPool>,
+    pool: PgPool,
 }
 
 impl fmt::Debug for PostgresDeviceSessionRepository {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PostgresDeviceSessionRepository")
-            .field("pool_refs", &Arc::strong_count(&self.pool))
-            .finish()
+        f.debug_struct("PostgresDeviceSessionRepository").finish()
     }
 }
 
 impl PostgresDeviceSessionRepository {
-    pub fn new(pool: Arc<PgPool>) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
 
 #[async_trait]
 impl DeviceSessionRepository for PostgresDeviceSessionRepository {
-    async fn find_by_id(&self, session_id: Uuid) -> Result<Option<DeviceSession>> {
+    async fn find_by_id(&self, _session_id: Uuid) -> Result<Option<DeviceSession>> {
         todo!("Implement find_by_id")
     }
 
@@ -72,7 +69,7 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
         Ok(Vec::new())
     }
 
-    async fn save(&self, session: &DeviceSession) -> Result<()> {
+    async fn save(&self, _session: &DeviceSession) -> Result<()> {
         todo!("Implement save")
     }
 }

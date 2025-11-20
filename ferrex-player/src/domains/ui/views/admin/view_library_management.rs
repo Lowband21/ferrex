@@ -37,7 +37,7 @@ pub fn view_library_management(state: &State) -> Element<'_, Message> {
     let permissions = state.permission_checker();
 
     // Check if user has permission to view libraries
-    if !permissions.can_view_library_settings() {
+    if !permissions.can_view_admin_dashboard() {
         return container(
             column![
                 text("Access Denied")

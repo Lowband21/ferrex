@@ -38,7 +38,7 @@ fn create_test_jwt_with_expiry(seconds_from_now: i64) -> String {
 /// Create a test user
 fn create_test_user() -> User {
     User {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         username: "testuser".to_string(),
         display_name: "Test User".to_string(),
         avatar_url: None,

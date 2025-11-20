@@ -570,11 +570,11 @@ mod tests {
         let machine = AuthStateMachine::<Unauthenticated, 3, 300>::new();
 
         // Select user
-        let user_id = Uuid::new_v4();
+        let user_id = Uuid::now_v7();
         let machine = machine.select_user(user_id).unwrap();
 
         // Require password
-        let device_id = Uuid::new_v4();
+        let device_id = Uuid::now_v7();
         let machine = machine.require_password(device_id).unwrap();
 
         // Verify password

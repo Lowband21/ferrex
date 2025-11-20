@@ -87,7 +87,7 @@ impl MockAuthServer {
 /// Create a test user
 pub fn create_test_user() -> User {
     User {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         username: "test_user".to_string(),
         display_name: "Test User".to_string(),
         avatar_url: None,

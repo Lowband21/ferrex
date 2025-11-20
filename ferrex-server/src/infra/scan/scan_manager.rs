@@ -31,6 +31,7 @@ use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
 use crate::infra::orchestration::ScanOrchestrator;
+use ferrex_core::database::postgres::PostgresDatabase;
 
 const EVENT_VERSION: &str = "1";
 const HISTORY_CAPACITY: usize = 256;
@@ -285,7 +286,31 @@ impl ScanControlPlaneInner {
         if history.len() == HISTORY_CAPACITY {
             history.pop_front();
         }
-        history.push_back(snapshot);
+        history.push_back(snapshot.clone());
+
+        // Rebuild precomputed sort positions for the completed library scan
+        if snapshot.status == ScanLifecycleStatus::Completed {
+            if let Some(pg) = self
+                .db
+                .backend()
+                .as_any()
+                .downcast_ref::<PostgresDatabase>()
+            {
+                let lib = snapshot.library_id.as_uuid();
+                if let Err(e) = sqlx::query!("SELECT rebuild_movie_sort_positions($1)", lib)
+                    .execute(pg.pool())
+                    .await
+                {
+                    tracing::warn!(
+                        "failed to rebuild movie_sort_positions for library {}: {}",
+                        lib,
+                        e
+                    );
+                } else {
+                    tracing::info!("rebuilt precomputed movie positions for library {}", lib);
+                }
+            }
+        }
     }
 
     async fn lookup(&self, scan_id: &Uuid) -> Result<Arc<ScanRun>, ScanControlError> {

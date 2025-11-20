@@ -483,7 +483,7 @@ async fn bench_stub_latency_logging(pool: PgPool) {
 }
 
 async fn seed_library(pool: &PgPool) -> uuid::Uuid {
-    let id = uuid::Uuid::new_v4();
+    let id = uuid::Uuid::now_v7();
     let name = format!("Integration Test Library {}", id);
     sqlx::query(
         "INSERT INTO libraries (id, name, paths, library_type, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW())"

@@ -1,4 +1,6 @@
 pub mod cache;
+pub mod infrastructure;
+pub mod ports;
 pub mod postgres;
 pub mod postgres_ext;
 pub mod traits;

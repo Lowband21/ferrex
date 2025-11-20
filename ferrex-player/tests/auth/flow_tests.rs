@@ -22,7 +22,7 @@ fn make_user(id: uuid::Uuid, username: &str) -> ferrex_core::user::User {
 fn users_loaded_success_sets_selecting_user() {
     let mut state = State::default();
     let user_dto = ferrex_player::domains::auth::dto::UserListItemDto {
-        id: uuid::Uuid::new_v4(),
+        id: uuid::Uuid::now_v7(),
         username: "alice".into(),
         display_name: "Alice".into(),
         avatar_url: None,
@@ -44,7 +44,7 @@ fn users_loaded_success_sets_selecting_user() {
 #[test]
 fn device_status_with_pin_shows_pin_entry() {
     let mut state = State::default();
-    let user = make_user(uuid::Uuid::new_v4(), "bob");
+    let user = make_user(uuid::Uuid::now_v7(), "bob");
 
     let status = ferrex_player::domains::auth::manager::DeviceAuthStatus {
         device_registered: true,
@@ -69,7 +69,7 @@ fn device_status_with_pin_shows_pin_entry() {
 #[test]
 fn device_status_no_pin_shows_password_entry() {
     let mut state = State::default();
-    let user = make_user(uuid::Uuid::new_v4(), "carol");
+    let user = make_user(uuid::Uuid::now_v7(), "carol");
 
     let status = ferrex_player::domains::auth::manager::DeviceAuthStatus {
         device_registered: false,

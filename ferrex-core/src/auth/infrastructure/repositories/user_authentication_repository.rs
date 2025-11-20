@@ -2,26 +2,23 @@ use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::PgPool;
 use std::fmt;
-use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::domain::aggregates::UserAuthentication;
 use crate::auth::domain::repositories::UserAuthenticationRepository;
 
 pub struct PostgresUserAuthRepository {
-    pool: Arc<PgPool>,
+    pool: PgPool,
 }
 
 impl fmt::Debug for PostgresUserAuthRepository {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PostgresUserAuthRepository")
-            .field("pool_refs", &Arc::strong_count(&self.pool))
-            .finish()
+        f.debug_struct("PostgresUserAuthRepository").finish()
     }
 }
 
 impl PostgresUserAuthRepository {
-    pub fn new(pool: Arc<PgPool>) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
@@ -38,7 +35,7 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
             "#,
             user_id
         )
-        .fetch_optional(&*self.pool)
+        .fetch_optional(&self.pool)
         .await?;
 
         match user {
@@ -65,7 +62,7 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
             "#,
             username
         )
-        .fetch_optional(&*self.pool)
+        .fetch_optional(&self.pool)
         .await?;
 
         match user {
@@ -95,7 +92,7 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
             user_auth.user_id(),
             user_auth.password_hash()
         )
-        .execute(&*self.pool)
+        .execute(&self.pool)
         .await?;
 
         Ok(())

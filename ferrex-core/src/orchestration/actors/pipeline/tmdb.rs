@@ -1698,6 +1698,7 @@ impl TmdbMetadataActor {
             title,
             details: MediaDetailsOption::Details(TmdbDetails::Series(enhanced)),
             endpoint: SeriesURL::from_string(format!("/series/{}", tmdb_id)),
+            discovered_at: Utc::now(),
             created_at: Utc::now(),
             theme_color: None,
         })
@@ -1738,6 +1739,7 @@ impl TmdbMetadataActor {
             title,
             details: MediaDetailsOption::Endpoint(endpoint.clone()),
             endpoint: SeriesURL::from_string(endpoint),
+            discovered_at: Utc::now(),
             created_at: Utc::now(),
             theme_color: None,
         })
@@ -1857,6 +1859,7 @@ impl TmdbMetadataActor {
             tmdb_series_id: series_ref.tmdb_id,
             details,
             endpoint,
+            discovered_at: Utc::now(),
             created_at: Utc::now(),
             theme_color: None,
         })
@@ -1956,6 +1959,9 @@ impl TmdbMetadataActor {
             None => MediaDetailsOption::Endpoint(format!("/episode/lookup/{}", actual_file_id)),
         };
 
+        let file_discovered_at = media_file.discovered_at;
+        let file_created_at = media_file.created_at;
+
         let episode_ref = EpisodeReference {
             id: episode_id,
             library_id: command.analyzed.library_id,
@@ -1967,6 +1973,8 @@ impl TmdbMetadataActor {
             details,
             endpoint: EpisodeURL::from_string(format!("/stream/{}", actual_file_id)),
             file: media_file,
+            discovered_at: file_discovered_at,
+            created_at: file_created_at,
         };
 
         self.db

@@ -50,6 +50,10 @@ pub struct SeriesReference {
     pub title: SeriesTitle,
     pub details: MediaDetailsOption,
     pub endpoint: SeriesURL,
+    /// When the series was discovered (row creation time)
+    #[serde(default = "chrono::Utc::now")]
+    #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
+    pub discovered_at: chrono::DateTime<chrono::Utc>,
     /// When the series folder was created (for date added sorting)
     #[serde(default = "chrono::Utc::now")]
     #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
@@ -71,6 +75,10 @@ pub struct SeasonReference {
     pub tmdb_series_id: u64,
     pub details: MediaDetailsOption,
     pub endpoint: SeasonURL,
+    /// When the season was discovered (row creation time)
+    #[serde(default = "chrono::Utc::now")]
+    #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
+    pub discovered_at: chrono::DateTime<chrono::Utc>,
     /// When the season folder was created (for date added sorting)
     #[serde(default = "chrono::Utc::now")]
     #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
@@ -95,4 +103,12 @@ pub struct EpisodeReference {
     pub details: MediaDetailsOption,
     pub endpoint: EpisodeURL,
     pub file: MediaFile,
+    /// When the episode was discovered (row creation time)
+    #[serde(default = "chrono::Utc::now")]
+    #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
+    pub discovered_at: chrono::DateTime<chrono::Utc>,
+    /// When the episode was created (for alternate date-based sorting)
+    #[serde(default = "chrono::Utc::now")]
+    #[rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)]
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }

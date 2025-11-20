@@ -287,7 +287,7 @@ impl FileWatcher {
         };
 
         Some(FileWatchEvent {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             library_id,
             event_type,
             file_path: path_str,

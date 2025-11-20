@@ -6,7 +6,12 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Varchar",
+        {
+          "Custom": {
+            "name": "citext",
+            "kind": "Simple"
+          }
+        },
         "Varchar",
         "Varchar",
         "Timestamptz",

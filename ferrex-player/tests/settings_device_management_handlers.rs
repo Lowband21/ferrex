@@ -15,12 +15,12 @@ struct MockSettingsServiceOk;
 impl SettingsService for MockSettingsServiceOk {
     async fn list_user_devices(&self) -> anyhow::Result<Vec<AuthenticatedDevice>> {
         Ok(vec![AuthenticatedDevice {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             fingerprint: "fp-test".to_string(),
             name: "Test Device".to_string(),
             platform: ferrex_core::auth::Platform::Linux,
             app_version: Some("1.0.0".to_string()),
-            first_authenticated_by: Uuid::new_v4(),
+            first_authenticated_by: Uuid::now_v7(),
             first_authenticated_at: Utc::now(),
             trusted_until: Utc::now(),
             last_seen_at: Utc::now(),

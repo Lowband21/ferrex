@@ -16,7 +16,7 @@ async fn test_manual_login_triggers_library_loading() {
     
     // Create a test user and permissions
     let user = User {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         username: "testuser".to_string(),
         display_name: "Test User".to_string(),
         avatar_url: None,
@@ -133,7 +133,7 @@ async fn test_watch_status_loaded_emits_login_success() {
     
     // Setup authenticated state
     let user = User {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         username: "admin".to_string(),
         display_name: "Admin".to_string(),
         avatar_url: None,
@@ -188,7 +188,7 @@ async fn test_auto_login_still_works() {
     let mut state = State::new("http://localhost:3000".to_string());
     
     let user = User {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         username: "autouser".to_string(),
         display_name: "Auto User".to_string(),
         avatar_url: None,

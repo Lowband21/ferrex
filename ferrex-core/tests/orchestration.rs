@@ -21,7 +21,7 @@ use ferrex_core::types::ids::LibraryID as CoreLibraryID; // avoid clash
 use uuid::Uuid;
 
 async fn seed_library(pool: &PgPool) -> Uuid {
-    let library_id = Uuid::new_v4();
+    let library_id = Uuid::now_v7();
     let unique_name = format!("Test Library - Queue {}", library_id);
     sqlx::query(
         "INSERT INTO libraries (id, name, paths, library_type, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW())"

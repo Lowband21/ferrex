@@ -77,10 +77,11 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
         let order = spec.order.unwrap_or(SortOrder::Ascending);
 
         let mut qb = QueryBuilder::new(
-            "SELECT mr.id \
+            "SELECT (msp.title_pos - 1)::INT4 AS idx \
              FROM movie_references mr \
              JOIN media_files mf ON mr.file_id = mf.id \
-             LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id",
+             LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id \
+             JOIN movie_sort_positions msp ON msp.movie_id = mr.id",
         );
 
         let mut needs_watch_progress = matches!(sort, SortBy::WatchProgress | SortBy::LastWatched);
@@ -132,6 +133,8 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
         }
 
         qb.push(" WHERE mr.library_id = ");
+        qb.push_bind(library_id);
+        qb.push(" AND msp.library_id = ");
         qb.push_bind(library_id);
 
         Ok(Self {
@@ -259,42 +262,78 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
     }
 
     fn apply_sort(&mut self) -> Result<(), FilterQueryError> {
-        let order_suffix = match self.order {
-            SortOrder::Ascending => " ASC NULLS LAST",
-            SortOrder::Descending => " DESC NULLS LAST",
-        };
-
-        let primary_expr = match self.sort {
-            SortBy::Title => "LOWER(mr.title)",
-            SortBy::DateAdded => "mf.created_at",
-            SortBy::ReleaseDate => "mm.release_date",
-            SortBy::Rating => "mm.vote_average",
-            SortBy::Runtime => "mm.runtime",
-            SortBy::Popularity => "mm.popularity",
-            SortBy::Bitrate => "((mf.technical_metadata->>'bitrate')::BIGINT)",
-            SortBy::FileSize => "mf.file_size",
-            SortBy::ContentRating => "mm.primary_certification",
-            SortBy::Resolution => "((mf.technical_metadata->>'height')::INTEGER)",
+        match self.sort {
             SortBy::WatchProgress => {
                 if !self.needs_watch_progress {
                     return Err(FilterQueryError::MissingUserContext("watch progress sort"));
                 }
-                "CASE WHEN uwp.duration > 0 \
-                 THEN (uwp.position::FLOAT8 / NULLIF(uwp.duration::FLOAT8, 0)) \
-                 ELSE NULL END"
+                let order_suffix = match self.order {
+                    SortOrder::Ascending => " ASC NULLS LAST",
+                    SortOrder::Descending => " DESC NULLS LAST",
+                };
+                self.qb.push(" ORDER BY CASE WHEN uwp.duration > 0 THEN (uwp.position::FLOAT8 / NULLIF(uwp.duration::FLOAT8, 0)) ELSE NULL END");
+                self.qb.push(order_suffix);
+                self.qb.push(", msp.title_pos ASC");
             }
             SortBy::LastWatched => {
                 if !(self.needs_watch_progress || self.needs_watch_completed) {
                     return Err(FilterQueryError::MissingUserContext("last watched sort"));
                 }
-                "GREATEST(COALESCE(uwp.last_watched, 0), COALESCE(ucm.completed_at, 0))"
+                let order_suffix = match self.order {
+                    SortOrder::Ascending => " ASC NULLS LAST",
+                    SortOrder::Descending => " DESC NULLS LAST",
+                };
+                self.qb.push(" ORDER BY GREATEST(COALESCE(uwp.last_watched, 0), COALESCE(ucm.completed_at, 0))");
+                self.qb.push(order_suffix);
+                self.qb.push(", msp.title_pos ASC");
             }
-        };
-
-        self.qb.push(" ORDER BY ");
-        self.qb.push(primary_expr);
-        self.qb.push(order_suffix);
-        self.qb.push(", LOWER(mr.title) ASC, mr.id ASC");
+            other => {
+                // Use precomputed position columns
+                let (order_col, direction) = match (other, self.order) {
+                    (SortBy::Title, SortOrder::Ascending) => ("msp.title_pos", "ASC"),
+                    (SortBy::Title, SortOrder::Descending) => ("msp.title_pos_desc", "ASC"),
+                    (SortBy::DateAdded, SortOrder::Ascending) => ("msp.date_added_pos", "ASC"),
+                    (SortBy::DateAdded, SortOrder::Descending) => {
+                        ("msp.date_added_pos_desc", "ASC")
+                    }
+                    (SortBy::CreatedAt, SortOrder::Ascending) => ("msp.created_at_pos", "ASC"),
+                    (SortBy::CreatedAt, SortOrder::Descending) => {
+                        ("msp.created_at_pos_desc", "ASC")
+                    }
+                    (SortBy::ReleaseDate, SortOrder::Ascending) => ("msp.release_date_pos", "ASC"),
+                    (SortBy::ReleaseDate, SortOrder::Descending) => {
+                        ("msp.release_date_pos_desc", "ASC")
+                    }
+                    (SortBy::Rating, SortOrder::Ascending) => ("msp.rating_pos", "ASC"),
+                    (SortBy::Rating, SortOrder::Descending) => ("msp.rating_pos_desc", "ASC"),
+                    (SortBy::Runtime, SortOrder::Ascending) => ("msp.runtime_pos", "ASC"),
+                    (SortBy::Runtime, SortOrder::Descending) => ("msp.runtime_pos_desc", "ASC"),
+                    (SortBy::Popularity, SortOrder::Ascending) => ("msp.popularity_pos", "ASC"),
+                    (SortBy::Popularity, SortOrder::Descending) => {
+                        ("msp.popularity_pos_desc", "ASC")
+                    }
+                    (SortBy::Bitrate, SortOrder::Ascending) => ("msp.bitrate_pos", "ASC"),
+                    (SortBy::Bitrate, SortOrder::Descending) => ("msp.bitrate_pos_desc", "ASC"),
+                    (SortBy::FileSize, SortOrder::Ascending) => ("msp.file_size_pos", "ASC"),
+                    (SortBy::FileSize, SortOrder::Descending) => ("msp.file_size_pos_desc", "ASC"),
+                    (SortBy::ContentRating, SortOrder::Ascending) => {
+                        ("msp.content_rating_pos", "ASC")
+                    }
+                    (SortBy::ContentRating, SortOrder::Descending) => {
+                        ("msp.content_rating_pos_desc", "ASC")
+                    }
+                    (SortBy::Resolution, SortOrder::Ascending) => ("msp.resolution_pos", "ASC"),
+                    (SortBy::Resolution, SortOrder::Descending) => {
+                        ("msp.resolution_pos_desc", "ASC")
+                    }
+                    _ => ("msp.title_pos", "ASC"),
+                };
+                self.qb.push(" ORDER BY ");
+                self.qb.push(order_col);
+                self.qb.push(" ");
+                self.qb.push(direction);
+            }
+        }
 
         Ok(())
     }
@@ -334,7 +373,7 @@ mod tests {
             order: Some(SortOrder::Ascending),
         };
 
-        let qb = build_filtered_movie_query(Uuid::new_v4(), &spec, Some(Uuid::new_v4())).unwrap();
+        let qb = build_filtered_movie_query(Uuid::now_v7(), &spec, Some(Uuid::now_v7())).unwrap();
         let sql = qb.sql();
         assert!(sql.contains("technical_metadata->>'height'"));
         assert!(sql.contains("BETWEEN"));
@@ -354,7 +393,7 @@ mod tests {
             order: Some(SortOrder::Descending),
         };
 
-        let qb = build_filtered_movie_query(Uuid::new_v4(), &spec, Some(Uuid::new_v4())).unwrap();
+        let qb = build_filtered_movie_query(Uuid::now_v7(), &spec, Some(Uuid::now_v7())).unwrap();
         let sql = qb.sql();
         assert!(sql.contains("user_watch_progress"));
         assert!(sql.contains("uwp.position::FLOAT8"));
@@ -376,7 +415,7 @@ mod tests {
             order: Some(SortOrder::Ascending),
         };
 
-        let qb = build_filtered_movie_query(Uuid::new_v4(), &spec, Some(Uuid::new_v4())).unwrap();
+        let qb = build_filtered_movie_query(Uuid::now_v7(), &spec, Some(Uuid::now_v7())).unwrap();
         let sql = qb.sql();
         assert!(sql.contains("user_completed_media"));
         assert!(sql.contains("ucm.media_uuid IS NOT NULL"));

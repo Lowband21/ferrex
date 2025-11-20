@@ -21,10 +21,10 @@ pub enum Message {
     ViewEpisode(EpisodeID),
 
     // Sorting
-    SetSortBy(SortBy),                           // Change sort field
-    ToggleSortOrder,                             // Toggle ascending/descending
-    ApplySortedPositions(LibraryID, Vec<u32>), // Apply fetched position indices for a library (Phase 1)
-    ApplyFilteredPositions(LibraryID, Vec<u32>), // Apply fetched filtered position indices (Phase 1)
+    SetSortBy(SortBy),                                      // Change sort field
+    ToggleSortOrder,                                        // Toggle ascending/descending
+    ApplySortedPositions(LibraryID, Option<u64>, Vec<u32>), // Apply position indices with optional cache key
+    ApplyFilteredPositions(LibraryID, u64, Vec<u32>), // Apply filtered indices with cache key (Phase 1)
     RequestFilteredPositions, // Trigger fetching filtered positions for active library
     // Filter panel interactions
     ToggleFilterPanel,          // Open/close the filter panel
@@ -180,8 +180,8 @@ impl Message {
             // Sorting
             Self::SetSortBy(_) => "UI::SetSortBy",
             Self::ToggleSortOrder => "UI::ToggleSortOrder",
-            Self::ApplySortedPositions(_, _) => "UI::ApplySortedPositions",
-            Self::ApplyFilteredPositions(_, _) => "UI::ApplyFilteredPositions",
+            Self::ApplySortedPositions(_, _, _) => "UI::ApplySortedPositions",
+            Self::ApplyFilteredPositions(_, _, _) => "UI::ApplyFilteredPositions",
             Self::RequestFilteredPositions => "UI::RequestFilteredPositions",
             Self::ToggleFilterPanel => "UI::ToggleFilterPanel",
             Self::ToggleFilterGenre(_) => "UI::ToggleFilterGenre",
@@ -336,8 +336,13 @@ impl std::fmt::Debug for Message {
             Self::ViewEpisode(id) => write!(f, "UI::ViewEpisode({})", id),
             Self::SetSortBy(sort) => write!(f, "UI::SetSortBy({:?})", sort),
             Self::ToggleSortOrder => write!(f, "UI::ToggleSortOrder"),
-            Self::ApplySortedPositions(_, _) => write!(f, "UI::ApplySortedPositions"),
-            Self::ApplyFilteredPositions(_, _) => write!(f, "UI::ApplyFilteredPositions"),
+            Self::ApplySortedPositions(_, cache_key, _) => match cache_key {
+                Some(hash) => write!(f, "UI::ApplySortedPositions(hash={hash})"),
+                None => write!(f, "UI::ApplySortedPositions"),
+            },
+            Self::ApplyFilteredPositions(_, hash, _) => {
+                write!(f, "UI::ApplyFilteredPositions(hash={hash})")
+            }
             Self::RequestFilteredPositions => write!(f, "UI::RequestFilteredPositions"),
             Self::ToggleFilterPanel => write!(f, "UI::ToggleFilterPanel"),
             Self::ToggleFilterGenre(_) => write!(f, "UI::ToggleFilterGenre"),

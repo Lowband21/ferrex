@@ -33,8 +33,8 @@ impl SortableEntity for MovieReference {
             // since it indicates a programming error
             *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
         } else if F::ID == "date_added" {
-            // Date added comes from the file creation time
-            let key = OptionalDateKey::new(Some(self.file.created_at));
+            // Date added now uses the discovery time (row creation time)
+            let key = OptionalDateKey::new(Some(self.file.discovered_at));
             *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
         } else if F::ID == "release_date" {
             // Release date requires TMDB details
@@ -141,8 +141,8 @@ impl SortableEntity for SeriesReference {
             let key = StringKey::from_str(self.title.as_str());
             *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
         } else if F::ID == "date_added" {
-            // Date added comes from the series folder creation time
-            let key = OptionalDateKey::new(Some(self.created_at));
+            // Date added now uses discovery time for series
+            let key = OptionalDateKey::new(Some(self.discovered_at));
             *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
         } else if F::ID == "release_date" {
             // First air date requires TMDB details
@@ -268,10 +268,11 @@ mod tests {
             details: MediaDetailsOption::Details(TmdbDetails::Movie(details)),
             endpoint: MovieURL::from_string("/movies/test-movie-1".to_string()),
             file: crate::MediaFile {
-                id: Uuid::new_v4(),
+                id: Uuid::now_v7(),
                 path: std::path::PathBuf::from("/movies/test.mp4"),
                 filename: "test.mp4".to_string(),
                 size: 1000000,
+                discovered_at: chrono::Utc::now(),
                 created_at: chrono::Utc::now(),
                 media_file_metadata: None,
                 library_id: LibraryID::new(),

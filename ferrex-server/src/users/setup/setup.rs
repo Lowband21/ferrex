@@ -22,7 +22,7 @@
 
 use axum::{extract::State, Json};
 use chrono::{DateTime, Duration, Utc};
-use ferrex_core::{api_types::ApiResponse, user::AuthToken};
+use ferrex_core::{api_types::ApiResponse, rbac::roles, user::AuthToken};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -261,6 +261,8 @@ pub async fn create_initial_admin(
 
     // Create user using UserService
     let user_service = UserService::new(&state);
+    // Ensure the built-in 'admin' role exists before assignment
+    user_service.ensure_admin_role_exists().await?;
     let user = user_service
         .create_user(CreateUserParams {
             username: request.username,
@@ -271,11 +273,18 @@ pub async fn create_initial_admin(
         .await?;
 
     // Assign admin role
-    let admin_role_id =
-        Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("Invalid admin role UUID");
+    let admin_role = state
+        .db
+        .backend()
+        .get_all_roles()
+        .await
+        .map_err(|e| AppError::internal(format!("Failed to load roles: {}", e)))?
+        .into_iter()
+        .find(|role| role.name == roles::ADMIN)
+        .ok_or_else(|| AppError::internal("Admin role missing after initialization"))?;
 
     user_service
-        .assign_role(user.id, admin_role_id, user.id)
+        .assign_role(user.id, admin_role.id, user.id)
         .await?;
 
     // Generate tokens

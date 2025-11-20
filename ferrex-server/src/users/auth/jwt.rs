@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_generate_and_validate_token() {
-        let user_id = Uuid::new_v4();
+        let user_id = Uuid::now_v7();
         let token = generate_access_token(user_id).expect("Failed to generate token");
 
         let claims = validate_token_sync(&token).expect("Failed to validate token");
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_expired_token() {
-        let user_id = Uuid::new_v4();
+        let user_id = Uuid::now_v7();
         let now = Utc::now();
 
         let claims = Claims {
@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn test_multi_key_token_validation() {
-        let user_id = Uuid::new_v4();
+        let user_id = Uuid::now_v7();
         let manager = JwtKeyManager::new();
 
         // Generate token with original key

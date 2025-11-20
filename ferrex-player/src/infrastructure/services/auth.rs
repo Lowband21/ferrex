@@ -174,7 +174,7 @@ pub mod mock {
             } else {
                 let now = chrono::Utc::now();
                 let user = User {
-                    id: Uuid::new_v4(),
+                    id: Uuid::now_v7(),
                     username: "test".into(),
                     display_name: "Test".into(),
                     avatar_url: None,
@@ -258,7 +258,7 @@ pub mod mock {
             _remember_device: bool,
         ) -> RepositoryResult<crate::domains::auth::manager::PlayerAuthResult> {
             let user = User {
-                id: Uuid::new_v4(),
+                id: Uuid::now_v7(),
                 username: "test".into(),
                 display_name: "Test".into(),
                 avatar_url: None,
@@ -288,7 +288,7 @@ pub mod mock {
             _pin: String,
         ) -> RepositoryResult<crate::domains::auth::manager::PlayerAuthResult> {
             let user = User {
-                id: Uuid::new_v4(),
+                id: Uuid::now_v7(),
                 username: "test".into(),
                 display_name: "Test".into(),
                 avatar_url: None,
@@ -350,7 +350,7 @@ pub mod mock {
         }
 
         async fn current_device_id(&self) -> RepositoryResult<Uuid> {
-            Ok(Uuid::new_v4())
+            Ok(Uuid::now_v7())
         }
 
         async fn authenticate(

@@ -46,6 +46,7 @@ use ferrex_server::{
     },
     media::prep::thumbnail_service::ThumbnailService,
     routes,
+    users::UserService,
 };
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -290,9 +291,9 @@ async fn main() -> anyhow::Result<()> {
             .downcast_ref::<PostgresDatabase>()
             .expect("Expected PostgreSQL backend for authentication service");
 
-        Arc::new(create_authentication_service(Arc::new(
+        Arc::new(create_authentication_service(
             postgres_backend.pool().clone(),
-        )))
+        ))
     };
 
     let state = AppState {
@@ -306,6 +307,10 @@ async fn main() -> anyhow::Result<()> {
         auth_service,
         admin_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
+
+    if let Err(err) = UserService::new(&state).ensure_admin_role_exists().await {
+        warn!(error = %err, "Failed to bootstrap RBAC defaults");
+    }
 
     // Start periodic cleanup of expired admin sessions
     let cleanup_state = state.clone();

@@ -8,7 +8,6 @@ use ferrex_core::LibraryActorConfig;
 use ferrex_core::LibraryType;
 use ferrex_core::Media;
 use ferrex_core::MediaDetailsOption;
-use ferrex_core::indices::IndexManager;
 use ferrex_core::query::{
     filtering::hash_filter_spec,
     types::{SortBy, SortOrder},
@@ -157,6 +156,7 @@ fn parse_sort_field(s: &str) -> Option<SortBy> {
     match s.to_lowercase().as_str() {
         "title" => Some(SortBy::Title),
         "date_added" | "added" => Some(SortBy::DateAdded),
+        "created_at" | "created" => Some(SortBy::CreatedAt),
         "release_date" | "year" => Some(SortBy::ReleaseDate),
         "rating" => Some(SortBy::Rating),
         "popularity" => Some(SortBy::Popularity),
@@ -219,29 +219,7 @@ pub async fn get_library_sorted_indices_handler(
         return Err(StatusCode::NOT_IMPLEMENTED);
     }
 
-    // Build sorted IDs using core index manager (in-memory sort for now)
-    let index_mgr = IndexManager::new(state.db.clone());
-    let sorted_ids = match index_mgr
-        .sort_media_ids_for_library(
-            library_ref.id,
-            lib_type,
-            sort_field,
-            sort_order,
-            Some(user.id),
-        )
-        .await
-    {
-        Ok(ids) => ids,
-        Err(e) => {
-            error!("Failed to sort media for library {}: {}", library_id, e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-
-    // Persist indices for static sorts for faster future reuse
-    // Note: persistence of indices is removed in Phase 1 simplified design
-
-    // Build base-order map (by title asc) to translate UUID -> position
+    // Build SQL that uses precomputed positions from movie_sort_positions
     let pool = state
         .db
         .backend()
@@ -249,28 +227,68 @@ pub async fn get_library_sorted_indices_handler(
         .downcast_ref::<ferrex_core::database::postgres::PostgresDatabase>()
         .expect("Postgres backend")
         .pool();
-    let base_ids: Vec<Uuid> = match sqlx::query_scalar!(
-        r#"SELECT mr.id FROM movie_references mr WHERE mr.library_id=$1 ORDER BY mr.title"#,
-        library_ref.id.as_uuid()
-    )
-    .fetch_all(pool)
-    .await
-    {
-        Ok(v) => v,
+
+    let (order_col, order_direction) = match (sort_field, sort_order) {
+        (SortBy::Title, SortOrder::Ascending) => ("msp.title_pos", "ASC"),
+        (SortBy::Title, SortOrder::Descending) => ("msp.title_pos_desc", "ASC"),
+        (SortBy::DateAdded, SortOrder::Ascending) => ("msp.date_added_pos", "ASC"),
+        (SortBy::DateAdded, SortOrder::Descending) => ("msp.date_added_pos_desc", "ASC"),
+        (SortBy::CreatedAt, SortOrder::Ascending) => ("msp.created_at_pos", "ASC"),
+        (SortBy::CreatedAt, SortOrder::Descending) => ("msp.created_at_pos_desc", "ASC"),
+        (SortBy::ReleaseDate, SortOrder::Ascending) => ("msp.release_date_pos", "ASC"),
+        (SortBy::ReleaseDate, SortOrder::Descending) => ("msp.release_date_pos_desc", "ASC"),
+        (SortBy::Rating, SortOrder::Ascending) => ("msp.rating_pos", "ASC"),
+        (SortBy::Rating, SortOrder::Descending) => ("msp.rating_pos_desc", "ASC"),
+        (SortBy::Runtime, SortOrder::Ascending) => ("msp.runtime_pos", "ASC"),
+        (SortBy::Runtime, SortOrder::Descending) => ("msp.runtime_pos_desc", "ASC"),
+        (SortBy::Popularity, SortOrder::Ascending) => ("msp.popularity_pos", "ASC"),
+        (SortBy::Popularity, SortOrder::Descending) => ("msp.popularity_pos_desc", "ASC"),
+        (SortBy::Bitrate, SortOrder::Ascending) => ("msp.bitrate_pos", "ASC"),
+        (SortBy::Bitrate, SortOrder::Descending) => ("msp.bitrate_pos_desc", "ASC"),
+        (SortBy::FileSize, SortOrder::Ascending) => ("msp.file_size_pos", "ASC"),
+        (SortBy::FileSize, SortOrder::Descending) => ("msp.file_size_pos_desc", "ASC"),
+        (SortBy::ContentRating, SortOrder::Ascending) => ("msp.content_rating_pos", "ASC"),
+        (SortBy::ContentRating, SortOrder::Descending) => ("msp.content_rating_pos_desc", "ASC"),
+        (SortBy::Resolution, SortOrder::Ascending) => ("msp.resolution_pos", "ASC"),
+        (SortBy::Resolution, SortOrder::Descending) => ("msp.resolution_pos_desc", "ASC"),
+        // Fallback to title
+        _ => ("msp.title_pos", "ASC"),
+    };
+
+    let mut qb = sqlx::QueryBuilder::new(
+        "SELECT (msp.title_pos - 1)::INT4 AS idx FROM movie_sort_positions msp WHERE msp.library_id = ",
+    );
+    qb.push_bind(library_ref.id.as_uuid());
+    qb.push(" ORDER BY ");
+    qb.push(order_col);
+    qb.push(" ");
+    qb.push(order_direction);
+
+    if let Some(offset) = params.offset {
+        qb.push(" OFFSET ");
+        qb.push_bind(offset as i64);
+    }
+    if let Some(limit) = params.limit {
+        qb.push(" LIMIT ");
+        qb.push_bind(limit as i64);
+    }
+
+    let rows = match qb.build().fetch_all(pool).await {
+        Ok(rows) => rows,
         Err(e) => {
-            error!("Failed to get base order for library {}: {}", library_id, e);
+            error!(
+                "Failed to query precomputed positions for library {}: {}",
+                library_id, e
+            );
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
-    let mut pos_map = HashMap::with_capacity(base_ids.len());
-    for (i, id) in base_ids.iter().enumerate() {
-        pos_map.insert(*id, i as u32);
-    }
 
-    let mut positions: Vec<u32> = Vec::with_capacity(sorted_ids.len());
-    for id in sorted_ids.into_iter() {
-        if let Some(p) = pos_map.get(&id) {
-            positions.push(*p);
+    let mut positions = Vec::with_capacity(rows.len());
+    for row in rows {
+        let idx: i32 = row.get("idx");
+        if idx >= 0 {
+            positions.push(idx as u32);
         }
     }
 
@@ -299,33 +317,6 @@ pub async fn post_library_filtered_indices_handler(
         return Err(StatusCode::NOT_IMPLEMENTED);
     }
 
-    let library_uuid = library_ref.id.as_uuid();
-    let user_scope = requires_user_scope(&spec).then_some(user.id);
-    let cache_key = FilterCacheKey {
-        library_id: library_uuid,
-        spec_hash: hash_filter_spec(&spec),
-        user_id: user_scope,
-    };
-
-    if let Some(indices) = get_cached_indices(&cache_key) {
-        return respond_with_indices(indices);
-    }
-
-    let index_manager = IndexManager::new(state.db.clone());
-    let pos_map = match index_manager
-        .compute_title_position_map(library_ref.id, library_ref.library_type)
-        .await
-    {
-        Ok(map) => map,
-        Err(e) => {
-            error!(
-                "Failed to compute base positions for library {}: {}",
-                library_id, e
-            );
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-
     let pool = state
         .db
         .backend()
@@ -333,6 +324,18 @@ pub async fn post_library_filtered_indices_handler(
         .downcast_ref::<ferrex_core::database::postgres::PostgresDatabase>()
         .expect("Postgres backend")
         .pool();
+
+    let library_uuid = library_ref.id.as_uuid();
+    let user_scope = requires_user_scope(&spec).then_some(user.id);
+    // Check short-lived in-process cache first
+    let cache_key = FilterCacheKey {
+        library_id: library_uuid,
+        spec_hash: hash_filter_spec(&spec),
+        user_id: user_scope,
+    };
+    if let Some(indices) = get_cached_indices(&cache_key) {
+        return respond_with_indices(indices);
+    }
 
     let mut qb = match build_filtered_movie_query(library_ref.id.as_uuid(), &spec, Some(user.id)) {
         Ok(builder) => builder,
@@ -345,7 +348,6 @@ pub async fn post_library_filtered_indices_handler(
             });
         }
     };
-
     let rows = match qb.build().fetch_all(pool).await {
         Ok(rows) => rows,
         Err(e) => {
@@ -356,9 +358,9 @@ pub async fn post_library_filtered_indices_handler(
 
     let mut positions = Vec::with_capacity(rows.len());
     for row in rows {
-        let id: Uuid = row.get("id");
-        if let Some(p) = pos_map.get(&id) {
-            positions.push(*p);
+        let idx: i32 = row.get("idx");
+        if idx >= 0 {
+            positions.push(idx as u32);
         }
     }
 

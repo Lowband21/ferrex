@@ -159,7 +159,7 @@ impl QueryComplexityAnalyzer {
 
         // Check sort complexity
         complexity_score += match query.sort.primary {
-            SortBy::Title | SortBy::DateAdded => 1,
+            SortBy::Title | SortBy::DateAdded | SortBy::CreatedAt => 1,
             SortBy::ReleaseDate | SortBy::Rating => 2,
             SortBy::LastWatched | SortBy::WatchProgress => 3,
             _ => 2,
@@ -280,10 +280,11 @@ mod tests {
             },
             endpoint: MovieURL::from_string("/stream/123".to_string()),
             file: MediaFile {
-                id: Uuid::new_v4(),
+                id: Uuid::now_v7(),
                 path: PathBuf::from("/test.mp4"),
                 filename: "test.mp4".to_string(),
                 size: 1000,
+                discovered_at: chrono::Utc::now(),
                 created_at: chrono::Utc::now(),
                 media_file_metadata: None,
                 library_id: LibraryID::new_uuid(),
@@ -338,7 +339,7 @@ mod tests {
         // Moderate query
         let mut moderate_query = MediaQuery::default();
         moderate_query.sort.primary = SortBy::Title;
-        moderate_query.filters.library_ids = vec![Uuid::new_v4()];
+        moderate_query.filters.library_ids = vec![Uuid::now_v7()];
         moderate_query.filters.media_type = Some(crate::query::types::MediaTypeFilter::Movie);
 
         assert_eq!(

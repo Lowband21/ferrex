@@ -24,6 +24,10 @@ mod sort_option {
                 label: "Date Added",
             },
             SortOption {
+                value: SortBy::CreatedAt,
+                label: "File Created",
+            },
+            SortOption {
                 value: SortBy::Title,
                 label: "Title",
             },

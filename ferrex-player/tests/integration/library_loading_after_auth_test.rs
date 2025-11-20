@@ -15,7 +15,7 @@ async fn test_libraries_loaded_after_authentication() {
 
     // Create a test user and permissions
     let user = User {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         username: "testuser".to_string(),
         display_name: "Test User".to_string(),
         avatar_url: None,
@@ -171,7 +171,7 @@ async fn test_complete_login_to_library_flow() {
 
     // Step 1: Create test data
     let user = User {
-        id: Uuid::new_v4(),
+        id: Uuid::now_v7(),
         username: "admin".to_string(),
         display_name: "Admin User".to_string(),
         avatar_url: None,
