@@ -44,11 +44,13 @@ pub async fn update_preferences(
         updated_user.updated_at = chrono::Utc::now();
 
         state
-            .unit_of_work
+            .unit_of_work()
             .users
             .update_user(&updated_user)
             .await
-            .map_err(|_| AppError::internal("Failed to update user preferences"))?;
+            .map_err(|_| {
+                AppError::internal("Failed to update user preferences")
+            })?;
     }
 
     Ok(Json(ApiResponse::success(PreferencesResponse {

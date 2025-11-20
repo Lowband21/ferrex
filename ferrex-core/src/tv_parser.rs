@@ -227,7 +227,10 @@ impl TvParser {
                             && abs_ep > 0
                             && abs_ep < 10000
                         {
-                            debug!("Parsed absolute episode: {} from {}", abs_ep, filename);
+                            debug!(
+                                "Parsed absolute episode: {} from {}",
+                                abs_ep, filename
+                            );
                             return Some(EpisodeInfo {
                                 season: 1,
                                 episode: abs_ep,
@@ -245,7 +248,8 @@ impl TvParser {
                             && let Ok(episode) = captures[1].parse::<u32>()
                         {
                             // If we're in a season folder, use that season
-                            let season = Self::parse_season_from_path(path).unwrap_or(1);
+                            let season =
+                                Self::parse_season_from_path(path).unwrap_or(1);
 
                             debug!(
                                 "Parsed episode: S{:02}E{:02} from {}",
@@ -268,7 +272,8 @@ impl TvParser {
                             && let Ok(episode) = captures[1].parse::<u32>()
                         {
                             // For parts/chapters, assume season 1 unless in season folder
-                            let season = Self::parse_season_from_path(path).unwrap_or(1);
+                            let season =
+                                Self::parse_season_from_path(path).unwrap_or(1);
 
                             debug!(
                                 "Parsed part/chapter as episode: S{:02}E{:02} from {}",
@@ -327,7 +332,10 @@ impl TvParser {
             .collect()
     }
 
-    fn parse_series_child_season_number(series_name: &str, child_name: &str) -> Option<u32> {
+    fn parse_series_child_season_number(
+        series_name: &str,
+        child_name: &str,
+    ) -> Option<u32> {
         let series_norm = Self::normalize_series_hint(series_name);
         let child_norm = Self::normalize_series_hint(child_name);
 
@@ -428,7 +436,9 @@ impl TvParser {
     /// Parse season number from folder name
     pub fn parse_season_folder(folder_name: &str) -> Option<u32> {
         // Check for specials folder
-        if folder_name.to_lowercase() == "specials" || folder_name.to_lowercase() == "special" {
+        if folder_name.to_lowercase() == "specials"
+            || folder_name.to_lowercase() == "special"
+        {
             return Some(0);
         }
 
@@ -451,7 +461,9 @@ impl TvParser {
             return Some(season);
         }
 
-        series_name.and_then(|series| Self::parse_series_child_season_number(series, folder_name))
+        series_name.and_then(|series| {
+            Self::parse_series_child_season_number(series, folder_name)
+        })
     }
 
     /// Extract series name from path
@@ -467,7 +479,9 @@ impl TvParser {
                 .and_then(|gp| gp.file_name())
                 .and_then(|name| name.to_str());
 
-            if Self::parse_season_folder_with_series(parent_str, series_name).is_some() {
+            if Self::parse_season_folder_with_series(parent_str, series_name)
+                .is_some()
+            {
                 if let Some(grandparent) = parent.parent()
                     && let Some(show_name) = grandparent.file_name()
                 {
@@ -529,8 +543,8 @@ impl TvParser {
 
         // Common anime folder indicators
         let anime_indicators = vec![
-            "anime", "[subbed]", "[dubbed]", "[bd]", "[dvd]", "[720p]", "[1080p]", "[hevc]",
-            "[x264]", "[x265]",
+            "anime", "[subbed]", "[dubbed]", "[bd]", "[dvd]", "[720p]",
+            "[1080p]", "[hevc]", "[x264]", "[x265]",
         ];
 
         for indicator in anime_indicators {
@@ -594,7 +608,8 @@ mod tests {
 
     #[test]
     fn test_parse_episode_s01e01() {
-        let path = PathBuf::from("/media/Show Name/Season 1/S01E01 - Pilot.mkv");
+        let path =
+            PathBuf::from("/media/Show Name/Season 1/S01E01 - Pilot.mkv");
         assert_eq!(TvParser::parse_episode(&path), Some((1, 1)));
     }
 
@@ -606,7 +621,8 @@ mod tests {
 
     #[test]
     fn test_parse_episode_from_folder() {
-        let path = PathBuf::from("/media/Show Name/Season 2/03 - Episode Name.mkv");
+        let path =
+            PathBuf::from("/media/Show Name/Season 2/03 - Episode Name.mkv");
         assert_eq!(TvParser::parse_episode(&path), Some((2, 3)));
     }
 
@@ -642,7 +658,9 @@ mod tests {
 
     #[test]
     fn test_parse_special_episode() {
-        let path = PathBuf::from("/media/Show/Specials/S00E01 - Christmas Special.mkv");
+        let path = PathBuf::from(
+            "/media/Show/Specials/S00E01 - Christmas Special.mkv",
+        );
         let info = TvParser::parse_episode_info(&path).unwrap();
         assert_eq!(info.season, 0);
         assert_eq!(info.episode, 1);
@@ -671,26 +689,39 @@ mod tests {
     #[test]
     fn test_parse_season_folder_with_series_variants() {
         assert_eq!(
-            TvParser::parse_season_folder_with_series("The Office Season 02", Some("The Office")),
+            TvParser::parse_season_folder_with_series(
+                "The Office Season 02",
+                Some("The Office")
+            ),
             Some(2)
         );
         assert_eq!(
-            TvParser::parse_season_folder_with_series("The Office S03", Some("The Office")),
+            TvParser::parse_season_folder_with_series(
+                "The Office S03",
+                Some("The Office")
+            ),
             Some(3)
         );
         assert_eq!(
-            TvParser::parse_season_folder_with_series("The Office 4", Some("The Office")),
+            TvParser::parse_season_folder_with_series(
+                "The Office 4",
+                Some("The Office")
+            ),
             Some(4)
         );
         assert_eq!(
-            TvParser::parse_season_folder_with_series("The Office Extras", Some("The Office")),
+            TvParser::parse_season_folder_with_series(
+                "The Office Extras",
+                Some("The Office")
+            ),
             None
         );
     }
 
     #[test]
     fn test_extract_series_name_with_prefixed_season_folder() {
-        let path = PathBuf::from("/media/The Office/The Office S02/Episode.mkv");
+        let path =
+            PathBuf::from("/media/The Office/The Office S02/Episode.mkv");
         assert_eq!(
             TvParser::extract_series_name(&path),
             Some("The Office".to_string())
@@ -699,7 +730,8 @@ mod tests {
 
     #[test]
     fn test_is_in_tv_structure() {
-        let tv_path = PathBuf::from("/media/Shows/Breaking Bad/Season 1/S01E01.mkv");
+        let tv_path =
+            PathBuf::from("/media/Shows/Breaking Bad/Season 1/S01E01.mkv");
         assert!(TvParser::is_in_tv_structure(&tv_path));
 
         let movie_path = PathBuf::from("/media/Movies/The Matrix (1999).mkv");
@@ -729,14 +761,17 @@ mod tests {
 
     #[test]
     fn test_is_likely_anime() {
-        let anime_path1 =
-            PathBuf::from("/media/Anime/Attack on Titan/[HorribleSubs] AOT - 01 [720p].mkv");
+        let anime_path1 = PathBuf::from(
+            "/media/Anime/Attack on Titan/[HorribleSubs] AOT - 01 [720p].mkv",
+        );
         assert!(TvParser::is_likely_anime(&anime_path1));
 
-        let anime_path2 = PathBuf::from("/media/Shows/Naruto [Dubbed]/Episode 001.mkv");
+        let anime_path2 =
+            PathBuf::from("/media/Shows/Naruto [Dubbed]/Episode 001.mkv");
         assert!(TvParser::is_likely_anime(&anime_path2));
 
-        let regular_path = PathBuf::from("/media/Shows/Breaking Bad/S01E01.mkv");
+        let regular_path =
+            PathBuf::from("/media/Shows/Breaking Bad/S01E01.mkv");
         assert!(!TvParser::is_likely_anime(&regular_path));
     }
 }

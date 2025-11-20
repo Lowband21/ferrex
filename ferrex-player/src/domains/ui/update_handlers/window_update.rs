@@ -43,7 +43,12 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<Message> {
         .ui
         .state
         .background_shader_state
-        .update_depth_lines(&state.domains.ui.state.view, size.width, size.height, uuid);
+        .update_depth_lines(
+            &state.domains.ui.state.view,
+            size.width,
+            size.height,
+            uuid,
+        );
 
     Task::none()
 }
@@ -56,7 +61,10 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<Message> {
     ),
     profiling::function
 )]
-pub fn handle_window_moved(state: &mut State, position: Option<iced::Point>) -> Task<Message> {
+pub fn handle_window_moved(
+    state: &mut State,
+    position: Option<iced::Point>,
+) -> Task<Message> {
     // Store the window position for later use (e.g., when spawning MPV)
     if let Some(position) = position {
         log::info!("Window moved to: ({}, {})", position.x, position.y);

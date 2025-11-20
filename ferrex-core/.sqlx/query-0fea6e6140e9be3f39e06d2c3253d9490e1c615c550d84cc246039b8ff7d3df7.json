@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT media_type, media_id, image_id, image_type, order_index, is_primary\n            FROM media_images\n            WHERE media_type = $1 AND media_id = $2 AND image_type = $3 AND is_primary = true\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "image_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "image_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "order_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_primary",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0fea6e6140e9be3f39e06d2c3253d9490e1c615c550d84cc246039b8ff7d3df7"
+}

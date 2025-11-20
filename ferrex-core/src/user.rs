@@ -299,7 +299,8 @@ mod tests {
             "expires_in": 3600
         }"#;
 
-        let token: AuthToken = serde_json::from_str(raw).expect("token deserializes");
+        let token: AuthToken =
+            serde_json::from_str(raw).expect("token deserializes");
         assert_eq!(token.scope, SessionScope::Full);
     }
 }
@@ -408,7 +409,9 @@ pub enum AuthError {
 /// Validation errors for user input
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ValidationError {
-    #[error("Invalid username: must be 3-30 characters, alphanumeric or underscore")]
+    #[error(
+        "Invalid username: must be 3-30 characters, alphanumeric or underscore"
+    )]
     InvalidUsername,
 
     #[error("Password too short: minimum 8 characters required")]

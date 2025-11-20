@@ -1,5 +1,5 @@
-use ferrex_core::player_prelude::UserPermissions;
 use ferrex_core::api_types::users_admin::AdminUserInfo;
+use ferrex_core::player_prelude::UserPermissions;
 use iced::Task;
 use log::{debug, error, info};
 
@@ -10,13 +10,18 @@ use crate::{
 };
 
 /// Handle user management domain messages
-pub fn update_user_management(state: &mut State, message: Message) -> DomainUpdateResult {
+pub fn update_user_management(
+    state: &mut State,
+    message: Message,
+) -> DomainUpdateResult {
     #[cfg(any(
         feature = "profile-with-puffin",
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::USER_MGMT_UPDATE);
+    profiling::scope!(
+        crate::infrastructure::profiling_scopes::scopes::USER_MGMT_UPDATE
+    );
 
     debug!("User management update: {}", message.name());
 
@@ -130,7 +135,10 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
                 user.display_name, user.username
             );
             // TODO: Update state and emit event
-            DomainUpdateResult::with_events(Task::none(), vec![CrossDomainEvent::LibraryUpdated])
+            DomainUpdateResult::with_events(
+                Task::none(),
+                vec![CrossDomainEvent::LibraryUpdated],
+            )
             // TODO: Create proper UserCreated event
         }
 
@@ -195,7 +203,10 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
                 user.display_name, user.username
             );
             // TODO: Update state and emit event
-            DomainUpdateResult::with_events(Task::none(), vec![CrossDomainEvent::LibraryUpdated])
+            DomainUpdateResult::with_events(
+                Task::none(),
+                vec![CrossDomainEvent::LibraryUpdated],
+            )
             // TODO: Create proper UserUpdated event
         }
 
@@ -239,8 +250,12 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
                         .map_err(|e| e.to_string())
                 },
                 |result| match result {
-                    Ok(id) => DomainMessage::from(Message::DeleteUserSuccess(id)),
-                    Err(err) => DomainMessage::from(Message::DeleteUserError(err)),
+                    Ok(id) => {
+                        DomainMessage::from(Message::DeleteUserSuccess(id))
+                    }
+                    Err(err) => {
+                        DomainMessage::from(Message::DeleteUserError(err))
+                    }
                 },
             ))
         }
@@ -254,7 +269,10 @@ pub fn update_user_management(state: &mut State, message: Message) -> DomainUpda
                 .state
                 .users
                 .retain(|u| u.id != user_id);
-            DomainUpdateResult::with_events(Task::none(), vec![CrossDomainEvent::LibraryUpdated])
+            DomainUpdateResult::with_events(
+                Task::none(),
+                vec![CrossDomainEvent::LibraryUpdated],
+            )
             // TODO: Create proper UserDeleted event
         }
 

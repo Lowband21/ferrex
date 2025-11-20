@@ -11,13 +11,18 @@ use iced::Task;
     ),
     profiling::function
 )]
-pub fn update_streaming(state: &mut State, message: Message) -> DomainUpdateResult {
+pub fn update_streaming(
+    state: &mut State,
+    message: Message,
+) -> DomainUpdateResult {
     #[cfg(any(
         feature = "profile-with-puffin",
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::STREAMING_UPDATE);
+    profiling::scope!(
+        crate::infrastructure::profiling_scopes::scopes::STREAMING_UPDATE
+    );
 
     match message {
         // Transcoding messages
@@ -92,9 +97,11 @@ fn handle_master_playlist_ready(
         state.domains.streaming.state.master_playlist = Some(playlist);
 
         // Now that we confirmed the playlist exists, send direct message to Player domain
-        DomainUpdateResult::task(Task::done(crate::common::messages::DomainMessage::Player(
-            crate::domains::player::messages::Message::VideoReadyToPlay,
-        )))
+        DomainUpdateResult::task(Task::done(
+            crate::common::messages::DomainMessage::Player(
+                crate::domains::player::messages::Message::VideoReadyToPlay,
+            ),
+        ))
     } else {
         log::error!("Master playlist check failed - retrying in 2 seconds");
         // Retry checking after a delay
@@ -108,7 +115,10 @@ fn handle_master_playlist_ready(
 }
 
 /// Handle segment prefetch request
-fn handle_start_segment_prefetch(_state: &mut State, _segment_index: usize) -> DomainUpdateResult {
+fn handle_start_segment_prefetch(
+    _state: &mut State,
+    _segment_index: usize,
+) -> DomainUpdateResult {
     // TODO: Implement segment prefetching when needed
     // For now, GStreamer handles buffering internally
     DomainUpdateResult::task(Task::none())
@@ -125,7 +135,10 @@ fn handle_segment_prefetched(
 }
 
 /// Handle bandwidth measurement update
-fn handle_bandwidth_measured(state: &mut State, bandwidth: u64) -> DomainUpdateResult {
+fn handle_bandwidth_measured(
+    state: &mut State,
+    bandwidth: u64,
+) -> DomainUpdateResult {
     log::debug!("Bandwidth measured: {} bps", bandwidth);
     state.domains.streaming.state.last_bandwidth_measurement = Some(bandwidth);
 

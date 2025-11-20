@@ -64,7 +64,11 @@ impl CarouselState {
     }
 
     /// Create a new carousel state with custom item dimensions
-    pub fn new_with_dimensions(total_items: usize, item_width: f32, item_spacing: f32) -> Self {
+    pub fn new_with_dimensions(
+        total_items: usize,
+        item_width: f32,
+        item_spacing: f32,
+    ) -> Self {
         let items_per_page = 5; // Default, will be updated based on width
         Self {
             current_index: 0,
@@ -92,7 +96,8 @@ impl CarouselState {
         const MAX_ITEMS: usize = 10;
 
         let item_total_width = self.item_width + self.item_spacing;
-        let calculated_items = (available_width / item_total_width).floor() as usize;
+        let calculated_items =
+            (available_width / item_total_width).floor() as usize;
         self.items_per_page = calculated_items.clamp(MIN_ITEMS, MAX_ITEMS);
         self.update_visible_range();
     }
@@ -103,7 +108,8 @@ impl CarouselState {
         const BUFFER: usize = 2;
 
         let start = self.current_index.saturating_sub(BUFFER);
-        let end = (self.current_index + self.items_per_page + BUFFER).min(self.total_items);
+        let end = (self.current_index + self.items_per_page + BUFFER)
+            .min(self.total_items);
 
         self.visible_start = start;
         self.visible_end = end;
@@ -163,8 +169,10 @@ impl CarouselState {
     pub fn go_left(&mut self) {
         if self.can_go_left() {
             // Scroll by roughly one page worth (items * (width + spacing))
-            let scroll_amount = self.items_per_page as f32 * (self.item_width + self.item_spacing);
-            self.scroll_position = (self.scroll_position - scroll_amount).max(0.0);
+            let scroll_amount = self.items_per_page as f32
+                * (self.item_width + self.item_spacing);
+            self.scroll_position =
+                (self.scroll_position - scroll_amount).max(0.0);
             self.update_visible_range_from_scroll();
         }
     }
@@ -172,13 +180,16 @@ impl CarouselState {
     pub fn go_right(&mut self) {
         if self.can_go_right() {
             // Scroll by roughly one page worth (items * (width + spacing))
-            let scroll_amount = self.items_per_page as f32 * (self.item_width + self.item_spacing);
+            let scroll_amount = self.items_per_page as f32
+                * (self.item_width + self.item_spacing);
             self.scroll_position += scroll_amount;
             self.update_visible_range_from_scroll();
         }
     }
 
-    pub fn get_scroll_offset(&self) -> iced::widget::scrollable::AbsoluteOffset {
+    pub fn get_scroll_offset(
+        &self,
+    ) -> iced::widget::scrollable::AbsoluteOffset {
         iced::widget::scrollable::AbsoluteOffset {
             x: self.scroll_position,
             y: 0.0,
@@ -191,13 +202,15 @@ impl CarouselState {
 
         // Calculate which item is at the current scroll position
         let item_with_spacing = self.item_width + self.item_spacing;
-        let first_visible = (self.scroll_position / item_with_spacing).floor() as usize;
+        let first_visible =
+            (self.scroll_position / item_with_spacing).floor() as usize;
 
         // Update current index
         self.current_index = first_visible;
 
         // Update visible range with buffer
         self.visible_start = first_visible.saturating_sub(BUFFER);
-        self.visible_end = (first_visible + self.items_per_page + BUFFER).min(self.total_items);
+        self.visible_end = (first_visible + self.items_per_page + BUFFER)
+            .min(self.total_items);
     }
 }

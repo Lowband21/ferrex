@@ -11,13 +11,18 @@ use iced::Task;
     ),
     profiling::function
 )]
-pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResult {
+pub fn update_metadata(
+    state: &mut State,
+    message: Message,
+) -> DomainUpdateResult {
     #[cfg(any(
         feature = "profile-with-puffin",
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::METADATA_UPDATE);
+    profiling::scope!(
+        crate::infrastructure::profiling_scopes::scopes::METADATA_UPDATE
+    );
 
     match message {
         Message::InitializeService => {
@@ -43,11 +48,15 @@ pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResul
                 Ok(details) => {
                     log::info!("Media details loaded: {} items", details.len());
                     // TODO: Process loaded media details
-                    DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
+                    DomainUpdateResult::task(
+                        Task::none().map(DomainMessage::Metadata),
+                    )
                 }
                 Err(e) => {
                     log::error!("Failed to load media details: {}", e);
-                    DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
+                    DomainUpdateResult::task(
+                        Task::none().map(DomainMessage::Metadata),
+                    )
                 }
             }
         }
@@ -82,7 +91,10 @@ pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResul
         //    DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
         //}
         Message::SeriesSortingCompleted(series_refs) => {
-            log::info!("Series sorting completed: {} series", series_refs.len());
+            log::info!(
+                "Series sorting completed: {} series",
+                series_refs.len()
+            );
             // TODO: Update UI with sorted series
             DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
         }
@@ -125,7 +137,9 @@ pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResul
         //    )
         //}
         Message::CheckDetailsFetcherQueue => {
-            log::debug!("CheckDetailsFetcherQueue - deprecated with new batch metadata service");
+            log::debug!(
+                "CheckDetailsFetcherQueue - deprecated with new batch metadata service"
+            );
             // This is no longer needed with the new metadata service
             // The service sends MediaDetailsUpdated messages directly
             DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
@@ -166,6 +180,8 @@ pub fn update_metadata(state: &mut State, message: Message) -> DomainUpdateResul
             let task = crate::domains::metadata::update_handlers::unified_image::handle_unified_image_load_failed(state, request, error);
             DomainUpdateResult::task(task.map(DomainMessage::Metadata))
         }
-        Message::NoOp => DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata)),
+        Message::NoOp => {
+            DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
+        }
     }
 }

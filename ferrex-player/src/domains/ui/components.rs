@@ -22,7 +22,9 @@ use rkyv::rancor::Error;
     ),
     profiling::function
 )]
-pub fn create_cast_scrollable(cast: &[ArchivedCastMember]) -> Element<'static, Message> {
+pub fn create_cast_scrollable(
+    cast: &[ArchivedCastMember],
+) -> Element<'static, Message> {
     if cast.is_empty() {
         return Space::new().into();
     }
@@ -77,25 +79,26 @@ fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, Message> {
         ArchivedOption::None => 0,
     };
 
-    let profile_image: Element<'static, Message> = if let Some(uuid) = profile_uuid {
-        image_for(uuid)
-            .size(ImageSize::Profile)
-            .image_type(ImageType::Person)
-            .animation(AnimationType::flip())
-            .width(Length::Fixed(card_width))
-            .height(Length::Fixed(image_height))
-            .radius(CORNER_RADIUS)
-            .image_index(profile_index)
-            .placeholder(Icon::User)
-            .into()
-    } else {
-        container(icon_text(Icon::User))
-            .width(Length::Fixed(card_width))
-            .height(Length::Fixed(image_height))
-            .align_x(iced::Alignment::Center)
-            .align_y(iced::Alignment::Center)
-            .into()
-    };
+    let profile_image: Element<'static, Message> =
+        if let Some(uuid) = profile_uuid {
+            image_for(uuid)
+                .size(ImageSize::Profile)
+                .image_type(ImageType::Person)
+                .animation(AnimationType::flip())
+                .width(Length::Fixed(card_width))
+                .height(Length::Fixed(image_height))
+                .radius(CORNER_RADIUS)
+                .image_index(profile_index)
+                .placeholder(Icon::User)
+                .into()
+        } else {
+            container(icon_text(Icon::User))
+                .width(Length::Fixed(card_width))
+                .height(Length::Fixed(image_height))
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center)
+                .into()
+        };
 
     card_content = card_content.push(profile_image);
 
@@ -121,7 +124,9 @@ fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, Message> {
 }
 
 /// Create the backdrop aspect ratio toggle button
-pub fn create_backdrop_aspect_button<'a>(state: &'a State) -> Element<'a, Message> {
+pub fn create_backdrop_aspect_button<'a>(
+    state: &'a State,
+) -> Element<'a, Message> {
     let aspect_button_text = match state
         .domains
         .ui

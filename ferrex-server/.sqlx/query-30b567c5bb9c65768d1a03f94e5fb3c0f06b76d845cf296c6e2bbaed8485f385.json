@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM images\n            WHERE id NOT IN (\n                SELECT DISTINCT image_id FROM media_images\n            )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "30b567c5bb9c65768d1a03f94e5fb3c0f06b76d845cf296c6e2bbaed8485f385"
+}

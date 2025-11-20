@@ -38,7 +38,7 @@ pub enum Message {
 
     // Video events
     VideoLoaded(bool), // Success flag
-    VideoReadyToPlay,  // Video is ready to be loaded and played (from streaming domain)
+    VideoReadyToPlay, // Video is ready to be loaded and played (from streaming domain)
     EndOfStream,
     NewFrame,
     Reload,
@@ -103,7 +103,9 @@ impl fmt::Debug for Message {
             // Seeking
             Message::Seek(pos) => write!(f, "Seek({})", pos),
             Message::SeekTo(duration) => write!(f, "SeekTo({:?})", duration),
-            Message::SeekRelative(delta) => write!(f, "SeekRelative({})", delta),
+            Message::SeekRelative(delta) => {
+                write!(f, "SeekRelative({})", delta)
+            }
             Message::SeekRelease => write!(f, "SeekRelease"),
             Message::SeekBarPressed => write!(f, "SeekBarPressed"),
             Message::SeekDone => write!(f, "SeekDone"),
@@ -117,7 +119,9 @@ impl fmt::Debug for Message {
             Message::ToggleRepeat => write!(f, "ToggleRepeat"),
 
             // Video events
-            Message::VideoLoaded(success) => write!(f, "VideoLoaded({})", success),
+            Message::VideoLoaded(success) => {
+                write!(f, "VideoLoaded({})", success)
+            }
             Message::VideoReadyToPlay => write!(f, "VideoReadyToPlay"),
             Message::EndOfStream => write!(f, "EndOfStream"),
             Message::NewFrame => write!(f, "NewFrame"),
@@ -135,11 +139,17 @@ impl fmt::Debug for Message {
             Message::VideoDoubleClicked => write!(f, "VideoDoubleClicked"),
 
             // Settings
-            Message::SetPlaybackSpeed(speed) => write!(f, "SetPlaybackSpeed({})", speed),
-            Message::SetContentFit(fit) => write!(f, "SetContentFit({:?})", fit),
+            Message::SetPlaybackSpeed(speed) => {
+                write!(f, "SetPlaybackSpeed({})", speed)
+            }
+            Message::SetContentFit(fit) => {
+                write!(f, "SetContentFit({:?})", fit)
+            }
 
             // Track selection
-            Message::AudioTrackSelected(track) => write!(f, "AudioTrackSelected({})", track),
+            Message::AudioTrackSelected(track) => {
+                write!(f, "AudioTrackSelected({})", track)
+            }
             Message::SubtitleTrackSelected(track) => match track {
                 Some(t) => write!(f, "SubtitleTrackSelected(Some({}))", t),
                 None => write!(f, "SubtitleTrackSelected(None)"),
@@ -152,8 +162,12 @@ impl fmt::Debug for Message {
             Message::CycleSubtitleTrack => write!(f, "CycleSubtitleTrack"),
             Message::CycleSubtitleSimple => write!(f, "CycleSubtitleSimple"),
             Message::TracksLoaded => write!(f, "TracksLoaded"),
-            Message::CheckControlsVisibility => write!(f, "CheckControlsVisibility"),
-            Message::ExternalPlaybackStarted => write!(f, "ExternalPlaybackStarted"),
+            Message::CheckControlsVisibility => {
+                write!(f, "CheckControlsVisibility")
+            }
+            Message::ExternalPlaybackStarted => {
+                write!(f, "ExternalPlaybackStarted")
+            }
             Message::ExternalPlaybackUpdate { position, duration } => {
                 write!(
                     f,
@@ -161,12 +175,16 @@ impl fmt::Debug for Message {
                     position, duration
                 )
             }
-            Message::ExternalPlaybackEnded => write!(f, "ExternalPlaybackEnded"),
+            Message::ExternalPlaybackEnded => {
+                write!(f, "ExternalPlaybackEnded")
+            }
             Message::PollExternalMpv => write!(f, "PollExternalMpv"),
 
             // External MPV player messages
             #[cfg(feature = "external-mpv-player")]
-            Message::ExternalPlaybackStarted => write!(f, "ExternalPlaybackStarted"),
+            Message::ExternalPlaybackStarted => {
+                write!(f, "ExternalPlaybackStarted")
+            }
             #[cfg(feature = "external-mpv-player")]
             Message::ExternalPlaybackUpdate { position, duration } => {
                 write!(
@@ -176,7 +194,9 @@ impl fmt::Debug for Message {
                 )
             }
             #[cfg(feature = "external-mpv-player")]
-            Message::ExternalPlaybackEnded => write!(f, "ExternalPlaybackEnded"),
+            Message::ExternalPlaybackEnded => {
+                write!(f, "ExternalPlaybackEnded")
+            }
             #[cfg(feature = "external-mpv-player")]
             Message::PollExternalMpv => write!(f, "PollExternalMpv"),
         }

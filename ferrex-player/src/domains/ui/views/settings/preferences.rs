@@ -6,7 +6,9 @@ use crate::domains::ui::messages::Message;
 use crate::domains::ui::theme;
 use crate::state_refactored::State;
 use ferrex_core::player_prelude::{GridSize, PlaybackQuality, ResumeBehavior};
-use iced::widget::{Space, button, column, container, pick_list, row, slider, text, toggler};
+use iced::widget::{
+    Space, button, column, container, pick_list, row, slider, text, toggler,
+};
 use iced::{Element, Length};
 
 #[cfg_attr(
@@ -98,7 +100,8 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, Message> {
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             row![
                 text("Small").size(14),
-                slider(0.5..=2.0, 1.0, |_| Message::NoOp).width(Length::Fixed(200.0)),
+                slider(0.5..=2.0, 1.0, |_| Message::NoOp)
+                    .width(Length::Fixed(200.0)),
                 text("Large").size(14),
             ]
             .spacing(10)

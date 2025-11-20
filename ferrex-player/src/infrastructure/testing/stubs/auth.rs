@@ -3,12 +3,16 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
-use ferrex_core::identity::auth::domain::value_objects::SessionScope;
-use ferrex_core::player_prelude::{AuthToken, Role, User, UserPermissions, UserPreferences};
+use ferrex_core::auth::domain::value_objects::SessionScope;
+use ferrex_core::player_prelude::{
+    AuthToken, Role, User, UserPermissions, UserPreferences,
+};
 use uuid::Uuid;
 
 use crate::domains::auth::dto::UserListItemDto;
-use crate::domains::auth::manager::{AutoLoginScope, DeviceAuthStatus, PlayerAuthResult};
+use crate::domains::auth::manager::{
+    AutoLoginScope, DeviceAuthStatus, PlayerAuthResult,
+};
 use crate::domains::auth::storage::StoredAuth;
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::auth::AuthService;
@@ -170,7 +174,10 @@ impl TestAuthService {
 }
 
 impl InnerAuthState {
-    fn auth_result(&self, user: &User) -> RepositoryResult<(User, UserPermissions)> {
+    fn auth_result(
+        &self,
+        user: &User,
+    ) -> RepositoryResult<(User, UserPermissions)> {
         match self.permissions.get(&user.id) {
             Some(perms) => Ok((user.clone(), perms.clone())),
             None => Err(RepositoryError::QueryFailed(format!(
@@ -180,21 +187,21 @@ impl InnerAuthState {
         }
     }
 
-    fn player_auth_result(&self, user: &User) -> RepositoryResult<PlayerAuthResult> {
-        let permissions = self
-            .permissions
-            .get(&user.id)
-            .cloned()
-            .ok_or_else(|| RepositoryError::QueryFailed("Missing permissions".into()))?;
-        let status = self
-            .device_status
-            .get(&user.id)
-            .cloned()
-            .unwrap_or(DeviceAuthStatus {
+    fn player_auth_result(
+        &self,
+        user: &User,
+    ) -> RepositoryResult<PlayerAuthResult> {
+        let permissions =
+            self.permissions.get(&user.id).cloned().ok_or_else(|| {
+                RepositoryError::QueryFailed("Missing permissions".into())
+            })?;
+        let status = self.device_status.get(&user.id).cloned().unwrap_or(
+            DeviceAuthStatus {
                 device_registered: true,
                 has_pin: false,
                 remaining_attempts: Some(5),
-            });
+            },
+        );
 
         Ok(PlayerAuthResult {
             user: user.clone(),
@@ -212,12 +219,12 @@ impl AuthService for TestAuthService {
         _pin: String,
         _server_url: String,
     ) -> RepositoryResult<(User, UserPermissions)> {
-        let user = self
-            .get_user(&username)
-            .ok_or_else(|| RepositoryError::NotFound {
+        let user = self.get_user(&username).ok_or_else(|| {
+            RepositoryError::NotFound {
                 entity_type: "User".into(),
                 id: username.clone(),
-            })?;
+            }
+        })?;
 
         let mut guard = self.inner.write().expect("lock poisoned");
         let (user, permissions) = guard.auth_result(&user)?;
@@ -248,7 +255,9 @@ impl AuthService for TestAuthService {
             .clone())
     }
 
-    async fn get_current_permissions(&self) -> RepositoryResult<Option<UserPermissions>> {
+    async fn get_current_permissions(
+        &self,
+    ) -> RepositoryResult<Option<UserPermissions>> {
         Ok(self
             .inner
             .read()
@@ -265,16 +274,17 @@ impl AuthService for TestAuthService {
         Ok(self.user_list())
     }
 
-    async fn check_device_auth(&self, user_id: Uuid) -> RepositoryResult<DeviceAuthStatus> {
+    async fn check_device_auth(
+        &self,
+        user_id: Uuid,
+    ) -> RepositoryResult<DeviceAuthStatus> {
         let guard = self.inner.read().expect("lock poisoned");
-        guard
-            .device_status
-            .get(&user_id)
-            .cloned()
-            .ok_or_else(|| RepositoryError::NotFound {
+        guard.device_status.get(&user_id).cloned().ok_or_else(|| {
+            RepositoryError::NotFound {
                 entity_type: "DeviceAuthStatus".into(),
                 id: user_id.to_string(),
-            })
+            }
+        })
     }
 
     async fn set_device_pin(&self, pin: String) -> RepositoryResult<()> {
@@ -313,12 +323,12 @@ impl AuthService for TestAuthService {
         _password: String,
         remember_device: bool,
     ) -> RepositoryResult<PlayerAuthResult> {
-        let user = self
-            .get_user(&username)
-            .ok_or_else(|| RepositoryError::NotFound {
+        let user = self.get_user(&username).ok_or_else(|| {
+            RepositoryError::NotFound {
                 entity_type: "User".into(),
                 id: username.clone(),
-            })?;
+            }
+        })?;
 
         let result = self
             .inner
@@ -372,7 +382,10 @@ impl AuthService for TestAuthService {
             .clone())
     }
 
-    async fn apply_stored_auth(&self, stored_auth: StoredAuth) -> RepositoryResult<()> {
+    async fn apply_stored_auth(
+        &self,
+        stored_auth: StoredAuth,
+    ) -> RepositoryResult<()> {
         if let Ok(mut guard) = self.inner.write() {
             guard.current_user = Some(stored_auth.user.clone());
             guard.current_permissions = stored_auth.permissions.clone();
@@ -382,7 +395,10 @@ impl AuthService for TestAuthService {
         Ok(())
     }
 
-    async fn is_auto_login_enabled(&self, user_id: &Uuid) -> RepositoryResult<bool> {
+    async fn is_auto_login_enabled(
+        &self,
+        user_id: &Uuid,
+    ) -> RepositoryResult<bool> {
         Ok(*self
             .inner
             .read()
@@ -392,7 +408,9 @@ impl AuthService for TestAuthService {
             .unwrap_or(&false))
     }
 
-    async fn validate_session(&self) -> RepositoryResult<(User, UserPermissions)> {
+    async fn validate_session(
+        &self,
+    ) -> RepositoryResult<(User, UserPermissions)> {
         let guard = self.inner.read().expect("lock poisoned");
         match (
             guard.current_user.clone(),
@@ -405,7 +423,9 @@ impl AuthService for TestAuthService {
         }
     }
 
-    async fn is_current_user_auto_login_enabled(&self) -> RepositoryResult<bool> {
+    async fn is_current_user_auto_login_enabled(
+        &self,
+    ) -> RepositoryResult<bool> {
         let guard = self.inner.read().expect("lock poisoned");
         if let Some(user) = guard.current_user.as_ref() {
             Ok(*guard.auto_login.get(&user.id).unwrap_or(&false))
@@ -438,18 +458,18 @@ impl AuthService for TestAuthService {
         if let Ok(mut guard) = self.inner.write()
             && let (Some(user), Some(token)) =
                 (guard.current_user.clone(), guard.auth_token.clone())
-            {
-                let stored = StoredAuth {
-                    token,
-                    user,
-                    server_url: "http://localhost:3000".into(),
-                    permissions: guard.current_permissions.clone(),
-                    stored_at: Utc::now(),
-                    device_trust_expires_at: Some(Utc::now() + Duration::days(30)),
-                    refresh_token: Some("refresh-token".into()),
-                };
-                guard.stored_auth = Some(stored);
-            }
+        {
+            let stored = StoredAuth {
+                token,
+                user,
+                server_url: "https://localhost:3000".into(),
+                permissions: guard.current_permissions.clone(),
+                stored_at: Utc::now(),
+                device_trust_expires_at: Some(Utc::now() + Duration::days(30)),
+                refresh_token: Some("refresh-token".into()),
+            };
+            guard.stored_auth = Some(stored);
+        }
         Ok(())
     }
 
@@ -461,7 +481,8 @@ impl AuthService for TestAuthService {
         if let Ok(mut guard) = self.inner.write() {
             match scope {
                 AutoLoginScope::DeviceOnly | AutoLoginScope::UserDefault => {
-                    let user_id = guard.current_user.as_ref().map(|user| user.id);
+                    let user_id =
+                        guard.current_user.as_ref().map(|user| user.id);
                     if let Some(user_id) = user_id {
                         guard.auto_login.insert(user_id, enabled);
                     }

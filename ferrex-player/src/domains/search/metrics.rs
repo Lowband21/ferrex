@@ -103,7 +103,10 @@ impl PerformanceHistory {
     }
 
     /// Get success rate for a strategy
-    pub fn get_success_rate(&self, strategy: super::types::SearchStrategy) -> f32 {
+    pub fn get_success_rate(
+        &self,
+        strategy: super::types::SearchStrategy,
+    ) -> f32 {
         let metrics = match strategy {
             super::types::SearchStrategy::Client => &self.client_metrics,
             super::types::SearchStrategy::Server => &self.server_metrics,
@@ -346,9 +349,12 @@ impl StrategyWeights {
         capabilities: &ClientCapabilities,
     ) {
         // Base weights from success rates
-        self.client_weight = history.get_success_rate(super::types::SearchStrategy::Client);
-        self.server_weight = history.get_success_rate(super::types::SearchStrategy::Server);
-        self.hybrid_weight = history.get_success_rate(super::types::SearchStrategy::Hybrid);
+        self.client_weight =
+            history.get_success_rate(super::types::SearchStrategy::Client);
+        self.server_weight =
+            history.get_success_rate(super::types::SearchStrategy::Server);
+        self.hybrid_weight =
+            history.get_success_rate(super::types::SearchStrategy::Hybrid);
 
         // Adjust for network quality
         match network.quality() {
@@ -374,12 +380,14 @@ impl StrategyWeights {
         }
 
         // Adjust based on execution times
-        if let Some(client_time) =
-            history.get_average_execution_time(super::types::SearchStrategy::Client)
-            && let Some(server_time) =
-                history.get_average_execution_time(super::types::SearchStrategy::Server)
+        if let Some(client_time) = history
+            .get_average_execution_time(super::types::SearchStrategy::Client)
+            && let Some(server_time) = history.get_average_execution_time(
+                super::types::SearchStrategy::Server,
+            )
         {
-            let time_ratio = client_time.as_millis() as f32 / server_time.as_millis() as f32;
+            let time_ratio =
+                client_time.as_millis() as f32 / server_time.as_millis() as f32;
             if time_ratio > 2.0 {
                 self.client_weight *= 0.5;
             } else if time_ratio < 0.5 {
@@ -388,7 +396,8 @@ impl StrategyWeights {
         }
 
         // Normalize weights
-        let total = self.client_weight + self.server_weight + self.hybrid_weight;
+        let total =
+            self.client_weight + self.server_weight + self.hybrid_weight;
         if total > 0.0 {
             self.client_weight /= total;
             self.server_weight /= total;
@@ -402,7 +411,9 @@ impl StrategyWeights {
     }
 
     pub fn get_best_strategy(&self) -> super::types::SearchStrategy {
-        if self.server_weight >= self.client_weight && self.server_weight >= self.hybrid_weight {
+        if self.server_weight >= self.client_weight
+            && self.server_weight >= self.hybrid_weight
+        {
             super::types::SearchStrategy::Server
         } else if self.client_weight >= self.hybrid_weight {
             super::types::SearchStrategy::Client

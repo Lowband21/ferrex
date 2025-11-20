@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT kind, library_id, priority, COUNT(*)::bigint AS ready\n            FROM orchestrator_jobs\n            WHERE state = 'ready'\n            GROUP BY kind, library_id, priority\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "priority",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "ready",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "c514145d3cfc647f16aedf696a93738e6ea7f42be4ea0f46e8a93c282174ded9"
+}

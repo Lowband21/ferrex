@@ -14,7 +14,11 @@ pub struct SeriesFolderClues {
 }
 
 impl SeriesFolderClues {
-    fn new(raw_title: String, year: Option<u16>, region: Option<String>) -> Self {
+    fn new(
+        raw_title: String,
+        year: Option<u16>,
+        region: Option<String>,
+    ) -> Self {
         let normalized_title = clean_series_title(&raw_title);
         Self {
             raw_title,
@@ -51,7 +55,8 @@ impl SeriesFolderClues {
         metadata_year: Option<u16>,
     ) -> Self {
         if self.raw_title == "Unknown Series"
-            && let Some(title) = metadata_title.map(str::trim).filter(|t| !t.is_empty())
+            && let Some(title) =
+                metadata_title.map(str::trim).filter(|t| !t.is_empty())
         {
             self.raw_title = title.to_string();
             self.normalized_title = clean_series_title(title);
@@ -151,7 +156,8 @@ mod tests {
 
     #[test]
     fn parses_title_year_and_region() {
-        let path = PathBuf::from("/media/The Office (2005) (US)/Season 01/E01.mkv");
+        let path =
+            PathBuf::from("/media/The Office (2005) (US)/Season 01/E01.mkv");
         let clues = SeriesFolderClues::from_path(&path);
         assert_eq!(clues.raw_title, "The Office");
         assert_eq!(clues.year, Some(2005));
@@ -179,7 +185,8 @@ mod tests {
 
     #[test]
     fn parses_series_when_season_folder_repeats_name() {
-        let path = PathBuf::from("/media/The Office/The Office S02/Episode.mkv");
+        let path =
+            PathBuf::from("/media/The Office/The Office S02/Episode.mkv");
         let clues = SeriesFolderClues::from_path(&path);
         assert_eq!(clues.raw_title, "The Office");
         assert_eq!(clues.year, None);

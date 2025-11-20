@@ -91,9 +91,14 @@ impl HlsClient {
                             last_error
                         );
                         // Longer delays: 2s, 4s, 8s
-                        let delay_secs = 2u64.saturating_mul(1 << (retries - 1));
-                        log::info!("Waiting {} seconds before retry...", delay_secs);
-                        tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+                        let delay_secs =
+                            2u64.saturating_mul(1 << (retries - 1));
+                        log::info!(
+                            "Waiting {} seconds before retry...",
+                            delay_secs
+                        );
+                        tokio::time::sleep(Duration::from_secs(delay_secs))
+                            .await;
                     }
                 }
             }
@@ -106,8 +111,12 @@ impl HlsClient {
     }
 
     /// Start adaptive transcoding for a media file
-    pub async fn start_adaptive_transcoding(&self, media_id: &str) -> Result<String, String> {
-        let url = format!("{}/transcode/{}/adaptive", self.server_url, media_id);
+    pub async fn start_adaptive_transcoding(
+        &self,
+        media_id: &str,
+    ) -> Result<String, String> {
+        let url =
+            format!("{}/transcode/{}/adaptive", self.server_url, media_id);
 
         log::info!("=== ADAPTIVE TRANSCODING REQUEST ===");
         log::info!("Media ID: {}", media_id);
@@ -125,7 +134,11 @@ impl HlsClient {
             .await
             .map_err(|e| {
                 let elapsed = start_time.elapsed();
-                log::error!("Failed to start transcoding after {:?}: {}", elapsed, e);
+                log::error!(
+                    "Failed to start transcoding after {:?}: {}",
+                    elapsed,
+                    e
+                );
                 format!("Failed to start transcoding: {}", e)
             })?;
 
@@ -220,9 +233,13 @@ impl HlsClient {
     }
 
     /// Fetch and parse the master playlist
-    pub async fn fetch_master_playlist(&self, media_id: &Uuid) -> Result<MasterPlaylist, String> {
+    pub async fn fetch_master_playlist(
+        &self,
+        media_id: &Uuid,
+    ) -> Result<MasterPlaylist, String> {
         let media_id = media_id.to_string();
-        let url = format!("{}/transcode/{}/master.m3u8", self.server_url, media_id);
+        let url =
+            format!("{}/transcode/{}/master.m3u8", self.server_url, media_id);
 
         log::info!("Fetching master playlist: {}", url);
 
@@ -235,7 +252,10 @@ impl HlsClient {
             .map_err(|e| format!("Failed to fetch master playlist: {}", e))?;
 
         if !response.status().is_success() {
-            return Err(format!("Master playlist not ready: {}", response.status()));
+            return Err(format!(
+                "Master playlist not ready: {}",
+                response.status()
+            ));
         }
 
         let content = response
@@ -274,10 +294,13 @@ impl HlsClient {
                                 bandwidth = parts[1].parse().unwrap_or(0);
                             }
                             "RESOLUTION" => {
-                                let res_parts: Vec<&str> = parts[1].split('x').collect();
+                                let res_parts: Vec<&str> =
+                                    parts[1].split('x').collect();
                                 if res_parts.len() == 2
-                                    && let (Ok(w), Ok(h)) =
-                                        (res_parts[0].parse::<u32>(), res_parts[1].parse::<u32>())
+                                    && let (Ok(w), Ok(h)) = (
+                                        res_parts[0].parse::<u32>(),
+                                        res_parts[1].parse::<u32>(),
+                                    )
                                 {
                                     resolution = Some((w, h));
                                 }
@@ -299,7 +322,8 @@ impl HlsClient {
                             .unwrap_or("unknown")
                             .to_string();
 
-                        let playlist_url = if playlist_path.starts_with("http") {
+                        let playlist_url = if playlist_path.starts_with("http")
+                        {
                             playlist_path.to_string()
                         } else {
                             format!(
@@ -337,7 +361,10 @@ impl HlsClient {
     }
 
     /// Select the best variant based on current bandwidth
-    pub fn select_variant<'a>(&self, master_playlist: &'a MasterPlaylist) -> &'a Variant {
+    pub fn select_variant<'a>(
+        &self,
+        master_playlist: &'a MasterPlaylist,
+    ) -> &'a Variant {
         // Calculate average bandwidth from recent history
         let avg_bandwidth = self.calculate_average_bandwidth();
 
@@ -382,7 +409,10 @@ impl HlsClient {
             .map_err(|e| format!("Failed to fetch variant playlist: {}", e))?;
 
         if !response.status().is_success() {
-            return Err(format!("Variant playlist error: {}", response.status()));
+            return Err(format!(
+                "Variant playlist error: {}",
+                response.status()
+            ));
         }
 
         let content = response
@@ -394,7 +424,10 @@ impl HlsClient {
     }
 
     /// Parse variant playlist content
-    fn parse_variant_playlist(&self, content: &str) -> Result<VariantPlaylist, String> {
+    fn parse_variant_playlist(
+        &self,
+        content: &str,
+    ) -> Result<VariantPlaylist, String> {
         let mut segments = Vec::new();
         let mut target_duration = 4.0;
         let mut media_sequence = 0;
@@ -429,7 +462,8 @@ impl HlsClient {
                         segments.push(Segment {
                             duration,
                             url: segment_url,
-                            sequence_number: media_sequence + segments.len() as u64,
+                            sequence_number: media_sequence
+                                + segments.len() as u64,
                         });
 
                         i += 1; // Skip the URL line
@@ -448,12 +482,18 @@ impl HlsClient {
     }
 
     /// Fetch a segment with bandwidth tracking
-    pub async fn fetch_segment(&self, segment: &Segment) -> Result<Vec<u8>, String> {
+    pub async fn fetch_segment(
+        &self,
+        segment: &Segment,
+    ) -> Result<Vec<u8>, String> {
         // Check cache first
         {
             let inner = self.inner.lock().unwrap();
             if let Some(data) = inner.segment_cache.get(&segment.url) {
-                log::debug!("Segment {} found in cache", segment.sequence_number);
+                log::debug!(
+                    "Segment {} found in cache",
+                    segment.sequence_number
+                );
                 return Ok(data.clone());
             }
         }
@@ -485,7 +525,8 @@ impl HlsClient {
         let duration = start.elapsed();
 
         // Calculate bandwidth (bits per second)
-        let bandwidth = ((data.len() as f64 * 8.0) / duration.as_secs_f64()) as u64;
+        let bandwidth =
+            ((data.len() as f64 * 8.0) / duration.as_secs_f64()) as u64;
         self.record_bandwidth(bandwidth);
 
         log::info!(
@@ -506,7 +547,8 @@ impl HlsClient {
             // Limit cache size
             if inner.segment_cache.len() > 10 {
                 // Remove oldest segments
-                let keys: Vec<String> = inner.segment_cache.keys().cloned().collect();
+                let keys: Vec<String> =
+                    inner.segment_cache.keys().cloned().collect();
                 if let Some(oldest) = keys.first() {
                     inner.segment_cache.remove(oldest);
                 }
@@ -554,7 +596,8 @@ impl HlsClient {
             // 20% headroom
             // Find next higher quality
             master_playlist.variants.iter().find(|v| {
-                v.bandwidth > current.bandwidth && v.bandwidth <= avg_bandwidth * 80 / 100
+                v.bandwidth > current.bandwidth
+                    && v.bandwidth <= avg_bandwidth * 80 / 100
             })
         } else if avg_bandwidth < current.bandwidth * 80 / 100 {
             // Below 80% of current

@@ -61,13 +61,12 @@ pub struct LibraryActorConfig {
 
 impl LibraryActorConfig {
     pub fn roots(&self) -> impl Iterator<Item = LibraryRootDescriptor> + '_ {
-        self.root_paths
-            .iter()
-            .enumerate()
-            .map(|(idx, path)| LibraryRootDescriptor {
+        self.root_paths.iter().enumerate().map(|(idx, path)| {
+            LibraryRootDescriptor {
                 root_id: LibraryRootsId(idx as u16),
                 path_norm: path.to_string_lossy().to_string(),
-            })
+            }
+        })
     }
 
     pub fn root_path(&self, id: LibraryRootsId) -> Option<PathBuf> {
@@ -143,7 +142,10 @@ impl LibraryActorState {
             .insert(record.dedupe_key.clone(), record);
     }
 
-    pub fn release_job(&mut self, dedupe_key: &DedupeKey) -> Option<IssuedJobRecord> {
+    pub fn release_job(
+        &mut self,
+        dedupe_key: &DedupeKey,
+    ) -> Option<IssuedJobRecord> {
         self.outstanding_jobs.remove(dedupe_key)
     }
 
@@ -305,7 +307,9 @@ where
                 >= self.config.max_outstanding_jobs
                 && !self.state.outstanding_jobs.contains_key(&dedupe_key);
             if outstanding_limit_reached {
-                return Ok(vec![LibraryActorEvent::JobThrottled { dedupe_key }]);
+                return Ok(vec![LibraryActorEvent::JobThrottled {
+                    dedupe_key,
+                }]);
             }
         }
 
@@ -342,8 +346,10 @@ where
     ) -> Result<Vec<LibraryActorEvent>> {
         let mut events = Vec::new();
 
-        let root_paths: Vec<String> = self.config.roots().map(|r| r.path_norm).collect();
-        let preview: Vec<&str> = root_paths.iter().take(5).map(|s| s.as_str()).collect();
+        let root_paths: Vec<String> =
+            self.config.roots().map(|r| r.path_norm).collect();
+        let preview: Vec<&str> =
+            root_paths.iter().take(5).map(|s| s.as_str()).collect();
         info!(
             target: "scan::seed",
             library_id = %self.config.library.id,
@@ -354,7 +360,8 @@ where
         );
 
         // Depth-1 enumeration only; let FolderScan jobs recurse
-        let (folders, skipped) = Self::enumerate_first_level_folders(&root_paths).await;
+        let (folders, skipped) =
+            Self::enumerate_first_level_folders(&root_paths).await;
 
         info!(
             target: "scan::seed",
@@ -386,7 +393,9 @@ where
 
     // Enumerate immediate child folders for each root (depth=1).
     // Continues on errors; returns (folders, skipped_count).
-    async fn enumerate_first_level_folders(root_paths: &[String]) -> (Vec<String>, usize) {
+    async fn enumerate_first_level_folders(
+        root_paths: &[String],
+    ) -> (Vec<String>, usize) {
         use tokio::fs;
         let mut folders: Vec<String> = Vec::new();
         let mut skipped: usize = 0;
@@ -449,11 +458,13 @@ where
 
         let state_correlation = self.state.current_correlation;
         let event_hint = events.iter().find_map(|event| event.correlation_id);
-        let burst_correlation = correlation_id.or(state_correlation).or(event_hint);
+        let burst_correlation =
+            correlation_id.or(state_correlation).or(event_hint);
 
-        let (overflow, changes): (Vec<_>, Vec<_>) = events
-            .into_iter()
-            .partition(|event| matches!(event.kind, FileSystemEventKind::Overflow));
+        let (overflow, changes): (Vec<_>, Vec<_>) =
+            events.into_iter().partition(|event| {
+                matches!(event.kind, FileSystemEventKind::Overflow)
+            });
 
         if !overflow.is_empty() {
             let mut targets = HashSet::new();
@@ -476,7 +487,9 @@ where
                         JobPriority::P0,
                         ScanReason::WatcherOverflow,
                         Some(ParentDescriptors {
-                            resolved_type: Some(self.config.library.library_type),
+                            resolved_type: Some(
+                                self.config.library.library_type,
+                            ),
                             ..ParentDescriptors::default()
                         }),
                         burst_correlation,
@@ -515,7 +528,9 @@ where
                         JobPriority::P0,
                         ScanReason::HotChange,
                         Some(ParentDescriptors {
-                            resolved_type: Some(self.config.library.library_type),
+                            resolved_type: Some(
+                                self.config.library.library_type,
+                            ),
                             ..ParentDescriptors::default()
                         }),
                         burst_correlation,
@@ -777,7 +792,10 @@ mod tests {
             ))
         }
 
-        async fn dequeue(&self, _request: DequeueRequest) -> Result<Option<JobLease>> {
+        async fn dequeue(
+            &self,
+            _request: DequeueRequest,
+        ) -> Result<Option<JobLease>> {
             Ok(None)
         }
 
@@ -800,7 +818,11 @@ mod tests {
             Ok(())
         }
 
-        async fn dead_letter(&self, _lease_id: LeaseId, _error: Option<String>) -> Result<()> {
+        async fn dead_letter(
+            &self,
+            _lease_id: LeaseId,
+            _error: Option<String>,
+        ) -> Result<()> {
             Ok(())
         }
 
@@ -840,7 +862,11 @@ mod tests {
         FileSystemEvent {
             version: 1,
             correlation_id: correlation,
-            idempotency_key: hash_parts(&["fs-test", &library_id.to_string(), &path_key]),
+            idempotency_key: hash_parts(&[
+                "fs-test",
+                &library_id.to_string(),
+                &path_key,
+            ]),
             library_id,
             path_key,
             fingerprint: None,
@@ -854,7 +880,8 @@ mod tests {
     fn make_actor(
         queue: Arc<RecordingQueue>,
         root: PathBuf,
-    ) -> DefaultLibraryActor<RecordingQueue, NoopActorObserver, NoopPublisher> {
+    ) -> DefaultLibraryActor<RecordingQueue, NoopActorObserver, NoopPublisher>
+    {
         let library_id = LibraryID::new();
         let reference = LibraryReference {
             id: library_id,
@@ -880,7 +907,11 @@ mod tests {
         queue: Arc<RecordingQueue>,
         root: PathBuf,
         publisher: Arc<RecordingPublisher>,
-    ) -> DefaultLibraryActor<RecordingQueue, NoopActorObserver, RecordingPublisher> {
+    ) -> DefaultLibraryActor<
+        RecordingQueue,
+        NoopActorObserver,
+        RecordingPublisher,
+    > {
         let library_id = LibraryID::new();
         let reference = LibraryReference {
             id: library_id,
@@ -909,8 +940,11 @@ mod tests {
         std::fs::create_dir_all(root.join("seed")).unwrap();
         let queue = Arc::new(RecordingQueue::default());
         let publisher = Arc::new(RecordingPublisher::default());
-        let mut actor =
-            make_actor_with_publisher(Arc::clone(&queue), root.clone(), Arc::clone(&publisher));
+        let mut actor = make_actor_with_publisher(
+            Arc::clone(&queue),
+            root.clone(),
+            Arc::clone(&publisher),
+        );
         let correlation = Uuid::now_v7();
 
         std::fs::create_dir_all(root.join("seed")).unwrap();
@@ -925,7 +959,11 @@ mod tests {
         let enqueued = events
             .iter()
             .find_map(|event| {
-                if let LibraryActorEvent::EnqueueFolderScan { correlation_id, .. } = event {
+                if let LibraryActorEvent::EnqueueFolderScan {
+                    correlation_id,
+                    ..
+                } = event
+                {
                     Some(*correlation_id)
                 } else {
                     None
@@ -945,8 +983,11 @@ mod tests {
         let root = temp.path().to_path_buf();
         let queue = Arc::new(RecordingQueue::default());
         let publisher = Arc::new(RecordingPublisher::default());
-        let mut actor =
-            make_actor_with_publisher(Arc::clone(&queue), root.clone(), Arc::clone(&publisher));
+        let mut actor = make_actor_with_publisher(
+            Arc::clone(&queue),
+            root.clone(),
+            Arc::clone(&publisher),
+        );
         let library_id = actor.config.library.id;
         let scan_id = Uuid::now_v7();
 
@@ -978,9 +1019,10 @@ mod tests {
         // redundant and could reintroduce the incomplete-state bug these guards
         // were meant to avoid.
         assert!(
-            responses
-                .iter()
-                .all(|event| !matches!(event, LibraryActorEvent::EnqueueFolderScan { .. })),
+            responses.iter().all(|event| !matches!(
+                event,
+                LibraryActorEvent::EnqueueFolderScan { .. }
+            )),
             "fs events during bulk should not enqueue additional scans"
         );
 
@@ -993,8 +1035,11 @@ mod tests {
         let root = temp.path().to_path_buf();
         let queue = Arc::new(RecordingQueue::default());
         let publisher = Arc::new(RecordingPublisher::default());
-        let mut actor =
-            make_actor_with_publisher(Arc::clone(&queue), root.clone(), Arc::clone(&publisher));
+        let mut actor = make_actor_with_publisher(
+            Arc::clone(&queue),
+            root.clone(),
+            Arc::clone(&publisher),
+        );
         let library_id = actor.config.library.id;
         let correlation = Uuid::now_v7();
 
@@ -1047,8 +1092,11 @@ mod tests {
         let root = temp.path().to_path_buf();
         let queue = Arc::new(RecordingQueue::default());
         let publisher = Arc::new(RecordingPublisher::default());
-        let mut actor =
-            make_actor_with_publisher(Arc::clone(&queue), root.clone(), Arc::clone(&publisher));
+        let mut actor = make_actor_with_publisher(
+            Arc::clone(&queue),
+            root.clone(),
+            Arc::clone(&publisher),
+        );
         let library_id = actor.config.library.id;
 
         let _ = actor
@@ -1077,7 +1125,11 @@ mod tests {
         let enqueued = responses
             .iter()
             .find_map(|event| {
-                if let LibraryActorEvent::EnqueueFolderScan { correlation_id, .. } = event {
+                if let LibraryActorEvent::EnqueueFolderScan {
+                    correlation_id,
+                    ..
+                } = event
+                {
                     Some(*correlation_id)
                 } else {
                     None

@@ -1,6 +1,8 @@
 use crate::{
     domains::auth::messages::Message,
-    domains::ui::theme::{FerrexTheme, TextInput, button_style, container_style},
+    domains::ui::theme::{
+        FerrexTheme, TextInput, button_style, container_style,
+    },
 };
 use iced::{
     Alignment, Element, Length, Theme,

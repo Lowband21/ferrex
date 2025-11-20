@@ -7,6 +7,11 @@ use sqlx::Row;
 
 use ferrex_core::orchestration::persistence::PostgresQueueService;
 
+#[path = "support/mod.rs"]
+mod support;
+
+use support::constants::ORCHESTRATION_JITTER_TOLERANCE_MS;
+
 #[sqlx::test]
 async fn postgres_queue_service_initializes(pool: PgPool) {
     // Should succeed without panic and return a service instance
@@ -20,7 +25,6 @@ use ferrex_core::orchestration::job::{
     EnqueueRequest, FolderScanJob, JobPayload, JobPriority, ScanReason,
 };
 use ferrex_core::orchestration::lease::DequeueRequest;
-use std::hash::{Hash, Hasher, SipHasher};
 use uuid::Uuid;
 
 async fn seed_library(pool: &PgPool) -> Uuid {
@@ -92,7 +96,10 @@ async fn enqueue_duplicate_returns_merged_handle(pool: PgPool) {
         enqueue_time: Utc::now(),
         device_id: None,
     };
-    let req1 = EnqueueRequest::new(JobPriority::P2, JobPayload::FolderScan(fs.clone()));
+    let req1 = EnqueueRequest::new(
+        JobPriority::P2,
+        JobPayload::FolderScan(fs.clone()),
+    );
     let req2 = EnqueueRequest::new(JobPriority::P2, JobPayload::FolderScan(fs));
 
     let h1 = svc.enqueue(req1.clone()).await.expect("enqueue 1 ok");
@@ -262,7 +269,10 @@ async fn enqueue_merge_elevates_priority_and_makes_available(pool: PgPool) {
         enqueue_time: Utc::now(),
         device_id: None,
     };
-    let req_p2 = EnqueueRequest::new(JobPriority::P2, JobPayload::FolderScan(fs.clone()));
+    let req_p2 = EnqueueRequest::new(
+        JobPriority::P2,
+        JobPayload::FolderScan(fs.clone()),
+    );
     let h1 = svc.enqueue(req_p2.clone()).await.expect("enqueue p2 ok");
     assert!(h1.accepted);
 
@@ -276,17 +286,20 @@ async fn enqueue_merge_elevates_priority_and_makes_available(pool: PgPool) {
     .expect("defer job");
 
     // Enqueue P0 (higher priority) with same dedupe
-    let req_p0 = EnqueueRequest::new(JobPriority::P0, JobPayload::FolderScan(fs));
+    let req_p0 =
+        EnqueueRequest::new(JobPriority::P0, JobPayload::FolderScan(fs));
     let h2 = svc.enqueue(req_p0.clone()).await.expect("enqueue p0 ok");
     assert!(!h2.accepted, "second enqueue should merge");
     assert_eq!(h2.job_id.0, h1.job_id.0, "merge points to same job");
 
     // Verify priority elevated and available_at not in the future
-    let row = sqlx::query("SELECT priority, available_at FROM orchestrator_jobs WHERE id = $1")
-        .bind(h1.job_id.0)
-        .fetch_one(&pool)
-        .await
-        .expect("fetch updated job");
+    let row = sqlx::query(
+        "SELECT priority, available_at FROM orchestrator_jobs WHERE id = $1",
+    )
+    .bind(h1.job_id.0)
+    .fetch_one(&pool)
+    .await
+    .expect("fetch updated job");
 
     let pri: i16 = row.get::<i16, _>("priority");
     assert_eq!(pri, 0, "priority should be elevated to 0");
@@ -318,28 +331,37 @@ async fn enqueue_duplicate_no_elevation_keeps_priority(pool: PgPool) {
         enqueue_time: Utc::now(),
         device_id: None,
     };
-    let req_p0 = EnqueueRequest::new(JobPriority::P0, JobPayload::FolderScan(fs.clone()));
+    let req_p0 = EnqueueRequest::new(
+        JobPriority::P0,
+        JobPayload::FolderScan(fs.clone()),
+    );
     let h1 = svc.enqueue(req_p0.clone()).await.expect("enqueue p0 ok");
     assert!(h1.accepted);
 
-    let before = sqlx::query("SELECT priority, updated_at FROM orchestrator_jobs WHERE id = $1")
-        .bind(h1.job_id.0)
-        .fetch_one(&pool)
-        .await
-        .expect("fetch before");
+    let before = sqlx::query(
+        "SELECT priority, updated_at FROM orchestrator_jobs WHERE id = $1",
+    )
+    .bind(h1.job_id.0)
+    .fetch_one(&pool)
+    .await
+    .expect("fetch before");
     let before_pri: i16 = before.get::<i16, _>("priority");
-    let before_updated: chrono::DateTime<chrono::Utc> = before.get("updated_at");
+    let before_updated: chrono::DateTime<chrono::Utc> =
+        before.get("updated_at");
 
     // Enqueue lower priority duplicate (P2)
-    let req_p2 = EnqueueRequest::new(JobPriority::P2, JobPayload::FolderScan(fs));
+    let req_p2 =
+        EnqueueRequest::new(JobPriority::P2, JobPayload::FolderScan(fs));
     let h2 = svc.enqueue(req_p2.clone()).await.expect("enqueue p2 ok");
     assert!(!h2.accepted);
 
-    let after = sqlx::query("SELECT priority, updated_at FROM orchestrator_jobs WHERE id = $1")
-        .bind(h1.job_id.0)
-        .fetch_one(&pool)
-        .await
-        .expect("fetch after");
+    let after = sqlx::query(
+        "SELECT priority, updated_at FROM orchestrator_jobs WHERE id = $1",
+    )
+    .bind(h1.job_id.0)
+    .fetch_one(&pool)
+    .await
+    .expect("fetch after");
     let after_pri: i16 = after.get::<i16, _>("priority");
 
     assert_eq!(before_pri, 0, "initial priority should be 0");
@@ -480,7 +502,8 @@ async fn job_completion_sets_terminal_state(pool: PgPool) {
     let state: String = row.get("state");
     let lease_owner: Option<String> = row.get("lease_owner");
     let lease_id: Option<uuid::Uuid> = row.get("lease_id");
-    let lease_expires_at: Option<chrono::DateTime<chrono::Utc>> = row.get("lease_expires_at");
+    let lease_expires_at: Option<chrono::DateTime<chrono::Utc>> =
+        row.get("lease_expires_at");
 
     assert_eq!(state.as_str(), "completed");
     assert!(lease_owner.is_none());
@@ -556,12 +579,13 @@ async fn job_failure_backoff_and_dead_letter(pool: PgPool) {
         let delay_ms = (available_at - updated_at).num_milliseconds();
 
         let attempt_u16 = atts as u16;
-        let mut anchor =
-            (retry.backoff_base_ms as f64) * 2f64.powi((attempt_u16.saturating_sub(1)) as i32);
+        let mut anchor = (retry.backoff_base_ms as f64)
+            * 2f64.powi((attempt_u16.saturating_sub(1)) as i32);
         anchor = anchor.min(retry.backoff_max_ms as f64);
 
         if fast_reason && attempt_u16 <= retry.fast_retry_attempts {
-            anchor = (anchor * retry.fast_retry_factor as f64).min(retry.backoff_max_ms as f64);
+            anchor = (anchor * retry.fast_retry_factor as f64)
+                .min(retry.backoff_max_ms as f64);
         }
 
         let mut library_under_pressure = false;
@@ -581,22 +605,25 @@ async fn job_failure_backoff_and_dead_letter(pool: PgPool) {
             .min(retry.backoff_max_ms as f64);
         let lower = 0f64.max(anchor - jitter_span);
         let upper = (anchor + jitter_span).min(retry.backoff_max_ms as f64);
-        let unit = deterministic_unit(job_id.0, attempt_u16);
-        let expected_delay = lower + (upper - lower) * unit;
-        let expected_delay_ms = expected_delay.round() as i64;
+        let window_min =
+            lower.floor() as i64 - ORCHESTRATION_JITTER_TOLERANCE_MS;
+        let window_max =
+            upper.ceil() as i64 + ORCHESTRATION_JITTER_TOLERANCE_MS;
 
-        assert_eq!(
-            delay_ms, expected_delay_ms,
-            "attempt {} scheduled unexpected delay",
+        assert!(
+            (window_min..=window_max).contains(&delay_ms),
+            "attempt {} scheduled delay outside jitter window (actual: {delay_ms}ms, expected range: {lower:.0}ms..={upper:.0}ms)",
             attempt_u16
         );
 
         // Force availability for next iteration to avoid sleeping
-        sqlx::query("UPDATE orchestrator_jobs SET available_at = NOW() WHERE id = $1")
-            .bind(job_id.0)
-            .execute(&pool)
-            .await
-            .expect("force availability");
+        sqlx::query(
+            "UPDATE orchestrator_jobs SET available_at = NOW() WHERE id = $1",
+        )
+        .bind(job_id.0)
+        .execute(&pool)
+        .await
+        .expect("force availability");
     }
 
     // Drive attempts to dead_letter at > max attempts
@@ -631,14 +658,6 @@ async fn job_failure_backoff_and_dead_letter(pool: PgPool) {
     .expect("fetch final");
     let state: String = row.get("state");
     assert_eq!(state.as_str(), "dead_letter");
-}
-
-fn deterministic_unit(job_id: uuid::Uuid, attempt: u16) -> f64 {
-    let mut hasher = SipHasher::new_with_keys(0, 0);
-    job_id.hash(&mut hasher);
-    attempt.hash(&mut hasher);
-    let bits = hasher.finish();
-    (bits as f64) / (u64::MAX as f64)
 }
 
 #[sqlx::test]

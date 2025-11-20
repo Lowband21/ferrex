@@ -2,7 +2,9 @@ use std::path::Path;
 
 use crate::database::PostgresDatabase;
 use crate::database::ports::folder_inventory::FolderInventoryRepository;
-use crate::database::traits::{FolderInventory, FolderProcessingStatus, FolderScanFilters};
+use crate::database::traits::{
+    FolderInventory, FolderProcessingStatus, FolderScanFilters,
+};
 use crate::error::Result;
 use crate::types::ids::LibraryID;
 use chrono::{DateTime, Utc};
@@ -49,7 +51,10 @@ impl PostgresDatabase {
             .await
     }
 
-    pub async fn upsert_folder(&self, folder: &FolderInventory) -> Result<Uuid> {
+    pub async fn upsert_folder(
+        &self,
+        folder: &FolderInventory,
+    ) -> Result<Uuid> {
         self.folder_inventory_repository()
             .upsert_folder(folder)
             .await
@@ -100,13 +105,19 @@ impl PostgresDatabase {
             .await
     }
 
-    pub async fn get_child_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>> {
+    pub async fn get_child_folders(
+        &self,
+        parent_folder_id: Uuid,
+    ) -> Result<Vec<FolderInventory>> {
         self.folder_inventory_repository()
             .get_child_folders(parent_folder_id)
             .await
     }
 
-    pub async fn get_season_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>> {
+    pub async fn get_season_folders(
+        &self,
+        parent_folder_id: Uuid,
+    ) -> Result<Vec<FolderInventory>> {
         self.folder_inventory_repository()
             .get_season_folders(parent_folder_id)
             .await

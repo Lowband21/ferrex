@@ -48,11 +48,17 @@ impl LibraryState {
         }
     }
 
-    fn ensure_priority(&mut self, priority: JobPriority) -> &mut PriorityLibraryState {
+    fn ensure_priority(
+        &mut self,
+        priority: JobPriority,
+    ) -> &mut PriorityLibraryState {
         self.priorities.entry(priority).or_default()
     }
 
-    fn priority_state(&mut self, priority: JobPriority) -> Option<&mut PriorityLibraryState> {
+    fn priority_state(
+        &mut self,
+        priority: JobPriority,
+    ) -> Option<&mut PriorityLibraryState> {
         self.priorities.get_mut(&priority)
     }
 }
@@ -135,12 +141,15 @@ impl SchedulerState {
         library_id: LibraryID,
         defaults: &QueueDefaults,
     ) -> &mut LibraryState {
-        self.libraries
-            .entry(library_id)
-            .or_insert_with(|| LibraryState::new(&defaults.policy_for(library_id), (defaults,)))
+        self.libraries.entry(library_id).or_insert_with(|| {
+            LibraryState::new(&defaults.policy_for(library_id), (defaults,))
+        })
     }
 
-    fn select_for_priority(&mut self, priority: JobPriority) -> Option<(LibraryID, i32)> {
+    fn select_for_priority(
+        &mut self,
+        priority: JobPriority,
+    ) -> Option<(LibraryID, i32)> {
         let mut selected: Option<(LibraryID, i32)> = None;
         let mut total_weight = 0i32;
 
@@ -156,9 +165,11 @@ impl SchedulerState {
                 priority_state.current_weight += weight;
                 total_weight += weight;
                 match selected {
-                    Some((_, weight)) if priority_state.current_weight <= weight => {}
+                    Some((_, weight))
+                        if priority_state.current_weight <= weight => {}
                     _ => {
-                        selected = Some((*library_id, priority_state.current_weight));
+                        selected =
+                            Some((*library_id, priority_state.current_weight));
                     }
                 }
             }
@@ -253,7 +264,10 @@ pub struct ReadyCountEntry {
 }
 
 impl WeightedFairScheduler {
-    pub fn new(config: &QueueConfig, priority_weights: PriorityWeights) -> Self {
+    pub fn new(
+        config: &QueueConfig,
+        priority_weights: PriorityWeights,
+    ) -> Self {
         let defaults = Arc::new(QueueDefaults::new(config));
         let ring = Arc::new(build_priority_ring(priority_weights));
         Self {
@@ -263,7 +277,11 @@ impl WeightedFairScheduler {
         }
     }
 
-    pub async fn record_ready(&self, library_id: LibraryID, priority: JobPriority) {
+    pub async fn record_ready(
+        &self,
+        library_id: LibraryID,
+        priority: JobPriority,
+    ) {
         let mut state = self.state.lock().await;
         let library = state.ensure_library(library_id, &self.defaults);
         let priority_state = library.ensure_priority(priority);
@@ -279,13 +297,19 @@ impl WeightedFairScheduler {
             if entry.count == 0 {
                 continue;
             }
-            let library = state.ensure_library(entry.library_id, &self.defaults);
+            let library =
+                state.ensure_library(entry.library_id, &self.defaults);
             let priority_state = library.ensure_priority(entry.priority);
-            priority_state.ready = priority_state.ready.saturating_add(entry.count);
+            priority_state.ready =
+                priority_state.ready.saturating_add(entry.count);
         }
     }
 
-    pub async fn record_enqueued(&self, library_id: LibraryID, priority: JobPriority) {
+    pub async fn record_enqueued(
+        &self,
+        library_id: LibraryID,
+        priority: JobPriority,
+    ) {
         self.record_ready(library_id, priority).await;
     }
 
@@ -297,9 +321,12 @@ impl WeightedFairScheduler {
         let mut state = self.state.lock().await;
         for _ in 0..self.priority_ring.len() {
             let priority = self.priority_ring[state.next_priority_index];
-            state.next_priority_index = (state.next_priority_index + 1) % self.priority_ring.len();
+            state.next_priority_index =
+                (state.next_priority_index + 1) % self.priority_ring.len();
 
-            if let Some((library_id, weight_debt)) = state.select_for_priority(priority) {
+            if let Some((library_id, weight_debt)) =
+                state.select_for_priority(priority)
+            {
                 let reservation_id = Uuid::now_v7();
                 state.reservations.insert(
                     reservation_id,
@@ -319,10 +346,14 @@ impl WeightedFairScheduler {
         None
     }
 
-    pub async fn confirm(&self, reservation_id: Uuid) -> Option<SchedulingReservation> {
+    pub async fn confirm(
+        &self,
+        reservation_id: Uuid,
+    ) -> Option<SchedulingReservation> {
         let mut state = self.state.lock().await;
         let reservation = state.reservations.remove(&reservation_id)?;
-        if let Some(library) = state.libraries.get_mut(&reservation.library_id) {
+        if let Some(library) = state.libraries.get_mut(&reservation.library_id)
+        {
             library.pending = library.pending.saturating_sub(1);
             library.inflight += 1;
         }
@@ -336,10 +367,13 @@ impl WeightedFairScheduler {
     pub async fn cancel(&self, reservation_id: Uuid) {
         let mut state = self.state.lock().await;
         if let Some(reservation) = state.reservations.remove(&reservation_id)
-            && let Some(library) = state.libraries.get_mut(&reservation.library_id)
+            && let Some(library) =
+                state.libraries.get_mut(&reservation.library_id)
         {
             library.pending = library.pending.saturating_sub(1);
-            if let Some(priority_state) = library.priority_state(reservation.priority) {
+            if let Some(priority_state) =
+                library.priority_state(reservation.priority)
+            {
                 priority_state.ready += 1;
                 priority_state.current_weight += reservation.weight_debt;
             }
@@ -368,10 +402,7 @@ impl WeightedFairScheduler {
                     *id,
                     (
                         lib.inflight,
-                        lib.priorities
-                            .values()
-                            .map(|p| p.ready)
-                            .sum::<usize>(),
+                        lib.priorities.values().map(|p| p.ready).sum::<usize>(),
                     ),
                 )
             })

@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use iced::{Application, Font, Preset, Program as IcedProgram, Settings, Theme};
+use iced::{
+    Application, Font, Preset, Program as IcedProgram, Settings, Theme,
+};
 
 use crate::common::messages::DomainMessage;
 use crate::state_refactored::State;
@@ -14,7 +16,9 @@ pub use bootstrap::AppConfig;
 /// Build the Ferrex application using the provided configuration.
 pub fn application(
     config: AppConfig,
-) -> Application<impl IcedProgram<State = State, Message = DomainMessage, Theme = Theme>> {
+) -> Application<
+    impl IcedProgram<State = State, Message = DomainMessage, Theme = Theme>,
+> {
     let config = Arc::new(config);
 
     let boot_config = Arc::clone(&config);
@@ -55,7 +59,9 @@ fn app_theme(_: &State) -> Theme {
 pub fn application_with_presets(
     config: AppConfig,
     custom_presets: Vec<Preset<State, DomainMessage>>,
-) -> Application<impl IcedProgram<State = State, Message = DomainMessage, Theme = Theme>> {
+) -> Application<
+    impl IcedProgram<State = State, Message = DomainMessage, Theme = Theme>,
+> {
     let config = Arc::new(config);
     let boot_config = Arc::clone(&config);
 

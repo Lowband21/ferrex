@@ -9,7 +9,10 @@ use iced::{
 use lucide_icons::Icon;
 
 /// Creates a filter button that shows the number of active filters
-pub fn filter_button<'a>(active_filter_count: usize, is_open: bool) -> Element<'a, Message> {
+pub fn filter_button<'a>(
+    active_filter_count: usize,
+    is_open: bool,
+) -> Element<'a, Message> {
     let icon = Icon::ListFilter;
 
     let button_content = if active_filter_count > 0 {

@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// Defines the different roles a user can have in the system,
 /// each with different permissions and capabilities.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default,
+)]
 pub enum UserRole {
     /// Regular user with basic permissions
     /// - Can view media

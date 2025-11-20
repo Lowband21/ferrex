@@ -9,7 +9,8 @@ use crate::{
     database::ports::images::ImageRepository,
     database::postgres::PostgresDatabase,
     database::traits::{
-        ImageLookupParams, ImageRecord, ImageVariant, MediaDatabaseTrait, MediaImage,
+        ImageLookupParams, ImageRecord, ImageVariant, MediaDatabaseTrait,
+        MediaImage,
     },
     error::Result,
     image::MediaImageKind,
@@ -43,11 +44,17 @@ impl ImageRepository for PostgresImageRepository {
         self.db.create_image(tmdb_path).await
     }
 
-    async fn get_image_by_tmdb_path(&self, tmdb_path: &str) -> Result<Option<ImageRecord>> {
+    async fn get_image_by_tmdb_path(
+        &self,
+        tmdb_path: &str,
+    ) -> Result<Option<ImageRecord>> {
         self.db.get_image_by_tmdb_path(tmdb_path).await
     }
 
-    async fn get_image_by_hash(&self, hash: &str) -> Result<Option<ImageRecord>> {
+    async fn get_image_by_hash(
+        &self,
+        hash: &str,
+    ) -> Result<Option<ImageRecord>> {
         self.db.get_image_by_hash(hash).await
     }
 
@@ -75,7 +82,9 @@ impl ImageRepository for PostgresImageRepository {
         height: Option<i32>,
     ) -> Result<ImageVariant> {
         self.db
-            .create_image_variant(image_id, variant, file_path, size, width, height)
+            .create_image_variant(
+                image_id, variant, file_path, size, width, height,
+            )
             .await
     }
 
@@ -87,7 +96,10 @@ impl ImageRepository for PostgresImageRepository {
         self.db.get_image_variant(image_id, variant).await
     }
 
-    async fn get_image_variants(&self, image_id: Uuid) -> Result<Vec<ImageVariant>> {
+    async fn get_image_variants(
+        &self,
+        image_id: Uuid,
+    ) -> Result<Vec<ImageVariant>> {
         self.db.get_image_variants(image_id).await
     }
 
@@ -112,7 +124,11 @@ impl ImageRepository for PostgresImageRepository {
             .await
     }
 
-    async fn get_media_images(&self, media_type: &str, media_id: Uuid) -> Result<Vec<MediaImage>> {
+    async fn get_media_images(
+        &self,
+        media_type: &str,
+        media_id: Uuid,
+    ) -> Result<Vec<MediaImage>> {
         self.db.get_media_images(media_type, media_id).await
     }
 
@@ -150,7 +166,13 @@ impl ImageRepository for PostgresImageRepository {
         theme_color: Option<&str>,
     ) -> Result<MediaImageVariantRecord> {
         self.db
-            .mark_media_image_variant_cached(key, width, height, content_hash, theme_color)
+            .mark_media_image_variant_cached(
+                key,
+                width,
+                height,
+                content_hash,
+                theme_color,
+            )
             .await
     }
 

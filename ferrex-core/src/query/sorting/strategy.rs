@@ -271,7 +271,8 @@ where
     }
 }
 
-impl<T, F, const REVERSE: bool> SortStrategy<T> for ConstFieldSort<T, F, REVERSE>
+impl<T, F, const REVERSE: bool> SortStrategy<T>
+    for ConstFieldSort<T, F, REVERSE>
 where
     T: SortableEntity + Clone,
     F: SortFieldMarker + Clone,

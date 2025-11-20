@@ -109,7 +109,7 @@ pub async fn full_initialization_operation(
     // Step 1: Create application state (identical to real app)
     log::info!("⚙️  Step 1: Creating application state...");
     let step1_start = Instant::now();
-    let mut state = State::new("http://localhost:3000".to_string());
+    let mut state = State::new("https://localhost:3000".to_string());
 
     // Set up authentication for server communication
     if let Err(e) = setup_benchmark_authentication(&state).await {

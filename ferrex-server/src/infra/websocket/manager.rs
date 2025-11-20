@@ -75,19 +75,28 @@ impl ConnectionManager {
     }
 
     /// Get all connections in a room
-    pub fn get_room_connections(&self, room_code: &str) -> Vec<Arc<Connection>> {
+    pub fn get_room_connections(
+        &self,
+        room_code: &str,
+    ) -> Vec<Arc<Connection>> {
         self.rooms
             .get(room_code)
             .map(|room| {
                 room.iter()
-                    .filter_map(|conn_id| self.connections.get(conn_id).map(|c| c.clone()))
+                    .filter_map(|conn_id| {
+                        self.connections.get(conn_id).map(|c| c.clone())
+                    })
                     .collect()
             })
             .unwrap_or_default()
     }
 
     /// Broadcast a message to all connections in a room
-    pub async fn broadcast_to_room(&self, room_code: &str, message: SyncMessage) {
+    pub async fn broadcast_to_room(
+        &self,
+        room_code: &str,
+        message: SyncMessage,
+    ) {
         let connections = self.get_room_connections(room_code);
 
         for conn in connections {

@@ -80,7 +80,7 @@ pub async fn update_progress_handler(
 
     // Update progress in database
     state
-        .unit_of_work
+        .unit_of_work()
         .watch_status
         .update_watch_progress(user.id, &request)
         .await
@@ -124,7 +124,7 @@ pub async fn get_watch_state_handler(
     Extension(user): Extension<User>,
 ) -> Result<Json<ApiResponse<UserWatchState>>, (StatusCode, String)> {
     let watch_state = state
-        .unit_of_work
+        .unit_of_work()
         .watch_status
         .get_user_watch_state(user.id)
         .await
@@ -145,7 +145,7 @@ pub async fn get_continue_watching_handler(
     Query(params): Query<ContinueWatchingQuery>,
 ) -> Result<Json<ApiResponse<Vec<InProgressItem>>>, (StatusCode, String)> {
     let items = state
-        .unit_of_work
+        .unit_of_work()
         .watch_status
         .get_continue_watching(user.id, params.limit)
         .await
@@ -166,7 +166,7 @@ pub async fn clear_progress_handler(
     Path(media_id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     state
-        .unit_of_work
+        .unit_of_work()
         .watch_status
         .clear_watch_progress(user.id, &media_id)
         .await
@@ -188,7 +188,7 @@ pub async fn get_media_progress_handler(
 ) -> Result<Json<ApiResponse<Option<ProgressResponse>>>, (StatusCode, String)> {
     // Get user's watch state
     let watch_state = state
-        .unit_of_work
+        .unit_of_work()
         .watch_status
         .get_user_watch_state(user.id)
         .await
@@ -250,7 +250,7 @@ pub async fn mark_completed_handler(
 
     // Update progress to mark as completed
     state
-        .unit_of_work
+        .unit_of_work()
         .watch_status
         .update_watch_progress(user.id, &request)
         .await
@@ -271,7 +271,7 @@ pub async fn is_completed_handler(
     Path(media_id): Path<Uuid>,
 ) -> Result<Json<bool>, (StatusCode, String)> {
     let is_completed = state
-        .unit_of_work
+        .unit_of_work()
         .watch_status
         .is_media_completed(user.id, &media_id)
         .await

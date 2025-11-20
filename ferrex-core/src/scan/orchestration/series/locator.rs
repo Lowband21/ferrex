@@ -62,7 +62,10 @@ impl SeriesLocator {
     }
 }
 
-fn candidate_titles(descriptors: Option<&ParentDescriptors>, fallback_title: &str) -> Vec<String> {
+fn candidate_titles(
+    descriptors: Option<&ParentDescriptors>,
+    fallback_title: &str,
+) -> Vec<String> {
     let mut titles = Vec::new();
 
     if let Some(desc) = descriptors {

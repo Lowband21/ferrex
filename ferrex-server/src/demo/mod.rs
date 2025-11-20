@@ -9,7 +9,6 @@ use ferrex_core::providers::TmdbApiProvider;
 use ferrex_core::rbac::roles;
 use ferrex_core::types::LibraryID;
 use ferrex_core::types::library::LibraryType;
-use reqwest::Url;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -89,7 +88,10 @@ impl std::fmt::Debug for DemoCoordinator {
 }
 
 impl DemoCoordinator {
-    pub async fn bootstrap(config: &mut Config, tmdb: Arc<TmdbApiProvider>) -> Result<Self> {
+    pub async fn bootstrap(
+        config: &mut Config,
+        tmdb: Arc<TmdbApiProvider>,
+    ) -> Result<Self> {
         if std::env::var("TMDB_API_KEY")
             .map(|value| value.trim().is_empty())
             .unwrap_or(true)
@@ -111,7 +113,8 @@ impl DemoCoordinator {
     ) -> Result<Self> {
         let root = resolve_root(&options, config);
 
-        std::fs::create_dir_all(&root).context("failed to create demo root directory")?;
+        std::fs::create_dir_all(&root)
+            .context("failed to create demo root directory")?;
 
         let options_shared = Arc::new(Mutex::new(options));
         let initial_options = {
@@ -125,16 +128,19 @@ impl DemoCoordinator {
             .context("failed to plan demo structure")?;
         demo::prepare_plan_roots(None, &plan)
             .context("failed to prepare demo filesystem for bootstrap")?;
-        demo::apply_plan(&plan).context("failed to materialise demo file tree")?;
+        demo::apply_plan(&plan)
+            .context("failed to materialise demo file tree")?;
 
         // Ensure server points at the demo root
-        config.media_root = Some(root.clone());
+        config.media.root = Some(root.clone());
 
         // Initialise shared context for downstream components
         demo::init_demo_context(root.clone(), initial_options.policy())?;
 
-        let username = std::env::var("FERREX_DEMO_USERNAME").unwrap_or_else(|_| "demo".into());
-        let password = std::env::var("FERREX_DEMO_PASSWORD").unwrap_or_else(|_| "demo".into());
+        let username = std::env::var("FERREX_DEMO_USERNAME")
+            .unwrap_or_else(|_| "demo".into());
+        let password = std::env::var("FERREX_DEMO_PASSWORD")
+            .unwrap_or_else(|_| "demo".into());
 
         Ok(Self {
             options: options_shared,
@@ -177,7 +183,10 @@ impl DemoCoordinator {
         }
     }
 
-    pub async fn sync_database(&self, unit_of_work: Arc<AppUnitOfWork>) -> Result<Vec<LibraryID>> {
+    pub async fn sync_database(
+        &self,
+        unit_of_work: Arc<AppUnitOfWork>,
+    ) -> Result<Vec<LibraryID>> {
         let mut registered_ids = Vec::new();
 
         let plans = {
@@ -193,7 +202,9 @@ impl DemoCoordinator {
         demo::clear_registered_libraries();
 
         for plan in &plans {
-            if let Some(existing) = existing.iter().find(|lib| lib.name == plan.name) {
+            if let Some(existing) =
+                existing.iter().find(|lib| lib.name == plan.name)
+            {
                 demo::register_demo_library(existing);
                 registered_ids.push(existing.id);
                 continue;
@@ -241,7 +252,8 @@ impl DemoCoordinator {
 
         demo::prepare_plan_roots(Some(&previous_plan), &new_plan)
             .context("failed to prepare demo filesystem for reset")?;
-        demo::apply_plan(&new_plan).context("failed to reapply demo folder structure")?;
+        demo::apply_plan(&new_plan)
+            .context("failed to reapply demo folder structure")?;
 
         {
             let mut guard = self.plan.lock().await;
@@ -321,7 +333,7 @@ impl DemoCoordinator {
             .context("failed to ensure admin role exists")?;
 
         if state
-            .unit_of_work
+            .unit_of_work()
             .users
             .get_user_by_username(&self.username)
             .await
@@ -346,13 +358,15 @@ impl DemoCoordinator {
             .context("failed to create demo user")?;
 
         let roles = state
-            .unit_of_work
+            .unit_of_work()
             .rbac
             .get_all_roles()
             .await
             .context("failed to list roles for demo user")?;
 
-        if let Some(admin_role) = roles.into_iter().find(|role| role.name == roles::ADMIN) {
+        if let Some(admin_role) =
+            roles.into_iter().find(|role| role.name == roles::ADMIN)
+        {
             service
                 .assign_role(user.id, admin_role.id, user.id)
                 .await
@@ -367,5 +381,5 @@ fn resolve_root(options: &DemoSeedOptions, config: &Config) -> PathBuf {
     if let Some(explicit) = &options.root {
         return explicit.clone();
     }
-    config.cache_dir.join("demo-media")
+    config.cache_root().join("demo-media")
 }

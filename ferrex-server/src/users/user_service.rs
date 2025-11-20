@@ -4,8 +4,8 @@ use ferrex_core::{
     application::rbac_bootstrap::RbacBootstrapService,
     user::User,
     user_management::{
-        CreateUserCommand, DeleteUserCommand, ListUsersOptions, UpdateUserCommand, UserAdminError,
-        UserAdministrationService,
+        CreateUserCommand, DeleteUserCommand, ListUsersOptions,
+        UpdateUserCommand, UserAdminError, UserAdministrationService,
     },
 };
 use std::fmt;
@@ -58,10 +58,10 @@ impl<'a> fmt::Debug for UserService<'a> {
 impl<'a> UserService<'a> {
     pub fn new(state: &'a AppState) -> Self {
         let admin = UserAdministrationService::new(
-            state.unit_of_work.users.clone(),
-            state.unit_of_work.rbac.clone(),
-            state.unit_of_work.security_settings.clone(),
-            state.auth_crypto.clone(),
+            state.unit_of_work().users.clone(),
+            state.unit_of_work().rbac.clone(),
+            state.unit_of_work().security_settings.clone(),
+            state.auth_crypto().clone(),
             state.auth_service(),
         );
 
@@ -73,7 +73,8 @@ impl<'a> UserService<'a> {
     }
 
     pub async fn ensure_admin_role_exists(&self) -> AppResult<()> {
-        let bootstrap = RbacBootstrapService::new(self.state.unit_of_work.rbac.clone());
+        let bootstrap =
+            RbacBootstrapService::new(self.state.unit_of_work().rbac.clone());
         bootstrap.ensure_defaults().await.map_err(AppError::from)
     }
 
@@ -87,18 +88,25 @@ impl<'a> UserService<'a> {
             .map_err(map_admin_error)
     }
 
-    pub async fn get_user_by_username(&self, username: &str) -> AppResult<Option<User>> {
+    pub async fn get_user_by_username(
+        &self,
+        username: &str,
+    ) -> AppResult<Option<User>> {
         let lookup = username.to_lowercase();
         self.state
-            .unit_of_work
+            .unit_of_work()
             .users
             .get_user_by_username(&lookup)
             .await
             .map_err(AppError::from)
     }
 
-    pub async fn create_user(&self, params: CreateUserParams) -> AppResult<User> {
-        Self::validate_username(&params.username).map_err(AppError::bad_request)?;
+    pub async fn create_user(
+        &self,
+        params: CreateUserParams,
+    ) -> AppResult<User> {
+        Self::validate_username(&params.username)
+            .map_err(AppError::bad_request)?;
 
         let command = CreateUserCommand {
             username: params.username,
@@ -126,7 +134,11 @@ impl<'a> UserService<'a> {
         Ok(record.user)
     }
 
-    pub async fn update_user(&self, user_id: Uuid, params: UpdateUserParams) -> AppResult<User> {
+    pub async fn update_user(
+        &self,
+        user_id: Uuid,
+        params: UpdateUserParams,
+    ) -> AppResult<User> {
         let command = UpdateUserCommand {
             display_name: params.display_name,
             email: params.email,
@@ -151,7 +163,11 @@ impl<'a> UserService<'a> {
         Ok(record.user)
     }
 
-    pub async fn delete_user(&self, user_id: Uuid, deleted_by: Uuid) -> AppResult<()> {
+    pub async fn delete_user(
+        &self,
+        user_id: Uuid,
+        deleted_by: Uuid,
+    ) -> AppResult<()> {
         self.admin()
             .delete_user(DeleteUserCommand {
                 user_id,
@@ -176,7 +192,7 @@ impl<'a> UserService<'a> {
         assigned_by: Uuid,
     ) -> AppResult<()> {
         self.state
-            .unit_of_work
+            .unit_of_work()
             .rbac
             .assign_user_role(user_id, role_id, assigned_by)
             .await
@@ -191,7 +207,7 @@ impl<'a> UserService<'a> {
     ) -> AppResult<()> {
         let admin_role = self
             .state
-            .unit_of_work
+            .unit_of_work()
             .rbac
             .get_all_roles()
             .await
@@ -199,10 +215,11 @@ impl<'a> UserService<'a> {
             .into_iter()
             .find(|role| role.name == "admin");
 
-        let check_last_admin = admin_role.as_ref().map(|role| role.id) == Some(role_id);
+        let check_last_admin =
+            admin_role.as_ref().map(|role| role.id) == Some(role_id);
 
         self.state
-            .unit_of_work
+            .unit_of_work()
             .rbac
             .remove_user_role_atomic(user_id, role_id, check_last_admin)
             .await
@@ -219,9 +236,11 @@ impl<'a> UserService<'a> {
     }
 
     pub fn validate_username(username: &str) -> Result<(), String> {
-        UserAdministrationService::validate_username(username).map_err(|err| match err {
-            UserAdminError::Validation(message) => message,
-            other => other.to_string(),
+        UserAdministrationService::validate_username(username).map_err(|err| {
+            match err {
+                UserAdminError::Validation(message) => message,
+                other => other.to_string(),
+            }
         })
     }
 }
@@ -229,10 +248,16 @@ impl<'a> UserService<'a> {
 fn map_admin_error(err: UserAdminError) -> AppError {
     match err {
         UserAdminError::UserNotFound => AppError::not_found("User not found"),
-        UserAdminError::UsernameExists => AppError::conflict("Username already exists"),
-        UserAdminError::EmailExists => AppError::conflict("Email already exists"),
+        UserAdminError::UsernameExists => {
+            AppError::conflict("Username already exists")
+        }
+        UserAdminError::EmailExists => {
+            AppError::conflict("Email already exists")
+        }
         UserAdminError::Validation(message) => AppError::bad_request(message),
-        UserAdminError::PermissionDenied(message) => AppError::forbidden(message),
+        UserAdminError::PermissionDenied(message) => {
+            AppError::forbidden(message)
+        }
         UserAdminError::Internal(message) => AppError::internal(message),
     }
 }

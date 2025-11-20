@@ -1,8 +1,18 @@
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Serialize};
 
 /// Wrapper for image binary data to enable rkyv serialization
-#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub struct ImageData {
     /// The actual image bytes (JPEG/PNG/WebP)
     pub bytes: Vec<u8>,

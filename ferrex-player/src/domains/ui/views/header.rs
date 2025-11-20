@@ -69,20 +69,24 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     .into(),
             );
 
-            let left_section = row(left_section_items).align_y(iced::Alignment::Center);
+            let left_section =
+                row(left_section_items).align_y(iced::Alignment::Center);
 
             // Center section - Search (always visible)
             let center_section = container(
                 row![
                     container(
-                        text_input("Search...", &state.domains.search.state.query)
-                            .id(Id::new("search-input"))
-                            .on_input(Message::UpdateSearchQuery)
-                            .on_submit(Message::ExecuteSearch)
-                            .style(theme::TextInput::header_search())
-                            .padding([15, 12])
-                            .size(14)
-                            .width(Length::Fixed(300.0))
+                        text_input(
+                            "Search...",
+                            &state.domains.search.state.query
+                        )
+                        .id(Id::new("search-input"))
+                        .on_input(Message::UpdateSearchQuery)
+                        .on_submit(Message::ExecuteSearch)
+                        .style(theme::TextInput::header_search())
+                        .padding([15, 12])
+                        .size(14)
+                        .width(Length::Fixed(300.0))
                     )
                     .height(HEIGHT)
                     .center_y(Length::Fill),
@@ -127,7 +131,8 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             let mut right_section = right_section;
 
             if !state.domains.library.state.active_scans.is_empty() {
-                let active_count = state.domains.library.state.active_scans.len();
+                let active_count =
+                    state.domains.library.state.active_scans.len();
                 right_section = right_section.push(
                     container(
                         row![
@@ -145,21 +150,23 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             }
 
             right_section = right_section.push({
-                let element: Element<Message> =
-                    if state.permission_checker().can_view_admin_dashboard() {
-                        button(
-                            container(icon_text_with_size(Icon::Settings, 16.0))
-                                .center_x(Length::Fill)
-                                .center_y(Length::Fill),
-                        )
-                        .on_press(Message::ShowLibraryManagement)
-                        .style(theme::Button::HeaderIcon.style())
-                        .width(Length::Fixed(HEIGHT))
-                        .height(HEIGHT)
-                        .into()
-                    } else {
-                        Space::new().width(HEIGHT).into()
-                    };
+                let element: Element<Message> = if state
+                    .permission_checker()
+                    .can_view_admin_dashboard()
+                {
+                    button(
+                        container(icon_text_with_size(Icon::Settings, 16.0))
+                            .center_x(Length::Fill)
+                            .center_y(Length::Fill),
+                    )
+                    .on_press(Message::ShowLibraryManagement)
+                    .style(theme::Button::HeaderIcon.style())
+                    .width(Length::Fixed(HEIGHT))
+                    .height(HEIGHT)
+                    .into()
+                } else {
+                    Space::new().width(HEIGHT).into()
+                };
                 element
             });
 
@@ -238,7 +245,8 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 .into(),
             );
 
-            let left_section = row(left_section_items).align_y(iced::Alignment::Center);
+            let left_section =
+                row(left_section_items).align_y(iced::Alignment::Center);
 
             // Right section - same controls as library view
             let right_section = row![
@@ -261,21 +269,26 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 .height(HEIGHT),
                 // Admin settings (show only if user has permissions)
                 {
-                    let admin_element: Element<'_, Message> =
-                        if state.permission_checker().can_view_admin_dashboard() {
-                            button(
-                                container(icon_text_with_size(Icon::Settings, 16.0))
-                                    .center_x(Length::Fill)
-                                    .center_y(Length::Fill),
-                            )
-                            .on_press(Message::ShowLibraryManagement)
-                            .style(theme::Button::HeaderIcon.style())
-                            .width(Length::Fixed(HEIGHT))
-                            .height(HEIGHT)
-                            .into()
-                        } else {
-                            Space::new().width(HEIGHT).into()
-                        };
+                    let admin_element: Element<'_, Message> = if state
+                        .permission_checker()
+                        .can_view_admin_dashboard()
+                    {
+                        button(
+                            container(icon_text_with_size(
+                                Icon::Settings,
+                                16.0,
+                            ))
+                            .center_x(Length::Fill)
+                            .center_y(Length::Fill),
+                        )
+                        .on_press(Message::ShowLibraryManagement)
+                        .style(theme::Button::HeaderIcon.style())
+                        .width(Length::Fixed(HEIGHT))
+                        .height(HEIGHT)
+                        .into()
+                    } else {
+                        Space::new().width(HEIGHT).into()
+                    };
                     admin_element
                 },
                 // Profile placeholder
@@ -354,7 +367,8 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 .into(),
             );
 
-            let left_section = row(left_section_items).align_y(iced::Alignment::Center);
+            let left_section =
+                row(left_section_items).align_y(iced::Alignment::Center);
 
             // Right section - Controls
             let mut right_section = row![
@@ -380,33 +394,16 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
 
             // Library management (admin) button
             right_section = right_section.push({
-                let element: Element<Message> =
-                    if state.permission_checker().can_view_admin_dashboard() {
-                        button(
-                            container(icon_text_with_size(Icon::Settings, 16.0))
-                                .center_x(Length::Fill)
-                                .center_y(Length::Fill),
-                        )
-                        .on_press(Message::ShowLibraryManagement)
-                        .style(theme::Button::HeaderIcon.style())
-                        .width(Length::Fixed(HEIGHT))
-                        .height(HEIGHT)
-                        .into()
-                    } else {
-                        Space::new().width(HEIGHT).into()
-                    };
-                element
-            });
-
-            // Users management button
-            right_section = right_section.push({
-                let element: Element<Message> = if state.permission_checker().can_view_users() {
+                let element: Element<Message> = if state
+                    .permission_checker()
+                    .can_view_admin_dashboard()
+                {
                     button(
-                        container(icon_text_with_size(Icon::Users, 16.0))
+                        container(icon_text_with_size(Icon::Settings, 16.0))
                             .center_x(Length::Fill)
                             .center_y(Length::Fill),
                     )
-                    .on_press(Message::ShowUserManagement)
+                    .on_press(Message::ShowLibraryManagement)
                     .style(theme::Button::HeaderIcon.style())
                     .width(Length::Fixed(HEIGHT))
                     .height(HEIGHT)
@@ -414,6 +411,26 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 } else {
                     Space::new().width(HEIGHT).into()
                 };
+                element
+            });
+
+            // Users management button
+            right_section = right_section.push({
+                let element: Element<Message> =
+                    if state.permission_checker().can_view_users() {
+                        button(
+                            container(icon_text_with_size(Icon::Users, 16.0))
+                                .center_x(Length::Fill)
+                                .center_y(Length::Fill),
+                        )
+                        .on_press(Message::ShowUserManagement)
+                        .style(theme::Button::HeaderIcon.style())
+                        .width(Length::Fixed(HEIGHT))
+                        .height(HEIGHT)
+                        .into()
+                    } else {
+                        Space::new().width(HEIGHT).into()
+                    };
                 element
             });
 
@@ -577,7 +594,8 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 .into(),
             );
 
-            let left_section = row(left_section_items).align_y(iced::Alignment::Center);
+            let left_section =
+                row(left_section_items).align_y(iced::Alignment::Center);
 
             Stack::new()
                 .push(
@@ -638,7 +656,8 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 .into(),
             );
 
-            let left_section = row(left_section_items).align_y(iced::Alignment::Center);
+            let left_section =
+                row(left_section_items).align_y(iced::Alignment::Center);
 
             Stack::new()
                 .push(
@@ -719,10 +738,12 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
             .map(|l| l.get())
             .filter(|l| l.enabled)
         {
-            let name: String = deserialize::<String, Error>(&library.name).unwrap();
+            let name: String =
+                deserialize::<String, Error>(&library.name).unwrap();
             let id = deserialize::<LibraryID, Error>(&library.id).unwrap();
             // Check if this library tab is active
-            let is_active = state.tab_manager.active_tab_id() == TabId::Library(id);
+            let is_active =
+                state.tab_manager.active_tab_id() == TabId::Library(id);
             let button_style = if is_active {
                 theme::Button::Primary.style()
             } else {

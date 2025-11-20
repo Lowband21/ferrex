@@ -22,7 +22,10 @@ impl fmt::Debug for ThumbnailService {
 }
 
 impl ThumbnailService {
-    pub fn new(cache_dir: PathBuf, media_files: Arc<dyn MediaFilesReadPort>) -> Result<Self> {
+    pub fn new(
+        cache_dir: PathBuf,
+        media_files: Arc<dyn MediaFilesReadPort>,
+    ) -> Result<Self> {
         // Initialize ffmpeg unless explicitly disabled (useful for tests)
         let ffmpeg_disabled = env::var("FERREX_DISABLE_FFMPEG")
             .map(|value| value == "1")
@@ -51,7 +54,11 @@ impl ThumbnailService {
     }
 
     /// Extract and cache a thumbnail from a video file
-    pub async fn extract_thumbnail(&self, media_id: &Uuid, video_path: &str) -> Result<PathBuf> {
+    pub async fn extract_thumbnail(
+        &self,
+        media_id: &Uuid,
+        video_path: &str,
+    ) -> Result<PathBuf> {
         let thumbnail_path = self.get_thumbnail_path(media_id);
 
         // Check if already cached
@@ -68,7 +75,11 @@ impl ThumbnailService {
         }
 
         // Extract thumbnail using ffmpeg
-        tracing::info!("Extracting thumbnail for {} from {}", media_id, video_path);
+        tracing::info!(
+            "Extracting thumbnail for {} from {}",
+            media_id,
+            video_path
+        );
 
         // Run extraction in blocking task since ffmpeg is not async
         let video_path = video_path.to_string();
@@ -93,7 +104,10 @@ impl ThumbnailService {
     }
 
     /// Get cached thumbnail or extract if needed
-    pub async fn get_or_extract_thumbnail(&self, media_id: &Uuid) -> Result<PathBuf> {
+    pub async fn get_or_extract_thumbnail(
+        &self,
+        media_id: &Uuid,
+    ) -> Result<PathBuf> {
         // Check if already cached
         let thumbnail_path = self.get_thumbnail_path(media_id);
         if thumbnail_path.exists() {
@@ -132,7 +146,11 @@ fn extract_frame_at_percentage(
     let mut input_ctx = match ffmpeg::format::input(&input_path) {
         Ok(ctx) => ctx,
         Err(e) => {
-            tracing::error!("Failed to open input file '{}': {}", input_path, e);
+            tracing::error!(
+                "Failed to open input file '{}': {}",
+                input_path,
+                e
+            );
             return Err(anyhow::anyhow!(
                 "Cannot open video file, it may be corrupt or unsupported: {}",
                 e
@@ -141,13 +159,14 @@ fn extract_frame_at_percentage(
     };
 
     // Find video stream
-    let video_stream = match input_ctx.streams().best(ffmpeg::media::Type::Video) {
-        Some(stream) => stream,
-        None => {
-            tracing::error!("No video stream found in '{}'", input_path);
-            return Err(anyhow::anyhow!("No video stream found in file"));
-        }
-    };
+    let video_stream =
+        match input_ctx.streams().best(ffmpeg::media::Type::Video) {
+            Some(stream) => stream,
+            None => {
+                tracing::error!("No video stream found in '{}'", input_path);
+                return Err(anyhow::anyhow!("No video stream found in file"));
+            }
+        };
 
     let video_stream_index = video_stream.index();
 
@@ -191,8 +210,8 @@ fn extract_frame_at_percentage(
     } else if stream_duration > 0 && percentage > 0.0 {
         // Fall back to stream duration with time base conversion
         let target_ts = (stream_duration as f64 * percentage) as i64;
-        let seek_seconds =
-            (target_ts as f64 * time_base.numerator() as f64) / time_base.denominator() as f64;
+        let seek_seconds = (target_ts as f64 * time_base.numerator() as f64)
+            / time_base.denominator() as f64;
         let seek_position = (seek_seconds * 1_000_000.0) as i64;
 
         tracing::info!(
@@ -212,16 +231,17 @@ fn extract_frame_at_percentage(
     }
 
     // Create decoder with error handling
-    let codec = match ffmpeg::codec::context::Context::from_parameters(codec_params) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!("Failed to create codec context: {}", e);
-            return Err(anyhow::anyhow!(
-                "Invalid or corrupt video codec parameters: {}",
-                e
-            ));
-        }
-    };
+    let codec =
+        match ffmpeg::codec::context::Context::from_parameters(codec_params) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("Failed to create codec context: {}", e);
+                return Err(anyhow::anyhow!(
+                    "Invalid or corrupt video codec parameters: {}",
+                    e
+                ));
+            }
+        };
 
     let mut decoder = match codec.decoder().video() {
         Ok(d) => d,
@@ -337,7 +357,9 @@ fn extract_frame_at_percentage(
                         frame_count += 1;
 
                         // Validate decoded frame before processing
-                        if decoded_frame.width() == 0 || decoded_frame.height() == 0 {
+                        if decoded_frame.width() == 0
+                            || decoded_frame.height() == 0
+                        {
                             tracing::warn!(
                                 "Decoded frame {} has invalid dimensions: {}x{}",
                                 frame_count,
@@ -347,7 +369,8 @@ fn extract_frame_at_percentage(
                             continue;
                         }
 
-                        if decoded_frame.format() == ffmpeg::format::Pixel::None {
+                        if decoded_frame.format() == ffmpeg::format::Pixel::None
+                        {
                             tracing::warn!(
                                 "Decoded frame {} has invalid pixel format",
                                 frame_count
@@ -371,12 +394,13 @@ fn extract_frame_at_percentage(
 
                         // Try to estimate the frame position
                         let pts = decoded_frame.pts().unwrap_or(0);
-                        let time_seconds = if pts > 0 && time_base.denominator() > 0 {
-                            (pts as f64 * time_base.numerator() as f64)
-                                / time_base.denominator() as f64
-                        } else {
-                            0.0
-                        };
+                        let time_seconds =
+                            if pts > 0 && time_base.denominator() > 0 {
+                                (pts as f64 * time_base.numerator() as f64)
+                                    / time_base.denominator() as f64
+                            } else {
+                                0.0
+                            };
 
                         tracing::info!(
                             "Successfully decoded frame {} at {}x{}, format: {:?}, pts: {}, time: {:.2}s",
@@ -403,10 +427,16 @@ fn extract_frame_at_percentage(
                                 // Frame scaled successfully
                             }
                             Err(e) => {
-                                tracing::error!("Failed to scale frame {}: {}", frame_count, e);
+                                tracing::error!(
+                                    "Failed to scale frame {}: {}",
+                                    frame_count,
+                                    e
+                                );
                                 // Try next frame instead of failing immediately
                                 if frame_count < 50 {
-                                    tracing::warn!("Trying next frame after scale error");
+                                    tracing::warn!(
+                                        "Trying next frame after scale error"
+                                    );
                                     continue;
                                 } else {
                                     return Err(anyhow::anyhow!(
@@ -428,14 +458,20 @@ fn extract_frame_at_percentage(
                         // Check if frame data looks valid (not all black)
                         let data = scaled_frame.data(0);
                         let sample_size = std::cmp::min(100, data.len());
-                        let non_zero_count = data[..sample_size].iter().filter(|&&b| b > 0).count();
+                        let non_zero_count = data[..sample_size]
+                            .iter()
+                            .filter(|&&b| b > 0)
+                            .count();
                         tracing::debug!(
                             "Frame data sample: {} non-zero bytes out of {}",
                             non_zero_count,
                             sample_size
                         );
 
-                        if non_zero_count == 0 && !seek_succeeded && frame_count < 50 {
+                        if non_zero_count == 0
+                            && !seek_succeeded
+                            && frame_count < 50
+                        {
                             tracing::warn!(
                                 "Frame {} appears to be all black, trying next frame",
                                 frame_count
@@ -444,12 +480,17 @@ fn extract_frame_at_percentage(
                         }
 
                         // Save as JPEG
-                        if let Err(e) = save_frame_as_jpeg(&scaled_frame, output_path) {
+                        if let Err(e) =
+                            save_frame_as_jpeg(&scaled_frame, output_path)
+                        {
                             tracing::error!("Failed to save thumbnail: {}", e);
                             return Err(e);
                         }
 
-                        tracing::info!("Thumbnail saved successfully to {:?}", output_path);
+                        tracing::info!(
+                            "Thumbnail saved successfully to {:?}",
+                            output_path
+                        );
                         return Ok(());
                     }
                     Err(ffmpeg::Error::Other { errno: -11 }) => {
@@ -472,7 +513,10 @@ fn extract_frame_at_percentage(
 }
 
 /// Save a frame as JPEG
-fn save_frame_as_jpeg(frame: &ffmpeg::util::frame::video::Video, output_path: &Path) -> Result<()> {
+fn save_frame_as_jpeg(
+    frame: &ffmpeg::util::frame::video::Video,
+    output_path: &Path,
+) -> Result<()> {
     use image::{ImageBuffer, Rgb};
 
     let width = frame.width();
@@ -505,7 +549,13 @@ fn save_frame_as_jpeg(frame: &ffmpeg::util::frame::video::Video, output_path: &P
 
     // Create image from RGB data
     let img = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, image_data)
-        .ok_or_else(|| anyhow::anyhow!("Failed to create image buffer {}x{}", width, height))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Failed to create image buffer {}x{}",
+                width,
+                height
+            )
+        })?;
 
     // Save as JPEG with quality 85
     img.save(output_path).context("Failed to save thumbnail")?;

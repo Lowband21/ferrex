@@ -36,7 +36,10 @@ pub trait SetupClaimsRepository: Send + Sync {
 
     /// Return the most recent claim that is neither confirmed nor revoked and has
     /// not expired.
-    async fn get_active(&self, now: DateTime<Utc>) -> Result<Option<SetupClaimRecord>>;
+    async fn get_active(
+        &self,
+        now: DateTime<Utc>,
+    ) -> Result<Option<SetupClaimRecord>>;
 
     /// Lookup a claim by matching the stored code hash. Expired or revoked
     /// claims should be ignored.
@@ -56,7 +59,11 @@ pub trait SetupClaimsRepository: Send + Sync {
     ) -> Result<SetupClaimRecord>;
 
     /// Increment the attempt counter for diagnostic purposes.
-    async fn increment_attempt(&self, id: Uuid, now: DateTime<Utc>) -> Result<()>;
+    async fn increment_attempt(
+        &self,
+        id: Uuid,
+        now: DateTime<Utc>,
+    ) -> Result<()>;
 
     /// Find a confirmed claim by token hash (used when creating the admin after
     /// claim confirmation). Implementations should ensure revoked claims are
@@ -77,7 +84,11 @@ pub trait SetupClaimsRepository: Send + Sync {
     ) -> Result<SetupClaimRecord>;
 
     /// Revoke every claim (used by the CLI) returning the number of rows affected.
-    async fn revoke_all(&self, reason: Option<&str>, now: DateTime<Utc>) -> Result<u64>;
+    async fn revoke_all(
+        &self,
+        reason: Option<&str>,
+        now: DateTime<Utc>,
+    ) -> Result<u64>;
 
     /// Remove stale revoked/expired rows to keep the table lean. Returns the
     /// number of rows removed.

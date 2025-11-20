@@ -1,6 +1,6 @@
 pub mod claim;
 
 pub use claim::{
-    ConfirmedClaim, ConsumedClaim, SetupClaimError, SetupClaimService, StartedClaim,
-    ValidatedClaimToken,
+    ConfirmedClaim, ConsumedClaim, SetupClaimError, SetupClaimService,
+    StartedClaim, ValidatedClaimToken,
 };

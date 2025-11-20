@@ -7,7 +7,9 @@ use uuid::Uuid;
 
 use crate::auth::AuthCrypto;
 use crate::auth::domain::aggregates::{DeviceSession, DeviceStatus};
-use crate::auth::domain::repositories::{DevicePinStatus, DeviceSessionRepository};
+use crate::auth::domain::repositories::{
+    DevicePinStatus, DeviceSessionRepository,
+};
 use crate::auth::domain::value_objects::{
     DeviceFingerprint, RevocationReason, SessionScope, SessionToken,
 };
@@ -49,7 +51,10 @@ impl PostgresDeviceSessionRepository {
 
 #[async_trait]
 impl DeviceSessionRepository for PostgresDeviceSessionRepository {
-    async fn find_by_id(&self, session_id: Uuid) -> Result<Option<DeviceSession>> {
+    async fn find_by_id(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Option<DeviceSession>> {
         let record = sqlx::query_as!(
             DeviceSessionRecord,
             r#"
@@ -141,7 +146,10 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
         record.map(|row| self.hydrate_session(row)).transpose()
     }
 
-    async fn find_by_user_id(&self, user_id: Uuid) -> Result<Vec<DeviceSession>> {
+    async fn find_by_user_id(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<DeviceSession>> {
         let rows = sqlx::query_as!(
             DeviceSessionRecord,
             r#"
@@ -344,7 +352,10 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
         Ok(persisted_session_id)
     }
 
-    async fn exists_by_fingerprint(&self, fingerprint: &DeviceFingerprint) -> Result<bool> {
+    async fn exists_by_fingerprint(
+        &self,
+        fingerprint: &DeviceFingerprint,
+    ) -> Result<bool> {
         let exists = sqlx::query_scalar::<_, bool>(
             r#"
             SELECT EXISTS(
@@ -391,7 +402,10 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
 }
 
 impl PostgresDeviceSessionRepository {
-    fn hydrate_session(&self, row: DeviceSessionRecord) -> Result<DeviceSession> {
+    fn hydrate_session(
+        &self,
+        row: DeviceSessionRecord,
+    ) -> Result<DeviceSession> {
         let DeviceSessionRecord {
             id,
             user_id,
@@ -413,16 +427,22 @@ impl PostgresDeviceSessionRepository {
         let fingerprint = DeviceFingerprint::from_hash(device_fingerprint)
             .context("invalid device fingerprint stored in database")?;
 
-        let session_token = match (session_token_hash, session_created_at, session_expires_at) {
+        let session_token = match (
+            session_token_hash,
+            session_created_at,
+            session_expires_at,
+        ) {
             (Some(token), Some(created_at), Some(expires_at)) => Some(
                 SessionToken::from_value(token, created_at, expires_at)
-                    .context("failed to hydrate session token from database row")?,
+                    .context(
+                        "failed to hydrate session token from database row",
+                    )?,
             ),
             _ => None,
         };
 
-        let status =
-            status_from_db(&status_value).context("invalid auth_device_sessions.status value")?;
+        let status = status_from_db(&status_value)
+            .context("invalid auth_device_sessions.status value")?;
 
         let failed_attempts: u8 = failed_attempts
             .try_into()
@@ -449,7 +469,9 @@ fn is_hex_digest(candidate: &str) -> bool {
     candidate.len() == 64 && candidate.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-fn status_from_db(value: &str) -> Result<crate::auth::domain::aggregates::DeviceStatus> {
+fn status_from_db(
+    value: &str,
+) -> Result<crate::auth::domain::aggregates::DeviceStatus> {
     use crate::auth::domain::aggregates::DeviceStatus;
 
     match value {
@@ -460,7 +482,9 @@ fn status_from_db(value: &str) -> Result<crate::auth::domain::aggregates::Device
     }
 }
 
-fn status_to_db(status: crate::auth::domain::aggregates::DeviceStatus) -> &'static str {
+fn status_to_db(
+    status: crate::auth::domain::aggregates::DeviceStatus,
+) -> &'static str {
     use crate::auth::domain::aggregates::DeviceStatus;
 
     match status {

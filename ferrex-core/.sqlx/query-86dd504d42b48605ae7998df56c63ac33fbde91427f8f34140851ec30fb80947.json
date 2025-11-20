@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO auth_refresh_tokens (\n                user_id,\n                device_session_id,\n                session_id,\n                token_hash,\n                issued_at,\n                expires_at,\n                metadata,\n                device_name,\n                family_id,\n                generation,\n                origin_scope\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb, NULL, $7, $8, $9)\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Uuid",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "86dd504d42b48605ae7998df56c63ac33fbde91427f8f34140851ec30fb80947"
+}

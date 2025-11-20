@@ -3,7 +3,9 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
-async fn test_folder_inventory_table_exists(pool: PgPool) -> Result<(), sqlx::Error> {
+async fn test_folder_inventory_table_exists(
+    pool: PgPool,
+) -> Result<(), sqlx::Error> {
     let result = sqlx::query(
         "SELECT EXISTS (
             SELECT FROM information_schema.tables 
@@ -25,7 +27,9 @@ async fn test_folder_inventory_table_exists(pool: PgPool) -> Result<(), sqlx::Er
 // uniqueness, triggers, and CRUD operations.
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
-async fn test_folder_inventory_constraints(pool: PgPool) -> Result<(), sqlx::Error> {
+async fn test_folder_inventory_constraints(
+    pool: PgPool,
+) -> Result<(), sqlx::Error> {
     // Test folder_type check constraint
     let invalid_folder_type = sqlx::query(
         "INSERT INTO folder_inventory (library_id, folder_path, folder_type) 
@@ -98,7 +102,9 @@ async fn test_folder_inventory_constraints(pool: PgPool) -> Result<(), sqlx::Err
 }
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
-async fn test_folder_inventory_crud_operations(pool: PgPool) -> Result<(), sqlx::Error> {
+async fn test_folder_inventory_crud_operations(
+    pool: PgPool,
+) -> Result<(), sqlx::Error> {
     // First, we need a library to reference
     let library_id = Uuid::now_v7();
     sqlx::query(
@@ -198,10 +204,11 @@ async fn test_folder_inventory_crud_operations(pool: PgPool) -> Result<(), sqlx:
         .execute(&pool)
         .await?;
 
-    let delete_check = sqlx::query("SELECT COUNT(*) FROM folder_inventory WHERE id = $1")
-        .bind(folder_id)
-        .fetch_one(&pool)
-        .await?;
+    let delete_check =
+        sqlx::query("SELECT COUNT(*) FROM folder_inventory WHERE id = $1")
+            .bind(folder_id)
+            .fetch_one(&pool)
+            .await?;
 
     assert_eq!(delete_check.get::<i64, _>(0), 0, "Folder should be deleted");
 
@@ -215,7 +222,9 @@ async fn test_folder_inventory_crud_operations(pool: PgPool) -> Result<(), sqlx:
 }
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
-async fn test_folder_inventory_cascade_delete(pool: PgPool) -> Result<(), sqlx::Error> {
+async fn test_folder_inventory_cascade_delete(
+    pool: PgPool,
+) -> Result<(), sqlx::Error> {
     // Create a library
     let library_id = Uuid::now_v7();
     sqlx::query(
@@ -263,10 +272,12 @@ async fn test_folder_inventory_cascade_delete(pool: PgPool) -> Result<(), sqlx::
         .await?;
 
     // Check folders are deleted
-    let folder_count = sqlx::query("SELECT COUNT(*) FROM folder_inventory WHERE library_id = $1")
-        .bind(library_id)
-        .fetch_one(&pool)
-        .await?;
+    let folder_count = sqlx::query(
+        "SELECT COUNT(*) FROM folder_inventory WHERE library_id = $1",
+    )
+    .bind(library_id)
+    .fetch_one(&pool)
+    .await?;
 
     assert_eq!(
         folder_count.get::<i64, _>(0),
@@ -278,7 +289,9 @@ async fn test_folder_inventory_cascade_delete(pool: PgPool) -> Result<(), sqlx::
 }
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
-async fn test_folder_inventory_unique_constraint(pool: PgPool) -> Result<(), sqlx::Error> {
+async fn test_folder_inventory_unique_constraint(
+    pool: PgPool,
+) -> Result<(), sqlx::Error> {
     // Create a library
     let library_id = Uuid::now_v7();
     sqlx::query(
@@ -329,7 +342,9 @@ async fn test_folder_inventory_unique_constraint(pool: PgPool) -> Result<(), sql
 }
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
-async fn test_folder_inventory_trigger_updated_at(pool: PgPool) -> Result<(), sqlx::Error> {
+async fn test_folder_inventory_trigger_updated_at(
+    pool: PgPool,
+) -> Result<(), sqlx::Error> {
     // Create a library
     let library_id = Uuid::now_v7();
     sqlx::query(
@@ -357,10 +372,11 @@ async fn test_folder_inventory_trigger_updated_at(pool: PgPool) -> Result<(), sq
     .await?;
 
     // Get initial updated_at
-    let initial = sqlx::query("SELECT updated_at FROM folder_inventory WHERE id = $1")
-        .bind(folder_id)
-        .fetch_one(&pool)
-        .await?;
+    let initial =
+        sqlx::query("SELECT updated_at FROM folder_inventory WHERE id = $1")
+            .bind(folder_id)
+            .fetch_one(&pool)
+            .await?;
     let initial_updated_at: DateTime<Utc> = initial.get(0);
 
     // Wait briefly to ensure timestamp difference
@@ -373,10 +389,11 @@ async fn test_folder_inventory_trigger_updated_at(pool: PgPool) -> Result<(), sq
         .await?;
 
     // Get new updated_at
-    let updated = sqlx::query("SELECT updated_at FROM folder_inventory WHERE id = $1")
-        .bind(folder_id)
-        .fetch_one(&pool)
-        .await?;
+    let updated =
+        sqlx::query("SELECT updated_at FROM folder_inventory WHERE id = $1")
+            .bind(folder_id)
+            .fetch_one(&pool)
+            .await?;
     let new_updated_at: DateTime<Utc> = updated.get(0);
 
     assert!(

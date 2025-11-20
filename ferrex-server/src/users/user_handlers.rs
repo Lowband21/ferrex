@@ -7,7 +7,9 @@ use axum::{
 use ferrex_core::{
     api_types::ApiResponse,
     auth::domain::{
-        services::{AuthenticationError, PasswordChangeActor, PasswordChangeRequest},
+        services::{
+            AuthenticationError, PasswordChangeActor, PasswordChangeRequest,
+        },
         value_objects::DeviceFingerprint,
     },
     user::{User, UserUpdateRequest},
@@ -41,7 +43,9 @@ pub async fn list_users_handler(
         .get("X-Device-Fingerprint")
         .and_then(|v| v.to_str().ok())
         .ok_or_else(|| {
-            AppError::bad_request("Device fingerprint required for user list".to_string())
+            AppError::bad_request(
+                "Device fingerprint required for user list".to_string(),
+            )
         })?;
 
     // Validate device fingerprint format (basic validation)
@@ -51,11 +55,13 @@ pub async fn list_users_handler(
         ));
     }
 
-    let fingerprint = DeviceFingerprint::from_hash(device_fingerprint.to_string())
-        .map_err(|_| AppError::bad_request("Invalid device fingerprint".to_string()))?;
+    let fingerprint =
+        DeviceFingerprint::from_hash(device_fingerprint.to_string()).map_err(
+            |_| AppError::bad_request("Invalid device fingerprint".to_string()),
+        )?;
 
     let (is_known_device, mut users, pin_map) = state
-        .auth_facade
+        .auth_facade()
         .device_user_listing(&fingerprint)
         .await
         .map_err(map_facade_error)?;
@@ -70,7 +76,10 @@ pub async fn list_users_handler(
         let user_list: Vec<UserListItemDto> = limited
             .into_iter()
             .map(|user| UserListItemDto {
-                id: Uuid::new_v5(&Uuid::NAMESPACE_DNS, user.username.as_bytes()),
+                id: Uuid::new_v5(
+                    &Uuid::NAMESPACE_DNS,
+                    user.username.as_bytes(),
+                ),
                 username: user.username,
                 display_name: user.display_name,
                 avatar_url: user.avatar_url,
@@ -113,16 +122,18 @@ pub async fn list_users_authenticated_handler(
 
     let users = if is_admin {
         // Admin gets full user list
-        state.unit_of_work.users.get_all_users().await?
+        state.unit_of_work().users.get_all_users().await?
     } else {
         // Regular users only see themselves
         vec![
             state
-                .unit_of_work
+                .unit_of_work()
                 .users
                 .get_user_by_id(user.id)
                 .await?
-                .ok_or_else(|| AppError::not_found("User not found".to_string()))?,
+                .ok_or_else(|| {
+                    AppError::not_found("User not found".to_string())
+                })?,
         ]
     };
 
@@ -130,7 +141,7 @@ pub async fn list_users_authenticated_handler(
     let device_session = if let Some(device_id) = device_id {
         Some(
             state
-                .auth_facade
+                .auth_facade()
                 .get_device_by_id(device_id)
                 .await
                 .map_err(map_facade_error)?,
@@ -174,20 +185,28 @@ pub struct UserListItemDto {
 
 fn map_facade_error(err: AuthFacadeError) -> AppError {
     match err {
-        AuthFacadeError::UserNotFound => AppError::not_found("User not found".to_string()),
+        AuthFacadeError::UserNotFound => {
+            AppError::not_found("User not found".to_string())
+        }
         AuthFacadeError::Storage(inner) => AppError::from(inner),
         AuthFacadeError::Authentication(inner) => match inner {
             AuthenticationError::InvalidCredentials => {
                 AppError::bad_request("Invalid credentials".to_string())
             }
-            AuthenticationError::UserNotFound => AppError::not_found("User not found".to_string()),
+            AuthenticationError::UserNotFound => {
+                AppError::not_found("User not found".to_string())
+            }
             AuthenticationError::TooManyFailedAttempts => {
                 AppError::forbidden("Too many failed attempts".to_string())
             }
             other => AppError::internal(other.to_string()),
         },
-        AuthFacadeError::DeviceTrust(inner) => AppError::internal(inner.to_string()),
-        AuthFacadeError::PinManagement(inner) => AppError::internal(inner.to_string()),
+        AuthFacadeError::DeviceTrust(inner) => {
+            AppError::internal(inner.to_string())
+        }
+        AuthFacadeError::PinManagement(inner) => {
+            AppError::internal(inner.to_string())
+        }
     }
 }
 
@@ -203,7 +222,7 @@ pub async fn get_user_handler(
     }
 
     let user = state
-        .unit_of_work
+        .unit_of_work()
         .users
         .get_user_by_id(user_id)
         .await?
@@ -226,11 +245,13 @@ pub async fn update_user_handler(
         PasswordChangeActor::UserInitiated
     } else {
         let is_admin = state
-            .unit_of_work
+            .unit_of_work()
             .rbac
             .user_has_role(current_user.id, "admin")
             .await
-            .map_err(|e| AppError::internal(format!("Failed to verify admin role: {e}")))?;
+            .map_err(|e| {
+                AppError::internal(format!("Failed to verify admin role: {e}"))
+            })?;
         if !is_admin {
             return Err(AppError::forbidden(
                 "You do not have permission to modify this user",
@@ -242,7 +263,7 @@ pub async fn update_user_handler(
     };
 
     let mut user = state
-        .unit_of_work
+        .unit_of_work()
         .users
         .get_user_by_id(user_id)
         .await?
@@ -270,7 +291,7 @@ pub async fn update_user_handler(
         };
 
         state
-            .auth_facade
+            .auth_facade()
             .change_password(PasswordChangeRequest {
                 user_id,
                 new_password,
@@ -308,7 +329,9 @@ pub async fn delete_user_handler(
 ) -> AppResult<StatusCode> {
     // Users can only delete their own account
     if current_user.id != user_id {
-        return Err(AppError::forbidden("You can only delete your own account"));
+        return Err(AppError::forbidden(
+            "You can only delete your own account",
+        ));
     }
 
     // Use UserService to delete user
@@ -332,7 +355,7 @@ pub async fn change_password_handler(
     Json(request): Json<ChangePasswordRequest>,
 ) -> AppResult<StatusCode> {
     state
-        .auth_facade
+        .auth_facade()
         .change_password(PasswordChangeRequest {
             user_id: current_user.id,
             new_password: request.new_password,

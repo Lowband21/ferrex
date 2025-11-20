@@ -26,18 +26,24 @@ pub enum SettingsView {
 #[derive(Debug, Clone)]
 pub struct SecurityState {
     // Password change fields
-    pub password_current: crate::domains::auth::security::secure_credential::SecureCredential,
-    pub password_new: crate::domains::auth::security::secure_credential::SecureCredential,
-    pub password_confirm: crate::domains::auth::security::secure_credential::SecureCredential,
+    pub password_current:
+        crate::domains::auth::security::secure_credential::SecureCredential,
+    pub password_new:
+        crate::domains::auth::security::secure_credential::SecureCredential,
+    pub password_confirm:
+        crate::domains::auth::security::secure_credential::SecureCredential,
     pub password_error: Option<String>,
     pub password_loading: bool,
     pub password_show: bool,
     pub showing_password_change: bool,
 
     // PIN change fields
-    pub pin_current: crate::domains::auth::security::secure_credential::SecureCredential,
-    pub pin_new: crate::domains::auth::security::secure_credential::SecureCredential,
-    pub pin_confirm: crate::domains::auth::security::secure_credential::SecureCredential,
+    pub pin_current:
+        crate::domains::auth::security::secure_credential::SecureCredential,
+    pub pin_new:
+        crate::domains::auth::security::secure_credential::SecureCredential,
+    pub pin_confirm:
+        crate::domains::auth::security::secure_credential::SecureCredential,
     pub pin_error: Option<String>,
     pub pin_loading: bool,
     pub showing_pin_change: bool,
@@ -193,7 +199,8 @@ impl PasswordChangeState {
             return Err("Passwords do not match".to_string());
         }
         if self.current == self.new {
-            return Err("New password must be different from current password".to_string());
+            return Err("New password must be different from current password"
+                .to_string());
         }
 
         // Check password complexity
@@ -202,7 +209,10 @@ impl PasswordChangeState {
         let has_digit = self.new.chars().any(|c| c.is_ascii_digit());
 
         if !has_upper || !has_lower || !has_digit {
-            return Err("Password must contain uppercase, lowercase, and numbers".to_string());
+            return Err(
+                "Password must contain uppercase, lowercase, and numbers"
+                    .to_string(),
+            );
         }
 
         Ok(())
@@ -247,7 +257,9 @@ impl PinChangeState {
             return Err("PINs do not match".to_string());
         }
         if !self.is_new_pin && self.current == self.new {
-            return Err("New PIN must be different from current PIN".to_string());
+            return Err(
+                "New PIN must be different from current PIN".to_string()
+            );
         }
 
         Ok(())

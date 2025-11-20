@@ -95,14 +95,16 @@ impl NetworkMonitor {
 
         // Calculate average latency
         let avg_latency = if !measurements.latencies.is_empty() {
-            measurements.latencies.iter().sum::<u64>() / measurements.latencies.len() as u64
+            measurements.latencies.iter().sum::<u64>()
+                / measurements.latencies.len() as u64
         } else {
             100 // Default to 100ms if no measurements
         };
 
         // Calculate average bandwidth
         let avg_bandwidth = if !measurements.bandwidths.is_empty() {
-            measurements.bandwidths.iter().sum::<u64>() / measurements.bandwidths.len() as u64
+            measurements.bandwidths.iter().sum::<u64>()
+                / measurements.bandwidths.len() as u64
         } else {
             1_000_000 // Default to 1MB/s if no measurements
         };
@@ -112,7 +114,9 @@ impl NetworkMonitor {
             (lat, bw, loss) if lat < 50 && bw > 10_000_000 && loss < 0.01 => {
                 NetworkQuality::Excellent
             }
-            (lat, bw, loss) if lat < 200 && bw > 1_000_000 && loss < 0.05 => NetworkQuality::Good,
+            (lat, bw, loss) if lat < 200 && bw > 1_000_000 && loss < 0.05 => {
+                NetworkQuality::Good
+            }
             _ => NetworkQuality::Poor,
         }
     }
@@ -167,14 +171,16 @@ impl NetworkMonitor {
 
         // Base latency
         let base_latency_ms = if !measurements.latencies.is_empty() {
-            measurements.latencies.iter().sum::<u64>() / measurements.latencies.len() as u64
+            measurements.latencies.iter().sum::<u64>()
+                / measurements.latencies.len() as u64
         } else {
             100
         };
 
         // Add time for data transfer
         let bandwidth = if !measurements.bandwidths.is_empty() {
-            measurements.bandwidths.iter().sum::<u64>() / measurements.bandwidths.len() as u64
+            measurements.bandwidths.iter().sum::<u64>()
+                / measurements.bandwidths.len() as u64
         } else {
             1_000_000 // 1MB/s default
         };
@@ -187,7 +193,8 @@ impl NetworkMonitor {
 
         // Account for packet loss (retransmissions)
         let packet_loss_factor = 1.0 + measurements.packet_loss;
-        let total_ms = ((base_latency_ms + transfer_time_ms) as f32 * packet_loss_factor) as u64;
+        let total_ms = ((base_latency_ms + transfer_time_ms) as f32
+            * packet_loss_factor) as u64;
 
         Duration::from_millis(total_ms)
     }

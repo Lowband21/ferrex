@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -13,7 +15,15 @@ use crate::types::media::{
 use crate::types::media_id::MediaID;
 
 /// Lightweight payload of library media used by UI clients
-#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub struct LibraryMediaResponse {
     pub library: LibraryReference,
     pub media: Vec<Media>, // Lightweight - MediaDetailsOption will be Endpoint variant

@@ -37,7 +37,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, user: User) {
 
     // Register connection
     state
-        .websocket_manager
+        .websocket_manager()
         .add_connection(conn_id, connection.clone());
 
     // Spawn task to handle outgoing messages
@@ -56,22 +56,30 @@ async fn handle_socket(socket: WebSocket, state: AppState, user: User) {
     while let Some(msg) = ws_receiver.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                if let Ok(sync_msg) = serde_json::from_str::<SyncMessage>(text.as_str())
-                    && let Err(e) = handle_sync_message(sync_msg, &state, conn_id, &user).await
+                if let Ok(sync_msg) =
+                    serde_json::from_str::<SyncMessage>(text.as_str())
+                    && let Err(e) =
+                        handle_sync_message(sync_msg, &state, conn_id, &user)
+                            .await
                 {
                     tracing::error!("Error handling sync message: {}", e);
                 }
             }
             Ok(Message::Binary(bin)) => {
-                if let Ok(sync_msg) = serde_json::from_slice::<SyncMessage>(bin.as_ref())
-                    && let Err(e) = handle_sync_message(sync_msg, &state, conn_id, &user).await
+                if let Ok(sync_msg) =
+                    serde_json::from_slice::<SyncMessage>(bin.as_ref())
+                    && let Err(e) =
+                        handle_sync_message(sync_msg, &state, conn_id, &user)
+                            .await
                 {
                     tracing::error!("Error handling sync message: {}", e);
                 }
             }
             Ok(Message::Ping(_)) => {
                 // Update last ping time
-                if let Some(conn) = state.websocket_manager.get_connection(&conn_id) {
+                if let Some(conn) =
+                    state.websocket_manager().get_connection(&conn_id)
+                {
                     conn.update_ping().await;
                 }
             }
@@ -101,12 +109,12 @@ async fn handle_host_command<F>(
 where
     F: FnOnce(&mut ferrex_core::sync_session::PlaybackState),
 {
-    if let Some(conn) = state.websocket_manager.get_connection(&conn_id)
+    if let Some(conn) = state.websocket_manager().get_connection(&conn_id)
         && let Some(room_code) = conn.get_room_code().await
     {
         // Verify sender is host
         if let Some(session) = state
-            .unit_of_work
+            .unit_of_work()
             .sync_sessions
             .get_sync_session_by_code(&room_code)
             .await?
@@ -118,14 +126,14 @@ where
 
             // Update database
             state
-                .unit_of_work
+                .unit_of_work()
                 .sync_sessions
                 .update_sync_session_state(session.id, &new_state)
                 .await?;
 
             // Broadcast to all participants
             state
-                .websocket_manager
+                .websocket_manager()
                 .broadcast_to_room(&room_code, msg.clone())
                 .await;
         }
@@ -179,12 +187,13 @@ async fn handle_sync_message(
 
         // Participant status updates
         Ready { .. } | NotReady { .. } => {
-            if let Some(conn) = state.websocket_manager.get_connection(&conn_id)
+            if let Some(conn) =
+                state.websocket_manager().get_connection(&conn_id)
                 && let Some(room_code) = conn.get_room_code().await
             {
                 // Update participant ready status
                 if let Some(mut session) = state
-                    .unit_of_work
+                    .unit_of_work()
                     .sync_sessions
                     .get_sync_session_by_code(&room_code)
                     .await?
@@ -198,14 +207,14 @@ async fn handle_sync_message(
 
                     // Update database
                     state
-                        .unit_of_work
+                        .unit_of_work()
                         .sync_sessions
                         .update_sync_session(session.id, &session)
                         .await?;
 
                     // Notify host
                     if let Some(host_conn) = state
-                        .websocket_manager
+                        .websocket_manager()
                         .get_room_connections(&room_code)
                         .into_iter()
                         .find(|c| c.user.id == session.host_id)
@@ -218,10 +227,11 @@ async fn handle_sync_message(
 
         // Request sync - send current state
         RequestSync => {
-            if let Some(conn) = state.websocket_manager.get_connection(&conn_id)
+            if let Some(conn) =
+                state.websocket_manager().get_connection(&conn_id)
                 && let Some(room_code) = conn.get_room_code().await
                 && let Some(session) = state
-                    .unit_of_work
+                    .unit_of_work()
                     .sync_sessions
                     .get_sync_session_by_code(&room_code)
                     .await?
@@ -235,7 +245,9 @@ async fn handle_sync_message(
 
         // Handle ping/pong
         Ping { timestamp } => {
-            if let Some(conn) = state.websocket_manager.get_connection(&conn_id) {
+            if let Some(conn) =
+                state.websocket_manager().get_connection(&conn_id)
+            {
                 conn.update_ping().await;
                 conn.send_message(Pong { timestamp }).await?;
             }
@@ -243,7 +255,9 @@ async fn handle_sync_message(
 
         Pong { .. } => {
             // Update last ping time
-            if let Some(conn) = state.websocket_manager.get_connection(&conn_id) {
+            if let Some(conn) =
+                state.websocket_manager().get_connection(&conn_id)
+            {
                 conn.update_ping().await;
             }
         }
@@ -260,25 +274,28 @@ async fn handle_sync_message(
 /// Handle user disconnect
 async fn handle_disconnect(state: &AppState, conn_id: Uuid, user: &User) {
     // Get room code before removing connection
-    let room_code = match state.websocket_manager.get_connection(&conn_id) {
+    let room_code = match state.websocket_manager().get_connection(&conn_id) {
         Some(conn) => conn.get_room_code().await,
         _ => None,
     };
 
     // Remove connection
-    state.websocket_manager.remove_connection(conn_id);
+    state.websocket_manager().remove_connection(conn_id);
 
     // Handle room cleanup if needed
     if let Some(room_code) = room_code {
         // Notify other participants
         state
-            .websocket_manager
-            .broadcast_to_room(&room_code, SyncMessage::UserLeft { user_id: user.id })
+            .websocket_manager()
+            .broadcast_to_room(
+                &room_code,
+                SyncMessage::UserLeft { user_id: user.id },
+            )
             .await;
 
         // Check if host left and migrate if needed
         if let Some(mut session) = state
-            .unit_of_work
+            .unit_of_work()
             .sync_sessions
             .get_sync_session_by_code(&room_code)
             .await
@@ -295,27 +312,33 @@ async fn handle_disconnect(state: &AppState, conn_id: Uuid, user: &User) {
 
                     // Update database
                     let _ = state
-                        .unit_of_work
+                        .unit_of_work()
                         .sync_sessions
                         .update_sync_session(session.id, &session)
                         .await;
 
-                    tracing::info!("Migrated host to user {}", new_host.user_id);
+                    tracing::info!(
+                        "Migrated host to user {}",
+                        new_host.user_id
+                    );
                 } else {
                     // No participants left, end session
                     let _ = state
-                        .unit_of_work
+                        .unit_of_work()
                         .sync_sessions
                         .end_sync_session(session.id)
                         .await;
 
-                    tracing::info!("Ended session {} - no participants", session.id);
+                    tracing::info!(
+                        "Ended session {} - no participants",
+                        session.id
+                    );
                 }
             } else {
                 // Just remove participant
                 session.remove_participant(user.id);
                 let _ = state
-                    .unit_of_work
+                    .unit_of_work()
                     .sync_sessions
                     .update_sync_session(session.id, &session)
                     .await;

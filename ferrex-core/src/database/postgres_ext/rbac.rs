@@ -6,7 +6,10 @@ use crate::{
 use uuid::Uuid;
 
 impl PostgresDatabase {
-    pub async fn rbac_get_user_permissions(&self, user_id: Uuid) -> Result<UserPermissions> {
+    pub async fn rbac_get_user_permissions(
+        &self,
+        user_id: Uuid,
+    ) -> Result<UserPermissions> {
         self.rbac_repository().get_user_permissions(user_id).await
     }
 
@@ -29,7 +32,11 @@ impl PostgresDatabase {
             .await
     }
 
-    pub async fn rbac_remove_user_role(&self, user_id: Uuid, role_id: Uuid) -> Result<()> {
+    pub async fn rbac_remove_user_role(
+        &self,
+        user_id: Uuid,
+        role_id: Uuid,
+    ) -> Result<()> {
         self.rbac_repository()
             .remove_user_role(user_id, role_id)
             .await
@@ -55,7 +62,9 @@ impl PostgresDatabase {
         reason: Option<String>,
     ) -> Result<()> {
         self.rbac_repository()
-            .override_user_permission(user_id, permission, granted, granted_by, reason)
+            .override_user_permission(
+                user_id, permission, granted, granted_by, reason,
+            )
             .await
     }
 }

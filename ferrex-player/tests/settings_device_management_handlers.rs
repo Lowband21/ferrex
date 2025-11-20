@@ -11,7 +11,9 @@ use uuid::Uuid;
 struct MockSettingsServiceOk;
 #[async_trait::async_trait]
 impl SettingsService for MockSettingsServiceOk {
-    async fn list_user_devices(&self) -> anyhow::Result<Vec<AuthenticatedDevice>> {
+    async fn list_user_devices(
+        &self,
+    ) -> anyhow::Result<Vec<AuthenticatedDevice>> {
         Ok(vec![AuthenticatedDevice {
             id: Uuid::now_v7(),
             user_id: Uuid::now_v7(),
@@ -46,7 +48,9 @@ impl SettingsService for MockSettingsServiceOk {
 struct MockSettingsServiceErr;
 #[async_trait::async_trait]
 impl SettingsService for MockSettingsServiceErr {
-    async fn list_user_devices(&self) -> anyhow::Result<Vec<AuthenticatedDevice>> {
+    async fn list_user_devices(
+        &self,
+    ) -> anyhow::Result<Vec<AuthenticatedDevice>> {
         anyhow::bail!("boom")
     }
     async fn revoke_device(&self, _device_id: Uuid) -> anyhow::Result<()> {
@@ -141,7 +145,8 @@ async fn handle_devices_loaded_success_updates_state() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn handle_revoke_device_invalid_id_is_noop() {
-    let mut state = new_state_with_service(Some(Arc::new(MockSettingsServiceOk)));
+    let mut state =
+        new_state_with_service(Some(Arc::new(MockSettingsServiceOk)));
     let _task = ferrex_player::domains::settings::update::device_management::handle_revoke_device(
         &mut state,
         "not-a-uuid".into(),

@@ -1,7 +1,11 @@
 use crate::{
     error::Result,
-    orchestration::{DedupeKey, JobId, JobPriority, LibraryRootsId, ScanReason},
-    player_prelude::{EpisodeID, LibraryID, LibraryType, MovieID, SeasonID, SeriesID},
+    orchestration::{
+        DedupeKey, JobId, JobPriority, LibraryRootsId, ScanReason,
+    },
+    player_prelude::{
+        EpisodeID, LibraryID, LibraryType, MovieID, SeasonID, SeriesID,
+    },
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -84,7 +88,8 @@ pub struct IssuedJobRecord {
 /// Response carrying a maintenance queue cursor per partition.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MaintenanceSnapshot {
-    pub partitions: HashMap<LibraryRootsId, (MaintenancePartition, DateTime<Utc>)>,
+    pub partitions:
+        HashMap<LibraryRootsId, (MaintenancePartition, DateTime<Utc>)>,
 }
 
 /// Hook for pluggable observers (metrics/tracing) to receive actor lifecycle events.

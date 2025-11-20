@@ -1,6 +1,8 @@
 //! User selection view
 
-use super::components::{auth_card, auth_container, error_message, spacing, title};
+use super::components::{
+    auth_card, auth_container, error_message, spacing, title,
+};
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::dto::UserListItemDto;
 use crate::domains::auth::messages as auth;
@@ -56,13 +58,13 @@ pub fn view_user_selection_with_admin_state<'a>(
     // User list
     if users.is_empty() {
         content = content.push(
-            container(
-                text("No users found")
-                    .size(16)
-                    .style(|theme: &Theme| text::Style {
-                        color: Some(theme.extended_palette().background.strong.text),
-                    }),
-            )
+            container(text("No users found").size(16).style(
+                |theme: &Theme| text::Style {
+                    color: Some(
+                        theme.extended_palette().background.strong.text,
+                    ),
+                },
+            ))
             .width(Length::Fill)
             .padding(40)
             .align_x(iced::alignment::Horizontal::Center),
@@ -70,12 +72,15 @@ pub fn view_user_selection_with_admin_state<'a>(
     } else {
         let mut user_items: Vec<Element<'a, DomainMessage>> = users
             .iter()
-            .map(|user| user_button_with_auth_method(user, admin_pin_unlock_enabled))
+            .map(|user| {
+                user_button_with_auth_method(user, admin_pin_unlock_enabled)
+            })
             .collect();
 
         // Add "Add User" button for admins
         if let Some(permissions) = user_permissions
-            && (permissions.has_role("admin") || permissions.has_permission("users:create"))
+            && (permissions.has_role("admin")
+                || permissions.has_permission("users:create"))
         {
             user_items.push(add_user_button());
         }
@@ -128,7 +133,9 @@ pub fn view_user_selection_with_admin_state<'a>(
     ),
     profiling::function
 )]
-fn admin_session_indicator<'a>(admin_pin_unlock_enabled: bool) -> Element<'a, DomainMessage> {
+fn admin_session_indicator<'a>(
+    admin_pin_unlock_enabled: bool,
+) -> Element<'a, DomainMessage> {
     let (icon_text, status_text) = if admin_pin_unlock_enabled {
         ("🔓", "PIN Available")
     } else {
@@ -149,11 +156,11 @@ fn admin_session_indicator<'a>(admin_pin_unlock_enabled: bool) -> Element<'a, Do
                     color: Some(theme_color(theme)),
                 }),
             Space::new().width(Length::Fixed(8.0)),
-            text(status_text)
-                .size(14)
-                .style(move |theme: &Theme| text::Style {
+            text(status_text).size(14).style(move |theme: &Theme| {
+                text::Style {
                     color: Some(theme_color(theme)),
-                }),
+                }
+            }),
         ]
         .align_y(Alignment::Center),
     )
@@ -219,35 +226,39 @@ fn user_button_internal<'a>(
     button(
         row![
             // User avatar placeholder
-            container(text(user.display_name.chars().next().unwrap_or('U')).size(24))
-                .width(Length::Fixed(48.0))
-                .height(Length::Fixed(48.0))
-                .align_x(iced::alignment::Horizontal::Center)
-                .align_y(iced::alignment::Vertical::Center)
-                .style(|theme: &Theme| {
-                    let palette = theme.extended_palette();
-                    container::Style {
-                        background: Some(palette.primary.weak.color.into()),
-                        border: iced::Border {
-                            radius: 24.0.into(),
-                            ..Default::default()
-                        },
+            container(
+                text(user.display_name.chars().next().unwrap_or('U')).size(24)
+            )
+            .width(Length::Fixed(48.0))
+            .height(Length::Fixed(48.0))
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .style(|theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                    background: Some(palette.primary.weak.color.into()),
+                    border: iced::Border {
+                        radius: 24.0.into(),
                         ..Default::default()
-                    }
-                }),
+                    },
+                    ..Default::default()
+                }
+            }),
             Space::new().width(Length::Fixed(16.0)),
             column![
                 text(&user.display_name).size(18),
                 text(&user.username).size(14).style(|theme: &Theme| {
                     text::Style {
-                        color: Some(theme.extended_palette().background.strong.text),
+                        color: Some(
+                            theme.extended_palette().background.strong.text,
+                        ),
                     }
                 }),
-                text(auth_method_text)
-                    .size(12)
-                    .style(move |theme: &Theme| text::Style {
+                text(auth_method_text).size(12).style(move |theme: &Theme| {
+                    text::Style {
                         color: Some(auth_method_color(theme)),
-                    }),
+                    }
+                }),
             ]
             .align_x(Alignment::Start),
         ]
@@ -341,14 +352,18 @@ fn add_user_button<'a>() -> Element<'a, DomainMessage> {
                 text("Add User").size(18),
                 text("admin").size(14).style(|theme: &Theme| {
                     text::Style {
-                        color: Some(theme.extended_palette().background.strong.text),
+                        color: Some(
+                            theme.extended_palette().background.strong.text,
+                        ),
                     }
                 }),
-                text("Create a new user account")
-                    .size(12)
-                    .style(|theme: &Theme| text::Style {
-                        color: Some(theme.extended_palette().primary.base.color),
-                    }),
+                text("Create a new user account").size(12).style(
+                    |theme: &Theme| text::Style {
+                        color: Some(
+                            theme.extended_palette().primary.base.color
+                        ),
+                    }
+                ),
             ]
             .align_x(Alignment::Start),
         ]

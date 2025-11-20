@@ -176,7 +176,8 @@ where
                 Ok(cache) => {
                     if let Some(ref cached_state) = cache.last_sort {
                         cached_state.items_hash == items_hash
-                            && cached_state.timestamp.elapsed() < cached_state.ttl
+                            && cached_state.timestamp.elapsed()
+                                < cached_state.ttl
                             && cached_state.sorted_indices.len() == items.len()
                     } else {
                         false
@@ -216,7 +217,8 @@ where
         for sorted_item in &items_copy {
             // Find the index of this item in the original array
             // This is a simple O(n²) approach; could be optimized with a HashMap
-            for (idx, (orig_idx, orig_item)) in indexed_items.iter().enumerate() {
+            for (idx, (orig_idx, orig_item)) in indexed_items.iter().enumerate()
+            {
                 if std::ptr::eq(sorted_item, orig_item) {
                     sorted_indices.push(*orig_idx);
                     indexed_items.remove(idx);

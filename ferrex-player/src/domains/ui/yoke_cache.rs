@@ -72,7 +72,9 @@ impl<Y> YokeCache<Y> {
     /// Insert or update (LRU-aware)
     pub fn insert(&self, id: Uuid, yoke: Arc<Y>) {
         let mut inner = self.inner.write();
-        if let std::collections::hash_map::Entry::Occupied(mut e) = inner.map.entry(id) {
+        if let std::collections::hash_map::Entry::Occupied(mut e) =
+            inner.map.entry(id)
+        {
             e.insert(yoke);
             if let Some(pos) = inner.lru.iter().position(|x| x == &id) {
                 inner.lru.remove(pos);

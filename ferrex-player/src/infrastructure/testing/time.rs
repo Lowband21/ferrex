@@ -20,10 +20,16 @@ pub trait TimeProvider: Send + Sync + 'static {
     fn utc_now(&self) -> DateTime<Utc>;
 
     /// Sleep for a duration (in tests, this advances virtual time)
-    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>>;
+    fn sleep(
+        &self,
+        duration: Duration,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>>;
 
     /// Create a timer that fires after a duration
-    fn timer(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>>;
+    fn timer(
+        &self,
+        duration: Duration,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>>;
 
     /// Clone the time provider into a boxed trait object
     fn clone_box(&self) -> Box<dyn TimeProvider>;
@@ -46,11 +52,17 @@ impl TimeProvider for SystemTimeProvider {
         Utc::now()
     }
 
-    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    fn sleep(
+        &self,
+        duration: Duration,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         Box::pin(tokio::time::sleep(duration))
     }
 
-    fn timer(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    fn timer(
+        &self,
+        duration: Duration,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         Box::pin(tokio::time::sleep(duration))
     }
 
@@ -215,11 +227,17 @@ impl TimeProvider for VirtualTimeProvider {
         self.system_now().into()
     }
 
-    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    fn sleep(
+        &self,
+        duration: Duration,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         Box::pin(VirtualSleep::new(self, duration))
     }
 
-    fn timer(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    fn timer(
+        &self,
+        duration: Duration,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         Box::pin(VirtualSleep::new(self, duration))
     }
 
@@ -300,7 +318,8 @@ impl TimeContext {
 #[macro_export]
 macro_rules! with_time {
     ($provider:expr_2021, $body:expr_2021) => {{
-        let _time_context = $crate::infrastructure::testing::time::TimeContext::new($provider);
+        let _time_context =
+            $crate::infrastructure::testing::time::TimeContext::new($provider);
         $body
     }};
 }
@@ -435,7 +454,8 @@ mod tests {
 
     #[test]
     fn test_time_provider_as_trait_object() {
-        let provider: Box<dyn TimeProvider> = Box::new(VirtualTimeProvider::new());
+        let provider: Box<dyn TimeProvider> =
+            Box::new(VirtualTimeProvider::new());
         let _now = provider.now();
         let _cloned = provider.clone_box();
     }

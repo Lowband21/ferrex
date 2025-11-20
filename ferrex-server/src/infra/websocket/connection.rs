@@ -52,10 +52,9 @@ impl Connection {
 
     /// Send a message to this connection
     pub async fn send_message(&self, message: SyncMessage) -> Result<()> {
-        self.sender
-            .send(message)
-            .await
-            .map_err(|_| anyhow::anyhow!("Failed to send message: channel closed"))
+        self.sender.send(message).await.map_err(|_| {
+            anyhow::anyhow!("Failed to send message: channel closed")
+        })
     }
 
     /// Update the current room code

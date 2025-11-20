@@ -31,7 +31,7 @@ pub enum ViewState {
         backdrop_handle: Option<iced::widget::image::Handle>, // Cached backdrop handle
     },
     EpisodeDetail {
-        episode_id: EpisodeID,                                // Keep as string for now
+        episode_id: EpisodeID, // Keep as string for now
         backdrop_handle: Option<iced::widget::image::Handle>, // Cached backdrop handle
     },
     UserSettings, // User settings and preferences view
@@ -71,21 +71,21 @@ impl ViewState {
     pub fn header_height(&self) -> Option<f32> {
         if self.has_header() {
             match self {
-                ViewState::Library => {
-                    Some(crate::infrastructure::constants::layout::header::HEIGHT)
-                } // Main library header
+                ViewState::Library => Some(
+                    crate::infrastructure::constants::layout::header::HEIGHT,
+                ), // Main library header
                 ViewState::MovieDetail { .. }
                 | ViewState::SeriesDetail { .. }
                 | ViewState::SeasonDetail { .. }
-                | ViewState::EpisodeDetail { .. } => {
-                    Some(crate::infrastructure::constants::layout::header::HEIGHT)
-                } // Same header height
+                | ViewState::EpisodeDetail { .. } => Some(
+                    crate::infrastructure::constants::layout::header::HEIGHT,
+                ), // Same header height
                 ViewState::LibraryManagement
                 | ViewState::AdminDashboard
                 | ViewState::AdminUsers
-                | ViewState::UserSettings => {
-                    Some(crate::infrastructure::constants::layout::header::HEIGHT)
-                } // Same header height
+                | ViewState::UserSettings => Some(
+                    crate::infrastructure::constants::layout::header::HEIGHT,
+                ), // Same header height
                 _ => None,
             }
         } else {

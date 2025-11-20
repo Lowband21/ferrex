@@ -2,8 +2,8 @@ pub mod subscriptions;
 
 use crate::domains::ui::{DisplayMode, views::carousel::CarouselMessage};
 use ferrex_core::player_prelude::{
-    EpisodeID, Library, LibraryID, MediaID, MediaIDLike, MovieID, SeasonID, SeriesID, SortBy,
-    UiDecade, UiGenre, UiResolution, UiWatchStatus,
+    EpisodeID, Library, LibraryID, MediaID, MediaIDLike, MovieID, SeasonID,
+    SeriesID, SortBy, UiDecade, UiGenre, UiResolution, UiWatchStatus,
 };
 use iced::Size;
 use iced::widget::scrollable;
@@ -193,7 +193,9 @@ impl Message {
             Self::SetSortBy(_) => "UI::SetSortBy",
             Self::ToggleSortOrder => "UI::ToggleSortOrder",
             Self::ApplySortedPositions(_, _, _) => "UI::ApplySortedPositions",
-            Self::ApplyFilteredPositions(_, _, _) => "UI::ApplyFilteredPositions",
+            Self::ApplyFilteredPositions(_, _, _) => {
+                "UI::ApplyFilteredPositions"
+            }
             Self::RequestFilteredPositions => "UI::RequestFilteredPositions",
             Self::ToggleFilterPanel => "UI::ToggleFilterPanel",
             Self::ToggleFilterGenre(_) => "UI::ToggleFilterGenre",
@@ -305,7 +307,9 @@ impl Message {
             Self::RefreshViewModels => "UI::RefreshViewModels",
             Self::UpdateViewModelFilters => "UI::UpdateViewModelFilters",
             Self::CheckMediaStoreRefresh => "UI::CheckMediaStoreRefresh",
-            Self::QueueVisibleDetailsForFetch => "UI::QueueVisibleDetailsForFetch",
+            Self::QueueVisibleDetailsForFetch => {
+                "UI::QueueVisibleDetailsForFetch"
+            }
 
             // Cross-domain proxy messages
             Self::ToggleFullscreen => "UI::ToggleFullscreen",
@@ -327,9 +331,13 @@ impl Message {
             Self::UpdateLibraryFormName(_) => "UI::UpdateLibraryFormName",
             Self::UpdateLibraryFormType(_) => "UI::UpdateLibraryFormType",
             Self::UpdateLibraryFormPaths(_) => "UI::UpdateLibraryFormPaths",
-            Self::UpdateLibraryFormScanInterval(_) => "UI::UpdateLibraryFormScanInterval",
+            Self::UpdateLibraryFormScanInterval(_) => {
+                "UI::UpdateLibraryFormScanInterval"
+            }
             Self::ToggleLibraryFormEnabled => "UI::ToggleLibraryFormEnabled",
-            Self::ToggleLibraryFormStartScan => "UI::ToggleLibraryFormStartScan",
+            Self::ToggleLibraryFormStartScan => {
+                "UI::ToggleLibraryFormStartScan"
+            }
             Self::SubmitLibraryForm => "UI::SubmitLibraryForm",
             Self::PauseLibraryScan(_, _) => "UI::PauseLibraryScan",
             Self::ResumeLibraryScan(_, _) => "UI::ResumeLibraryScan",
@@ -346,9 +354,15 @@ impl Message {
 impl std::fmt::Debug for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SetDisplayMode(mode) => write!(f, "UI::SetDisplayMode({:?})", mode),
-            Self::SelectLibraryAndMode(id) => write!(f, "UI::SelectLibraryAndMode({})", id),
-            Self::ViewDetails(id) => write!(f, "UI::ViewDetails({})", id.to_uuid()),
+            Self::SetDisplayMode(mode) => {
+                write!(f, "UI::SetDisplayMode({:?})", mode)
+            }
+            Self::SelectLibraryAndMode(id) => {
+                write!(f, "UI::SelectLibraryAndMode({})", id)
+            }
+            Self::ViewDetails(id) => {
+                write!(f, "UI::ViewDetails({})", id.to_uuid())
+            }
             Self::ViewMovieDetails(movie) => {
                 write!(f, "UI::ViewMovieDetails({:?})", movie) // FIX
             }
@@ -360,29 +374,43 @@ impl std::fmt::Debug for Message {
             Self::SetSortBy(sort) => write!(f, "UI::SetSortBy({:?})", sort),
             Self::ToggleSortOrder => write!(f, "UI::ToggleSortOrder"),
             Self::ApplySortedPositions(_, cache_key, _) => match cache_key {
-                Some(hash) => write!(f, "UI::ApplySortedPositions(hash={hash})"),
+                Some(hash) => {
+                    write!(f, "UI::ApplySortedPositions(hash={hash})")
+                }
                 None => write!(f, "UI::ApplySortedPositions"),
             },
             Self::ApplyFilteredPositions(_, hash, _) => {
                 write!(f, "UI::ApplyFilteredPositions(hash={hash})")
             }
-            Self::RequestFilteredPositions => write!(f, "UI::RequestFilteredPositions"),
+            Self::RequestFilteredPositions => {
+                write!(f, "UI::RequestFilteredPositions")
+            }
             Self::ToggleFilterPanel => write!(f, "UI::ToggleFilterPanel"),
             Self::ToggleFilterGenre(_) => write!(f, "UI::ToggleFilterGenre"),
             Self::SetFilterDecade(_) => write!(f, "UI::SetFilterDecade"),
             Self::ClearFilterDecade => write!(f, "UI::ClearFilterDecade"),
-            Self::SetFilterResolution(_) => write!(f, "UI::SetFilterResolution"),
-            Self::SetFilterWatchStatus(_) => write!(f, "UI::SetFilterWatchStatus"),
+            Self::SetFilterResolution(_) => {
+                write!(f, "UI::SetFilterResolution")
+            }
+            Self::SetFilterWatchStatus(_) => {
+                write!(f, "UI::SetFilterWatchStatus")
+            }
             Self::ApplyFilters => write!(f, "UI::ApplyFilters"),
             Self::ClearFilters => write!(f, "UI::ClearFilters"),
             Self::SortedIndexFailed(_) => write!(f, "UI::SortedIndexFailed"),
             Self::ShowAdminDashboard => write!(f, "UI::ShowAdminDashboard"),
             Self::HideAdminDashboard => write!(f, "UI::HideAdminDashboard"),
-            Self::ShowLibraryManagement => write!(f, "UI::ShowLibraryManagement"),
-            Self::HideLibraryManagement => write!(f, "UI::HideLibraryManagement"),
+            Self::ShowLibraryManagement => {
+                write!(f, "UI::ShowLibraryManagement")
+            }
+            Self::HideLibraryManagement => {
+                write!(f, "UI::HideLibraryManagement")
+            }
             Self::ShowUserManagement => write!(f, "UI::ShowUserManagement"),
             Self::HideUserManagement => write!(f, "UI::HideUserManagement"),
-            Self::UserAdminDelete(uuid) => write!(f, "UI::UserAdminDelete({})", uuid),
+            Self::UserAdminDelete(uuid) => {
+                write!(f, "UI::UserAdminDelete({})", uuid)
+            }
             #[cfg(feature = "demo")]
             Self::DemoMoviesTargetChanged(value) => {
                 write!(f, "UI::DemoMoviesTargetChanged({value})")
@@ -396,14 +424,22 @@ impl std::fmt::Debug for Message {
             #[cfg(feature = "demo")]
             Self::DemoRefreshStatus => write!(f, "UI::DemoRefreshStatus"),
             Self::NavigateHome => write!(f, "UI::NavigateHome"),
-            Self::WindowResized(size) => write!(f, "UI::WindowResized({:?})", size),
-            Self::WindowMoved(position) => write!(f, "UI::WindowMoved({:?})", position),
-            Self::ToggleBackdropAspectMode => write!(f, "UI::ToggleBackdropAspectMode"),
+            Self::WindowResized(size) => {
+                write!(f, "UI::WindowResized({:?})", size)
+            }
+            Self::WindowMoved(position) => {
+                write!(f, "UI::WindowMoved({:?})", position)
+            }
+            Self::ToggleBackdropAspectMode => {
+                write!(f, "UI::ToggleBackdropAspectMode")
+            }
             //Self::TvShowLoaded(series_id, result) => match result {
             //    Ok(_) => write!(f, "UI::TvShowLoaded({}, Ok)", series_id),
             //    Err(e) => write!(f, "UI::TvShowLoaded({}, Err: {})", series_id, e),
             //},
-            Self::AggregateAllLibraries => write!(f, "UI::AggregateAllLibraries"),
+            Self::AggregateAllLibraries => {
+                write!(f, "UI::AggregateAllLibraries")
+            }
             Self::ShowLibraryForm(lib) => {
                 if let Some(l) = lib {
                     write!(f, "UI::ShowLibraryForm(Some: {})", l.name)
@@ -414,9 +450,15 @@ impl std::fmt::Debug for Message {
             Self::HideLibraryForm => write!(f, "UI::HideLibraryForm"),
             Self::ScanLibrary(id) => write!(f, "UI::ScanLibrary_({})", id),
             Self::DeleteLibrary(id) => write!(f, "UI::DeleteLibrary({})", id),
-            Self::UpdateLibraryFormName(name) => write!(f, "UI::UpdateLibraryFormName({})", name),
-            Self::ShowClearDatabaseConfirm => write!(f, "UI::ShowClearDatabaseConfirm"),
-            Self::HideClearDatabaseConfirm => write!(f, "UI::HideClearDatabaseConfirm"),
+            Self::UpdateLibraryFormName(name) => {
+                write!(f, "UI::UpdateLibraryFormName({})", name)
+            }
+            Self::ShowClearDatabaseConfirm => {
+                write!(f, "UI::ShowClearDatabaseConfirm")
+            }
+            Self::HideClearDatabaseConfirm => {
+                write!(f, "UI::HideClearDatabaseConfirm")
+            }
             Self::ClearDatabase => write!(f, "UI::ClearDatabase"),
             Self::DatabaseCleared(_) => write!(f, "UI::DatabaseCleared"),
             Self::ClearError => write!(f, "UI::ClearError"),
@@ -442,12 +484,20 @@ impl std::fmt::Debug for Message {
             Self::BackToSettings => write!(f, "UI::BackToSettings"),
             Self::Logout => write!(f, "UI::Logout"),
             Self::ShowChangePassword => write!(f, "UI::ShowChangePassword"),
-            Self::UpdatePasswordCurrent(_) => write!(f, "UI::UpdatePasswordCurrent"),
+            Self::UpdatePasswordCurrent(_) => {
+                write!(f, "UI::UpdatePasswordCurrent")
+            }
             Self::UpdatePasswordNew(_) => write!(f, "UI::UpdatePasswordNew"),
-            Self::UpdatePasswordConfirm(_) => write!(f, "UI::UpdatePasswordConfirm"),
-            Self::TogglePasswordVisibility => write!(f, "UI::TogglePasswordVisibility"),
+            Self::UpdatePasswordConfirm(_) => {
+                write!(f, "UI::UpdatePasswordConfirm")
+            }
+            Self::TogglePasswordVisibility => {
+                write!(f, "UI::TogglePasswordVisibility")
+            }
             Self::SubmitPasswordChange => write!(f, "UI::SubmitPasswordChange"),
-            Self::PasswordChangeResult(_) => write!(f, "UI::PasswordChangeResult"),
+            Self::PasswordChangeResult(_) => {
+                write!(f, "UI::PasswordChangeResult")
+            }
             Self::CancelPasswordChange => write!(f, "UI::CancelPasswordChange"),
             Self::ShowSetPin => write!(f, "UI::ShowSetPin"),
             Self::ShowChangePin => write!(f, "UI::ShowChangePin"),
@@ -459,12 +509,20 @@ impl std::fmt::Debug for Message {
             Self::CancelPinChange => write!(f, "UI::CancelPinChange"),
             Self::LoadDevices => write!(f, "UI::LoadDevices"),
             Self::DevicesLoaded(result) => match result {
-                Ok(devices) => write!(f, "UI::DevicesLoaded(Ok: {} devices)", devices.len()),
+                Ok(devices) => write!(
+                    f,
+                    "UI::DevicesLoaded(Ok: {} devices)",
+                    devices.len()
+                ),
                 Err(e) => write!(f, "UI::DevicesLoaded(Err: {})", e),
             },
-            Self::RevokeDevice(device_id) => write!(f, "UI::RevokeDevice({})", device_id),
+            Self::RevokeDevice(device_id) => {
+                write!(f, "UI::RevokeDevice({})", device_id)
+            }
             Self::DeviceRevoked(result) => match result {
-                Ok(device_id) => write!(f, "UI::DeviceRevoked(Ok: {})", device_id),
+                Ok(device_id) => {
+                    write!(f, "UI::DeviceRevoked(Ok: {})", device_id)
+                }
                 Err(e) => write!(f, "UI::DeviceRevoked(Err: {})", e),
             },
             Self::RefreshDevices => write!(f, "UI::RefreshDevices"),
@@ -478,24 +536,40 @@ impl std::fmt::Debug for Message {
                 write!(f, "UI::UpdateBackdropHandle({:?})", handle)
             }
             Self::RefreshViewModels => write!(f, "UI::RefreshViewModels"),
-            Self::UpdateViewModelFilters => write!(f, "UI::UpdateViewModelFilters"),
-            Self::CheckMediaStoreRefresh => write!(f, "UI::CheckMediaStoreRefresh"),
-            Self::QueueVisibleDetailsForFetch => write!(f, "UI::QueueVisibleDetailsForFetch"),
+            Self::UpdateViewModelFilters => {
+                write!(f, "UI::UpdateViewModelFilters")
+            }
+            Self::CheckMediaStoreRefresh => {
+                write!(f, "UI::CheckMediaStoreRefresh")
+            }
+            Self::QueueVisibleDetailsForFetch => {
+                write!(f, "UI::QueueVisibleDetailsForFetch")
+            }
             Self::ToggleFullscreen => write!(f, "UI::ToggleFullscreen"),
-            Self::SelectLibrary(uuid) => write!(f, "UI::SelectLibrary({:?})", uuid),
+            Self::SelectLibrary(uuid) => {
+                write!(f, "UI::SelectLibrary({:?})", uuid)
+            }
             Self::PlayMediaWithId(media_id) => {
                 write!(f, "UI::PlayMediaWithId({:?})", media_id)
             }
             Message::PlaySeriesNextEpisode(series_id) => {
                 write!(f, "PlaySeriesNextEpisode({:?})", series_id)
             }
-            Self::UpdateLibraryFormType(_) => write!(f, "UI::UpdateLibraryFormType()"),
-            Self::UpdateLibraryFormPaths(_) => write!(f, "UI::UpdateLibraryFormPaths()"),
+            Self::UpdateLibraryFormType(_) => {
+                write!(f, "UI::UpdateLibraryFormType()")
+            }
+            Self::UpdateLibraryFormPaths(_) => {
+                write!(f, "UI::UpdateLibraryFormPaths()")
+            }
             Self::UpdateLibraryFormScanInterval(_) => {
                 write!(f, "UI::UpdateLibraryFormScanInterval()")
             }
-            Self::ToggleLibraryFormEnabled => write!(f, "UI::ToggleLibraryFormEnabled"),
-            Self::ToggleLibraryFormStartScan => write!(f, "UI::ToggleLibraryFormStartScan"),
+            Self::ToggleLibraryFormEnabled => {
+                write!(f, "UI::ToggleLibraryFormEnabled")
+            }
+            Self::ToggleLibraryFormStartScan => {
+                write!(f, "UI::ToggleLibraryFormStartScan")
+            }
             Self::SubmitLibraryForm => write!(f, "UI::SubmitLibraryForm"),
             Self::PauseLibraryScan(library_id, scan_id) => {
                 write!(f, "UI::PauseLibraryScan({}, {})", library_id, scan_id)

@@ -2,7 +2,9 @@ use super::messages::Message;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::infrastructure::services::api::ApiService;
 use crate::state_refactored::State;
-use ferrex_core::player_prelude::{MediaIDLike, UpdateProgressRequest, UserWatchState};
+use ferrex_core::player_prelude::{
+    MediaIDLike, UpdateProgressRequest, UserWatchState,
+};
 use iced::Task;
 
 /// Handle media domain messages - focused on media management, not playback
@@ -74,7 +76,8 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
         Message::ProgressUpdateSent(media_id, position, duration) => {
             // Update the last sent position
             state.domains.player.state.last_progress_sent = position;
-            state.domains.player.state.last_progress_update = Some(std::time::Instant::now());
+            state.domains.player.state.last_progress_update =
+                Some(std::time::Instant::now());
 
             // Update local watch state to reflect in UI immediately
             let should_refresh_ui = {
@@ -88,18 +91,28 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                 } else {
                     // Ensure we have a local watch state cache to update
                     if state.domains.media.state.user_watch_state.is_none() {
-                        state.domains.media.state.user_watch_state = Some(UserWatchState::new());
+                        state.domains.media.state.user_watch_state =
+                            Some(UserWatchState::new());
                     }
 
-                    if let Some(watch_state) = &mut state.domains.media.state.user_watch_state {
+                    if let Some(watch_state) =
+                        &mut state.domains.media.state.user_watch_state
+                    {
                         let media_uuid = media_id.to_uuid();
-                        let progress_ratio = (position / duration).clamp(0.0, 1.0);
+                        let progress_ratio =
+                            (position / duration).clamp(0.0, 1.0);
                         let reached_completion = progress_ratio >= 0.95;
 
-                        let was_completed = watch_state.completed.contains(media_id.as_uuid());
-                        let was_in_progress =
-                            watch_state.in_progress.contains_key(media_id.as_uuid());
-                        watch_state.update_progress(media_uuid, position as f32, duration as f32);
+                        let was_completed =
+                            watch_state.completed.contains(media_id.as_uuid());
+                        let was_in_progress = watch_state
+                            .in_progress
+                            .contains_key(media_id.as_uuid());
+                        watch_state.update_progress(
+                            media_uuid,
+                            position as f32,
+                            duration as f32,
+                        );
                         log::info!(
                             "Updated local watch state for {:?}: {:.1}s/{:.1}s ({:.1}%)",
                             media_id,
@@ -108,19 +121,26 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                             progress_ratio * 100.0
                         );
 
-                        let is_completed = watch_state.completed.contains(media_id.as_uuid());
-                        let is_in_progress =
-                            watch_state.in_progress.contains_key(media_id.as_uuid());
+                        let is_completed =
+                            watch_state.completed.contains(media_id.as_uuid());
+                        let is_in_progress = watch_state
+                            .in_progress
+                            .contains_key(media_id.as_uuid());
 
                         // Debug: Check what's actually in the watch state now
-                        if let Some(item) = watch_state.in_progress.get(media_id.as_uuid()) {
+                        if let Some(item) =
+                            watch_state.in_progress.get(media_id.as_uuid())
+                        {
                             log::debug!(
                                 "Watch state verification - MediaID {:?} has position: {:.1}s, duration: {:.1}s",
                                 media_id,
                                 item.position,
                                 item.duration
                             );
-                        } else if watch_state.completed.contains(media_id.as_uuid()) {
+                        } else if watch_state
+                            .completed
+                            .contains(media_id.as_uuid())
+                        {
                             log::debug!(
                                 "Watch state verification - MediaID {:?} is marked as completed",
                                 media_id
@@ -139,15 +159,24 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
 
                         // Otherwise fall back to debounce window (max one refresh every 2 seconds)
                         let allow_debounce_refresh = if let Some(last_refresh) =
-                            state.domains.media.state.last_ui_refresh_for_progress
+                            state
+                                .domains
+                                .media
+                                .state
+                                .last_ui_refresh_for_progress
                         {
-                            last_refresh.elapsed() > std::time::Duration::from_secs(2)
+                            last_refresh.elapsed()
+                                > std::time::Duration::from_secs(2)
                         } else {
                             true
                         };
 
                         if bypass_debounce || allow_debounce_refresh {
-                            state.domains.media.state.last_ui_refresh_for_progress =
+                            state
+                                .domains
+                                .media
+                                .state
+                                .last_ui_refresh_for_progress =
                                 Some(std::time::Instant::now());
                             true
                         } else {
@@ -178,7 +207,9 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
         }
 
         Message::SendProgressUpdateWithData(media_id, position, duration) => {
-            log::debug!("SendProgressUpdateWithData: Starting progress update with captured data");
+            log::debug!(
+                "SendProgressUpdateWithData: Starting progress update with captured data"
+            );
 
             let duration = duration;
 
@@ -208,12 +239,19 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
                                 .map(|_| position)
                         },
                         move |result| match result {
-                            Ok(pos) => DomainMessage::Media(Message::ProgressUpdateSent(
-                                media_id, pos, duration,
-                            )),
+                            Ok(pos) => DomainMessage::Media(
+                                Message::ProgressUpdateSent(
+                                    media_id, pos, duration,
+                                ),
+                            ),
                             Err(e) => {
-                                log::warn!("Failed to send progress update: {}", e);
-                                DomainMessage::Media(Message::ProgressUpdateFailed)
+                                log::warn!(
+                                    "Failed to send progress update: {}",
+                                    e
+                                );
+                                DomainMessage::Media(
+                                    Message::ProgressUpdateFailed,
+                                )
                             }
                         },
                     ))
@@ -232,7 +270,10 @@ pub fn update_media(state: &mut State, message: Message) -> DomainUpdateResult {
 
         // All other messages are now handled by player domain
         _ => {
-            log::warn!("Media domain received unhandled message: {:?}", message);
+            log::warn!(
+                "Media domain received unhandled message: {:?}",
+                message
+            );
             DomainUpdateResult::task(Task::none())
         }
     }

@@ -12,7 +12,8 @@ use crate::database::ports::media_references::MediaReferencesRepository;
 use crate::error::{MediaError, Result};
 use crate::metadata::MetadataExtractor;
 use crate::orchestration::job::{
-    ImageFetchJob, IndexUpsertJob, MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob,
+    ImageFetchJob, IndexUpsertJob, MediaAnalyzeJob, MediaFingerprint,
+    MetadataEnrichJob,
 };
 use crate::types::ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID};
 use crate::types::library::LibraryType;
@@ -97,12 +98,18 @@ impl IndexingOutcome {
 
 #[async_trait]
 pub trait MediaAnalyzeActor: Send + Sync {
-    async fn analyze(&self, command: MediaAnalyzeCommand) -> Result<MediaAnalyzed>;
+    async fn analyze(
+        &self,
+        command: MediaAnalyzeCommand,
+    ) -> Result<MediaAnalyzed>;
 }
 
 #[async_trait]
 pub trait MetadataActor: Send + Sync {
-    async fn enrich(&self, command: MetadataCommand) -> Result<MediaReadyForIndex>;
+    async fn enrich(
+        &self,
+        command: MetadataCommand,
+    ) -> Result<MediaReadyForIndex>;
 }
 
 #[async_trait]
@@ -145,7 +152,10 @@ impl DefaultMediaAnalyzeActor {
 
 #[async_trait]
 impl MediaAnalyzeActor for DefaultMediaAnalyzeActor {
-    async fn analyze(&self, command: MediaAnalyzeCommand) -> Result<MediaAnalyzed> {
+    async fn analyze(
+        &self,
+        command: MediaAnalyzeCommand,
+    ) -> Result<MediaAnalyzed> {
         let MediaAnalyzeCommand { job } = command;
         let MediaAnalyzeJob {
             library_id,
@@ -157,7 +167,8 @@ impl MediaAnalyzeActor for DefaultMediaAnalyzeActor {
         } = job;
 
         #[cfg(feature = "demo")]
-        if crate::demo::policy().is_some_and(|policy| policy.skip_metadata_probe)
+        if crate::demo::policy()
+            .is_some_and(|policy| policy.skip_metadata_probe)
             && crate::demo::is_demo_library(&library_id)
         {
             let mut context_obj: Map<String, Value> = match context {
@@ -190,15 +201,21 @@ impl MediaAnalyzeActor for DefaultMediaAnalyzeActor {
         let path_for_probe = path_norm.clone();
         let extraction = tokio::task::spawn_blocking(move || {
             let path = PathBuf::from(&path_for_probe);
-            let mut extractor = MetadataExtractor::with_library_type(library_type);
+            let mut extractor =
+                MetadataExtractor::with_library_type(library_type);
             extractor.extract_metadata(&path)
         })
         .await
-        .map_err(|e| MediaError::Internal(format!("metadata extraction task failed: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "metadata extraction task failed: {e}"
+            ))
+        })?;
 
         let (streams_json, metadata_value) = match extraction {
             Ok(metadata) => {
-                let json = serde_json::to_value(&metadata).unwrap_or(Value::Null);
+                let json =
+                    serde_json::to_value(&metadata).unwrap_or(Value::Null);
                 (json.clone(), Some(json))
             }
             Err(err) => {
@@ -250,7 +267,10 @@ impl DefaultMetadataActor {
 
 #[async_trait]
 impl MetadataActor for DefaultMetadataActor {
-    async fn enrich(&self, command: MetadataCommand) -> Result<MediaReadyForIndex> {
+    async fn enrich(
+        &self,
+        command: MetadataCommand,
+    ) -> Result<MediaReadyForIndex> {
         Ok(MediaReadyForIndex {
             library_id: command.job.library_id,
             logical_id: None,
@@ -324,7 +344,10 @@ impl DefaultIndexerActor {
         }
     }
 
-    fn parse_logical_id(job: &IndexUpsertJob, ready: &MediaReadyForIndex) -> Option<Uuid> {
+    fn parse_logical_id(
+        job: &IndexUpsertJob,
+        ready: &MediaReadyForIndex,
+    ) -> Option<Uuid> {
         ready
             .logical_id
             .as_deref()

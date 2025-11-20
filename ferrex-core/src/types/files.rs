@@ -1,7 +1,9 @@
 use crate::error::{MediaError, Result};
 #[cfg(feature = "ffmpeg")]
 use crate::metadata::MetadataExtractor;
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
@@ -9,7 +11,15 @@ use uuid::Uuid;
 
 use super::LibraryID;
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct MediaFile {
     pub id: Uuid,
@@ -40,7 +50,15 @@ impl Default for MediaFile {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct MediaFileMetadata {
     // Technical metadata from FFmpeg
@@ -109,7 +127,14 @@ impl fmt::Debug for MediaFileMetadata {
     }
 }
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub enum ParsedMediaInfo {
@@ -118,7 +143,14 @@ pub enum ParsedMediaInfo {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct ParsedMovieInfo {
@@ -130,7 +162,14 @@ pub struct ParsedMovieInfo {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct ParsedEpisodeInfo {
@@ -145,7 +184,14 @@ pub struct ParsedEpisodeInfo {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[serde(rename_all = "PascalCase")]
 #[rkyv(derive(Debug, PartialEq, Eq))]
@@ -179,7 +225,9 @@ impl MediaFile {
     pub fn new(path: PathBuf, library_id: LibraryID) -> Result<Self> {
         let filename = path
             .file_name()
-            .ok_or_else(|| MediaError::InvalidMedia("Invalid file path".to_string()))?
+            .ok_or_else(|| {
+                MediaError::InvalidMedia("Invalid file path".to_string())
+            })?
             .to_string_lossy()
             .to_string();
 
@@ -191,7 +239,8 @@ impl MediaFile {
             .ok()
             .and_then(|time| {
                 // Convert SystemTime to chrono DateTime
-                let duration = time.duration_since(std::time::UNIX_EPOCH).ok()?;
+                let duration =
+                    time.duration_since(std::time::UNIX_EPOCH).ok()?;
                 chrono::DateTime::<chrono::Utc>::from_timestamp(
                     duration.as_secs() as i64,
                     duration.subsec_nanos(),
@@ -203,7 +252,8 @@ impl MediaFile {
                     .modified()
                     .ok()
                     .and_then(|time| {
-                        let duration = time.duration_since(std::time::UNIX_EPOCH).ok()?;
+                        let duration =
+                            time.duration_since(std::time::UNIX_EPOCH).ok()?;
                         chrono::DateTime::<chrono::Utc>::from_timestamp(
                             duration.as_secs() as i64,
                             duration.subsec_nanos(),
@@ -249,7 +299,8 @@ impl MediaFile {
     }
 
     pub fn is_video_file(&self) -> bool {
-        let video_extensions = ["mp4", "mkv", "avi", "mov", "webm", "flv", "wmv"];
+        let video_extensions =
+            ["mp4", "mkv", "avi", "mov", "webm", "flv", "wmv"];
 
         if let Some(extension) = self.path.extension()
             && let Some(ext_str) = extension.to_str()

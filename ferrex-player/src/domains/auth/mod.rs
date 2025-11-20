@@ -34,7 +34,8 @@ pub struct AuthDomainState {
     pub auth_flow: AuthenticationFlow,
     pub user_permissions: Option<UserPermissions>,
     pub auto_login_enabled: bool,
-    pub auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
+    pub auth_service:
+        std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
 }
 
 #[cfg_attr(
@@ -48,7 +49,9 @@ pub struct AuthDomainState {
 impl AuthDomainState {
     pub fn new(
         api_service: std::sync::Arc<dyn ApiService>,
-        auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
+        auth_service: std::sync::Arc<
+            dyn crate::infrastructure::services::auth::AuthService,
+        >,
     ) -> Self {
         Self {
             api_service,
@@ -92,7 +95,10 @@ impl AuthDomain {
         Self { state }
     }
 
-    pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
+    pub fn handle_event(
+        &mut self,
+        event: &CrossDomainEvent,
+    ) -> Task<DomainMessage> {
         match event {
             CrossDomainEvent::DatabaseCleared => {
                 // Reset auth state

@@ -43,7 +43,10 @@ impl TechnicalMetadataExtractor {
     }
 
     /// Extract technical metadata using FFmpeg
-    pub fn extract_metadata<P: AsRef<Path>>(&mut self, file_path: P) -> Result<TechnicalMetadata> {
+    pub fn extract_metadata<P: AsRef<Path>>(
+        &mut self,
+        file_path: P,
+    ) -> Result<TechnicalMetadata> {
         let file_path = file_path.as_ref();
 
         // Ensure FFmpeg is initialized
@@ -51,13 +54,16 @@ impl TechnicalMetadataExtractor {
 
         debug!("Opening file with FFmpeg: {}", file_path.display());
 
-        let input = ffmpeg::format::input(file_path).map_err(MediaError::Ffmpeg)?;
+        let input =
+            ffmpeg::format::input(file_path).map_err(MediaError::Ffmpeg)?;
 
         let mut technical = TechnicalMetadata::default();
 
         // Get duration
         if input.duration() != ffmpeg::ffi::AV_NOPTS_VALUE {
-            technical.duration = Some(input.duration() as f64 / ffmpeg::ffi::AV_TIME_BASE as f64);
+            technical.duration = Some(
+                input.duration() as f64 / ffmpeg::ffi::AV_TIME_BASE as f64,
+            );
         }
 
         // Get bitrate
@@ -71,8 +77,10 @@ impl TechnicalMetadataExtractor {
         let mut best_audio_stream = None;
 
         for (i, stream) in input.streams().enumerate() {
-            let codec = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
-                .map_err(MediaError::Ffmpeg)?;
+            let codec = ffmpeg::codec::context::Context::from_parameters(
+                stream.parameters(),
+            )
+            .map_err(MediaError::Ffmpeg)?;
 
             match codec.medium() {
                 ffmpeg::media::Type::Video => {
@@ -128,8 +136,10 @@ impl TechnicalMetadataExtractor {
             // Get frame rate
             let frame_rate = stream.avg_frame_rate();
             if frame_rate.denominator() != 0 {
-                technical.framerate =
-                    Some(frame_rate.numerator() as f64 / frame_rate.denominator() as f64);
+                technical.framerate = Some(
+                    frame_rate.numerator() as f64
+                        / frame_rate.denominator() as f64,
+                );
             }
 
             // Get codec name

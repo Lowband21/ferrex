@@ -43,7 +43,8 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
 
     // Periodic cleanup of stale image cache entries
     subscriptions.push(
-        super::image_cache_cleanup_subscription::image_cache_cleanup().map(DomainMessage::Metadata),
+        super::image_cache_cleanup_subscription::image_cache_cleanup()
+            .map(DomainMessage::Metadata),
     );
 
     Subscription::batch(subscriptions)

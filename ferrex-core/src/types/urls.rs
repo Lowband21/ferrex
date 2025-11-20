@@ -1,4 +1,6 @@
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -11,7 +13,15 @@ pub trait UrlLike {
 
 /// Movie endpoint URL with validation
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq, Hash))]
 pub struct MovieURL(String);
@@ -65,7 +75,15 @@ impl std::hash::Hash for MovieURL {
 
 /// Series endpoint URL with validation
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq, Hash))]
 pub struct SeriesURL(String);
@@ -115,7 +133,15 @@ impl std::hash::Hash for SeriesURL {
 
 /// Season endpoint URL with validation
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq, Hash))]
 pub struct SeasonURL(String);
@@ -165,7 +191,15 @@ impl std::hash::Hash for SeasonURL {
 
 /// Episode endpoint URL with validation
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq, Hash))]
 pub struct EpisodeURL(String);

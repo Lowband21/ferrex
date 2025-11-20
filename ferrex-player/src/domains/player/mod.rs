@@ -64,7 +64,10 @@ impl PlayerDomain {
     }
 
     /// Handle cross-domain events
-    pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
+    pub fn handle_event(
+        &mut self,
+        event: &CrossDomainEvent,
+    ) -> Task<DomainMessage> {
         match event {
             CrossDomainEvent::LibraryChanged(library_id) => {
                 self.current_library_id = Some(*library_id);
@@ -76,9 +79,8 @@ impl PlayerDomain {
             }
             // Legacy transcoding events - no longer used
             #[allow(dead_code)]
-            CrossDomainEvent::RequestTranscoding(_) | CrossDomainEvent::TranscodingReady(_) => {
-                Task::none()
-            }
+            CrossDomainEvent::RequestTranscoding(_)
+            | CrossDomainEvent::TranscodingReady(_) => Task::none(),
             // NOTE: VideoReadyToPlay moved to direct Media messages in Task 2.7
             _ => Task::none(),
         }

@@ -9,29 +9,36 @@ use std::{collections::HashMap, fmt, sync::Arc};
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::database::PostgresDatabase;
 use ferrex_core::error::{MediaError, Result};
-use ferrex_core::fs_watch::{FsWatchConfig, FsWatchService, NoopFsWatchObserver};
+use ferrex_core::fs_watch::{
+    FsWatchConfig, FsWatchService, NoopFsWatchObserver,
+};
 use ferrex_core::image_service::ImageService;
 use ferrex_core::orchestration::{
     actors::{
-        DefaultFolderScanActor, DefaultIndexerActor, DefaultLibraryActor, DefaultMediaAnalyzeActor,
-        LibraryActorCommand, LibraryActorConfig, LibraryRootsId, NoopActorObserver,
+        DefaultFolderScanActor, DefaultIndexerActor, DefaultLibraryActor,
+        DefaultMediaAnalyzeActor, LibraryActorCommand, LibraryActorConfig,
+        LibraryRootsId, NoopActorObserver,
         folder::FolderScanActor,
         pipeline::{
-            DefaultImageFetchActor, ImageFetchActor, IndexerActor, MediaAnalyzeActor,
-            MetadataActor, TmdbMetadataActor,
+            DefaultImageFetchActor, ImageFetchActor, IndexerActor,
+            MediaAnalyzeActor, MetadataActor, TmdbMetadataActor,
         },
     },
     budget::InMemoryBudget,
     config::OrchestratorConfig,
     correlation::CorrelationCache,
     dispatcher::{DefaultJobDispatcher, DispatcherActors, JobDispatcher},
-    events::{JobEvent, JobEventPayload, JobEventPublisher, ScanEvent, stable_path_key},
+    events::{
+        JobEvent, JobEventPayload, JobEventPublisher, ScanEvent,
+        stable_path_key,
+    },
     job::{EnqueueRequest, JobHandle, JobKind, JobPriority, JobValidator},
     lease::{DequeueRequest, JobLease},
     persistence::{PostgresCursorRepository, PostgresQueueService},
     queue::QueueService,
     runtime::{
-        InProcJobEventBus, LibraryActorHandle, OrchestratorRuntime, OrchestratorRuntimeBuilder,
+        InProcJobEventBus, LibraryActorHandle, OrchestratorRuntime,
+        OrchestratorRuntimeBuilder,
     },
     scheduler::ReadyCountEntry,
 };
@@ -41,7 +48,13 @@ use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
 
 pub struct ScanOrchestrator {
-    runtime: Arc<OrchestratorRuntime<PostgresQueueService, InProcJobEventBus, InMemoryBudget>>,
+    runtime: Arc<
+        OrchestratorRuntime<
+            PostgresQueueService,
+            InProcJobEventBus,
+            InMemoryBudget,
+        >,
+    >,
     actors: Arc<ActorSystem>,
     validator: Arc<dyn JobValidator>,
     cursors: Arc<PostgresCursorRepository>,
@@ -84,13 +97,14 @@ impl ScanOrchestrator {
             actors.image_actor(),
         );
 
-        let dispatcher: Arc<dyn JobDispatcher> = Arc::new(DefaultJobDispatcher::new(
-            Arc::clone(&queue),
-            Arc::clone(&events),
-            Arc::clone(&cursors),
-            dispatcher_actors,
-            correlations.clone(),
-        ));
+        let dispatcher: Arc<dyn JobDispatcher> =
+            Arc::new(DefaultJobDispatcher::new(
+                Arc::clone(&queue),
+                Arc::clone(&events),
+                Arc::clone(&cursors),
+                dispatcher_actors,
+                correlations.clone(),
+            ));
 
         let watch_cfg = config.watch.clone();
 
@@ -121,7 +135,13 @@ impl ScanOrchestrator {
 
     pub fn runtime(
         &self,
-    ) -> Arc<OrchestratorRuntime<PostgresQueueService, InProcJobEventBus, InMemoryBudget>> {
+    ) -> Arc<
+        OrchestratorRuntime<
+            PostgresQueueService,
+            InProcJobEventBus,
+            InMemoryBudget,
+        >,
+    > {
         Arc::clone(&self.runtime)
     }
 
@@ -129,11 +149,15 @@ impl ScanOrchestrator {
         Arc::clone(&self.actors)
     }
 
-    pub fn subscribe_job_events(&self) -> tokio::sync::broadcast::Receiver<JobEvent> {
+    pub fn subscribe_job_events(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<JobEvent> {
         self.events.subscribe()
     }
 
-    pub fn subscribe_scan_events(&self) -> tokio::sync::broadcast::Receiver<ScanEvent> {
+    pub fn subscribe_scan_events(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<ScanEvent> {
         self.events.subscribe_scan()
     }
 
@@ -262,7 +286,9 @@ impl ScanOrchestrator {
         }
 
         events.publish(event).await.map_err(|err| {
-            MediaError::Internal(format!("failed to publish enqueue event: {err}"))
+            MediaError::Internal(format!(
+                "failed to publish enqueue event: {err}"
+            ))
         })?;
 
         Ok(handle)
@@ -279,7 +305,8 @@ impl ScanOrchestrator {
             return Ok(());
         }
 
-        let mut totals: HashMap<(LibraryID, JobPriority), usize> = HashMap::new();
+        let mut totals: HashMap<(LibraryID, JobPriority), usize> =
+            HashMap::new();
         let mut ready_total = 0usize;
 
         for bucket in persistent_counts.iter() {
@@ -321,14 +348,18 @@ impl ScanOrchestrator {
         Ok(())
     }
 
-    pub async fn dequeue(&self, request: DequeueRequest) -> Result<Option<JobLease>> {
+    pub async fn dequeue(
+        &self,
+        request: DequeueRequest,
+    ) -> Result<Option<JobLease>> {
         let queue = self.runtime.queue();
         let events = self.runtime.events();
 
         let lease = queue.dequeue(request).await?;
         if let Some(ref lease) = lease {
             let payload = &lease.job.payload;
-            let correlation_id = self.correlations.fetch_or_generate(lease.job.id).await;
+            let correlation_id =
+                self.correlations.fetch_or_generate(lease.job.id).await;
             let event = JobEvent::from_job(
                 Some(correlation_id),
                 payload.library_id(),
@@ -343,7 +374,9 @@ impl ScanOrchestrator {
             );
 
             events.publish(event).await.map_err(|err| {
-                MediaError::Internal(format!("failed to publish dequeue event: {err}"))
+                MediaError::Internal(format!(
+                    "failed to publish dequeue event: {err}"
+                ))
             })?;
         }
 
@@ -351,7 +384,9 @@ impl ScanOrchestrator {
     }
 
     /// Return ready-queue depths for each job kind to aid diagnostics.
-    pub async fn queue_depths(&self) -> Result<ferrex_core::api_scan::ScanQueueDepths> {
+    pub async fn queue_depths(
+        &self,
+    ) -> Result<ferrex_core::api_scan::ScanQueueDepths> {
         let queue = self.runtime.queue();
         Ok(ferrex_core::api_scan::ScanQueueDepths {
             folder_scan: queue.queue_depth(JobKind::FolderScan).await?,
@@ -372,8 +407,10 @@ impl ScanOrchestrator {
         unit_of_work: Arc<AppUnitOfWork>,
     ) -> Result<Self> {
         let pool = postgres.pool().clone();
-        let queue =
-            Arc::new(PostgresQueueService::new_with_retry(pool.clone(), config.retry).await?);
+        let queue = Arc::new(
+            PostgresQueueService::new_with_retry(pool.clone(), config.retry)
+                .await?,
+        );
         let cursors = Arc::new(PostgresCursorRepository::new(pool));
         let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
 
@@ -416,19 +453,22 @@ impl ActorSystem {
     ) -> Self {
         let image_actor: Arc<dyn ImageFetchActor> =
             Arc::new(DefaultImageFetchActor::new(Arc::clone(&image_service)));
-        let metadata_actor: Arc<dyn MetadataActor> = Arc::new(TmdbMetadataActor::new(
-            unit_of_work.media_refs.clone(),
-            unit_of_work.media_files_write.clone(),
-            tmdb,
-            Arc::clone(&image_service),
-        ));
+        let metadata_actor: Arc<dyn MetadataActor> =
+            Arc::new(TmdbMetadataActor::new(
+                unit_of_work.media_refs.clone(),
+                unit_of_work.media_files_write.clone(),
+                tmdb,
+                Arc::clone(&image_service),
+            ));
 
         Self {
             observer: Arc::new(NoopActorObserver),
             folder_actor: Arc::new(DefaultFolderScanActor::new()),
             analyze_actor: Arc::new(DefaultMediaAnalyzeActor::new()),
             metadata_actor,
-            indexer_actor: Arc::new(DefaultIndexerActor::new(unit_of_work.media_refs.clone())),
+            indexer_actor: Arc::new(DefaultIndexerActor::new(
+                unit_of_work.media_refs.clone(),
+            )),
             image_actor,
             events,
             correlations,

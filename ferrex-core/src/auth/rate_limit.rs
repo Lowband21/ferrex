@@ -120,6 +120,7 @@ impl RateLimitKey {
 
 /// Configuration for rate limiting rules
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RateLimitRule {
     /// Name of the rule for identification
     pub name: String,
@@ -163,6 +164,7 @@ impl Default for RateLimitRule {
 
 /// Endpoint-specific rate limit configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EndpointLimits {
     /// Login endpoint limits
     pub login: RateLimitRule,
@@ -181,6 +183,15 @@ pub struct EndpointLimits {
 
     /// Token refresh limits
     pub token_refresh: RateLimitRule,
+
+    /// Setup claim start limits (LAN-only endpoint)
+    pub setup_start: RateLimitRule,
+
+    /// Setup claim confirm limits (LAN-only endpoint)
+    pub setup_confirm: RateLimitRule,
+
+    /// Setup create admin limits
+    pub setup_create_admin: RateLimitRule,
 }
 
 impl Default for EndpointLimits {
@@ -226,6 +237,27 @@ impl Default for EndpointLimits {
                 limit: 100,
                 window: Duration::from_secs(3600), // 100 refreshes per hour
                 exponential_backoff: false,
+                ..Default::default()
+            },
+            setup_start: RateLimitRule {
+                name: "setup_start".to_string(),
+                limit: 5,
+                window: Duration::from_secs(120), // 5 per 2 minutes
+                violation_threshold: 3,
+                ..Default::default()
+            },
+            setup_confirm: RateLimitRule {
+                name: "setup_confirm".to_string(),
+                limit: 5,
+                window: Duration::from_secs(120),
+                violation_threshold: 3,
+                ..Default::default()
+            },
+            setup_create_admin: RateLimitRule {
+                name: "setup_create_admin".to_string(),
+                limit: 2,
+                window: Duration::from_secs(3600), // 2 per hour
+                violation_threshold: 1,
                 ..Default::default()
             },
         }
@@ -301,7 +333,9 @@ impl TrustedSources {
                 ip.as_ref()
                     .map(|i| self.ip_addresses.contains(i))
                     .unwrap_or(false)
-                    || user_id.map(|u| self.user_ids.contains(&u)).unwrap_or(false)
+                    || user_id
+                        .map(|u| self.user_ids.contains(&u))
+                        .unwrap_or(false)
                     || device_id
                         .map(|d| self.device_ids.contains(&d))
                         .unwrap_or(false)
@@ -316,7 +350,11 @@ pub mod backoff {
     use super::*;
 
     /// Calculate exponential backoff duration
-    pub fn exponential(base: Duration, violations: u32, max: Duration) -> Duration {
+    pub fn exponential(
+        base: Duration,
+        violations: u32,
+        max: Duration,
+    ) -> Duration {
         let multiplier = 2_u32.saturating_pow(violations.saturating_sub(1));
         let backoff = base.saturating_mul(multiplier);
         backoff.min(max)
@@ -351,8 +389,14 @@ mod tests {
         let max = Duration::from_secs(3600);
 
         assert_eq!(backoff::exponential(base, 1, max), Duration::from_secs(60));
-        assert_eq!(backoff::exponential(base, 2, max), Duration::from_secs(120));
-        assert_eq!(backoff::exponential(base, 3, max), Duration::from_secs(240));
+        assert_eq!(
+            backoff::exponential(base, 2, max),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            backoff::exponential(base, 3, max),
+            Duration::from_secs(240)
+        );
         assert_eq!(backoff::exponential(base, 10, max), max); // Should cap at max
     }
 }

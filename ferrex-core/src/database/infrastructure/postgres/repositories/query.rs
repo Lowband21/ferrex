@@ -32,7 +32,10 @@ impl fmt::Debug for PostgresQueryRepository {
 
 #[async_trait]
 impl QueryRepository for PostgresQueryRepository {
-    async fn query_media(&self, query: &MediaQuery) -> Result<Vec<MediaWithStatus>> {
+    async fn query_media(
+        &self,
+        query: &MediaQuery,
+    ) -> Result<Vec<MediaWithStatus>> {
         self.db.query_media(query).await
     }
 }

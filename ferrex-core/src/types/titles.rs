@@ -1,10 +1,20 @@
 use crate::error::MediaError;
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Serialize};
 
 /// Strongly typed movie title
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq, Hash))]
 pub struct MovieTitle(String);
@@ -80,7 +90,15 @@ impl Ord for MovieTitle {
 
 /// Strongly typed series title
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq, Hash))]
 pub struct SeriesTitle(String);
@@ -154,7 +172,15 @@ impl Ord for SeriesTitle {
 
 /// Strongly typed episode title
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq, Hash))]
 pub struct EpisodeTitle(String);

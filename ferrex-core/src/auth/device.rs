@@ -32,15 +32,23 @@ impl Platform {
             Platform::MacOS
         } else if ua.contains("linux") {
             Platform::Linux
-        } else if ua.contains("windows") || ua.contains("win32") || ua.contains("win64") {
+        } else if ua.contains("windows")
+            || ua.contains("win32")
+            || ua.contains("win64")
+        {
             Platform::Windows
-        } else if ua.contains("iphone") || ua.contains("ipad") && !ua.contains("mac") {
+        } else if ua.contains("iphone")
+            || ua.contains("ipad") && !ua.contains("mac")
+        {
             Platform::IOS
         } else if ua.contains("android") {
             Platform::Android
         } else if ua.contains("appletv") || ua.contains("tvos") {
             Platform::TvOS
-        } else if ua.contains("mozilla") || ua.contains("chrome") || ua.contains("safari") {
+        } else if ua.contains("mozilla")
+            || ua.contains("chrome")
+            || ua.contains("safari")
+        {
             Platform::Web
         } else {
             Platform::Unknown
@@ -85,7 +93,9 @@ impl AsRef<str> for Platform {
     feature = "database",
     sqlx(type_name = "auth_device_status", rename_all = "lowercase")
 )]
-#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq,
+)]
 pub enum AuthDeviceStatus {
     #[serde(rename = "pending")]
     #[default]

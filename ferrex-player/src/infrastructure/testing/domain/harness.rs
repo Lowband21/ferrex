@@ -168,7 +168,10 @@ impl TestHarness {
     }
 
     /// Run multiple tests
-    pub async fn run_tests<'a, I, F, Fut>(&self, tests: I) -> Vec<(&'a str, TestResult)>
+    pub async fn run_tests<'a, I, F, Fut>(
+        &self,
+        tests: I,
+    ) -> Vec<(&'a str, TestResult)>
     where
         I: IntoIterator<Item = (&'a str, F)>,
         F: FnOnce() -> Fut + Send,
@@ -247,7 +250,10 @@ impl TestHarness {
     }
 
     /// Run test with panic capture
-    async fn run_with_panic_capture<F, Fut>(&self, test_fn: F) -> Result<Result<(), String>, String>
+    async fn run_with_panic_capture<F, Fut>(
+        &self,
+        test_fn: F,
+    ) -> Result<Result<(), String>, String>
     where
         F: FnOnce() -> Fut + Send,
         Fut: Future<Output = Result<(), String>> + Send,
@@ -310,7 +316,10 @@ pub trait TestSuite: Send + Sync {
 /// A single test in a suite
 pub struct Test {
     name: String,
-    run: Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send>,
+    run: Box<
+        dyn FnOnce() -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+            + Send,
+    >,
 }
 
 use std::pin::Pin;
@@ -388,7 +397,8 @@ mod tests {
     async fn test_harness_success() {
         let harness = TestHarness::new();
 
-        let result = harness.run_test("success_test", || async { Ok(()) }).await;
+        let result =
+            harness.run_test("success_test", || async { Ok(()) }).await;
 
         assert!(result.passed);
         assert!(result.error.is_none());
@@ -400,7 +410,9 @@ mod tests {
         let harness = TestHarness::new();
 
         let result = harness
-            .run_test("failure_test", || async { Err("Test failed".to_string()) })
+            .run_test("failure_test", || async {
+                Err("Test failed".to_string())
+            })
             .await;
 
         assert!(!result.passed);

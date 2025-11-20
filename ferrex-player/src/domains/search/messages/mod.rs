@@ -66,7 +66,9 @@ impl std::fmt::Debug for Message {
             Self::UpdateQuery(query) => write!(f, "UpdateQuery({})", query),
             Self::ExecuteSearch => write!(f, "ExecuteSearch"),
             Self::ClearSearch => write!(f, "ClearSearch"),
-            Self::SelectResult(media_ref) => write!(f, "SelectResult({:?})", media_ref),
+            Self::SelectResult(media_ref) => {
+                write!(f, "SelectResult({:?})", media_ref)
+            }
             Self::LoadMore => write!(f, "LoadMore"),
             Self::ToggleMode => write!(f, "ToggleMode"),
             Self::SetMode(mode) => write!(f, "SetMode({:?})", mode),
@@ -75,7 +77,9 @@ impl std::fmt::Debug for Message {
             Self::SelectCurrent => write!(f, "SelectCurrent"),
 
             // Internal events
-            Self::SearchDebounced(query) => write!(f, "SearchDebounced({})", query),
+            Self::SearchDebounced(query) => {
+                write!(f, "SearchDebounced({})", query)
+            }
             Self::ResultsReceived {
                 query,
                 results,
@@ -90,7 +94,9 @@ impl std::fmt::Debug for Message {
                 )
             }
             Self::SearchError(error) => write!(f, "SearchError({})", error),
-            Self::SetSearching(searching) => write!(f, "SetSearching({})", searching),
+            Self::SetSearching(searching) => {
+                write!(f, "SetSearching({})", searching)
+            }
             Self::RecordMetrics(_) => write!(f, "RecordMetrics(...)"),
 
             // Cross-domain coordination
@@ -100,7 +106,9 @@ impl std::fmt::Debug for Message {
             Self::RefreshFromMediaStore => write!(f, "RefreshFromMediaStore"),
 
             // Internal calibration
-            Self::_CalibrationComplete(_) => write!(f, "_CalibrationComplete(...)"),
+            Self::_CalibrationComplete(_) => {
+                write!(f, "_CalibrationComplete(...)")
+            }
             Self::RunCalibration => write!(f, "RunCalibration"),
         }
     }

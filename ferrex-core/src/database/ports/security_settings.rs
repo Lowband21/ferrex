@@ -14,6 +14,8 @@ pub struct SecuritySettingsUpdate {
 #[async_trait]
 pub trait SecuritySettingsRepository: Send + Sync {
     async fn get_settings(&self) -> Result<AuthSecuritySettings>;
-    async fn update_settings(&self, update: SecuritySettingsUpdate)
-    -> Result<AuthSecuritySettings>;
+    async fn update_settings(
+        &self,
+        update: SecuritySettingsUpdate,
+    ) -> Result<AuthSecuritySettings>;
 }

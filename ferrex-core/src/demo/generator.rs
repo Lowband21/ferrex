@@ -72,8 +72,10 @@ pub async fn generate_plan(
             }
             LibraryType::Series => {
                 let count = library_option.series_count.unwrap_or(3).max(1);
-                let seasons = library_option.seasons_per_series.unwrap_or((1, 2));
-                let episodes = library_option.episodes_per_season.unwrap_or((4, 6));
+                let seasons =
+                    library_option.seasons_per_series.unwrap_or((1, 2));
+                let episodes =
+                    library_option.episodes_per_season.unwrap_or((4, 6));
                 generator
                     .generate_series(
                         &root_path,
@@ -86,8 +88,12 @@ pub async fn generate_plan(
             }
         };
 
-        let mut plan =
-            structure_to_demo_plan(name, library_option.library_type, root_path, structure);
+        let mut plan = structure_to_demo_plan(
+            name,
+            library_option.library_type,
+            root_path,
+            structure,
+        );
         apply_deviations(
             &mut plan,
             library_option,
@@ -136,7 +142,11 @@ pub fn apply_plan(plan: &DemoSeedPlan) -> Result<()> {
             std::fs::create_dir_all(dir).map_err(|err| {
                 MediaError::Io(std::io::Error::new(
                     err.kind(),
-                    format!("failed to create demo directory {}: {}", dir.display(), err),
+                    format!(
+                        "failed to create demo directory {}: {}",
+                        dir.display(),
+                        err
+                    ),
                 ))
             })?;
         }
@@ -146,7 +156,11 @@ pub fn apply_plan(plan: &DemoSeedPlan) -> Result<()> {
                 std::fs::create_dir_all(parent).map_err(|err| {
                     MediaError::Io(std::io::Error::new(
                         err.kind(),
-                        format!("failed to prepare parent {}: {}", parent.display(), err),
+                        format!(
+                            "failed to prepare parent {}: {}",
+                            parent.display(),
+                            err
+                        ),
                     ))
                 })?;
             }
@@ -158,7 +172,11 @@ pub fn apply_plan(plan: &DemoSeedPlan) -> Result<()> {
                 .map_err(|err| {
                     MediaError::Io(std::io::Error::new(
                         err.kind(),
-                        format!("failed to create demo file {}: {}", file.display(), err),
+                        format!(
+                            "failed to create demo file {}: {}",
+                            file.display(),
+                            err
+                        ),
                     ))
                 })?;
         }
@@ -170,7 +188,10 @@ pub fn apply_plan(plan: &DemoSeedPlan) -> Result<()> {
 /// Remove library roots that are no longer part of the plan and ensure
 /// upcoming roots are clean before materialisation. This keeps the demo tree
 /// deterministic between resets and avoids leftover structures skewing scans.
-pub fn prepare_plan_roots(previous: Option<&DemoSeedPlan>, next: &DemoSeedPlan) -> Result<()> {
+pub fn prepare_plan_roots(
+    previous: Option<&DemoSeedPlan>,
+    next: &DemoSeedPlan,
+) -> Result<()> {
     let mut next_roots: HashSet<PathBuf> = HashSet::new();
     for library in &next.libraries {
         next_roots.insert(library.root_path.clone());
@@ -202,7 +223,11 @@ pub fn prepare_plan_roots(previous: Option<&DemoSeedPlan>, next: &DemoSeedPlan) 
             std::fs::remove_dir_all(&root).map_err(|err| {
                 MediaError::Io(std::io::Error::new(
                     err.kind(),
-                    format!("failed to reset demo root {}: {}", root.display(), err),
+                    format!(
+                        "failed to reset demo root {}: {}",
+                        root.display(),
+                        err
+                    ),
                 ))
             })?;
         }
@@ -314,7 +339,8 @@ fn apply_series_deviations(plan: &mut DemoLibraryPlan, rate: f32) {
                     .and_then(|name| name.to_str())
                     .and_then(extract_number)
                     .unwrap_or(1);
-                let new_dir = season_dir.with_file_name(format!("S{:02}", season_number));
+                let new_dir =
+                    season_dir.with_file_name(format!("S{:02}", season_number));
                 rename_subtree(plan, &season_dir, &new_dir);
                 current_dir = new_dir;
             }

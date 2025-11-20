@@ -5,5 +5,8 @@ use crate::query::types::{MediaQuery, MediaWithStatus};
 
 #[async_trait]
 pub trait QueryRepository: Send + Sync {
-    async fn query_media(&self, query: &MediaQuery) -> Result<Vec<MediaWithStatus>>;
+    async fn query_media(
+        &self,
+        query: &MediaQuery,
+    ) -> Result<Vec<MediaWithStatus>>;
 }

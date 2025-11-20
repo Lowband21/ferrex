@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT COUNT(*)::bigint\n                FROM orchestrator_jobs\n                WHERE library_id = $1\n                  AND id <> $2\n                  AND attempts >= $3\n                  AND state IN ('ready','leased')\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d817fe9bd895fd53ecf0e9006a6c077504b42261e08971a0bf83c59d5e7c4d79"
+}

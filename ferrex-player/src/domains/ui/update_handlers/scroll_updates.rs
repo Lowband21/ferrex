@@ -16,14 +16,18 @@ use iced::{Task, widget::scrollable::Viewport};
     ),
     profiling::function
 )]
-pub fn handle_detail_view_scrolled(state: &mut State, viewport: Viewport) -> Task<Message> {
+pub fn handle_detail_view_scrolled(
+    state: &mut State,
+    viewport: Viewport,
+) -> Task<Message> {
     // Update scroll offset for fixed backdrop
     let scroll_offset = viewport.absolute_offset().y;
     log::debug!(
         "DetailViewScrolled: Updating background shader scroll offset to {}",
         scroll_offset
     );
-    state.domains.ui.state.background_shader_state.scroll_offset = scroll_offset;
+    state.domains.ui.state.background_shader_state.scroll_offset =
+        scroll_offset;
 
     // TODO: This is cumbersome, fix it
     let uuid = state
@@ -57,7 +61,10 @@ pub fn handle_detail_view_scrolled(state: &mut State, viewport: Viewport) -> Tas
     ),
     profiling::function
 )]
-pub fn handle_tab_grid_scrolled(state: &mut State, viewport: Viewport) -> Task<Message> {
+pub fn handle_tab_grid_scrolled(
+    state: &mut State,
+    viewport: Viewport,
+) -> Task<Message> {
     // Get the active tab and update its scroll state
     let active_tab_id = state.tab_manager.active_tab_id();
 
@@ -75,7 +82,10 @@ pub fn handle_tab_grid_scrolled(state: &mut State, viewport: Viewport) -> Task<M
     }
 
     // Save scroll position to ScrollPositionManager for persistence
-    let scroll_state = crate::domains::ui::scroll_manager::ScrollState::from_viewport(viewport);
+    let scroll_state =
+        crate::domains::ui::scroll_manager::ScrollState::from_viewport(
+            viewport,
+        );
     state
         .domains
         .ui
@@ -97,11 +107,11 @@ pub fn handle_tab_grid_scrolled(state: &mut State, viewport: Viewport) -> Task<M
     // This avoids visible stalls while atlas uploads complete
     {
         use std::time::Duration;
-        let until = now
-            + Duration::from_millis(
-                (crate::infrastructure::constants::animation::DEFAULT_DURATION_MS as f64 * 1.25)
-                    as u64,
-            );
+        let until = now + Duration::from_millis(
+            (crate::infrastructure::constants::animation::DEFAULT_DURATION_MS
+                as f64
+                * 1.25) as u64,
+        );
         let ui_until = &mut state.domains.ui.state.poster_anim_active_until;
         *ui_until = Some(ui_until.map(|u| u.max(until)).unwrap_or(until));
     }
@@ -118,7 +128,9 @@ pub fn handle_tab_grid_scrolled(state: &mut State, viewport: Viewport) -> Task<M
         .ui
         .state
         .last_check_task_created
-        .map(|last| last.elapsed() >= Duration::from_millis(SCROLL_STOP_DEBOUNCE_MS / 2))
+        .map(|last| {
+            last.elapsed() >= Duration::from_millis(SCROLL_STOP_DEBOUNCE_MS / 2)
+        })
         .unwrap_or(true);
 
     if should_create_task {
@@ -130,12 +142,20 @@ pub fn handle_tab_grid_scrolled(state: &mut State, viewport: Viewport) -> Task<M
         let mut prefetched = 0usize;
         for archived_id in visible_items.iter() {
             // Deserialize archived ID to runtime MediaID
-            if let Ok(media_id) = rkyv::deserialize::<MediaID, rkyv::rancor::Error>(archived_id) {
+            if let Ok(media_id) =
+                rkyv::deserialize::<MediaID, rkyv::rancor::Error>(archived_id)
+            {
                 match media_id {
                     MediaID::Movie(mid) => {
                         let uuid = mid.to_uuid();
                         // Skip if already cached
-                        if state.domains.ui.state.movie_yoke_cache.contains_key(&uuid) {
+                        if state
+                            .domains
+                            .ui
+                            .state
+                            .movie_yoke_cache
+                            .contains_key(&uuid)
+                        {
                             continue;
                         }
                         // Fetch and insert into cache
@@ -161,7 +181,13 @@ pub fn handle_tab_grid_scrolled(state: &mut State, viewport: Viewport) -> Task<M
                     }
                     MediaID::Series(mid) => {
                         let uuid = mid.to_uuid();
-                        if state.domains.ui.state.series_yoke_cache.contains_key(&uuid) {
+                        if state
+                            .domains
+                            .ui
+                            .state
+                            .series_yoke_cache
+                            .contains_key(&uuid)
+                        {
                             continue;
                         }
                         if let Ok(yoke) = state
@@ -190,7 +216,10 @@ pub fn handle_tab_grid_scrolled(state: &mut State, viewport: Viewport) -> Task<M
 
         Task::perform(
             async move {
-                tokio::time::sleep(Duration::from_millis(SCROLL_STOP_DEBOUNCE_MS)).await;
+                tokio::time::sleep(Duration::from_millis(
+                    SCROLL_STOP_DEBOUNCE_MS,
+                ))
+                .await;
             },
             |_| Message::CheckScrollStopped,
         )

@@ -60,9 +60,12 @@ impl VirtualListState {
         }
 
         // Calculate first and last visible items
-        let first_visible = (self.scroll_position / self.item_height).floor() as usize;
-        let visible_count = (self.viewport_height / self.item_height).ceil() as usize;
-        let last_visible = (first_visible + visible_count).min(self.total_items);
+        let first_visible =
+            (self.scroll_position / self.item_height).floor() as usize;
+        let visible_count =
+            (self.viewport_height / self.item_height).ceil() as usize;
+        let last_visible =
+            (first_visible + visible_count).min(self.total_items);
 
         // Add overscan
         let start = first_visible.saturating_sub(self.overscan);
@@ -81,7 +84,8 @@ impl VirtualListState {
 
     /// Get items that need to be pre-loaded (slightly ahead of current position)
     pub fn get_preload_range(&self, preload_ahead: usize) -> Range<usize> {
-        let end = (self.visible_range.end + preload_ahead).min(self.total_items);
+        let end =
+            (self.visible_range.end + preload_ahead).min(self.total_items);
         self.visible_range.end..end
     }
 }
@@ -105,14 +109,18 @@ pub fn virtual_list<'a, Message: 'a>(
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::VIRTUAL_LIST_RENDER);
+    profiling::scope!(
+        crate::infrastructure::profiling_scopes::scopes::VIRTUAL_LIST_RENDER
+    );
 
     let mut content = column![].spacing(0).width(Length::Fill);
 
     // Add spacer for items above viewport
     if state.visible_range.start > 0 {
-        let spacer_height = state.visible_range.start as f32 * state.item_height;
-        content = content.push(Space::new().height(Length::Fixed(spacer_height)));
+        let spacer_height =
+            state.visible_range.start as f32 * state.item_height;
+        content =
+            content.push(Space::new().height(Length::Fixed(spacer_height)));
     }
 
     // Add visible items
@@ -129,7 +137,8 @@ pub fn virtual_list<'a, Message: 'a>(
     if state.visible_range.end < state.total_items {
         let remaining_items = state.total_items - state.visible_range.end;
         let spacer_height = remaining_items as f32 * state.item_height;
-        content = content.push(Space::new().height(Length::Fixed(spacer_height)));
+        content =
+            content.push(Space::new().height(Length::Fixed(spacer_height)));
     }
 
     scrollable(content)

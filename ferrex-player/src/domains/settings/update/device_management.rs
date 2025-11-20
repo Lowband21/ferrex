@@ -43,14 +43,20 @@ pub fn handle_load_devices(state: &mut State) -> DomainUpdateResult {
                         .map(|device| {
                             // Determine device type from platform
                             let device_type = match device.platform {
-                                ferrex_core::auth::Platform::Android => "mobile",
+                                ferrex_core::auth::Platform::Android => {
+                                    "mobile"
+                                }
                                 ferrex_core::auth::Platform::IOS => "mobile",
                                 ferrex_core::auth::Platform::TvOS => "tv",
-                                ferrex_core::auth::Platform::Windows => "desktop",
+                                ferrex_core::auth::Platform::Windows => {
+                                    "desktop"
+                                }
                                 ferrex_core::auth::Platform::MacOS => "desktop",
                                 ferrex_core::auth::Platform::Linux => "desktop",
                                 ferrex_core::auth::Platform::Web => "web",
-                                ferrex_core::auth::Platform::Unknown => "unknown",
+                                ferrex_core::auth::Platform::Unknown => {
+                                    "unknown"
+                                }
                             }
                             .to_string();
 
@@ -66,7 +72,8 @@ pub fn handle_load_devices(state: &mut State) -> DomainUpdateResult {
                                 device_name: device.name.clone(),
                                 device_type,
                                 last_active: device.last_activity,
-                                is_current_device: device.id == current_device_id,
+                                is_current_device: device.id
+                                    == current_device_id,
                                 location,
                             }
                         })
@@ -97,7 +104,8 @@ pub fn handle_devices_loaded(
         }
         Err(error) => {
             error!("Failed to load devices: {}", error);
-            state.domains.settings.device_management_state.error_message = Some(error);
+            state.domains.settings.device_management_state.error_message =
+                Some(error);
         }
     }
 
@@ -111,7 +119,10 @@ pub fn handle_refresh_devices(state: &mut State) -> DomainUpdateResult {
 }
 
 /// Handle revoke device
-pub fn handle_revoke_device(state: &mut State, device_id: String) -> DomainUpdateResult {
+pub fn handle_revoke_device(
+    state: &mut State,
+    device_id: String,
+) -> DomainUpdateResult {
     info!("Revoking device: {}", device_id);
 
     // Use trait-based SettingsService for device operations
@@ -156,7 +167,8 @@ pub fn handle_device_revoked(
         }
         Err(error) => {
             error!("Failed to revoke device: {}", error);
-            state.domains.settings.device_management_state.error_message = Some(error);
+            state.domains.settings.device_management_state.error_message =
+                Some(error);
         }
     }
 

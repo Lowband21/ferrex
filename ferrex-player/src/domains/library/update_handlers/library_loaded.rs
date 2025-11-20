@@ -10,7 +10,9 @@ use iced::Task;
 use rkyv::util::AlignedVec;
 
 /// Fetch all libraries
-pub async fn fetch_libraries(api_service: Arc<dyn ApiService>) -> anyhow::Result<AlignedVec> {
+pub async fn fetch_libraries(
+    api_service: Arc<dyn ApiService>,
+) -> anyhow::Result<AlignedVec> {
     let now = Instant::now();
     let bytes: AlignedVec = api_service
         .as_ref()
@@ -49,11 +51,20 @@ pub fn handle_libraries_loaded(
                     {
                         let mut repo_lock = state.media_repo.write();
                         *repo_lock = Some(media_repo);
-                        log::info!("Populated MediaRepo with {} libraries", library_count);
+                        log::info!(
+                            "Populated MediaRepo with {} libraries",
+                            library_count
+                        );
                     }
 
                     // Register libraries with TabManager for tab creation
-                    if state.domains.library.state.repo_accessor.is_initialized() {
+                    if state
+                        .domains
+                        .library
+                        .state
+                        .repo_accessor
+                        .is_initialized()
+                    {
                         state.update_tab_manager_libraries();
                         log::info!(
                             "Registered {} libraries with TabManager",

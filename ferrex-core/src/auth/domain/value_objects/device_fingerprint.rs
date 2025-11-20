@@ -60,7 +60,10 @@ impl DeviceFingerprint {
         hostname: Option<String>,
     ) -> Result<Self, DeviceFingerprintError> {
         // Ensure we have at least some hardware information
-        if os_info.is_empty() && cpu_info.is_none() && mac_address.is_none() && machine_id.is_none()
+        if os_info.is_empty()
+            && cpu_info.is_none()
+            && mac_address.is_none()
+            && machine_id.is_none()
         {
             return Err(DeviceFingerprintError::MissingHardwareInfo);
         }
@@ -196,7 +199,8 @@ mod tests {
 
     #[test]
     fn test_missing_hardware_info() {
-        let result = DeviceFingerprint::new(String::new(), None, None, None, None);
+        let result =
+            DeviceFingerprint::new(String::new(), None, None, None, None);
 
         assert!(matches!(
             result,

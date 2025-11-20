@@ -1,7 +1,8 @@
 //! Credential entry view for both password and PIN
 
 use super::components::{
-    auth_card, auth_container, error_message, primary_button, secondary_button, spacing, title,
+    auth_card, auth_container, error_message, primary_button, secondary_button,
+    spacing, title,
 };
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::messages as auth;
@@ -10,7 +11,9 @@ use crate::domains::auth::types::CredentialType;
 use ferrex_core::player_prelude::User;
 use iced::{
     Alignment, Element, Length, Theme,
-    widget::{Space, button, checkbox, column, container, row, text, text_input},
+    widget::{
+        Space, button, checkbox, column, container, row, text, text_input,
+    },
 };
 
 /// Shows the credential entry screen (password or PIN)
@@ -35,8 +38,10 @@ pub fn view_credential_entry<'a>(
     let mut content = column![
         // User info
         container(
-            column![text(user.display_name.chars().next().unwrap_or('U')).size(48),]
-                .align_x(Alignment::Center)
+            column![
+                text(user.display_name.chars().next().unwrap_or('U')).size(48),
+            ]
+            .align_x(Alignment::Center)
         )
         .width(Length::Fill)
         .align_x(iced::alignment::Horizontal::Center)
@@ -60,7 +65,9 @@ pub fn view_credential_entry<'a>(
             .size(16)
             .style(|theme: &Theme| {
                 text::Style {
-                    color: Some(theme.extended_palette().background.strong.text),
+                    color: Some(
+                        theme.extended_palette().background.strong.text,
+                    ),
                 }
             })
             .align_x(iced::alignment::Horizontal::Center),
@@ -92,8 +99,12 @@ pub fn view_credential_entry<'a>(
         CredentialType::Password => {
             content = content.push(
                 text_input("Password", input.as_str())
-                    .on_input(|s| DomainMessage::Auth(auth::Message::UpdateCredential(s)))
-                    .on_submit(DomainMessage::Auth(auth::Message::SubmitCredential))
+                    .on_input(|s| {
+                        DomainMessage::Auth(auth::Message::UpdateCredential(s))
+                    })
+                    .on_submit(DomainMessage::Auth(
+                        auth::Message::SubmitCredential,
+                    ))
                     .secure(!show_password)
                     .padding(12)
                     .size(16)
@@ -105,7 +116,11 @@ pub fn view_credential_entry<'a>(
             // Password visibility toggle
             content = content.push(
                 checkbox("Show password", show_password)
-                    .on_toggle(|_| DomainMessage::Auth(auth::Message::TogglePasswordVisibility))
+                    .on_toggle(|_| {
+                        DomainMessage::Auth(
+                            auth::Message::TogglePasswordVisibility,
+                        )
+                    })
                     .size(16)
                     .spacing(8),
             );
@@ -115,7 +130,9 @@ pub fn view_credential_entry<'a>(
             // Remember device checkbox
             content = content.push(
                 checkbox("Remember this device", remember_device)
-                    .on_toggle(|_| DomainMessage::Auth(auth::Message::ToggleRememberDevice))
+                    .on_toggle(|_| {
+                        DomainMessage::Auth(auth::Message::ToggleRememberDevice)
+                    })
                     .size(16)
                     .spacing(8),
             );
@@ -142,11 +159,13 @@ pub fn view_credential_entry<'a>(
     };
 
     let submit_button = if loading
-        || (matches!(input_type, CredentialType::Pin { .. }) && input.len() != 4)
+        || (matches!(input_type, CredentialType::Pin { .. })
+            && input.len() != 4)
     {
         primary_button(submit_label)
     } else {
-        primary_button(submit_label).on_press(DomainMessage::Auth(auth::Message::SubmitCredential))
+        primary_button(submit_label)
+            .on_press(DomainMessage::Auth(auth::Message::SubmitCredential))
     };
 
     content = content.push(submit_button);
@@ -154,8 +173,10 @@ pub fn view_credential_entry<'a>(
     content = content.push(Space::new().height(Length::Fixed(12.0)));
 
     // Back button
-    content =
-        content.push(secondary_button("Back").on_press(DomainMessage::Auth(auth::Message::Back)));
+    content = content.push(
+        secondary_button("Back")
+            .on_press(DomainMessage::Auth(auth::Message::Back)),
+    );
 
     let card = auth_card(content.align_x(Alignment::Center));
     auth_container(card).into()

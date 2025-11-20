@@ -21,7 +21,11 @@ pub trait LibraryRepository: Send + Sync {
     async fn list_libraries(&self) -> Result<Vec<Library>>;
 
     /// Update a library by id.
-    async fn update_library(&self, id: LibraryID, library: Library) -> Result<()>;
+    async fn update_library(
+        &self,
+        id: LibraryID,
+        library: Library,
+    ) -> Result<()>;
 
     /// Delete a library by id.
     async fn delete_library(&self, id: LibraryID) -> Result<()>;
@@ -33,5 +37,8 @@ pub trait LibraryRepository: Send + Sync {
     async fn list_library_references(&self) -> Result<Vec<LibraryReference>>;
 
     /// Fetch a single library reference by id (UUID of the library).
-    async fn get_library_reference(&self, id: uuid::Uuid) -> Result<LibraryReference>;
+    async fn get_library_reference(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<LibraryReference>;
 }

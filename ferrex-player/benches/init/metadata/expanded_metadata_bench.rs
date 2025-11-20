@@ -148,7 +148,7 @@ pub async fn batch_metadata_operation(
     );
 
     // Create state and setup authentication
-    let state = State::new("http://localhost:3000".to_string());
+    let state = State::new("https://localhost:3000".to_string());
     service_registry::init_registry(state.image_service.clone());
 
     if let Err(e) = setup_benchmark_authentication(&state).await {

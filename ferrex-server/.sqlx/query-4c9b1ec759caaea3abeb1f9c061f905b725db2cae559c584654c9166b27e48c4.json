@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT u.id\n                FROM users u\n                INNER JOIN user_roles ur ON u.id = ur.user_id\n                INNER JOIN roles r ON ur.role_id = r.id\n                WHERE r.name = 'admin'\n                AND u.id != $1\n                FOR UPDATE OF u\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4c9b1ec759caaea3abeb1f9c061f905b725db2cae559c584654c9166b27e48c4"
+}

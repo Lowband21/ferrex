@@ -68,13 +68,19 @@ pub mod scopes {
 #[macro_export]
 macro_rules! profile_ui {
     (grid_render) => {
-        profiling::scope!($crate::infrastructure::profiling_scopes::scopes::GRID_RENDER)
+        profiling::scope!(
+            $crate::infrastructure::profiling_scopes::scopes::GRID_RENDER
+        )
     };
     (grid_layout) => {
-        profiling::scope!($crate::infrastructure::profiling_scopes::scopes::GRID_LAYOUT)
+        profiling::scope!(
+            $crate::infrastructure::profiling_scopes::scopes::GRID_LAYOUT
+        )
     };
     (grid_scroll) => {
-        profiling::scope!($crate::infrastructure::profiling_scopes::scopes::GRID_SCROLL)
+        profiling::scope!(
+            $crate::infrastructure::profiling_scopes::scopes::GRID_SCROLL
+        )
     };
     (poster_load, $media_id:expr_2021) => {
         profiling::scope!(&format!(
@@ -183,11 +189,19 @@ pub fn check_performance_target(operation: &str, duration: Duration) -> bool {
     let ms = duration.as_secs_f32() * 1000.0;
 
     match operation {
-        s if s.starts_with(scopes::GRID_RENDER) => ms <= targets.view_operation_ms,
-        s if s.starts_with(scopes::GRID_SCROLL) => ms <= targets.scroll_frame_ms,
+        s if s.starts_with(scopes::GRID_RENDER) => {
+            ms <= targets.view_operation_ms
+        }
+        s if s.starts_with(scopes::GRID_SCROLL) => {
+            ms <= targets.scroll_frame_ms
+        }
         s if s.starts_with(scopes::POSTER_LOAD) => ms <= targets.poster_load_ms,
-        s if s.starts_with(scopes::METADATA_TV) => ms <= targets.metadata_per_item_ms * 10.0, // TV is slower
-        s if s.starts_with(scopes::METADATA_MOVIE) => ms <= targets.metadata_per_item_ms,
+        s if s.starts_with(scopes::METADATA_TV) => {
+            ms <= targets.metadata_per_item_ms * 10.0
+        } // TV is slower
+        s if s.starts_with(scopes::METADATA_MOVIE) => {
+            ms <= targets.metadata_per_item_ms
+        }
         _ => ms <= targets.frame_time_ms,
     }
 }

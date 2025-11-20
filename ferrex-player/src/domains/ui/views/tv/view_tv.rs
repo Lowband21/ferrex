@@ -35,7 +35,10 @@ use iced::{
     ),
     profiling::function
 )]
-pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<'a, Message> {
+pub fn view_series_detail<'a>(
+    state: &'a State,
+    series_id: SeriesID,
+) -> Element<'a, Message> {
     // Resolve series yoke via UI cache with lazy fetch (interior mutable cache)
     let series_uuid = series_id.to_uuid();
     let series_yoke_arc = match state
@@ -427,16 +430,19 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
     if !seasons.is_empty() {
         content = content.push(Space::new().height(20));
 
-        if let Some(carousel_state) = &state.domains.ui.state.show_seasons_carousel {
+        if let Some(carousel_state) =
+            &state.domains.ui.state.show_seasons_carousel
+        {
             // Build season cards lazily using windowed carousel with media_card!
             let seasons_vec = seasons.clone();
-            let section = crate::domains::ui::views::carousel::windowed_media_carousel(
-                "show_seasons".to_string(),
-                "Seasons",
-                seasons_vec.len(),
-                carousel_state,
-                move |idx| {
-                    seasons_vec.get(idx).map(|s| {
+            let section =
+                crate::domains::ui::views::carousel::windowed_media_carousel(
+                    "show_seasons".to_string(),
+                    "Seasons",
+                    seasons_vec.len(),
+                    carousel_state,
+                    move |idx| {
+                        seasons_vec.get(idx).map(|s| {
                         let title_str = if s.season_number.value() == 0 {
                             "Specials".to_string()
                         } else {
@@ -467,8 +473,8 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
                             }
                         }
                     })
-                },
-            );
+                    },
+                );
 
             content = content.push(section);
         }
@@ -488,7 +494,8 @@ pub fn view_series_detail<'a>(state: &'a State, series_id: SeriesID) -> Element<
     let backdrop_height = window_width / display_aspect;
 
     // Create aspect ratio toggle button
-    let aspect_button = crate::domains::ui::components::create_backdrop_aspect_button(state);
+    let aspect_button =
+        crate::domains::ui::components::create_backdrop_aspect_button(state);
 
     // Position the button at bottom-right of backdrop with small margin
     let button_container = container(aspect_button)
@@ -660,13 +667,14 @@ pub fn view_season_detail<'a>(
         content = content.push(Space::new().height(20));
         if let Some(ep_cs) = &state.domains.ui.state.season_episodes_carousel {
             let eps_vec = episodes.clone();
-            let ep_section = crate::domains::ui::views::carousel::windowed_media_carousel(
-                "season_episodes".to_string(),
-                "Episodes",
-                eps_vec.len(),
-                ep_cs,
-                move |idx| {
-                    eps_vec.get(idx).map(|e| {
+            let ep_section =
+                crate::domains::ui::views::carousel::windowed_media_carousel(
+                    "season_episodes".to_string(),
+                    "Episodes",
+                    eps_vec.len(),
+                    ep_cs,
+                    move |idx| {
+                        eps_vec.get(idx).map(|e| {
                         // Build episode title/subtitle
                         let title_str = format!(
                             "S{:02}E{:02}",
@@ -698,8 +706,8 @@ pub fn view_season_detail<'a>(
                             }
                         }
                     })
-                },
-            );
+                    },
+                );
             content = content.push(ep_section);
         }
     }
@@ -719,7 +727,8 @@ pub fn view_season_detail<'a>(
     let backdrop_height = window_width / display_aspect;
 
     // Create aspect ratio toggle button
-    let aspect_button = crate::domains::ui::components::create_backdrop_aspect_button(state);
+    let aspect_button =
+        crate::domains::ui::components::create_backdrop_aspect_button(state);
 
     // Position the button at bottom-right of backdrop with small margin
     let button_container = container(aspect_button)
@@ -750,48 +759,53 @@ pub fn view_episode_detail<'a>(
 ) -> Element<'a, Message> {
     // Try to get episode yoke from cache or fetch on-demand
     let ep_uuid = episode_id.to_uuid();
-    let episode_yoke_arc = match state.domains.ui.state.episode_yoke_cache.peek_ref(&ep_uuid) {
-        Some(arc) => arc,
-        _ => match state
-            .domains
-            .ui
-            .state
-            .repo_accessor
-            .get_episode_yoke(&MediaID::Episode(*episode_id))
-        {
-            Ok(yoke) => {
-                let arc = std::sync::Arc::new(yoke);
-                state
-                    .domains
-                    .ui
-                    .state
-                    .episode_yoke_cache
-                    .insert(ep_uuid, arc.clone());
-                arc
-            }
-            Err(e) => {
-                log::warn!("[TV] Failed to fetch episode yoke for {}: {:?}", ep_uuid, e);
-                return container(
-                    column![
-                        text("Media Not Found")
-                            .size(24)
-                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                        Space::new().height(10),
-                        text("Repository error:")
-                            .size(16)
-                            .color(theme::MediaServerTheme::TEXT_SUBDUED),
-                    ]
-                    .spacing(10)
-                    .align_x(iced::Alignment::Center),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center_x(Length::Fill)
-                .center_y(Length::Fill)
-                .into();
-            }
-        },
-    };
+    let episode_yoke_arc =
+        match state.domains.ui.state.episode_yoke_cache.peek_ref(&ep_uuid) {
+            Some(arc) => arc,
+            _ => match state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get_episode_yoke(&MediaID::Episode(*episode_id))
+            {
+                Ok(yoke) => {
+                    let arc = std::sync::Arc::new(yoke);
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .episode_yoke_cache
+                        .insert(ep_uuid, arc.clone());
+                    arc
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[TV] Failed to fetch episode yoke for {}: {:?}",
+                        ep_uuid,
+                        e
+                    );
+                    return container(
+                        column![
+                            text("Media Not Found")
+                                .size(24)
+                                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                            Space::new().height(10),
+                            text("Repository error:")
+                                .size(16)
+                                .color(theme::MediaServerTheme::TEXT_SUBDUED),
+                        ]
+                        .spacing(10)
+                        .align_x(iced::Alignment::Center),
+                    )
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill)
+                    .into();
+                }
+            },
+        };
     let episode = episode_yoke_arc.get();
 
     // Add dynamic spacing at the top based on backdrop dimensions
@@ -819,17 +833,18 @@ pub fn view_episode_detail<'a>(
     let mut details = column![].spacing(15).padding(20).width(Length::Fill);
 
     // Title and info
-    let (ep_name, overview, air_date, runtime, vote_average) = if let Some(d) = episode.details() {
-        (
-            Some(d.name.to_string()),
-            d.overview.as_ref(),
-            d.air_date.as_ref(),
-            d.runtime.as_ref(),
-            d.vote_average.as_ref(),
-        )
-    } else {
-        (None, None, None, None, None)
-    };
+    let (ep_name, overview, air_date, runtime, vote_average) =
+        if let Some(d) = episode.details() {
+            (
+                Some(d.name.to_string()),
+                d.overview.as_ref(),
+                d.air_date.as_ref(),
+                d.runtime.as_ref(),
+                d.vote_average.as_ref(),
+            )
+        } else {
+            (None, None, None, None, None)
+        };
 
     let (season_number, ep_number) = if let Some(d) = episode.details() {
         (d.season_number, d.episode_number)
@@ -863,7 +878,9 @@ pub fn view_episode_detail<'a>(
 
     // Play button
     let button_row = components::create_action_button_row(
-        Message::PlayMediaWithId(MediaID::Episode(EpisodeID(episode.id.to_uuid()))),
+        Message::PlayMediaWithId(MediaID::Episode(EpisodeID(
+            episode.id.to_uuid(),
+        ))),
         vec![],
     );
     details = details.push(Space::new().height(10));
@@ -884,7 +901,9 @@ pub fn view_episode_detail<'a>(
     }
 
     // Layout
-    content = content.push(column![still_element, Space::new().height(20), details].spacing(10));
+    content = content.push(
+        column![still_element, Space::new().height(20), details].spacing(10),
+    );
 
     // Create the main content container
     let content_container = container(content).width(Length::Fill);
@@ -899,7 +918,8 @@ pub fn view_episode_detail<'a>(
     let backdrop_height = window_width / display_aspect;
 
     // Create aspect ratio toggle button
-    let aspect_button = crate::domains::ui::components::create_backdrop_aspect_button(state);
+    let aspect_button =
+        crate::domains::ui::components::create_backdrop_aspect_button(state);
 
     // Position the button at bottom-right of backdrop with small margin
     let button_container = container(aspect_button)

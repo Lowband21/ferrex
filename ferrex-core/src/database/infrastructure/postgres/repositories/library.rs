@@ -84,7 +84,9 @@ impl LibraryRepository for PostgresLibraryRepository {
         )
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to create library: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to create library: {}", e))
+        })?;
 
         Ok(library.id)
     }
@@ -113,14 +115,18 @@ impl LibraryRepository for PostgresLibraryRepository {
         )
         .fetch_optional(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Database query failed: {}", e))
+        })?;
 
         let Some(row) = row else {
             return Ok(None);
         };
 
-        let library_type = Self::decode_type(&row.library_type)
-            .ok_or_else(|| MediaError::InvalidMedia("Unknown library type".to_string()))?;
+        let library_type =
+            Self::decode_type(&row.library_type).ok_or_else(|| {
+                MediaError::InvalidMedia("Unknown library type".to_string())
+            })?;
 
         Ok(Some(Library {
             id: LibraryID(row.id),
@@ -163,11 +169,14 @@ impl LibraryRepository for PostgresLibraryRepository {
         )
         .fetch_all(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Database query failed: {}", e))
+        })?;
 
         let mut libraries = Vec::with_capacity(rows.len());
         for row in rows {
-            let Some(library_type) = Self::decode_type(&row.library_type) else {
+            let Some(library_type) = Self::decode_type(&row.library_type)
+            else {
                 continue;
             };
 
@@ -192,7 +201,11 @@ impl LibraryRepository for PostgresLibraryRepository {
         Ok(libraries)
     }
 
-    async fn update_library(&self, id: LibraryID, library: Library) -> Result<()> {
+    async fn update_library(
+        &self,
+        id: LibraryID,
+        library: Library,
+    ) -> Result<()> {
         let paths: Vec<String> = library
             .paths
             .iter()
@@ -230,7 +243,9 @@ impl LibraryRepository for PostgresLibraryRepository {
         )
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to update library: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to update library: {}", e))
+        })?;
 
         Ok(())
     }
@@ -239,7 +254,9 @@ impl LibraryRepository for PostgresLibraryRepository {
         sqlx::query!("DELETE FROM libraries WHERE id = $1", id.as_uuid())
             .execute(self.pool())
             .await
-            .map_err(|e| MediaError::Internal(format!("Delete failed: {}", e)))?;
+            .map_err(|e| {
+                MediaError::Internal(format!("Delete failed: {}", e))
+            })?;
 
         Ok(())
     }
@@ -266,7 +283,8 @@ impl LibraryRepository for PostgresLibraryRepository {
 
         let mut libraries = Vec::with_capacity(rows.len());
         for row in rows {
-            let Some(library_type) = Self::decode_type(&row.library_type) else {
+            let Some(library_type) = Self::decode_type(&row.library_type)
+            else {
                 continue;
             };
 
@@ -281,21 +299,28 @@ impl LibraryRepository for PostgresLibraryRepository {
         Ok(libraries)
     }
 
-    async fn get_library_reference(&self, id: Uuid) -> Result<LibraryReference> {
+    async fn get_library_reference(
+        &self,
+        id: Uuid,
+    ) -> Result<LibraryReference> {
         let row = sqlx::query!(
             "SELECT id, name, library_type, paths FROM libraries WHERE id = $1",
             id
         )
         .fetch_optional(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Database query failed: {}", e))
+        })?;
 
         let Some(row) = row else {
             return Err(MediaError::NotFound("Library not found".to_string()));
         };
 
-        let library_type = Self::decode_type(&row.library_type)
-            .ok_or_else(|| MediaError::InvalidMedia("Unknown library type".to_string()))?;
+        let library_type =
+            Self::decode_type(&row.library_type).ok_or_else(|| {
+                MediaError::InvalidMedia("Unknown library type".to_string())
+            })?;
 
         Ok(LibraryReference {
             id: LibraryID(row.id),

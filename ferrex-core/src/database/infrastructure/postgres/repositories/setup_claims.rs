@@ -26,43 +26,60 @@ impl PostgresSetupClaimsRepository {
     }
 
     fn map_row(row: &PgRow) -> Result<SetupClaimRecord> {
-        let id: Uuid = row
-            .try_get("id")
-            .map_err(|e| MediaError::Internal(format!("Failed to read claim id: {e}")))?;
-        let code_hash: String = row
-            .try_get("code_hash")
-            .map_err(|e| MediaError::Internal(format!("Failed to read claim code hash: {e}")))?;
-        let claim_token_hash: Option<String> = row
-            .try_get("claim_token_hash")
-            .map_err(|e| MediaError::Internal(format!("Failed to read claim token hash: {e}")))?;
-        let created_at: DateTime<Utc> = row
-            .try_get("created_at")
-            .map_err(|e| MediaError::Internal(format!("Failed to read created_at: {e}")))?;
-        let expires_at: DateTime<Utc> = row
-            .try_get("expires_at")
-            .map_err(|e| MediaError::Internal(format!("Failed to read expires_at: {e}")))?;
+        let id: Uuid = row.try_get("id").map_err(|e| {
+            MediaError::Internal(format!("Failed to read claim id: {e}"))
+        })?;
+        let code_hash: String = row.try_get("code_hash").map_err(|e| {
+            MediaError::Internal(format!("Failed to read claim code hash: {e}"))
+        })?;
+        let claim_token_hash: Option<String> =
+            row.try_get("claim_token_hash").map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to read claim token hash: {e}"
+                ))
+            })?;
+        let created_at: DateTime<Utc> =
+            row.try_get("created_at").map_err(|e| {
+                MediaError::Internal(format!("Failed to read created_at: {e}"))
+            })?;
+        let expires_at: DateTime<Utc> =
+            row.try_get("expires_at").map_err(|e| {
+                MediaError::Internal(format!("Failed to read expires_at: {e}"))
+            })?;
         let confirmed_at: Option<DateTime<Utc>> = row
             .try_get("confirmed_at")
-            .map_err(|e| MediaError::Internal(format!("Failed to read confirmed_at: {e}")))?;
-        let client_name: Option<String> = row
-            .try_get("client_name")
-            .map_err(|e| MediaError::Internal(format!("Failed to read client_name: {e}")))?;
+            .map_err(|e| {
+            MediaError::Internal(format!("Failed to read confirmed_at: {e}"))
+        })?;
+        let client_name: Option<String> =
+            row.try_get("client_name").map_err(|e| {
+                MediaError::Internal(format!("Failed to read client_name: {e}"))
+            })?;
         let client_ip: Option<IpAddr> = row
             .try_get::<Option<IpNetwork>, _>("client_ip")
-            .map_err(|e| MediaError::Internal(format!("Failed to read client_ip: {e}")))?
+            .map_err(|e| {
+                MediaError::Internal(format!("Failed to read client_ip: {e}"))
+            })?
             .map(|network| network.ip());
-        let attempts: i32 = row
-            .try_get("attempts")
-            .map_err(|e| MediaError::Internal(format!("Failed to read attempts: {e}")))?;
-        let last_attempt_at: Option<DateTime<Utc>> = row
-            .try_get("last_attempt_at")
-            .map_err(|e| MediaError::Internal(format!("Failed to read last_attempt_at: {e}")))?;
-        let revoked_at: Option<DateTime<Utc>> = row
-            .try_get("revoked_at")
-            .map_err(|e| MediaError::Internal(format!("Failed to read revoked_at: {e}")))?;
-        let revoked_reason: Option<String> = row
-            .try_get("revoked_reason")
-            .map_err(|e| MediaError::Internal(format!("Failed to read revoked_reason: {e}")))?;
+        let attempts: i32 = row.try_get("attempts").map_err(|e| {
+            MediaError::Internal(format!("Failed to read attempts: {e}"))
+        })?;
+        let last_attempt_at: Option<DateTime<Utc>> =
+            row.try_get("last_attempt_at").map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to read last_attempt_at: {e}"
+                ))
+            })?;
+        let revoked_at: Option<DateTime<Utc>> =
+            row.try_get("revoked_at").map_err(|e| {
+                MediaError::Internal(format!("Failed to read revoked_at: {e}"))
+            })?;
+        let revoked_reason: Option<String> =
+            row.try_get("revoked_reason").map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to read revoked_reason: {e}"
+                ))
+            })?;
 
         Ok(SetupClaimRecord {
             id,
@@ -114,7 +131,10 @@ impl SetupClaimsRepository for PostgresSetupClaimsRepository {
         Self::map_row(&row)
     }
 
-    async fn get_active(&self, now: DateTime<Utc>) -> Result<Option<SetupClaimRecord>> {
+    async fn get_active(
+        &self,
+        now: DateTime<Utc>,
+    ) -> Result<Option<SetupClaimRecord>> {
         let row = sqlx::query(
             r#"
             SELECT
@@ -141,7 +161,11 @@ impl SetupClaimsRepository for PostgresSetupClaimsRepository {
         .bind(now)
         .fetch_optional(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to load active setup claim: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to load active setup claim: {e}"
+            ))
+        })?;
 
         Ok(row.map(|row| Self::map_row(&row)).transpose()?)
     }
@@ -179,7 +203,9 @@ impl SetupClaimsRepository for PostgresSetupClaimsRepository {
         .bind(now)
         .fetch_optional(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to lookup setup claim: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to lookup setup claim: {e}"))
+        })?;
 
         Ok(row.map(|row| Self::map_row(&row)).transpose()?)
     }
@@ -218,12 +244,18 @@ impl SetupClaimsRepository for PostgresSetupClaimsRepository {
         .bind(now)
         .fetch_one(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to confirm setup claim: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to confirm setup claim: {e}"))
+        })?;
 
         Self::map_row(&row)
     }
 
-    async fn increment_attempt(&self, id: Uuid, now: DateTime<Utc>) -> Result<()> {
+    async fn increment_attempt(
+        &self,
+        id: Uuid,
+        now: DateTime<Utc>,
+    ) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE setup_claims
@@ -236,7 +268,9 @@ impl SetupClaimsRepository for PostgresSetupClaimsRepository {
         .bind(now)
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to record claim attempt: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to record claim attempt: {e}"))
+        })?;
 
         Ok(())
     }
@@ -274,7 +308,11 @@ impl SetupClaimsRepository for PostgresSetupClaimsRepository {
         .bind(now)
         .fetch_optional(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to lookup setup claim by token: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to lookup setup claim by token: {e}"
+            ))
+        })?;
 
         Ok(row.map(|row| Self::map_row(&row)).transpose()?)
     }
@@ -311,12 +349,18 @@ impl SetupClaimsRepository for PostgresSetupClaimsRepository {
         .bind(reason)
         .fetch_one(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to revoke setup claim: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to revoke setup claim: {e}"))
+        })?;
 
         Self::map_row(&row)
     }
 
-    async fn revoke_all(&self, reason: Option<&str>, now: DateTime<Utc>) -> Result<u64> {
+    async fn revoke_all(
+        &self,
+        reason: Option<&str>,
+        now: DateTime<Utc>,
+    ) -> Result<u64> {
         let result = sqlx::query(
             r#"
             UPDATE setup_claims
@@ -329,7 +373,9 @@ impl SetupClaimsRepository for PostgresSetupClaimsRepository {
         .bind(reason)
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to revoke setup claims: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to revoke setup claims: {e}"))
+        })?;
 
         Ok(result.rows_affected())
     }
@@ -345,7 +391,11 @@ impl SetupClaimsRepository for PostgresSetupClaimsRepository {
         .bind(before)
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to purge stale setup claims: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to purge stale setup claims: {e}"
+            ))
+        })?;
 
         Ok(result.rows_affected())
     }

@@ -21,7 +21,11 @@ impl CorrelationCache {
         guard.insert(job_id, correlation_id);
     }
 
-    pub async fn remember_if_absent(&self, job_id: JobId, correlation_id: Uuid) {
+    pub async fn remember_if_absent(
+        &self,
+        job_id: JobId,
+        correlation_id: Uuid,
+    ) {
         let mut guard = self.inner.lock().await;
         guard.entry(job_id).or_insert(correlation_id);
     }

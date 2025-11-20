@@ -3,7 +3,8 @@
 //! Provides a simplified interface for testing any domain in isolation.
 
 use crate::infrastructure::testing::{
-    executor::TestExecutor, mocks::MockRegistry, recorder::TestRecorder, time::TimeProvider,
+    executor::TestExecutor, mocks::MockRegistry, recorder::TestRecorder,
+    time::TimeProvider,
 };
 use std::future::Future;
 use std::pin::Pin;
@@ -131,7 +132,10 @@ where
     }
 
     /// Set the time provider
-    pub fn with_time_provider(mut self, provider: Box<dyn TimeProvider>) -> Self {
+    pub fn with_time_provider(
+        mut self,
+        provider: Box<dyn TimeProvider>,
+    ) -> Self {
         self.time_provider = Some(provider);
         self
     }
@@ -259,29 +263,57 @@ impl DomainTestContext for SimpleTestContext {
 #[macro_export]
 macro_rules! impl_domain_test_context {
     ($context:ty) => {
-        impl $crate::infrastructure::testing::domain::DomainTestContext for $context {
-            fn executor(&self) -> &$crate::infrastructure::testing::TestExecutor {
+        impl $crate::infrastructure::testing::domain::DomainTestContext
+            for $context
+        {
+            fn executor(
+                &self,
+            ) -> &$crate::infrastructure::testing::TestExecutor {
                 &self.executor
             }
 
-            fn time_provider(&self) -> &dyn $crate::infrastructure::testing::TimeProvider {
+            fn time_provider(
+                &self,
+            ) -> &dyn $crate::infrastructure::testing::TimeProvider {
                 &*self.time_provider
             }
 
-            fn mock_registry(&self) -> &$crate::infrastructure::testing::MockRegistry {
+            fn mock_registry(
+                &self,
+            ) -> &$crate::infrastructure::testing::MockRegistry {
                 &self.mock_registry
             }
 
-            fn recorder(&self) -> &$crate::infrastructure::testing::TestRecorder {
+            fn recorder(
+                &self,
+            ) -> &$crate::infrastructure::testing::TestRecorder {
                 &self.recorder
             }
 
-            fn execute_command(&mut self, command: &str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>> {
+            fn execute_command(
+                &mut self,
+                command: &str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<Output = Result<(), String>>
+                        + Send
+                        + '_,
+                >,
+            > {
                 self.recorder.record_command(command.to_string());
                 Box::pin(async { Ok(()) })
             }
 
-            fn execute_query(&self, query: &str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>> {
+            fn execute_query(
+                &self,
+                query: &str,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<Output = Result<String, String>>
+                        + Send
+                        + '_,
+                >,
+            > {
                 self.recorder.record_query(query.to_string());
                 Box::pin(async move { Ok(String::new()) })
             }

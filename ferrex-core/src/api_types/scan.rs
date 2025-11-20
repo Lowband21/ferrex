@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
@@ -9,7 +11,15 @@ use crate::types::media_events::ScanProgressEvent;
 
 /// Lifecycle state of a background scan job
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[serde(rename_all = "snake_case")]
 #[rkyv(derive(Debug, PartialEq, Eq))]
@@ -23,7 +33,15 @@ pub enum ScanLifecycleStatus {
 }
 
 /// Snapshot of a scan job used for dashboards and SSE updates
-#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct ScanSnapshotDto {
     pub scan_id: Uuid,
@@ -103,6 +121,7 @@ pub struct ScanCommandAcceptedResponse {
 /// Re-export media scan SSE payloads for downstream clients
 pub mod events {
     pub use crate::types::media_events::{
-        MediaEvent, ScanEventMetadata, ScanProgressEvent, ScanStageLatencySummary,
+        MediaEvent, ScanEventMetadata, ScanProgressEvent,
+        ScanStageLatencySummary,
     };
 }

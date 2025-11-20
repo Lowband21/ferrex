@@ -130,7 +130,10 @@ impl SyncSession {
     }
 
     /// Add a participant to the session
-    pub fn add_participant(&mut self, participant: Participant) -> Result<(), SyncSessionError> {
+    pub fn add_participant(
+        &mut self,
+        participant: Participant,
+    ) -> Result<(), SyncSessionError> {
         // Limit to 10 participants
         if self.participants.len() >= 10 {
             return Err(SyncSessionError::SessionFull);

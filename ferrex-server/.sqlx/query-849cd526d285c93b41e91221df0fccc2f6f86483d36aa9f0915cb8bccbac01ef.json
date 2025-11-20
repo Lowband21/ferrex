@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO episode_translations (\n                episode_id, iso_3166_1, iso_639_1, name, english_name,\n                title, overview, homepage, tagline\n            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "849cd526d285c93b41e91221df0fccc2f6f86483d36aa9f0915cb8bccbac01ef"
+}

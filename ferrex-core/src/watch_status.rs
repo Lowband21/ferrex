@@ -74,7 +74,8 @@ impl Serialize for UserWatchState {
         use serde::ser::SerializeStruct;
 
         // Convert HashMap<MediaID, InProgressItem> to Vec<&InProgressItem> for serialization
-        let in_progress_vec: Vec<&InProgressItem> = self.in_progress.values().collect();
+        let in_progress_vec: Vec<&InProgressItem> =
+            self.in_progress.values().collect();
 
         let mut state = serializer.serialize_struct("UserWatchState", 2)?;
         state.serialize_field("in_progress", &in_progress_vec)?;
@@ -296,7 +297,10 @@ impl UserWatchState {
     }
 
     /// Get continue watching items (sorted by last watched)
-    pub fn get_continue_watching(self, _limit: usize) -> HashMap<Uuid, InProgressItem> {
+    pub fn get_continue_watching(
+        self,
+        _limit: usize,
+    ) -> HashMap<Uuid, InProgressItem> {
         self.in_progress
         //let mut items: Vec<InProgressItem> = self.in_progress.values().cloned().collect();
         //items.sort_by(|a, b| b.last_watched.cmp(&a.last_watched));

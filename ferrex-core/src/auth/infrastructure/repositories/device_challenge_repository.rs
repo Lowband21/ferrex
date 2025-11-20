@@ -5,7 +5,9 @@ use sqlx::PgPool;
 use std::fmt;
 use uuid::Uuid;
 
-use crate::auth::domain::repositories::{DeviceChallengeRecord, DeviceChallengeRepository};
+use crate::auth::domain::repositories::{
+    DeviceChallengeRecord, DeviceChallengeRepository,
+};
 
 pub struct PostgresDeviceChallengeRepository {
     pool: PgPool,
@@ -82,7 +84,10 @@ impl DeviceChallengeRepository for PostgresDeviceChallengeRepository {
         Ok(())
     }
 
-    async fn consume_if_fresh(&self, id: Uuid) -> Result<Option<(Uuid, Vec<u8>)>> {
+    async fn consume_if_fresh(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<(Uuid, Vec<u8>)>> {
         let row = sqlx::query!(
             r#"
             WITH got AS (

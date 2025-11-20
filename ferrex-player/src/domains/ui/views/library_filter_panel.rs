@@ -13,7 +13,9 @@ use crate::{
     },
     state_refactored::State,
 };
-use ferrex_core::player_prelude::{UiDecade, UiGenre, UiResolution, UiWatchStatus};
+use ferrex_core::player_prelude::{
+    UiDecade, UiGenre, UiResolution, UiWatchStatus,
+};
 
 const GENRES_PER_ROW: usize = 4;
 
@@ -26,12 +28,15 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
         let mut chunk_row = row![].spacing(8).align_y(Alignment::Center);
 
         for genre in chunk {
-            let is_selected = ui_state.selected_genres.iter().any(|x| x == genre);
-            let chip = button(text(genre.to_string()).size(14).color(if is_selected {
-                MediaServerTheme::TEXT_PRIMARY
-            } else {
-                MediaServerTheme::TEXT_SECONDARY
-            }))
+            let is_selected =
+                ui_state.selected_genres.iter().any(|x| x == genre);
+            let chip = button(text(genre.to_string()).size(14).color(
+                if is_selected {
+                    MediaServerTheme::TEXT_PRIMARY
+                } else {
+                    MediaServerTheme::TEXT_SECONDARY
+                },
+            ))
             .padding([6, 12])
             .style(filter_chip_style(is_selected))
             .on_press(Message::ToggleFilterGenre(*genre));
@@ -52,11 +57,12 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
 
     // Resolution dropdown
     let resolutions = UiResolution::all();
-    let res_pick = pick_list(resolutions, Some(ui_state.selected_resolution), |opt| {
-        Message::SetFilterResolution(opt)
-    })
-    .placeholder("Resolution")
-    .width(Length::Fixed(140.0));
+    let res_pick =
+        pick_list(resolutions, Some(ui_state.selected_resolution), |opt| {
+            Message::SetFilterResolution(opt)
+        })
+        .placeholder("Resolution")
+        .width(Length::Fixed(140.0));
 
     // Watch status dropdown
     let watch_statuses = UiWatchStatus::all();
@@ -144,7 +150,9 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, Message> {
     .into()
 }
 
-fn filter_chip_style(is_selected: bool) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
+fn filter_chip_style(
+    is_selected: bool,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
     move |_, status| {
         let (background, border_color, text_color) = if is_selected {
             match status {

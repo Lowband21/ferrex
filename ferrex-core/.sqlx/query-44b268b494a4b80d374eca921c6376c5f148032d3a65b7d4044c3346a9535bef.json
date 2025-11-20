@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO auth_sessions (\n                    user_id,\n                    device_session_id,\n                    scope,\n                    session_token_hash,\n                    created_at,\n                    expires_at,\n                    last_activity,\n                    metadata\n                )\n                VALUES ($1, $2, $3, $4, $5, $6, $7, '{}'::jsonb)\n                ON CONFLICT (session_token_hash) DO UPDATE\n                SET expires_at = EXCLUDED.expires_at,\n                    last_activity = EXCLUDED.last_activity,\n                    scope = EXCLUDED.scope,\n                    revoked = FALSE,\n                    revoked_at = NULL,\n                    revoked_reason = NULL,\n                    metadata = EXCLUDED.metadata\n                RETURNING id\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "44b268b494a4b80d374eca921c6376c5f148032d3a65b7d4044c3346a9535bef"
+}

@@ -9,10 +9,11 @@ use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::domains::media::messages::Message as MediaMessage;
 use crate::infrastructure::repository::{Accessor, ReadWrite};
 use crate::infrastructure::{
-    api_types::UserWatchState,
-    services::api::ApiService,
+    api_types::UserWatchState, services::api::ApiService,
 };
-use ferrex_core::player_prelude::{InProgressItem, MediaID, MediaIDLike, SeasonDetails};
+use ferrex_core::player_prelude::{
+    InProgressItem, MediaID, MediaIDLike, SeasonDetails,
+};
 use iced::Task;
 use std::sync::Arc;
 
@@ -61,7 +62,12 @@ impl MediaDomainState {
         &self.user_watch_state
     }
 
-    pub fn update_cached_in_progress(&mut self, id: MediaID, position: f32, duration: f32) {
+    pub fn update_cached_in_progress(
+        &mut self,
+        id: MediaID,
+        position: f32,
+        duration: f32,
+    ) {
         if let Some(state) = &mut self.user_watch_state {
             state.in_progress.insert(
                 id.to_uuid(),
@@ -86,10 +92,14 @@ impl MediaDomainState {
     pub fn get_media_progress(&self, media_id: &MediaID) -> Option<f32> {
         if let Some(ref watch_state) = self.user_watch_state {
             // Check if it's in progress
-            if let Some(in_progress) = watch_state.in_progress.get(media_id.as_uuid())
+            if let Some(in_progress) =
+                watch_state.in_progress.get(media_id.as_uuid())
                 && in_progress.duration > 0.0
             {
-                return Some((in_progress.position / in_progress.duration).clamp(0.0, 1.0));
+                return Some(
+                    (in_progress.position / in_progress.duration)
+                        .clamp(0.0, 1.0),
+                );
             }
 
             // Check if it's completed
@@ -155,7 +165,10 @@ impl MediaDomain {
         Task::none()
     }
 
-    pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
+    pub fn handle_event(
+        &mut self,
+        event: &CrossDomainEvent,
+    ) -> Task<DomainMessage> {
         match event {
             CrossDomainEvent::ClearCurrentShowData => {
                 // Clear current show data

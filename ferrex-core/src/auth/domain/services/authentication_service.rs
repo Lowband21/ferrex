@@ -8,15 +8,18 @@ use uuid::Uuid;
 use super::{AuthEventContext, map_domain_events};
 use crate::auth::AuthCrypto;
 use crate::auth::domain::aggregates::{
-    DeviceSession, DeviceSessionError, UserAuthentication, UserAuthenticationError,
+    DeviceSession, DeviceSessionError, UserAuthentication,
+    UserAuthenticationError,
 };
 use crate::auth::domain::events::AuthEvent;
 use crate::auth::domain::repositories::{
-    AuthEventRepository, AuthSessionRecord, AuthSessionRepository, DeviceSessionRepository,
-    RefreshTokenRepository, UserAuthenticationRepository,
+    AuthEventRepository, AuthSessionRecord, AuthSessionRepository,
+    DeviceSessionRepository, RefreshTokenRepository,
+    UserAuthenticationRepository,
 };
 use crate::auth::domain::value_objects::{
-    DeviceFingerprint, RefreshToken, RevocationReason, SessionScope, SessionToken,
+    DeviceFingerprint, RefreshToken, RevocationReason, SessionScope,
+    SessionToken,
 };
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -48,7 +51,9 @@ pub struct AuthenticationService {
     session_store: Arc<dyn AuthSessionRepository>,
     crypto: Arc<AuthCrypto>,
     event_repo: Option<Arc<dyn AuthEventRepository>>,
-    challenge_repo: Option<Arc<dyn crate::auth::domain::repositories::DeviceChallengeRepository>>,
+    challenge_repo: Option<
+        Arc<dyn crate::auth::domain::repositories::DeviceChallengeRepository>,
+    >,
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +93,9 @@ impl PasswordChangeActor {
     fn describe(&self) -> (&'static str, Option<Uuid>) {
         match self {
             Self::UserInitiated => ("user", None),
-            Self::AdminInitiated { admin_user_id } => ("admin", Some(*admin_user_id)),
+            Self::AdminInitiated { admin_user_id } => {
+                ("admin", Some(*admin_user_id))
+            }
         }
     }
 }
@@ -139,14 +146,19 @@ impl AuthenticationService {
         }
     }
 
-    pub fn with_event_repository(mut self, event_repo: Arc<dyn AuthEventRepository>) -> Self {
+    pub fn with_event_repository(
+        mut self,
+        event_repo: Arc<dyn AuthEventRepository>,
+    ) -> Self {
         self.event_repo = Some(event_repo);
         self
     }
 
     pub fn with_challenge_repository(
         mut self,
-        repo: Arc<dyn crate::auth::domain::repositories::DeviceChallengeRepository>,
+        repo: Arc<
+            dyn crate::auth::domain::repositories::DeviceChallengeRepository,
+        >,
     ) -> Self {
         self.challenge_repo = Some(repo);
         self
@@ -171,7 +183,8 @@ impl AuthenticationService {
             .map_err(AuthenticationError::from)?
             .ok_or(AuthenticationError::UserNotFound)?;
 
-        let requires_current = matches!(actor, PasswordChangeActor::UserInitiated);
+        let requires_current =
+            matches!(actor, PasswordChangeActor::UserInitiated);
         if requires_current && current_password.is_none() {
             return Err(AuthenticationError::InvalidCredentials);
         }
@@ -181,17 +194,21 @@ impl AuthenticationService {
                 .crypto
                 .verify_password(current, user.password_hash())
                 .map_err(|err| {
-                    AuthenticationError::DatabaseError(anyhow::anyhow!(err.to_string()))
+                    AuthenticationError::DatabaseError(anyhow::anyhow!(
+                        err.to_string()
+                    ))
                 })?;
             if !verified {
                 return Err(AuthenticationError::InvalidCredentials);
             }
         }
 
-        let password_hash = self
-            .crypto
-            .hash_password(&new_password)
-            .map_err(|err| AuthenticationError::DatabaseError(anyhow::anyhow!(err.to_string())))?;
+        let password_hash =
+            self.crypto.hash_password(&new_password).map_err(|err| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    err.to_string()
+                ))
+            })?;
 
         user.update_password(password_hash);
 
@@ -224,9 +241,9 @@ impl AuthenticationService {
             if let Err(err) = session.revoke()
                 && !matches!(err, DeviceSessionError::DeviceRevoked)
             {
-                return Err(AuthenticationError::DatabaseError(anyhow::anyhow!(
-                    err.to_string()
-                )));
+                return Err(AuthenticationError::DatabaseError(
+                    anyhow::anyhow!(err.to_string()),
+                ));
             }
 
             let events = session.take_events();
@@ -319,7 +336,11 @@ impl AuthenticationService {
         pin_proof: &str,
     ) -> Result<SessionToken, AuthenticationError> {
         let bundle = self
-            .authenticate_device_with_pin(user_id, device_fingerprint, pin_proof)
+            .authenticate_device_with_pin(
+                user_id,
+                device_fingerprint,
+                pin_proof,
+            )
             .await?;
 
         Ok(bundle.session_token)
@@ -332,9 +353,12 @@ impl AuthenticationService {
     ) -> Result<TokenBundle, AuthenticationError> {
         let user = self.authenticate_user(username, password).await?;
 
-        let session_token = SessionToken::generate(Duration::hours(24)).map_err(|_| {
-            AuthenticationError::DatabaseError(anyhow::anyhow!("failed to generate session token"))
-        })?;
+        let session_token = SessionToken::generate(Duration::hours(24))
+            .map_err(|_| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    "failed to generate session token"
+                ))
+            })?;
 
         let session_hash = self.crypto.hash_token(session_token.as_str());
         let session_scope = SessionScope::Full;
@@ -350,14 +374,20 @@ impl AuthenticationService {
             )
             .await?;
 
-        let refresh_token = RefreshToken::generate(Duration::days(30)).map_err(|_| {
-            AuthenticationError::DatabaseError(anyhow::anyhow!("failed to generate refresh token"))
-        })?;
+        let refresh_token = RefreshToken::generate(Duration::days(30))
+            .map_err(|_| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    "failed to generate refresh token"
+                ))
+            })?;
 
         let refresh_hash = self.crypto.hash_token(refresh_token.as_str());
-        let refresh_generation = i32::try_from(refresh_token.generation()).map_err(|_| {
-            AuthenticationError::DatabaseError(anyhow::anyhow!("refresh token generation overflow"))
-        })?;
+        let refresh_generation = i32::try_from(refresh_token.generation())
+            .map_err(|_| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    "refresh token generation overflow"
+                ))
+            })?;
 
         let refresh_record_id = self
             .refresh_repo
@@ -393,7 +423,7 @@ impl AuthenticationService {
         pin_proof: &str,
     ) -> Result<TokenBundle, AuthenticationError> {
         // Load user and device session separately
-        let mut user = self
+        let user = self
             .user_repo
             .find_by_id(user_id)
             .await
@@ -455,22 +485,31 @@ impl AuthenticationService {
 
         let events = session.take_events();
 
-        let session_record_id = self.session_repo.save(&session).await?.ok_or_else(|| {
-            AuthenticationError::DatabaseError(anyhow::anyhow!("failed to persist session token"))
-        })?;
+        let session_record_id =
+            self.session_repo.save(&session).await?.ok_or_else(|| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    "failed to persist session token"
+                ))
+            })?;
 
         let mut context = AuthEventContext::default();
         context.auth_session_id = Some(session_record_id);
         self.publish_events(events, context).await?;
 
-        let refresh_token = RefreshToken::generate(Duration::days(30)).map_err(|_| {
-            AuthenticationError::DatabaseError(anyhow::anyhow!("failed to generate refresh token"))
-        })?;
+        let refresh_token = RefreshToken::generate(Duration::days(30))
+            .map_err(|_| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    "failed to generate refresh token"
+                ))
+            })?;
 
         let refresh_hash = self.crypto.hash_token(refresh_token.as_str());
-        let refresh_generation = i32::try_from(refresh_token.generation()).map_err(|_| {
-            AuthenticationError::DatabaseError(anyhow::anyhow!("refresh token generation overflow"))
-        })?;
+        let refresh_generation = i32::try_from(refresh_token.generation())
+            .map_err(|_| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    "refresh token generation overflow"
+                ))
+            })?;
 
         let refresh_record_id = self
             .refresh_repo
@@ -519,7 +558,10 @@ impl AuthenticationService {
 
             if reused_after_rotation {
                 self.refresh_repo
-                    .revoke_family(record.token.family_id(), RevocationReason::ReuseDetected)
+                    .revoke_family(
+                        record.token.family_id(),
+                        RevocationReason::ReuseDetected,
+                    )
                     .await?;
             }
 
@@ -534,7 +576,9 @@ impl AuthenticationService {
             .mark_used(record.id, RevocationReason::Rotation)
             .await?;
 
-        if record.origin_scope == SessionScope::Playback && record.device_session_id.is_none() {
+        if record.origin_scope == SessionScope::Playback
+            && record.device_session_id.is_none()
+        {
             // Sticky scope enforcement: playback-origin refresh must remain tied to a device
             return Err(AuthenticationError::InvalidCredentials);
         }
@@ -572,28 +616,31 @@ impl AuthenticationService {
 
             let events = session.take_events();
 
-            let session_record_id = self.session_repo.save(&session).await?.ok_or_else(|| {
-                AuthenticationError::DatabaseError(anyhow::anyhow!(
-                    "failed to persist refreshed session token"
-                ))
-            })?;
+            let session_record_id =
+                self.session_repo.save(&session).await?.ok_or_else(|| {
+                    AuthenticationError::DatabaseError(anyhow::anyhow!(
+                        "failed to persist refreshed session token"
+                    ))
+                })?;
 
             let mut context = AuthEventContext::default();
             context.auth_session_id = Some(session_record_id);
             self.publish_events(events, context).await?;
 
-            let refresh_token = record.token.rotate(Duration::days(30)).map_err(|_| {
-                AuthenticationError::DatabaseError(anyhow::anyhow!(
-                    "failed to rotate refresh token"
-                ))
-            })?;
+            let refresh_token =
+                record.token.rotate(Duration::days(30)).map_err(|_| {
+                    AuthenticationError::DatabaseError(anyhow::anyhow!(
+                        "failed to rotate refresh token"
+                    ))
+                })?;
 
             let refresh_hash = self.crypto.hash_token(refresh_token.as_str());
-            let refresh_generation = i32::try_from(refresh_token.generation()).map_err(|_| {
-                AuthenticationError::DatabaseError(anyhow::anyhow!(
-                    "refresh token generation overflow"
-                ))
-            })?;
+            let refresh_generation = i32::try_from(refresh_token.generation())
+                .map_err(|_| {
+                    AuthenticationError::DatabaseError(anyhow::anyhow!(
+                        "refresh token generation overflow"
+                    ))
+                })?;
 
             let refresh_record_id = self
                 .refresh_repo
@@ -620,11 +667,12 @@ impl AuthenticationService {
                 scope: SessionScope::Playback,
             })
         } else {
-            let session_token = SessionToken::generate(Duration::hours(24)).map_err(|_| {
-                AuthenticationError::DatabaseError(anyhow::anyhow!(
-                    "failed to generate session token"
-                ))
-            })?;
+            let session_token = SessionToken::generate(Duration::hours(24))
+                .map_err(|_| {
+                    AuthenticationError::DatabaseError(anyhow::anyhow!(
+                        "failed to generate session token"
+                    ))
+                })?;
 
             let session_hash = self.crypto.hash_token(session_token.as_str());
             let session_record_id = self
@@ -639,18 +687,20 @@ impl AuthenticationService {
                 )
                 .await?;
 
-            let refresh_token = record.token.rotate(Duration::days(30)).map_err(|_| {
-                AuthenticationError::DatabaseError(anyhow::anyhow!(
-                    "failed to rotate refresh token"
-                ))
-            })?;
+            let refresh_token =
+                record.token.rotate(Duration::days(30)).map_err(|_| {
+                    AuthenticationError::DatabaseError(anyhow::anyhow!(
+                        "failed to rotate refresh token"
+                    ))
+                })?;
 
             let refresh_hash = self.crypto.hash_token(refresh_token.as_str());
-            let refresh_generation = i32::try_from(refresh_token.generation()).map_err(|_| {
-                AuthenticationError::DatabaseError(anyhow::anyhow!(
-                    "refresh token generation overflow"
-                ))
-            })?;
+            let refresh_generation = i32::try_from(refresh_token.generation())
+                .map_err(|_| {
+                    AuthenticationError::DatabaseError(anyhow::anyhow!(
+                        "refresh token generation overflow"
+                    ))
+                })?;
 
             let refresh_record_id = self
                 .refresh_repo
@@ -696,7 +746,7 @@ impl AuthenticationService {
         let user_id = session.user_id();
 
         // Load user for verification
-        let mut user = self
+        let user = self
             .user_repo
             .find_by_id(user_id)
             .await
@@ -719,15 +769,24 @@ impl AuthenticationService {
             }
 
             // Verify signature using device public key
-            let (alg_opt, pk_opt) = (session.device_key_alg(), session.device_public_key());
+            let (alg_opt, pk_opt) =
+                (session.device_key_alg(), session.device_public_key());
             let (alg, pk) = match (alg_opt, pk_opt) {
                 (Some(a), Some(k)) => (a, k),
                 _ => return Err(AuthenticationError::DeviceNotTrusted),
             };
 
-            let verified =
-                verify_device_signature(alg, pk, challenge_id, &nonce, user_id, device_signature)
-                    .map_err(|e| AuthenticationError::DatabaseError(anyhow::anyhow!(e)))?;
+            let verified = verify_device_signature(
+                alg,
+                pk,
+                challenge_id,
+                &nonce,
+                user_id,
+                device_signature,
+            )
+            .map_err(|e| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(e))
+            })?;
             if !verified {
                 // Do not increment device failed_attempts for possession failures
                 return Err(AuthenticationError::InvalidCredentials);
@@ -780,22 +839,31 @@ impl AuthenticationService {
 
         let events = session.take_events();
 
-        let session_record_id = self.session_repo.save(&session).await?.ok_or_else(|| {
-            AuthenticationError::DatabaseError(anyhow::anyhow!("failed to persist session token"))
-        })?;
+        let session_record_id =
+            self.session_repo.save(&session).await?.ok_or_else(|| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    "failed to persist session token"
+                ))
+            })?;
 
         let mut context = AuthEventContext::default();
         context.auth_session_id = Some(session_record_id);
         self.publish_events(events, context).await?;
 
-        let refresh_token = RefreshToken::generate(Duration::days(30)).map_err(|_| {
-            AuthenticationError::DatabaseError(anyhow::anyhow!("failed to generate refresh token"))
-        })?;
+        let refresh_token = RefreshToken::generate(Duration::days(30))
+            .map_err(|_| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    "failed to generate refresh token"
+                ))
+            })?;
 
         let refresh_hash = self.crypto.hash_token(refresh_token.as_str());
-        let refresh_generation = i32::try_from(refresh_token.generation()).map_err(|_| {
-            AuthenticationError::DatabaseError(anyhow::anyhow!("refresh token generation overflow"))
-        })?;
+        let refresh_generation = i32::try_from(refresh_token.generation())
+            .map_err(|_| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    "refresh token generation overflow"
+                ))
+            })?;
 
         let refresh_record_id = self
             .refresh_repo
@@ -925,7 +993,8 @@ impl AuthenticationService {
         // Check if the token matches and is valid
         match session.session_token() {
             Some(stored_token)
-                if stored_token.secure_compare(token.as_str()) && stored_token.is_valid() =>
+                if stored_token.secure_compare(token.as_str())
+                    && stored_token.is_valid() =>
             {
                 Ok(session)
             }
@@ -949,7 +1018,10 @@ impl AuthenticationService {
     }
 
     /// Create a short-lived device possession challenge nonce
-    pub async fn get_pin_client_salt(&self, user_id: Uuid) -> Result<Vec<u8>, AuthenticationError> {
+    pub async fn get_pin_client_salt(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<u8>, AuthenticationError> {
         let mut user = self
             .user_repo
             .find_by_id(user_id)
@@ -989,7 +1061,7 @@ impl AuthenticationService {
             .ok_or(AuthenticationError::DeviceNotFound)?;
 
         let mut nonce = vec![0u8; 32];
-        rand::thread_rng().fill_bytes(&mut nonce);
+        rand::rng().fill_bytes(&mut nonce);
         let expires_at = Utc::now() + Duration::seconds(ttl_seconds.max(30));
 
         let id = repo
@@ -1002,11 +1074,14 @@ impl AuthenticationService {
 
 fn map_device_pin_error(err: DeviceSessionError) -> AuthenticationError {
     match err {
-        DeviceSessionError::DeviceNotTrusted | DeviceSessionError::DeviceRevoked => {
+        DeviceSessionError::DeviceNotTrusted
+        | DeviceSessionError::DeviceRevoked => {
             AuthenticationError::DeviceNotTrusted
         }
         DeviceSessionError::InvalidPin => AuthenticationError::InvalidPin,
-        DeviceSessionError::TooManyFailedAttempts => AuthenticationError::TooManyFailedAttempts,
+        DeviceSessionError::TooManyFailedAttempts => {
+            AuthenticationError::TooManyFailedAttempts
+        }
         _ => AuthenticationError::InvalidCredentials,
     }
 }
@@ -1020,7 +1095,9 @@ fn map_user_auth_error(err: UserAuthenticationError) -> AuthenticationError {
         U::AccountInactive => AE::InvalidCredentials,
         U::AccountLocked => AE::TooManyFailedAttempts,
         U::UserNotFound => AE::UserNotFound,
-        other => AE::DatabaseError(anyhow::anyhow!("unexpected auth error: {other}")),
+        other => {
+            AE::DatabaseError(anyhow::anyhow!("unexpected auth error: {other}"))
+        }
     }
 }
 
@@ -1100,14 +1177,21 @@ impl AuthenticationService {
             return Err(AuthenticationError::InvalidCredentials);
         }
 
-        let (alg_opt, pk_opt) = (session.device_key_alg(), session.device_public_key());
+        let (alg_opt, pk_opt) =
+            (session.device_key_alg(), session.device_public_key());
         let (alg, pk) = match (alg_opt, pk_opt) {
             (Some(a), Some(k)) => (a, k),
             _ => return Err(AuthenticationError::DeviceNotTrusted),
         };
-        let verified =
-            verify_device_signature(alg, pk, challenge_id, &nonce, user_id, device_signature)
-                .map_err(|e| AuthenticationError::DatabaseError(anyhow::anyhow!(e)))?;
+        let verified = verify_device_signature(
+            alg,
+            pk,
+            challenge_id,
+            &nonce,
+            user_id,
+            device_signature,
+        )
+        .map_err(|e| AuthenticationError::DatabaseError(anyhow::anyhow!(e)))?;
         if !verified {
             return Err(AuthenticationError::InvalidCredentials);
         }

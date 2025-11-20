@@ -5,14 +5,15 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use ferrex_core::auth::device::AuthDeviceStatus;
-use ferrex_core::identity::auth::domain::value_objects::SessionScope;
+use ferrex_core::auth::domain::value_objects::SessionScope;
 use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, ConfirmClaimResponse,
-    CreateLibraryRequest, FilterIndicesRequest, LatestProgressResponse, Library, LibraryID,
-    LibraryType, Media, MediaQuery, MediaWithStatus, Platform, Role, ScanCommandAcceptedResponse,
-    ScanCommandRequest, ScanConfig, ScanMetrics, StartClaimResponse, StartScanRequest,
-    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions, UserPreferences,
-    UserWatchState,
+    CreateLibraryRequest, FilterIndicesRequest, LatestProgressResponse,
+    Library, LibraryID, LibraryType, Media, MediaQuery, MediaWithStatus,
+    Platform, Role, ScanCommandAcceptedResponse, ScanCommandRequest,
+    ScanConfig, ScanMetrics, StartClaimResponse, StartScanRequest,
+    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions,
+    UserPreferences, UserWatchState,
 };
 use rkyv::util::AlignedVec;
 use uuid::Uuid;
@@ -43,7 +44,7 @@ struct InnerApiState {
 
 impl Default for TestApiService {
     fn default() -> Self {
-        Self::new("http://localhost:3000")
+        Self::new("https://localhost:3000")
     }
 }
 
@@ -123,7 +124,10 @@ impl ApiService for TestApiService {
         Ok(self.inner.read().expect("lock poisoned").libraries.clone())
     }
 
-    async fn fetch_library_media(&self, library_id: Uuid) -> RepositoryResult<Vec<Media>> {
+    async fn fetch_library_media(
+        &self,
+        library_id: Uuid,
+    ) -> RepositoryResult<Vec<Media>> {
         let guard = self.inner.read().expect("lock poisoned");
         Ok(guard
             .library_media
@@ -132,7 +136,10 @@ impl ApiService for TestApiService {
             .unwrap_or_default())
     }
 
-    async fn create_library(&self, request: CreateLibraryRequest) -> RepositoryResult<LibraryID> {
+    async fn create_library(
+        &self,
+        request: CreateLibraryRequest,
+    ) -> RepositoryResult<LibraryID> {
         let CreateLibraryRequest {
             name,
             library_type,
@@ -170,7 +177,9 @@ impl ApiService for TestApiService {
         request: UpdateLibraryRequest,
     ) -> RepositoryResult<()> {
         let mut guard = self.inner.write().expect("lock poisoned");
-        if let Some(library) = guard.libraries.iter_mut().find(|lib| lib.id == id) {
+        if let Some(library) =
+            guard.libraries.iter_mut().find(|lib| lib.id == id)
+        {
             if let Some(name) = request.name {
                 library.name = name;
             }
@@ -234,7 +243,9 @@ impl ApiService for TestApiService {
         })
     }
 
-    async fn fetch_active_scans(&self) -> RepositoryResult<ActiveScansResponse> {
+    async fn fetch_active_scans(
+        &self,
+    ) -> RepositoryResult<ActiveScansResponse> {
         Ok(ActiveScansResponse {
             scans: Vec::new(),
             count: 0,
@@ -274,7 +285,10 @@ impl ApiService for TestApiService {
     }
 
     #[cfg(feature = "demo")]
-    async fn reset_demo(&self, _request: DemoResetRequest) -> RepositoryResult<DemoStatus> {
+    async fn reset_demo(
+        &self,
+        _request: DemoResetRequest,
+    ) -> RepositoryResult<DemoStatus> {
         Err(RepositoryError::UpdateFailed(
             "Demo reset not available in test stub".into(),
         ))
@@ -289,16 +303,23 @@ impl ApiService for TestApiService {
             .clone())
     }
 
-    async fn update_progress(&self, request: &UpdateProgressRequest) -> RepositoryResult<()> {
+    async fn update_progress(
+        &self,
+        request: &UpdateProgressRequest,
+    ) -> RepositoryResult<()> {
         if let Ok(mut guard) = self.inner.write() {
-            guard
-                .watch_state
-                .update_progress(request.media_id, request.position, request.duration);
+            guard.watch_state.update_progress(
+                request.media_id,
+                request.position,
+                request.duration,
+            );
         }
         Ok(())
     }
 
-    async fn list_user_devices(&self) -> RepositoryResult<Vec<AuthenticatedDevice>> {
+    async fn list_user_devices(
+        &self,
+    ) -> RepositoryResult<Vec<AuthenticatedDevice>> {
         Ok(self.inner.read().expect("lock poisoned").devices.clone())
     }
 
@@ -309,7 +330,10 @@ impl ApiService for TestApiService {
         Ok(())
     }
 
-    async fn query_media(&self, _query: MediaQuery) -> RepositoryResult<Vec<MediaWithStatus>> {
+    async fn query_media(
+        &self,
+        _query: MediaQuery,
+    ) -> RepositoryResult<Vec<MediaWithStatus>> {
         Ok(Vec::new())
     }
 
@@ -428,7 +452,9 @@ impl ApiService for TestApiService {
             .current_user
             .clone()
             .ok_or_else(|| {
-                RepositoryError::QueryFailed("No current user available in TestApiService".into())
+                RepositoryError::QueryFailed(
+                    "No current user available in TestApiService".into(),
+                )
             })
     }
 
@@ -439,7 +465,9 @@ impl ApiService for TestApiService {
             .current_permissions
             .clone()
             .ok_or_else(|| {
-                RepositoryError::QueryFailed("No permissions available in TestApiService".into())
+                RepositoryError::QueryFailed(
+                    "No permissions available in TestApiService".into(),
+                )
             })
     }
 
@@ -536,7 +564,10 @@ fn sample_permissions(user_id: Uuid) -> UserPermissions {
             is_system: true,
             created_at: Utc::now().timestamp(),
         }],
-        permissions: HashMap::from([("system:admin".into(), true), ("user:create".into(), true)]),
+        permissions: HashMap::from([
+            ("system:admin".into(), true),
+            ("user:create".into(), true),
+        ]),
         permission_details: None,
     }
 }

@@ -1,5 +1,7 @@
 use super::Message;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use base64::{
+    Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
+};
 use ferrex_core::player_prelude::ScanProgressEvent;
 use iced::Subscription;
 use rkyv::{from_bytes, rancor::Error as RkyvError};
@@ -54,13 +56,17 @@ pub fn scan_progress(
     )
 }
 
-fn build_scan_subscription_stream(id: &ScanProgressId) -> BoxStream<'static, Message> {
+fn build_scan_subscription_stream(
+    id: &ScanProgressId,
+) -> BoxStream<'static, Message> {
     let server_url = id.server_url.clone();
     let scan_id = id.scan_id;
     let api = Arc::clone(&id.api);
     Box::pin(futures::stream::unfold(
         ScanState::new(server_url, scan_id, api),
-        |mut state| async move { state.next_event().await.map(|message| (message, state)) },
+        |mut state| async move {
+            state.next_event().await.map(|message| (message, state))
+        },
     ))
 }
 
@@ -81,7 +87,11 @@ struct ScanState {
 }
 
 impl ScanState {
-    fn new(server_url: String, scan_id: Uuid, api_service: Arc<dyn ApiService>) -> Self {
+    fn new(
+        server_url: String,
+        scan_id: Uuid,
+        api_service: Arc<dyn ApiService>,
+    ) -> Self {
         Self {
             server_url,
             scan_id,
@@ -110,7 +120,11 @@ impl ScanState {
                         continue;
                     }
                     Some(ScanEvent::Error(err)) => {
-                        log::warn!("scan SSE error for {}: {}", self.scan_id, err);
+                        log::warn!(
+                            "scan SSE error for {}: {}",
+                            self.scan_id,
+                            err
+                        );
                         self.reset_stream();
                         return None;
                     }
@@ -149,8 +163,12 @@ impl ScanState {
                 Ok(mut event_source) => {
                     while let Some(event) = event_source.next().await {
                         let scan_event = match event {
-                            Ok(reqwest_eventsource::Event::Open) => ScanEvent::Open,
-                            Ok(reqwest_eventsource::Event::Message(msg)) => ScanEvent::Message(msg),
+                            Ok(reqwest_eventsource::Event::Open) => {
+                                ScanEvent::Open
+                            }
+                            Ok(reqwest_eventsource::Event::Message(msg)) => {
+                                ScanEvent::Message(msg)
+                            }
                             Err(e) => ScanEvent::Error(e.to_string()),
                         };
 
@@ -181,8 +199,13 @@ impl ScanState {
         }
     }
 
-    fn handle_sse_message(&mut self, msg: eventsource_stream::Event) -> Option<Message> {
-        if matches!(msg.data.as_str(), "keepalive" | "keep-alive") || msg.data.is_empty() {
+    fn handle_sse_message(
+        &mut self,
+        msg: eventsource_stream::Event,
+    ) -> Option<Message> {
+        if matches!(msg.data.as_str(), "keepalive" | "keep-alive")
+            || msg.data.is_empty()
+        {
             return None;
         }
 
@@ -211,7 +234,10 @@ impl ScanState {
     }
 }
 
-fn decode_scan_progress_event(payload: &str, scan_id: Uuid) -> Result<ScanProgressEvent, String> {
+fn decode_scan_progress_event(
+    payload: &str,
+    scan_id: Uuid,
+) -> Result<ScanProgressEvent, String> {
     if payload.trim().is_empty() {
         return Err("empty payload".to_string());
     }
@@ -229,13 +255,16 @@ fn decode_scan_progress_event(payload: &str, scan_id: Uuid) -> Result<ScanProgre
         }
     }
 
-    serde_json::from_str::<ScanProgressEvent>(payload).map_err(|err| err.to_string())
+    serde_json::from_str::<ScanProgressEvent>(payload)
+        .map_err(|err| err.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+    use base64::{
+        Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
+    };
     use chrono::Utc;
     use ferrex_core::player_prelude::{LibraryID, ScanStageLatencySummary};
     use rkyv::rancor::Error as RkyvError;
@@ -271,8 +300,8 @@ mod tests {
         let bytes = to_bytes::<RkyvError>(&event).expect("serialize rkyv");
         let encoded = BASE64_STANDARD.encode(bytes.as_slice());
 
-        let decoded =
-            decode_scan_progress_event(&encoded, event.scan_id).expect("decode rkyv event");
+        let decoded = decode_scan_progress_event(&encoded, event.scan_id)
+            .expect("decode rkyv event");
         assert_eq!(decoded.version, event.version);
         assert_eq!(decoded.scan_id, event.scan_id);
         assert_eq!(decoded.library_id, event.library_id);
@@ -282,12 +311,18 @@ mod tests {
         assert_eq!(decoded.sequence, event.sequence);
         assert_eq!(decoded.current_path, event.current_path);
         assert_eq!(decoded.path_key, event.path_key);
-        assert_eq!(decoded.p95_stage_latencies_ms, event.p95_stage_latencies_ms);
+        assert_eq!(
+            decoded.p95_stage_latencies_ms,
+            event.p95_stage_latencies_ms
+        );
         assert_eq!(decoded.correlation_id, event.correlation_id);
         assert_eq!(decoded.idempotency_key, event.idempotency_key);
         assert_eq!(decoded.retrying_items, event.retrying_items);
         assert_eq!(decoded.dead_lettered_items, event.dead_lettered_items);
-        assert_eq!(decoded.emitted_at.timestamp(), event.emitted_at.timestamp());
+        assert_eq!(
+            decoded.emitted_at.timestamp(),
+            event.emitted_at.timestamp()
+        );
     }
 
     #[test]
@@ -295,7 +330,8 @@ mod tests {
         let event = sample_progress_event();
         let json = serde_json::to_string(&event).expect("json encode");
 
-        let decoded = decode_scan_progress_event(&json, event.scan_id).expect("decode json event");
+        let decoded = decode_scan_progress_event(&json, event.scan_id)
+            .expect("decode json event");
         assert_eq!(decoded, event);
     }
 }

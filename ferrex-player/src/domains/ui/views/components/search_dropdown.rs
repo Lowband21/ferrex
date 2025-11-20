@@ -62,9 +62,12 @@ pub fn view_search_dropdown(state: &State) -> Option<Element<'_, Message>> {
     } else if search_state.results.is_empty() {
         // Show no results state
         results_column = results_column.push(
-            container(text(format!("No results for \"{}\"", search_state.query)).size(14))
-                .padding(Padding::from([12.0, 16.0]))
-                .width(Length::Fill),
+            container(
+                text(format!("No results for \"{}\"", search_state.query))
+                    .size(14),
+            )
+            .padding(Padding::from([12.0, 16.0]))
+            .width(Length::Fill),
         );
     } else {
         // Show results
@@ -79,7 +82,8 @@ pub fn view_search_dropdown(state: &State) -> Option<Element<'_, Message>> {
             .enumerate()
         {
             let is_selected = search_state.selected_index == Some(index);
-            results_column = results_column.push(view_search_result(result, is_selected));
+            results_column =
+                results_column.push(view_search_result(result, is_selected));
         }
 
         // Show "Load More" button if there are more results
@@ -188,7 +192,10 @@ pub fn view_search_dropdown(state: &State) -> Option<Element<'_, Message>> {
 }
 
 /// Render an individual search result item
-fn view_search_result(result: &SearchResult, is_selected: bool) -> Element<'_, Message> {
+fn view_search_result(
+    result: &SearchResult,
+    is_selected: bool,
+) -> Element<'_, Message> {
     let background_color = if is_selected {
         Color::from_rgba(0.3, 0.3, 0.3, 0.8)
     } else {
@@ -233,7 +240,9 @@ fn view_search_result(result: &SearchResult, is_selected: bool) -> Element<'_, M
             }),
     )
     .on_press(DomainMessage::Search(
-        crate::domains::search::messages::Message::SelectResult(result.media_ref.clone()),
+        crate::domains::search::messages::Message::SelectResult(
+            result.media_ref.clone(),
+        ),
     ))
     .style(ButtonStyle::Text.style())
     .width(Length::Fill)
@@ -265,7 +274,9 @@ pub fn view_search_fullscreen(state: &State) -> Element<'_, Message> {
     let header = row![
         button(text("← Back").size(14))
             .on_press(DomainMessage::Search(
-                crate::domains::search::messages::Message::SetMode(SearchMode::Dropdown)
+                crate::domains::search::messages::Message::SetMode(
+                    SearchMode::Dropdown
+                )
             ))
             .style(ButtonStyle::Text.style()),
         Space::new().width(Length::Fixed(20.0)),
@@ -305,7 +316,8 @@ pub fn view_search_fullscreen(state: &State) -> Element<'_, Message> {
     } else {
         // Show all results in a grid
         for result in &search_state.results {
-            results_column = results_column.push(view_search_result_fullscreen(result));
+            results_column =
+                results_column.push(view_search_result_fullscreen(result));
         }
 
         // Load more button
@@ -327,11 +339,9 @@ pub fn view_search_fullscreen(state: &State) -> Element<'_, Message> {
 
     column![
         header,
-        container(
-            scrollable(results_column).direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::default()
-            ))
-        )
+        container(scrollable(results_column).direction(
+            scrollable::Direction::Vertical(scrollable::Scrollbar::default())
+        ))
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(Padding::from([0.0, 20.0]))
@@ -347,7 +357,9 @@ pub fn view_search_fullscreen(state: &State) -> Element<'_, Message> {
     ),
     profiling::function
 )]
-fn view_search_result_fullscreen(result: &SearchResult) -> Element<'_, Message> {
+fn view_search_result_fullscreen(
+    result: &SearchResult,
+) -> Element<'_, Message> {
     let mut content_row = row![].spacing(16).align_y(Alignment::Center);
 
     // Larger icon/poster area
@@ -379,7 +391,8 @@ fn view_search_result_fullscreen(result: &SearchResult) -> Element<'_, Message> 
     }
 
     if let Some(year) = result.year {
-        text_column = text_column.push(text(format!("Year: {}", year)).size(12));
+        text_column =
+            text_column.push(text(format!("Year: {}", year)).size(12));
     }
 
     content_row = content_row.push(text_column);
@@ -390,9 +403,9 @@ fn view_search_result_fullscreen(result: &SearchResult) -> Element<'_, Message> 
             .width(Length::Fill)
             .style(|_theme: &Theme| {
                 container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(
-                        0.15, 0.15, 0.15, 0.8,
-                    ))),
+                    background: Some(iced::Background::Color(
+                        Color::from_rgba(0.15, 0.15, 0.15, 0.8),
+                    )),
                     border: iced::Border {
                         color: Color::from_rgb(0.25, 0.25, 0.25),
                         width: 1.0,
@@ -403,7 +416,9 @@ fn view_search_result_fullscreen(result: &SearchResult) -> Element<'_, Message> 
             }),
     )
     .on_press(DomainMessage::Search(
-        crate::domains::search::messages::Message::SelectResult(result.media_ref.clone()),
+        crate::domains::search::messages::Message::SelectResult(
+            result.media_ref.clone(),
+        ),
     ))
     .style(ButtonStyle::Text.style())
     .width(Length::Fill)

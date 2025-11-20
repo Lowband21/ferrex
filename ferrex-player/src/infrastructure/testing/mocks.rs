@@ -66,12 +66,13 @@ impl MockService for SimpleMock {
 
     fn verify(&self) -> Result<(), String> {
         if let Some(expected) = self.expected_calls
-            && self.call_count != expected {
-                return Err(format!(
-                    "Expected {} calls, got {}",
-                    expected, self.call_count
-                ));
-            }
+            && self.call_count != expected
+        {
+            return Err(format!(
+                "Expected {} calls, got {}",
+                expected, self.call_count
+            ));
+        }
         Ok(())
     }
 
@@ -365,7 +366,9 @@ macro_rules! mock_service {
         impl $name {
             pub fn new() -> Self {
                 Self {
-                    inner: $crate::infrastructure::testing::mocks::SimpleMock::new(),
+                    inner:
+                        $crate::infrastructure::testing::mocks::SimpleMock::new(
+                        ),
                 }
             }
 
@@ -448,7 +451,8 @@ mod tests {
         let mock = SimpleMock::new().expect_calls(1);
         registry.register::<UserService, _>(mock);
 
-        let handle: MockHandle<SimpleMock> = registry.get::<UserService, _>().unwrap();
+        let handle: MockHandle<SimpleMock> =
+            registry.get::<UserService, _>().unwrap();
 
         handle
             .with_mut(|mock| {
@@ -464,12 +468,15 @@ mod tests {
     fn test_domain_mock() {
         let registry = MockRegistry::new();
 
-        let mock = DomainMock::new().with_response("get_user".to_string(), "user123".to_string());
+        let mock = DomainMock::new()
+            .with_response("get_user".to_string(), "user123".to_string());
 
         registry.register::<UserService, _>(mock);
 
-        let result = registry
-            .with_mock_mut::<UserService, DomainMock, _, _>(|mock| mock.execute("get_user"));
+        let result =
+            registry.with_mock_mut::<UserService, DomainMock, _, _>(|mock| {
+                mock.execute("get_user")
+            });
 
         assert_eq!(result, Some(Some("user123".to_string())));
     }
@@ -478,7 +485,8 @@ mod tests {
     fn test_mock_not_found() {
         let registry = MockRegistry::new();
 
-        let handle: Option<MockHandle<SimpleMock>> = registry.get::<UserService, _>();
+        let handle: Option<MockHandle<SimpleMock>> =
+            registry.get::<UserService, _>();
         assert!(handle.is_none());
     }
 
@@ -495,7 +503,10 @@ mod tests {
 
         registry.reset_all();
 
-        let count = registry.with_mock::<UserService, SimpleMock, _, _>(|mock| mock.call_count());
+        let count =
+            registry.with_mock::<UserService, SimpleMock, _, _>(|mock| {
+                mock.call_count()
+            });
 
         assert_eq!(count, Some(0));
     }

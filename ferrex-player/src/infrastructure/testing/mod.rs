@@ -52,14 +52,19 @@ pub mod utils;
 
 // Re-export commonly used types
 pub use domain::{
-    DomainBoundary, DomainContextBuilder, DomainTestContext, EventBus, GenericDomainContext,
-    HarnessConfig, InMemoryEventBus, ServiceDependency, TestHarness, TestResult,
+    DomainBoundary, DomainContextBuilder, DomainTestContext, EventBus,
+    GenericDomainContext, HarnessConfig, InMemoryEventBus, ServiceDependency,
+    TestHarness, TestResult,
 };
 pub use executor::{ExecutionMode, TaskTestExt, TestExecutor};
-pub use mocks::{DomainMock, MockBuilder, MockHandle, MockRegistry, MockService, SimpleMock};
+pub use mocks::{
+    DomainMock, MockBuilder, MockHandle, MockRegistry, MockService, SimpleMock,
+};
 pub use recorder::{Operation, OperationType, StateSnapshot, TestRecorder};
 pub use stubs::{TestApiService, TestAuthService, TestSettingsService};
-pub use time::{SystemTimeProvider, TimeContext, TimeProvider, VirtualTimeProvider};
+pub use time::{
+    SystemTimeProvider, TimeContext, TimeProvider, VirtualTimeProvider,
+};
 
 // The macros are already exported at the crate root via #[macro_export]
 // They don't need to be re-exported here

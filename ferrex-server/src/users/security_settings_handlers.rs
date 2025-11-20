@@ -35,7 +35,9 @@ impl TryFrom<PasswordPolicyInput> for PasswordPolicy {
 
     fn try_from(value: PasswordPolicyInput) -> Result<Self, Self::Error> {
         if value.min_length == 0 {
-            return Err(AppError::bad_request("Minimum length must be at least 1"));
+            return Err(AppError::bad_request(
+                "Minimum length must be at least 1",
+            ));
         }
 
         Ok(PasswordPolicy {
@@ -59,17 +61,18 @@ pub async fn get_security_settings(
     State(state): State<AppState>,
     Extension(_admin): Extension<User>,
 ) -> AppResult<Json<ApiResponse<SecuritySettingsResponse>>> {
-    let repo = state.unit_of_work.security_settings.clone();
-    let security_settings = repo
-        .get_settings()
-        .await
-        .map_err(|e| AppError::internal(format!("Failed to load security settings: {e}")))?;
+    let repo = state.unit_of_work().security_settings.clone();
+    let security_settings = repo.get_settings().await.map_err(|e| {
+        AppError::internal(format!("Failed to load security settings: {e}"))
+    })?;
 
     Ok(Json(ApiResponse::success(SecuritySettingsResponse {
         admin_password_policy: PasswordPolicyResponse::from(
             &security_settings.admin_password_policy,
         ),
-        user_password_policy: PasswordPolicyResponse::from(&security_settings.user_password_policy),
+        user_password_policy: PasswordPolicyResponse::from(
+            &security_settings.user_password_policy,
+        ),
     })))
 }
 
@@ -78,14 +81,16 @@ pub async fn update_security_settings(
     Extension(admin): Extension<User>,
     Json(request): Json<UpdateSecuritySettingsRequest>,
 ) -> AppResult<Json<ApiResponse<SecuritySettingsResponse>>> {
-    let admin_policy: PasswordPolicy = request.admin_password_policy.try_into()?;
-    let user_policy: PasswordPolicy = request.user_password_policy.try_into()?;
+    let admin_policy: PasswordPolicy =
+        request.admin_password_policy.try_into()?;
+    let user_policy: PasswordPolicy =
+        request.user_password_policy.try_into()?;
 
     // If enforcement is on, ensure the policy is actually usable
     validate_enforced_policy(&admin_policy)?;
     validate_enforced_policy(&user_policy)?;
 
-    let repo = state.unit_of_work.security_settings.clone();
+    let repo = state.unit_of_work().security_settings.clone();
     let updated = repo
         .update_settings(SecuritySettingsUpdate {
             admin_password_policy: admin_policy,
@@ -93,7 +98,11 @@ pub async fn update_security_settings(
             updated_by: Some(admin.id),
         })
         .await
-        .map_err(|e| AppError::internal(format!("Failed to update security settings: {e}")))?;
+        .map_err(|e| {
+            AppError::internal(format!(
+                "Failed to update security settings: {e}"
+            ))
+        })?;
 
     info!(
         "Admin {} ({}) updated security settings",
@@ -101,8 +110,12 @@ pub async fn update_security_settings(
     );
 
     Ok(Json(ApiResponse::success(SecuritySettingsResponse {
-        admin_password_policy: PasswordPolicyResponse::from(&updated.admin_password_policy),
-        user_password_policy: PasswordPolicyResponse::from(&updated.user_password_policy),
+        admin_password_policy: PasswordPolicyResponse::from(
+            &updated.admin_password_policy,
+        ),
+        user_password_policy: PasswordPolicyResponse::from(
+            &updated.user_password_policy,
+        ),
     })))
 }
 

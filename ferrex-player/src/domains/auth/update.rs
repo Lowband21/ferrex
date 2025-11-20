@@ -1,5 +1,7 @@
 use super::update_handlers::*;
-use crate::common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult};
+use crate::common::messages::{
+    CrossDomainEvent, DomainMessage, DomainUpdateResult,
+};
 use crate::domains::auth::messages as auth;
 use crate::state_refactored::State;
 use iced::Task;
@@ -20,7 +22,10 @@ macro_rules! wrap_task {
     ),
     profiling::function
 )]
-pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateResult {
+pub fn update_auth(
+    state: &mut State,
+    message: auth::Message,
+) -> DomainUpdateResult {
     match message {
         // Core auth flow
         auth::Message::CheckAuthStatus => {
@@ -86,12 +91,16 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
         // Login results
         auth::Message::LoginSuccess(user, permissions) => {
             // Handle login success with cross-domain events
-            let task = handle_login_success(state, user.clone(), permissions.clone());
+            let task =
+                handle_login_success(state, user.clone(), permissions.clone());
             let events = vec![
                 CrossDomainEvent::UserAuthenticated(user, permissions),
                 CrossDomainEvent::AuthenticationComplete,
             ];
-            DomainUpdateResult::with_events(task.map(DomainMessage::Auth), events)
+            DomainUpdateResult::with_events(
+                task.map(DomainMessage::Auth),
+                events,
+            )
         }
 
         auth::Message::WatchStatusLoaded(result) => {
@@ -108,7 +117,10 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
                 vec![]
             };
 
-            DomainUpdateResult::with_events(task.map(DomainMessage::Auth), events)
+            DomainUpdateResult::with_events(
+                task.map(DomainMessage::Auth),
+                events,
+            )
         }
 
         auth::Message::Logout => {
@@ -124,7 +136,10 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
                 CrossDomainEvent::ClearCurrentShowData,
                 CrossDomainEvent::UserLoggedOut,
             ];
-            DomainUpdateResult::with_events(task.map(DomainMessage::Auth), events)
+            DomainUpdateResult::with_events(
+                task.map(DomainMessage::Auth),
+                events,
+            )
         }
 
         // Password login
@@ -236,7 +251,11 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
         }
 
         auth::Message::SetupComplete(access_token, refresh_token) => {
-            wrap_task!(handle_setup_complete(state, access_token, refresh_token,))
+            wrap_task!(handle_setup_complete(
+                state,
+                access_token,
+                refresh_token,
+            ))
         }
 
         auth::Message::SetupError(error) => {
@@ -276,7 +295,9 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
         }
 
         // Command execution
-        auth::Message::ExecuteCommand(command) => handle_auth_command(state, command),
+        auth::Message::ExecuteCommand(command) => {
+            handle_auth_command(state, command)
+        }
 
         auth::Message::CommandResult(command, result) => {
             handle_auth_command_result(state, command, result)
@@ -293,7 +314,10 @@ pub fn update_auth(state: &mut State, message: auth::Message) -> DomainUpdateRes
     ),
     profiling::function
 )]
-fn handle_auth_command(state: &mut State, command: auth::AuthCommand) -> DomainUpdateResult {
+fn handle_auth_command(
+    state: &mut State,
+    command: auth::AuthCommand,
+) -> DomainUpdateResult {
     info!("Executing auth command: {}", command.sanitized_display());
 
     // RUS-136: Use trait-based auth_service instead of auth_manager
@@ -311,7 +335,9 @@ fn handle_auth_command(state: &mut State, command: auth::AuthCommand) -> DomainU
 
 /// Execute an auth command using the auth service
 async fn execute_auth_command(
-    auth_service: &std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
+    auth_service: &std::sync::Arc<
+        dyn crate::infrastructure::services::auth::AuthService,
+    >,
     command: &auth::AuthCommand,
 ) -> auth::AuthCommandResult {
     match command {
@@ -321,7 +347,9 @@ async fn execute_auth_command(
         } => {
             // Note: This would require a change_password method on AuthManager
             // For now, return not implemented
-            auth::AuthCommandResult::Error("Password change not yet implemented".to_string())
+            auth::AuthCommandResult::Error(
+                "Password change not yet implemented".to_string(),
+            )
         }
 
         auth::AuthCommand::SetUserPin { pin } => {
@@ -337,7 +365,9 @@ async fn execute_auth_command(
         auth::AuthCommand::RemoveUserPin => {
             // Note: This would require a remove_device_pin method on AuthManager
             // For now, return not implemented
-            auth::AuthCommandResult::Error("PIN removal not yet implemented".to_string())
+            auth::AuthCommandResult::Error(
+                "PIN removal not yet implemented".to_string(),
+            )
         }
 
         auth::AuthCommand::EnableAdminPinUnlock => {

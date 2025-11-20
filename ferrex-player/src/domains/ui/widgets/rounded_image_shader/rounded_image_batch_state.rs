@@ -6,14 +6,16 @@
 //! frame budget and texture cache state are known.
 
 use super::{
-    AnimatedPosterBounds, AnimationType, create_batch_instance, create_placeholder_instance,
+    AnimatedPosterBounds, AnimationType, create_batch_instance,
+    create_placeholder_instance,
 };
 use crate::infrastructure::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME;
 use bytemuck::{Pod, Zeroable};
 use iced::widget::image::Handle;
 use iced::{Color, Point, Rectangle as LayoutRect};
 use iced_wgpu::primitive::{
-    PrepareContext, PrimitiveBatchState, RenderContext, buffer_manager::InstanceBufferManager,
+    PrepareContext, PrimitiveBatchState, RenderContext,
+    buffer_manager::InstanceBufferManager,
 };
 use iced_wgpu::wgpu;
 use std::collections::HashMap;
@@ -138,9 +140,15 @@ impl RoundedImageBatchState {
     }
 
     /// Lazily creates the render pipeline once the atlas layout is known.
-    fn ensure_pipeline(&mut self, device: &wgpu::Device, atlas_layout: Arc<wgpu::BindGroupLayout>) {
+    fn ensure_pipeline(
+        &mut self,
+        device: &wgpu::Device,
+        atlas_layout: Arc<wgpu::BindGroupLayout>,
+    ) {
         if let Some(existing) = &self.atlas_bind_group_layout {
-            if Arc::ptr_eq(existing, &atlas_layout) && self.render_pipeline.is_some() {
+            if Arc::ptr_eq(existing, &atlas_layout)
+                && self.render_pipeline.is_some()
+            {
                 return;
             }
 
@@ -151,49 +159,54 @@ impl RoundedImageBatchState {
             }
         }
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Rounded Image Pipeline Layout (Batched)"),
-            bind_group_layouts: &[&self.globals_bind_group_layout, atlas_layout.as_ref()],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Rounded Image Pipeline Layout (Batched)"),
+                bind_group_layouts: &[
+                    &self.globals_bind_group_layout,
+                    atlas_layout.as_ref(),
+                ],
+                push_constant_ranges: &[],
+            });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Rounded Image Pipeline (Batched)"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &self.shader,
-                entry_point: Some("vs_main"),
-                buffers: &[Self::vertex_buffer_layout()],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &self.shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: self.surface_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        });
+        let pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Rounded Image Pipeline (Batched)"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &self.shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[Self::vertex_buffer_layout()],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
 
         self.render_pipeline = Some(Arc::new(pipeline));
         self.atlas_bind_group_layout = Some(atlas_layout);
@@ -245,12 +258,14 @@ impl PrimitiveBatchState for RoundedImageBatchState {
     where
         Self: Sized,
     {
-        let shader = Arc::new(device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Rounded Image Shader (Batched)"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/rounded_image.wgsl").into(),
-            ),
-        }));
+        let shader = Arc::new(device.create_shader_module(
+            wgpu::ShaderModuleDescriptor {
+                label: Some("Rounded Image Shader (Batched)"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!("../../shaders/rounded_image.wgsl").into(),
+                ),
+            },
+        ));
 
         let globals_bind_group_layout = Arc::new(
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -263,8 +278,12 @@ impl PrimitiveBatchState for RoundedImageBatchState {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
                             min_binding_size: Some(
-                                std::num::NonZeroU64::new(std::mem::size_of::<Globals>() as u64)
-                                    .expect("globals size > 0"),
+                                std::num::NonZeroU64::new(std::mem::size_of::<
+                                    Globals,
+                                >(
+                                )
+                                    as u64)
+                                .expect("globals size > 0"),
                             ),
                         },
                         count: None,
@@ -272,20 +291,23 @@ impl PrimitiveBatchState for RoundedImageBatchState {
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        ty: wgpu::BindingType::Sampler(
+                            wgpu::SamplerBindingType::Filtering,
+                        ),
                         count: None,
                     },
                 ],
             }),
         );
 
-        let sampler = Arc::new(device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("Rounded Image Sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
-            ..wgpu::SamplerDescriptor::default()
-        }));
+        let sampler =
+            Arc::new(device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("Rounded Image Sampler"),
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
+                ..wgpu::SamplerDescriptor::default()
+            }));
 
         Self {
             pending_primitives: Vec::new(),
@@ -316,7 +338,8 @@ impl PrimitiveBatchState for RoundedImageBatchState {
             self.ensure_pipeline(context.device, atlas_layout);
 
             for pending in std::mem::take(&mut self.pending_primitives) {
-                let mut atlas_region = image_cache.cached_raster_region(&pending.handle);
+                let mut atlas_region =
+                    image_cache.cached_raster_region(&pending.handle);
                 let was_cached = atlas_region.is_some();
 
                 if !was_cached {
@@ -345,10 +368,16 @@ impl PrimitiveBatchState for RoundedImageBatchState {
 
                     load_time_ref = match (pending.load_time, entry) {
                         (Some(explicit), _) => Some(explicit),
-                        (None, std::collections::hash_map::Entry::Occupied(occupied)) => {
-                            Some(*occupied.get())
-                        }
-                        (None, std::collections::hash_map::Entry::Vacant(vacant)) => {
+                        (
+                            None,
+                            std::collections::hash_map::Entry::Occupied(
+                                occupied,
+                            ),
+                        ) => Some(*occupied.get()),
+                        (
+                            None,
+                            std::collections::hash_map::Entry::Vacant(vacant),
+                        ) => {
                             let instant = Instant::now();
                             vacant.insert(instant);
                             Some(instant)
@@ -391,9 +420,11 @@ impl PrimitiveBatchState for RoundedImageBatchState {
         }
 
         let pending_before_upload = self.instance_manager.pending_count();
-        let upload_result =
-            self.instance_manager
-                .upload(context.device, context.encoder, context.belt);
+        let upload_result = self.instance_manager.upload(
+            context.device,
+            context.encoder,
+            context.belt,
+        );
 
         if upload_result.is_none() {
             if pending_before_upload > 0 {
@@ -413,12 +444,14 @@ impl PrimitiveBatchState for RoundedImageBatchState {
         };
 
         if self.globals_buffer.is_none() {
-            self.globals_buffer = Some(context.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Rounded Image Globals Buffer (Batched)"),
-                size: std::mem::size_of::<Globals>() as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            self.globals_buffer =
+                Some(context.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Rounded Image Globals Buffer (Batched)"),
+                    size: std::mem::size_of::<Globals>() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
         }
 
         if let Some(buffer) = &self.globals_buffer {
@@ -434,22 +467,27 @@ impl PrimitiveBatchState for RoundedImageBatchState {
                 .copy_from_slice(bytemuck::bytes_of(&globals));
 
             if self.globals_bind_group.is_none() {
-                self.globals_bind_group = Some(context.device.create_bind_group(
-                    &wgpu::BindGroupDescriptor {
-                        label: Some("Rounded Image Globals Bind Group (Batched)"),
-                        layout: &self.globals_bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(&self.sampler),
-                            },
-                        ],
-                    },
-                ));
+                self.globals_bind_group =
+                    Some(context.device.create_bind_group(
+                        &wgpu::BindGroupDescriptor {
+                            label: Some(
+                                "Rounded Image Globals Bind Group (Batched)",
+                            ),
+                            layout: &self.globals_bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::Sampler(
+                                        &self.sampler,
+                                    ),
+                                },
+                            ],
+                        },
+                    ));
             }
         }
     }
@@ -495,7 +533,12 @@ impl PrimitiveBatchState for RoundedImageBatchState {
         render_pass.set_bind_group(1, atlas_bind_group, &[]);
 
         let scissor = context.scissor_rect;
-        render_pass.set_scissor_rect(scissor.x, scissor.y, scissor.width, scissor.height);
+        render_pass.set_scissor_rect(
+            scissor.x,
+            scissor.y,
+            scissor.width,
+            scissor.height,
+        );
         render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
         render_pass.draw(0..4, start..end);
     }

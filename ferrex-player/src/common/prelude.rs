@@ -25,4 +25,6 @@ pub fn icon_char(icon: Icon) -> String {
     icon.unicode().to_string()
 }
 
-pub use crate::common::ui_utils::{icon_text, icon_text_with_size, lucide_font};
+pub use crate::common::ui_utils::{
+    icon_text, icon_text_with_size, lucide_font,
+};

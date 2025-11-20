@@ -13,7 +13,9 @@ use crate::domains::ui;
 use crate::domains::search;
 use crate::domains::user_management;
 
-use ferrex_core::player_prelude::{LibraryID, MediaFile, MediaID, User, UserPermissions};
+use ferrex_core::player_prelude::{
+    LibraryID, MediaFile, MediaID, User, UserPermissions,
+};
 use iced::Task;
 
 /// Result of a domain update operation
@@ -52,7 +54,10 @@ impl DomainUpdate {
     }
 
     /// Create an update with messages and events
-    pub fn with(messages: Vec<DomainMessage>, events: Vec<CrossDomainEvent>) -> Self {
+    pub fn with(
+        messages: Vec<DomainMessage>,
+        events: Vec<CrossDomainEvent>,
+    ) -> Self {
         Self { messages, events }
     }
 
@@ -92,7 +97,10 @@ impl DomainUpdateResult {
     }
 
     /// Create a result with task and events
-    pub fn with_events(task: Task<DomainMessage>, events: Vec<CrossDomainEvent>) -> Self {
+    pub fn with_events(
+        task: Task<DomainMessage>,
+        events: Vec<CrossDomainEvent>,
+    ) -> Self {
         Self { task, events }
     }
 
@@ -229,19 +237,31 @@ impl std::fmt::Debug for DomainMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Auth(msg) => write!(f, "DomainMessage::Auth({:?})", msg),
-            Self::Library(msg) => write!(f, "DomainMessage::Library({:?})", msg),
+            Self::Library(msg) => {
+                write!(f, "DomainMessage::Library({:?})", msg)
+            }
             Self::Media(msg) => write!(f, "DomainMessage::Media({:?})", msg),
             Self::Player(msg) => write!(f, "DomainMessage::Player({:?})", msg),
             Self::Ui(msg) => write!(f, "DomainMessage::Ui({:?})", msg),
-            Self::Metadata(msg) => write!(f, "DomainMessage::Metadata({:?})", msg),
-            Self::Streaming(msg) => write!(f, "DomainMessage::Streaming({:?})", msg),
-            Self::Settings(msg) => write!(f, "DomainMessage::Settings({:?})", msg),
-            Self::UserManagement(msg) => write!(f, "DomainMessage::UserManagement({:?})", msg),
+            Self::Metadata(msg) => {
+                write!(f, "DomainMessage::Metadata({:?})", msg)
+            }
+            Self::Streaming(msg) => {
+                write!(f, "DomainMessage::Streaming({:?})", msg)
+            }
+            Self::Settings(msg) => {
+                write!(f, "DomainMessage::Settings({:?})", msg)
+            }
+            Self::UserManagement(msg) => {
+                write!(f, "DomainMessage::UserManagement({:?})", msg)
+            }
             Self::Search(msg) => write!(f, "DomainMessage::Search({:?})", msg),
             Self::NoOp => write!(f, "DomainMessage::NoOp"),
             Self::Tick => write!(f, "DomainMessage::Tick"),
             Self::ClearError => write!(f, "DomainMessage::ClearError"),
-            Self::Event(event) => write!(f, "DomainMessage::Event({:?})", event),
+            Self::Event(event) => {
+                write!(f, "DomainMessage::Event({:?})", event)
+            }
         }
     }
 }
@@ -264,7 +284,7 @@ pub enum CrossDomainEvent {
     LibraryUpdated,
     MediaListChanged,
     LibrarySelected(LibraryID),
-    LibrarySelectAll,      // Select all libraries (show all content)
+    LibrarySelectAll, // Select all libraries (show all content)
     RequestLibraryRefresh, // Request to refresh library list
     // NOTE: Library management events moved to direct messages in Task 2.5
 
@@ -272,7 +292,7 @@ pub enum CrossDomainEvent {
     MediaStartedPlaying(MediaFile),
     MediaStopped,
     MediaPaused,
-    MediaToggleFullscreen,               // Toggle fullscreen mode
+    MediaToggleFullscreen, // Toggle fullscreen mode
     MediaPlayWithId(MediaFile, MediaID), // Play media with tracking ID
 
     // Player coordination events
@@ -285,7 +305,7 @@ pub enum CrossDomainEvent {
     // UI events
 
     // Window management events
-    HideWindow,          // Hide the application window (e.g., for external MPV)
+    HideWindow, // Hide the application window (e.g., for external MPV)
     RestoreWindow(bool), // Restore window with fullscreen state
     SetWindowMode(iced::window::Mode), // Set specific window mode
 
@@ -296,7 +316,9 @@ pub enum CrossDomainEvent {
     // Metadata events
     MetadataUpdated(MediaID),
     BatchMetadataReady(Vec<crate::infrastructure::api_types::Media>),
-    RequestBatchMetadataFetch(Vec<(uuid::Uuid, Vec<crate::infrastructure::api_types::Media>)>), // Request batch metadata fetching
+    RequestBatchMetadataFetch(
+        Vec<(uuid::Uuid, Vec<crate::infrastructure::api_types::Media>)>,
+    ), // Request batch metadata fetching
     MediaLoaded, // Media has been loaded and is ready
 
     // Additional library events
@@ -326,5 +348,8 @@ pub enum CrossDomainEvent {
 pub trait DomainEventHandler {
     type Message;
 
-    fn handle_event(&self, event: &CrossDomainEvent) -> Option<Task<Self::Message>>;
+    fn handle_event(
+        &self,
+        event: &CrossDomainEvent,
+    ) -> Option<Task<Self::Message>>;
 }

@@ -16,7 +16,13 @@ pub struct ProgressEntry {
 /// to allow independent implementation and caching strategies.
 #[async_trait]
 pub trait WatchMetricsReadPort: Send + Sync {
-    async fn load_progress_map(&self, user_id: Uuid) -> Result<HashMap<Uuid, ProgressEntry>>;
+    async fn load_progress_map(
+        &self,
+        user_id: Uuid,
+    ) -> Result<HashMap<Uuid, ProgressEntry>>;
 
-    async fn load_completed_map(&self, user_id: Uuid) -> Result<HashMap<Uuid, i64>>;
+    async fn load_completed_map(
+        &self,
+        user_id: Uuid,
+    ) -> Result<HashMap<Uuid, i64>>;
 }

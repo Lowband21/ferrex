@@ -2,11 +2,12 @@ use anyhow::Result;
 use ferrex_core::{
     api_routes::v1,
     api_types::setup::{
-        ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest, StartClaimResponse,
+        ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest,
+        StartClaimResponse,
     },
     player_prelude::{
-        ApiResponse, AuthToken, AuthenticatedDevice, MediaQuery, MediaWithStatus,
-        UpdateProgressRequest, UserWatchState,
+        ApiResponse, AuthToken, AuthenticatedDevice, MediaQuery,
+        MediaWithStatus, UpdateProgressRequest, UserWatchState,
     },
 };
 use log::{info, warn};
@@ -22,7 +23,10 @@ pub type RefreshTokenCallback = Arc<
         Option<
             Box<
                 dyn Fn() -> std::pin::Pin<
-                        Box<dyn std::future::Future<Output = Result<AuthToken>> + Send>,
+                        Box<
+                            dyn std::future::Future<Output = Result<AuthToken>>
+                                + Send,
+                        >,
                     > + Send
                     + Sync,
             >,
@@ -129,9 +133,15 @@ impl ApiClient {
     }
 
     /// Build a request with authentication headers
-    pub async fn build_request(&self, builder: RequestBuilder) -> RequestBuilder {
+    pub async fn build_request(
+        &self,
+        builder: RequestBuilder,
+    ) -> RequestBuilder {
         if let Some(token) = self.token_store.read().await.as_ref() {
-            builder.header("Authorization", format!("Bearer {}", token.access_token))
+            builder.header(
+                "Authorization",
+                format!("Bearer {}", token.access_token),
+            )
         } else {
             builder
         }
@@ -144,7 +154,10 @@ impl ApiClient {
     }
 
     /// Execute a request and handle common errors
-    async fn execute_request<T: DeserializeOwned>(&self, request: RequestBuilder) -> Result<T> {
+    async fn execute_request<T: DeserializeOwned>(
+        &self,
+        request: RequestBuilder,
+    ) -> Result<T> {
         // Clone the request for potential retry
         let request_clone = request.try_clone();
         let response = request.send().await?;
@@ -160,17 +173,23 @@ impl ApiClient {
             StatusCode::UNAUTHORIZED => {
                 // Try to refresh token if we have a callback
                 if let Some(request_retry) = request_clone
-                    && let Some(ref callback) = *self.refresh_callback.lock().await
+                    && let Some(ref callback) =
+                        *self.refresh_callback.lock().await
                 {
                     info!("[ApiClient] Token expired, attempting refresh");
                     match callback().await {
                         Ok(new_token) => {
-                            info!("[ApiClient] Token refreshed successfully, retrying request");
+                            info!(
+                                "[ApiClient] Token refreshed successfully, retrying request"
+                            );
                             self.set_token(Some(new_token.clone())).await;
 
                             // Rebuild request with new token and execute without retry
-                            let retry_request = self.build_request(request_retry).await;
-                            return self.execute_request_without_retry(retry_request).await;
+                            let retry_request =
+                                self.build_request(request_retry).await;
+                            return self
+                                .execute_request_without_retry(retry_request)
+                                .await;
                         }
                         Err(e) => {
                             warn!("[ApiClient] Token refresh failed: {}", e);
@@ -232,7 +251,10 @@ impl ApiClient {
     }
 
     /// Execute a request that returns rkyv binary data
-    pub async fn execute_rkyv_request(&self, request: RequestBuilder) -> Result<Vec<u8>> {
+    pub async fn execute_rkyv_request(
+        &self,
+        request: RequestBuilder,
+    ) -> Result<Vec<u8>> {
         // Add Accept header for rkyv format
         let request = request.header("Accept", "application/octet-stream");
         let response = request.send().await?;
@@ -276,7 +298,10 @@ impl ApiClient {
     }
 
     /// Execute a request for setup status (handles different response format)
-    async fn execute_setup_request(&self, request: RequestBuilder) -> Result<SetupStatus> {
+    async fn execute_setup_request(
+        &self,
+        request: RequestBuilder,
+    ) -> Result<SetupStatus> {
         let response = request.send().await?;
 
         match response.status() {
@@ -308,7 +333,11 @@ impl ApiClient {
     }
 
     /// POST request with authentication
-    pub async fn post<T: Serialize, R: DeserializeOwned>(&self, path: &str, body: &T) -> Result<R> {
+    pub async fn post<T: Serialize, R: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &T,
+    ) -> Result<R> {
         let url = self.build_url(path);
 
         let request = self.client.post(&url).json(body);
@@ -317,7 +346,11 @@ impl ApiClient {
     }
 
     /// POST request for endpoints that return 204 No Content
-    pub async fn post_no_content<T: Serialize>(&self, path: &str, body: &T) -> Result<()> {
+    pub async fn post_no_content<T: Serialize>(
+        &self,
+        path: &str,
+        body: &T,
+    ) -> Result<()> {
         let url = self.build_url(path);
 
         let request = self.client.post(&url).json(body);
@@ -332,25 +365,33 @@ impl ApiClient {
             StatusCode::UNAUTHORIZED => {
                 // Try to refresh token if we have a callback
                 if let Some(request_retry) = request_clone
-                    && let Some(ref callback) = *self.refresh_callback.lock().await
+                    && let Some(ref callback) =
+                        *self.refresh_callback.lock().await
                 {
                     info!("[ApiClient] Token expired, attempting refresh");
                     match callback().await {
                         Ok(new_token) => {
-                            info!("[ApiClient] Token refreshed successfully, retrying request");
+                            info!(
+                                "[ApiClient] Token refreshed successfully, retrying request"
+                            );
                             self.set_token(Some(new_token.clone())).await;
 
                             // Rebuild request with new token and retry
-                            let retry_request = self.build_request(request_retry).await;
+                            let retry_request =
+                                self.build_request(request_retry).await;
                             let retry_response = retry_request.send().await?;
 
                             match retry_response.status() {
-                                StatusCode::OK | StatusCode::NO_CONTENT => return Ok(()),
+                                StatusCode::OK | StatusCode::NO_CONTENT => {
+                                    return Ok(());
+                                }
                                 _ => {
                                     let error_text = retry_response
                                         .text()
                                         .await
-                                        .unwrap_or_else(|_| "Unknown error".to_string());
+                                        .unwrap_or_else(|_| {
+                                            "Unknown error".to_string()
+                                        });
                                     return Err(anyhow::anyhow!(
                                         "Request failed after retry: {}",
                                         error_text
@@ -383,7 +424,11 @@ impl ApiClient {
     }
 
     /// GET request with authentication, returns raw rkyv bytes (structured data only)
-    pub async fn get_rkyv(&self, path: &str, query: Option<(&str, &str)>) -> Result<AlignedVec> {
+    pub async fn get_rkyv(
+        &self,
+        path: &str,
+        query: Option<(&str, &str)>,
+    ) -> Result<AlignedVec> {
         let url = self.build_url(path);
 
         // Debug logging
@@ -412,7 +457,9 @@ impl ApiClient {
                     .unwrap_or("");
 
                 if content_type.contains("application/octet-stream") {
-                    let size_hint = response.content_length().unwrap_or(1024 * 1024) as usize;
+                    let size_hint =
+                        response.content_length().unwrap_or(1024 * 1024)
+                            as usize;
                     let mut aligned = AlignedVec::with_capacity(size_hint);
                     let bytes = response.bytes().await?;
                     aligned.extend_from_slice(&bytes);
@@ -446,7 +493,11 @@ impl ApiClient {
     }
 
     /// GET request with authentication, returns raw bytes (for images)
-    pub async fn get_bytes(&self, path: &str, query: Option<(&str, &str)>) -> Result<Vec<u8>> {
+    pub async fn get_bytes(
+        &self,
+        path: &str,
+        query: Option<(&str, &str)>,
+    ) -> Result<Vec<u8>> {
         let url = self.build_url(path);
 
         log::debug!("GET (bytes) request to: {}", url);
@@ -499,7 +550,10 @@ impl ApiClient {
     }
 
     /// GET request for public endpoints (no authentication)
-    pub async fn get_public<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+    pub async fn get_public<T: DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> Result<T> {
         let url = self.build_url(path);
 
         log::debug!("[ApiClient] GET (public) request to: {}", url);
@@ -510,7 +564,11 @@ impl ApiClient {
     }
 
     /// PUT request
-    pub async fn put<T: Serialize, R: DeserializeOwned>(&self, path: &str, body: &T) -> Result<R> {
+    pub async fn put<T: Serialize, R: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &T,
+    ) -> Result<R> {
         let url = self.build_url(path);
 
         let request = self.client.put(&url).json(body);
@@ -535,7 +593,10 @@ impl ApiClient {
     }
 
     /// Update watch progress for a media item
-    pub async fn update_progress(&self, request: &UpdateProgressRequest) -> Result<()> {
+    pub async fn update_progress(
+        &self,
+        request: &UpdateProgressRequest,
+    ) -> Result<()> {
         // This endpoint returns 204 No Content, so we need special handling
         self.post_no_content(v1::watch::UPDATE_PROGRESS, request)
             .await
@@ -580,7 +641,10 @@ impl ApiClient {
     }
 
     /// Confirm a secure claim using the provided claim code
-    pub async fn confirm_setup_claim(&self, claim_code: &str) -> Result<ConfirmClaimResponse> {
+    pub async fn confirm_setup_claim(
+        &self,
+        claim_code: &str,
+    ) -> Result<ConfirmClaimResponse> {
         let request = ConfirmClaimRequest {
             claim_code: claim_code.to_string(),
         };
@@ -616,7 +680,10 @@ impl ApiClient {
     }
 
     /// Execute a media query
-    pub async fn query_media(&self, query: MediaQuery) -> Result<Vec<MediaWithStatus>> {
+    pub async fn query_media(
+        &self,
+        query: MediaQuery,
+    ) -> Result<Vec<MediaWithStatus>> {
         // Server endpoint is at /media/query, not /api/v1/media/query
         self.post(v1::media::QUERY, &query).await
     }

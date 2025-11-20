@@ -24,7 +24,9 @@ pub struct StreamingDomainState {
     pub repo_accessor: Accessor<ReadOnly>,
 
     // Streaming-specific service trait
-    pub streaming_service: Arc<dyn crate::infrastructure::services::streaming::StreamingApiService>,
+    pub streaming_service: Arc<
+        dyn crate::infrastructure::services::streaming::StreamingApiService,
+    >,
 
     // Streaming state moved from PlayerState
     pub using_hls: bool,
@@ -33,8 +35,10 @@ pub struct StreamingDomainState {
     pub transcoding_duration: Option<f64>, // Duration from transcoding job
     pub transcoding_check_count: u32,      // Number of status checks performed
     pub hls_client: Option<crate::domains::library::server::hls::HlsClient>,
-    pub master_playlist: Option<crate::domains::library::server::hls::MasterPlaylist>,
-    pub current_variant_playlist: Option<crate::domains::library::server::hls::VariantPlaylist>,
+    pub master_playlist:
+        Option<crate::domains::library::server::hls::MasterPlaylist>,
+    pub current_variant_playlist:
+        Option<crate::domains::library::server::hls::VariantPlaylist>,
     pub current_segment_index: usize,
     pub segment_buffer: Vec<Vec<u8>>, // Prefetched segments
     pub last_bandwidth_measurement: Option<u64>, // bits per second
@@ -88,7 +92,9 @@ impl std::fmt::Debug for StreamingDomainState {
 impl StreamingDomainState {
     pub fn new(
         api_service: Arc<dyn ApiService>,
-        streaming_service: Arc<dyn crate::infrastructure::services::streaming::StreamingApiService>,
+        streaming_service: Arc<
+            dyn crate::infrastructure::services::streaming::StreamingApiService,
+        >,
         repo_accessor: Accessor<ReadOnly>,
     ) -> Self {
         Self {
@@ -148,12 +154,18 @@ impl StreamingDomain {
     }
 
     /// Update function - delegates to existing update_streaming logic
-    pub fn update(&mut self, _message: StreamingMessage) -> Task<DomainMessage> {
+    pub fn update(
+        &mut self,
+        _message: StreamingMessage,
+    ) -> Task<DomainMessage> {
         // This will call the existing update_streaming function
         Task::none()
     }
 
-    pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
+    pub fn handle_event(
+        &mut self,
+        event: &CrossDomainEvent,
+    ) -> Task<DomainMessage> {
         match event {
             CrossDomainEvent::LibraryChanged(library_id) => {
                 self.state.current_library_id = Some(*library_id);

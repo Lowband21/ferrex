@@ -1,8 +1,8 @@
 # Development environment for Rusty Media Server
-FROM rust:1.81-bookworm
+FROM rust:1.90.0-slim-trixie
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libavcodec-dev \
     libavformat-dev \

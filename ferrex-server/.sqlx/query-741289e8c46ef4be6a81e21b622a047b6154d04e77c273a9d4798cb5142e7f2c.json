@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE auth_refresh_tokens\n            SET revoked = TRUE,\n                revoked_at = NOW(),\n                revoked_reason = COALESCE(revoked_reason, $2)\n            WHERE family_id = $1 AND revoked = FALSE\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "741289e8c46ef4be6a81e21b622a047b6154d04e77c273a9d4798cb5142e7f2c"
+}

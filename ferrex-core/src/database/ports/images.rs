@@ -1,7 +1,9 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::database::traits::{ImageLookupParams, ImageRecord, ImageVariant, MediaImage};
+use crate::database::traits::{
+    ImageLookupParams, ImageRecord, ImageVariant, MediaImage,
+};
 use crate::error::Result;
 use crate::image::MediaImageKind;
 use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
@@ -15,8 +17,14 @@ use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
 pub trait ImageRepository: Send + Sync {
     // Image records
     async fn create_image(&self, tmdb_path: &str) -> Result<ImageRecord>;
-    async fn get_image_by_tmdb_path(&self, tmdb_path: &str) -> Result<Option<ImageRecord>>;
-    async fn get_image_by_hash(&self, hash: &str) -> Result<Option<ImageRecord>>;
+    async fn get_image_by_tmdb_path(
+        &self,
+        tmdb_path: &str,
+    ) -> Result<Option<ImageRecord>>;
+    async fn get_image_by_hash(
+        &self,
+        hash: &str,
+    ) -> Result<Option<ImageRecord>>;
     async fn update_image_metadata(
         &self,
         image_id: Uuid,
@@ -42,7 +50,10 @@ pub trait ImageRepository: Send + Sync {
         image_id: Uuid,
         variant: &str,
     ) -> Result<Option<ImageVariant>>;
-    async fn get_image_variants(&self, image_id: Uuid) -> Result<Vec<ImageVariant>>;
+    async fn get_image_variants(
+        &self,
+        image_id: Uuid,
+    ) -> Result<Vec<ImageVariant>>;
 
     // Media linking
     async fn link_media_image(
@@ -54,7 +65,11 @@ pub trait ImageRepository: Send + Sync {
         order_index: i32,
         is_primary: bool,
     ) -> Result<()>;
-    async fn get_media_images(&self, media_type: &str, media_id: Uuid) -> Result<Vec<MediaImage>>;
+    async fn get_media_images(
+        &self,
+        media_type: &str,
+        media_id: Uuid,
+    ) -> Result<Vec<MediaImage>>;
     async fn get_media_primary_image(
         &self,
         media_type: &str,
@@ -96,5 +111,7 @@ pub trait ImageRepository: Send + Sync {
 
     // Maintenance
     async fn cleanup_orphaned_images(&self) -> Result<u32>;
-    async fn get_image_cache_stats(&self) -> Result<std::collections::HashMap<String, u64>>;
+    async fn get_image_cache_stats(
+        &self,
+    ) -> Result<std::collections::HashMap<String, u64>>;
 }

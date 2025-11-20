@@ -27,9 +27,9 @@ pub async fn register(
     State(state): State<AppState>,
     Json(request): Json<RegisterRequest>,
 ) -> AppResult<Json<ApiResponse<AuthToken>>> {
-    request
-        .validate()
-        .map_err(|e| AppError::bad_request(format!("Validation error: {}", e)))?;
+    request.validate().map_err(|e| {
+        AppError::bad_request(format!("Validation error: {}", e))
+    })?;
 
     if request.password.is_empty() {
         return Err(AppError::bad_request("Password cannot be empty"));
@@ -40,11 +40,14 @@ pub async fn register(
         ));
     }
 
-    let security_repo = state.unit_of_work.security_settings.clone();
-    let security_settings = security_repo
-        .get_settings()
-        .await
-        .map_err(|e| AppError::internal(format!("Failed to load security settings: {}", e)))?;
+    let security_repo = state.unit_of_work().security_settings.clone();
+    let security_settings =
+        security_repo.get_settings().await.map_err(|e| {
+            AppError::internal(format!(
+                "Failed to load security settings: {}",
+                e
+            ))
+        })?;
 
     let user_policy = security_settings.user_password_policy.clone();
     let policy_check = user_policy.check(&request.password);
@@ -65,7 +68,7 @@ pub async fn register(
 
     // Check if username already exists
     if let Ok(Some(_)) = state
-        .unit_of_work
+        .unit_of_work()
         .users
         .get_user_by_username(&request.username)
         .await
@@ -75,9 +78,11 @@ pub async fn register(
 
     // Hash password using centralized crypto helper
     let password_hash = state
-        .auth_crypto
+        .auth_crypto()
         .hash_password(&request.password)
-        .map_err(|e| AppError::internal(format!("Failed to hash password: {e}")))?;
+        .map_err(|e| {
+            AppError::internal(format!("Failed to hash password: {e}"))
+        })?;
 
     // Create user
     let user_id = Uuid::now_v7();
@@ -95,7 +100,7 @@ pub async fn register(
     };
 
     state
-        .unit_of_work
+        .unit_of_work()
         .users
         .create_user_with_password(&user, &password_hash)
         .await
@@ -155,14 +160,14 @@ pub async fn logout(
     updated_user.updated_at = Utc::now();
 
     state
-        .unit_of_work
+        .unit_of_work()
         .users
         .update_user(&updated_user)
         .await
         .map_err(|_| AppError::internal("Failed to update user preferences"))?;
 
     state
-        .auth_facade
+        .auth_facade()
         .revoke_all_user_sessions(user.id)
         .await
         .map_err(map_auth_facade_error)?;
@@ -197,19 +202,23 @@ fn bundle_to_auth_token(bundle: TokenBundle) -> AuthToken {
 
 fn map_auth_error(err: AuthenticationError) -> AppError {
     match err {
-        AuthenticationError::InvalidCredentials | AuthenticationError::InvalidPin => {
+        AuthenticationError::InvalidCredentials
+        | AuthenticationError::InvalidPin => {
             AppError::unauthorized(AuthError::InvalidCredentials.to_string())
         }
-        AuthenticationError::TooManyFailedAttempts => {
-            AppError::rate_limited("Too many failed authentication attempts".to_string())
-        }
+        AuthenticationError::TooManyFailedAttempts => AppError::rate_limited(
+            "Too many failed authentication attempts".to_string(),
+        ),
         AuthenticationError::SessionExpired => {
             AppError::unauthorized(AuthError::TokenInvalid.to_string())
         }
-        AuthenticationError::DeviceNotFound | AuthenticationError::DeviceNotTrusted => {
-            AppError::forbidden("Device not eligible for authentication".to_string())
+        AuthenticationError::DeviceNotFound
+        | AuthenticationError::DeviceNotTrusted => AppError::forbidden(
+            "Device not eligible for authentication".to_string(),
+        ),
+        AuthenticationError::UserNotFound => {
+            AppError::not_found("User not found".to_string())
         }
-        AuthenticationError::UserNotFound => AppError::not_found("User not found".to_string()),
         AuthenticationError::DatabaseError(e) => {
             AppError::internal(format!("Authentication failed: {e}"))
         }

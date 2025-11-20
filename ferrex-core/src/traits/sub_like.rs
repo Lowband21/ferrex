@@ -5,14 +5,16 @@ use super::{
     media_ops::MediaOps,
 };
 use crate::types::details::{
-    ArchivedEnhancedMovieDetails, ArchivedEnhancedSeriesDetails, ArchivedEpisodeDetails,
-    ArchivedMediaDetailsOption, ArchivedSeasonDetails, ArchivedTmdbDetails, EnhancedMovieDetails,
-    EnhancedSeriesDetails, EpisodeDetails, MediaDetailsOption, SeasonDetails, TmdbDetails,
+    ArchivedEnhancedMovieDetails, ArchivedEnhancedSeriesDetails,
+    ArchivedEpisodeDetails, ArchivedMediaDetailsOption, ArchivedSeasonDetails,
+    ArchivedTmdbDetails, EnhancedMovieDetails, EnhancedSeriesDetails,
+    EpisodeDetails, MediaDetailsOption, SeasonDetails, TmdbDetails,
 };
 use crate::types::files::MediaFile;
 use crate::types::media::{
     ArchivedEpisodeReference, ArchivedMovieReference, ArchivedSeasonReference,
-    ArchivedSeriesReference, EpisodeReference, MovieReference, SeasonReference, SeriesReference,
+    ArchivedSeriesReference, EpisodeReference, MovieReference, SeasonReference,
+    SeriesReference,
 };
 
 pub trait MovieLike: MediaOps {
@@ -55,7 +57,9 @@ impl MovieLike for MovieReference {
     fn details(&self) -> Option<&EnhancedMovieDetails> {
         if let MediaDetailsOption::Details(details) = &self.details {
             match details {
-                TmdbDetails::Movie(enhanced_movie_details) => Some(enhanced_movie_details),
+                TmdbDetails::Movie(enhanced_movie_details) => {
+                    Some(enhanced_movie_details)
+                }
                 _ => None,
             }
         } else {
@@ -91,7 +95,9 @@ impl MovieLike for ArchivedMovieReference {
     fn details(&self) -> Option<&ArchivedEnhancedMovieDetails> {
         if let ArchivedMediaDetailsOption::Details(details) = &self.details {
             match details {
-                ArchivedTmdbDetails::Movie(enhanced_movie_details) => Some(enhanced_movie_details),
+                ArchivedTmdbDetails::Movie(enhanced_movie_details) => {
+                    Some(enhanced_movie_details)
+                }
                 _ => None,
             }
         } else {
@@ -148,7 +154,9 @@ impl SeriesLike for ArchivedSeriesReference {
     fn details(&self) -> Option<&ArchivedEnhancedSeriesDetails> {
         if let ArchivedMediaDetailsOption::Details(details) = &self.details {
             match details {
-                ArchivedTmdbDetails::Series(series_details) => Some(series_details),
+                ArchivedTmdbDetails::Series(series_details) => {
+                    Some(series_details)
+                }
                 _ => None,
             }
         } else {
@@ -195,7 +203,9 @@ impl SeasonLike for ArchivedSeasonReference {
     fn details(&self) -> Option<&ArchivedSeasonDetails> {
         if let ArchivedMediaDetailsOption::Details(details) = &self.details {
             match details {
-                ArchivedTmdbDetails::Season(season_details) => Some(season_details),
+                ArchivedTmdbDetails::Season(season_details) => {
+                    Some(season_details)
+                }
                 _ => None,
             }
         } else {
@@ -244,7 +254,9 @@ impl EpisodeLike for ArchivedEpisodeReference {
     fn details(&self) -> Option<&ArchivedEpisodeDetails> {
         if let ArchivedMediaDetailsOption::Details(details) = &self.details {
             match details {
-                ArchivedTmdbDetails::Episode(episode_details) => Some(episode_details),
+                ArchivedTmdbDetails::Episode(episode_details) => {
+                    Some(episode_details)
+                }
                 _ => None,
             }
         } else {

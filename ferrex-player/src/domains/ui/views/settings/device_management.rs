@@ -3,8 +3,8 @@
 //! Allows users to view and manage their authenticated devices
 
 use crate::{
-    common::ui_utils::icon_text, domains::ui::messages::Message, domains::ui::theme,
-    state_refactored::State,
+    common::ui_utils::icon_text, domains::ui::messages::Message,
+    domains::ui::theme, state_refactored::State,
 };
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Border, Element, Length, Theme};
@@ -260,13 +260,13 @@ fn create_device_card<'a>(device: &'a UserDevice) -> Element<'a, Message> {
         row![
             // Device icon and info
             row![
-                icon_text(device_icon)
-                    .size(32)
-                    .color(if device.is_current_device {
+                icon_text(device_icon).size(32).color(
+                    if device.is_current_device {
                         theme::MediaServerTheme::SUCCESS
                     } else {
                         theme::MediaServerTheme::TEXT_SECONDARY
-                    }),
+                    }
+                ),
                 Space::new().width(15),
                 column![
                     row![
@@ -288,14 +288,18 @@ fn create_device_card<'a>(device: &'a UserDevice) -> Element<'a, Message> {
                                 let palette = theme.extended_palette();
                                 container::Style {
                                     background: Some(
-                                        theme::MediaServerTheme::SUCCESS.scale_alpha(0.2).into(),
+                                        theme::MediaServerTheme::SUCCESS
+                                            .scale_alpha(0.2)
+                                            .into(),
                                     ),
                                     border: Border {
                                         color: theme::MediaServerTheme::SUCCESS,
                                         width: 1.0,
                                         radius: 4.0.into(),
                                     },
-                                    text_color: Some(theme::MediaServerTheme::SUCCESS),
+                                    text_color: Some(
+                                        theme::MediaServerTheme::SUCCESS,
+                                    ),
                                     ..Default::default()
                                 }
                             })
@@ -307,9 +311,12 @@ fn create_device_card<'a>(device: &'a UserDevice) -> Element<'a, Message> {
                     ]
                     .align_y(iced::Alignment::Center),
                     Space::new().height(2),
-                    text(format!("{} • {}", device.device_type, last_active_text))
-                        .size(14)
-                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    text(format!(
+                        "{} • {}",
+                        device.device_type, last_active_text
+                    ))
+                    .size(14)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
                     if let Some(location) = &device.location {
                         Element::new(
                             text(format!("📍 {}", location))

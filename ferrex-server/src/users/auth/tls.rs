@@ -93,7 +93,8 @@ pub struct TlsConfigManager {
 
 impl fmt::Debug for TlsConfigManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let config_snapshot = self.config.try_read().ok().map(|guard| guard.clone());
+        let config_snapshot =
+            self.config.try_read().ok().map(|guard| guard.clone());
         let rustls_config_state = self
             .rustls_config
             .try_read()
@@ -183,7 +184,9 @@ impl TlsConfigManager {
     }
 
     /// Load rustls configuration from certificate files
-    async fn load_rustls_config(config: &TlsCertConfig) -> Result<ServerConfig, TlsError> {
+    async fn load_rustls_config(
+        config: &TlsCertConfig,
+    ) -> Result<ServerConfig, TlsError> {
         // Load certificate chain
         let cert_chain = Self::load_certificates(&config.cert_path).await?;
 
@@ -200,13 +203,16 @@ impl TlsConfigManager {
         // The min_tls_version configuration would need to be applied at builder level
 
         // Configure ALPN for HTTP/2
-        rustls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        rustls_config.alpn_protocols =
+            vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
         Ok(rustls_config)
     }
 
     /// Load certificates from PEM file
-    async fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsError> {
+    async fn load_certificates(
+        path: &Path,
+    ) -> Result<Vec<CertificateDer<'static>>, TlsError> {
         if !path.exists() {
             return Err(TlsError::CertificateNotFound(path.to_path_buf()));
         }
@@ -230,7 +236,9 @@ impl TlsConfigManager {
     }
 
     /// Load private key from PEM file
-    async fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, TlsError> {
+    async fn load_private_key(
+        path: &Path,
+    ) -> Result<PrivateKeyDer<'static>, TlsError> {
         if !path.exists() {
             return Err(TlsError::PrivateKeyNotFound(path.to_path_buf()));
         }
@@ -279,7 +287,9 @@ impl TlsConfigManager {
 }
 
 /// Helper function to create TLS acceptor configuration
-pub async fn create_tls_acceptor(config: TlsCertConfig) -> Result<RustlsConfig> {
+pub async fn create_tls_acceptor(
+    config: TlsCertConfig,
+) -> Result<RustlsConfig> {
     RustlsConfig::from_pem_file(&config.cert_path, &config.key_path)
         .await
         .context("Failed to create TLS acceptor")
@@ -335,13 +345,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_missing_certificate() {
-        let result = TlsConfigManager::load_certificates(Path::new("/nonexistent/cert.pem")).await;
+        let result = TlsConfigManager::load_certificates(Path::new(
+            "/nonexistent/cert.pem",
+        ))
+        .await;
         assert!(matches!(result, Err(TlsError::CertificateNotFound(_))));
     }
 
     #[tokio::test]
     async fn test_missing_private_key() {
-        let result = TlsConfigManager::load_private_key(Path::new("/nonexistent/key.pem")).await;
+        let result = TlsConfigManager::load_private_key(Path::new(
+            "/nonexistent/key.pem",
+        ))
+        .await;
         assert!(matches!(result, Err(TlsError::PrivateKeyNotFound(_))));
     }
 }

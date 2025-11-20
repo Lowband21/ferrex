@@ -75,7 +75,8 @@ impl MediaQueryBuilder {
 
     /// Filter by rating range
     pub fn rating_range(mut self, min: f32, max: f32) -> Self {
-        self.query.filters.rating_range = Some(ScalarRange::new(min, max).to_rating_value());
+        self.query.filters.rating_range =
+            Some(ScalarRange::new(min, max).to_rating_value());
         self
     }
 
@@ -110,7 +111,11 @@ impl MediaQueryBuilder {
     }
 
     /// Add text search with specific fields
-    pub fn search_in(mut self, text: impl Into<String>, fields: Vec<SearchField>) -> Self {
+    pub fn search_in(
+        mut self,
+        text: impl Into<String>,
+        fields: Vec<SearchField>,
+    ) -> Self {
         self.query.search = Some(SearchQuery {
             text: text.into(),
             fields,
@@ -197,7 +202,11 @@ impl MediaQuery {
     }
 
     /// Create a library browse query
-    pub fn browse_library(library_id: LibraryID, page: usize, per_page: usize) -> Self {
+    pub fn browse_library(
+        library_id: LibraryID,
+        page: usize,
+        per_page: usize,
+    ) -> Self {
         MediaQueryBuilder::new()
             .in_library(library_id)
             .page(page, per_page)

@@ -6,8 +6,8 @@
 
 use crate::infrastructure::repository::MaybeYoked;
 use ferrex_core::player_prelude::{
-    ImageSize, ImageType, MediaDetailsOptionLike, MediaID, MediaIDLike, MediaOps, MovieID,
-    MovieLike, Priority, SeriesID, SeriesLike,
+    ImageSize, ImageType, MediaDetailsOptionLike, MediaID, MediaIDLike,
+    MediaOps, MovieID, MovieLike, Priority, SeriesID, SeriesLike,
 };
 use iced::widget::text::Wrapping;
 use iced::widget::{button, container, mouse_area, text};
@@ -122,22 +122,33 @@ pub fn movie_reference_card_with_state<'a>(
                         arc
                     }
                     Err(e) => {
-                        log::warn!("Failed to fetch movie yoke for {}: {:?}", uuid, e);
-                        let placeholder_img: Element<'_, Message> = image_for(movie_id.to_uuid())
-                            .size(ImageSize::Poster)
-                            .image_type(ImageType::Movie)
-                            .radius(CORNER_RADIUS)
-                            .width(Length::Fixed(200.0))
-                            .height(Length::Fixed(300.0))
-                            .animation(state.domains.ui.state.default_widget_animation)
-                            .placeholder(lucide_icons::Icon::Film)
-                            .priority(if is_hovered || is_visible {
-                                Priority::Visible
-                            } else {
-                                Priority::Preload
-                            })
-                            .is_hovered(is_hovered)
-                            .into();
+                        log::warn!(
+                            "Failed to fetch movie yoke for {}: {:?}",
+                            uuid,
+                            e
+                        );
+                        let placeholder_img: Element<'_, Message> =
+                            image_for(movie_id.to_uuid())
+                                .size(ImageSize::Poster)
+                                .image_type(ImageType::Movie)
+                                .radius(CORNER_RADIUS)
+                                .width(Length::Fixed(200.0))
+                                .height(Length::Fixed(300.0))
+                                .animation(
+                                    state
+                                        .domains
+                                        .ui
+                                        .state
+                                        .default_widget_animation,
+                                )
+                                .placeholder(lucide_icons::Icon::Film)
+                                .priority(if is_hovered || is_visible {
+                                    Priority::Visible
+                                } else {
+                                    Priority::Preload
+                                })
+                                .is_hovered(is_hovered)
+                                .into();
                         let image_with_hover = mouse_area(placeholder_img)
                             .on_enter(Message::MediaHovered(uuid))
                             .on_exit(Message::MediaUnhovered(uuid));
@@ -315,23 +326,34 @@ pub fn series_reference_card_with_state<'a>(
                         arc
                     }
                     Err(e) => {
-                        log::warn!("Failed to fetch series yoke for {}: {:?}", uuid, e);
+                        log::warn!(
+                            "Failed to fetch series yoke for {}: {:?}",
+                            uuid,
+                            e
+                        );
                         // Fallback placeholder card preserving mouse handlers
-                        let placeholder_img: Element<'_, Message> = image_for(series_id.to_uuid())
-                            .size(ImageSize::Poster)
-                            .image_type(ImageType::Series)
-                            .radius(CORNER_RADIUS)
-                            .width(Length::Fixed(200.0))
-                            .height(Length::Fixed(300.0))
-                            .animation(state.domains.ui.state.default_widget_animation)
-                            .placeholder(lucide_icons::Icon::Tv)
-                            .priority(if is_hovered || is_visible {
-                                Priority::Visible
-                            } else {
-                                Priority::Preload
-                            })
-                            .is_hovered(is_hovered)
-                            .into();
+                        let placeholder_img: Element<'_, Message> =
+                            image_for(series_id.to_uuid())
+                                .size(ImageSize::Poster)
+                                .image_type(ImageType::Series)
+                                .radius(CORNER_RADIUS)
+                                .width(Length::Fixed(200.0))
+                                .height(Length::Fixed(300.0))
+                                .animation(
+                                    state
+                                        .domains
+                                        .ui
+                                        .state
+                                        .default_widget_animation,
+                                )
+                                .placeholder(lucide_icons::Icon::Tv)
+                                .priority(if is_hovered || is_visible {
+                                    Priority::Visible
+                                } else {
+                                    Priority::Preload
+                                })
+                                .is_hovered(is_hovered)
+                                .into();
                         let image_with_hover = mouse_area(placeholder_img)
                             .on_enter(Message::MediaHovered(uuid))
                             .on_exit(Message::MediaUnhovered(uuid));

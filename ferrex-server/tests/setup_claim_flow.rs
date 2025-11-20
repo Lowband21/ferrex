@@ -21,7 +21,8 @@ async fn claim_flow_allows_admin_creation(pool: PgPool) -> Result<()> {
     let (router, state, tempdir) = app.into_parts();
     let _tempdir = tempdir; // keep temp directory alive for test lifetime
     let router: Router<()> = router.with_state(state.clone());
-    let make_service = router.into_make_service_with_connect_info::<SocketAddr>();
+    let make_service =
+        router.into_make_service_with_connect_info::<SocketAddr>();
     let server = TestServer::builder()
         .http_transport()
         .build(make_service)
@@ -81,7 +82,8 @@ async fn claim_reset_revokes_pending_codes(pool: PgPool) -> Result<()> {
     let (router, state, tempdir) = app.into_parts();
     let _tempdir = tempdir; // keep temp directory alive for test lifetime
     let router: Router<()> = router.with_state(state.clone());
-    let make_service = router.into_make_service_with_connect_info::<SocketAddr>();
+    let make_service =
+        router.into_make_service_with_connect_info::<SocketAddr>();
     let server = TestServer::builder()
         .http_transport()
         .build(make_service)

@@ -114,9 +114,14 @@ impl PinCode {
 
     /// Validate a PIN against the policy
     /// Hash a PIN using Argon2id
-    fn hash_with_crypto(pin_material: &str, crypto: &AuthCrypto) -> Result<String, PinCodeError> {
+    fn hash_with_crypto(
+        pin_material: &str,
+        crypto: &AuthCrypto,
+    ) -> Result<String, PinCodeError> {
         crypto.hash_password(pin_material).map_err(|err| match err {
-            AuthCryptoError::PasswordHash(message) => PinCodeError::CryptoError(message),
+            AuthCryptoError::PasswordHash(message) => {
+                PinCodeError::CryptoError(message)
+            }
             _ => PinCodeError::HashingFailed,
         })
     }
@@ -126,7 +131,11 @@ impl PinCode {
     /// This method prevents timing attacks by ensuring that verification
     /// takes the same amount of time regardless of whether the PIN is correct
     /// or how many characters match.
-    pub fn verify(&self, pin: &str, crypto: &AuthCrypto) -> Result<bool, PinCodeError> {
+    pub fn verify(
+        &self,
+        pin: &str,
+        crypto: &AuthCrypto,
+    ) -> Result<bool, PinCodeError> {
         let mut pin_value = PinValue(pin.to_string());
 
         let is_equal = crypto
@@ -193,7 +202,8 @@ mod tests {
     fn accepts_arbitrary_client_proof_material() {
         let policy = PinPolicy::default();
         let crypto = test_crypto();
-        let proof = "argon2id$v=19$m=65536,t=3,p=1$ZW1wdHlzbHQ$8J9CaJH2zv+2czZP2mEAPw";
+        let proof =
+            "argon2id$v=19$m=65536,t=3,p=1$ZW1wdHlzbHQ$8J9CaJH2zv+2czZP2mEAPw";
         let pin = PinCode::new(proof.to_string(), &policy, &crypto).unwrap();
         assert!(pin.verify(proof, &crypto).unwrap());
     }

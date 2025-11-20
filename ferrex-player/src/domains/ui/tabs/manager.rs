@@ -1,6 +1,8 @@
 //! Tab manager for coordinating multiple independent tab states
 
-use ferrex_core::player_prelude::{ArchivedMediaID, LibraryID, SortBy, SortOrder};
+use ferrex_core::player_prelude::{
+    ArchivedMediaID, LibraryID, SortBy, SortOrder,
+};
 use std::collections::HashMap;
 
 use super::{TabId, TabState};
@@ -49,7 +51,11 @@ impl TabManager {
     }
 
     /// Register library information for tab creation
-    pub fn register_library(&mut self, library_id: LibraryID, library_type: LibraryType) {
+    pub fn register_library(
+        &mut self,
+        library_id: LibraryID,
+        library_type: LibraryType,
+    ) {
         self.library_info.insert(library_id, library_type);
     }
 
@@ -99,7 +105,9 @@ impl TabManager {
                 }
                 TabId::Library(library_id) => {
                     // Create library tab if we have the library info
-                    if let Some(&library_type) = self.library_info.get(&library_id) {
+                    if let Some(&library_type) =
+                        self.library_info.get(&library_id)
+                    {
                         self.tabs.insert(
                             tab_id,
                             TabState::new_library(
@@ -219,7 +227,11 @@ impl TabManager {
         if self.active_tab != tab_id {
             // Note: Current scroll position is already being saved in real-time by scroll handlers
             // This is just for logging/debugging
-            log::debug!("Switching from tab {:?} to {:?}", self.active_tab, tab_id);
+            log::debug!(
+                "Switching from tab {:?} to {:?}",
+                self.active_tab,
+                tab_id
+            );
         }
 
         // Switch to the new tab
@@ -234,7 +246,9 @@ impl TabManager {
                 grid_state.resize(window_width);
 
                 // Restore the tab's scroll position from ScrollPositionManager
-                if let Some(scroll_state) = scroll_manager.get_tab_scroll(&tab_id) {
+                if let Some(scroll_state) =
+                    scroll_manager.get_tab_scroll(&tab_id)
+                {
                     grid_state.scroll_position = scroll_state.position;
                     log::info!(
                         "Restored scroll position for tab {:?}: {}",

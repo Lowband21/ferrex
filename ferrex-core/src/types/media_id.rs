@@ -2,14 +2,15 @@ use crate::{
     traits::prelude::MediaIDLike,
     types::{
         ids::{
-            ArchivedEpisodeID, ArchivedMovieID, ArchivedSeasonID, ArchivedSeriesID, EpisodeID,
-            MovieID, SeasonID, SeriesID,
+            ArchivedEpisodeID, ArchivedMovieID, ArchivedSeasonID,
+            ArchivedSeriesID, EpisodeID, MovieID, SeasonID, SeriesID,
         },
         media::{ArchivedMedia, ArchivedMovieReference},
     },
 };
 use rkyv::{
-    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize, deserialize, rancor::Error,
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+    deserialize, rancor::Error,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -67,19 +68,28 @@ impl MediaID {
 impl ArchivedMediaID {
     pub fn eq_movie(&self, other: &ArchivedMovieID) -> bool {
         match (self, other) {
-            (ArchivedMediaID::Movie(ArchivedMovieID(a)), ArchivedMovieID(b)) => a == b,
+            (
+                ArchivedMediaID::Movie(ArchivedMovieID(a)),
+                ArchivedMovieID(b),
+            ) => a == b,
             _ => false,
         }
     }
     pub fn eq_series(&self, other: &ArchivedSeriesID) -> bool {
         match (self, other) {
-            (ArchivedMediaID::Series(ArchivedSeriesID(a)), ArchivedSeriesID(b)) => a == b,
+            (
+                ArchivedMediaID::Series(ArchivedSeriesID(a)),
+                ArchivedSeriesID(b),
+            ) => a == b,
             _ => false,
         }
     }
     pub fn eq_episode(&self, other: &ArchivedEpisodeID) -> bool {
         match (self, other) {
-            (ArchivedMediaID::Episode(ArchivedEpisodeID(a)), ArchivedEpisodeID(b)) => a == b,
+            (
+                ArchivedMediaID::Episode(ArchivedEpisodeID(a)),
+                ArchivedEpisodeID(b),
+            ) => a == b,
             _ => false,
         }
     }
@@ -90,9 +100,15 @@ impl std::fmt::Display for MediaID {
         let mut buff = Uuid::encode_buffer();
         match self {
             MediaID::Movie(id) => write!(f, "Movie({})", id.as_str(&mut buff)),
-            MediaID::Series(id) => write!(f, "Series({})", id.as_str(&mut buff)),
-            MediaID::Season(id) => write!(f, "Season({})", id.as_str(&mut buff)),
-            MediaID::Episode(id) => write!(f, "Episode({})", id.as_str(&mut buff)),
+            MediaID::Series(id) => {
+                write!(f, "Series({})", id.as_str(&mut buff))
+            }
+            MediaID::Season(id) => {
+                write!(f, "Season({})", id.as_str(&mut buff))
+            }
+            MediaID::Episode(id) => {
+                write!(f, "Episode({})", id.as_str(&mut buff))
+            }
         }
     }
 }
@@ -101,7 +117,9 @@ impl From<ArchivedMedia> for ArchivedMovieReference {
     fn from(med_ref: ArchivedMedia) -> Self {
         match med_ref {
             ArchivedMedia::Movie(data) => data,
-            _ => panic!("Cannot convert non-movie reference to movie reference"),
+            _ => {
+                panic!("Cannot convert non-movie reference to movie reference")
+            }
         }
     }
 }

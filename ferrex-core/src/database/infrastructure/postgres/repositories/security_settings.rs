@@ -36,19 +36,29 @@ impl PostgresSecuritySettingsRepository {
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
-            MediaError::Internal(format!("Failed to load auth security settings id: {e}"))
+            MediaError::Internal(format!(
+                "Failed to load auth security settings id: {e}"
+            ))
         })? {
-            let id: Uuid = record
-                .try_get("id")
-                .map_err(|e| MediaError::Internal(format!("Failed to parse settings id: {e}")))?;
+            let id: Uuid = record.try_get("id").map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to parse settings id: {e}"
+                ))
+            })?;
             return Ok(id);
         }
 
         let default = AuthSecuritySettings::default();
         let admin_json = serde_json::to_value(&default.admin_password_policy)
-            .map_err(|e| MediaError::Internal(format!("Failed to encode admin policy: {e}")))?;
+            .map_err(|e| {
+            MediaError::Internal(format!("Failed to encode admin policy: {e}"))
+        })?;
         let user_json = serde_json::to_value(&default.user_password_policy)
-            .map_err(|e| MediaError::Internal(format!("Failed to encode user policy: {e}")))?;
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to encode user policy: {e}"
+                ))
+            })?;
 
         let row = sqlx::query(
             r#"
@@ -64,16 +74,19 @@ impl PostgresSecuritySettingsRepository {
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to insert default auth security settings: {e}")))?;
 
-        let id: Uuid = row
-            .try_get("id")
-            .map_err(|e| MediaError::Internal(format!("Failed to parse settings id: {e}")))?;
+        let id: Uuid = row.try_get("id").map_err(|e| {
+            MediaError::Internal(format!("Failed to parse settings id: {e}"))
+        })?;
 
         Ok(id)
     }
 
     fn map_policy(value: Value) -> Result<PasswordPolicy> {
-        serde_json::from_value(value)
-            .map_err(|e| MediaError::Internal(format!("Invalid password policy payload: {e}")))
+        serde_json::from_value(value).map_err(|e| {
+            MediaError::Internal(format!(
+                "Invalid password policy payload: {e}"
+            ))
+        })
     }
 
     fn map_row(
@@ -110,20 +123,30 @@ impl SecuritySettingsRepository for PostgresSecuritySettingsRepository {
         .bind(id)
         .fetch_one(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to load auth security settings: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to load auth security settings: {e}"
+            ))
+        })?;
 
-        let admin_policy: Value = row
-            .try_get("admin_password_policy")
-            .map_err(|e| MediaError::Internal(format!("Failed to read admin policy: {e}")))?;
-        let user_policy: Value = row
-            .try_get("user_password_policy")
-            .map_err(|e| MediaError::Internal(format!("Failed to read user policy: {e}")))?;
-        let updated_at: DateTime<Utc> = row
-            .try_get("updated_at")
-            .map_err(|e| MediaError::Internal(format!("Failed to read updated_at: {e}")))?;
-        let updated_by: Option<Uuid> = row
-            .try_get("updated_by")
-            .map_err(|e| MediaError::Internal(format!("Failed to read updated_by: {e}")))?;
+        let admin_policy: Value =
+            row.try_get("admin_password_policy").map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to read admin policy: {e}"
+                ))
+            })?;
+        let user_policy: Value =
+            row.try_get("user_password_policy").map_err(|e| {
+                MediaError::Internal(format!("Failed to read user policy: {e}"))
+            })?;
+        let updated_at: DateTime<Utc> =
+            row.try_get("updated_at").map_err(|e| {
+                MediaError::Internal(format!("Failed to read updated_at: {e}"))
+            })?;
+        let updated_by: Option<Uuid> =
+            row.try_get("updated_by").map_err(|e| {
+                MediaError::Internal(format!("Failed to read updated_by: {e}"))
+            })?;
 
         Self::map_row(admin_policy, user_policy, updated_at, updated_by)
     }
@@ -134,12 +157,18 @@ impl SecuritySettingsRepository for PostgresSecuritySettingsRepository {
     ) -> Result<AuthSecuritySettings> {
         let id = self.ensure_singleton_id().await?;
 
-        let admin_json = serde_json::to_value(&update.admin_password_policy).map_err(|e| {
-            MediaError::Internal(format!("Failed to encode admin password policy: {e}"))
-        })?;
-        let user_json = serde_json::to_value(&update.user_password_policy).map_err(|e| {
-            MediaError::Internal(format!("Failed to encode user password policy: {e}"))
-        })?;
+        let admin_json = serde_json::to_value(&update.admin_password_policy)
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to encode admin password policy: {e}"
+                ))
+            })?;
+        let user_json = serde_json::to_value(&update.user_password_policy)
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to encode user password policy: {e}"
+                ))
+            })?;
 
         let row = sqlx::query(
             r#"
@@ -163,21 +192,29 @@ impl SecuritySettingsRepository for PostgresSecuritySettingsRepository {
         .fetch_one(self.pool())
         .await
         .map_err(|e| {
-            MediaError::Internal(format!("Failed to update auth security settings: {e}"))
+            MediaError::Internal(format!(
+                "Failed to update auth security settings: {e}"
+            ))
         })?;
 
-        let admin_policy: Value = row
-            .try_get("admin_password_policy")
-            .map_err(|e| MediaError::Internal(format!("Failed to read admin policy: {e}")))?;
-        let user_policy: Value = row
-            .try_get("user_password_policy")
-            .map_err(|e| MediaError::Internal(format!("Failed to read user policy: {e}")))?;
-        let updated_at: DateTime<Utc> = row
-            .try_get("updated_at")
-            .map_err(|e| MediaError::Internal(format!("Failed to read updated_at: {e}")))?;
-        let updated_by: Option<Uuid> = row
-            .try_get("updated_by")
-            .map_err(|e| MediaError::Internal(format!("Failed to read updated_by: {e}")))?;
+        let admin_policy: Value =
+            row.try_get("admin_password_policy").map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to read admin policy: {e}"
+                ))
+            })?;
+        let user_policy: Value =
+            row.try_get("user_password_policy").map_err(|e| {
+                MediaError::Internal(format!("Failed to read user policy: {e}"))
+            })?;
+        let updated_at: DateTime<Utc> =
+            row.try_get("updated_at").map_err(|e| {
+                MediaError::Internal(format!("Failed to read updated_at: {e}"))
+            })?;
+        let updated_by: Option<Uuid> =
+            row.try_get("updated_by").map_err(|e| {
+                MediaError::Internal(format!("Failed to read updated_by: {e}"))
+            })?;
 
         Self::map_row(admin_policy, user_policy, updated_at, updated_by)
     }

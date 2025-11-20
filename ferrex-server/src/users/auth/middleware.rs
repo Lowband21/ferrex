@@ -5,8 +5,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ferrex_core::{
-    api_types::ApiResponse, auth::domain::value_objects::SessionScope, rbac::UserPermissions,
-    user::User,
+    api_types::ApiResponse, auth::domain::value_objects::SessionScope,
+    rbac::UserPermissions, user::User,
 };
 
 use crate::infra::app_state::AppState;
@@ -26,7 +26,7 @@ pub async fn auth_middleware(
         .map_err(map_authentication_error_to_status)?;
 
     let user = state
-        .unit_of_work
+        .unit_of_work()
         .users
         .get_user_by_id(session.user_id)
         .await
@@ -34,7 +34,7 @@ pub async fn auth_middleware(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let permissions = state
-        .unit_of_work
+        .unit_of_work()
         .rbac
         .get_user_permissions(user.id)
         .await
@@ -54,20 +54,26 @@ pub async fn optional_auth_middleware(
     next: Next,
 ) -> Response {
     if let Ok(token) = extract_bearer_token(&request)
-        && let Ok(session) = state.auth_service().validate_session_token(&token).await
+        && let Ok(session) =
+            state.auth_service().validate_session_token(&token).await
         && let Ok(Some(user)) = state
-            .unit_of_work
+            .unit_of_work()
             .users
             .get_user_by_id(session.user_id)
             .await
+    {
+        if let Ok(permissions) = state
+            .unit_of_work()
+            .rbac
+            .get_user_permissions(user.id)
+            .await
         {
-            if let Ok(permissions) = state.unit_of_work.rbac.get_user_permissions(user.id).await {
-                request.extensions_mut().insert(permissions);
-            }
-            request.extensions_mut().insert(user);
-            request.extensions_mut().insert(session.device_session_id);
-            request.extensions_mut().insert(session.scope);
+            request.extensions_mut().insert(permissions);
         }
+        request.extensions_mut().insert(user);
+        request.extensions_mut().insert(session.device_session_id);
+        request.extensions_mut().insert(session.scope);
+    }
 
     next.run(request).await
 }
@@ -99,7 +105,9 @@ pub async fn admin_middleware(request: Request, next: Next) -> Response {
         }
     };
 
-    if let Err(response) = ensure_admin_scope(request.extensions().get::<SessionScope>()) {
+    if let Err(response) =
+        ensure_admin_scope(request.extensions().get::<SessionScope>())
+    {
         return response;
     }
 
@@ -147,7 +155,9 @@ fn map_authentication_error_to_status(err: AuthenticationError) -> StatusCode {
         | AuthenticationError::DeviceNotTrusted
         | AuthenticationError::SessionExpired
         | AuthenticationError::UserNotFound => StatusCode::UNAUTHORIZED,
-        AuthenticationError::DatabaseError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        AuthenticationError::DatabaseError(_) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -181,7 +191,8 @@ mod tests {
 
     #[test]
     fn missing_scope_returns_unauthorized() {
-        let response = ensure_admin_scope(None).expect_err("expected unauthorized");
+        let response =
+            ensure_admin_scope(None).expect_err("expected unauthorized");
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
@@ -194,6 +205,7 @@ mod tests {
 
     #[test]
     fn full_scope_is_allowed() {
-        ensure_admin_scope(Some(&SessionScope::Full)).expect("full scope should pass");
+        ensure_admin_scope(Some(&SessionScope::Full))
+            .expect("full scope should pass");
     }
 }

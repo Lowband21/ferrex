@@ -5,7 +5,9 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::database::ports::watch_metrics::{ProgressEntry, WatchMetricsReadPort};
+use crate::database::ports::watch_metrics::{
+    ProgressEntry, WatchMetricsReadPort,
+};
 use crate::error::{MediaError, Result};
 
 #[derive(Clone)]
@@ -34,7 +36,10 @@ impl fmt::Debug for PostgresWatchMetricsRepository {
 
 #[async_trait]
 impl WatchMetricsReadPort for PostgresWatchMetricsRepository {
-    async fn load_progress_map(&self, user_id: Uuid) -> Result<HashMap<Uuid, ProgressEntry>> {
+    async fn load_progress_map(
+        &self,
+        user_id: Uuid,
+    ) -> Result<HashMap<Uuid, ProgressEntry>> {
         let rows = sqlx::query!(
             r#"
             SELECT media_uuid, position, duration, last_watched
@@ -45,7 +50,12 @@ impl WatchMetricsReadPort for PostgresWatchMetricsRepository {
         )
         .fetch_all(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to load watch progress: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to load watch progress: {}",
+                e
+            ))
+        })?;
 
         let mut map = HashMap::with_capacity(rows.len());
         for row in rows {
@@ -63,7 +73,10 @@ impl WatchMetricsReadPort for PostgresWatchMetricsRepository {
         Ok(map)
     }
 
-    async fn load_completed_map(&self, user_id: Uuid) -> Result<HashMap<Uuid, i64>> {
+    async fn load_completed_map(
+        &self,
+        user_id: Uuid,
+    ) -> Result<HashMap<Uuid, i64>> {
         let rows = sqlx::query!(
             r#"
             SELECT media_uuid, completed_at
@@ -74,7 +87,12 @@ impl WatchMetricsReadPort for PostgresWatchMetricsRepository {
         )
         .fetch_all(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to load completed media: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to load completed media: {}",
+                e
+            ))
+        })?;
 
         let mut map = HashMap::with_capacity(rows.len());
         for row in rows {

@@ -23,11 +23,13 @@ use crate::database::ports::{
 #[cfg(feature = "database")]
 use crate::database::{
     infrastructure::postgres::{
-        PostgresFolderInventoryRepository, PostgresImageRepository, PostgresIndicesRepository,
-        PostgresLibraryRepository, PostgresMediaReferencesRepository, PostgresMediaRepository,
-        PostgresProcessingStatusRepository, PostgresQueryRepository, PostgresRbacRepository,
-        PostgresSecuritySettingsRepository, PostgresSetupClaimsRepository,
-        PostgresSyncSessionsRepository, PostgresUsersRepository, PostgresWatchMetricsRepository,
+        PostgresFolderInventoryRepository, PostgresImageRepository,
+        PostgresIndicesRepository, PostgresLibraryRepository,
+        PostgresMediaReferencesRepository, PostgresMediaRepository,
+        PostgresProcessingStatusRepository, PostgresQueryRepository,
+        PostgresRbacRepository, PostgresSecuritySettingsRepository,
+        PostgresSetupClaimsRepository, PostgresSyncSessionsRepository,
+        PostgresUsersRepository, PostgresWatchMetricsRepository,
         PostgresWatchStatusRepository,
     },
     postgres::PostgresDatabase,
@@ -167,15 +169,24 @@ impl AppUnitOfWorkBuilder {
         self.libraries = Some(repo);
         self
     }
-    pub fn with_media_refs(mut self, repo: Arc<dyn MediaReferencesRepository>) -> Self {
+    pub fn with_media_refs(
+        mut self,
+        repo: Arc<dyn MediaReferencesRepository>,
+    ) -> Self {
         self.media_refs = Some(repo);
         self
     }
-    pub fn with_media_files_read(mut self, repo: Arc<dyn MediaFilesReadPort>) -> Self {
+    pub fn with_media_files_read(
+        mut self,
+        repo: Arc<dyn MediaFilesReadPort>,
+    ) -> Self {
         self.media_files_read = Some(repo);
         self
     }
-    pub fn with_media_files_write(mut self, repo: Arc<dyn MediaFilesWritePort>) -> Self {
+    pub fn with_media_files_write(
+        mut self,
+        repo: Arc<dyn MediaFilesWritePort>,
+    ) -> Self {
         self.media_files_write = Some(repo);
         self
     }
@@ -195,27 +206,45 @@ impl AppUnitOfWorkBuilder {
         self.rbac = Some(repo);
         self
     }
-    pub fn with_setup_claims(mut self, repo: Arc<dyn SetupClaimsRepository>) -> Self {
+    pub fn with_setup_claims(
+        mut self,
+        repo: Arc<dyn SetupClaimsRepository>,
+    ) -> Self {
         self.setup_claims = Some(repo);
         self
     }
-    pub fn with_watch_status(mut self, repo: Arc<dyn WatchStatusRepository>) -> Self {
+    pub fn with_watch_status(
+        mut self,
+        repo: Arc<dyn WatchStatusRepository>,
+    ) -> Self {
         self.watch_status = Some(repo);
         self
     }
-    pub fn with_watch_metrics(mut self, repo: Arc<dyn WatchMetricsReadPort>) -> Self {
+    pub fn with_watch_metrics(
+        mut self,
+        repo: Arc<dyn WatchMetricsReadPort>,
+    ) -> Self {
         self.watch_metrics = Some(repo);
         self
     }
-    pub fn with_sync_sessions(mut self, repo: Arc<dyn SyncSessionsRepository>) -> Self {
+    pub fn with_sync_sessions(
+        mut self,
+        repo: Arc<dyn SyncSessionsRepository>,
+    ) -> Self {
         self.sync_sessions = Some(repo);
         self
     }
-    pub fn with_folder_inventory(mut self, repo: Arc<dyn FolderInventoryRepository>) -> Self {
+    pub fn with_folder_inventory(
+        mut self,
+        repo: Arc<dyn FolderInventoryRepository>,
+    ) -> Self {
         self.folder_inventory = Some(repo);
         self
     }
-    pub fn with_processing_status(mut self, repo: Arc<dyn ProcessingStatusRepository>) -> Self {
+    pub fn with_processing_status(
+        mut self,
+        repo: Arc<dyn ProcessingStatusRepository>,
+    ) -> Self {
         self.processing_status = Some(repo);
         self
     }
@@ -231,9 +260,9 @@ impl AppUnitOfWorkBuilder {
             libraries: self
                 .libraries
                 .ok_or_else(|| "missing LibraryRepository".to_string())?,
-            media_refs: self
-                .media_refs
-                .ok_or_else(|| "missing MediaReferencesRepository".to_string())?,
+            media_refs: self.media_refs.ok_or_else(|| {
+                "missing MediaReferencesRepository".to_string()
+            })?,
             media_files_read: self
                 .media_files_read
                 .ok_or_else(|| "missing MediaFilesReadPort".to_string())?,
@@ -252,9 +281,9 @@ impl AppUnitOfWorkBuilder {
             rbac: self
                 .rbac
                 .ok_or_else(|| "missing RbacRepository".to_string())?,
-            security_settings: self
-                .security_settings
-                .ok_or_else(|| "missing SecuritySettingsRepository".to_string())?,
+            security_settings: self.security_settings.ok_or_else(|| {
+                "missing SecuritySettingsRepository".to_string()
+            })?,
             setup_claims: self
                 .setup_claims
                 .ok_or_else(|| "missing SetupClaimsRepository".to_string())?,
@@ -267,12 +296,12 @@ impl AppUnitOfWorkBuilder {
             sync_sessions: self
                 .sync_sessions
                 .ok_or_else(|| "missing SyncSessionsRepository".to_string())?,
-            folder_inventory: self
-                .folder_inventory
-                .ok_or_else(|| "missing FolderInventoryRepository".to_string())?,
-            processing_status: self
-                .processing_status
-                .ok_or_else(|| "missing ProcessingStatusRepository".to_string())?,
+            folder_inventory: self.folder_inventory.ok_or_else(|| {
+                "missing FolderInventoryRepository".to_string()
+            })?,
+            processing_status: self.processing_status.ok_or_else(|| {
+                "missing ProcessingStatusRepository".to_string()
+            })?,
             indices: self
                 .indices
                 .ok_or_else(|| "missing IndicesRepository".to_string())?,
@@ -306,16 +335,20 @@ impl AppUnitOfWorkBuilder {
         self.media_files_read = Some(media_repo.clone());
         self.media_files_write = Some(media_repo.clone());
 
-        let images: Arc<dyn ImageRepository> = Arc::new(PostgresImageRepository::new(db.clone()));
+        let images: Arc<dyn ImageRepository> =
+            Arc::new(PostgresImageRepository::new(db.clone()));
         self.images = Some(images);
 
-        let query: Arc<dyn QueryRepository> = Arc::new(PostgresQueryRepository::new(db.clone()));
+        let query: Arc<dyn QueryRepository> =
+            Arc::new(PostgresQueryRepository::new(db.clone()));
         self.query = Some(query);
 
-        let users: Arc<dyn UsersRepository> = Arc::new(PostgresUsersRepository::new(pool.clone()));
+        let users: Arc<dyn UsersRepository> =
+            Arc::new(PostgresUsersRepository::new(pool.clone()));
         self.users = Some(users);
 
-        let rbac: Arc<dyn RbacRepository> = Arc::new(PostgresRbacRepository::new(pool.clone()));
+        let rbac: Arc<dyn RbacRepository> =
+            Arc::new(PostgresRbacRepository::new(pool.clone()));
         self.rbac = Some(rbac);
 
         let security: Arc<dyn SecuritySettingsRepository> =

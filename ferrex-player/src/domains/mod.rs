@@ -15,7 +15,9 @@ pub mod streaming;
 pub mod ui;
 pub mod user_management;
 
-use crate::common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult};
+use crate::common::messages::{
+    CrossDomainEvent, DomainMessage, DomainUpdateResult,
+};
 use iced::Task;
 
 /// Domain trait that all domains must implement
@@ -30,7 +32,8 @@ pub trait Domain {
 
     /// Handle a cross-domain event
     /// Returns a Task that will produce domain messages
-    fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage>;
+    fn handle_event(&mut self, event: &CrossDomainEvent)
+    -> Task<DomainMessage>;
 }
 
 /// Domain registry that manages all domain states
@@ -50,7 +53,10 @@ pub struct DomainRegistry {
 
 impl DomainRegistry {
     /// Handle a cross-domain event by notifying all relevant domains
-    pub fn handle_event(&mut self, event: CrossDomainEvent) -> Task<DomainMessage> {
+    pub fn handle_event(
+        &mut self,
+        event: CrossDomainEvent,
+    ) -> Task<DomainMessage> {
         // Each domain can react to cross-domain events
         let tasks = vec![
             self.auth.handle_event(&event),

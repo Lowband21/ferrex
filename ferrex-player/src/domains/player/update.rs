@@ -25,7 +25,9 @@ pub fn update_player(
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::PLAYER_UPDATE);
+    profiling::scope!(
+        crate::infrastructure::profiling_scopes::scopes::PLAYER_UPDATE
+    );
 
     // Convenience alias
     let state: &mut PlayerDomainState = &mut app_state.domains.player.state;
@@ -38,26 +40,75 @@ pub fn update_player(
             // Delegate to PlayMediaWithId with no ID tracking
             update_player(
                 app_state,
-                Message::PlayMediaWithId(media, MediaID::Movie(MovieID::new_uuid())),
+                Message::PlayMediaWithId(
+                    media,
+                    MediaID::Movie(MovieID::new_uuid()),
+                ),
             )
         }
 
         Message::NavigateBack => {
-            // Reset player state and navigate back
-            state.reset();
-            // Send direct UI domain message for navigation
-            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
-                ui::messages::Message::NavigateBack,
-            )))
+            let update_task = if let Some(media_id) = state.current_media_id {
+                let position = if let Some(video) = &mut state.video_opt {
+                    video.position().as_secs_f64()
+                } else {
+                    state.last_valid_position
+                };
+                let duration = if let Some(video) = &mut state.video_opt {
+                    video.duration().as_secs_f64()
+                } else {
+                    state.last_valid_duration
+                };
+                Task::done(crate::common::messages::DomainMessage::Media(
+                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                        media_id, position, duration,
+                    ),
+                ))
+            } else {
+                Task::none()
+            };
+
+            let tasks = Task::batch(vec![
+                update_task,
+                Task::done(DomainMessage::Player(Message::ResetAfterStop)),
+                Task::done(DomainMessage::Ui(
+                    ui::messages::Message::NavigateBack,
+                )),
+            ]);
+
+            DomainUpdateResult::task(tasks)
         }
 
         Message::NavigateHome => {
-            // Reset player state and navigate home
-            state.reset();
-            // Send direct UI domain message for navigation
-            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
-                ui::messages::Message::NavigateHome,
-            )))
+            let update_task = if let Some(media_id) = state.current_media_id {
+                let position = if let Some(video) = &mut state.video_opt {
+                    video.position().as_secs_f64()
+                } else {
+                    state.last_valid_position
+                };
+                let duration = if let Some(video) = &mut state.video_opt {
+                    video.duration().as_secs_f64()
+                } else {
+                    state.last_valid_duration
+                };
+                Task::done(crate::common::messages::DomainMessage::Media(
+                    crate::domains::media::messages::Message::SendProgressUpdateWithData(
+                        media_id, position, duration,
+                    ),
+                ))
+            } else {
+                Task::none()
+            };
+
+            let tasks = Task::batch(vec![
+                update_task,
+                Task::done(DomainMessage::Player(Message::ResetAfterStop)),
+                Task::done(DomainMessage::Ui(
+                    ui::messages::Message::NavigateHome,
+                )),
+            ]);
+
+            DomainUpdateResult::task(tasks)
         }
 
         Message::Play => {
@@ -134,7 +185,9 @@ pub fn update_player(
             let tasks = Task::batch(vec![
                 update_task,
                 Task::done(DomainMessage::Player(Message::ResetAfterStop)),
-                Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack)),
+                Task::done(DomainMessage::Ui(
+                    ui::messages::Message::NavigateBack,
+                )),
             ]);
 
             // Return tasks without resetting yet
@@ -154,17 +207,24 @@ pub fn update_player(
 
         Message::SeekRelease => {
             // Perform the seek on release
-            if let (Some(video), Some(media_id)) = (&mut state.video_opt, state.current_media_id) {
+            if let (Some(video), Some(media_id)) =
+                (&mut state.video_opt, state.current_media_id)
+            {
                 state.dragging = false;
 
                 // Use pending seek position if available, otherwise use last seek position
-                let final_seek_position = state.pending_seek_position.or(state.last_seek_position);
+                let final_seek_position =
+                    state.pending_seek_position.or(state.last_seek_position);
 
                 if let Some(seek_position) = final_seek_position {
-                    log::debug!("Starting seek to position: {:.2}s", seek_position);
+                    log::debug!(
+                        "Starting seek to position: {:.2}s",
+                        seek_position
+                    );
                     state.seeking = true;
                     state.seek_started_time = Some(std::time::Instant::now());
-                    let duration = Duration::try_from_secs_f64(seek_position).unwrap_or_default();
+                    let duration = Duration::try_from_secs_f64(seek_position)
+                        .unwrap_or_default();
                     if let Err(err) = video.seek(duration, false) {
                         log::error!(
                             "Failed to seek video to {:.3}s: {}",
@@ -175,7 +235,10 @@ pub fn update_player(
                 } else if let Some(seek_position) = state.last_seek_position {
                     // Update position immediately for better UX
                     state.last_valid_position = seek_position;
-                    log::debug!("Seek initiated, position set to: {:.2}s", seek_position);
+                    log::debug!(
+                        "Seek initiated, position set to: {:.2}s",
+                        seek_position
+                    );
                 }
 
                 state.last_seek_position = None;
@@ -224,7 +287,9 @@ pub fn update_player(
 
         Message::SeekDone => {
             // Seek operation completed, clear seeking flag
-            if let (Some(video), Some(media_id)) = (&mut state.video_opt, state.current_media_id) {
+            if let (Some(video), Some(media_id)) =
+                (&mut state.video_opt, state.current_media_id)
+            {
                 let video_pos = video.position().as_secs_f64();
                 log::debug!(
                     "SeekDone: Clearing seeking flag. Video position: {:.2}s, UI position: {:.2}s",
@@ -258,7 +323,8 @@ pub fn update_player(
                 };
 
                 // Determine reliable duration for clamping
-                let raw_duration = state.source_duration.unwrap_or(state.last_valid_duration);
+                let raw_duration =
+                    state.source_duration.unwrap_or(state.last_valid_duration);
                 let clamp_duration = if raw_duration > 0.0 {
                     raw_duration
                 } else if state.last_valid_duration > 0.0 {
@@ -276,7 +342,8 @@ pub fn update_player(
                 // Perform the seek
                 state.seeking = true;
                 state.seek_started_time = Some(std::time::Instant::now());
-                let seek_to = Duration::try_from_secs_f64(new_position).unwrap_or_default();
+                let seek_to = Duration::try_from_secs_f64(new_position)
+                    .unwrap_or_default();
                 if let Err(err) = video.seek(seek_to, false) {
                     log::error!(
                         "Failed to seek video to {:.3}s: {}",
@@ -327,15 +394,18 @@ pub fn update_player(
                 app_state.domains.ui.state.view = ui::types::ViewState::Player;
                 DomainUpdateResult::task(Task::none())
             } else {
-                app_state.domains.ui.state.view = ui::types::ViewState::VideoError {
-                    message: "Failed to load video".to_string(),
-                };
+                app_state.domains.ui.state.view =
+                    ui::types::ViewState::VideoError {
+                        message: "Failed to load video".to_string(),
+                    };
                 DomainUpdateResult::task(Task::none())
             }
         }
 
         Message::VideoReadyToPlay => {
-            log::info!("[Player] Video ready to play - loading video directly in player");
+            log::info!(
+                "[Player] Video ready to play - loading video directly in player"
+            );
 
             // Runtime option: allow external player; default false for now
             let use_external = false;
@@ -346,7 +416,8 @@ pub fn update_player(
                     app_state.window_size.width as u32,
                     app_state.window_size.height as u32,
                 ));
-                let window_position = app_state.window_position.map(|p| (p.x as i32, p.y as i32));
+                let window_position =
+                    app_state.window_position.map(|p| (p.x as i32, p.y as i32));
                 let resume_position = state.pending_resume_position;
 
                 // Activate external mode and set view to Player (internal view hidden if desired later)
@@ -379,21 +450,28 @@ pub fn update_player(
                     }
                     Err(e) => {
                         log::error!("Failed to start external MPV: {}", e);
-                        app_state.domains.ui.state.view = ui::types::ViewState::VideoError {
-                            message: format!("Failed to start external player: {}", e),
-                        };
+                        app_state.domains.ui.state.view =
+                            ui::types::ViewState::VideoError {
+                                message: format!(
+                                    "Failed to start external player: {}",
+                                    e
+                                ),
+                            };
                         DomainUpdateResult::task(Task::none())
                     }
                 }
             } else {
                 DomainUpdateResult::task(
-                    crate::domains::player::video::load_video(app_state).map(DomainMessage::Player),
+                    crate::domains::player::video::load_video(app_state)
+                        .map(DomainMessage::Player),
                 )
             }
         }
 
         Message::EndOfStream => {
-            log::info!("End of stream");
+            log::info!(
+                "End of stream - finalizing playback and navigating back"
+            );
 
             // Capture position and duration for progress update
             if let Some(media_id) = state.current_media_id {
@@ -408,29 +486,45 @@ pub fn update_player(
                 ));
 
                 // Check if we should play next episode
-                let next_episode_task = if let Some(media_id) = &state.current_media_id {
+                let next_episode_task = if let Some(media_id) =
+                    &state.current_media_id
+                {
                     // Only auto-play next episode if this is an episode
                     if let ferrex_core::MediaID::Episode(_) = media_id {
-                        log::info!("Current media is an episode, checking for next episode");
+                        log::info!(
+                            "Current media is an episode, checking for next episode"
+                        );
                         Task::done(crate::common::messages::DomainMessage::Media(
                             crate::domains::media::messages::Message::PlayNextEpisode,
                         ))
                     } else {
                         Task::none()
                     }
-                // Prefer backend position if video is still present
-                let (position, duration) = if let Some(video) = &mut state.video_opt {
-                    (
-                        video.position().as_secs_f64(),
-                        video.duration().as_secs_f64(),
-                    )
-                } else {
-                    Task::none()
                 };
 
-                DomainUpdateResult::task(Task::batch(vec![progress_task, next_episode_task]))
+                let (position, duration) =
+                    if let Some(video) = &mut state.video_opt {
+                        (
+                            video.position().as_secs_f64(),
+                            video.duration().as_secs_f64(),
+                        )
+                    } else {
+                        (state.last_valid_position, state.last_valid_duration)
+                    };
+
+                DomainUpdateResult::task(Task::batch(vec![
+                    progress_task,
+                    next_episode_task,
+                ]))
             } else {
-                DomainUpdateResult::task(Task::none())
+                // No media id - just reset and navigate back
+                let tasks = Task::batch(vec![
+                    Task::done(DomainMessage::Player(Message::ResetAfterStop)),
+                    Task::done(DomainMessage::Ui(
+                        ui::messages::Message::NavigateBack,
+                    )),
+                ]);
+                DomainUpdateResult::task(tasks)
             }
         }
 
@@ -464,11 +558,16 @@ pub fn update_player(
                 if state.last_valid_duration <= 0.0 {
                     let new_duration = video.duration().as_secs_f64();
                     if new_duration > 0.0 {
-                        log::info!("Duration now available: {} seconds", new_duration);
+                        log::info!(
+                            "Duration now available: {} seconds",
+                            new_duration
+                        );
                         state.last_valid_duration = new_duration;
                         state.last_valid_duration = new_duration;
                     } else {
-                        log::debug!("NewFrame: Duration still not available from video");
+                        log::debug!(
+                            "NewFrame: Duration still not available from video"
+                        );
                     }
                 }
 
@@ -572,16 +671,18 @@ pub fn update_player(
                 - crate::infrastructure::constants::player_controls::SEEK_BAR_CENTER_FROM_BOTTOM;
             let max_vertical_distance = super::state::SEEK_BAR_VISUAL_HEIGHT
                 * super::state::SEEK_BAR_CLICK_TOLERANCE_MULTIPLIER;
-            let within_seek_zone =
-                (point.y - seek_bar_vertical_center).abs() <= max_vertical_distance;
+            let within_seek_zone = (point.y - seek_bar_vertical_center).abs()
+                <= max_vertical_distance;
 
             // Update seek bar hover state
             state.seek_bar_hovered = within_seek_zone;
 
             // Only calculate seek position if within vertical bounds OR already dragging
             if within_seek_zone || state.dragging {
-                let percentage = (point.x / window_size.width).clamp(0.0, 1.0) as f64;
-                let duration = state.source_duration.unwrap_or(state.last_valid_duration);
+                let percentage =
+                    (point.x / window_size.width).clamp(0.0, 1.0) as f64;
+                let duration =
+                    state.source_duration.unwrap_or(state.last_valid_duration);
                 let seek_position = percentage * duration;
                 // Store for potential click-to-seek
                 state.last_seek_position = Some(seek_position);
@@ -593,8 +694,10 @@ pub fn update_player(
             // If we're dragging the seek bar, update position and perform seek
             if state.dragging {
                 // When dragging, always calculate position even if outside vertical zone
-                let percentage = (point.x / window_size.width).clamp(0.0, 1.0) as f64;
-                let duration = state.source_duration.unwrap_or(state.last_valid_duration);
+                let percentage =
+                    (point.x / window_size.width).clamp(0.0, 1.0) as f64;
+                let duration =
+                    state.source_duration.unwrap_or(state.last_valid_duration);
                 let seek_position = percentage * duration;
 
                 // Update position immediately for responsive UI
@@ -603,7 +706,9 @@ pub fn update_player(
 
                 // Throttle actual seeks to prevent overwhelming the network
                 let should_seek = match state.last_seek_time {
-                    Some(last_time) => last_time.elapsed() > Duration::from_millis(100),
+                    Some(last_time) => {
+                        last_time.elapsed() > Duration::from_millis(100)
+                    }
                     None => true,
                 };
 
@@ -611,7 +716,8 @@ pub fn update_player(
                     // Perform the actual seek
                     if let Some(video) = state.video_opt.as_mut() {
                         let duration =
-                            Duration::try_from_secs_f64(seek_position).unwrap_or_default();
+                            Duration::try_from_secs_f64(seek_position)
+                                .unwrap_or_default();
                         if let Err(err) = video.seek(duration, false) {
                             log::error!(
                                 "Failed to seek video to {:.3}s while dragging: {}",
@@ -651,7 +757,9 @@ pub fn update_player(
             }
         }
 
-        Message::VideoDoubleClicked => update_player(app_state, Message::ToggleFullscreen),
+        Message::VideoDoubleClicked => {
+            update_player(app_state, Message::ToggleFullscreen)
+        }
 
         Message::SetPlaybackSpeed(speed) => {
             if let Some(video) = &mut state.video_opt {
@@ -728,9 +836,9 @@ pub fn update_player(
                     }
                 } else {
                     // Not on Wayland; ensure Appsink
-                    if let Err(e) = video
-                        .set_preference(subwave_unified::video::BackendPreference::ForceAppsink)
-                    {
+                    if let Err(e) = video.set_preference(
+                        subwave_unified::video::BackendPreference::ForceAppsink,
+                    ) {
                         log::error!("Failed to switch backend: {}", e);
                     }
                 }
@@ -768,7 +876,9 @@ pub fn update_player(
         Message::CheckControlsVisibility => {
             // Periodically clear notifications and hide controls if idle
             state.update_track_notification();
-            if state.controls && state.controls_time.elapsed() > Duration::from_secs(3) {
+            if state.controls
+                && state.controls_time.elapsed() > Duration::from_secs(3)
+            {
                 state.controls = false;
             }
             DomainUpdateResult::task(Task::none())
@@ -801,7 +911,8 @@ pub fn update_player(
             state.current_media_id = Some(media_id);
 
             // Transfer pending resume position from media domain if available
-            state.pending_resume_position = app_state.domains.media.state.pending_resume_position;
+            state.pending_resume_position =
+                app_state.domains.media.state.pending_resume_position;
             app_state.domains.media.state.pending_resume_position = None;
 
             // Seed playback UI with the position we expect to resume from (or clear if none)
@@ -818,21 +929,27 @@ pub fn update_player(
             }
 
             // HDR detection heuristics (copied from previous media handler)
-            let is_hdr_content = if let Some(metadata) = &media.media_file_metadata {
+            let is_hdr_content = if let Some(metadata) =
+                &media.media_file_metadata
+            {
                 if let Some(bit_depth) = metadata.bit_depth {
                     bit_depth > 8
                 } else if let Some(color_transfer) = &metadata.color_transfer {
                     ["smpte2084", "arib-std-b67", "smpte2086"]
                         .iter()
                         .any(|t| color_transfer.contains(t))
-                } else if let Some(color_primaries) = &metadata.color_primaries {
+                } else if let Some(color_primaries) = &metadata.color_primaries
+                {
                     color_primaries.contains("bt2020")
                 } else {
                     false
                 }
             } else {
                 let f = media.filename.as_str();
-                f.contains("2160p") || f.contains("UHD") || f.contains("HDR") || f.contains("DV")
+                f.contains("2160p")
+                    || f.contains("UHD")
+                    || f.contains("HDR")
+                    || f.contains("DV")
             };
             state.is_hdr_content = is_hdr_content;
 
@@ -857,10 +974,12 @@ pub fn update_player(
                     )
                 }
                 Err(e) => {
-                    app_state.domains.ui.state.error_message = Some(format!("Invalid URL: {}", e));
-                    app_state.domains.ui.state.view = ui::types::ViewState::VideoError {
-                        message: format!("Invalid URL: {}", e),
-                    };
+                    app_state.domains.ui.state.error_message =
+                        Some(format!("Invalid URL: {}", e));
+                    app_state.domains.ui.state.view =
+                        ui::types::ViewState::VideoError {
+                            message: format!("Invalid URL: {}", e),
+                        };
                     DomainUpdateResult::task(Task::none())
                 }
             }
@@ -909,6 +1028,14 @@ pub fn update_player(
                 state.external_mpv_handle = None;
                 state.external_mpv_active = false;
 
+                let tasks = Task::batch(vec![
+                    Task::done(DomainMessage::Player(Message::ResetAfterStop)),
+                    Task::done(DomainMessage::Ui(
+                        ui::messages::Message::NavigateBack,
+                    )),
+                    progress_task,
+                ]);
+
                 // Emit RestoreWindow event
                 DomainUpdateResult::with_events(
                     progress_task,
@@ -917,7 +1044,13 @@ pub fn update_player(
                     )],
                 )
             } else {
-                DomainUpdateResult::task(Task::none())
+                let tasks = Task::batch(vec![
+                    Task::done(DomainMessage::Player(Message::ResetAfterStop)),
+                    Task::done(DomainMessage::Ui(
+                        ui::messages::Message::NavigateBack,
+                    )),
+                ]);
+                DomainUpdateResult::task(tasks)
             }
         }
 
@@ -977,7 +1110,11 @@ pub fn update_player(
                         let (position, duration) = handle.poll_position();
                         let final_fullscreen = handle.get_final_fullscreen();
 
-                        log::info!("position: {:?}, duration: {:?}", position, duration);
+                        log::info!(
+                            "position: {:?}, duration: {:?}",
+                            position,
+                            duration
+                        );
 
                         state.last_valid_position = position;
                         state.is_fullscreen = final_fullscreen;
@@ -986,10 +1123,11 @@ pub fn update_player(
                         state.external_mpv_active = false;
 
                         // Send final progress update
-                        let end_playback_task =
-                            Task::done(crate::common::messages::DomainMessage::Player(
+                        let end_playback_task = Task::done(
+                            crate::common::messages::DomainMessage::Player(
                                 Message::ExternalPlaybackEnded,
-                            ));
+                            ),
+                        );
                         let progress_task = Task::done(crate::common::messages::DomainMessage::Media(
                         crate::domains::media::messages::Message::SendProgressUpdateWithData(
                             media_id, position, duration,
@@ -997,8 +1135,9 @@ pub fn update_player(
                     ));
 
                         // Navigate back to previous view
-                        let nav_task =
-                            Task::done(DomainMessage::Ui(ui::messages::Message::NavigateBack));
+                        let nav_task = Task::done(DomainMessage::Ui(
+                            ui::messages::Message::NavigateBack,
+                        ));
 
                         // Emit RestoreWindow event and return tasks
                         DomainUpdateResult::with_events(
@@ -1018,7 +1157,10 @@ pub fn update_player(
                         if position >= 0.0 && duration > 0.0 {
                             update_player(
                                 app_state,
-                                Message::ExternalPlaybackUpdate { position, duration },
+                                Message::ExternalPlaybackUpdate {
+                                    position,
+                                    duration,
+                                },
                             )
                         } else {
                             DomainUpdateResult::task(Task::none())
@@ -1036,9 +1178,12 @@ pub fn update_player(
                 app_state.window_size.width as u32,
                 app_state.window_size.height as u32,
             ));
-            let window_position = app_state.window_position.map(|p| (p.x as i32, p.y as i32));
+            let window_position =
+                app_state.window_position.map(|p| (p.x as i32, p.y as i32));
+
             // Ensure handoff starts at the current native player position
-            let resume_position = if let Some(video) = state.video_opt.as_ref() {
+            let resume_position = if let Some(video) = state.video_opt.as_ref()
+            {
                 let pos = video.position().as_secs_f64();
                 if pos > 0.0 {
                     Some(pos as f32)
@@ -1070,16 +1215,21 @@ pub fn update_player(
                 Ok(handle) => {
                     state.external_mpv_active = true;
                     state.external_mpv_handle = Some(Box::new(handle));
-                    app_state.domains.ui.state.view = ui::types::ViewState::Player;
+                    app_state.domains.ui.state.view =
+                        ui::types::ViewState::Player;
                     DomainUpdateResult::task(Task::done(DomainMessage::Player(
                         Message::ExternalPlaybackStarted,
                     )))
                 }
                 Err(e) => {
                     log::error!("Failed to start external MPV: {}", e);
-                    app_state.domains.ui.state.view = ui::types::ViewState::VideoError {
-                        message: format!("Failed to start external player: {}", e),
-                    };
+                    app_state.domains.ui.state.view =
+                        ui::types::ViewState::VideoError {
+                            message: format!(
+                                "Failed to start external player: {}",
+                                e
+                            ),
+                        };
                     DomainUpdateResult::task(Task::none())
                 }
             }

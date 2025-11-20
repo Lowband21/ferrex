@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use crate::infrastructure::api_types::Library;
 use crate::state_refactored::State;
-use crate::{domains::library::messages::Message, infrastructure::services::api::ApiService};
+use crate::{
+    domains::library::messages::Message,
+    infrastructure::services::api::ApiService,
+};
 
 use chrono::Utc;
 use ferrex_core::{
@@ -40,16 +43,23 @@ pub fn handle_create_library(
     )
 }
 
-pub fn handle_library_created(state: &mut State, result: Result<Library, String>) -> Task<Message> {
+pub fn handle_library_created(
+    state: &mut State,
+    result: Result<Library, String>,
+) -> Task<Message> {
     match result {
         Ok(library) => {
             log::info!("Created library successfully; refreshing libraries");
             state.domains.library.state.library_form_data = None; // Close form on success
             state.domains.library.state.library_form_errors.clear();
-            state.domains.library.state.library_form_success =
-                Some(format!("Library \"{}\" created successfully", library.name));
+            state.domains.library.state.library_form_success = Some(format!(
+                "Library \"{}\" created successfully",
+                library.name
+            ));
             Task::perform(
-                super::library_loaded::fetch_libraries(state.api_service.clone()),
+                super::library_loaded::fetch_libraries(
+                    state.api_service.clone(),
+                ),
                 |res| Message::LibrariesLoaded(res.map_err(|e| e.to_string())),
             )
         }
@@ -97,15 +107,23 @@ pub fn handle_update_library(
     )
 }
 
-pub fn handle_library_updated(state: &mut State, result: Result<Library, String>) -> Task<Message> {
+pub fn handle_library_updated(
+    state: &mut State,
+    result: Result<Library, String>,
+) -> Task<Message> {
     match result {
         Ok(library) => {
-            log::info!("Updated library: {} - refreshing libraries", library.name);
+            log::info!(
+                "Updated library: {} - refreshing libraries",
+                library.name
+            );
             state.domains.library.state.library_form_data = None; // Close form on success
             state.domains.library.state.library_form_errors.clear();
             // Trigger reload of libraries
             Task::perform(
-                super::library_loaded::fetch_libraries(state.api_service.clone()),
+                super::library_loaded::fetch_libraries(
+                    state.api_service.clone(),
+                ),
                 |res| Message::LibrariesLoaded(res.map_err(|e| e.to_string())),
             )
         }
@@ -148,12 +166,19 @@ pub fn handle_library_deleted(
 ) -> Task<Message> {
     match result {
         Ok(library_id) => {
-            log::info!("Deleted library: {} - refreshing libraries", library_id);
-            if state.domains.library.state.current_library_id.as_ref() == Some(&library_id) {
+            log::info!(
+                "Deleted library: {} - refreshing libraries",
+                library_id
+            );
+            if state.domains.library.state.current_library_id.as_ref()
+                == Some(&library_id)
+            {
                 state.domains.library.state.current_library_id = None;
             }
             Task::perform(
-                super::library_loaded::fetch_libraries(state.api_service.clone()),
+                super::library_loaded::fetch_libraries(
+                    state.api_service.clone(),
+                ),
                 |res| Message::LibrariesLoaded(res.map_err(|e| e.to_string())),
             )
         }
@@ -164,7 +189,10 @@ pub fn handle_library_deleted(
     }
 }
 
-pub fn handle_show_library_form(state: &mut State, library: Option<Library>) -> Task<Message> {
+pub fn handle_show_library_form(
+    state: &mut State,
+    library: Option<Library>,
+) -> Task<Message> {
     state.domains.library.state.library_form_errors.clear();
     state.domains.library.state.library_form_success = None;
     state.domains.library.state.library_form_data = Some(match library {
@@ -180,7 +208,9 @@ pub fn handle_show_library_form(state: &mut State, library: Option<Library>) -> 
                 paths: lib
                     .paths
                     .iter()
-                    .map(|path| String::from(path.to_str().unwrap_or("Invalid Path")))
+                    .map(|path| {
+                        String::from(path.to_str().unwrap_or("Invalid Path"))
+                    })
                     .collect(),
                 scan_interval_minutes: lib.scan_interval_minutes.to_string(),
                 enabled: lib.enabled,
@@ -212,7 +242,10 @@ pub fn handle_hide_library_form(state: &mut State) -> Task<Message> {
 }
 
 /// Delete a library and recreate it with the same properties, triggering a fresh bulk scan.
-pub fn handle_reset_library(state: &mut State, library_id: LibraryID) -> Task<Message> {
+pub fn handle_reset_library(
+    state: &mut State,
+    library_id: LibraryID,
+) -> Task<Message> {
     use rkyv::{deserialize, rancor::Error};
 
     // Read current library from repo (archived)
@@ -229,14 +262,17 @@ pub fn handle_reset_library(state: &mut State, library_id: LibraryID) -> Task<Me
         )));
     };
 
-    let lib = match deserialize::<crate::infrastructure::api_types::Library, Error>(*yoke.get()) {
-        Ok(v) => v,
-        Err(_) => {
-            return Task::done(Message::ResetLibraryDone(Err(
-                "deserialize_failed".to_string()
-            )));
-        }
-    };
+    let lib =
+        match deserialize::<crate::infrastructure::api_types::Library, Error>(
+            *yoke.get(),
+        ) {
+            Ok(v) => v,
+            Err(_) => {
+                return Task::done(Message::ResetLibraryDone(Err(
+                    "deserialize_failed".to_string(),
+                )));
+            }
+        };
 
     let delete_api = state.api_service.clone();
     let create_api = state.api_service.clone();
@@ -275,22 +311,37 @@ pub fn handle_reset_library(state: &mut State, library_id: LibraryID) -> Task<Me
     )
 }
 
-pub fn handle_update_libarary_form_name(state: &mut State, name: String) -> Task<Message> {
-    if let Some(ref mut form_data) = state.domains.library.state.library_form_data {
+pub fn handle_update_libarary_form_name(
+    state: &mut State,
+    name: String,
+) -> Task<Message> {
+    if let Some(ref mut form_data) =
+        state.domains.library.state.library_form_data
+    {
         form_data.name = name;
     }
     Task::none()
 }
 
-pub fn handle_update_library_form_type(state: &mut State, library_type: String) -> Task<Message> {
-    if let Some(ref mut form_data) = state.domains.library.state.library_form_data {
+pub fn handle_update_library_form_type(
+    state: &mut State,
+    library_type: String,
+) -> Task<Message> {
+    if let Some(ref mut form_data) =
+        state.domains.library.state.library_form_data
+    {
         form_data.library_type = library_type;
     }
     Task::none()
 }
 
-pub fn handle_update_library_form_paths(state: &mut State, paths: String) -> Task<Message> {
-    if let Some(ref mut form_data) = state.domains.library.state.library_form_data {
+pub fn handle_update_library_form_paths(
+    state: &mut State,
+    paths: String,
+) -> Task<Message> {
+    if let Some(ref mut form_data) =
+        state.domains.library.state.library_form_data
+    {
         form_data.paths = paths;
     }
     Task::none()
@@ -300,21 +351,29 @@ pub fn handle_update_library_form_scan_interval(
     state: &mut State,
     interval: String,
 ) -> Task<Message> {
-    if let Some(ref mut form_data) = state.domains.library.state.library_form_data {
+    if let Some(ref mut form_data) =
+        state.domains.library.state.library_form_data
+    {
         form_data.scan_interval_minutes = interval;
     }
     Task::none()
 }
 
 pub fn handle_toggle_library_form_enabled(state: &mut State) -> Task<Message> {
-    if let Some(ref mut form_data) = state.domains.library.state.library_form_data {
+    if let Some(ref mut form_data) =
+        state.domains.library.state.library_form_data
+    {
         form_data.enabled = !form_data.enabled;
     }
     Task::none()
 }
 
-pub fn handle_toggle_library_form_start_scan(state: &mut State) -> Task<Message> {
-    if let Some(ref mut form_data) = state.domains.library.state.library_form_data {
+pub fn handle_toggle_library_form_start_scan(
+    state: &mut State,
+) -> Task<Message> {
+    if let Some(ref mut form_data) =
+        state.domains.library.state.library_form_data
+    {
         form_data.start_scan = !form_data.start_scan;
     }
     Task::none()
@@ -388,7 +447,10 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from)
                 .collect(),
-            scan_interval_minutes: form_data.scan_interval_minutes.parse().unwrap_or(60),
+            scan_interval_minutes: form_data
+                .scan_interval_minutes
+                .parse()
+                .unwrap_or(60),
             last_scan: None,
             enabled: form_data.enabled,
             media: None,
@@ -411,16 +473,22 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
                             library
                                 .paths
                                 .iter()
-                                .filter_map(|p| p.to_str().map(|s| s.to_string()))
+                                .filter_map(|p| {
+                                    p.to_str().map(|s| s.to_string())
+                                })
                                 .collect(),
                         ),
-                        scan_interval_minutes: Some(library.scan_interval_minutes),
+                        scan_interval_minutes: Some(
+                            library.scan_interval_minutes,
+                        ),
                         enabled: Some(library.enabled),
                     };
                     api.update_library(library.id, req).await.map(|_| library)
                 },
                 |result| match result {
-                    Ok(updated_library) => Message::LibraryUpdated(Ok(updated_library)),
+                    Ok(updated_library) => {
+                        Message::LibraryUpdated(Ok(updated_library))
+                    }
                     Err(e) => Message::LibraryUpdated(Err(e.to_string())),
                 },
             )
@@ -445,7 +513,9 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<Message> {
                     api.create_library(req).await.map(|_| library)
                 },
                 |result| match result {
-                    Ok(created_library) => Message::LibraryCreated(Ok(created_library)),
+                    Ok(created_library) => {
+                        Message::LibraryCreated(Ok(created_library))
+                    }
                     Err(e) => Message::LibraryCreated(Err(e.to_string())),
                 },
             )

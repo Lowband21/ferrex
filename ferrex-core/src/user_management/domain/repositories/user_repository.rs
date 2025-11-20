@@ -10,10 +10,16 @@ use uuid::Uuid;
 #[async_trait]
 pub trait UserRepository: Send + Sync {
     /// Create a new user
-    async fn create(&self, user: UserAggregate) -> Result<UserAggregate, UserRepositoryError>;
+    async fn create(
+        &self,
+        user: UserAggregate,
+    ) -> Result<UserAggregate, UserRepositoryError>;
 
     /// Find a user by their unique identifier
-    async fn find_by_id(&self, id: Uuid) -> Result<Option<UserAggregate>, UserRepositoryError>;
+    async fn find_by_id(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<UserAggregate>, UserRepositoryError>;
 
     /// Find a user by their username
     async fn find_by_username(
@@ -28,27 +34,43 @@ pub trait UserRepository: Send + Sync {
     ) -> Result<Option<UserAggregate>, UserRepositoryError>;
 
     /// Update an existing user
-    async fn update(&self, user: UserAggregate) -> Result<UserAggregate, UserRepositoryError>;
+    async fn update(
+        &self,
+        user: UserAggregate,
+    ) -> Result<UserAggregate, UserRepositoryError>;
 
     /// Delete a user by their identifier
     async fn delete(&self, id: Uuid) -> Result<bool, UserRepositoryError>;
 
     /// List all users with optional filtering
-    async fn list(&self, filter: UserListFilter)
-    -> Result<Vec<UserAggregate>, UserRepositoryError>;
+    async fn list(
+        &self,
+        filter: UserListFilter,
+    ) -> Result<Vec<UserAggregate>, UserRepositoryError>;
 
     /// Count users with optional filtering
-    async fn count(&self, filter: UserListFilter) -> Result<u64, UserRepositoryError>;
+    async fn count(
+        &self,
+        filter: UserListFilter,
+    ) -> Result<u64, UserRepositoryError>;
 
     /// Check if a username is already taken
-    async fn username_exists(&self, username: &Username) -> Result<bool, UserRepositoryError>;
+    async fn username_exists(
+        &self,
+        username: &Username,
+    ) -> Result<bool, UserRepositoryError>;
 
     /// Check if an email is already taken
-    async fn email_exists(&self, email: &str) -> Result<bool, UserRepositoryError>;
+    async fn email_exists(
+        &self,
+        email: &str,
+    ) -> Result<bool, UserRepositoryError>;
 
     /// Find users by role
-    async fn find_by_role(&self, role: UserRole)
-    -> Result<Vec<UserAggregate>, UserRepositoryError>;
+    async fn find_by_role(
+        &self,
+        role: UserRole,
+    ) -> Result<Vec<UserAggregate>, UserRepositoryError>;
 
     /// Get users who haven't logged in since the specified date
     async fn find_inactive_since(
@@ -141,7 +163,8 @@ impl UserRepositoryError {
     pub fn is_constraint_violation(&self) -> bool {
         matches!(
             self,
-            UserRepositoryError::UsernameExists | UserRepositoryError::EmailExists
+            UserRepositoryError::UsernameExists
+                | UserRepositoryError::EmailExists
         )
     }
 }

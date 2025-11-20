@@ -90,7 +90,11 @@ impl AuthService {
     }
 
     // TODO: Why are we ignoring the password?
-    pub async fn create_user(&self, username: String, _password: String) -> AuthResult<Uuid> {
+    pub async fn create_user(
+        &self,
+        username: String,
+        _password: String,
+    ) -> AuthResult<Uuid> {
         let mut users = self.users.write().await;
 
         if users.iter().any(|u| u.username == username) {
@@ -120,7 +124,10 @@ impl AuthService {
     /// Get user permissions
     ///
     /// Business Rule: First user automatically gets admin role
-    pub async fn get_user_permissions(&self, user_id: Uuid) -> AuthResult<UserPermissions> {
+    pub async fn get_user_permissions(
+        &self,
+        user_id: Uuid,
+    ) -> AuthResult<UserPermissions> {
         let users = self.users.read().await;
         let _user = users
             .iter()
@@ -175,7 +182,11 @@ impl AuthService {
     /// Business Rule: Authentication creates a session for tracking
     /// Admin authentication activates admin session for PIN auth
     /// Business Rule: Account locks after 5 failed attempts
-    pub async fn authenticate(&self, user_id: Uuid, password: String) -> AuthResult<SessionToken> {
+    pub async fn authenticate(
+        &self,
+        user_id: Uuid,
+        password: String,
+    ) -> AuthResult<SessionToken> {
         // Check if account is locked
         if self.is_account_locked(user_id).await {
             return Err(AuthError::AccountLocked);
@@ -317,7 +328,11 @@ impl AuthService {
     /// Enable auto-login for a user on a specific device
     ///
     /// Business Rule: Auto-login must be explicitly enabled per device
-    pub async fn enable_auto_login(&self, user_id: Uuid, device_id: String) -> AuthResult<()> {
+    pub async fn enable_auto_login(
+        &self,
+        user_id: Uuid,
+        device_id: String,
+    ) -> AuthResult<()> {
         // Verify user exists
         let users = self.users.read().await;
         let _ = users
@@ -335,7 +350,10 @@ impl AuthService {
     /// Attempt auto-login for a device
     ///
     /// Business Rule: Auto-login works only if explicitly enabled for device-user pair
-    pub async fn attempt_auto_login(&self, device_id: String) -> AuthResult<SessionToken> {
+    pub async fn attempt_auto_login(
+        &self,
+        device_id: String,
+    ) -> AuthResult<SessionToken> {
         let auto_login = self.auto_login_enabled.read().await;
 
         // Find any user with auto-login enabled for this device
@@ -374,7 +392,11 @@ impl AuthService {
     }
 
     /// Check if auto-login is enabled for a user on a specific device
-    pub async fn is_auto_login_enabled(&self, user_id: Uuid, device_id: String) -> bool {
+    pub async fn is_auto_login_enabled(
+        &self,
+        user_id: Uuid,
+        device_id: String,
+    ) -> bool {
         let auto_login = self.auto_login_enabled.read().await;
         auto_login
             .get(&(device_id, user_id))
@@ -440,7 +462,11 @@ impl AuthService {
     // Device trust methods
 
     /// Trust a device for a user (30-day default expiry per requirements)
-    pub async fn trust_device(&self, user_id: Uuid, device_id: String) -> AuthResult<()> {
+    pub async fn trust_device(
+        &self,
+        user_id: Uuid,
+        device_id: String,
+    ) -> AuthResult<()> {
         let has_pin = {
             let pins = self.user_pins.read().await;
             pins.iter().any(|p| p.user_id == user_id)
@@ -471,7 +497,11 @@ impl AuthService {
     }
 
     /// Check if a device is trusted for a user
-    pub async fn is_device_trusted(&self, user_id: Uuid, device_id: &str) -> bool {
+    pub async fn is_device_trusted(
+        &self,
+        user_id: Uuid,
+        device_id: &str,
+    ) -> bool {
         let registrations = self.device_registrations.read().await;
         let now = self.now().await;
 
@@ -720,7 +750,10 @@ impl AuthService {
     }
 
     /// Get the device associated with a session
-    pub async fn get_session_device(&self, session: &SessionToken) -> Option<String> {
+    pub async fn get_session_device(
+        &self,
+        session: &SessionToken,
+    ) -> Option<String> {
         let sessions = self.active_sessions.read().await;
         sessions
             .iter()
@@ -749,7 +782,9 @@ impl AuthService {
         let now = self.now().await;
 
         // Find or create the user's attempt record
-        if let Some(attempt) = attempts.iter_mut().find(|a| a.user_id == user_id) {
+        if let Some(attempt) =
+            attempts.iter_mut().find(|a| a.user_id == user_id)
+        {
             // Reset count if last attempt was more than 5 minutes ago
             if now - attempt.last_attempt > chrono::Duration::minutes(5) {
                 attempt.count = 1;
@@ -761,7 +796,8 @@ impl AuthService {
 
                 // Lock account after 5 failed attempts (for 5 minutes)
                 if attempt.count >= 5 {
-                    attempt.locked_until = Some(now + chrono::Duration::minutes(5));
+                    attempt.locked_until =
+                        Some(now + chrono::Duration::minutes(5));
                 }
             }
         } else {
@@ -788,7 +824,11 @@ impl AuthService {
     /// - Deleting a user invalidates all their sessions
     /// - Removes all trusted devices for the user
     /// - Removes all auto-login settings for the user
-    pub async fn delete_user(&self, user_id: Uuid, admin_session: SessionToken) -> AuthResult<()> {
+    pub async fn delete_user(
+        &self,
+        user_id: Uuid,
+        admin_session: SessionToken,
+    ) -> AuthResult<()> {
         // Verify admin permissions
         if !admin_session.is_admin {
             return Err(AuthError::InsufficientPermissions);

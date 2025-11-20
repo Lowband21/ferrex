@@ -10,8 +10,8 @@ mod pin_management_service;
 pub(crate) use event_context::map_domain_events;
 
 pub use authentication_service::{
-    AuthenticationError, AuthenticationService, PasswordChangeActor, PasswordChangeRequest,
-    TokenBundle, ValidatedSession,
+    AuthenticationError, AuthenticationService, PasswordChangeActor,
+    PasswordChangeRequest, TokenBundle, ValidatedSession,
 };
 pub use device_trust_service::{DeviceTrustError, DeviceTrustService};
 pub use event_context::AuthEventContext;
@@ -34,7 +34,14 @@ pub fn create_authentication_service(
         pool.clone(),
         crypto.clone(),
     ));
-    let refresh_repo = Arc::new(PostgresRefreshTokenRepository::new(pool.clone()));
+    let refresh_repo =
+        Arc::new(PostgresRefreshTokenRepository::new(pool.clone()));
     let session_store = Arc::new(PostgresAuthSessionRepository::new(pool));
-    AuthenticationService::new(user_repo, session_repo, refresh_repo, session_store, crypto)
+    AuthenticationService::new(
+        user_repo,
+        session_repo,
+        refresh_repo,
+        session_store,
+        crypto,
+    )
 }

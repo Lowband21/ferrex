@@ -7,8 +7,9 @@ use uuid::Uuid;
 
 use ferrex_core::auth::domain::value_objects::{DeviceFingerprint, PinPolicy};
 use ferrex_core::auth::infrastructure::repositories::{
-    PostgresAuthEventRepository, PostgresAuthSessionRepository, PostgresDeviceSessionRepository,
-    PostgresRefreshTokenRepository, PostgresUserAuthRepository,
+    PostgresAuthEventRepository, PostgresAuthSessionRepository,
+    PostgresDeviceSessionRepository, PostgresRefreshTokenRepository,
+    PostgresUserAuthRepository,
 };
 use ferrex_core::auth::{
     AuthCrypto,
@@ -30,18 +31,23 @@ pub struct TestAuthHarness {
 impl TestAuthHarness {
     /// Construct a new harness backed by the provided pool.
     pub fn new(pool: PgPool) -> Result<Self> {
-        let crypto = Arc::new(AuthCrypto::new("test-pepper", "test-token-key")?);
+        let crypto =
+            Arc::new(AuthCrypto::new("test-pepper", "test-token-key")?);
 
-        let auth_service = create_authentication_service(pool.clone(), crypto.clone());
+        let auth_service =
+            create_authentication_service(pool.clone(), crypto.clone());
 
         let user_repo = Arc::new(PostgresUserAuthRepository::new(pool.clone()));
         let session_repo = Arc::new(PostgresDeviceSessionRepository::new(
             pool.clone(),
             crypto.clone(),
         ));
-        let event_repo = Arc::new(PostgresAuthEventRepository::new(pool.clone()));
-        let session_store = Arc::new(PostgresAuthSessionRepository::new(pool.clone()));
-        let refresh_repo = Arc::new(PostgresRefreshTokenRepository::new(pool.clone()));
+        let event_repo =
+            Arc::new(PostgresAuthEventRepository::new(pool.clone()));
+        let session_store =
+            Arc::new(PostgresAuthSessionRepository::new(pool.clone()));
+        let refresh_repo =
+            Arc::new(PostgresRefreshTokenRepository::new(pool.clone()));
 
         let device_trust_service = DeviceTrustService::new(
             user_repo.clone(),
@@ -51,8 +57,12 @@ impl TestAuthHarness {
             refresh_repo,
         );
 
-        let pin_service =
-            PinManagementService::new(user_repo, session_repo, event_repo, crypto.clone());
+        let pin_service = PinManagementService::new(
+            user_repo,
+            session_repo,
+            event_repo,
+            crypto.clone(),
+        );
 
         Ok(Self {
             pool,
@@ -120,7 +130,11 @@ impl TestAuthHarness {
     }
 
     /// Convenience for creating a user where the display name matches the username.
-    pub async fn create_user(&self, username: &str, password: &str) -> Result<Uuid> {
+    pub async fn create_user(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<Uuid> {
         self.create_user_with_password(username, username, password)
             .await
     }
@@ -135,16 +149,22 @@ impl TestAuthHarness {
     ) -> Result<Uuid> {
         let registered = self
             .device_trust_service
-            .register_device(user_id, fingerprint.clone(), device_name.to_string(), None)
+            .register_device(
+                user_id,
+                fingerprint.clone(),
+                device_name.to_string(),
+                None,
+            )
             .await
             .context("failed to register test device")?;
 
-        let (last_activity,): (DateTime<Utc>,) =
-            sqlx::query_as("SELECT last_activity FROM auth_device_sessions WHERE id = $1")
-                .bind(registered.id())
-                .fetch_one(self.pool())
-                .await
-                .context("failed to inspect device session prior to pin set")?;
+        let (last_activity,): (DateTime<Utc>,) = sqlx::query_as(
+            "SELECT last_activity FROM auth_device_sessions WHERE id = $1",
+        )
+        .bind(registered.id())
+        .fetch_one(self.pool())
+        .await
+        .context("failed to inspect device session prior to pin set")?;
         println!("registered device last_activity: {last_activity:?}");
 
         self.pin_service

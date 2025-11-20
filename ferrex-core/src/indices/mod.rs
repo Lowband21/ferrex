@@ -2,7 +2,9 @@ use crate::error::{MediaError, Result};
 use crate::player_prelude::Media;
 use crate::{
     database::ports::media_references::MediaReferencesRepository,
-    database::ports::watch_metrics::{ProgressEntry as WatchProgressEntry, WatchMetricsReadPort},
+    database::ports::watch_metrics::{
+        ProgressEntry as WatchProgressEntry, WatchMetricsReadPort,
+    },
     query::types::{SortBy, SortOrder},
     traits::prelude::MediaIDLike,
     types::{
@@ -55,10 +57,14 @@ impl IndexManager {
             .media_refs
             .get_library_media_references(library_id, library_type)
             .await?;
-        let watch_data = if matches!(sort_field, SortBy::WatchProgress | SortBy::LastWatched) {
+        let watch_data = if matches!(
+            sort_field,
+            SortBy::WatchProgress | SortBy::LastWatched
+        ) {
             let user_id = user_id.ok_or_else(|| {
                 MediaError::InvalidMedia(
-                    "watch-based sorting requires an authenticated user".to_string(),
+                    "watch-based sorting requires an authenticated user"
+                        .to_string(),
                 )
             })?;
             Some(self.load_watch_data(user_id).await?)
@@ -66,8 +72,13 @@ impl IndexManager {
             None
         };
 
-        self.sort_media(&media_items, sort_field, sort_order, watch_data.as_ref())
-            .await
+        self.sort_media(
+            &media_items,
+            sort_field,
+            sort_order,
+            watch_data.as_ref(),
+        )
+        .await
     }
 
     /// Compute a title-based position map for a library to translate UUIDs into indices
@@ -99,7 +110,8 @@ impl IndexManager {
         sort_order: SortOrder,
         watch_data: Option<&WatchData>,
     ) -> Result<Vec<Uuid>> {
-        let mut indexed_items: Vec<(usize, &Media)> = media_items.iter().enumerate().collect();
+        let mut indexed_items: Vec<(usize, &Media)> =
+            media_items.iter().enumerate().collect();
 
         indexed_items.sort_by(|a, b| {
             let cmp = match sort_field {
@@ -151,7 +163,10 @@ impl IndexManager {
                 SortBy::ContentRating => {
                     let a_rating = Self::get_content_rating(a.1);
                     let b_rating = Self::get_content_rating(b.1);
-                    Self::compare_optional_str(a_rating.as_deref(), b_rating.as_deref())
+                    Self::compare_optional_str(
+                        a_rating.as_deref(),
+                        b_rating.as_deref(),
+                    )
                 }
                 SortBy::Resolution => {
                     let a_res = Self::get_resolution(a.1);
@@ -169,8 +184,10 @@ impl IndexManager {
                 }
                 SortBy::LastWatched => {
                     if let Some(data) = watch_data {
-                        let a_last = data.last_watched(&Self::get_media_id(a.1));
-                        let b_last = data.last_watched(&Self::get_media_id(b.1));
+                        let a_last =
+                            data.last_watched(&Self::get_media_id(a.1));
+                        let b_last =
+                            data.last_watched(&Self::get_media_id(b.1));
                         Self::compare_optional(a_last, b_last)
                     } else {
                         std::cmp::Ordering::Equal
@@ -229,8 +246,9 @@ impl IndexManager {
 
     fn get_release_date(media: &Media) -> Option<chrono::NaiveDate> {
         fn parse(date: &Option<String>) -> Option<chrono::NaiveDate> {
-            date.as_deref()
-                .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+            date.as_deref().and_then(|s| {
+                chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
+            })
         }
 
         match media {
@@ -253,11 +271,15 @@ impl IndexManager {
     fn get_rating(media: &Media) -> Option<f32> {
         match media {
             Media::Movie(m) => match &m.details {
-                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => details.vote_average,
+                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
+                    details.vote_average
+                }
                 _ => None,
             },
             Media::Series(s) => match &s.details {
-                MediaDetailsOption::Details(TmdbDetails::Series(details)) => details.vote_average,
+                MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
+                    details.vote_average
+                }
                 _ => None,
             },
             _ => None,
@@ -267,7 +289,9 @@ impl IndexManager {
     fn get_runtime(media: &Media) -> Option<u32> {
         match media {
             Media::Movie(m) => match &m.details {
-                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => details.runtime,
+                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
+                    details.runtime
+                }
                 _ => None,
             },
             _ => None,
@@ -277,11 +301,15 @@ impl IndexManager {
     fn get_popularity(media: &Media) -> Option<f32> {
         match media {
             Media::Movie(m) => match &m.details {
-                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => details.popularity,
+                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
+                    details.popularity
+                }
                 _ => None,
             },
             Media::Series(s) => match &s.details {
-                MediaDetailsOption::Details(TmdbDetails::Series(details)) => details.popularity,
+                MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
+                    details.popularity
+                }
                 _ => None,
             },
             _ => None,
@@ -323,21 +351,25 @@ impl IndexManager {
     fn get_content_rating(media: &Media) -> Option<String> {
         match media {
             Media::Movie(m) => match &m.details {
-                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => details
-                    .content_rating
-                    .as_ref()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string()),
+                MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
+                    details
+                        .content_rating
+                        .as_ref()
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string())
+                }
                 _ => None,
             },
             Media::Series(s) => match &s.details {
-                MediaDetailsOption::Details(TmdbDetails::Series(details)) => details
-                    .content_rating
-                    .as_ref()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string()),
+                MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
+                    details
+                        .content_rating
+                        .as_ref()
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string())
+                }
                 _ => None,
             },
             _ => None,
@@ -353,7 +385,10 @@ impl IndexManager {
         }
     }
 
-    fn compare_optional<T: Ord>(a: Option<T>, b: Option<T>) -> std::cmp::Ordering {
+    fn compare_optional<T: Ord>(
+        a: Option<T>,
+        b: Option<T>,
+    ) -> std::cmp::Ordering {
         match (a, b) {
             (Some(a), Some(b)) => a.cmp(&b),
             (Some(_), None) => std::cmp::Ordering::Less,
@@ -362,16 +397,24 @@ impl IndexManager {
         }
     }
 
-    fn compare_optional_partial<T: PartialOrd>(a: Option<T>, b: Option<T>) -> std::cmp::Ordering {
+    fn compare_optional_partial<T: PartialOrd>(
+        a: Option<T>,
+        b: Option<T>,
+    ) -> std::cmp::Ordering {
         match (a, b) {
-            (Some(a), Some(b)) => a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal),
+            (Some(a), Some(b)) => {
+                a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal)
+            }
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => std::cmp::Ordering::Equal,
         }
     }
 
-    fn compare_optional_str(a: Option<&str>, b: Option<&str>) -> std::cmp::Ordering {
+    fn compare_optional_str(
+        a: Option<&str>,
+        b: Option<&str>,
+    ) -> std::cmp::Ordering {
         match (a, b) {
             (Some(a), Some(b)) => a.cmp(b),
             (Some(_), None) => std::cmp::Ordering::Less,
@@ -384,7 +427,9 @@ impl IndexManager {
 #[cfg(feature = "database")]
 impl IndexManager {
     /// Convenience helper to build an index manager from an application unit of work.
-    pub fn from_unit_of_work(uow: &crate::application::unit_of_work::AppUnitOfWork) -> Self {
+    pub fn from_unit_of_work(
+        uow: &crate::application::unit_of_work::AppUnitOfWork,
+    ) -> Self {
         Self::new(uow.media_refs.clone(), uow.watch_metrics.clone())
     }
 }

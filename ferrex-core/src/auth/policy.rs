@@ -55,16 +55,24 @@ impl PasswordPolicy {
             if password.len() < self.min_length as usize {
                 failures.push(PasswordPolicyRule::MinLength(self.min_length));
             }
-            if self.require_uppercase && !password.chars().any(|c| c.is_uppercase()) {
+            if self.require_uppercase
+                && !password.chars().any(|c| c.is_uppercase())
+            {
                 failures.push(PasswordPolicyRule::Uppercase);
             }
-            if self.require_lowercase && !password.chars().any(|c| c.is_lowercase()) {
+            if self.require_lowercase
+                && !password.chars().any(|c| c.is_lowercase())
+            {
                 failures.push(PasswordPolicyRule::Lowercase);
             }
-            if self.require_number && !password.chars().any(|c| c.is_ascii_digit()) {
+            if self.require_number
+                && !password.chars().any(|c| c.is_ascii_digit())
+            {
                 failures.push(PasswordPolicyRule::Number);
             }
-            if self.require_special && !password.chars().any(|c| !c.is_alphanumeric()) {
+            if self.require_special
+                && !password.chars().any(|c| !c.is_alphanumeric())
+            {
                 failures.push(PasswordPolicyRule::Special);
             }
         }
@@ -85,7 +93,9 @@ pub enum PasswordPolicyRule {
 impl fmt::Display for PasswordPolicyRule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MinLength(len) => write!(f, "minimum length of {} characters", len),
+            Self::MinLength(len) => {
+                write!(f, "minimum length of {} characters", len)
+            }
             Self::Uppercase => write!(f, "at least one uppercase letter"),
             Self::Lowercase => write!(f, "at least one lowercase letter"),
             Self::Number => write!(f, "at least one number"),

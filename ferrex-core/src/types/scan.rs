@@ -19,7 +19,11 @@ pub struct ScanResponse {
 }
 
 impl ScanResponse {
-    pub fn new(status: ScanStatus, scan_id: Option<Uuid>, message: String) -> Self {
+    pub fn new(
+        status: ScanStatus,
+        scan_id: Option<Uuid>,
+        message: String,
+    ) -> Self {
         ScanResponse {
             status,
             scan_id,

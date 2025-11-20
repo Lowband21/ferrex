@@ -18,7 +18,9 @@ use crate::image::MediaImageKind;
 use crate::image::records::MediaImageVariantKey;
 use crate::image_service::{ImageService, TmdbImageSize};
 use crate::orchestration::actors::messages::ParentDescriptors;
-use crate::orchestration::job::{ImageFetchJob, ImageFetchPriority, ImageFetchSource};
+use crate::orchestration::job::{
+    ImageFetchJob, ImageFetchPriority, ImageFetchSource,
+};
 use crate::orchestration::series::{
     SeriesFolderClues, SeriesLocator, clean_series_title, collapse_whitespace,
 };
@@ -26,27 +28,30 @@ use crate::providers::{ProviderError, TmdbApiProvider};
 use crate::traits::prelude::MediaIDLike;
 use crate::tv_parser::TvParser;
 use crate::types::details::{
-    AlternativeTitle, CastMember, CollectionInfo, ContentRating, CrewMember, EnhancedMovieDetails,
-    EnhancedSeriesDetails, EpisodeDetails, ExternalIds, GenreInfo, Keyword, MediaDetailsOption,
-    NetworkInfo, PersonExternalIds, ProductionCompany, ProductionCountry, RelatedMediaRef,
-    ReleaseDateEntry, ReleaseDatesByCountry, SeasonDetails, SpokenLanguage, TmdbDetails,
+    AlternativeTitle, CastMember, CollectionInfo, ContentRating, CrewMember,
+    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, ExternalIds,
+    GenreInfo, Keyword, MediaDetailsOption, NetworkInfo, PersonExternalIds,
+    ProductionCompany, ProductionCountry, RelatedMediaRef, ReleaseDateEntry,
+    ReleaseDatesByCountry, SeasonDetails, SpokenLanguage, TmdbDetails,
     Translation, Video,
 };
 use crate::types::files::{MediaFile, MediaFileMetadata, ParsedMediaInfo};
 use crate::types::ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID};
 use crate::types::image::MediaImages;
 use crate::types::library::LibraryType;
-use crate::types::media::{EpisodeReference, MovieReference, SeasonReference, SeriesReference};
+use crate::types::media::{
+    EpisodeReference, MovieReference, SeasonReference, SeriesReference,
+};
 use crate::types::numbers::{EpisodeNumber, SeasonNumber};
 use crate::types::titles::{MovieTitle, SeriesTitle};
 use crate::types::urls::{EpisodeURL, MovieURL, SeasonURL, SeriesURL, UrlLike};
 use tmdb_api::{
     common::release_date::ReleaseDateKind,
     movie::{
-        alternative_titles::MovieAlternativeTitlesResult, credits::MovieCreditsResult,
-        external_ids::MovieExternalIdsResult, keywords::MovieKeywordsResult,
-        release_dates::MovieReleaseDatesResult, translations::MovieTranslationsResult,
-        videos::MovieVideosResult,
+        alternative_titles::MovieAlternativeTitlesResult,
+        credits::MovieCreditsResult, external_ids::MovieExternalIdsResult,
+        keywords::MovieKeywordsResult, release_dates::MovieReleaseDatesResult,
+        translations::MovieTranslationsResult, videos::MovieVideosResult,
     },
     tvshow::{
         Season as TmdbSeason, aggregate_credits::TVShowAggregateCreditsResult,
@@ -55,17 +60,21 @@ use tmdb_api::{
 };
 use uuid::Uuid;
 
-use super::{DefaultMetadataActor, MediaReadyForIndex, MetadataActor, MetadataCommand};
+use super::{
+    DefaultMetadataActor, MediaReadyForIndex, MetadataActor, MetadataCommand,
+};
 
 static MOVIE_FOLDER_YEAR_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^(.+?)\s*\((\d{4})\)(?:\s.+)?\s*$")
         .expect("movie folder year regex should compile")
 });
 static MOVIE_FILENAME_YEAR_PARENS_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(.+?)\s*\((\d{4})\)").expect("movie filename paren regex should compile")
+    Regex::new(r"^(.+?)\s*\((\d{4})\)")
+        .expect("movie filename paren regex should compile")
 });
 static MOVIE_FILENAME_YEAR_DOT_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(.+?)[\.\s]+(\d{4})[\.\s]").expect("movie filename dot regex should compile")
+    Regex::new(r"^(.+?)[\.\s]+(\d{4})[\.\s]")
+        .expect("movie filename dot regex should compile")
 });
 const SEASON_NOT_FOUND_PREFIX: &str = "season_not_found";
 const EPISODE_NOT_FOUND_PREFIX: &str = "episode_not_found";
@@ -129,7 +138,9 @@ impl TmdbMetadataActor {
             .unwrap_or(MetadataMediaKind::Unknown)
     }
 
-    fn extract_technical_metadata(context: &Value) -> Option<MediaFileMetadata> {
+    fn extract_technical_metadata(
+        context: &Value,
+    ) -> Option<MediaFileMetadata> {
         context
             .as_object()
             .and_then(|obj| obj.get("technical_metadata"))
@@ -166,20 +177,25 @@ impl TmdbMetadataActor {
 
     fn parse_movie_folder_name(name: &str) -> (String, Option<u16>) {
         if let Some(captures) = MOVIE_FOLDER_YEAR_PATTERN.captures(name) {
-            let title = captures.get(1).map(|m| m.as_str().trim()).unwrap_or("");
-            let year = captures.get(2).and_then(|m| m.as_str().parse::<u16>().ok());
+            let title =
+                captures.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+            let year =
+                captures.get(2).and_then(|m| m.as_str().parse::<u16>().ok());
             return (title.to_string(), year);
         }
         (name.trim().to_string(), None)
     }
 
     fn parse_movie_filename(name: &str) -> (String, Option<u16>) {
-        if let Some(captures) = MOVIE_FILENAME_YEAR_PARENS_PATTERN.captures(name) {
+        if let Some(captures) =
+            MOVIE_FILENAME_YEAR_PARENS_PATTERN.captures(name)
+        {
             let title = captures
                 .get(1)
                 .map(|m| m.as_str().replace(['.', '_'], " ").trim().to_string())
                 .unwrap_or_else(String::new);
-            let year = captures.get(2).and_then(|m| m.as_str().parse::<u16>().ok());
+            let year =
+                captures.get(2).and_then(|m| m.as_str().parse::<u16>().ok());
             return (title, year);
         }
 
@@ -188,7 +204,8 @@ impl TmdbMetadataActor {
                 .get(1)
                 .map(|m| m.as_str().replace(['.', '_'], " ").trim().to_string())
                 .unwrap_or_else(String::new);
-            let year = captures.get(2).and_then(|m| m.as_str().parse::<u16>().ok());
+            let year =
+                captures.get(2).and_then(|m| m.as_str().parse::<u16>().ok());
             return (title, year);
         }
 
@@ -227,7 +244,8 @@ impl TmdbMetadataActor {
         TvParser::parse_episode_info(path).map(|info| {
             let clues = folder_clues;
             let episode_title = TvParser::extract_episode_title(path);
-            let episode_year = info.year.and_then(|value| u16::try_from(value).ok());
+            let episode_year =
+                info.year.and_then(|value| u16::try_from(value).ok());
 
             EpisodeContextInfo {
                 series: clues,
@@ -244,7 +262,9 @@ impl TmdbMetadataActor {
             .as_object()
             .and_then(|obj| obj.get("parent"))
             .cloned()
-            .and_then(|raw| serde_json::from_value::<ParentDescriptors>(raw).ok())
+            .and_then(|raw| {
+                serde_json::from_value::<ParentDescriptors>(raw).ok()
+            })
     }
 
     async fn queue_image_job(
@@ -259,7 +279,9 @@ impl TmdbMetadataActor {
         priority_hint: ImageFetchPriority,
         jobs: &mut Vec<ImageFetchJob>,
     ) -> Result<()> {
-        let Some(tmdb_path) = tmdb_path.map(str::trim).filter(|path| !path.is_empty()) else {
+        let Some(tmdb_path) =
+            tmdb_path.map(str::trim).filter(|path| !path.is_empty())
+        else {
             return Ok(());
         };
 
@@ -300,7 +322,8 @@ impl TmdbMetadataActor {
         episode: &EpisodeReference,
         jobs: &mut Vec<ImageFetchJob>,
     ) -> Result<()> {
-        let image_key = format!("local/episode/{}/thumbnail.jpg", episode.file.id);
+        let image_key =
+            format!("local/episode/{}/thumbnail.jpg", episode.file.id);
 
         self.image_service
             .link_to_media(
@@ -389,7 +412,8 @@ impl TmdbMetadataActor {
         for ch in title.trim().chars() {
             if ch.is_ascii_alphanumeric() {
                 slug.push(ch.to_ascii_lowercase());
-            } else if (ch.is_whitespace() || matches!(ch, '.' | '_' | '-' | '/' | '\\'))
+            } else if (ch.is_whitespace()
+                || matches!(ch, '.' | '_' | '-' | '/' | '\\'))
                 && !slug.ends_with('-')
             {
                 slug.push('-');
@@ -400,7 +424,10 @@ impl TmdbMetadataActor {
 
     fn handle_movie_release_dates(
         tmdb_id: u64,
-        result: std::result::Result<MovieReleaseDatesResult, crate::providers::ProviderError>,
+        result: std::result::Result<
+            MovieReleaseDatesResult,
+            crate::providers::ProviderError,
+        >,
     ) -> Option<(
         Option<String>,
         Vec<ContentRating>,
@@ -426,7 +453,9 @@ impl TmdbMetadataActor {
     fn release_date_kind_to_i32(kind: &ReleaseDateKind) -> i32 {
         match kind {
             ReleaseDateKind::Premiere => ReleaseDateKind::Premiere as i32,
-            ReleaseDateKind::TheatricalLimited => ReleaseDateKind::TheatricalLimited as i32,
+            ReleaseDateKind::TheatricalLimited => {
+                ReleaseDateKind::TheatricalLimited as i32
+            }
             ReleaseDateKind::Theatrical => ReleaseDateKind::Theatrical as i32,
             ReleaseDateKind::Digital => ReleaseDateKind::Digital as i32,
             ReleaseDateKind::Physical => ReleaseDateKind::Physical as i32,
@@ -434,7 +463,9 @@ impl TmdbMetadataActor {
         }
     }
 
-    fn extract_movie_certification(data: &MovieReleaseDatesResult) -> Option<String> {
+    fn extract_movie_certification(
+        data: &MovieReleaseDatesResult,
+    ) -> Option<String> {
         let preferred = [
             ReleaseDateKind::Theatrical,
             ReleaseDateKind::TheatricalLimited,
@@ -444,26 +475,28 @@ impl TmdbMetadataActor {
             ReleaseDateKind::Premiere,
         ];
 
-        let pick_cert = |dates: &[tmdb_api::common::release_date::ReleaseDate]| {
-            for kind in preferred.iter() {
-                if let Some(cert) = dates
+        let pick_cert =
+            |dates: &[tmdb_api::common::release_date::ReleaseDate]| {
+                for kind in preferred.iter() {
+                    if let Some(cert) = dates
+                        .iter()
+                        .filter(|rd| &rd.kind == kind)
+                        .filter_map(|rd| rd.certification.as_ref())
+                        .find(|cert| !cert.trim().is_empty())
+                    {
+                        return Some(cert.trim().to_string());
+                    }
+                }
+                dates
                     .iter()
-                    .filter(|rd| &rd.kind == kind)
                     .filter_map(|rd| rd.certification.as_ref())
                     .find(|cert| !cert.trim().is_empty())
-                {
-                    return Some(cert.trim().to_string());
-                }
-            }
-            dates
-                .iter()
-                .filter_map(|rd| rd.certification.as_ref())
-                .find(|cert| !cert.trim().is_empty())
-                .map(|cert| cert.trim().to_string())
-        };
+                    .map(|cert| cert.trim().to_string())
+            };
 
         for region in ["US", "GB", "CA", "AU", "NZ", "FR"] {
-            if let Some(entry) = data.results.iter().find(|r| r.iso_3166_1 == region)
+            if let Some(entry) =
+                data.results.iter().find(|r| r.iso_3166_1 == region)
                 && let Some(cert) = pick_cert(&entry.release_dates)
             {
                 return Some(cert);
@@ -476,7 +509,9 @@ impl TmdbMetadataActor {
             .next()
     }
 
-    fn map_movie_release_dates(data: &MovieReleaseDatesResult) -> Vec<ReleaseDatesByCountry> {
+    fn map_movie_release_dates(
+        data: &MovieReleaseDatesResult,
+    ) -> Vec<ReleaseDatesByCountry> {
         data.results
             .iter()
             .map(|entry| ReleaseDatesByCountry {
@@ -487,7 +522,9 @@ impl TmdbMetadataActor {
                     .map(|rd| ReleaseDateEntry {
                         certification: rd.certification.clone(),
                         release_date: Some(rd.release_date.to_rfc3339()),
-                        release_type: Some(Self::release_date_kind_to_i32(&rd.kind)),
+                        release_type: Some(Self::release_date_kind_to_i32(
+                            &rd.kind,
+                        )),
                         note: rd.note.clone(),
                         iso_639_1: rd.iso_639_1.clone(),
                         descriptors: Vec::new(),
@@ -497,7 +534,9 @@ impl TmdbMetadataActor {
             .collect()
     }
 
-    fn map_movie_content_ratings(data: &MovieReleaseDatesResult) -> Vec<ContentRating> {
+    fn map_movie_content_ratings(
+        data: &MovieReleaseDatesResult,
+    ) -> Vec<ContentRating> {
         data.results
             .iter()
             .filter_map(|entry| {
@@ -544,7 +583,9 @@ impl TmdbMetadataActor {
             .collect()
     }
 
-    fn map_movie_translations(result: &MovieTranslationsResult) -> Vec<Translation> {
+    fn map_movie_translations(
+        result: &MovieTranslationsResult,
+    ) -> Vec<Translation> {
         result
             .translations
             .iter()
@@ -577,17 +618,16 @@ impl TmdbMetadataActor {
                     Some(iso_trimmed.to_string())
                 };
 
-                let title_type = title
-                    .kind
-                    .as_ref()
-                    .map(|kind| kind.trim())
-                    .and_then(|kind| {
-                        if kind.is_empty() {
-                            None
-                        } else {
-                            Some(kind.to_string())
-                        }
-                    });
+                let title_type =
+                    title.kind.as_ref().map(|kind| kind.trim()).and_then(
+                        |kind| {
+                            if kind.is_empty() {
+                                None
+                            } else {
+                                Some(kind.to_string())
+                            }
+                        },
+                    );
 
                 let title_text = title.title.trim();
                 if title_text.is_empty() {
@@ -673,8 +713,16 @@ impl TmdbMetadataActor {
                     also_known_as: Vec::new(),
                     external_ids: PersonExternalIds::default(),
                     image_slot: slot,
-                    profile_media_id: c.person.profile_path.as_ref().map(|_| person_uuid),
-                    profile_image_index: c.person.profile_path.as_ref().map(|_| slot),
+                    profile_media_id: c
+                        .person
+                        .profile_path
+                        .as_ref()
+                        .map(|_| person_uuid),
+                    profile_image_index: c
+                        .person
+                        .profile_path
+                        .as_ref()
+                        .map(|_| slot),
                 }
             })
             .collect()
@@ -687,7 +735,10 @@ impl TmdbMetadataActor {
             .filter(|c| {
                 matches!(
                     c.job.as_str(),
-                    "Director" | "Producer" | "Writer" | "Director of Photography"
+                    "Director"
+                        | "Producer"
+                        | "Writer"
+                        | "Director of Photography"
                 )
             })
             .take(10)
@@ -729,10 +780,13 @@ impl TmdbMetadataActor {
         }
     }
 
-    fn extract_series_content_rating(data: &TvContentRatingResult) -> Option<String> {
+    fn extract_series_content_rating(
+        data: &TvContentRatingResult,
+    ) -> Option<String> {
         let preferred_regions = ["US", "GB", "CA", "AU", "NZ", "FR"];
         for region in preferred_regions {
-            if let Some(entry) = data.results.iter().find(|r| r.iso_3166_1 == region)
+            if let Some(entry) =
+                data.results.iter().find(|r| r.iso_3166_1 == region)
                 && !entry.rating.trim().is_empty()
             {
                 return Some(entry.rating.trim().to_string());
@@ -745,7 +799,9 @@ impl TmdbMetadataActor {
             .map(|entry| entry.rating.trim().to_string())
     }
 
-    fn map_series_content_ratings(data: &TvContentRatingResult) -> Vec<ContentRating> {
+    fn map_series_content_ratings(
+        data: &TvContentRatingResult,
+    ) -> Vec<ContentRating> {
         let mut ratings = Vec::new();
         let mut index_by_iso = HashMap::new();
 
@@ -767,7 +823,10 @@ impl TmdbMetadataActor {
                     .get_mut(idx)
                     .expect("series rating index should be valid");
                 if Self::should_replace_rating(existing, &candidate) {
-                    Self::merge_descriptors(&mut candidate, &existing.descriptors);
+                    Self::merge_descriptors(
+                        &mut candidate,
+                        &existing.descriptors,
+                    );
                     *existing = candidate;
                 } else {
                     Self::merge_descriptors(existing, &candidate.descriptors);
@@ -828,11 +887,16 @@ impl TmdbMetadataActor {
         normalized
     }
 
-    fn should_replace_rating(existing: &ContentRating, candidate: &ContentRating) -> bool {
+    fn should_replace_rating(
+        existing: &ContentRating,
+        candidate: &ContentRating,
+    ) -> bool {
         match (&existing.rating, &candidate.rating) {
             (None, Some(_)) => true,
             (Some(_), None) => false,
-            (None, None) => candidate.descriptors.len() > existing.descriptors.len(),
+            (None, None) => {
+                candidate.descriptors.len() > existing.descriptors.len()
+            }
             (Some(existing_value), Some(candidate_value)) => {
                 let existing_key = Self::rating_compare_key(existing_value);
                 let candidate_key = Self::rating_compare_key(candidate_value);
@@ -874,7 +938,9 @@ impl TmdbMetadataActor {
             .to_uppercase()
     }
 
-    fn map_series_cast(credits: &TVShowAggregateCreditsResult) -> Vec<CastMember> {
+    fn map_series_cast(
+        credits: &TVShowAggregateCreditsResult,
+    ) -> Vec<CastMember> {
         let mut next_slot: u32 = 0;
         credits
             .cast
@@ -892,7 +958,10 @@ impl TmdbMetadataActor {
 
                 CastMember {
                     id: c.inner.id,
-                    credit_id: c.roles.first().map(|role| role.credit_id.clone()),
+                    credit_id: c
+                        .roles
+                        .first()
+                        .map(|role| role.credit_id.clone()),
                     cast_id: None,
                     name: c.inner.name.clone(),
                     original_name: Some(c.inner.original_name.clone()),
@@ -913,20 +982,32 @@ impl TmdbMetadataActor {
                         0 => None,
                         value => Some(value as u8),
                     },
-                    known_for_department: Some(c.inner.known_for_department.clone()),
+                    known_for_department: Some(
+                        c.inner.known_for_department.clone(),
+                    ),
                     adult: Some(c.inner.adult),
                     popularity: Some(c.inner.popularity as f32),
                     also_known_as: Vec::new(),
                     external_ids: PersonExternalIds::default(),
                     image_slot: slot,
-                    profile_media_id: c.inner.profile_path.as_ref().map(|_| person_uuid),
-                    profile_image_index: c.inner.profile_path.as_ref().map(|_| slot),
+                    profile_media_id: c
+                        .inner
+                        .profile_path
+                        .as_ref()
+                        .map(|_| person_uuid),
+                    profile_image_index: c
+                        .inner
+                        .profile_path
+                        .as_ref()
+                        .map(|_| slot),
                 }
             })
             .collect()
     }
 
-    fn map_series_crew(credits: &TVShowAggregateCreditsResult) -> Vec<CrewMember> {
+    fn map_series_crew(
+        credits: &TVShowAggregateCreditsResult,
+    ) -> Vec<CrewMember> {
         credits
             .crew
             .iter()
@@ -947,7 +1028,9 @@ impl TmdbMetadataActor {
                     0 => None,
                     value => Some(value as u8),
                 },
-                known_for_department: Some(c.inner.known_for_department.clone()),
+                known_for_department: Some(
+                    c.inner.known_for_department.clone(),
+                ),
                 adult: Some(c.inner.adult),
                 popularity: Some(c.inner.popularity as f32),
                 original_name: Some(c.inner.original_name.clone()),
@@ -968,17 +1051,24 @@ impl TmdbMetadataActor {
         }
     }
 
-    async fn enrich_movie(&self, mut command: MetadataCommand) -> Result<MediaReadyForIndex> {
-        let metadata = Self::extract_technical_metadata(&command.analyzed.context);
+    async fn enrich_movie(
+        &self,
+        mut command: MetadataCommand,
+    ) -> Result<MediaReadyForIndex> {
+        let metadata =
+            Self::extract_technical_metadata(&command.analyzed.context);
         let path = PathBuf::from(&command.analyzed.path_norm);
-        let (title_hint, year_hint) = Self::derive_movie_info(metadata.as_ref(), &path);
+        let (title_hint, year_hint) =
+            Self::derive_movie_info(metadata.as_ref(), &path);
         let clean_title = clean_series_title(&title_hint);
 
         let search_results = self
             .tmdb
             .search_movies(&clean_title, year_hint)
             .await
-            .map_err(|e| MediaError::Internal(format!("TMDB search failed: {e}")))?;
+            .map_err(|e| {
+                MediaError::Internal(format!("TMDB search failed: {e}"))
+            })?;
 
         if let Some(candidate) = search_results.first() {
             let tmdb_id = candidate.tmdb_id;
@@ -994,7 +1084,9 @@ impl TmdbMetadataActor {
             self.media_refs.store_movie_reference(&movie_ref).await?;
 
             let mut image_jobs = Vec::new();
-            if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) = &movie_ref.details {
+            if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) =
+                &movie_ref.details
+            {
                 self.queue_image_job(
                     command.job.library_id,
                     "movie",
@@ -1050,11 +1142,9 @@ impl TmdbMetadataActor {
         metadata: Option<&MediaFileMetadata>,
         tmdb_id: u64,
     ) -> Result<MovieReference> {
-        let tmdb_details = self
-            .tmdb
-            .get_movie(tmdb_id)
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to fetch movie details: {e}")))?;
+        let tmdb_details = self.tmdb.get_movie(tmdb_id).await.map_err(|e| {
+            MediaError::Internal(format!("Failed to fetch movie details: {e}"))
+        })?;
 
         let (
             release_dates_res,
@@ -1079,12 +1169,16 @@ impl TmdbMetadataActor {
         );
 
         let (certification, content_ratings, release_dates_list) =
-            Self::handle_movie_release_dates(tmdb_id, release_dates_res).unwrap_or_default();
+            Self::handle_movie_release_dates(tmdb_id, release_dates_res)
+                .unwrap_or_default();
 
         let keywords = keywords_res
             .map(|res| Self::map_movie_keywords(&res))
             .unwrap_or_else(|err| {
-                warn!("Failed to fetch movie keywords for {}: {}", tmdb_id, err);
+                warn!(
+                    "Failed to fetch movie keywords for {}: {}",
+                    tmdb_id, err
+                );
                 Vec::new()
             });
 
@@ -1128,7 +1222,10 @@ impl TmdbMetadataActor {
         let similar = similar_res
             .map(|res| Self::map_related_movies(&res))
             .unwrap_or_else(|err| {
-                warn!("Failed to fetch similar movies for {}: {}", tmdb_id, err);
+                warn!(
+                    "Failed to fetch similar movies for {}: {}",
+                    tmdb_id, err
+                );
                 Vec::new()
             });
 
@@ -1178,7 +1275,8 @@ impl TmdbMetadataActor {
             })
             .collect::<Vec<_>>();
 
-        let mut media_file = MediaFile::new(PathBuf::from(path_norm), library_id)?;
+        let mut media_file =
+            MediaFile::new(PathBuf::from(path_norm), library_id)?;
         if let Some(meta) = metadata {
             media_file.media_file_metadata = Some(meta.clone());
         }
@@ -1191,15 +1289,16 @@ impl TmdbMetadataActor {
         let cast = credits.as_ref().map(Self::map_cast).unwrap_or_default();
         let crew = credits.as_ref().map(Self::map_crew).unwrap_or_default();
 
-        let collection = tmdb_details
-            .belongs_to_collection
-            .as_ref()
-            .map(|collection| CollectionInfo {
-                id: collection.id,
-                name: collection.name.clone(),
-                poster_path: collection.poster_path.clone(),
-                backdrop_path: collection.backdrop_path.clone(),
-            });
+        let collection =
+            tmdb_details
+                .belongs_to_collection
+                .as_ref()
+                .map(|collection| CollectionInfo {
+                    id: collection.id,
+                    name: collection.name.clone(),
+                    poster_path: collection.poster_path.clone(),
+                    backdrop_path: collection.backdrop_path.clone(),
+                });
 
         let enhanced = EnhancedMovieDetails {
             id: tmdb_details.inner.id as u64,
@@ -1247,10 +1346,13 @@ impl TmdbMetadataActor {
             id: movie_id,
             library_id,
             tmdb_id,
-            title: MovieTitle::new(tmdb_details.inner.title.clone())
-                .map_err(|e| MediaError::Internal(format!("Invalid movie title: {e}")))?,
+            title: MovieTitle::new(tmdb_details.inner.title.clone()).map_err(
+                |e| MediaError::Internal(format!("Invalid movie title: {e}")),
+            )?,
             details: MediaDetailsOption::Details(TmdbDetails::Movie(enhanced)),
-            endpoint: MovieURL::from_string(format!("/stream/{actual_file_id}")),
+            endpoint: MovieURL::from_string(format!(
+                "/stream/{actual_file_id}"
+            )),
             file: media_file,
             theme_color: None,
         };
@@ -1290,10 +1392,17 @@ impl TmdbMetadataActor {
             id: movie_id,
             library_id: command.analyzed.library_id,
             tmdb_id: 0,
-            title: MovieTitle::new(title.clone())
-                .map_err(|e| MediaError::Internal(format!("Invalid movie title: {e}")))?,
-            details: MediaDetailsOption::Endpoint(format!("/movie/lookup/{}", media_file.id)),
-            endpoint: MovieURL::from_string(format!("/stream/{}", media_file.id)),
+            title: MovieTitle::new(title.clone()).map_err(|e| {
+                MediaError::Internal(format!("Invalid movie title: {e}"))
+            })?,
+            details: MediaDetailsOption::Endpoint(format!(
+                "/movie/lookup/{}",
+                media_file.id
+            )),
+            endpoint: MovieURL::from_string(format!(
+                "/stream/{}",
+                media_file.id
+            )),
             file: media_file,
             theme_color: None,
         };
@@ -1312,11 +1421,16 @@ impl TmdbMetadataActor {
         })
     }
 
-    async fn enrich_episode(&self, mut command: MetadataCommand) -> Result<MediaReadyForIndex> {
-        let metadata = Self::extract_technical_metadata(&command.analyzed.context);
+    async fn enrich_episode(
+        &self,
+        mut command: MetadataCommand,
+    ) -> Result<MediaReadyForIndex> {
+        let metadata =
+            Self::extract_technical_metadata(&command.analyzed.context);
         let path = PathBuf::from(&command.analyzed.path_norm);
 
-        let Some(info) = Self::derive_episode_info(metadata.as_ref(), &path) else {
+        let Some(info) = Self::derive_episode_info(metadata.as_ref(), &path)
+        else {
             return DefaultMetadataActor::new().enrich(command).await;
         };
 
@@ -1344,7 +1458,9 @@ impl TmdbMetadataActor {
                 .await
             {
                 Ok(season_ref) => break (candidate_series, season_ref),
-                Err(MediaError::InvalidMedia(msg)) if msg.starts_with(SEASON_NOT_FOUND_PREFIX) => {
+                Err(MediaError::InvalidMedia(msg))
+                    if msg.starts_with(SEASON_NOT_FOUND_PREFIX) =>
+                {
                     if candidate_series.tmdb_id == 0 {
                         return Err(MediaError::InvalidMedia(msg));
                     }
@@ -1357,7 +1473,9 @@ impl TmdbMetadataActor {
             }
         };
 
-        if let MediaDetailsOption::Details(TmdbDetails::Series(details)) = &series_ref.details {
+        if let MediaDetailsOption::Details(TmdbDetails::Series(details)) =
+            &series_ref.details
+        {
             self.queue_image_job(
                 command.job.library_id,
                 "series",
@@ -1383,11 +1501,17 @@ impl TmdbMetadataActor {
             )
             .await?;
 
-            self.queue_person_profile_jobs(command.job.library_id, &details.cast, &mut image_jobs)
-                .await?;
+            self.queue_person_profile_jobs(
+                command.job.library_id,
+                &details.cast,
+                &mut image_jobs,
+            )
+            .await?;
         }
 
-        if let MediaDetailsOption::Details(TmdbDetails::Season(details)) = &season_ref.details {
+        if let MediaDetailsOption::Details(TmdbDetails::Season(details)) =
+            &season_ref.details
+        {
             self.queue_image_job(
                 command.job.library_id,
                 "season",
@@ -1403,7 +1527,13 @@ impl TmdbMetadataActor {
         }
 
         let (episode_ref, tmdb_episode_id) = self
-            .create_episode_reference(&command, &series_ref, &season_ref, metadata.clone(), &info)
+            .create_episode_reference(
+                &command,
+                &series_ref,
+                &season_ref,
+                metadata.clone(),
+                &info,
+            )
             .await?;
 
         match &episode_ref.details {
@@ -1480,9 +1610,14 @@ impl TmdbMetadataActor {
     ) -> Result<SeriesReference> {
         let locator = SeriesLocator::new(self.media_refs.clone());
         if let Some(existing) = locator
-            .find_existing_series(library_id, parent, &info.series.normalized_title)
+            .find_existing_series(
+                library_id,
+                parent,
+                &info.series.normalized_title,
+            )
             .await?
-            && (existing.tmdb_id == 0 || !excluded_tmdb_ids.contains(&existing.tmdb_id))
+            && (existing.tmdb_id == 0
+                || !excluded_tmdb_ids.contains(&existing.tmdb_id))
         {
             return Ok(existing);
         }
@@ -1495,7 +1630,9 @@ impl TmdbMetadataActor {
                 info.series.region.as_deref(),
             )
             .await
-            .map_err(|e| MediaError::Internal(format!("TMDB series search failed: {e}")))?;
+            .map_err(|e| {
+                MediaError::Internal(format!("TMDB series search failed: {e}"))
+            })?;
 
         let mut ordered_tmdb_ids = Vec::new();
         let mut seen_ids = HashSet::new();
@@ -1531,12 +1668,14 @@ impl TmdbMetadataActor {
                 .media_refs
                 .get_series_by_tmdb_id(library_id, tmdb_id)
                 .await?
-                && (existing.tmdb_id == 0 || !excluded_tmdb_ids.contains(&existing.tmdb_id))
+                && (existing.tmdb_id == 0
+                    || !excluded_tmdb_ids.contains(&existing.tmdb_id))
             {
                 return Ok(existing);
             }
 
-            let mut series_ref = self.build_series_reference(library_id, tmdb_id).await?;
+            let mut series_ref =
+                self.build_series_reference(library_id, tmdb_id).await?;
 
             self.media_refs.store_series_reference(&series_ref).await?;
 
@@ -1555,7 +1694,9 @@ impl TmdbMetadataActor {
                 }
             }
 
-            if series_ref.tmdb_id == 0 || !excluded_tmdb_ids.contains(&series_ref.tmdb_id) {
+            if series_ref.tmdb_id == 0
+                || !excluded_tmdb_ids.contains(&series_ref.tmdb_id)
+            {
                 return Ok(series_ref);
             }
         }
@@ -1574,13 +1715,13 @@ impl TmdbMetadataActor {
         library_id: LibraryID,
         tmdb_id: u64,
     ) -> Result<SeriesReference> {
-        let details =
-            self.tmdb.get_series(tmdb_id).await.map_err(|e| {
-                MediaError::Internal(format!("Failed to fetch series details: {e}"))
-            })?;
+        let details = self.tmdb.get_series(tmdb_id).await.map_err(|e| {
+            MediaError::Internal(format!("Failed to fetch series details: {e}"))
+        })?;
 
         let credits = self.tmdb.get_series_credits(tmdb_id).await.ok();
-        let (content_rating, content_ratings) = self.fetch_series_content_rating(tmdb_id).await;
+        let (content_rating, content_ratings) =
+            self.fetch_series_content_rating(tmdb_id).await;
 
         let genres = details
             .genres
@@ -1624,14 +1765,16 @@ impl TmdbMetadataActor {
             .map(|company| ProductionCompany {
                 id: company.id,
                 name: company.name.clone(),
-                origin_country: company.origin_country.clone().and_then(|country| {
-                    let trimmed = country.trim().to_string();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(trimmed)
-                    }
-                }),
+                origin_country: company.origin_country.clone().and_then(
+                    |country| {
+                        let trimmed = country.trim().to_string();
+                        if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed)
+                        }
+                    },
+                ),
             })
             .collect::<Vec<_>>();
 
@@ -1664,8 +1807,15 @@ impl TmdbMetadataActor {
             name: details.inner.name.clone(),
             original_name: Some(details.inner.original_name.clone()),
             overview: details.inner.overview.clone(),
-            first_air_date: details.inner.first_air_date.as_ref().map(|d| d.to_string()),
-            last_air_date: details.last_air_date.as_ref().map(|d| d.to_string()),
+            first_air_date: details
+                .inner
+                .first_air_date
+                .as_ref()
+                .map(|d| d.to_string()),
+            last_air_date: details
+                .last_air_date
+                .as_ref()
+                .map(|d| d.to_string()),
             number_of_seasons: Some(details.number_of_seasons as u32),
             number_of_episodes: details.number_of_episodes.map(|n| n as u32),
             vote_average: Some(details.inner.vote_average as f32),
@@ -1700,12 +1850,13 @@ impl TmdbMetadataActor {
             similar: Vec::new(),
         };
 
-        let title = SeriesTitle::new(details.inner.name.clone()).map_err(|e| {
-            MediaError::Internal(format!(
-                "Invalid series title '{}' ({e})",
-                details.inner.name
-            ))
-        })?;
+        let title =
+            SeriesTitle::new(details.inner.name.clone()).map_err(|e| {
+                MediaError::Internal(format!(
+                    "Invalid series title '{}' ({e})",
+                    details.inner.name
+                ))
+            })?;
 
         Ok(SeriesReference {
             id: SeriesID::new(),
@@ -1732,7 +1883,10 @@ impl TmdbMetadataActor {
             .filter(|title| !title.is_empty())
             .unwrap_or_else(|| info.series.normalized_title.clone());
         let title = SeriesTitle::new(clean_title.clone()).map_err(|e| {
-            MediaError::Internal(format!("Invalid series title '{}' ({e})", clean_title))
+            MediaError::Internal(format!(
+                "Invalid series title '{}' ({e})",
+                clean_title
+            ))
         })?;
 
         let slug_source = parent
@@ -1778,7 +1932,10 @@ impl TmdbMetadataActor {
         }
 
         let season_number_u8 = u8::try_from(season_number).map_err(|_| {
-            MediaError::InvalidMedia(format!("Season number {} out of range", season_number))
+            MediaError::InvalidMedia(format!(
+                "Season number {} out of range",
+                season_number
+            ))
         })?;
 
         let season_details = if series_ref.tmdb_id > 0 {
@@ -1806,10 +1963,16 @@ impl TmdbMetadataActor {
         };
 
         let mut season_ref = self
-            .build_season_reference(library_id, series_ref, season_number_u8, season_details)
+            .build_season_reference(
+                library_id,
+                series_ref,
+                season_number_u8,
+                season_details,
+            )
             .await?;
 
-        let actual_id = self.media_refs.store_season_reference(&season_ref).await?;
+        let actual_id =
+            self.media_refs.store_season_reference(&season_ref).await?;
 
         if season_ref.id.to_uuid() != actual_id {
             season_ref.id = SeasonID(actual_id);
@@ -1838,7 +2001,11 @@ impl TmdbMetadataActor {
                 season_number: details.inner.season_number as u8,
                 name,
                 overview: details.inner.overview.clone(),
-                air_date: details.inner.air_date.as_ref().map(|d| d.to_string()),
+                air_date: details
+                    .inner
+                    .air_date
+                    .as_ref()
+                    .map(|d| d.to_string()),
                 episode_count: details.episodes.len() as u32,
                 poster_path: details.inner.poster_path.clone(),
                 runtime: None,
@@ -1858,7 +2025,9 @@ impl TmdbMetadataActor {
 
         let endpoint = SeasonURL::from_string(endpoint_path.clone());
         let details = match details_opt {
-            Some(details) => MediaDetailsOption::Details(TmdbDetails::Season(details)),
+            Some(details) => {
+                MediaDetailsOption::Details(TmdbDetails::Season(details))
+            }
             None => MediaDetailsOption::Endpoint(endpoint_path.clone()),
         };
 
@@ -1897,12 +2066,13 @@ impl TmdbMetadataActor {
         let actual_file_id = upsert.id;
         media_file.id = actual_file_id;
 
-        let episode_number_u8 = u8::try_from(info.episode_number).map_err(|_| {
-            MediaError::InvalidMedia(format!(
-                "Episode number {} out of range",
-                info.episode_number
-            ))
-        })?;
+        let episode_number_u8 =
+            u8::try_from(info.episode_number).map_err(|_| {
+                MediaError::InvalidMedia(format!(
+                    "Episode number {} out of range",
+                    info.episode_number
+                ))
+            })?;
 
         let episode_id = EpisodeID::new();
 
@@ -1923,12 +2093,20 @@ impl TmdbMetadataActor {
                         season_number: details.inner.season_number as u8,
                         name: details.inner.name.clone(),
                         overview: details.inner.overview.clone(),
-                        air_date: details.inner.air_date.as_ref().map(|d| d.to_string()),
+                        air_date: details
+                            .inner
+                            .air_date
+                            .as_ref()
+                            .map(|d| d.to_string()),
                         runtime: None,
                         still_path: details.inner.still_path.clone(),
                         vote_average: Some(details.inner.vote_average as f32),
                         vote_count: Some(details.inner.vote_count as u32),
-                        production_code: if details.inner.production_code.is_empty() {
+                        production_code: if details
+                            .inner
+                            .production_code
+                            .is_empty()
+                        {
                             None
                         } else {
                             Some(details.inner.production_code.clone())
@@ -1967,8 +2145,13 @@ impl TmdbMetadataActor {
         };
 
         let details = match episode_details {
-            Some(details) => MediaDetailsOption::Details(TmdbDetails::Episode(details)),
-            None => MediaDetailsOption::Endpoint(format!("/episode/lookup/{}", actual_file_id)),
+            Some(details) => {
+                MediaDetailsOption::Details(TmdbDetails::Episode(details))
+            }
+            None => MediaDetailsOption::Endpoint(format!(
+                "/episode/lookup/{}",
+                actual_file_id
+            )),
         };
 
         let file_discovered_at = media_file.discovered_at;
@@ -1983,7 +2166,10 @@ impl TmdbMetadataActor {
             series_id: series_ref.id,
             tmdb_series_id: series_ref.tmdb_id,
             details,
-            endpoint: EpisodeURL::from_string(format!("/stream/{}", actual_file_id)),
+            endpoint: EpisodeURL::from_string(format!(
+                "/stream/{}",
+                actual_file_id
+            )),
             file: media_file,
             discovered_at: file_discovered_at,
             created_at: file_created_at,
@@ -2009,7 +2195,9 @@ impl TmdbMetadataActor {
         let mut parent = map
             .get("parent")
             .cloned()
-            .and_then(|raw| serde_json::from_value::<ParentDescriptors>(raw).ok())
+            .and_then(|raw| {
+                serde_json::from_value::<ParentDescriptors>(raw).ok()
+            })
             .unwrap_or_default();
         parent.series_id = Some(series_ref.id);
         parent.season_id = Some(season_ref.id);
@@ -2019,8 +2207,14 @@ impl TmdbMetadataActor {
             map.insert("parent".into(), parent_json);
         }
 
-        map.insert("series_id".into(), Value::String(series_ref.id.to_string()));
-        map.insert("season_id".into(), Value::String(season_ref.id.to_string()));
+        map.insert(
+            "series_id".into(),
+            Value::String(series_ref.id.to_string()),
+        );
+        map.insert(
+            "season_id".into(),
+            Value::String(season_ref.id.to_string()),
+        );
         map.insert(
             "episode_id".into(),
             Value::String(episode_ref.id.to_string()),
@@ -2143,11 +2337,16 @@ enum MetadataMediaKind {
 
 #[async_trait]
 impl MetadataActor for TmdbMetadataActor {
-    async fn enrich(&self, command: MetadataCommand) -> Result<MediaReadyForIndex> {
+    async fn enrich(
+        &self,
+        command: MetadataCommand,
+    ) -> Result<MediaReadyForIndex> {
         match Self::infer_media_kind(&command.analyzed.context) {
             MetadataMediaKind::Movie => self.enrich_movie(command).await,
             MetadataMediaKind::Episode => self.enrich_episode(command).await,
-            MetadataMediaKind::Unknown => DefaultMetadataActor::new().enrich(command).await,
+            MetadataMediaKind::Unknown => {
+                DefaultMetadataActor::new().enrich(command).await
+            }
         }
     }
 }

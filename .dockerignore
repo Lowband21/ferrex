@@ -1,0 +1,13 @@
+# Ignore build artifacts and large directories to speed up Docker builds
+.git
+.gitignore
+.dockerignore
+Cargo.lock
+**/target
+config/
+cache/
+media/
+node_modules/
+*.log
+*.tmp
+*.bak

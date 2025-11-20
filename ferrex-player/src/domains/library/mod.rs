@@ -14,7 +14,8 @@ use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use crate::infrastructure::repository::accessor::{Accessor, ReadWrite};
 use crate::infrastructure::services::api::ApiService;
 use ferrex_core::player_prelude::{
-    LibraryID, LibraryMediaCache, ScanConfig, ScanMetrics, ScanProgressEvent, ScanSnapshotDto,
+    LibraryID, LibraryMediaCache, ScanConfig, ScanMetrics, ScanProgressEvent,
+    ScanSnapshotDto,
 };
 use iced::Task;
 use std::collections::HashMap;
@@ -113,7 +114,10 @@ impl LibraryDomain {
     //    Task::none()
     //}
 
-    pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
+    pub fn handle_event(
+        &mut self,
+        event: &CrossDomainEvent,
+    ) -> Task<DomainMessage> {
         match event {
             CrossDomainEvent::UserAuthenticated(_user, _permissions) => {
                 // Could trigger library refresh here

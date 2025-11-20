@@ -97,9 +97,13 @@ impl HardwareInfo {
 
         for disk in disks.list() {
             if let Some(mount_point) = disk.mount_point().to_str()
-                && !is_virtual_filesystem(mount_point, disk.file_system().as_encoded_bytes())
+                && !is_virtual_filesystem(
+                    mount_point,
+                    disk.file_system().as_encoded_bytes(),
+                )
             {
-                let identifier = format!("{}:{}", mount_point, disk.total_space());
+                let identifier =
+                    format!("{}:{}", mount_point, disk.total_space());
                 serials.insert(identifier);
             }
         }
@@ -118,7 +122,10 @@ impl HardwareInfo {
                 json_str.find("\"platform_UUID\"").and_then(|idx| {
                     let start = json_str[idx..].find("\"")?;
                     let end = json_str[idx + start + 1..].find("\"")?;
-                    Some(json_str[idx + start + 1..idx + start + 1 + end].to_string())
+                    Some(
+                        json_str[idx + start + 1..idx + start + 1 + end]
+                            .to_string(),
+                    )
                 })
             })
     }
@@ -147,7 +154,11 @@ impl HardwareInfo {
             })
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows"
+    )))]
     fn collect_platform_id() -> Option<String> {
         None
     }
@@ -287,7 +298,9 @@ pub async fn generate_hardware_fingerprint() -> Result<String> {
             }
 
             // Add current user
-            if let Ok(username) = std::env::var("USER").or_else(|_| std::env::var("USERNAME")) {
+            if let Ok(username) =
+                std::env::var("USER").or_else(|_| std::env::var("USERNAME"))
+            {
                 hasher.update(b"user:");
                 hasher.update(username.as_bytes());
             }

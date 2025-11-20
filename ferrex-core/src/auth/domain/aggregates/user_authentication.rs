@@ -8,7 +8,9 @@ use crate::auth::AuthCrypto;
 use crate::auth::domain::aggregates::{DeviceSession, DeviceStatus};
 use crate::auth::domain::events::AuthEvent;
 use crate::auth::domain::value_objects::PinCodeError;
-use crate::auth::domain::value_objects::{DeviceFingerprint, PinCode, PinPolicy, SessionToken};
+use crate::auth::domain::value_objects::{
+    DeviceFingerprint, PinCode, PinPolicy, SessionToken,
+};
 
 /// Errors that can occur during user authentication
 #[derive(Debug, Error)]
@@ -32,7 +34,9 @@ pub enum UserAuthenticationError {
     TooManyDevices,
 
     #[error("Invalid device session")]
-    InvalidDeviceSession(#[from] crate::auth::domain::aggregates::DeviceSessionError),
+    InvalidDeviceSession(
+        #[from] crate::auth::domain::aggregates::DeviceSessionError,
+    ),
 }
 
 /// User authentication aggregate
@@ -121,9 +125,14 @@ impl UserAuthentication {
     }
 
     /// Create a new user authentication aggregate
-    pub fn new(user_id: Uuid, username: String, password_hash: String, max_devices: usize) -> Self {
+    pub fn new(
+        user_id: Uuid,
+        username: String,
+        password_hash: String,
+        max_devices: usize,
+    ) -> Self {
         let mut salt = vec![0u8; 16];
-        rand::thread_rng().fill_bytes(&mut salt);
+        rand::rng().fill_bytes(&mut salt);
 
         Self {
             user_id,
@@ -180,7 +189,7 @@ impl UserAuthentication {
     /// Rotate the server-issued salt for future client proofs.
     pub fn rotate_pin_client_salt(&mut self) {
         let mut salt = vec![0u8; 16];
-        rand::thread_rng().fill_bytes(&mut salt);
+        rand::rng().fill_bytes(&mut salt);
         self.pin_client_salt = salt;
     }
 
@@ -277,10 +286,9 @@ impl UserAuthentication {
         self.failed_login_attempts = 0;
         self.last_login = Some(Utc::now());
 
-        if needs_rehash
-            && let Ok(new_hash) = crypto.hash_password(password) {
-                self.password_hash = new_hash;
-            }
+        if needs_rehash && let Ok(new_hash) = crypto.hash_password(password) {
+            self.password_hash = new_hash;
+        }
 
         self.add_event(AuthEvent::PasswordAuthenticated {
             user_id: self.user_id,
@@ -317,7 +325,8 @@ impl UserAuthentication {
         }
 
         // Create new device session
-        let session = DeviceSession::new(self.user_id, device_fingerprint, device_name);
+        let session =
+            DeviceSession::new(self.user_id, device_fingerprint, device_name);
 
         self.device_sessions.insert(fingerprint_str, session);
 
@@ -557,8 +566,12 @@ mod tests {
     #[test]
     fn test_user_authentication_flow() {
         let password_hash = hash_password("password123");
-        let mut auth =
-            UserAuthentication::new(Uuid::now_v7(), "testuser".to_string(), password_hash, 5);
+        let mut auth = UserAuthentication::new(
+            Uuid::now_v7(),
+            "testuser".to_string(),
+            password_hash,
+            5,
+        );
 
         let crypto = AuthCrypto::new("pepper", "token-key").unwrap();
 

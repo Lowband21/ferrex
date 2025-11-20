@@ -64,7 +64,10 @@ impl<Name, Email> UserBuilder<Name, Email> {
     }
 
     /// Set the user's email (required)
-    pub fn with_email(self, email: impl Into<String>) -> UserBuilder<Name, Set> {
+    pub fn with_email(
+        self,
+        email: impl Into<String>,
+    ) -> UserBuilder<Name, Set> {
         UserBuilder {
             name: self.name,
             email: Some(email.into()),

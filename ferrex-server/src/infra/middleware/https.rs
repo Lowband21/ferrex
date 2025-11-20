@@ -80,7 +80,8 @@ impl<S> HttpsRedirectMiddleware<S> {
             .ok_or("Missing Host header")?;
 
         // Build HTTPS URL preserving path and query
-        let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+        let path_and_query =
+            uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
 
         let https_url = format!("https://{}{}", host, path_and_query);
         Ok(https_url.parse()?)
@@ -89,15 +90,23 @@ impl<S> HttpsRedirectMiddleware<S> {
 
 impl<S> Service<Request<Body>> for HttpsRedirectMiddleware<S>
 where
-    S: Service<Request<Body>, Response = Response<Body>> + Send + Clone + 'static,
+    S: Service<Request<Body>, Response = Response<Body>>
+        + Send
+        + Clone
+        + 'static,
     S::Future: Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     type Response = Response<Body>;
     type Error = Box<dyn std::error::Error + Send + Sync>;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = Pin<
+        Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx).map_err(Into::into)
     }
 
@@ -111,20 +120,25 @@ where
                     match HeaderValue::from_str(&location) {
                         Ok(loc) => {
                             let mut response = Response::new(Body::empty());
-                            *response.status_mut() = StatusCode::MOVED_PERMANENTLY;
-                            response.headers_mut().insert(header::LOCATION, loc);
+                            *response.status_mut() =
+                                StatusCode::MOVED_PERMANENTLY;
+                            response
+                                .headers_mut()
+                                .insert(header::LOCATION, loc);
                             return Box::pin(async move { Ok(response) });
                         }
                         Err(_) => {
-                            let mut response =
-                                Response::new(Body::from("Invalid redirect location"));
+                            let mut response = Response::new(Body::from(
+                                "Invalid redirect location",
+                            ));
                             *response.status_mut() = StatusCode::BAD_REQUEST;
                             return Box::pin(async move { Ok(response) });
                         }
                     }
                 }
                 Err(_) => {
-                    let mut response = Response::new(Body::from("Invalid request"));
+                    let mut response =
+                        Response::new(Body::from("Invalid request"));
                     *response.status_mut() = StatusCode::BAD_REQUEST;
                     return Box::pin(async move { Ok(response) });
                 }
@@ -156,9 +170,9 @@ mod tests {
         let service = ServiceBuilder::new()
             .layer(HttpsRedirectLayer::new())
             .service_fn(|_req: Request<Body>| async {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Response::new(Body::from(
-                    "Hello",
-                )))
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                    Response::new(Body::from("Hello")),
+                )
             });
 
         let request = Request::builder()
@@ -181,9 +195,9 @@ mod tests {
         let service = ServiceBuilder::new()
             .layer(HttpsRedirectLayer::new())
             .service_fn(|_req: Request<Body>| async {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Response::new(Body::from(
-                    "Hello HTTPS",
-                )))
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                    Response::new(Body::from("Hello HTTPS")),
+                )
             });
 
         let request = Request::builder()
@@ -202,9 +216,9 @@ mod tests {
         let service = ServiceBuilder::new()
             .layer(HttpsRedirectLayer::new())
             .service_fn(|_req: Request<Body>| async {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Response::new(Body::from(
-                    "Hello",
-                )))
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                    Response::new(Body::from("Hello")),
+                )
             });
 
         let request = Request::builder()
@@ -225,9 +239,9 @@ mod tests {
         let service = ServiceBuilder::new()
             .layer(HttpsRedirectLayer::new())
             .service_fn(|_req: Request<Body>| async {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Response::new(Body::from(
-                    "Hello",
-                )))
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                    Response::new(Body::from("Hello")),
+                )
             });
 
         let request = Request::builder()
@@ -252,9 +266,9 @@ mod tests {
         let service = ServiceBuilder::new()
             .layer(HttpsRedirectLayer::new())
             .service_fn(|_req: Request<Body>| async {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Response::new(Body::from(
-                    "Hello",
-                )))
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                    Response::new(Body::from("Hello")),
+                )
             });
 
         let request = Request::builder()
@@ -277,9 +291,9 @@ mod tests {
         let service = ServiceBuilder::new()
             .layer(HttpsRedirectLayer::new())
             .service_fn(|_req: Request<Body>| async {
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Response::new(Body::from(
-                    "Hello",
-                )))
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                    Response::new(Body::from("Hello")),
+                )
             });
 
         let request = Request::builder()

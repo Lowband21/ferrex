@@ -25,7 +25,10 @@ pub mod policy;
 
 pub use config::{DemoLibraryOptions, DemoSeedOptions};
 #[cfg(feature = "scan-runtime")]
-pub use generator::{DemoLibraryPlan, DemoSeedPlan, apply_plan, generate_plan, prepare_plan_roots};
+pub use generator::{
+    DemoLibraryPlan, DemoSeedPlan, apply_plan, generate_plan,
+    prepare_plan_roots,
+};
 pub use policy::{DemoPolicy, DemoRuntimeMetadata};
 
 #[cfg(all(test, feature = "demo"))]
@@ -66,7 +69,9 @@ impl DemoContext {
     pub fn libraries(&self) -> Vec<(LibraryID, DemoRuntimeMetadata)> {
         self.libraries
             .lock()
-            .map(|map| map.iter().map(|(id, meta)| (*id, meta.clone())).collect())
+            .map(|map| {
+                map.iter().map(|(id, meta)| (*id, meta.clone())).collect()
+            })
             .unwrap_or_default()
     }
 }
@@ -75,7 +80,9 @@ impl DemoContext {
 pub fn init_demo_context(root: PathBuf, policy: DemoPolicy) -> Result<()> {
     DEMO_CONTEXT
         .set(DemoContext::new(root, policy))
-        .map_err(|_| MediaError::Internal("demo context already initialised".into()))
+        .map_err(|_| {
+            MediaError::Internal("demo context already initialised".into())
+        })
 }
 
 /// Fetch the global demo context if demo mode is active.
@@ -109,9 +116,10 @@ pub fn register_demo_library(library: &Library) {
 /// Clear all registered demo libraries (used when regenerating plans).
 pub fn clear_registered_libraries() {
     if let Some(ctx) = context()
-        && let Ok(mut guard) = ctx.libraries.lock() {
-            guard.clear();
-        }
+        && let Ok(mut guard) = ctx.libraries.lock()
+    {
+        guard.clear();
+    }
 }
 
 /// Check if the provided library ID belongs to the demo runtime.

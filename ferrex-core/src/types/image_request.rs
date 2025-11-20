@@ -191,7 +191,11 @@ impl ImageRequest {
     }
 
     /// Construct a backdrop request using typed variants.
-    pub fn backdrop(media_id: Uuid, kind: BackdropKind, size: BackdropSize) -> Self {
+    pub fn backdrop(
+        media_id: Uuid,
+        kind: BackdropKind,
+        size: BackdropSize,
+    ) -> Self {
         Self::new(media_id, size.as_image_size(), kind.image_type())
     }
 
@@ -221,7 +225,9 @@ const fn is_valid_combination(image_type: ImageType, size: ImageSize) -> bool {
     use ImageType::*;
 
     match image_type {
-        Movie | Series | Season => matches!(size, Thumbnail | Poster | Backdrop | Full),
+        Movie | Series | Season => {
+            matches!(size, Thumbnail | Poster | Backdrop | Full)
+        }
         Episode => matches!(size, Thumbnail),
         Person => matches!(size, Profile),
     }
@@ -230,8 +236,8 @@ const fn is_valid_combination(image_type: ImageType, size: ImageSize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        BackdropKind, BackdropSize, EpisodeStillSize, ImageRequest, ImageSize, ImageType,
-        PosterKind, PosterSize, Priority, ProfileSize,
+        BackdropKind, BackdropSize, EpisodeStillSize, ImageRequest, ImageSize,
+        ImageType, PosterKind, PosterSize, Priority, ProfileSize,
     };
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -246,7 +252,8 @@ mod tests {
     #[test]
     fn requests_ignore_priority_for_identity() {
         let media_id = Uuid::now_v7();
-        let base = ImageRequest::new(media_id, ImageSize::Poster, ImageType::Movie);
+        let base =
+            ImageRequest::new(media_id, ImageSize::Poster, ImageType::Movie);
         let visible = base.clone().with_priority(Priority::Visible);
         let preload = base.clone().with_priority(Priority::Preload);
 
@@ -257,7 +264,8 @@ mod tests {
     #[test]
     fn image_index_contributes_to_identity() {
         let media_id = Uuid::now_v7();
-        let base = ImageRequest::new(media_id, ImageSize::Poster, ImageType::Movie);
+        let base =
+            ImageRequest::new(media_id, ImageSize::Poster, ImageType::Movie);
         let first = base.clone().with_index(0);
         let second = base.clone().with_index(1);
 
@@ -270,35 +278,50 @@ mod tests {
     fn invalid_combinations_panic() {
         let media_id = Uuid::now_v7();
         // Movie media cannot request a profile-sized image.
-        let _ = ImageRequest::new(media_id, ImageSize::Profile, ImageType::Movie);
+        let _ =
+            ImageRequest::new(media_id, ImageSize::Profile, ImageType::Movie);
     }
 
     #[test]
     fn typed_constructors_produce_expected_mappings() {
         let media_id = Uuid::now_v7();
 
-        let poster = ImageRequest::poster(media_id, PosterKind::Movie, PosterSize::Original);
+        let poster = ImageRequest::poster(
+            media_id,
+            PosterKind::Movie,
+            PosterSize::Original,
+        );
         assert_eq!(poster.image_type, ImageType::Movie);
         assert_eq!(poster.size, ImageSize::Full);
 
-        let quality_poster = ImageRequest::poster(media_id, PosterKind::Movie, PosterSize::Quality);
+        let quality_poster = ImageRequest::poster(
+            media_id,
+            PosterKind::Movie,
+            PosterSize::Quality,
+        );
         assert_eq!(quality_poster.image_type, ImageType::Movie);
         assert_eq!(quality_poster.size, ImageSize::Poster);
 
-        let backdrop =
-            ImageRequest::backdrop(media_id, BackdropKind::Series, BackdropSize::Quality);
+        let backdrop = ImageRequest::backdrop(
+            media_id,
+            BackdropKind::Series,
+            BackdropSize::Quality,
+        );
         assert_eq!(backdrop.image_type, ImageType::Series);
         assert_eq!(backdrop.size, ImageSize::Backdrop);
 
-        let still = ImageRequest::episode_still(media_id, EpisodeStillSize::Standard);
+        let still =
+            ImageRequest::episode_still(media_id, EpisodeStillSize::Standard);
         assert_eq!(still.image_type, ImageType::Episode);
         assert_eq!(still.size, ImageSize::Thumbnail);
 
-        let profile = ImageRequest::person_profile(media_id, ProfileSize::Standard);
+        let profile =
+            ImageRequest::person_profile(media_id, ProfileSize::Standard);
         assert_eq!(profile.image_type, ImageType::Person);
         assert_eq!(profile.size, ImageSize::Profile);
 
-        let any_profile = ImageRequest::person_profile(media_id, ProfileSize::Any);
+        let any_profile =
+            ImageRequest::person_profile(media_id, ProfileSize::Any);
         assert_eq!(any_profile.image_type, ImageType::Person);
         assert_eq!(any_profile.size, ImageSize::Profile);
     }

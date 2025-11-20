@@ -10,7 +10,8 @@ pub mod domain;
 
 #[cfg(feature = "database")]
 pub use application::{
-    CreateUserCommand, DeleteUserCommand, ListUsersOptions, PaginatedUsers, UpdateUserCommand,
-    UserAdminError, UserAdminRecord, UserAdministrationService,
+    CreateUserCommand, DeleteUserCommand, ListUsersOptions, PaginatedUsers,
+    UpdateUserCommand, UserAdminError, UserAdminRecord,
+    UserAdministrationService,
 };
 pub use domain::*;

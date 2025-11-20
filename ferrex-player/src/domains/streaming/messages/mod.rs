@@ -4,12 +4,18 @@ use ferrex_core::player_prelude::TranscodingStatus;
 pub enum Message {
     // Transcoding
     TranscodingStarted(Result<String, String>), // job_id or error
-    TranscodingStatusUpdate(Result<(TranscodingStatus, Option<f64>, Option<String>), String>),
+    TranscodingStatusUpdate(
+        Result<(TranscodingStatus, Option<f64>, Option<String>), String>,
+    ),
     CheckTranscodingStatus, // Periodic check for transcoding status
 
     // HLS Streaming
-    MasterPlaylistLoaded(Option<crate::domains::library::server::hls::MasterPlaylist>), // Master playlist from server
-    MasterPlaylistReady(Option<crate::domains::library::server::hls::MasterPlaylist>), // Master playlist exists and ready for playback
+    MasterPlaylistLoaded(
+        Option<crate::domains::library::server::hls::MasterPlaylist>,
+    ), // Master playlist from server
+    MasterPlaylistReady(
+        Option<crate::domains::library::server::hls::MasterPlaylist>,
+    ), // Master playlist exists and ready for playback
 
     // Segment management
     StartSegmentPrefetch(usize), // Start prefetching segment at index
@@ -23,7 +29,9 @@ impl std::fmt::Debug for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             // Transcoding
-            Self::TranscodingStarted(result) => write!(f, "TranscodingStarted({:?})", result),
+            Self::TranscodingStarted(result) => {
+                write!(f, "TranscodingStarted({:?})", result)
+            }
             Self::TranscodingStatusUpdate(result) => {
                 write!(f, "TranscodingStatusUpdate({:?})", result)
             }
@@ -38,7 +46,9 @@ impl std::fmt::Debug for Message {
             }
 
             // Segment management
-            Self::StartSegmentPrefetch(index) => write!(f, "StartSegmentPrefetch({})", index),
+            Self::StartSegmentPrefetch(index) => {
+                write!(f, "StartSegmentPrefetch({})", index)
+            }
             Self::SegmentPrefetched(index, result) => write!(
                 f,
                 "SegmentPrefetched({}, {:?})",
@@ -47,7 +57,9 @@ impl std::fmt::Debug for Message {
             ),
 
             // Bandwidth adaptation
-            Self::BandwidthMeasured(bandwidth) => write!(f, "BandwidthMeasured({})", bandwidth),
+            Self::BandwidthMeasured(bandwidth) => {
+                write!(f, "BandwidthMeasured({})", bandwidth)
+            }
         }
     }
 }
@@ -57,7 +69,9 @@ impl Message {
         match self {
             // Transcoding
             Self::TranscodingStarted(_) => "Streaming::TranscodingStarted",
-            Self::TranscodingStatusUpdate(_) => "Streaming::TranscodingStatusUpdate",
+            Self::TranscodingStatusUpdate(_) => {
+                "Streaming::TranscodingStatusUpdate"
+            }
             Self::CheckTranscodingStatus => "Streaming::CheckTranscodingStatus",
 
             // HLS Streaming

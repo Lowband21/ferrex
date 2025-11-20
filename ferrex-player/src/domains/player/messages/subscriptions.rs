@@ -16,8 +16,9 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         && state.domains.player.state.controls
     {
         subs.push(
-            iced::time::every(std::time::Duration::from_millis(500))
-                .map(|_| DomainMessage::Player(Message::CheckControlsVisibility)),
+            iced::time::every(std::time::Duration::from_millis(500)).map(
+                |_| DomainMessage::Player(Message::CheckControlsVisibility),
+            ),
         );
     }
 

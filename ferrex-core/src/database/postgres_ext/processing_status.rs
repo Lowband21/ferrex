@@ -29,14 +29,20 @@ impl<'a> ProcessingStatusRepository<'a> {
         Self { db }
     }
 
-    pub async fn create_or_update(&self, status: &MediaProcessingStatus) -> Result<()> {
+    pub async fn create_or_update(
+        &self,
+        status: &MediaProcessingStatus,
+    ) -> Result<()> {
         self.db
             .processing_status_repository()
             .create_or_update_processing_status(status)
             .await
     }
 
-    pub async fn get(&self, media_file_id: Uuid) -> Result<Option<MediaProcessingStatus>> {
+    pub async fn get(
+        &self,
+        media_file_id: Uuid,
+    ) -> Result<Option<MediaProcessingStatus>> {
         self.db
             .processing_status_repository()
             .get_processing_status(media_file_id)

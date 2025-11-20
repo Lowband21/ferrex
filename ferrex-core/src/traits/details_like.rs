@@ -1,9 +1,10 @@
 use rkyv::option::ArchivedOption;
 
 use crate::types::details::{
-    ArchivedCastMember, ArchivedCrewMember, ArchivedEnhancedSeriesDetails, ArchivedExternalIds,
-    ArchivedSeasonDetails, CastMember, CrewMember, EnhancedMovieDetails, EnhancedSeriesDetails,
-    EpisodeDetails, ExternalIds, SeasonDetails, TmdbDetails,
+    ArchivedCastMember, ArchivedCrewMember, ArchivedEnhancedSeriesDetails,
+    ArchivedExternalIds, ArchivedSeasonDetails, CastMember, CrewMember,
+    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, ExternalIds,
+    SeasonDetails, TmdbDetails,
 };
 
 pub trait MediaDetails {

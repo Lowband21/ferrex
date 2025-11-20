@@ -265,7 +265,8 @@ pub mod examples {
             Self {
                 id: Uuid::now_v7(),
                 name: "Admin User With Long Name".to_string(),
-                email: "admin.user.with.long.email@subdomain.example.com".to_string(),
+                email: "admin.user.with.long.email@subdomain.example.com"
+                    .to_string(),
                 is_admin: true,
                 created_at: chrono::Utc::now() - chrono::Duration::days(365),
             }
@@ -274,7 +275,7 @@ pub mod examples {
         fn invalid() -> Self {
             Self {
                 id: Uuid::nil(),
-                name: String::new(),               // Invalid: empty name
+                name: String::new(), // Invalid: empty name
                 email: "not-an-email".to_string(), // Invalid: bad email format
                 is_admin: false,
                 created_at: chrono::Utc::now(),
@@ -309,7 +310,10 @@ pub mod examples {
                 "Many users for performance testing",
                 || {
                     (0..100)
-                        .map(|i| UserFixture::typical().with_name(&format!("User{}", i)))
+                        .map(|i| {
+                            UserFixture::typical()
+                                .with_name(&format!("User{}", i))
+                        })
                         .collect()
                 },
             ))
@@ -323,7 +327,10 @@ pub mod examples {
 
         pub fn with_name(mut self, name: &str) -> Self {
             self.name = name.to_string();
-            self.email = format!("{}@example.com", name.to_lowercase().replace(' ', "."));
+            self.email = format!(
+                "{}@example.com",
+                name.to_lowercase().replace(' ', ".")
+            );
             self
         }
     }

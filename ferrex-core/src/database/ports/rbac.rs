@@ -6,11 +6,23 @@ use crate::rbac::{Permission, PermissionCategory, Role, UserPermissions};
 
 #[async_trait]
 pub trait RbacRepository: Send + Sync {
-    async fn get_user_permissions(&self, user_id: Uuid) -> Result<UserPermissions>;
+    async fn get_user_permissions(
+        &self,
+        user_id: Uuid,
+    ) -> Result<UserPermissions>;
     async fn get_all_roles(&self) -> Result<Vec<Role>>;
     async fn get_all_permissions(&self) -> Result<Vec<Permission>>;
-    async fn assign_user_role(&self, user_id: Uuid, role_id: Uuid, granted_by: Uuid) -> Result<()>;
-    async fn remove_user_role(&self, user_id: Uuid, role_id: Uuid) -> Result<()>;
+    async fn assign_user_role(
+        &self,
+        user_id: Uuid,
+        role_id: Uuid,
+        granted_by: Uuid,
+    ) -> Result<()>;
+    async fn remove_user_role(
+        &self,
+        user_id: Uuid,
+        role_id: Uuid,
+    ) -> Result<()>;
     async fn remove_user_role_atomic(
         &self,
         user_id: Uuid,
@@ -26,8 +38,15 @@ pub trait RbacRepository: Send + Sync {
         reason: Option<String>,
     ) -> Result<()>;
 
-    async fn get_admin_count(&self, exclude_user_id: Option<Uuid>) -> Result<usize>;
-    async fn user_has_role(&self, user_id: Uuid, role_name: &str) -> Result<bool>;
+    async fn get_admin_count(
+        &self,
+        exclude_user_id: Option<Uuid>,
+    ) -> Result<usize>;
+    async fn user_has_role(
+        &self,
+        user_id: Uuid,
+        role_name: &str,
+    ) -> Result<bool>;
     async fn get_users_with_role(&self, role_name: &str) -> Result<Vec<Uuid>>;
 
     async fn upsert_role(
@@ -45,5 +64,9 @@ pub trait RbacRepository: Send + Sync {
         description: &str,
     ) -> Result<Uuid>;
 
-    async fn assign_permission_to_role(&self, role_id: Uuid, permission_id: Uuid) -> Result<()>;
+    async fn assign_permission_to_role(
+        &self,
+        role_id: Uuid,
+        permission_id: Uuid,
+    ) -> Result<()>;
 }

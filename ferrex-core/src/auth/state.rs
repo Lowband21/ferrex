@@ -100,25 +100,26 @@ impl AuthState {
             }
 
             // From UserSelected
-            (AuthState::UserSelected { user_id }, AuthEvent::DeviceCheckComplete(check_result)) => {
-                match check_result {
-                    DeviceCheckResult::Trusted(reg) if reg.requires_pin() => {
-                        let new_state = AuthState::AwaitingPin {
-                            user_id: *user_id,
-                            device_registration: reg.clone(),
-                        };
-                        (new_state, TransitionResult::Success)
-                    }
-                    _ => {
-                        let device_id = Uuid::now_v7();
-                        let new_state = AuthState::AwaitingPassword {
-                            user_id: *user_id,
-                            device_id,
-                        };
-                        (new_state, TransitionResult::Success)
-                    }
+            (
+                AuthState::UserSelected { user_id },
+                AuthEvent::DeviceCheckComplete(check_result),
+            ) => match check_result {
+                DeviceCheckResult::Trusted(reg) if reg.requires_pin() => {
+                    let new_state = AuthState::AwaitingPin {
+                        user_id: *user_id,
+                        device_registration: reg.clone(),
+                    };
+                    (new_state, TransitionResult::Success)
                 }
-            }
+                _ => {
+                    let device_id = Uuid::now_v7();
+                    let new_state = AuthState::AwaitingPassword {
+                        user_id: *user_id,
+                        device_id,
+                    };
+                    (new_state, TransitionResult::Success)
+                }
+            },
 
             // From AwaitingPassword
             (
@@ -225,7 +226,9 @@ impl AuthState {
             }
 
             // Handle cancellation from any state
-            (_, AuthEvent::Cancelled) => (AuthState::Unauthenticated, TransitionResult::Success),
+            (_, AuthEvent::Cancelled) => {
+                (AuthState::Unauthenticated, TransitionResult::Success)
+            }
 
             // Invalid transition
             _ => {
@@ -337,9 +340,9 @@ mod tests {
         state.transition(AuthEvent::UserSelected(user_id));
 
         // Device is trusted with PIN
-        let result = state.transition(AuthEvent::DeviceCheckComplete(DeviceCheckResult::Trusted(
-            device_reg,
-        )));
+        let result = state.transition(AuthEvent::DeviceCheckComplete(
+            DeviceCheckResult::Trusted(device_reg),
+        ));
         assert!(matches!(result, TransitionResult::Success));
         assert!(matches!(state, AuthState::AwaitingPin { .. }));
 

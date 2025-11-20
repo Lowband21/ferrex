@@ -18,16 +18,19 @@ pub mod v1 {
         pub mod device {
             pub const LOGIN: &str = v1_path!("/auth/device/login");
             pub const PIN_LOGIN: &str = v1_path!("/auth/device/pin");
-            pub const PIN_CHALLENGE: &str = v1_path!("/auth/device/pin/challenge");
+            pub const PIN_CHALLENGE: &str =
+                v1_path!("/auth/device/pin/challenge");
             pub const STATUS: &str = v1_path!("/auth/device/status");
             pub const SET_PIN: &str = v1_path!("/auth/device/pin/set");
             pub const CHANGE_PIN: &str = v1_path!("/auth/device/pin/change");
             pub const LIST: &str = v1_path!("/auth/device/list");
             pub const REVOKE: &str = v1_path!("/auth/device/revoke");
             pub const VALIDATE_TRUST: &str = v1_path!("/auth/device/validate");
-            pub const REVOKE_TRUST: &str = v1_path!("/auth/device/revoke-trust");
+            pub const REVOKE_TRUST: &str =
+                v1_path!("/auth/device/revoke-trust");
             pub const LIST_TRUSTED: &str = v1_path!("/auth/device/trusted");
-            pub const EXTEND_TRUST: &str = v1_path!("/auth/device/extend-trust");
+            pub const EXTEND_TRUST: &str =
+                v1_path!("/auth/device/extend-trust");
         }
     }
 
@@ -40,7 +43,9 @@ pub mod v1 {
         pub const CHANGE_PASSWORD: &str = v1_path!("/users/me/password");
         pub const ITEM: &str = v1_path!("/users/{id}");
 
-        #[deprecated(note = "User session routes are being migrated to the auth domain")]
+        #[deprecated(
+            note = "User session routes are being migrated to the auth domain"
+        )]
         pub mod sessions {
             pub const COLLECTION: &str = v1_path!("/users/sessions");
             pub const ITEM: &str = v1_path!("/users/sessions/{id}");
@@ -81,8 +86,10 @@ pub mod v1 {
         pub const ITEM: &str = v1_path!("/libraries/{id}");
         pub const MEDIA: &str = v1_path!("/libraries/{id}/media");
         pub const SORTED_IDS: &str = v1_path!("/libraries/{id}/sorted-ids");
-        pub const SORTED_INDICES: &str = v1_path!("/libraries/{id}/indices/sorted");
-        pub const FILTERED_INDICES: &str = v1_path!("/libraries/{id}/indices/filter");
+        pub const SORTED_INDICES: &str =
+            v1_path!("/libraries/{id}/indices/sorted");
+        pub const FILTERED_INDICES: &str =
+            v1_path!("/libraries/{id}/indices/filter");
 
         pub mod scans {
             pub const START: &str = v1_path!("/libraries/{id}/scans:start");
@@ -107,12 +114,14 @@ pub mod v1 {
     }
 
     pub mod images {
-        pub const SERVE: &str = v1_path!("/images/{type}/{id}/{category}/{index}");
+        pub const SERVE: &str =
+            v1_path!("/images/{type}/{id}/{category}/{index}");
     }
 
     pub mod stream {
         pub const PLAY: &str = v1_path!("/stream/{id}");
-        pub const REPORT_PROGRESS: &str = v1_path!("/stream/{media_type}/{id}/progress");
+        pub const REPORT_PROGRESS: &str =
+            v1_path!("/stream/{media_type}/{id}/progress");
     }
 
     pub mod sync {
@@ -124,12 +133,14 @@ pub mod v1 {
         pub const USER_ITEM: &str = v1_path!("/admin/users/{id}");
         pub const USER_ROLES: &str = v1_path!("/admin/users/{id}/roles");
         pub const USER_SESSIONS: &str = v1_path!("/admin/users/{id}/sessions");
-        pub const REVOKE_SESSION: &str = v1_path!("/admin/users/{user_id}/sessions/{session_id}");
+        pub const REVOKE_SESSION: &str =
+            v1_path!("/admin/users/{user_id}/sessions/{session_id}");
         pub const STATS: &str = v1_path!("/admin/stats");
 
         pub mod dev {
             pub const RESET_CHECK: &str = v1_path!("/admin/dev/reset/check");
-            pub const RESET_DATABASE: &str = v1_path!("/admin/dev/reset/database");
+            pub const RESET_DATABASE: &str =
+                v1_path!("/admin/dev/reset/database");
             pub const SEED: &str = v1_path!("/admin/dev/seed");
         }
 
@@ -144,7 +155,8 @@ pub mod v1 {
         }
 
         pub mod security {
-            pub const SETTINGS: &str = v1_path!("/admin/security/password-policy");
+            pub const SETTINGS: &str =
+                v1_path!("/admin/security/password-policy");
         }
     }
 
@@ -153,7 +165,8 @@ pub mod v1 {
         pub const PERMISSIONS: &str = v1_path!("/permissions");
         pub const USER_PERMISSIONS: &str = v1_path!("/users/{id}/permissions");
         pub const USER_ROLES: &str = v1_path!("/users/{id}/roles");
-        pub const OVERRIDE_PERMISSION: &str = v1_path!("/users/{id}/permissions/override");
+        pub const OVERRIDE_PERMISSION: &str =
+            v1_path!("/users/{id}/permissions/override");
         pub const MY_PERMISSIONS: &str = v1_path!("/users/me/permissions");
     }
 }
@@ -161,12 +174,19 @@ pub mod v1 {
 /// Helper utilities for working with route templates
 pub mod utils {
     /// Replace a single path parameter (e.g. `"{id}"`) with the provided value.
-    pub fn replace_param(route: &str, param: &str, value: impl AsRef<str>) -> String {
+    pub fn replace_param(
+        route: &str,
+        param: &str,
+        value: impl AsRef<str>,
+    ) -> String {
         route.replace(param, value.as_ref())
     }
 
     /// Replace multiple path parameters in order.
-    pub fn replace_params(route: &str, params: &[(impl AsRef<str>, impl AsRef<str>)]) -> String {
+    pub fn replace_params(
+        route: &str,
+        params: &[(impl AsRef<str>, impl AsRef<str>)],
+    ) -> String {
         let mut path = route.to_string();
         for (param, value) in params {
             path = path.replace(param.as_ref(), value.as_ref());
@@ -180,7 +200,8 @@ pub mod utils {
             return route.to_string();
         }
 
-        let mut path = String::with_capacity(route.len() + 1 + params.len() * 8);
+        let mut path =
+            String::with_capacity(route.len() + 1 + params.len() * 8);
         path.push_str(route);
         path.push('?');
 

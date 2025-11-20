@@ -265,8 +265,12 @@ mod tests {
         assert!(user_perms.has_permission("users:read"));
         assert!(!user_perms.has_permission("unknown:permission"));
 
-        assert!(user_perms.has_any_permission(&["media:stream", "media:delete"]));
-        assert!(!user_perms.has_all_permissions(&["media:stream", "media:delete"]));
+        assert!(
+            user_perms.has_any_permission(&["media:stream", "media:delete"])
+        );
+        assert!(
+            !user_perms.has_all_permissions(&["media:stream", "media:delete"])
+        );
 
         let granted = user_perms.granted_permissions();
         assert_eq!(granted.len(), 2);

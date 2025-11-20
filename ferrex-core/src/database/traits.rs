@@ -1,5 +1,4 @@
 use crate::{
-    auth::device::{AuthenticatedDevice, DeviceUpdateParams},
     error::Result,
     image::{
         MediaImageKind,
@@ -13,14 +12,19 @@ use crate::{
         files::{MediaFile, MediaFileMetadata},
         ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID},
         library::{Library, LibraryType},
-        media::{EpisodeReference, Media, MovieReference, SeasonReference, SeriesReference},
+        media::{
+            EpisodeReference, Media, MovieReference, SeasonReference,
+            SeriesReference,
+        },
     },
     user::User,
     watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -157,7 +161,15 @@ pub struct EpisodeInfo {
     pub media_file_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub struct ImageRecord {
     pub id: Uuid,
     pub tmdb_path: String,
@@ -170,7 +182,15 @@ pub struct ImageRecord {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub struct ImageVariant {
     pub id: Uuid,
     pub image_id: Uuid,
@@ -195,7 +215,15 @@ pub struct MediaImage {
     pub is_primary: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 pub struct ImageLookupParams {
     pub media_type: String,
     pub media_id: String,
@@ -300,10 +328,14 @@ pub trait MediaDatabaseTrait: Send + Sync {
 
     // Generic store media? Shouldn't we store the media file with the associated library?
     async fn store_media(&self, media_file: MediaFile) -> Result<Uuid>;
-    async fn store_media_batch(&self, media_files: Vec<MediaFile>) -> Result<Vec<Uuid>>;
+    async fn store_media_batch(
+        &self,
+        media_files: Vec<MediaFile>,
+    ) -> Result<Vec<Uuid>>;
     async fn get_media(&self, id: &Uuid) -> Result<Option<MediaFile>>;
     async fn get_media_by_path(&self, path: &str) -> Result<Option<MediaFile>>;
-    async fn list_media(&self, filters: MediaFilters) -> Result<Vec<MediaFile>>;
+    async fn list_media(&self, filters: MediaFilters)
+    -> Result<Vec<MediaFile>>;
     async fn get_stats(&self) -> Result<MediaStats>;
     async fn file_exists(&self, path: &str) -> Result<bool>;
     async fn delete_media(&self, id: &str) -> Result<()>;
@@ -333,9 +365,16 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn update_library_last_scan(&self, id: &LibraryID) -> Result<()>;
 
     // New reference type methods
-    async fn store_movie_reference(&self, movie: &MovieReference) -> Result<()>;
-    async fn store_series_reference(&self, series: &SeriesReference) -> Result<()>;
-    async fn store_season_reference(&self, season: &SeasonReference) -> Result<Uuid>;
+    async fn store_movie_reference(&self, movie: &MovieReference)
+    -> Result<()>;
+    async fn store_series_reference(
+        &self,
+        series: &SeriesReference,
+    ) -> Result<()>;
+    async fn store_season_reference(
+        &self,
+        season: &SeasonReference,
+    ) -> Result<Uuid>;
 
     // Series lookup methods
     async fn get_series_by_tmdb_id(
@@ -348,18 +387,37 @@ pub trait MediaDatabaseTrait: Send + Sync {
         library_id: LibraryID,
         name: &str,
     ) -> Result<Option<SeriesReference>>;
-    async fn store_episode_reference(&self, episode: &EpisodeReference) -> Result<()>;
+    async fn store_episode_reference(
+        &self,
+        episode: &EpisodeReference,
+    ) -> Result<()>;
 
     async fn get_all_movie_references(&self) -> Result<Vec<MovieReference>>;
     async fn get_series_references(&self) -> Result<Vec<SeriesReference>>;
-    async fn get_series_seasons(&self, series_id: &SeriesID) -> Result<Vec<SeasonReference>>;
-    async fn get_season_episodes(&self, season_id: &SeasonID) -> Result<Vec<EpisodeReference>>;
+    async fn get_series_seasons(
+        &self,
+        series_id: &SeriesID,
+    ) -> Result<Vec<SeasonReference>>;
+    async fn get_season_episodes(
+        &self,
+        season_id: &SeasonID,
+    ) -> Result<Vec<EpisodeReference>>;
 
     // Individual reference retrieval
-    async fn get_movie_reference(&self, id: &MovieID) -> Result<MovieReference>;
-    async fn get_series_reference(&self, id: &SeriesID) -> Result<SeriesReference>;
-    async fn get_season_reference(&self, id: &SeasonID) -> Result<SeasonReference>;
-    async fn get_episode_reference(&self, id: &EpisodeID) -> Result<EpisodeReference>;
+    async fn get_movie_reference(&self, id: &MovieID)
+    -> Result<MovieReference>;
+    async fn get_series_reference(
+        &self,
+        id: &SeriesID,
+    ) -> Result<SeriesReference>;
+    async fn get_season_reference(
+        &self,
+        id: &SeasonID,
+    ) -> Result<SeasonReference>;
+    async fn get_episode_reference(
+        &self,
+        id: &EpisodeID,
+    ) -> Result<EpisodeReference>;
 
     // Bulk reference retrieval methods for performance
     async fn get_library_media_references(
@@ -367,32 +425,68 @@ pub trait MediaDatabaseTrait: Send + Sync {
         library_id: LibraryID,
         library_type: LibraryType,
     ) -> Result<Vec<Media>>;
-    async fn get_library_series(&self, library_id: &LibraryID) -> Result<Vec<SeriesReference>>;
-    async fn get_library_seasons(&self, library_id: &LibraryID) -> Result<Vec<SeasonReference>>;
-    async fn get_library_episodes(&self, library_id: &LibraryID) -> Result<Vec<EpisodeReference>>;
-    async fn get_movie_references_bulk(&self, ids: &[&MovieID]) -> Result<Vec<MovieReference>>;
+    async fn get_library_series(
+        &self,
+        library_id: &LibraryID,
+    ) -> Result<Vec<SeriesReference>>;
+    async fn get_library_seasons(
+        &self,
+        library_id: &LibraryID,
+    ) -> Result<Vec<SeasonReference>>;
+    async fn get_library_episodes(
+        &self,
+        library_id: &LibraryID,
+    ) -> Result<Vec<EpisodeReference>>;
+    async fn get_movie_references_bulk(
+        &self,
+        ids: &[&MovieID],
+    ) -> Result<Vec<MovieReference>>;
 
     /// Lookup a movie reference by its media file path
-    async fn get_movie_reference_by_path(&self, path: &str) -> Result<Option<MovieReference>>;
-    async fn get_series_references_bulk(&self, ids: &[&SeriesID]) -> Result<Vec<SeriesReference>>;
-    async fn get_season_references_bulk(&self, ids: &[&SeasonID]) -> Result<Vec<SeasonReference>>;
+    async fn get_movie_reference_by_path(
+        &self,
+        path: &str,
+    ) -> Result<Option<MovieReference>>;
+    async fn get_series_references_bulk(
+        &self,
+        ids: &[&SeriesID],
+    ) -> Result<Vec<SeriesReference>>;
+    async fn get_season_references_bulk(
+        &self,
+        ids: &[&SeasonID],
+    ) -> Result<Vec<SeasonReference>>;
     async fn get_episode_references_bulk(
         &self,
         ids: &[&EpisodeID],
     ) -> Result<Vec<EpisodeReference>>;
 
     // TMDB ID updates
-    async fn update_movie_tmdb_id(&self, id: &MovieID, tmdb_id: u64) -> Result<()>;
-    async fn update_series_tmdb_id(&self, id: &SeriesID, tmdb_id: u64) -> Result<()>;
+    async fn update_movie_tmdb_id(
+        &self,
+        id: &MovieID,
+        tmdb_id: u64,
+    ) -> Result<()>;
+    async fn update_series_tmdb_id(
+        &self,
+        id: &SeriesID,
+        tmdb_id: u64,
+    ) -> Result<()>;
 
     // Library management
     async fn list_library_references(&self) -> Result<Vec<LibraryReference>>;
-    async fn get_library_reference(&self, id: Uuid) -> Result<LibraryReference>;
+    async fn get_library_reference(&self, id: Uuid)
+    -> Result<LibraryReference>;
 
     // Image management methods
     async fn create_image(&self, tmdb_path: &str) -> Result<ImageRecord>;
-    async fn get_image_by_tmdb_path(&self, tmdb_path: &str) -> Result<Option<ImageRecord>>;
-    async fn get_image_by_hash(&self, hash: &str) -> Result<Option<ImageRecord>>;
+    async fn get_image_by_tmdb_path(
+        &self,
+        tmdb_path: &str,
+    ) -> Result<Option<ImageRecord>>;
+    async fn get_image_by_hash(
+        &self,
+        hash: &str,
+    ) -> Result<Option<ImageRecord>>;
     async fn update_image_metadata(
         &self,
         image_id: Uuid,
@@ -418,7 +512,10 @@ pub trait MediaDatabaseTrait: Send + Sync {
         image_id: Uuid,
         variant: &str,
     ) -> Result<Option<ImageVariant>>;
-    async fn get_image_variants(&self, image_id: Uuid) -> Result<Vec<ImageVariant>>;
+    async fn get_image_variants(
+        &self,
+        image_id: Uuid,
+    ) -> Result<Vec<ImageVariant>>;
 
     // Media image linking
     async fn link_media_image(
@@ -430,7 +527,11 @@ pub trait MediaDatabaseTrait: Send + Sync {
         order_index: i32,
         is_primary: bool,
     ) -> Result<()>;
-    async fn get_media_images(&self, media_type: &str, media_id: Uuid) -> Result<Vec<MediaImage>>;
+    async fn get_media_images(
+        &self,
+        media_type: &str,
+        media_id: Uuid,
+    ) -> Result<Vec<MediaImage>>;
     async fn get_media_primary_image(
         &self,
         media_type: &str,
@@ -477,7 +578,10 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn create_scan_state(&self, scan_state: &ScanState) -> Result<()>;
     async fn update_scan_state(&self, scan_state: &ScanState) -> Result<()>;
     async fn get_scan_state(&self, id: Uuid) -> Result<Option<ScanState>>;
-    async fn get_active_scans(&self, library_id: Option<Uuid>) -> Result<Vec<ScanState>>;
+    async fn get_active_scans(
+        &self,
+        library_id: Option<Uuid>,
+    ) -> Result<Vec<ScanState>>;
     async fn get_latest_scan(
         &self,
         library_id: LibraryID,
@@ -507,7 +611,10 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn reset_processing_status(&self, media_file_id: Uuid) -> Result<()>;
 
     // File watch events
-    async fn create_file_watch_event(&self, event: &FileWatchEvent) -> Result<()>;
+    async fn create_file_watch_event(
+        &self,
+        event: &FileWatchEvent,
+    ) -> Result<()>;
     async fn get_unprocessed_events(
         &self,
         library_id: LibraryID,
@@ -519,24 +626,50 @@ pub trait MediaDatabaseTrait: Send + Sync {
     // User management methods
     async fn create_user(&self, user: &User) -> Result<()>;
     async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>>;
-    async fn get_user_by_username(&self, username: &str) -> Result<Option<User>>;
+    async fn get_user_by_username(
+        &self,
+        username: &str,
+    ) -> Result<Option<User>>;
     async fn get_all_users(&self) -> Result<Vec<User>>;
     async fn update_user(&self, user: &User) -> Result<()>;
     async fn delete_user(&self, id: Uuid) -> Result<()>;
 
     // User password management
-    async fn get_user_password_hash(&self, user_id: Uuid) -> Result<Option<String>>;
-    async fn update_user_password(&self, user_id: Uuid, password_hash: &str) -> Result<()>;
+    async fn get_user_password_hash(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<String>>;
+    async fn update_user_password(
+        &self,
+        user_id: Uuid,
+        password_hash: &str,
+    ) -> Result<()>;
 
     // Atomic user operations
-    async fn delete_user_atomic(&self, user_id: Uuid, check_last_admin: bool) -> Result<()>;
+    async fn delete_user_atomic(
+        &self,
+        user_id: Uuid,
+        check_last_admin: bool,
+    ) -> Result<()>;
 
     // RBAC methods
-    async fn get_user_permissions(&self, user_id: Uuid) -> Result<UserPermissions>;
+    async fn get_user_permissions(
+        &self,
+        user_id: Uuid,
+    ) -> Result<UserPermissions>;
     async fn get_all_roles(&self) -> Result<Vec<Role>>;
     async fn get_all_permissions(&self) -> Result<Vec<Permission>>;
-    async fn assign_user_role(&self, user_id: Uuid, role_id: Uuid, granted_by: Uuid) -> Result<()>;
-    async fn remove_user_role(&self, user_id: Uuid, role_id: Uuid) -> Result<()>;
+    async fn assign_user_role(
+        &self,
+        user_id: Uuid,
+        role_id: Uuid,
+        granted_by: Uuid,
+    ) -> Result<()>;
+    async fn remove_user_role(
+        &self,
+        user_id: Uuid,
+        role_id: Uuid,
+    ) -> Result<()>;
     async fn remove_user_role_atomic(
         &self,
         user_id: Uuid,
@@ -553,8 +686,15 @@ pub trait MediaDatabaseTrait: Send + Sync {
     ) -> Result<()>;
 
     // RBAC query operations
-    async fn get_admin_count(&self, exclude_user_id: Option<Uuid>) -> Result<usize>;
-    async fn user_has_role(&self, user_id: Uuid, role_name: &str) -> Result<bool>;
+    async fn get_admin_count(
+        &self,
+        exclude_user_id: Option<Uuid>,
+    ) -> Result<usize>;
+    async fn user_has_role(
+        &self,
+        user_id: Uuid,
+        role_name: &str,
+    ) -> Result<bool>;
     async fn get_users_with_role(&self, role_name: &str) -> Result<Vec<Uuid>>;
 
     // Watch status methods
@@ -563,30 +703,62 @@ pub trait MediaDatabaseTrait: Send + Sync {
         user_id: Uuid,
         progress: &UpdateProgressRequest,
     ) -> Result<()>;
-    async fn get_user_watch_state(&self, user_id: Uuid) -> Result<UserWatchState>;
+    async fn get_user_watch_state(
+        &self,
+        user_id: Uuid,
+    ) -> Result<UserWatchState>;
     async fn get_continue_watching(
         &self,
         user_id: Uuid,
         limit: usize,
     ) -> Result<Vec<InProgressItem>>;
-    async fn clear_watch_progress(&self, user_id: Uuid, media_id: &Uuid) -> Result<()>;
-    async fn is_media_completed(&self, user_id: Uuid, media_id: &Uuid) -> Result<bool>;
+    async fn clear_watch_progress(
+        &self,
+        user_id: Uuid,
+        media_id: &Uuid,
+    ) -> Result<()>;
+    async fn is_media_completed(
+        &self,
+        user_id: Uuid,
+        media_id: &Uuid,
+    ) -> Result<bool>;
 
     // Sync session methods
     async fn create_sync_session(&self, session: &SyncSession) -> Result<()>;
-    async fn get_sync_session_by_code(&self, room_code: &str) -> Result<Option<SyncSession>>;
+    async fn get_sync_session_by_code(
+        &self,
+        room_code: &str,
+    ) -> Result<Option<SyncSession>>;
     async fn get_sync_session(&self, id: Uuid) -> Result<Option<SyncSession>>;
-    async fn update_sync_session_state(&self, id: Uuid, state: &PlaybackState) -> Result<()>;
-    async fn update_sync_session(&self, id: Uuid, session: &SyncSession) -> Result<()>;
-    async fn add_sync_participant(&self, session_id: Uuid, participant: &Participant)
-    -> Result<()>;
-    async fn remove_sync_participant(&self, session_id: Uuid, user_id: Uuid) -> Result<()>;
+    async fn update_sync_session_state(
+        &self,
+        id: Uuid,
+        state: &PlaybackState,
+    ) -> Result<()>;
+    async fn update_sync_session(
+        &self,
+        id: Uuid,
+        session: &SyncSession,
+    ) -> Result<()>;
+    async fn add_sync_participant(
+        &self,
+        session_id: Uuid,
+        participant: &Participant,
+    ) -> Result<()>;
+    async fn remove_sync_participant(
+        &self,
+        session_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<()>;
     async fn delete_sync_session(&self, id: Uuid) -> Result<()>;
     async fn end_sync_session(&self, id: Uuid) -> Result<()>;
     async fn cleanup_expired_sync_sessions(&self) -> Result<u32>;
 
     // Query system
-    async fn query_media(&self, query: &MediaQuery) -> Result<Vec<MediaWithStatus>>;
+    async fn query_media(
+        &self,
+        query: &MediaQuery,
+    ) -> Result<Vec<MediaWithStatus>>;
 
     // Folder inventory management methods
     /// Get folders that need scanning based on filters
@@ -612,7 +784,10 @@ pub trait MediaDatabaseTrait: Send + Sync {
     ) -> Result<()>;
 
     /// Get complete folder inventory for a library
-    async fn get_folder_inventory(&self, library_id: LibraryID) -> Result<Vec<FolderInventory>>;
+    async fn get_folder_inventory(
+        &self,
+        library_id: LibraryID,
+    ) -> Result<Vec<FolderInventory>>;
 
     /// Upsert a folder (insert or update if exists)
     async fn upsert_folder(&self, folder: &FolderInventory) -> Result<Uuid>;
@@ -645,10 +820,16 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn mark_folder_processed(&self, folder_id: Uuid) -> Result<()>;
 
     /// Get child folders of a parent folder
-    async fn get_child_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>>;
+    async fn get_child_folders(
+        &self,
+        parent_folder_id: Uuid,
+    ) -> Result<Vec<FolderInventory>>;
 
     /// Get season folders under a series folder
     /// This queries folder_inventory table for all folders where parent_folder_id matches
     /// the series folder and folder_type is 'season'
-    async fn get_season_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>>;
+    async fn get_season_folders(
+        &self,
+        parent_folder_id: Uuid,
+    ) -> Result<Vec<FolderInventory>>;
 }

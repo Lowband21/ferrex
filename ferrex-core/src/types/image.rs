@@ -1,10 +1,19 @@
 use std::fmt;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct ImageMetadata {
@@ -18,7 +27,14 @@ pub struct ImageMetadata {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct ImageWithMetadata {
@@ -27,7 +43,14 @@ pub struct ImageWithMetadata {
 }
 
 #[derive(
-    Clone, Serialize, Deserialize, Default, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Clone,
+    Serialize,
+    Deserialize,
+    Default,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct MediaImages {

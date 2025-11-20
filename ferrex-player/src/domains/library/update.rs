@@ -15,8 +15,8 @@ use iced::Task;
 use std::collections::{HashMap, HashSet};
 
 use ferrex_core::player_prelude::{
-    ImageRequest, ImageSize, ImageType, LibraryID, MediaIDLike, MediaOps, Priority,
-    ScanLifecycleStatus, ScanSnapshotDto,
+    ImageRequest, ImageSize, ImageType, LibraryID, MediaIDLike, MediaOps,
+    Priority, ScanLifecycleStatus, ScanSnapshotDto,
 };
 #[cfg(feature = "demo")]
 use ferrex_core::types::library::LibraryType;
@@ -29,7 +29,10 @@ use ferrex_core::types::library::LibraryType;
     ),
     profiling::function
 )]
-pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult {
+pub fn update_library(
+    state: &mut State,
+    message: Message,
+) -> DomainUpdateResult {
     match message {
         // Core library loading
 
@@ -37,28 +40,42 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
         //    super::tv_loaded::handle_tv_shows_loaded(state, result)
         //}
         Message::RefreshLibrary => {
-            let task = super::update_handlers::refresh_library::handle_refresh_library(state);
+            let task =
+                super::update_handlers::refresh_library::handle_refresh_library(
+                    state,
+                );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
         // Library management
         Message::LibrariesLoaded(result) => {
             let task =
-                super::update_handlers::library_loaded::handle_libraries_loaded(state, result);
+                super::update_handlers::library_loaded::handle_libraries_loaded(
+                    state, result,
+                );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
         Message::LoadLibraries => {
             let task = if !state.domains.library.state.initial_library_fetch {
                 state.domains.library.state.initial_library_fetch = true;
-                Task::perform(fetch_libraries(state.api_service.clone()), |result| {
-                    Message::LibrariesLoaded(result.map_err(|e| e.to_string()))
-                })
+                Task::perform(
+                    fetch_libraries(state.api_service.clone()),
+                    |result| {
+                        Message::LibrariesLoaded(
+                            result.map_err(|e| e.to_string()),
+                        )
+                    },
+                )
             } else {
-                log::warn!("The libraries are already loaded, why is another attempt being made?");
+                log::warn!(
+                    "The libraries are already loaded, why is another attempt being made?"
+                );
                 Task::none()
             };
-            log::info!("LoadLibraries message received - loading libraries from server");
+            log::info!(
+                "LoadLibraries message received - loading libraries from server"
+            );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
@@ -113,7 +130,9 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
 
         Message::SelectLibrary(library_id) => {
             // This handler returns DomainUpdateResult directly
-            super::update_handlers::select_library::handle_select_library(state, library_id)
+            super::update_handlers::select_library::handle_select_library(
+                state, library_id,
+            )
         }
 
         Message::LibrarySelected(_library_id, _result) => {
@@ -122,7 +141,10 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
         }
 
         Message::ScanLibrary(library_id) => {
-            let task = super::update_handlers::scan_updates::handle_scan_library(state, library_id);
+            let task =
+                super::update_handlers::scan_updates::handle_scan_library(
+                    state, library_id,
+                );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
@@ -130,8 +152,9 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
             library_id,
             scan_id,
         } => {
-            let task =
-                super::update_handlers::scan_updates::handle_pause_scan(state, library_id, scan_id);
+            let task = super::update_handlers::scan_updates::handle_pause_scan(
+                state, library_id, scan_id,
+            );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
@@ -175,7 +198,9 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
 
         #[cfg(feature = "demo")]
         Message::ApplyDemoSizing(request) => {
-            let task = super::update_handlers::handle_apply_demo_sizing(state, request);
+            let task = super::update_handlers::handle_apply_demo_sizing(
+                state, request,
+            );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
@@ -192,7 +217,10 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
         }
 
         Message::FetchScanMetrics => {
-            let task = super::update_handlers::scan_updates::handle_fetch_scan_metrics(state);
+            let task =
+                super::update_handlers::scan_updates::handle_fetch_scan_metrics(
+                    state,
+                );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
@@ -209,7 +237,10 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
         }
 
         Message::FetchScanConfig => {
-            let task = super::update_handlers::scan_updates::handle_fetch_scan_config(state);
+            let task =
+                super::update_handlers::scan_updates::handle_fetch_scan_config(
+                    state,
+                );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
@@ -237,9 +268,10 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
                     Some(format!("Library reset failed: {}", err));
             } else {
                 // Refresh libraries and active scans after fresh rescan
-                let fetch = super::update_handlers::library_loaded::fetch_libraries(
-                    state.api_service.clone(),
-                );
+                let fetch =
+                    super::update_handlers::library_loaded::fetch_libraries(
+                        state.api_service.clone(),
+                    );
                 return DomainUpdateResult::task(
                     Task::perform(fetch, |res| {
                         Message::LibrariesLoaded(res.map_err(|e| e.to_string()))
@@ -347,33 +379,52 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
                 },
             );
 
-            let task = super::update_handlers::scan_updates::handle_fetch_active_scans(state);
+            let task =
+                super::update_handlers::scan_updates::handle_fetch_active_scans(
+                    state,
+                );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
         Message::FetchActiveScans => {
-            let task = super::update_handlers::scan_updates::handle_fetch_active_scans(state);
+            let task =
+                super::update_handlers::scan_updates::handle_fetch_active_scans(
+                    state,
+                );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
         Message::ActiveScansUpdated(snapshots) => {
-            super::update_handlers::scan_updates::apply_active_scan_snapshot(state, snapshots);
+            super::update_handlers::scan_updates::apply_active_scan_snapshot(
+                state, snapshots,
+            );
             DomainUpdateResult::task(Task::none())
         }
 
         Message::ScanProgressFrame(frame) => {
             let status = frame.status.clone();
-            super::update_handlers::scan_updates::apply_scan_progress_frame(state, frame.clone());
+            super::update_handlers::scan_updates::apply_scan_progress_frame(
+                state,
+                frame.clone(),
+            );
 
             match status.as_str() {
                 "completed" => {
-                    super::update_handlers::scan_updates::remove_scan(state, frame.scan_id);
+                    super::update_handlers::scan_updates::remove_scan(
+                        state,
+                        frame.scan_id,
+                    );
                     let refresh_task =
                         super::update_handlers::refresh_library::handle_refresh_library(state);
-                    DomainUpdateResult::task(refresh_task.map(DomainMessage::Library))
+                    DomainUpdateResult::task(
+                        refresh_task.map(DomainMessage::Library),
+                    )
                 }
                 "failed" | "canceled" => {
-                    super::update_handlers::scan_updates::remove_scan(state, frame.scan_id);
+                    super::update_handlers::scan_updates::remove_scan(
+                        state,
+                        frame.scan_id,
+                    );
                     DomainUpdateResult::task(Task::none())
                 }
                 _ => DomainUpdateResult::task(Task::none()),
@@ -456,23 +507,31 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
             }
             Err(e) => {
                 log::error!("Failed to load media references: {}", e);
-                state.domains.ui.state.error_message = Some(format!("Failed to load media: {}", e));
+                state.domains.ui.state.error_message =
+                    Some(format!("Failed to load media: {}", e));
                 state.loading = false;
                 DomainUpdateResult::task(Task::none())
             }
         },
 
         Message::RefreshCurrentLibrary => {
-            let task = super::update_handlers::refresh_library::handle_refresh_library(state);
+            let task =
+                super::update_handlers::refresh_library::handle_refresh_library(
+                    state,
+                );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
         Message::ScanCurrentLibrary => {
             // Scan the currently selected library if one is selected
-            if let Some(library_id) = state.domains.library.state.current_library_id {
+            if let Some(library_id) =
+                state.domains.library.state.current_library_id
+            {
                 log::info!("Scanning library: {}", library_id);
                 let task =
-                    super::update_handlers::scan_updates::handle_scan_library(state, library_id);
+                    super::update_handlers::scan_updates::handle_scan_library(
+                        state, library_id,
+                    );
                 DomainUpdateResult::task(task.map(DomainMessage::Library))
             } else {
                 log::warn!("No library currently selected to scan");
@@ -487,7 +546,8 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
             }
 
             let mut touched_libraries: HashSet<LibraryID> = HashSet::new();
-            let mut inline_additions: HashMap<LibraryID, Vec<Media>> = HashMap::new();
+            let mut inline_additions: HashMap<LibraryID, Vec<Media>> =
+                HashMap::new();
 
             for media in references {
                 let Some(library_id) = media_library_id(&media) else {
@@ -538,8 +598,13 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
                 }
             }
 
-            let inline_updated = apply_discovered_media_to_tabs(state, &inline_additions);
-            mark_tabs_after_media_changes(state, &touched_libraries, &inline_updated);
+            let inline_updated =
+                apply_discovered_media_to_tabs(state, &inline_additions);
+            mark_tabs_after_media_changes(
+                state,
+                &touched_libraries,
+                &inline_updated,
+            );
 
             DomainUpdateResult::task(Task::none())
         }
@@ -582,13 +647,18 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
         Message::MediaDeleted(id) => {
             let mut touched_libraries: HashSet<LibraryID> = HashSet::new();
 
-            let library_for_refresh = match state.domains.library.state.repo_accessor.get(&id) {
-                Ok(media) => media_library_id(&media),
-                Err(err) => {
-                    log::warn!("Failed to resolve media {} before deletion: {}", id, err);
-                    None
-                }
-            };
+            let library_for_refresh =
+                match state.domains.library.state.repo_accessor.get(&id) {
+                    Ok(media) => media_library_id(&media),
+                    Err(err) => {
+                        log::warn!(
+                            "Failed to resolve media {} before deletion: {}",
+                            id,
+                            err
+                        );
+                        None
+                    }
+                };
 
             match state.domains.library.state.repo_accessor.delete(&id) {
                 Ok(()) => {
@@ -622,7 +692,9 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
         }
 
         Message::BatchMetadataComplete => {
-            log::info!("[BatchMetadataFetcher] Complete message received - hiding loading spinner");
+            log::info!(
+                "[BatchMetadataFetcher] Complete message received - hiding loading spinner"
+            );
             state.loading = false;
             DomainUpdateResult::task(Task::none())
         }
@@ -631,7 +703,9 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
         Message::RefreshViewModels => {
             // This message is deprecated in Library domain - ViewModels are managed by UI domain
             // The UI domain handles RefreshViewModels to update its own ViewModels
-            log::debug!("Library: RefreshViewModels is now handled by UI domain");
+            log::debug!(
+                "Library: RefreshViewModels is now handled by UI domain"
+            );
             DomainUpdateResult::task(Task::none())
         } // TV Shows loading
           //Message::TvShowsLoaded(result) => {
@@ -653,19 +727,31 @@ fn media_library_id(media: &Media) -> Option<LibraryID> {
 fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
     match media {
         Media::Movie(movie) => Some(
-            ImageRequest::new(movie.id.to_uuid(), ImageSize::Poster, ImageType::Movie)
-                .with_priority(Priority::Visible)
-                .with_index(0),
+            ImageRequest::new(
+                movie.id.to_uuid(),
+                ImageSize::Poster,
+                ImageType::Movie,
+            )
+            .with_priority(Priority::Visible)
+            .with_index(0),
         ),
         Media::Series(series) => Some(
-            ImageRequest::new(series.id.to_uuid(), ImageSize::Poster, ImageType::Series)
-                .with_priority(Priority::Visible)
-                .with_index(0),
+            ImageRequest::new(
+                series.id.to_uuid(),
+                ImageSize::Poster,
+                ImageType::Series,
+            )
+            .with_priority(Priority::Visible)
+            .with_index(0),
         ),
         Media::Season(season) => Some(
-            ImageRequest::new(season.id.to_uuid(), ImageSize::Poster, ImageType::Season)
-                .with_priority(Priority::Visible)
-                .with_index(0),
+            ImageRequest::new(
+                season.id.to_uuid(),
+                ImageSize::Poster,
+                ImageType::Season,
+            )
+            .with_priority(Priority::Visible)
+            .with_index(0),
         ),
         Media::Episode(episode) => Some(
             ImageRequest::new(
@@ -679,7 +765,10 @@ fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
     }
 }
 
-fn refresh_tabs_for_libraries(state: &mut State, libraries: &HashSet<LibraryID>) {
+fn refresh_tabs_for_libraries(
+    state: &mut State,
+    libraries: &HashSet<LibraryID>,
+) {
     if libraries.is_empty() {
         return;
     }
@@ -761,7 +850,9 @@ fn apply_discovered_media_to_tabs(
             continue;
         }
 
-        if let Some(TabState::Library(tab_state)) = state.tab_manager.get_tab_mut(tab_id) {
+        if let Some(TabState::Library(tab_state)) =
+            state.tab_manager.get_tab_mut(tab_id)
+        {
             let mut inserted_any = false;
             for media in media_items {
                 if tab_state.insert_media_reference(media) {
@@ -791,7 +882,8 @@ fn mark_tabs_after_media_changes(
 
     for library_id in libraries {
         let tab_id = TabId::Library(*library_id);
-        let skip_active_refresh = inline_updated.contains(library_id) && active_tab == tab_id;
+        let skip_active_refresh =
+            inline_updated.contains(library_id) && active_tab == tab_id;
 
         if skip_active_refresh {
             continue;

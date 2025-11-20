@@ -3,19 +3,25 @@
 use crate::common::messages::DomainMessage;
 use crate::domains::ui::theme;
 use crate::domains::ui::types::ViewState;
-use crate::domains::ui::views::admin::{view_admin_dashboard, view_admin_users, view_library_management};
+use crate::domains::ui::views::admin::{
+    view_admin_dashboard, view_admin_users, view_library_management,
+};
 use crate::domains::ui::views::auth::view_auth;
 use crate::domains::ui::views::header::view_header;
 use crate::domains::ui::views::library::view_library;
 use crate::domains::ui::views::library_controls_bar::view_library_controls_bar;
 use crate::domains::ui::views::movies::view_movie_detail;
 use crate::domains::ui::views::settings::view_user_settings;
-use crate::domains::ui::views::tv::{view_episode_detail, view_season_detail, view_series_detail};
+use crate::domains::ui::views::tv::{
+    view_episode_detail, view_season_detail, view_series_detail,
+};
 use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::BackgroundEffect;
 use crate::domains::{player, ui};
 use crate::state_refactored::State;
-use ferrex_core::player_prelude::{BackdropKind, BackdropSize, ImageRequest, MediaIDLike};
+use ferrex_core::player_prelude::{
+    BackdropKind, BackdropSize, ImageRequest, MediaIDLike,
+};
 use iced::widget::{Space, Stack, column, container, scrollable};
 use iced::{Element, Font, Length};
 
@@ -44,12 +50,22 @@ pub fn view(state: &State) -> Element<'_, DomainMessage> {
     // Get the view content
     let content = match &state.domains.ui.state.view {
         ViewState::Library => view_library(state).map(DomainMessage::from),
-        ViewState::LibraryManagement => view_library_management(state).map(DomainMessage::from),
-        ViewState::AdminDashboard => view_admin_dashboard(state).map(DomainMessage::from),
-        ViewState::AdminUsers => view_admin_users(state).map(DomainMessage::from),
+        ViewState::LibraryManagement => {
+            view_library_management(state).map(DomainMessage::from)
+        }
+        ViewState::AdminDashboard => {
+            view_admin_dashboard(state).map(DomainMessage::from)
+        }
+        ViewState::AdminUsers => {
+            view_admin_users(state).map(DomainMessage::from)
+        }
         ViewState::Player => view_player(state).map(DomainMessage::Player),
-        ViewState::LoadingVideo { url } => view_loading_video(state, url).map(DomainMessage::from),
-        ViewState::VideoError { message } => view_video_error(message).map(DomainMessage::from),
+        ViewState::LoadingVideo { url } => {
+            view_loading_video(state, url).map(DomainMessage::from)
+        }
+        ViewState::VideoError { message } => {
+            view_video_error(message).map(DomainMessage::from)
+        }
         ViewState::MovieDetail { movie_id, .. } => {
             view_movie_detail(state, *movie_id).map(DomainMessage::from)
         }
@@ -60,11 +76,14 @@ pub fn view(state: &State) -> Element<'_, DomainMessage> {
             series_id,
             season_id,
             ..
-        } => view_season_detail(state, series_id, season_id).map(DomainMessage::from),
+        } => view_season_detail(state, series_id, season_id)
+            .map(DomainMessage::from),
         ViewState::EpisodeDetail { episode_id, .. } => {
             view_episode_detail(state, episode_id).map(DomainMessage::from)
         }
-        ViewState::UserSettings => view_user_settings(state).map(DomainMessage::from),
+        ViewState::UserSettings => {
+            view_user_settings(state).map(DomainMessage::from)
+        }
     };
 
     // Add header if the view needs it
@@ -85,8 +104,10 @@ pub fn view(state: &State) -> Element<'_, DomainMessage> {
             .as_ref()
             .map(|id| id.as_uuid());
         let controls_bar = match &state.domains.ui.state.view {
-            ViewState::Library => view_library_controls_bar(state, selected_library)
-                .map(|bar| bar.map(DomainMessage::from)),
+            ViewState::Library => {
+                view_library_controls_bar(state, selected_library)
+                    .map(|bar| bar.map(DomainMessage::from))
+            }
             _ => None,
         };
 
@@ -99,7 +120,9 @@ pub fn view(state: &State) -> Element<'_, DomainMessage> {
                 // Wrap content in scrollable for detail views
                 scrollable(content)
                     .on_scroll(|viewport| {
-                        DomainMessage::from(ui::messages::Message::DetailViewScrolled(viewport))
+                        DomainMessage::from(
+                            ui::messages::Message::DetailViewScrolled(viewport),
+                        )
                     })
                     .width(Length::Fill)
                     .height(Length::Fill)
@@ -210,8 +233,10 @@ pub fn view(state: &State) -> Element<'_, DomainMessage> {
         }
         // Create a stack with background as base layer
         // Convert bg_shader to Element first, then map from ui::Message to DomainMessage
-        let bg_shader_element: Element<ui::messages::Message> = bg_shader.into();
-        let bg_shader_mapped: Element<DomainMessage> = bg_shader_element.map(DomainMessage::from);
+        let bg_shader_element: Element<ui::messages::Message> =
+            bg_shader.into();
+        let bg_shader_mapped: Element<DomainMessage> =
+            bg_shader_element.map(DomainMessage::from);
 
         Stack::new()
             .push(bg_shader_mapped)
@@ -226,11 +251,14 @@ pub fn view(state: &State) -> Element<'_, DomainMessage> {
 
     view.finish();
     // Check search mode and render appropriate view
-    if state.domains.search.state.mode == crate::domains::search::types::SearchMode::FullScreen {
+    if state.domains.search.state.mode
+        == crate::domains::search::types::SearchMode::FullScreen
+    {
         // Show full-screen search view
         crate::domains::ui::views::components::view_search_fullscreen(state)
     } else {
-        match crate::domains::ui::views::components::view_search_dropdown(state) {
+        match crate::domains::ui::views::components::view_search_dropdown(state)
+        {
             Some(search_dropdown) => {
                 // Wrap the main content in a stack with the search dropdown overlay
                 Stack::new()

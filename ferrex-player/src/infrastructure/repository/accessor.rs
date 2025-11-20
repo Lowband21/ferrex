@@ -4,9 +4,10 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use ferrex_core::player_prelude::{
-    ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, EpisodeReference, Library, LibraryID,
-    LibraryType, Media, MediaID, MediaIDLike, MediaLike, MediaOps, MediaType, MovieID, SeasonID,
-    SeasonLike, SeasonReference, SeriesID, SortBy, SortOrder,
+    ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, EpisodeReference,
+    Library, LibraryID, LibraryType, Media, MediaID, MediaIDLike, MediaLike,
+    MediaOps, MediaType, MovieID, SeasonID, SeasonLike, SeasonReference,
+    SeriesID, SortBy, SortOrder,
 };
 use parking_lot::RwLock;
 use rkyv::{util::AlignedVec, vec::ArchivedVec};
@@ -57,7 +58,10 @@ impl<R> Accessor<R> {
     }
 
     #[inline]
-    fn infallible_with_repo<T>(&self, f: impl FnOnce(&MediaRepo) -> T) -> RepositoryResult<T> {
+    fn infallible_with_repo<T>(
+        &self,
+        f: impl FnOnce(&MediaRepo) -> T,
+    ) -> RepositoryResult<T> {
         let guard = self.repo.read();
         match &*guard {
             Some(repo) => Ok(f(repo)),
@@ -120,28 +124,46 @@ impl<R: ReadCap> Accessor<R> {
     }
 
     /// Get a single media item by ID (read-only)
-    pub fn get_media_yoke(&self, id: &impl MediaIDLike) -> RepositoryResult<MediaYoke> {
+    pub fn get_media_yoke(
+        &self,
+        id: &impl MediaIDLike,
+    ) -> RepositoryResult<MediaYoke> {
         self.with_repo(|repo| repo.get_media_yoke_internal(id))
     }
     /// Get a single media item by ID (read-only)
-    pub fn get_movie_yoke(&self, id: &impl MediaIDLike) -> RepositoryResult<MovieYoke> {
+    pub fn get_movie_yoke(
+        &self,
+        id: &impl MediaIDLike,
+    ) -> RepositoryResult<MovieYoke> {
         self.with_repo(|repo| repo.get_movie_yoke_internal(id))
     }
     /// Get a single media item by ID (read-only)
-    pub fn get_series_yoke(&self, id: &impl MediaIDLike) -> RepositoryResult<SeriesYoke> {
+    pub fn get_series_yoke(
+        &self,
+        id: &impl MediaIDLike,
+    ) -> RepositoryResult<SeriesYoke> {
         self.with_repo(|repo| repo.get_series_yoke_internal(id))
     }
 
-    pub fn get_season_yoke(&self, id: &impl MediaIDLike) -> RepositoryResult<SeasonYoke> {
+    pub fn get_season_yoke(
+        &self,
+        id: &impl MediaIDLike,
+    ) -> RepositoryResult<SeasonYoke> {
         self.with_repo(|repo| repo.get_season_yoke_internal(id))
     }
 
-    pub fn get_episode_yoke(&self, id: &impl MediaIDLike) -> RepositoryResult<EpisodeYoke> {
+    pub fn get_episode_yoke(
+        &self,
+        id: &impl MediaIDLike,
+    ) -> RepositoryResult<EpisodeYoke> {
         self.with_repo(|repo| repo.get_episode_yoke_internal(id))
     }
 
     /// Get all media from a library
-    pub fn get_library_media(&self, library_id: &LibraryID) -> RepositoryResult<Vec<Media>> {
+    pub fn get_library_media(
+        &self,
+        library_id: &LibraryID,
+    ) -> RepositoryResult<Vec<Media>> {
         self.with_repo(|repo| repo.get_library_media_internal(library_id))
     }
 
@@ -155,8 +177,13 @@ impl<R: ReadCap> Accessor<R> {
     } */
 
     /// Get multiple items by IDs
-    pub fn get_batch<I: MediaIDLike>(&self, ids: &[I]) -> RepositoryResult<Vec<Media>> {
-        self.with_repo(|repo| ids.iter().map(|id| repo.get_internal(id)).collect())
+    pub fn get_batch<I: MediaIDLike>(
+        &self,
+        ids: &[I],
+    ) -> RepositoryResult<Vec<Media>> {
+        self.with_repo(|repo| {
+            ids.iter().map(|id| repo.get_internal(id)).collect()
+        })
     }
 
     /// Get items by positions into the archived library media slice (index-based access)
@@ -167,12 +194,12 @@ impl<R: ReadCap> Accessor<R> {
     ) -> RepositoryResult<Vec<Media>> {
         self.with_repo(|repo| {
             let lib_uuid = library_id.as_uuid();
-            let yoke = repo.get_archived_library_yoke_internal(&lib_uuid).ok_or(
-                RepositoryError::NotFound {
+            let yoke = repo
+                .get_archived_library_yoke_internal(&lib_uuid)
+                .ok_or(RepositoryError::NotFound {
                     entity_type: "Library".into(),
                     id: library_id.to_string(),
-                },
-            )?;
+                })?;
             let archived = yoke.get();
             let slice = archived.media_as_slice();
 
@@ -180,8 +207,13 @@ impl<R: ReadCap> Accessor<R> {
             for &pos in positions {
                 let idx = pos as usize;
                 if let Some(media_ref) = slice.get(idx) {
-                    let owned = rkyv::deserialize::<Media, rkyv::rancor::Error>(media_ref)
-                        .map_err(|e| RepositoryError::DeserializationError(e.to_string()))?;
+                    let owned =
+                        rkyv::deserialize::<Media, rkyv::rancor::Error>(
+                            media_ref,
+                        )
+                        .map_err(|e| {
+                            RepositoryError::DeserializationError(e.to_string())
+                        })?;
                     out.push(owned);
                 }
             }
@@ -214,8 +246,11 @@ impl<R: ReadCap> Accessor<R> {
 
     pub fn get_archived_libraries<'a>(
         &self,
-    ) -> RepositoryResult<Vec<Yoke<&'static ArchivedLibrary, Arc<AlignedVec>>>> {
-        self.infallible_with_repo(|repo| repo.get_archived_libraries_yoke_internal())
+    ) -> RepositoryResult<Vec<Yoke<&'static ArchivedLibrary, Arc<AlignedVec>>>>
+    {
+        self.infallible_with_repo(|repo| {
+            repo.get_archived_libraries_yoke_internal()
+        })
     }
 
     /// Get library count
@@ -229,7 +264,10 @@ impl<R: ReadCap> Accessor<R> {
     }
 
     /// Get a specific library by ID
-    pub fn get_library(&self, library_id: &LibraryID) -> RepositoryResult<Option<Library>> {
+    pub fn get_library(
+        &self,
+        library_id: &LibraryID,
+    ) -> RepositoryResult<Option<Library>> {
         self.with_repo(|repo| Ok(repo.get_library_internal(library_id)))
     }
 
@@ -246,7 +284,9 @@ impl<R: ReadCap> Accessor<R> {
         &self,
         library_id: &Uuid,
     ) -> RepositoryResult<Option<LibraryYoke>> {
-        self.infallible_with_repo(|repo| repo.get_archived_library_yoke_internal(library_id))
+        self.infallible_with_repo(|repo| {
+            repo.get_archived_library_yoke_internal(library_id)
+        })
     }
 
     // TODO: Fix these clones
@@ -260,12 +300,12 @@ impl<R: ReadCap> Accessor<R> {
             let lib_uuid = library_id.as_uuid();
 
             // Determine library type from archived snapshot
-            let owned_lib =
-                repo.get_library_internal(library_id)
-                    .ok_or(RepositoryError::NotFound {
-                        entity_type: "Library".to_string(),
-                        id: library_id.to_string(),
-                    })?;
+            let owned_lib = repo.get_library_internal(library_id).ok_or(
+                RepositoryError::NotFound {
+                    entity_type: "Library".to_string(),
+                    id: library_id.to_string(),
+                },
+            )?;
 
             // Preferred path: server-provided sorted indices (movies only for now)
             let mut ids = if let Some(vec) = repo
@@ -276,12 +316,12 @@ impl<R: ReadCap> Accessor<R> {
                 vec.clone()
             } else {
                 // Fallback: compute indices directly from archived library
-                let yoke = repo.get_archived_library_yoke_internal(&lib_uuid).ok_or(
-                    RepositoryError::NotFound {
-                        entity_type: "ArchivedLibrary".to_string(),
-                        id: library_id.to_string(),
-                    },
-                )?;
+                let yoke = repo
+                    .get_archived_library_yoke_internal(&lib_uuid)
+                    .ok_or(RepositoryError::NotFound {
+                    entity_type: "ArchivedLibrary".to_string(),
+                    id: library_id.to_string(),
+                })?;
 
                 let archived = yoke.get();
                 let slice = archived.media_as_slice();
@@ -310,7 +350,9 @@ impl<R: ReadCap> Accessor<R> {
             }
 
             // Append runtime additions for this library, filtered by library type
-            if let Some(additions) = repo.modifications.added_by_library.get(&lib_uuid) {
+            if let Some(additions) =
+                repo.modifications.added_by_library.get(&lib_uuid)
+            {
                 let mut base_set: HashSet<Uuid> = ids.iter().copied().collect();
                 let mut runtime_items: Vec<(Uuid, Media)> = Vec::new();
 
@@ -319,15 +361,17 @@ impl<R: ReadCap> Accessor<R> {
                         continue;
                     }
 
-                    let Some(entry) = repo.modifications.added.get(media_id) else {
+                    let Some(entry) = repo.modifications.added.get(media_id)
+                    else {
                         continue;
                     };
 
-                    let matches_library = match (&owned_lib.library_type, entry.media_type()) {
-                        (LibraryType::Movies, MediaType::Movie) => true,
-                        (LibraryType::Series, MediaType::Series) => true,
-                        _ => false,
-                    };
+                    let matches_library =
+                        match (&owned_lib.library_type, entry.media_type()) {
+                            (LibraryType::Movies, MediaType::Movie) => true,
+                            (LibraryType::Series, MediaType::Series) => true,
+                            _ => false,
+                        };
 
                     if !matches_library {
                         continue;
@@ -347,7 +391,10 @@ impl<R: ReadCap> Accessor<R> {
 
                 if !runtime_items.is_empty() {
                     let compare_with_fallback =
-                        |a_media: &Media, a_id: &Uuid, b_media: &Media, b_id: &Uuid| {
+                        |a_media: &Media,
+                         a_id: &Uuid,
+                         b_media: &Media,
+                         b_id: &Uuid| {
                             compare_media(a_media, b_media, sort_by, sort_order)
                                 .unwrap_or_else(|| {
                                     compare_media(
@@ -361,21 +408,30 @@ impl<R: ReadCap> Accessor<R> {
                                 .then_with(|| a_id.cmp(b_id))
                         };
 
-                    runtime_items.sort_by(|a, b| compare_with_fallback(&a.1, &a.0, &b.1, &b.0));
+                    runtime_items.sort_by(|a, b| {
+                        compare_with_fallback(&a.1, &a.0, &b.1, &b.0)
+                    });
 
                     let runtime_len = runtime_items.len();
-                    let mut merged_ids = Vec::with_capacity(ids.len() + runtime_len);
+                    let mut merged_ids =
+                        Vec::with_capacity(ids.len() + runtime_len);
 
                     let mut runtime_iter = runtime_items.into_iter();
                     let mut pending_runtime = runtime_iter.next();
 
                     for &base_id in &ids {
                         let base_media = match owned_lib.library_type {
-                            LibraryType::Movies => repo.get_internal(&MovieID(base_id))?,
-                            LibraryType::Series => repo.get_internal(&SeriesID(base_id))?,
+                            LibraryType::Movies => {
+                                repo.get_internal(&MovieID(base_id))?
+                            }
+                            LibraryType::Series => {
+                                repo.get_internal(&SeriesID(base_id))?
+                            }
                         };
 
-                        while let Some((runtime_id, runtime_media)) = pending_runtime.as_ref() {
+                        while let Some((runtime_id, runtime_media)) =
+                            pending_runtime.as_ref()
+                        {
                             let ordering = compare_with_fallback(
                                 runtime_media,
                                 runtime_id,
@@ -438,10 +494,14 @@ impl<R: ReadCap> Accessor<R> {
     }
 
     /// Get season episode count (kept from previous UI accessor API)
-    pub fn get_season_episode_count(&self, season_id: &SeasonID) -> RepositoryResult<u32> {
+    pub fn get_season_episode_count(
+        &self,
+        season_id: &SeasonID,
+    ) -> RepositoryResult<u32> {
         self.with_repo(|repo| {
             // Reuse existing internal get with an owned MediaID
-            let media_ref = repo.get_internal(&MediaID::Season(season_id.to_owned()))?;
+            let media_ref =
+                repo.get_internal(&MediaID::Season(season_id.to_owned()))?;
             let mut buffer = Uuid::encode_buffer();
             match media_ref.to_season() {
                 Some(season) => Ok(season.num_episodes()),
@@ -460,7 +520,11 @@ impl<R: ReadCap> Accessor<R> {
 impl<R: WriteCap> Accessor<R> {
     /// Add or update a media item (runtime only, resets on restart)
     /// Requires the owning library ID for new items so we can keep the overlay library-centric.
-    pub fn upsert(&self, media: Media, library_id: &LibraryID) -> RepositoryResult<()> {
+    pub fn upsert(
+        &self,
+        media: Media,
+        library_id: &LibraryID,
+    ) -> RepositoryResult<()> {
         self.with_repo_mut(|repo| {
             let id = media.media_id().to_uuid();
             let lib_uuid = library_id.as_uuid();
@@ -484,7 +548,9 @@ impl<R: WriteCap> Accessor<R> {
                 // Existing archived item: treat as modified overlay
                 repo.modifications.added.remove(&id);
                 repo.modifications.unmark_runtime_only(&id);
-                if let Some(sets) = repo.modifications.added_by_library.get_mut(&lib_uuid) {
+                if let Some(sets) =
+                    repo.modifications.added_by_library.get_mut(&lib_uuid)
+                {
                     sets.remove(&id);
                     if sets.is_empty() {
                         repo.modifications.added_by_library.remove(&lib_uuid);
@@ -523,7 +589,9 @@ impl<R: WriteCap> Accessor<R> {
             // If the item was archived, we can compute its library via media_id_index
             if let Some(arch_lib_id) = repo.media_id_index.get(uuid) {
                 let lib_uuid = arch_lib_id;
-                if let Some(set) = repo.modifications.added_by_library.get_mut(lib_uuid) {
+                if let Some(set) =
+                    repo.modifications.added_by_library.get_mut(lib_uuid)
+                {
                     set.remove(uuid);
                     if set.is_empty() {
                         repo.modifications.added_by_library.remove(lib_uuid);
@@ -532,7 +600,9 @@ impl<R: WriteCap> Accessor<R> {
             } else {
                 // Not in archived index, so it was a runtime-added item. Find and remove.
                 let mut empty_keys = Vec::new();
-                for (lib_uuid, set) in repo.modifications.added_by_library.iter_mut() {
+                for (lib_uuid, set) in
+                    repo.modifications.added_by_library.iter_mut()
+                {
                     if set.remove(uuid) && set.is_empty() {
                         empty_keys.push(*lib_uuid);
                     }

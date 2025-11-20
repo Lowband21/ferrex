@@ -2,17 +2,17 @@
   "results": [
     {
       "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL cargo build --release",
-      "mean": 62.265081661626674,
-      "stddev": 0.22581535092120567,
-      "median": 62.13539705896,
-      "user": 699.0112970266667,
-      "system": 48.877274853333326,
-      "min": 62.13401837196,
-      "max": 62.52582955396,
+      "mean": 184.04775849957332,
+      "stddev": 12.317658870601182,
+      "median": 177.34536802224,
+      "user": 362.05096340666665,
+      "system": 17.58016795333333,
+      "min": 176.53464559324,
+      "max": 198.26326188324,
       "times": [
-        62.52582955396,
-        62.13401837196,
-        62.13539705896
+        198.26326188324,
+        176.53464559324,
+        177.34536802224
       ],
       "exit_codes": [
         0,
@@ -22,17 +22,17 @@
     },
     {
       "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL RUSTFLAGS='-Clinker=clang -Clink-args=--ld-path=wild' cargo build --release",
-      "mean": 66.10336159362667,
-      "stddev": 3.5732206575384513,
-      "median": 64.29802891496,
-      "user": 699.2993373600001,
-      "system": 46.32555885333333,
-      "min": 63.79300967796,
-      "max": 70.21904618795999,
+      "mean": 185.90217872623998,
+      "stddev": 12.613806407014767,
+      "median": 179.12119613624,
+      "user": 358.66041407333336,
+      "system": 17.292487286666667,
+      "min": 178.12925574024,
+      "max": 200.45608430224,
       "times": [
-        70.21904618795999,
-        63.79300967796,
-        64.29802891496
+        200.45608430224,
+        179.12119613624,
+        178.12925574024
       ],
       "exit_codes": [
         0,
@@ -42,17 +42,17 @@
     },
     {
       "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL mold -run cargo build --release",
-      "mean": 73.40047984929332,
-      "stddev": 12.645283347295697,
-      "median": 67.01240710495999,
-      "user": 703.1322756933333,
-      "system": 47.21998418666666,
-      "min": 65.22360658795999,
-      "max": 87.96542585495999,
+      "mean": 179.11241470457333,
+      "stddev": 0.09092605185723478,
+      "median": 179.14131856624,
+      "user": 359.9118534066667,
+      "system": 16.76536095333333,
+      "min": 179.01055012024,
+      "max": 179.18537542724,
       "times": [
-        67.01240710495999,
-        65.22360658795999,
-        87.96542585495999
+        179.18537542724,
+        179.14131856624,
+        179.01055012024
       ],
       "exit_codes": [
         0,

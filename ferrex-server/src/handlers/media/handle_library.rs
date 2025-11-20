@@ -15,8 +15,9 @@ use ferrex_core::types::{
 use ferrex_core::user::User;
 use ferrex_core::{
     api_types::{
-        ApiResponse, CreateLibraryRequest, FetchMediaRequest, FilterIndicesRequest,
-        IndicesResponse, LibraryMediaResponse, UpdateLibraryRequest,
+        ApiResponse, CreateLibraryRequest, FetchMediaRequest,
+        FilterIndicesRequest, IndicesResponse, LibraryMediaResponse,
+        UpdateLibraryRequest,
     },
     orchestration::LibraryActorConfig,
     types::LibraryType,
@@ -57,7 +58,7 @@ pub async fn get_library_media_util(
     library: LibraryReference,
 ) -> Result<LibraryMediaResponse, StatusCode> {
     let media = match state
-        .unit_of_work
+        .unit_of_work()
         .media_refs
         .get_library_media_references(library.id, library.library_type)
         .await
@@ -80,7 +81,7 @@ pub async fn get_library_media_handler(
 
     // Get library reference
     let library = match state
-        .unit_of_work
+        .unit_of_work()
         .libraries
         .get_library_reference(library_id)
         .await
@@ -110,13 +111,20 @@ pub async fn get_library_media_handler(
     }
 }
 
-pub async fn get_libraries_with_media_handler(State(state): State<AppState>) -> impl IntoResponse {
-    match state.unit_of_work.libraries.list_library_references().await {
+pub async fn get_libraries_with_media_handler(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    match state
+        .unit_of_work()
+        .libraries
+        .list_library_references()
+        .await
+    {
         Ok(libraries) => {
             let mut library_results = Vec::new();
             for library_ref in libraries {
                 let library = state
-                    .unit_of_work
+                    .unit_of_work()
                     .libraries
                     .get_library(library_ref.id)
                     .await
@@ -124,13 +132,15 @@ pub async fn get_libraries_with_media_handler(State(state): State<AppState>) -> 
                         error!("Failed to get library: {}", e);
                         StatusCode::INTERNAL_SERVER_ERROR
                     })?;
-                let library_media_response = get_library_media_util(&state, library_ref).await?;
+                let library_media_response =
+                    get_library_media_util(&state, library_ref).await?;
                 if let Some(mut library) = library {
                     library.media = Some(library_media_response.media);
                     library_results.push(library);
                 }
             }
-            let library_responses: Vec<_> = library_results.into_iter().collect::<Vec<_>>();
+            let library_responses: Vec<_> =
+                library_results.into_iter().collect::<Vec<_>>();
 
             // Serialize to rkyv format
             match rkyv::to_bytes::<rkyv::rancor::Error>(&library_responses) {
@@ -191,7 +201,7 @@ pub async fn get_library_sorted_indices_handler(
 
     // Lookup library reference to get library type
     let library_ref = match state
-        .unit_of_work
+        .unit_of_work()
         .libraries
         .get_library_reference(library_id)
         .await
@@ -229,7 +239,7 @@ pub async fn get_library_sorted_indices_handler(
     }
 
     let indices = match state
-        .unit_of_work
+        .unit_of_work()
         .indices
         .fetch_sorted_movie_indices(
             library_ref.id,
@@ -263,7 +273,7 @@ pub async fn post_library_filtered_indices_handler(
     info!("Getting filtered indices for library: {}", library_id);
 
     let library_ref = match state
-        .unit_of_work
+        .unit_of_work()
         .libraries
         .get_library_reference(library_id)
         .await
@@ -293,7 +303,7 @@ pub async fn post_library_filtered_indices_handler(
     }
 
     let indices = match state
-        .unit_of_work
+        .unit_of_work()
         .indices
         .fetch_filtered_movie_indices(library_ref.id, &spec, Some(user.id))
         .await
@@ -340,7 +350,10 @@ fn insert_cached_indices(key: FilterCacheKey, indices: Vec<u32>) {
 
 fn respond_with_indices(
     indices: Vec<u32>,
-) -> Result<([(axum::http::header::HeaderName, &'static str); 1], Bytes), StatusCode> {
+) -> Result<
+    ([(axum::http::header::HeaderName, &'static str); 1], Bytes),
+    StatusCode,
+> {
     let response = IndicesResponse {
         content_version: 1,
         indices,
@@ -360,7 +373,10 @@ fn respond_with_indices(
 
 fn requires_user_scope(spec: &FilterIndicesRequest) -> bool {
     spec.watch_status.is_some()
-        || matches!(spec.sort, Some(SortBy::WatchProgress | SortBy::LastWatched))
+        || matches!(
+            spec.sort,
+            Some(SortBy::WatchProgress | SortBy::LastWatched)
+        )
 }
 
 pub fn invalidate_filter_cache_for(library_id: Uuid) {
@@ -381,27 +397,35 @@ pub async fn fetch_media_handler(
     );
 
     match request.media_id {
-        MediaID::Movie(id) => match state.unit_of_work.media_refs.get_movie_reference(&id).await {
-            Ok(movie) => {
-                if matches!(movie.details, MediaDetailsOption::Endpoint(_)) {
-                    warn!(
-                        "Movie {} is missing required TMDB metadata; manual intervention required",
-                        movie.id
-                    );
-                    return Ok(Json(ApiResponse::error(
+        MediaID::Movie(id) => {
+            match state
+                .unit_of_work()
+                .media_refs
+                .get_movie_reference(&id)
+                .await
+            {
+                Ok(movie) => {
+                    if matches!(movie.details, MediaDetailsOption::Endpoint(_))
+                    {
+                        warn!(
+                            "Movie {} is missing required TMDB metadata; manual intervention required",
+                            movie.id
+                        );
+                        return Ok(Json(ApiResponse::error(
                         "Movie metadata unavailable; manual matching required".into(),
                     )));
-                }
+                    }
 
-                Ok(Json(ApiResponse::success(Media::Movie(movie))))
+                    Ok(Json(ApiResponse::success(Media::Movie(movie))))
+                }
+                Err(e) => {
+                    error!("Failed to get movie reference: {}", e);
+                    Ok(Json(ApiResponse::error(e.to_string())))
+                }
             }
-            Err(e) => {
-                error!("Failed to get movie reference: {}", e);
-                Ok(Json(ApiResponse::error(e.to_string())))
-            }
-        },
+        }
         MediaID::Series(id) => match state
-            .unit_of_work
+            .unit_of_work()
             .media_refs
             .get_series_reference(&id)
             .await
@@ -413,7 +437,8 @@ pub async fn fetch_media_handler(
                         series.id
                     );
                     return Ok(Json(ApiResponse::error(
-                        "Series metadata unavailable; manual matching required".into(),
+                        "Series metadata unavailable; manual matching required"
+                            .into(),
                     )));
                 }
 
@@ -426,7 +451,7 @@ pub async fn fetch_media_handler(
         },
         MediaID::Season(id) => {
             match state
-                .unit_of_work
+                .unit_of_work()
                 .media_refs
                 .get_season_reference(&id)
                 .await
@@ -443,7 +468,7 @@ pub async fn fetch_media_handler(
         }
         MediaID::Episode(id) => {
             match state
-                .unit_of_work
+                .unit_of_work()
                 .media_refs
                 .get_episode_reference(&id)
                 .await
@@ -474,16 +499,15 @@ pub async fn manual_match_media_handler(
 
     match request.media_id {
         MediaID::Movie(id) => {
-            match state
-                .unit_of_work
+            match state.unit_of_work()
                 .media_refs
                 .update_movie_tmdb_id(&id, request.tmdb_id)
                 .await
             {
                 Ok(_) => {
                     // Send update event
-                    if let Ok(movie) = state.unit_of_work.media_refs.get_movie_reference(&id).await {
-                        state.scan_control.publish_media_event(MediaEvent::MovieUpdated { movie });
+                    if let Ok(movie) = state.unit_of_work().media_refs.get_movie_reference(&id).await {
+                        state.scan_control().publish_media_event(MediaEvent::MovieUpdated { movie });
                     }
                     Ok(Json(ApiResponse::success(
                         "Movie TMDB ID updated".to_string(),
@@ -496,8 +520,7 @@ pub async fn manual_match_media_handler(
             }
         }
         MediaID::Series(id) => {
-            match state
-                .unit_of_work
+            match state.unit_of_work()
                 .media_refs
                 .update_series_tmdb_id(&id, request.tmdb_id)
                 .await
@@ -507,8 +530,8 @@ pub async fn manual_match_media_handler(
                     // TODO: This should cascade to seasons and episodes
 
                     // Send update event
-                    if let Ok(series) = state.unit_of_work.media_refs.get_series_reference(&id).await {
-                        state.scan_control.publish_media_event(MediaEvent::SeriesUpdated { series });
+                    if let Ok(series) = state.unit_of_work().media_refs.get_series_reference(&id).await {
+                        state.scan_control().publish_media_event(MediaEvent::SeriesUpdated { series });
                     }
                     Ok(Json(ApiResponse::success(
                         "Series TMDB ID updated".to_string(),
@@ -533,7 +556,12 @@ pub async fn list_libraries_handler(
 ) -> Result<Json<ApiResponse<Vec<LibraryReference>>>, StatusCode> {
     info!("Listing all libraries");
 
-    match state.unit_of_work.libraries.list_library_references().await {
+    match state
+        .unit_of_work()
+        .libraries
+        .list_library_references()
+        .await
+    {
         Ok(libraries) => {
             info!("Found {} libraries", libraries.len());
             Ok(Json(ApiResponse::success(libraries)))
@@ -552,7 +580,12 @@ pub async fn get_library_handler(
 ) -> Result<Json<ApiResponse<LibraryReference>>, StatusCode> {
     info!("Getting library: {}", id);
 
-    match state.unit_of_work.libraries.get_library_reference(id).await {
+    match state
+        .unit_of_work()
+        .libraries
+        .get_library_reference(id)
+        .await
+    {
         Ok(library) => Ok(Json(ApiResponse::success(library))),
         Err(e) => {
             error!("Failed to get library: {}", e);
@@ -593,8 +626,8 @@ pub async fn create_library_handler(
         library.id, library.library_type
     );
 
-    let libraries_repo = state.unit_of_work.libraries.clone();
-    let orchestrator = state.scan_control.orchestrator();
+    let libraries_repo = state.unit_of_work().libraries.clone();
+    let orchestrator = state.scan_control().orchestrator();
 
     match libraries_repo.create_library(library.clone()).await {
         Ok(id) => {
@@ -620,7 +653,9 @@ pub async fn create_library_handler(
                     library.id, err
                 );
 
-                if let Err(delete_err) = libraries_repo.delete_library(library.id).await {
+                if let Err(delete_err) =
+                    libraries_repo.delete_library(library.id).await
+                {
                     error!(
                         "Failed to roll back library {} after orchestrator error: {}",
                         library.id, delete_err
@@ -634,7 +669,7 @@ pub async fn create_library_handler(
 
             if request.start_scan && library.enabled {
                 match state
-                    .scan_control
+                    .scan_control()
                     .start_library_scan(library.id, None)
                     .await
                 {
@@ -677,12 +712,14 @@ pub async fn update_library_handler(
 
     // Get the existing library
     let uuid = Uuid::parse_str(&id).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let libraries_repo = state.unit_of_work.libraries.clone();
+    let libraries_repo = state.unit_of_work().libraries.clone();
 
     let mut library = match libraries_repo.get_library(LibraryID(uuid)).await {
         Ok(Some(lib)) => lib,
         Ok(None) => {
-            return Ok(Json(ApiResponse::error("Library not found".to_string())));
+            return Ok(Json(ApiResponse::error(
+                "Library not found".to_string(),
+            )));
         }
         Err(e) => {
             error!("Failed to get library: {}", e);
@@ -727,10 +764,11 @@ pub async fn delete_library_handler(
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
     info!("Deleting library: {}", id);
 
-    let library_uuid = Uuid::parse_str(&id).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let library_uuid =
+        Uuid::parse_str(&id).map_err(|_| StatusCode::BAD_REQUEST)?;
 
     match state
-        .unit_of_work
+        .unit_of_work()
         .libraries
         .delete_library(LibraryID(library_uuid))
         .await

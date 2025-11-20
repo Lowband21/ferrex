@@ -12,7 +12,9 @@ pub struct DisplayName(String);
 
 impl DisplayName {
     /// Create a new display name with validation
-    pub fn new(display_name: impl AsRef<str>) -> Result<Self, DisplayNameError> {
+    pub fn new(
+        display_name: impl AsRef<str>,
+    ) -> Result<Self, DisplayNameError> {
         let display_name = display_name.as_ref().trim().to_string();
 
         // Check for empty or whitespace-only names

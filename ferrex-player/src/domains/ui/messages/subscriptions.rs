@@ -14,10 +14,10 @@ use iced::Subscription;
 pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let mut subscriptions = vec![];
 
-    subscriptions.push(
-        iced::window::resize_events()
-            .map(|(_id, size)| DomainMessage::Ui(Message::WindowResized(size))),
-    );
+    subscriptions
+        .push(iced::window::resize_events().map(|(_id, size)| {
+            DomainMessage::Ui(Message::WindowResized(size))
+        }));
 
     let poster_anim_active = state
         .domains

@@ -51,7 +51,10 @@ impl PostgresFileChangeEventBus {
         }
     }
 
-    pub fn with_config(pool: PgPool, config: PostgresFileChangeEventBusConfig) -> Self {
+    pub fn with_config(
+        pool: PgPool,
+        config: PostgresFileChangeEventBusConfig,
+    ) -> Self {
         Self { pool, config }
     }
 
@@ -165,7 +168,11 @@ async fn fetch_events_after(
     .bind(limit)
     .fetch_all(pool)
     .await
-    .map_err(|err| MediaError::Internal(format!("failed to fetch file watch events: {err}")))?;
+    .map_err(|err| {
+        MediaError::Internal(format!(
+            "failed to fetch file watch events: {err}"
+        ))
+    })?;
 
     let mut events = Vec::with_capacity(rows.len());
     for row in rows {
@@ -179,14 +186,21 @@ async fn fetch_events_after(
     Ok(events)
 }
 
-async fn fetch_event(pool: &PgPool, event_id: Uuid) -> Result<Option<(LibraryID, DateTime<Utc>)>> {
+async fn fetch_event(
+    pool: &PgPool,
+    event_id: Uuid,
+) -> Result<Option<(LibraryID, DateTime<Utc>)>> {
     let result = sqlx::query_as::<_, (Uuid, DateTime<Utc>)>(
         "SELECT library_id, detected_at FROM file_watch_events WHERE id = $1",
     )
     .bind(event_id)
     .fetch_optional(pool)
     .await
-    .map_err(|err| MediaError::Internal(format!("failed to load file watch event by id: {err}")))?;
+    .map_err(|err| {
+        MediaError::Internal(format!(
+            "failed to load file watch event by id: {err}"
+        ))
+    })?;
 
     Ok(result.map(|(library, detected_at)| (LibraryID(library), detected_at)))
 }
@@ -214,7 +228,11 @@ async fn upsert_cursor(pool: &PgPool, cursor: &FileChangeCursor) -> Result<()> {
     .bind(cursor.last_detected_at)
     .execute(pool)
     .await
-    .map_err(|err| MediaError::Internal(format!("failed to upsert file watch cursor: {err}")))?;
+    .map_err(|err| {
+        MediaError::Internal(format!(
+            "failed to upsert file watch cursor: {err}"
+        ))
+    })?;
 
     Ok(())
 }
@@ -224,7 +242,10 @@ async fn load_cursor(
     group: &str,
     library_id: LibraryID,
 ) -> Result<Option<FileChangeCursor>> {
-    let row = sqlx::query_as::<_, (String, Uuid, Option<Uuid>, Option<DateTime<Utc>>)>(
+    let row = sqlx::query_as::<
+        _,
+        (String, Uuid, Option<Uuid>, Option<DateTime<Utc>>),
+    >(
         r#"
         SELECT group_name, library_id, last_event_id, last_detected_at
         FROM file_watch_consumer_offsets
@@ -235,14 +256,18 @@ async fn load_cursor(
     .bind(library_id.as_uuid())
     .fetch_optional(pool)
     .await
-    .map_err(|err| MediaError::Internal(format!("failed to load file watch cursor: {err}")))?;
+    .map_err(|err| {
+        MediaError::Internal(format!("failed to load file watch cursor: {err}"))
+    })?;
 
     Ok(row.map(
-        |(stored_group, stored_library, last_event_id, last_detected_at)| FileChangeCursor {
-            group: stored_group,
-            library_id: LibraryID(stored_library),
-            last_event_id,
-            last_detected_at,
+        |(stored_group, stored_library, last_event_id, last_detected_at)| {
+            FileChangeCursor {
+                group: stored_group,
+                library_id: LibraryID(stored_library),
+                last_event_id,
+                last_detected_at,
+            }
         },
     ))
 }
@@ -260,7 +285,9 @@ async fn set_processed(pool: &PgPool, event_id: Uuid) -> Result<()> {
     .execute(pool)
     .await
     .map_err(|err| {
-        MediaError::Internal(format!("failed to mark file watch event processed: {err}"))
+        MediaError::Internal(format!(
+            "failed to mark file watch event processed: {err}"
+        ))
     })?;
 
     Ok(())
@@ -276,7 +303,11 @@ async fn cleanup_old_events(pool: &PgPool, days_to_keep: i32) -> Result<u32> {
     .bind(days_to_keep.to_string())
     .execute(pool)
     .await
-    .map_err(|err| MediaError::Internal(format!("failed to clean up file watch events: {err}")))?
+    .map_err(|err| {
+        MediaError::Internal(format!(
+            "failed to clean up file watch events: {err}"
+        ))
+    })?
     .rows_affected();
 
     Ok(affected as u32)
@@ -316,16 +347,24 @@ impl FileChangeEventBus for PostgresFileChangeEventBus {
         .execute(self.pool())
         .await
         .map_err(|err| {
-            MediaError::Internal(format!("failed to persist file watch event: {err}"))
+            MediaError::Internal(format!(
+                "failed to persist file watch event: {err}"
+            ))
         })?;
 
         Ok(())
     }
 
-    async fn subscribe(&self, group: &str, library_id: LibraryID) -> Result<FileChangeEventStream> {
+    async fn subscribe(
+        &self,
+        group: &str,
+        library_id: LibraryID,
+    ) -> Result<FileChangeEventStream> {
         let cursor = load_cursor(self.pool(), group, library_id).await?;
-        let initial_detected_at = cursor.as_ref().and_then(|cursor| cursor.last_detected_at);
-        let initial_event_id = cursor.as_ref().and_then(|cursor| cursor.last_event_id);
+        let initial_detected_at =
+            cursor.as_ref().and_then(|cursor| cursor.last_detected_at);
+        let initial_event_id =
+            cursor.as_ref().and_then(|cursor| cursor.last_event_id);
 
         let (tx, rx) = mpsc::channel(self.config.channel_capacity);
         let pool = self.pool.clone();
@@ -379,8 +418,12 @@ impl FileChangeEventBus for PostgresFileChangeEventBus {
     }
 
     async fn ack(&self, group: &str, event_id: Uuid) -> Result<()> {
-        let Some((library_id, detected_at)) = fetch_event(self.pool(), event_id).await? else {
-            return Err(MediaError::NotFound("file watch event not found".into()));
+        let Some((library_id, detected_at)) =
+            fetch_event(self.pool(), event_id).await?
+        else {
+            return Err(MediaError::NotFound(
+                "file watch event not found".into(),
+            ));
         };
 
         let cursor = FileChangeCursor {

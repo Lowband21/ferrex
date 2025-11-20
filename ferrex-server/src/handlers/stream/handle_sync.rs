@@ -6,8 +6,9 @@ use axum::{
 };
 use ferrex_core::{
     sync_session::{
-        CreateSyncSessionRequest, CreateSyncSessionResponse, JoinSyncSessionResponse, Participant,
-        PlaybackState, SyncSession, SyncSessionError,
+        CreateSyncSessionRequest, CreateSyncSessionResponse,
+        JoinSyncSessionResponse, Participant, PlaybackState, SyncSession,
+        SyncSessionError,
     },
     traits::prelude::MediaIDLike,
     user::User,
@@ -49,11 +50,13 @@ pub async fn create_sync_session_handler(
 
     // Store in database
     state
-        .unit_of_work
+        .unit_of_work()
         .sync_sessions
         .create_sync_session(&session)
         .await
-        .map_err(|e| AppError::internal(format!("Failed to create sync session: {}", e)))?;
+        .map_err(|e| {
+            AppError::internal(format!("Failed to create sync session: {}", e))
+        })?;
 
     // Note: Connection to room will be handled when user connects via WebSocket
 
@@ -73,11 +76,13 @@ pub async fn join_sync_session_handler(
 ) -> AppResult<Json<JoinSyncSessionResponse>> {
     // Get session from database
     let mut session = state
-        .unit_of_work
+        .unit_of_work()
         .sync_sessions
         .get_sync_session_by_code(&room_code)
         .await
-        .map_err(|e| AppError::internal(format!("Failed to get sync session: {}", e)))?
+        .map_err(|e| {
+            AppError::internal(format!("Failed to get sync session: {}", e))
+        })?
         .ok_or_else(|| AppError::not_found("Invalid room code"))?;
 
     // Check if session is expired
@@ -97,23 +102,29 @@ pub async fn join_sync_session_handler(
     session
         .add_participant(participant.clone())
         .map_err(|e| match e {
-            SyncSessionError::SessionFull => AppError::bad_request("Session is full"),
-            _ => AppError::internal(format!("Failed to add participant: {}", e)),
+            SyncSessionError::SessionFull => {
+                AppError::bad_request("Session is full")
+            }
+            _ => {
+                AppError::internal(format!("Failed to add participant: {}", e))
+            }
         })?;
 
     // Update database
     state
-        .unit_of_work
+        .unit_of_work()
         .sync_sessions
         .add_sync_participant(session.id, &participant)
         .await
-        .map_err(|e| AppError::internal(format!("Failed to add participant: {}", e)))?;
+        .map_err(|e| {
+            AppError::internal(format!("Failed to add participant: {}", e))
+        })?;
 
     // Note: Connection to room will be handled when user connects via WebSocket
 
     // Notify other participants
     state
-        .websocket_manager
+        .websocket_manager()
         .broadcast_to_room(
             &session.room_code,
             ferrex_core::sync_session::SyncMessage::UserJoined { participant },
@@ -138,11 +149,13 @@ pub async fn leave_sync_session_handler(
 ) -> AppResult<Json<()>> {
     // Get session from database
     let mut session = state
-        .unit_of_work
+        .unit_of_work()
         .sync_sessions
         .get_sync_session(session_id)
         .await
-        .map_err(|e| AppError::internal(format!("Failed to get sync session: {}", e)))?
+        .map_err(|e| {
+            AppError::internal(format!("Failed to get sync session: {}", e))
+        })?
         .ok_or_else(|| AppError::not_found("Session not found"))?;
 
     // Remove participant
@@ -150,11 +163,13 @@ pub async fn leave_sync_session_handler(
 
     // Update database
     state
-        .unit_of_work
+        .unit_of_work()
         .sync_sessions
         .remove_sync_participant(session_id, user.id)
         .await
-        .map_err(|e| AppError::internal(format!("Failed to remove participant: {}", e)))?;
+        .map_err(|e| {
+            AppError::internal(format!("Failed to remove participant: {}", e))
+        })?;
 
     // Note: Connection cleanup will be handled by WebSocket disconnect
 
@@ -164,19 +179,26 @@ pub async fn leave_sync_session_handler(
         if let Some(new_host) = session.participants.first() {
             session.host_id = new_host.user_id;
             state
-                .unit_of_work
+                .unit_of_work()
                 .sync_sessions
                 .update_sync_session(session_id, &session)
                 .await
-                .map_err(|e| AppError::internal(format!("Failed to update session: {}", e)))?;
+                .map_err(|e| {
+                    AppError::internal(format!(
+                        "Failed to update session: {}",
+                        e
+                    ))
+                })?;
         } else {
             // No participants left, end session
             state
-                .unit_of_work
+                .unit_of_work()
                 .sync_sessions
                 .end_sync_session(session_id)
                 .await
-                .map_err(|e| AppError::internal(format!("Failed to end session: {}", e)))?;
+                .map_err(|e| {
+                    AppError::internal(format!("Failed to end session: {}", e))
+                })?;
         }
     }
 
@@ -191,11 +213,13 @@ pub async fn get_sync_session_state_handler(
 ) -> AppResult<Json<PlaybackState>> {
     // Get session from database
     let session = state
-        .unit_of_work
+        .unit_of_work()
         .sync_sessions
         .get_sync_session(session_id)
         .await
-        .map_err(|e| AppError::internal(format!("Failed to get sync session: {}", e)))?
+        .map_err(|e| {
+            AppError::internal(format!("Failed to get sync session: {}", e))
+        })?
         .ok_or_else(|| AppError::not_found("Session not found"))?;
 
     // Check if user is participant

@@ -3,7 +3,9 @@ use std::fmt;
 use tokio::sync::broadcast;
 
 use crate::error::Result;
-use crate::orchestration::events::{JobEvent, JobEventPublisher, ScanEvent, ScanEventPublisher};
+use crate::orchestration::events::{
+    JobEvent, JobEventPublisher, ScanEvent, ScanEventPublisher,
+};
 
 /// Lightweight in-process event bus that fans out orchestrator notifications to
 /// observers inside the runtime. This keeps the wiring flexible while we decide

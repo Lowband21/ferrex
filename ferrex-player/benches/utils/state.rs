@@ -89,7 +89,7 @@ pub fn get_or_initialize_global_state() -> Arc<BenchmarkGlobalState> {
                     log::warn!("🔄 Falling back to minimal state for benchmarks");
 
                     // Fallback to minimal state
-                    let state = State::new("http://localhost:3000".to_string());
+                    let state = State::new("https://localhost:3000".to_string());
                     service_registry::init_registry(state.image_service.clone());
 
                     BenchmarkGlobalState {
@@ -124,7 +124,7 @@ pub fn create_minimal_real_state() -> Arc<State> {
     // and established authentication, so subsequent calls will be faster
     let rt = Runtime::new().unwrap();
     rt.block_on(async {
-        let state = State::new("http://localhost:3000".to_string());
+        let state = State::new("https://localhost:3000".to_string());
 
         // Set up authentication using the same method as global initialization
         if let Err(e) = setup_benchmark_authentication(&state).await {

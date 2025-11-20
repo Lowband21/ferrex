@@ -15,10 +15,14 @@ use crate::{
     error::MediaError,
     orchestration::{
         config::RetryConfig,
-        job::{EnqueueRequest, JobHandle, JobId, JobKind, JobPayload, JobPriority, ScanReason},
+        job::{
+            EnqueueRequest, JobHandle, JobId, JobKind, JobPayload, JobPriority,
+            ScanReason,
+        },
         lease::{DequeueRequest, JobLease, LeaseId, LeaseRenewal},
         queue::{
-            ALL_JOB_KINDS, LeaseExpiryScanner, QueueInstrumentation, QueueService, QueueSnapshot,
+            ALL_JOB_KINDS, LeaseExpiryScanner, QueueInstrumentation,
+            QueueService, QueueSnapshot,
         },
         scan_cursor::{ScanCursor, ScanCursorId, ScanCursorRepository},
     },
@@ -58,13 +62,18 @@ impl PostgresQueueService {
     }
 
     /// Create a new service with an explicit retry policy.
-    pub async fn new_with_retry(pool: PgPool, retry_config: RetryConfig) -> Result<Self> {
+    pub async fn new_with_retry(
+        pool: PgPool,
+        retry_config: RetryConfig,
+    ) -> Result<Self> {
         // Health check
         sqlx::query_scalar::<_, i32>("SELECT 1")
             .fetch_one(&pool)
             .await
             .map_err(|e| {
-                MediaError::Internal(format!("Queue service failed Postgres health check: {e}"))
+                MediaError::Internal(format!(
+                    "Queue service failed Postgres health check: {e}"
+                ))
             })?;
         info!("Queue service connected to Postgres");
 
@@ -81,7 +90,11 @@ impl PostgresQueueService {
         .bind("idx_jobs_ready_dequeue")
         .fetch_optional(&pool)
         .await
-        .map_err(|e| MediaError::Internal(format!("Queue service schema validation failed: {e}")))?
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Queue service schema validation failed: {e}"
+            ))
+        })?
         .is_some();
 
         if !idx_exists {
@@ -107,7 +120,9 @@ impl PostgresQueueService {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MediaError::Internal(format!("lease expiry scan failed: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("lease expiry scan failed: {e}"))
+        })?;
 
         let mut resurrected = 0u64;
         let max_attempts = i32::from(self.retry_config.max_attempts);
@@ -127,7 +142,9 @@ impl PostgresQueueService {
 
                 let mut library_under_pressure = false;
                 if self.retry_config.heavy_library_attempt_threshold > 0 {
-                    let threshold = i32::from(self.retry_config.heavy_library_attempt_threshold);
+                    let threshold = i32::from(
+                        self.retry_config.heavy_library_attempt_threshold,
+                    );
                     if attempt_next as i32 >= threshold {
                         library_under_pressure = true;
                     } else {
@@ -151,12 +168,17 @@ impl PostgresQueueService {
                                 "lease resurrection pressure lookup failed: {e}"
                             ))
                         })?;
-                        library_under_pressure = pressure_count.unwrap_or(0) > 0;
+                        library_under_pressure =
+                            pressure_count.unwrap_or(0) > 0;
                     }
                 }
 
-                let delay_ms =
-                    self.compute_delay_ms(attempt_next, &payload, library_under_pressure, job_id);
+                let delay_ms = self.compute_delay_ms(
+                    attempt_next,
+                    &payload,
+                    library_under_pressure,
+                    job_id,
+                );
                 sqlx::query!(
                     r#"
                     UPDATE orchestrator_jobs
@@ -212,7 +234,8 @@ impl PostgresQueueService {
         }
 
         let exp = (attempt.saturating_sub(1)) as i32;
-        let scaled = (self.retry_config.backoff_base_ms as f64) * 2f64.powi(exp);
+        let scaled =
+            (self.retry_config.backoff_base_ms as f64) * 2f64.powi(exp);
         let capped = scaled.min(self.retry_config.backoff_max_ms as f64);
         capped.max(0.0) as u64
     }
@@ -224,7 +247,8 @@ impl PostgresQueueService {
         library_under_pressure: bool,
         job_id: JobId,
     ) -> u64 {
-        let anchor = self.anchor_delay_ms(attempt, payload, library_under_pressure);
+        let anchor =
+            self.anchor_delay_ms(attempt, payload, library_under_pressure);
         self.jittered_delay_for_anchor(anchor, job_id, attempt)
     }
 
@@ -246,8 +270,9 @@ impl PostgresQueueService {
         let fast_multiplier = self.fast_retry_multiplier(attempt, payload);
         let mut scaled = (base as f32 * fast_multiplier).round() as u64;
         if library_under_pressure {
-            scaled =
-                ((scaled as f32) * self.retry_config.heavy_library_slowdown_factor).round() as u64;
+            scaled = ((scaled as f32)
+                * self.retry_config.heavy_library_slowdown_factor)
+                .round() as u64;
         }
 
         scaled.clamp(0, self.retry_config.backoff_max_ms)
@@ -275,7 +300,12 @@ impl PostgresQueueService {
         }
     }
 
-    fn jittered_delay_for_anchor(&self, anchor_ms: u64, job_id: JobId, attempt: u16) -> u64 {
+    fn jittered_delay_for_anchor(
+        &self,
+        anchor_ms: u64,
+        job_id: JobId,
+        attempt: u16,
+    ) -> u64 {
         if anchor_ms == 0 {
             return 0;
         }
@@ -286,7 +316,8 @@ impl PostgresQueueService {
             .min(self.retry_config.backoff_max_ms as f64);
 
         let lower = 0f64.max(anchor_ms as f64 - jitter_span);
-        let upper = (anchor_ms as f64 + jitter_span).min(self.retry_config.backoff_max_ms as f64);
+        let upper = (anchor_ms as f64 + jitter_span)
+            .min(self.retry_config.backoff_max_ms as f64);
         if upper <= lower {
             return lower.round() as u64;
         }
@@ -340,7 +371,9 @@ impl PostgresQueueService {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MediaError::Internal(format!("ready count aggregation failed: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("ready count aggregation failed: {e}"))
+        })?;
 
         let mut counts = Vec::with_capacity(rows.len());
 
@@ -383,7 +416,9 @@ impl QueueInstrumentation for PostgresQueueService {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| MediaError::Internal(format!("metrics snapshot failed: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("metrics snapshot failed: {e}"))
+        })?;
 
         let mut snapshot = QueueSnapshot::new(Utc::now());
         for kind in ALL_JOB_KINDS {
@@ -415,8 +450,12 @@ impl QueueInstrumentation for PostgresQueueService {
 impl QueueService for PostgresQueueService {
     async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
         let job_id = crate::orchestration::job::JobId::new();
-        let payload_json = serde_json::to_value(&request.payload)
-            .map_err(|e| MediaError::Internal(format!("failed to serialize job payload: {e}")))?;
+        let payload_json =
+            serde_json::to_value(&request.payload).map_err(|e| {
+                MediaError::Internal(format!(
+                    "failed to serialize job payload: {e}"
+                ))
+            })?;
         let library_id = request.payload.library_id().as_uuid();
         let kind_str = request.payload.kind().to_string();
         let dedupe_key = request.dedupe_key().to_string();
@@ -437,8 +476,9 @@ impl QueueService for PostgresQueueService {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| MediaError::Internal(format!("enqueue precheck failed: {e}")))?
-        {
+        .map_err(|e| {
+            MediaError::Internal(format!("enqueue precheck failed: {e}"))
+        })? {
             let existing_id = crate::orchestration::job::JobId(existing.id);
             let existing_priority: i16 = existing.priority;
             // Try to elevate priority if incoming is higher and the job is not leased
@@ -513,7 +553,9 @@ impl QueueService for PostgresQueueService {
                     .fetch_optional(&self.pool)
                     .await
                     .map_err(|e| {
-                        MediaError::Internal(format!("enqueue conflict lookup failed: {e}"))
+                        MediaError::Internal(format!(
+                            "enqueue conflict lookup failed: {e}"
+                        ))
                     })?;
 
                     if let Some(row) = existing {
@@ -535,7 +577,9 @@ impl QueueService for PostgresQueueService {
                             .execute(&self.pool)
                             .await
                             .map_err(|e| {
-                                MediaError::Internal(format!("enqueue merge elevation failed: {e}"))
+                                MediaError::Internal(format!(
+                                    "enqueue merge elevation failed: {e}"
+                                ))
                             })?;
 
                             if update.rows_affected() > 0 {
@@ -585,7 +629,10 @@ impl QueueService for PostgresQueueService {
 
                         match retry {
                             Ok(_) => {
-                                info!("enqueue accepted new job {} on retry", job_id2.0);
+                                info!(
+                                    "enqueue accepted new job {} on retry",
+                                    job_id2.0
+                                );
                                 return Ok(JobHandle::accepted(
                                     job_id2,
                                     &request.payload,
@@ -593,7 +640,10 @@ impl QueueService for PostgresQueueService {
                                 ));
                             }
                             Err(sqlx::Error::Database(db_err2))
-                                if db_err2.code().map(|c| c.to_string()).as_deref()
+                                if db_err2
+                                    .code()
+                                    .map(|c| c.to_string())
+                                    .as_deref()
                                     == Some("23505") =>
                             {
                                 // Another concurrent inserter won; fetch and return the winner
@@ -642,28 +692,36 @@ impl QueueService for PostgresQueueService {
                     )));
                 }
             }
-            Err(e) => return Err(MediaError::Internal(format!("enqueue insert failed: {e}"))),
+            Err(e) => {
+                return Err(MediaError::Internal(format!(
+                    "enqueue insert failed: {e}"
+                )));
+            }
         }
     }
 
-    async fn enqueue_many(&self, requests: Vec<EnqueueRequest>) -> Result<Vec<JobHandle>> {
+    async fn enqueue_many(
+        &self,
+        requests: Vec<EnqueueRequest>,
+    ) -> Result<Vec<JobHandle>> {
         if requests.is_empty() {
             return Ok(Vec::new());
         }
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| MediaError::Internal(format!("begin enqueue_many tx failed: {e}")))?;
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            MediaError::Internal(format!("begin enqueue_many tx failed: {e}"))
+        })?;
 
         let mut out: Vec<JobHandle> = Vec::with_capacity(requests.len());
 
         for request in requests {
             let job_id = crate::orchestration::job::JobId::new();
-            let payload_json = serde_json::to_value(&request.payload).map_err(|e| {
-                MediaError::Internal(format!("failed to serialize job payload: {e}"))
-            })?;
+            let payload_json =
+                serde_json::to_value(&request.payload).map_err(|e| {
+                    MediaError::Internal(format!(
+                        "failed to serialize job payload: {e}"
+                    ))
+                })?;
             let library_id = request.payload.library_id().as_uuid();
             let kind_str = request.payload.kind().to_string();
             let dedupe_key = request.dedupe_key().to_string();
@@ -683,8 +741,11 @@ impl QueueService for PostgresQueueService {
             )
             .fetch_optional(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("enqueue_many precheck failed: {e}")))?
-            {
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "enqueue_many precheck failed: {e}"
+                ))
+            })? {
                 let existing_id = crate::orchestration::job::JobId(existing.id);
                 let existing_priority: i16 = existing.priority;
                 if priority_val < existing_priority {
@@ -810,22 +871,23 @@ impl QueueService for PostgresQueueService {
             }
         }
 
-        tx.commit()
-            .await
-            .map_err(|e| MediaError::Internal(format!("enqueue_many tx commit failed: {e}")))?;
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!("enqueue_many tx commit failed: {e}"))
+        })?;
 
         Ok(out)
     }
 
-    async fn dequeue(&self, request: DequeueRequest) -> Result<Option<JobLease>> {
+    async fn dequeue(
+        &self,
+        request: DequeueRequest,
+    ) -> Result<Option<JobLease>> {
         use crate::orchestration::job::{JobPriority, JobRecord, JobState};
         use uuid::Uuid;
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| MediaError::Internal(format!("begin dequeue tx failed: {e}")))?;
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            MediaError::Internal(format!("begin dequeue tx failed: {e}"))
+        })?;
 
         // Select next eligible job for this kind
         let kind_str = request.kind.to_string();
@@ -843,7 +905,8 @@ impl QueueService for PostgresQueueService {
             updated_at: chrono::DateTime<chrono::Utc>,
         }
 
-        let row: Option<SelectedRow> = if let Some(selector) = request.selector {
+        let row: Option<SelectedRow> = if let Some(selector) = request.selector
+        {
             let priority: i16 = selector.priority as u8 as i16;
             sqlx::query!(
                 r#"
@@ -960,7 +1023,9 @@ impl QueueService for PostgresQueueService {
         )
         .fetch_optional(&mut *tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("dequeue update->leased failed: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("dequeue update->leased failed: {e}"))
+        })?;
 
         if updated.is_none() {
             // Raced with state change; treat as empty
@@ -969,15 +1034,24 @@ impl QueueService for PostgresQueueService {
         }
 
         // Build JobRecord from the selected row and new lease fields
-        let payload: JobPayload = serde_json::from_value(row.payload)
-            .map_err(|e| MediaError::Internal(format!("failed to deserialize job payload: {e}")))?;
+        let payload: JobPayload =
+            serde_json::from_value(row.payload).map_err(|e| {
+                MediaError::Internal(format!(
+                    "failed to deserialize job payload: {e}"
+                ))
+            })?;
 
         let priority = match row.priority {
             0 => JobPriority::P0,
             1 => JobPriority::P1,
             2 => JobPriority::P2,
             3 => JobPriority::P3,
-            other => return Err(MediaError::Internal(format!("invalid priority {}", other))),
+            other => {
+                return Err(MediaError::Internal(format!(
+                    "invalid priority {}",
+                    other
+                )));
+            }
         };
 
         let job = JobRecord {
@@ -1003,9 +1077,9 @@ impl QueueService for PostgresQueueService {
             renewals: 0,
         };
 
-        tx.commit()
-            .await
-            .map_err(|e| MediaError::Internal(format!("dequeue tx commit failed: {e}")))?;
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!("dequeue tx commit failed: {e}"))
+        })?;
 
         Ok(Some(lease))
     }
@@ -1013,11 +1087,9 @@ impl QueueService for PostgresQueueService {
     async fn renew(&self, renewal: LeaseRenewal) -> Result<JobLease> {
         use crate::orchestration::job::{JobPriority, JobRecord, JobState};
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| MediaError::Internal(format!("begin renew tx failed: {e}")))?;
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            MediaError::Internal(format!("begin renew tx failed: {e}"))
+        })?;
 
         // Lock the row to ensure consistent renewal
         let row = sqlx::query!(
@@ -1041,7 +1113,9 @@ impl QueueService for PostgresQueueService {
                 renewal.lease_id.0
             );
             drop(tx);
-            return Err(MediaError::NotFound("lease not found or expired".into()));
+            return Err(MediaError::NotFound(
+                "lease not found or expired".into(),
+            ));
         };
 
         // Perform the extension
@@ -1061,15 +1135,24 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
         .await
         .map_err(|e| MediaError::Internal(format!("renew update failed: {e}")))?;
 
-        let payload: JobPayload = serde_json::from_value(row.payload)
-            .map_err(|e| MediaError::Internal(format!("failed to deserialize job payload: {e}")))?;
+        let payload: JobPayload =
+            serde_json::from_value(row.payload).map_err(|e| {
+                MediaError::Internal(format!(
+                    "failed to deserialize job payload: {e}"
+                ))
+            })?;
 
         let priority = match row.priority {
             0 => JobPriority::P0,
             1 => JobPriority::P1,
             2 => JobPriority::P2,
             3 => JobPriority::P3,
-            other => return Err(MediaError::Internal(format!("invalid priority {}", other))),
+            other => {
+                return Err(MediaError::Internal(format!(
+                    "invalid priority {}",
+                    other
+                )));
+            }
         };
 
         let job = JobRecord {
@@ -1098,9 +1181,9 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
             renewals: 1, // local increment only
         };
 
-        tx.commit()
-            .await
-            .map_err(|e| MediaError::Internal(format!("renew tx commit failed: {e}")))?;
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!("renew tx commit failed: {e}"))
+        })?;
 
         info!(
             "renewed lease {:?} until {}",
@@ -1124,7 +1207,9 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| MediaError::Internal(format!("complete update failed: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("complete update failed: {e}"))
+        })?;
 
         if res.rows_affected() > 0 {
             debug!("completed job with lease {:?}", lease_id.0);
@@ -1132,12 +1217,15 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
         Ok(())
     }
 
-    async fn fail(&self, lease_id: LeaseId, retryable: bool, error: Option<String>) -> Result<()> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| MediaError::Internal(format!("begin fail tx failed: {e}")))?;
+    async fn fail(
+        &self,
+        lease_id: LeaseId,
+        retryable: bool,
+        error: Option<String>,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            MediaError::Internal(format!("begin fail tx failed: {e}"))
+        })?;
 
         // Lock the row and get current attempts
         let row = sqlx::query!(
@@ -1151,7 +1239,9 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
         )
         .fetch_optional(&mut *tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("fail select failed: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("fail select failed: {e}"))
+        })?;
 
         let Some(row) = row else {
             drop(tx);
@@ -1170,13 +1260,19 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
             ))
         })?;
 
-        let mut library_under_pressure = if self.retry_config.heavy_library_attempt_threshold == 0 {
-            false
-        } else {
-            attempt_next as i32 >= i32::from(self.retry_config.heavy_library_attempt_threshold)
-        };
+        let mut library_under_pressure =
+            if self.retry_config.heavy_library_attempt_threshold == 0 {
+                false
+            } else {
+                attempt_next as i32
+                    >= i32::from(
+                        self.retry_config.heavy_library_attempt_threshold,
+                    )
+            };
 
-        if !library_under_pressure && self.retry_config.heavy_library_attempt_threshold > 0 {
+        if !library_under_pressure
+            && self.retry_config.heavy_library_attempt_threshold > 0
+        {
             let pressure_count: Option<i64> = sqlx::query_scalar!(
                 r#"
                 SELECT COUNT(*)::bigint
@@ -1192,13 +1288,21 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
             )
             .fetch_one(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("fail pressure lookup failed: {e}")))?;
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "fail pressure lookup failed: {e}"
+                ))
+            })?;
             library_under_pressure = pressure_count.unwrap_or(0) > 0;
         }
 
         if retryable && attempts_before < max_attempts {
-            let delay_ms =
-                self.compute_delay_ms(attempt_next, &payload, library_under_pressure, job_id);
+            let delay_ms = self.compute_delay_ms(
+                attempt_next,
+                &payload,
+                library_under_pressure,
+                job_id,
+            );
 
             sqlx::query!(
                 r#"
@@ -1221,9 +1325,9 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
             .await
             .map_err(|e| MediaError::Internal(format!("fail retry update failed: {e}")))?;
 
-            tx.commit()
-                .await
-                .map_err(|e| MediaError::Internal(format!("fail tx commit failed: {e}")))?;
+            tx.commit().await.map_err(|e| {
+                MediaError::Internal(format!("fail tx commit failed: {e}"))
+            })?;
 
             warn!(
                 "job {} failed retryable; attempts now {}; scheduled retry in {}ms (pressure={})",
@@ -1253,11 +1357,15 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
             )
             .execute(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("fail terminal update failed: {e}")))?;
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "fail terminal update failed: {e}"
+                ))
+            })?;
 
-            tx.commit()
-                .await
-                .map_err(|e| MediaError::Internal(format!("fail tx commit failed: {e}")))?;
+            tx.commit().await.map_err(|e| {
+                MediaError::Internal(format!("fail tx commit failed: {e}"))
+            })?;
 
             warn!(
                 "job {} moved to {} after attempts {}",
@@ -1267,7 +1375,11 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
         }
     }
 
-    async fn dead_letter(&self, lease_id: LeaseId, error: Option<String>) -> Result<()> {
+    async fn dead_letter(
+        &self,
+        lease_id: LeaseId,
+        error: Option<String>,
+    ) -> Result<()> {
         let res = sqlx::query!(
             r#"
             UPDATE orchestrator_jobs
@@ -1284,7 +1396,9 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| MediaError::Internal(format!("dead_letter update failed: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("dead_letter update failed: {e}"))
+        })?;
 
         if res.rows_affected() > 0 {
             warn!("job with lease {:?} moved to dead_letter", lease_id.0);
@@ -1303,7 +1417,9 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| MediaError::Internal(format!("cancel_job delete failed: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("cancel_job delete failed: {e}"))
+        })?;
         Ok(())
     }
 
@@ -1319,7 +1435,9 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
         .bind(kind_str)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| MediaError::Internal(format!("queue_depth query failed: {e}")))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("queue_depth query failed: {e}"))
+        })?;
         Ok(count as usize)
     }
 }
@@ -1389,7 +1507,10 @@ impl ScanCursorRepository for PostgresCursorRepository {
         ))
     }
 
-    async fn list_by_library(&self, library_id: LibraryID) -> Result<Vec<ScanCursor>> {
+    async fn list_by_library(
+        &self,
+        library_id: LibraryID,
+    ) -> Result<Vec<ScanCursor>> {
         let results = sqlx::query_as::<
             _,
             (

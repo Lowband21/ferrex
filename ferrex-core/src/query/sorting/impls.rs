@@ -4,8 +4,9 @@
 //! from media references based on available data.
 
 use super::{
-    HasField, MovieFieldSet, OptionalDateKey, OptionalFloatKey, OptionalU32Key, OptionalU64Key,
-    SeriesFieldSet, SortFieldMarker, SortKey, SortableEntity, StringKey,
+    HasField, MovieFieldSet, OptionalDateKey, OptionalFloatKey, OptionalU32Key,
+    OptionalU64Key, SeriesFieldSet, SortFieldMarker, SortKey, SortableEntity,
+    StringKey,
 };
 
 use crate::types::details::{MediaDetailsOption, TmdbDetails};
@@ -32,23 +33,32 @@ impl SortableEntity for MovieReference {
             // We know F::Key = StringKey when F::ID = "title"
             // This will panic if the type doesn't match, which is what we want
             // since it indicates a programming error
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "date_added" {
             // Date added now uses the discovery time (row creation time)
             let key = OptionalDateKey::new(Some(self.file.discovered_at));
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "release_date" {
             // Release date requires TMDB details
             let date = match &self.details {
-                MediaDetailsOption::Details(TmdbDetails::Movie(movie_details)) => {
+                MediaDetailsOption::Details(TmdbDetails::Movie(
+                    movie_details,
+                )) => {
                     movie_details.release_date.as_ref().and_then(|date_str| {
                         // Parse the date string (expected format: YYYY-MM-DD)
                         use chrono::{NaiveDate, NaiveTime, Utc};
                         NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
                             .ok()
                             .and_then(|date| {
-                                let naive_datetime =
-                                    date.and_time(NaiveTime::from_hms_opt(0, 0, 0)?);
+                                let naive_datetime = date.and_time(
+                                    NaiveTime::from_hms_opt(0, 0, 0)?,
+                                );
                                 naive_datetime.and_local_timezone(Utc).single()
                             })
                     })
@@ -56,40 +66,55 @@ impl SortableEntity for MovieReference {
                 _ => None,
             };
             let key = OptionalDateKey::new(date);
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "rating" {
             // Rating (vote_average) requires TMDB details
             let rating = match &self.details {
-                MediaDetailsOption::Details(TmdbDetails::Movie(movie_details)) => {
-                    movie_details.vote_average
-                }
+                MediaDetailsOption::Details(TmdbDetails::Movie(
+                    movie_details,
+                )) => movie_details.vote_average,
                 _ => None,
             };
             let key = OptionalFloatKey::new(rating);
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "popularity" {
             // Popularity requires TMDB details
             let popularity = match &self.details {
-                MediaDetailsOption::Details(TmdbDetails::Movie(movie_details)) => {
-                    movie_details.popularity
-                }
+                MediaDetailsOption::Details(TmdbDetails::Movie(
+                    movie_details,
+                )) => movie_details.popularity,
                 _ => None,
             };
             let key = OptionalFloatKey::new(popularity);
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "runtime" {
             // Runtime requires TMDB details
             let runtime = match &self.details {
-                MediaDetailsOption::Details(TmdbDetails::Movie(movie_details)) => {
-                    movie_details.runtime
-                }
+                MediaDetailsOption::Details(TmdbDetails::Movie(
+                    movie_details,
+                )) => movie_details.runtime,
                 _ => None,
             };
             let key = OptionalU32Key::new(runtime);
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "file_size" {
             let key = OptionalU64Key::new(Some(self.file.size));
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "resolution" {
             let height = self
                 .file
@@ -97,7 +122,10 @@ impl SortableEntity for MovieReference {
                 .as_ref()
                 .and_then(|meta| meta.height);
             let key = OptionalU32Key::new(height);
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "bitrate" {
             let bitrate = self
                 .file
@@ -105,20 +133,32 @@ impl SortableEntity for MovieReference {
                 .as_ref()
                 .and_then(|meta| meta.bitrate);
             let key = OptionalU64Key::new(bitrate);
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "content_rating" {
             let key = StringKey::missing();
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "last_watched" {
             // Last watched requires user context and watch status data
             // For now, return missing data - this will be implemented with watch status integration
             let key = <OptionalDateKey as SortKey>::missing();
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "watch_progress" {
             // Watch progress requires user context and watch status data
             // For now, return missing data - this will be implemented with watch status integration
             let key = <OptionalFloatKey as SortKey>::missing();
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else {
             // This should never happen if the trait system is used correctly
             panic!("Unknown sort field ID: {}", F::ID)
@@ -140,61 +180,89 @@ impl SortableEntity for SeriesReference {
         if F::ID == "title" {
             // Title is always available from SeriesReference
             let key = StringKey::from_str(self.title.as_str());
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "date_added" {
             // Date added now uses discovery time for series
             let key = OptionalDateKey::new(Some(self.discovered_at));
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "release_date" {
             // First air date requires TMDB details
             let date = match &self.details {
-                MediaDetailsOption::Details(TmdbDetails::Series(series_details)) => {
-                    series_details.first_air_date.as_ref().and_then(|date_str| {
-                        // Parse the date string (expected format: YYYY-MM-DD)
-                        use chrono::{NaiveDate, NaiveTime, Utc};
-                        NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-                            .ok()
-                            .and_then(|date| {
-                                let naive_datetime =
-                                    date.and_time(NaiveTime::from_hms_opt(0, 0, 0)?);
-                                naive_datetime.and_local_timezone(Utc).single()
-                            })
-                    })
+                MediaDetailsOption::Details(TmdbDetails::Series(
+                    series_details,
+                )) => {
+                    series_details.first_air_date.as_ref().and_then(
+                        |date_str| {
+                            // Parse the date string (expected format: YYYY-MM-DD)
+                            use chrono::{NaiveDate, NaiveTime, Utc};
+                            NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                                .ok()
+                                .and_then(|date| {
+                                    let naive_datetime = date.and_time(
+                                        NaiveTime::from_hms_opt(0, 0, 0)?,
+                                    );
+                                    naive_datetime
+                                        .and_local_timezone(Utc)
+                                        .single()
+                                })
+                        },
+                    )
                 }
                 _ => None,
             };
             let key = OptionalDateKey::new(date);
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "rating" {
             // Rating (vote_average) requires TMDB details
             let rating = match &self.details {
-                MediaDetailsOption::Details(TmdbDetails::Series(series_details)) => {
-                    series_details.vote_average
-                }
+                MediaDetailsOption::Details(TmdbDetails::Series(
+                    series_details,
+                )) => series_details.vote_average,
                 _ => None,
             };
             let key = OptionalFloatKey::new(rating);
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "popularity" {
             // Popularity requires TMDB details
             let popularity = match &self.details {
-                MediaDetailsOption::Details(TmdbDetails::Series(series_details)) => {
-                    series_details.popularity
-                }
+                MediaDetailsOption::Details(TmdbDetails::Series(
+                    series_details,
+                )) => series_details.popularity,
                 _ => None,
             };
             let key = OptionalFloatKey::new(popularity);
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "last_watched" {
             // Last watched requires user context and watch status data
             // For now, return missing data - this will be implemented with watch status integration
             let key = <OptionalDateKey as SortKey>::missing();
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else if F::ID == "watch_progress" {
             // Watch progress requires user context and watch status data
             // For now, return missing data - this will be implemented with watch status integration
             let key = <OptionalFloatKey as SortKey>::missing();
-            *Box::<dyn std::any::Any>::downcast(Box::new(key) as Box<dyn std::any::Any>).unwrap()
+            *Box::<dyn std::any::Any>::downcast(
+                Box::new(key) as Box<dyn std::any::Any>
+            )
+            .unwrap()
         } else {
             // This should never happen if the trait system is used correctly
             panic!("Unknown sort field ID: {}", F::ID)
@@ -209,10 +277,13 @@ impl SortableEntity for SeriesReference {
 mod tests {
     use super::*;
     use crate::query::sorting::fields::{
-        DateAddedField, PopularityField, RatingField, ReleaseDateField, RuntimeField, TitleField,
+        DateAddedField, PopularityField, RatingField, ReleaseDateField,
+        RuntimeField, TitleField,
     };
     use crate::query::sorting::strategy::{FieldSort, SortStrategy};
-    use crate::types::details::{EnhancedMovieDetails, ExternalIds, SpokenLanguage};
+    use crate::types::details::{
+        EnhancedMovieDetails, ExternalIds, SpokenLanguage,
+    };
     use crate::types::files::MediaFile;
     use crate::types::ids::{LibraryID, MovieID};
     use crate::types::image::MediaImages;
@@ -286,7 +357,8 @@ mod tests {
 
     fn create_test_movie_without_details() -> MovieReference {
         let mut movie = create_test_movie_with_details();
-        movie.details = MediaDetailsOption::Endpoint("/movies/test-movie-1".to_string());
+        movie.details =
+            MediaDetailsOption::Endpoint("/movies/test-movie-1".to_string());
         movie
     }
 
@@ -349,14 +421,17 @@ mod tests {
     #[test]
     fn test_missing_optional_values_stay_last_on_desc() {
         let mut with_details = create_test_movie_with_details();
-        with_details.title = MovieTitle::new("Rated Movie".to_string()).unwrap();
+        with_details.title =
+            MovieTitle::new("Rated Movie".to_string()).unwrap();
 
         let mut without_details = create_test_movie_without_details();
-        without_details.title = MovieTitle::new("Unrated Movie".to_string()).unwrap();
+        without_details.title =
+            MovieTitle::new("Unrated Movie".to_string()).unwrap();
 
         let mut movies = vec![without_details.clone(), with_details.clone()];
 
-        let sorter = FieldSort::<MovieReference, RatingField>::new(RatingField, true);
+        let sorter =
+            FieldSort::<MovieReference, RatingField>::new(RatingField, true);
         sorter.sort(&mut movies);
 
         assert_eq!(movies[0].title, with_details.title);

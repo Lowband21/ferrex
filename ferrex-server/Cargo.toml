@@ -27,6 +27,7 @@ rkyv.workspace = true
 toml = { version = "^0.9", default-features = false, features = [
   "parse",
   "serde",
+  "display",
 ] }
 
 # Concurrency
@@ -55,15 +56,19 @@ redis.workspace = true
 
 # UUID generation
 uuid.workspace = true
+url.workspace = true
 
 clap = { version = "^4.5", default-features = false, features = [
   "std",
   "env",
   "derive",
 ] }
+dialoguer = "^0.11"
+humantime = "^2.1"
 
 # Configuration
-dotenv = "^0.15"
+dotenvy = "^0.15.7"
+
 # Consider for future use
 # config.workspace = true
 

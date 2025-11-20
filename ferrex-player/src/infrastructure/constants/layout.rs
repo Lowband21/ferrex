@@ -63,7 +63,8 @@ pub mod animation {
         Flip,
     }
 
-    pub const DEFAULT_POSTER_ANIMATION: PosterAnimationKind = PosterAnimationKind::Fade;
+    pub const DEFAULT_POSTER_ANIMATION: PosterAnimationKind =
+        PosterAnimationKind::Fade;
 }
 
 /// Grid layout constants
@@ -227,7 +228,11 @@ pub mod calculations {
     }
 
     /// Calculate padding for centered grid layout
-    pub fn calculate_grid_padding(viewport_width: f32, columns: usize, scale: f32) -> f32 {
+    pub fn calculate_grid_padding(
+        viewport_width: f32,
+        columns: usize,
+        scale: f32,
+    ) -> f32 {
         let (container_width, _) = get_container_dimensions(scale);
         let effective_spacing = grid::EFFECTIVE_SPACING;
 
@@ -243,8 +248,10 @@ pub mod calculations {
         let base_height = poster::BASE_HEIGHT * scale;
 
         // Calculate animation padding for each dimension
-        let h_padding = super::animation::calculate_horizontal_padding(base_width);
-        let v_padding = super::animation::calculate_vertical_padding(base_height);
+        let h_padding =
+            super::animation::calculate_horizontal_padding(base_width);
+        let v_padding =
+            super::animation::calculate_vertical_padding(base_height);
 
         // Container must fit the base poster plus animation padding
         (base_width + h_padding * 2.0, base_height + v_padding * 2.0)

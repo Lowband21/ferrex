@@ -1,6 +1,6 @@
 use crate::demo::{
-    DemoPolicy, allow_zero_length_for, clear_registered_libraries, init_demo_context,
-    register_demo_library,
+    DemoPolicy, allow_zero_length_for, clear_registered_libraries,
+    init_demo_context, register_demo_library,
 };
 use crate::types::{
     ids::LibraryID,

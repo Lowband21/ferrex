@@ -67,11 +67,12 @@ impl QueryComplexityGuard {
         );
 
         // Check against maximum complexity
-        let max_allowed = if self.config.restrict_peak_hours && self.is_peak_hours() {
-            self.config.peak_hours_max_complexity
-        } else {
-            self.config.max_complexity_score
-        };
+        let max_allowed =
+            if self.config.restrict_peak_hours && self.is_peak_hours() {
+                self.config.peak_hours_max_complexity
+            } else {
+                self.config.max_complexity_score
+            };
 
         if complexity_score > max_allowed {
             warn!(
@@ -203,7 +204,10 @@ impl QueryComplexityGuard {
                 );
             }
             if search.fuzzy {
-                suggestions.push("Consider using exact search instead of fuzzy search".to_string());
+                suggestions.push(
+                    "Consider using exact search instead of fuzzy search"
+                        .to_string(),
+                );
             }
         }
 
@@ -216,11 +220,15 @@ impl QueryComplexityGuard {
         }
 
         if query.pagination.offset > 1000 {
-            suggestions
-                .push("Consider using cursor-based pagination for large offsets".to_string());
+            suggestions.push(
+                "Consider using cursor-based pagination for large offsets"
+                    .to_string(),
+            );
         }
 
-        if query.filters.watch_status.is_some() && !query.filters.library_ids.is_empty() {
+        if query.filters.watch_status.is_some()
+            && !query.filters.library_ids.is_empty()
+        {
             suggestions.push(
                 "Consider removing library filter when using watch status filter".to_string(),
             );
@@ -241,7 +249,9 @@ mod tests {
     use super::*;
     use crate::api_types::ScalarRange;
     use crate::query::types::SortOrder;
-    use crate::query_prelude::{MediaFilters, Pagination, SearchField, SearchQuery, SortCriteria};
+    use crate::query_prelude::{
+        MediaFilters, Pagination, SearchField, SearchQuery, SortCriteria,
+    };
     use uuid::Uuid;
 
     #[test]
@@ -280,8 +290,12 @@ mod tests {
                     "Comedy".to_string(),
                 ],
                 year_range: Some(ScalarRange::new(2000, 2023)),
-                rating_range: Some(ScalarRange::new(7.0, 10.0).to_rating_value()),
-                watch_status: Some(crate::watch_status::WatchStatusFilter::InProgress),
+                rating_range: Some(
+                    ScalarRange::new(7.0, 10.0).to_rating_value(),
+                ),
+                watch_status: Some(
+                    crate::watch_status::WatchStatusFilter::InProgress,
+                ),
                 ..Default::default()
             },
             sort: SortCriteria {

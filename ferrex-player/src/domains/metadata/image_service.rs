@@ -50,7 +50,8 @@ pub struct UnifiedImageService {
 }
 
 // Minimum delay between retry attempts for transient (e.g., 404) failures
-const RETRY_THROTTLE: std::time::Duration = std::time::Duration::from_millis(750);
+const RETRY_THROTTLE: std::time::Duration =
+    std::time::Duration::from_millis(750);
 
 #[cfg_attr(
     any(
@@ -100,7 +101,9 @@ impl UnifiedImageService {
         self.cache
             .get(request)
             .and_then(|entry| match &entry.state {
-                LoadState::Loaded(handle) => Some((handle.clone(), entry.loaded_at)),
+                LoadState::Loaded(handle) => {
+                    Some((handle.clone(), entry.loaded_at))
+                }
                 _ => None,
             })
     }
@@ -109,7 +112,8 @@ impl UnifiedImageService {
     pub fn take_loaded_entry(
         &self,
         request: &ImageRequest,
-    ) -> Option<(Handle, Option<std::time::Instant>, Option<FirstDisplayHint>)> {
+    ) -> Option<(Handle, Option<std::time::Instant>, Option<FirstDisplayHint>)>
+    {
         let mut entry = self.cache.get_mut(request)?;
         let handle = match &entry.state {
             LoadState::Loaded(handle) => handle.clone(),
@@ -141,11 +145,13 @@ impl UnifiedImageService {
             }
 
             let is_failed = matches!(entry.state, LoadState::Failed(_));
-            let is_failed_404 =
-                matches!(entry.state, LoadState::Failed(ref err) if err.contains("404"));
+            let is_failed_404 = matches!(entry.state, LoadState::Failed(ref err) if err.contains("404"));
 
             // For non-404 errors respect the max retry limit
-            if is_failed && !is_failed_404 && entry.retry_count >= MAX_RETRY_ATTEMPTS {
+            if is_failed
+                && !is_failed_404
+                && entry.retry_count >= MAX_RETRY_ATTEMPTS
+            {
                 entry.last_accessed = now;
                 log::debug!(
                     "Skipping image request for {:?} - exceeded max retries ({}/{})",
@@ -188,8 +194,13 @@ impl UnifiedImageService {
                     queue.change_priority(&request, new_priority);
                     // Send wake-up signal to notify loader of priority change
                     match self.load_sender.send(()) {
-                        Ok(_) => log::debug!("Sent wake-up signal for priority upgrade"),
-                        Err(e) => log::error!("Failed to send wake-up signal: {:?}", e),
+                        Ok(_) => log::debug!(
+                            "Sent wake-up signal for priority upgrade"
+                        ),
+                        Err(e) => log::error!(
+                            "Failed to send wake-up signal: {:?}",
+                            e
+                        ),
                     }
                 }
             } else {
@@ -197,8 +208,13 @@ impl UnifiedImageService {
                 queue.push(request.clone(), new_priority);
                 // Send wake-up signal to notify loader of new request
                 match self.load_sender.send(()) {
-                    Ok(_) => log::debug!("Sent wake-up signal for new request: {:?}", request),
-                    Err(e) => log::error!("Failed to send wake-up signal: {:?}", e),
+                    Ok(_) => log::debug!(
+                        "Sent wake-up signal for new request: {:?}",
+                        request
+                    ),
+                    Err(e) => {
+                        log::error!("Failed to send wake-up signal: {:?}", e)
+                    }
                 }
             }
         }
@@ -356,7 +372,8 @@ impl UnifiedImageService {
                 && (matches!(entry.state, LoadState::Failed(_))
                     || (matches!(entry.state, LoadState::Loading)
                         && self.loading.get(entry.key()).is_none_or(|start| {
-                            now.duration_since(*start) > std::time::Duration::from_secs(30)
+                            now.duration_since(*start)
+                                > std::time::Duration::from_secs(30)
                         })))
             {
                 to_remove.push(entry.key().clone());

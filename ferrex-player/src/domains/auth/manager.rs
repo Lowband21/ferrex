@@ -13,7 +13,8 @@ use ferrex_core::api_routes::v1;
 use ferrex_core::auth::domain::value_objects::SessionScope;
 use ferrex_core::auth::{AuthResult as ServerAuthResult, DeviceInfo};
 use ferrex_core::player_prelude::{
-    ApiResponse, AuthToken, LoginRequest, Platform, RegisterRequest, User, UserPermissions,
+    ApiResponse, AuthToken, LoginRequest, Platform, RegisterRequest, User,
+    UserPermissions,
 };
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use log::{debug, error, info, warn};
@@ -104,7 +105,10 @@ impl DeviceIdentity {
         }
 
         let content = serde_json::to_string_pretty(self).map_err(|e| {
-            AuthError::Internal(format!("Failed to serialize device identity: {}", e))
+            AuthError::Internal(format!(
+                "Failed to serialize device identity: {}",
+                e
+            ))
         })?;
         tokio::fs::write(&path, content)
             .await
@@ -113,11 +117,12 @@ impl DeviceIdentity {
     }
 
     fn config_path() -> AuthResult<PathBuf> {
-        let proj_dirs = ProjectDirs::from("", "ferrex", "media-player").ok_or_else(|| {
-            AuthError::Storage(StorageError::InitFailed(
-                "Unable to determine config directory".to_string(),
-            ))
-        })?;
+        let proj_dirs = ProjectDirs::from("", "ferrex", "media-player")
+            .ok_or_else(|| {
+                AuthError::Storage(StorageError::InitFailed(
+                    "Unable to determine config directory".to_string(),
+                ))
+            })?;
         Ok(proj_dirs.config_dir().join("device.json"))
     }
 }
@@ -227,7 +232,9 @@ impl AuthManager {
                         auth_manager
                             .refresh_access_token_internal()
                             .await
-                            .map_err(|e| anyhow::anyhow!("Token refresh failed: {}", e))
+                            .map_err(|e| {
+                                anyhow::anyhow!("Token refresh failed: {}", e)
+                            })
                     }
                 })
                 .await;
@@ -241,12 +248,13 @@ impl AuthManager {
     }
 
     pub async fn load_from_keychain(&self) -> AuthResult<Option<StoredAuth>> {
-        let hardware_fingerprint = generate_hardware_fingerprint().await.map_err(|e| {
-            AuthError::Storage(StorageError::InitFailed(format!(
-                "Failed to get hardware fingerprint: {}",
-                e
-            )))
-        })?;
+        let hardware_fingerprint =
+            generate_hardware_fingerprint().await.map_err(|e| {
+                AuthError::Storage(StorageError::InitFailed(format!(
+                    "Failed to get hardware fingerprint: {}",
+                    e
+                )))
+            })?;
 
         match self.auth_storage.load_auth(&hardware_fingerprint).await {
             Ok(Some(stored_auth)) => {
@@ -270,7 +278,9 @@ impl AuthManager {
                 );
 
                 // First check device trust expiry (30-day persistence)
-                if let Some(device_trust_expires) = stored_auth.device_trust_expires_at {
+                if let Some(device_trust_expires) =
+                    stored_auth.device_trust_expires_at
+                {
                     let now = Utc::now();
                     if now > device_trust_expires {
                         warn!(
@@ -280,7 +290,10 @@ impl AuthManager {
                         self.clear_keychain().await?;
                         return Ok(None);
                     }
-                    info!("Device trust still valid until {}", device_trust_expires);
+                    info!(
+                        "Device trust still valid until {}",
+                        device_trust_expires
+                    );
                     let mut guard = self.device_trust_expires_at.lock().await;
                     *guard = Some(device_trust_expires);
                 } else {
@@ -289,12 +302,15 @@ impl AuthManager {
                 }
 
                 // Check if this is a non-JWT token and calculate actual expiry
-                let parts: Vec<&str> = stored_auth.token.access_token.split('.').collect();
+                let parts: Vec<&str> =
+                    stored_auth.token.access_token.split('.').collect();
                 if parts.len() != 3 {
                     // For non-JWT tokens, check if it's expired based on stored_at + expires_in
-                    let elapsed = Utc::now().signed_duration_since(stored_auth.stored_at);
+                    let elapsed =
+                        Utc::now().signed_duration_since(stored_auth.stored_at);
                     let elapsed_seconds = elapsed.num_seconds();
-                    let remaining_seconds = stored_auth.token.expires_in as i64 - elapsed_seconds;
+                    let remaining_seconds =
+                        stored_auth.token.expires_in as i64 - elapsed_seconds;
 
                     info!(
                         "Non-JWT token: elapsed {} seconds, remaining {} seconds",
@@ -306,17 +322,20 @@ impl AuthManager {
                         if stored_auth.device_trust_expires_at.is_some()
                             && !stored_auth.token.refresh_token.is_empty()
                         {
-                            info!("Token expired but device trust valid - attempting refresh");
+                            info!(
+                                "Token expired but device trust valid - attempting refresh"
+                            );
 
                             // Set up auth state for refresh
-                            let permissions =
-                                stored_auth.permissions.clone().unwrap_or_else(|| {
-                                    UserPermissions {
-                                        user_id: stored_auth.user.id,
-                                        roles: Vec::new(),
-                                        permissions: std::collections::HashMap::new(),
-                                        permission_details: None,
-                                    }
+                            let permissions = stored_auth
+                                .permissions
+                                .clone()
+                                .unwrap_or_else(|| UserPermissions {
+                                    user_id: stored_auth.user.id,
+                                    roles: Vec::new(),
+                                    permissions: std::collections::HashMap::new(
+                                    ),
+                                    permission_details: None,
                                 });
                             self.auth_state.authenticate(
                                 stored_auth.user.clone(),
@@ -334,15 +353,22 @@ impl AuthManager {
                             match self.refresh_access_token().await {
                                 Ok(()) => {
                                     // Reload the refreshed auth
-                                    if let Ok(Some(refreshed)) =
-                                        self.auth_storage.load_auth(&hardware_fingerprint).await
+                                    if let Ok(Some(refreshed)) = self
+                                        .auth_storage
+                                        .load_auth(&hardware_fingerprint)
+                                        .await
                                     {
-                                        info!("[AuthManager] Successfully refreshed expired token");
+                                        info!(
+                                            "[AuthManager] Successfully refreshed expired token"
+                                        );
                                         return Ok(Some(refreshed));
                                     }
                                 }
                                 Err(e) => {
-                                    warn!("[AuthManager] Failed to refresh token: {}", e);
+                                    warn!(
+                                        "[AuthManager] Failed to refresh token: {}",
+                                        e
+                                    );
                                     // Fall through to clear auth
                                 }
                             }
@@ -367,17 +393,20 @@ impl AuthManager {
                         if stored_auth.device_trust_expires_at.is_some()
                             && !stored_auth.token.refresh_token.is_empty()
                         {
-                            info!("JWT expired but device trust valid - attempting refresh");
+                            info!(
+                                "JWT expired but device trust valid - attempting refresh"
+                            );
 
                             // Set up auth state for refresh
-                            let permissions =
-                                stored_auth.permissions.clone().unwrap_or_else(|| {
-                                    UserPermissions {
-                                        user_id: stored_auth.user.id,
-                                        roles: Vec::new(),
-                                        permissions: std::collections::HashMap::new(),
-                                        permission_details: None,
-                                    }
+                            let permissions = stored_auth
+                                .permissions
+                                .clone()
+                                .unwrap_or_else(|| UserPermissions {
+                                    user_id: stored_auth.user.id,
+                                    roles: Vec::new(),
+                                    permissions: std::collections::HashMap::new(
+                                    ),
+                                    permission_details: None,
                                 });
                             self.auth_state.authenticate(
                                 stored_auth.user.clone(),
@@ -395,15 +424,22 @@ impl AuthManager {
                             match self.refresh_access_token().await {
                                 Ok(()) => {
                                     // Reload the refreshed auth
-                                    if let Ok(Some(refreshed)) =
-                                        self.auth_storage.load_auth(&hardware_fingerprint).await
+                                    if let Ok(Some(refreshed)) = self
+                                        .auth_storage
+                                        .load_auth(&hardware_fingerprint)
+                                        .await
                                     {
-                                        info!("[AuthManager] Successfully refreshed expired JWT");
+                                        info!(
+                                            "[AuthManager] Successfully refreshed expired JWT"
+                                        );
                                         return Ok(Some(refreshed));
                                     }
                                 }
                                 Err(e) => {
-                                    warn!("[AuthManager] Failed to refresh JWT: {}", e);
+                                    warn!(
+                                        "[AuthManager] Failed to refresh JWT: {}",
+                                        e
+                                    );
                                     // Fall through to clear auth
                                 }
                             }
@@ -428,8 +464,11 @@ impl AuthManager {
                 // If decryption failed, it's likely due to hardware fingerprint change
                 // Clear the old cache to allow fresh login
                 if e.to_string().contains("Decryption failed") {
-                    info!("Clearing invalid auth cache due to decryption failure");
-                    if let Err(clear_err) = self.auth_storage.clear_auth().await {
+                    info!(
+                        "Clearing invalid auth cache due to decryption failure"
+                    );
+                    if let Err(clear_err) = self.auth_storage.clear_auth().await
+                    {
                         error!("Failed to clear auth cache: {}", clear_err);
                     }
                 }
@@ -440,7 +479,10 @@ impl AuthManager {
     }
 
     /// Apply stored authentication (actually authenticate the user)
-    pub async fn apply_stored_auth(&self, stored_auth: StoredAuth) -> AuthResult<()> {
+    pub async fn apply_stored_auth(
+        &self,
+        stored_auth: StoredAuth,
+    ) -> AuthResult<()> {
         info!(
             "Applying stored authentication for user: {}",
             stored_auth.user.username
@@ -471,8 +513,10 @@ impl AuthManager {
                 self.api_client.set_token(None).await;
                 self.auth_state.logout();
 
-                if matches!(&err, AuthError::Network(NetworkError::InvalidCredentials))
-                    && let Err(clear_err) = self.clear_keychain().await
+                if matches!(
+                    &err,
+                    AuthError::Network(NetworkError::InvalidCredentials)
+                ) && let Err(clear_err) = self.clear_keychain().await
                 {
                     warn!("Failed to clear invalid auth cache: {}", clear_err);
                 }
@@ -483,7 +527,9 @@ impl AuthManager {
     }
 
     /// Validate that the currently configured session is still authorized
-    pub async fn validate_session(&self) -> AuthResult<(User, UserPermissions)> {
+    pub async fn validate_session(
+        &self,
+    ) -> AuthResult<(User, UserPermissions)> {
         let (token, server_url) = self
             .auth_state
             .with_state(|state| match state {
@@ -498,8 +544,12 @@ impl AuthManager {
 
         match self.fetch_user_and_permissions().await {
             Ok((user, permissions)) => {
-                self.auth_state
-                    .authenticate(user.clone(), token, permissions.clone(), server_url);
+                self.auth_state.authenticate(
+                    user.clone(),
+                    token,
+                    permissions.clone(),
+                    server_url,
+                );
 
                 if let Err(err) = self.save_current_auth().await {
                     warn!("Failed to persist refreshed auth: {}", err);
@@ -511,8 +561,10 @@ impl AuthManager {
                 self.api_client.set_token(None).await;
                 self.auth_state.logout();
 
-                if matches!(&err, AuthError::Network(NetworkError::InvalidCredentials))
-                    && let Err(clear_err) = self.clear_keychain().await
+                if matches!(
+                    &err,
+                    AuthError::Network(NetworkError::InvalidCredentials)
+                ) && let Err(clear_err) = self.clear_keychain().await
                 {
                     warn!("Failed to clear invalid auth cache: {}", clear_err);
                 }
@@ -522,9 +574,12 @@ impl AuthManager {
         }
     }
 
-    async fn fetch_user_and_permissions(&self) -> AuthResult<(User, UserPermissions)> {
+    async fn fetch_user_and_permissions(
+        &self,
+    ) -> AuthResult<(User, UserPermissions)> {
         let user: User = self.fetch_api_data(v1::users::CURRENT).await?;
-        let permissions: UserPermissions = self.fetch_api_data(v1::roles::MY_PERMISSIONS).await?;
+        let permissions: UserPermissions =
+            self.fetch_api_data(v1::roles::MY_PERMISSIONS).await?;
         Ok((user, permissions))
     }
 
@@ -535,16 +590,18 @@ impl AuthManager {
         let url = self.api_client.build_url(path);
         let request = self.api_client.client.get(&url);
         let request = self.api_client.build_request(request).await;
-        let response = request
-            .send()
-            .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let response = request.send().await.map_err(|e| {
+            AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+        })?;
 
         match response.status() {
             StatusCode::OK => {
-                let api_response: ApiResponse<T> = response.json().await.map_err(|e| {
-                    AuthError::Network(NetworkError::InvalidResponse(e.to_string()))
-                })?;
+                let api_response: ApiResponse<T> =
+                    response.json().await.map_err(|e| {
+                        AuthError::Network(NetworkError::InvalidResponse(
+                            e.to_string(),
+                        ))
+                    })?;
 
                 api_response.data.ok_or_else(|| {
                     AuthError::Network(NetworkError::InvalidResponse(format!(
@@ -553,7 +610,9 @@ impl AuthManager {
                     )))
                 })
             }
-            StatusCode::UNAUTHORIZED => Err(AuthError::Network(NetworkError::InvalidCredentials)),
+            StatusCode::UNAUTHORIZED => {
+                Err(AuthError::Network(NetworkError::InvalidCredentials))
+            }
             status => {
                 let body = response
                     .text()
@@ -569,12 +628,13 @@ impl AuthManager {
 
     /// Save authentication to encrypted storage
     async fn save_to_keychain(&self, auth: &StoredAuth) -> AuthResult<()> {
-        let hardware_fingerprint = generate_hardware_fingerprint().await.map_err(|e| {
-            AuthError::Storage(StorageError::InitFailed(format!(
-                "Failed to get hardware fingerprint: {}",
-                e
-            )))
-        })?;
+        let hardware_fingerprint =
+            generate_hardware_fingerprint().await.map_err(|e| {
+                AuthError::Storage(StorageError::InitFailed(format!(
+                    "Failed to get hardware fingerprint: {}",
+                    e
+                )))
+            })?;
 
         // Log what we're saving for debugging
         info!(
@@ -587,10 +647,12 @@ impl AuthManager {
             .save_auth(auth, &hardware_fingerprint)
             .await
             .map_err(|e| {
-                AuthError::Storage(StorageError::WriteFailed(std::io::Error::other(format!(
-                    "Failed to save auth: {}",
-                    e
-                ))))
+                AuthError::Storage(StorageError::WriteFailed(
+                    std::io::Error::other(format!(
+                        "Failed to save auth: {}",
+                        e
+                    )),
+                ))
             })?;
 
         info!("Saved authentication to encrypted storage");
@@ -606,12 +668,14 @@ impl AuthManager {
     async fn refresh_access_token_internal(&self) -> AuthResult<AuthToken> {
         // Get current refresh token
         let refresh_token = self.auth_state.with_state(|state| match state {
-            AuthState::Authenticated { token, .. } => Some(token.refresh_token.clone()),
+            AuthState::Authenticated { token, .. } => {
+                Some(token.refresh_token.clone())
+            }
             _ => None,
         });
 
-        let refresh_token =
-            refresh_token.ok_or_else(|| AuthError::Token(TokenError::NotAuthenticated))?;
+        let refresh_token = refresh_token
+            .ok_or_else(|| AuthError::Token(TokenError::NotAuthenticated))?;
 
         if refresh_token.is_empty() {
             return Err(AuthError::Token(TokenError::RefreshTokenMissing));
@@ -622,7 +686,8 @@ impl AuthManager {
         // Temporarily disable the refresh callback to avoid infinite recursion
         let response: AuthToken = {
             // Create a new client without callback for this request
-            let temp_client = ApiClient::new(self.api_client.base_url().to_string());
+            let temp_client =
+                ApiClient::new(self.api_client.base_url().to_string());
             temp_client
                 .set_token(Some(AuthToken {
                     access_token: String::new(),
@@ -640,7 +705,9 @@ impl AuthManager {
                 .await
                 .map_err(|e| {
                     warn!("[AuthManager] Token refresh failed: {}", e);
-                    AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+                    AuthError::Network(NetworkError::RequestFailed(
+                        e.to_string(),
+                    ))
                 })?
         };
 
@@ -653,7 +720,11 @@ impl AuthManager {
                     permissions,
                     server_url,
                     ..
-                } => Some((user.clone(), permissions.clone(), server_url.clone())),
+                } => Some((
+                    user.clone(),
+                    permissions.clone(),
+                    server_url.clone(),
+                )),
                 _ => None,
             })
             .ok_or_else(|| AuthError::Token(TokenError::NotAuthenticated))?;
@@ -718,10 +789,9 @@ impl AuthManager {
     /// Clear stored authentication from encrypted storage
     pub async fn clear_keychain(&self) -> AuthResult<()> {
         self.auth_storage.clear_auth().await.map_err(|e| {
-            AuthError::Storage(StorageError::WriteFailed(std::io::Error::other(format!(
-                "Failed to clear auth: {}",
-                e
-            ))))
+            AuthError::Storage(StorageError::WriteFailed(
+                std::io::Error::other(format!("Failed to clear auth: {}", e)),
+            ))
         })?;
 
         info!("Cleared authentication from storage");
@@ -746,7 +816,9 @@ impl AuthManager {
             .api_client
             .post(v1::auth::LOGIN, &request)
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         info!(
             "Login received token with expires_in: {} seconds ({} minutes)",
@@ -758,18 +830,19 @@ impl AuthManager {
         self.api_client.set_token(Some(token.clone())).await;
 
         // Get user profile
-        let user: User = self
-            .api_client
-            .get(v1::users::CURRENT)
-            .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let user: User =
+            self.api_client.get(v1::users::CURRENT).await.map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         // Get user permissions
         let permissions: UserPermissions = self
             .api_client
             .get(v1::roles::MY_PERMISSIONS)
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         // Update auth state using AuthStateStore
         self.auth_state.authenticate(
@@ -806,24 +879,27 @@ impl AuthManager {
             .api_client
             .post(v1::auth::REGISTER, &request)
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         // Set token in API client
         self.api_client.set_token(Some(token.clone())).await;
 
         // Get user profile
-        let user: User = self
-            .api_client
-            .get(v1::users::CURRENT)
-            .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let user: User =
+            self.api_client.get(v1::users::CURRENT).await.map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         // Get user permissions
         let permissions: UserPermissions = self
             .api_client
             .get(v1::roles::MY_PERMISSIONS)
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         // Update auth state using AuthStateStore
         self.auth_state.authenticate(
@@ -853,8 +929,10 @@ impl AuthManager {
             // Use a short timeout for logout
             let _ = tokio::time::timeout(
                 std::time::Duration::from_secs(2),
-                api_client
-                    .post::<EmptyRequest, serde_json::Value>(v1::auth::LOGOUT, &EmptyRequest {}),
+                api_client.post::<EmptyRequest, serde_json::Value>(
+                    v1::auth::LOGOUT,
+                    &EmptyRequest {},
+                ),
             )
             .await;
         });
@@ -899,12 +977,17 @@ impl AuthManager {
                 ))
             })?
             .ok_or_else(|| {
-                AuthError::Storage(StorageError::InitFailed("device key not found".to_string()))
+                AuthError::Storage(StorageError::InitFailed(
+                    "device key not found".to_string(),
+                ))
             })?;
-        let signing_key =
-            SigningKey::from_bytes(signing_key_bytes.as_slice().try_into().map_err(|_| {
-                AuthError::Storage(StorageError::InitFailed("invalid device key".to_string()))
-            })?);
+        let signing_key = SigningKey::from_bytes(
+            signing_key_bytes.as_slice().try_into().map_err(|_| {
+                AuthError::Storage(StorageError::InitFailed(
+                    "invalid device key".to_string(),
+                ))
+            })?,
+        );
 
         // Request a challenge
         #[derive(serde::Serialize)]
@@ -923,14 +1006,20 @@ impl AuthManager {
             .api_client
             .post(v1::auth::device::PIN_CHALLENGE, &ChallengeReq { device_id })
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
-        let nonce = BASE64.decode(challenge.nonce.as_bytes()).map_err(|_| {
-            AuthError::Storage(StorageError::InitFailed("invalid nonce".to_string()))
-        })?;
-        let pin_salt = BASE64
-            .decode(challenge.pin_salt.as_bytes())
-            .map_err(|_| AuthError::Internal("invalid PIN salt from server".to_string()))?;
+        let nonce =
+            BASE64.decode(challenge.nonce.as_bytes()).map_err(|_| {
+                AuthError::Storage(StorageError::InitFailed(
+                    "invalid nonce".to_string(),
+                ))
+            })?;
+        let pin_salt =
+            BASE64.decode(challenge.pin_salt.as_bytes()).map_err(|_| {
+                AuthError::Internal("invalid PIN salt from server".to_string())
+            })?;
         // Build message v1: "Ferrex-PIN-v1" || challenge_id || nonce || user_id
         const CTX: &[u8] = b"Ferrex-PIN-v1";
         let mut msg = Vec::with_capacity(CTX.len() + 16 + nonce.len() + 16);
@@ -951,13 +1040,19 @@ impl AuthManager {
         self.api_client
             .post::<_, serde_json::Value>(v1::auth::device::SET_PIN, &request)
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         Ok(())
     }
 
     /// Change PIN for current device
-    pub async fn change_device_pin(&self, current_pin: String, new_pin: String) -> AuthResult<()> {
+    pub async fn change_device_pin(
+        &self,
+        current_pin: String,
+        new_pin: String,
+    ) -> AuthResult<()> {
         let device_id = self.get_or_create_device_id().await?;
 
         #[derive(serde::Serialize)]
@@ -985,12 +1080,17 @@ impl AuthManager {
                 ))
             })?
             .ok_or_else(|| {
-                AuthError::Storage(StorageError::InitFailed("device key not found".to_string()))
+                AuthError::Storage(StorageError::InitFailed(
+                    "device key not found".to_string(),
+                ))
             })?;
-        let signing_key =
-            SigningKey::from_bytes(signing_key_bytes.as_slice().try_into().map_err(|_| {
-                AuthError::Storage(StorageError::InitFailed("invalid device key".to_string()))
-            })?);
+        let signing_key = SigningKey::from_bytes(
+            signing_key_bytes.as_slice().try_into().map_err(|_| {
+                AuthError::Storage(StorageError::InitFailed(
+                    "invalid device key".to_string(),
+                ))
+            })?,
+        );
 
         // Request a challenge
         #[derive(serde::Serialize)]
@@ -1008,14 +1108,21 @@ impl AuthManager {
             .api_client
             .post(v1::auth::device::PIN_CHALLENGE, &ChallengeReq { device_id })
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
-        let nonce = BASE64.decode(challenge.nonce.as_bytes()).map_err(|_| {
-            AuthError::Storage(StorageError::InitFailed("invalid nonce".to_string()))
-        })?;
-        let pin_salt = BASE64
-            .decode(challenge.pin_salt.as_bytes())
-            .map_err(|_| AuthError::Internal("invalid PIN salt from server".to_string()))?;
-        let current_proof = Self::derive_client_pin_proof(&current_pin, &pin_salt)?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
+        let nonce =
+            BASE64.decode(challenge.nonce.as_bytes()).map_err(|_| {
+                AuthError::Storage(StorageError::InitFailed(
+                    "invalid nonce".to_string(),
+                ))
+            })?;
+        let pin_salt =
+            BASE64.decode(challenge.pin_salt.as_bytes()).map_err(|_| {
+                AuthError::Internal("invalid PIN salt from server".to_string())
+            })?;
+        let current_proof =
+            Self::derive_client_pin_proof(&current_pin, &pin_salt)?;
         let new_proof = Self::derive_client_pin_proof(&new_pin, &pin_salt)?;
         // Build message v1: "Ferrex-PIN-v1" || challenge_id || nonce || user_id
         const CTX: &[u8] = b"Ferrex-PIN-v1";
@@ -1036,15 +1143,23 @@ impl AuthManager {
         };
 
         self.api_client
-            .post::<_, serde_json::Value>(v1::auth::device::CHANGE_PIN, &request)
+            .post::<_, serde_json::Value>(
+                v1::auth::device::CHANGE_PIN,
+                &request,
+            )
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         Ok(())
     }
 
     /// Check if user has PIN on this device
-    pub async fn check_device_auth(&self, user_id: Uuid) -> AuthResult<DeviceAuthStatus> {
+    pub async fn check_device_auth(
+        &self,
+        user_id: Uuid,
+    ) -> AuthResult<DeviceAuthStatus> {
         // Try offline check first
         if let Some(status) = self.check_cached_device_status(user_id).await {
             log::info!(
@@ -1072,11 +1187,10 @@ impl AuthManager {
             device_id
         );
 
-        let status: DeviceAuthStatus = self
-            .api_client
-            .get(&status_path)
-            .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let status: DeviceAuthStatus =
+            self.api_client.get(&status_path).await.map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         log::info!(
             "[Auth] Device status for user {}: registered={}, has_pin={}, attempts_remaining={:?}",
@@ -1092,7 +1206,10 @@ impl AuthManager {
     }
 
     /// Handle authentication result
-    async fn handle_auth_result(&self, result: ServerAuthResult) -> AuthResult<()> {
+    async fn handle_auth_result(
+        &self,
+        result: ServerAuthResult,
+    ) -> AuthResult<()> {
         let now = Utc::now();
         let trust_expires_at = result
             .device_registration
@@ -1100,14 +1217,15 @@ impl AuthManager {
             .and_then(|reg| reg.expires_at);
 
         // Extract actual expiry from the JWT token, falling back to trust expiry when available
-        let mut expires_in = extract_token_expiry(&result.session_token).and_then(|secs| {
-            info!(
-                "JWT token expires in {} seconds ({} minutes)",
-                secs,
-                secs / 60
-            );
-            u32::try_from(secs).ok()
-        });
+        let mut expires_in = extract_token_expiry(&result.session_token)
+            .and_then(|secs| {
+                info!(
+                    "JWT token expires in {} seconds ({} minutes)",
+                    secs,
+                    secs / 60
+                );
+                u32::try_from(secs).ok()
+            });
 
         if expires_in.is_none()
             && let Some(expiry) = trust_expires_at
@@ -1141,18 +1259,19 @@ impl AuthManager {
         self.api_client.set_token(Some(token.clone())).await;
 
         // Get user details
-        let user: User = self
-            .api_client
-            .get(v1::users::CURRENT)
-            .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let user: User =
+            self.api_client.get(v1::users::CURRENT).await.map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         // Get user permissions
         let permissions: UserPermissions = self
             .api_client
             .get(v1::roles::MY_PERMISSIONS)
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         // Get server URL
         let server_url = self.api_client.build_url("");
@@ -1174,13 +1293,20 @@ impl AuthManager {
     }
 
     /// Check cached device status (stub for now)
-    async fn check_cached_device_status(&self, _user_id: Uuid) -> Option<DeviceAuthStatus> {
+    async fn check_cached_device_status(
+        &self,
+        _user_id: Uuid,
+    ) -> Option<DeviceAuthStatus> {
         // TODO: Implement offline cache
         None
     }
 
     /// Cache device status (stub for now)
-    async fn cache_device_status(&self, _user_id: Uuid, _status: &DeviceAuthStatus) {
+    async fn cache_device_status(
+        &self,
+        _user_id: Uuid,
+        _status: &DeviceAuthStatus,
+    ) {
         // TODO: Implement offline cache
     }
 
@@ -1199,12 +1325,13 @@ impl AuthManager {
 
         // Create new device identity
         let id = Uuid::now_v7();
-        let fingerprint = generate_hardware_fingerprint().await.map_err(|e| {
-            AuthError::Storage(StorageError::InitFailed(format!(
-                "Failed to get hardware fingerprint: {}",
-                e
-            )))
-        })?;
+        let fingerprint =
+            generate_hardware_fingerprint().await.map_err(|e| {
+                AuthError::Storage(StorageError::InitFailed(format!(
+                    "Failed to get hardware fingerprint: {}",
+                    e
+                )))
+            })?;
         let identity = DeviceIdentity {
             id,
             fingerprint: fingerprint.clone(),
@@ -1235,7 +1362,9 @@ impl AuthManager {
     /// Get current user permissions
     pub async fn get_current_permissions(&self) -> Option<UserPermissions> {
         self.auth_state.with_state(|state| match state {
-            AuthState::Authenticated { permissions, .. } => Some(permissions.clone()),
+            AuthState::Authenticated { permissions, .. } => {
+                Some(permissions.clone())
+            }
             _ => None,
         })
     }
@@ -1271,10 +1400,12 @@ impl AuthManager {
             .set_auto_login(&user.id, enabled)
             .await
             .map_err(|e| {
-                AuthError::Storage(StorageError::WriteFailed(std::io::Error::other(format!(
-                    "Failed to set auto-login: {}",
-                    e
-                ))))
+                AuthError::Storage(StorageError::WriteFailed(
+                    std::io::Error::other(format!(
+                        "Failed to set auto-login: {}",
+                        e
+                    )),
+                ))
             })?;
 
         if !enabled {
@@ -1286,9 +1417,16 @@ impl AuthManager {
             // Update server-side preference so settings stay in sync across devices
             let request = json!({ "auto_login_enabled": enabled });
             self.api_client
-                .put::<_, serde_json::Value>(v1::users::CURRENT_PREFERENCES, &request)
+                .put::<_, serde_json::Value>(
+                    v1::users::CURRENT_PREFERENCES,
+                    &request,
+                )
                 .await
-                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+                .map_err(|e| {
+                    AuthError::Network(NetworkError::RequestFailed(
+                        e.to_string(),
+                    ))
+                })?;
 
             // Update in-memory auth state with the new preference so UI stays consistent
             if let AuthState::Authenticated {
@@ -1337,43 +1475,58 @@ impl AuthManager {
                 })?;
 
         // Check if we have an active auth token
-        let has_auth = self
-            .auth_state
-            .with_state(|state| matches!(state, AuthState::Authenticated { .. }));
+        let has_auth = self.auth_state.with_state(|state| {
+            matches!(state, AuthState::Authenticated { .. })
+        });
 
         let users: Vec<UserListItemDto> = if has_auth {
             // Use authenticated endpoint for better information
             self.api_client
                 .get(v1::users::LIST_AUTH)
                 .await
-                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?
+                .map_err(|e| {
+                    AuthError::Network(NetworkError::RequestFailed(
+                        e.to_string(),
+                    ))
+                })?
         } else {
             // TODO: Use ApiClient trait instance
             // Use public endpoint with device fingerprint
             // Build request with custom header
             let client = reqwest::Client::new();
-            let url = format!("{}/api/v1/users/public", self.api_client.base_url());
+            let url =
+                format!("{}/api/v1/users/public", self.api_client.base_url());
 
             let response = client
                 .get(&url)
                 .header("X-Device-Fingerprint", fingerprint)
                 .send()
                 .await
-                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+                .map_err(|e| {
+                    AuthError::Network(NetworkError::RequestFailed(
+                        e.to_string(),
+                    ))
+                })?;
 
             if !response.status().is_success() {
                 let status = response.status();
-                let error_text = response.text().await.unwrap_or_else(|_| status.to_string());
-                return Err(AuthError::Network(NetworkError::RequestFailed(format!(
-                    "Failed to get users: {}",
-                    error_text
-                ))));
+                let error_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| status.to_string());
+                return Err(AuthError::Network(NetworkError::RequestFailed(
+                    format!("Failed to get users: {}", error_text),
+                )));
             }
 
             response
                 .json::<ApiResponse<Vec<UserListItemDto>>>()
                 .await
-                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?
+                .map_err(|e| {
+                    AuthError::Network(NetworkError::RequestFailed(
+                        e.to_string(),
+                    ))
+                })?
                 .data
                 .ok_or_else(|| {
                     AuthError::Network(NetworkError::RequestFailed(
@@ -1395,11 +1548,10 @@ impl AuthManager {
             library_count: usize,
         }
 
-        let status: SetupStatus = self
-            .api_client
-            .get(v1::setup::STATUS)
-            .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let status: SetupStatus =
+            self.api_client.get(v1::setup::STATUS).await.map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
         Ok(status.needs_setup)
     }
 
@@ -1421,51 +1573,60 @@ impl AuthManager {
             device_name: get_device_name(),
             platform: get_current_platform(),
             app_version: "1.0.0".to_string(),
-            hardware_id: Some(generate_hardware_fingerprint().await.map_err(|e| {
+            hardware_id: Some(generate_hardware_fingerprint().await.map_err(
+                |e| {
+                    AuthError::Storage(StorageError::InitFailed(format!(
+                        "Failed to get hardware fingerprint: {}",
+                        e
+                    )))
+                },
+            )?),
+        };
+
+        // Load or create a device keypair
+        let device_fingerprint =
+            generate_hardware_fingerprint().await.map_err(|e| {
                 AuthError::Storage(StorageError::InitFailed(format!(
                     "Failed to get hardware fingerprint: {}",
                     e
                 )))
-            })?),
-        };
+            })?;
 
-        // Load or create a device keypair
-        let device_fingerprint = generate_hardware_fingerprint().await.map_err(|e| {
-            AuthError::Storage(StorageError::InitFailed(format!(
-                "Failed to get hardware fingerprint: {}",
-                e
-            )))
-        })?;
-
-        let signing_key = match self.auth_storage.load_device_key().await.map_err(|e| {
-            error!("failed to load device key: {e}");
-            AuthError::Storage(StorageError::InitFailed(
-                "device key unavailable".to_string(),
-            ))
-        })? {
-            Some(bytes) => SigningKey::from_bytes(bytes.as_slice().try_into().map_err(|_| {
+        let signing_key =
+            match self.auth_storage.load_device_key().await.map_err(|e| {
+                error!("failed to load device key: {e}");
                 AuthError::Storage(StorageError::InitFailed(
-                    "invalid stored device key".to_string(),
+                    "device key unavailable".to_string(),
                 ))
-            })?),
-            None => {
-                let mut rng = OsRng;
-                let sk = SigningKey::generate(&mut rng);
-                // Persist the 32-byte secret
-                self.auth_storage
-                    .save_device_key(sk.to_bytes().as_slice())
-                    .await
-                    .map_err(|e| {
-                        error!("failed to persist device key: {e}");
-                        AuthError::Storage(StorageError::WriteFailed(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            "failed to persist device key",
-                        )))
-                    })?;
-                sk
-            }
-        };
-        let public_key_b64 = BASE64.encode(VerifyingKey::from(&signing_key).to_bytes());
+            })? {
+                Some(bytes) => SigningKey::from_bytes(
+                    bytes.as_slice().try_into().map_err(|_| {
+                        AuthError::Storage(StorageError::InitFailed(
+                            "invalid stored device key".to_string(),
+                        ))
+                    })?,
+                ),
+                None => {
+                    let mut rng = OsRng;
+                    let sk = SigningKey::generate(&mut rng);
+                    // Persist the 32-byte secret
+                    self.auth_storage
+                        .save_device_key(sk.to_bytes().as_slice())
+                        .await
+                        .map_err(|e| {
+                            error!("failed to persist device key: {e}");
+                            AuthError::Storage(StorageError::WriteFailed(
+                                std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    "failed to persist device key",
+                                ),
+                            ))
+                        })?;
+                    sk
+                }
+            };
+        let public_key_b64 =
+            BASE64.encode(VerifyingKey::from(&signing_key).to_bytes());
 
         let request = DeviceLoginRequest {
             username,
@@ -1480,7 +1641,9 @@ impl AuthManager {
             .api_client
             .post(v1::auth::device::LOGIN, &request)
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         // Log the received token for debugging
         info!(
@@ -1491,16 +1654,17 @@ impl AuthManager {
         self.handle_auth_result(result.clone()).await?;
 
         // Get user and permissions
-        let user: User = self
-            .api_client
-            .get(v1::users::CURRENT)
-            .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let user: User =
+            self.api_client.get(v1::users::CURRENT).await.map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
         let permissions: UserPermissions = self
             .api_client
             .get(v1::roles::MY_PERMISSIONS)
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         // Synchronize auto-login preferences based on user selection
         self.set_auto_login_scope(remember_device, AutoLoginScope::DeviceOnly)
@@ -1521,12 +1685,13 @@ impl AuthManager {
     ) -> AuthResult<PlayerAuthResult> {
         let device_id = self.get_or_create_device_id().await?;
         // Obtain device fingerprint and signing key
-        let device_fingerprint = generate_hardware_fingerprint().await.map_err(|e| {
-            AuthError::Storage(StorageError::InitFailed(format!(
-                "Failed to get hardware fingerprint: {}",
-                e
-            )))
-        })?;
+        let device_fingerprint =
+            generate_hardware_fingerprint().await.map_err(|e| {
+                AuthError::Storage(StorageError::InitFailed(format!(
+                    "Failed to get hardware fingerprint: {}",
+                    e
+                )))
+            })?;
         let signing_key_bytes = self
             .auth_storage
             .load_device_key()
@@ -1538,12 +1703,17 @@ impl AuthManager {
                 ))
             })?
             .ok_or_else(|| {
-                AuthError::Storage(StorageError::InitFailed("device key not found".to_string()))
+                AuthError::Storage(StorageError::InitFailed(
+                    "device key not found".to_string(),
+                ))
             })?;
-        let signing_key =
-            SigningKey::from_bytes(signing_key_bytes.as_slice().try_into().map_err(|_| {
-                AuthError::Storage(StorageError::InitFailed("invalid device key".to_string()))
-            })?);
+        let signing_key = SigningKey::from_bytes(
+            signing_key_bytes.as_slice().try_into().map_err(|_| {
+                AuthError::Storage(StorageError::InitFailed(
+                    "invalid device key".to_string(),
+                ))
+            })?,
+        );
 
         // Request a challenge
         #[derive(serde::Serialize)]
@@ -1562,14 +1732,20 @@ impl AuthManager {
             .api_client
             .post(v1::auth::device::PIN_CHALLENGE, &ChallengeReq { device_id })
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
-        let nonce = BASE64.decode(challenge.nonce.as_bytes()).map_err(|_| {
-            AuthError::Storage(StorageError::InitFailed("invalid nonce".to_string()))
-        })?;
-        let pin_salt = BASE64
-            .decode(challenge.pin_salt.as_bytes())
-            .map_err(|_| AuthError::Internal("invalid PIN salt from server".to_string()))?;
+        let nonce =
+            BASE64.decode(challenge.nonce.as_bytes()).map_err(|_| {
+                AuthError::Storage(StorageError::InitFailed(
+                    "invalid nonce".to_string(),
+                ))
+            })?;
+        let pin_salt =
+            BASE64.decode(challenge.pin_salt.as_bytes()).map_err(|_| {
+                AuthError::Internal("invalid PIN salt from server".to_string())
+            })?;
         // Build message v1: "Ferrex-PIN-v1" || challenge_id || nonce || user_id
         const CTX: &[u8] = b"Ferrex-PIN-v1";
         let mut msg = Vec::with_capacity(CTX.len() + 16 + nonce.len() + 16);
@@ -1591,21 +1767,24 @@ impl AuthManager {
             .api_client
             .post(v1::auth::device::PIN_LOGIN, &request)
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         self.handle_auth_result(result.clone()).await?;
 
         // Get user and permissions
-        let user: User = self
-            .api_client
-            .get(v1::users::CURRENT)
-            .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+        let user: User =
+            self.api_client.get(v1::users::CURRENT).await.map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
         let permissions: UserPermissions = self
             .api_client
             .get(v1::roles::MY_PERMISSIONS)
             .await
-            .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+            .map_err(|e| {
+                AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+            })?;
 
         Ok(PlayerAuthResult {
             user,
@@ -1620,7 +1799,10 @@ impl AuthManager {
     /// - password material = pin || user_salt (server-managed)
     /// - Argon2id params: m=64MiB, t=3, p=1, outlen=32
     /// - Argon2 salt = user_salt
-    fn derive_client_pin_proof(pin: &str, user_salt: &[u8]) -> AuthResult<String> {
+    fn derive_client_pin_proof(
+        pin: &str,
+        user_salt: &[u8],
+    ) -> AuthResult<String> {
         use argon2::password_hash::{PasswordHasher, SaltString};
         use argon2::{Algorithm, Argon2, Params, ParamsBuilder, Version};
 
@@ -1633,8 +1815,9 @@ impl AuthManager {
         material.extend_from_slice(pin.as_bytes());
         material.extend_from_slice(user_salt);
 
-        let salt = SaltString::encode_b64(user_salt)
-            .map_err(|_| AuthError::Internal("invalid PIN salt payload".to_string()))?;
+        let salt = SaltString::encode_b64(user_salt).map_err(|_| {
+            AuthError::Internal("invalid PIN salt payload".to_string())
+        })?;
 
         let params: Params = ParamsBuilder::new()
             .m_cost(64 * 1024)
@@ -1642,12 +1825,16 @@ impl AuthManager {
             .p_cost(1)
             .output_len(32)
             .build()
-            .map_err(|_| AuthError::Internal("invalid Argon2 parameters".to_string()))?;
+            .map_err(|_| {
+                AuthError::Internal("invalid Argon2 parameters".to_string())
+            })?;
         let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
         let phc = argon2
             .hash_password(&material, &salt)
-            .map_err(|_| AuthError::Internal("failed to derive PIN proof".to_string()))?
+            .map_err(|_| {
+                AuthError::Internal("failed to derive PIN proof".to_string())
+            })?
             .to_string();
         Ok(phc)
     }
@@ -1732,12 +1919,13 @@ mod tests {
         let salt_a = vec![0xAA; 16];
         let salt_b = vec![0xBB; 16];
 
-        let proof_a =
-            AuthManager::derive_client_pin_proof("2580", &salt_a).expect("proof for salt A");
+        let proof_a = AuthManager::derive_client_pin_proof("2580", &salt_a)
+            .expect("proof for salt A");
         let proof_a_repeat =
-            AuthManager::derive_client_pin_proof("2580", &salt_a).expect("repeat proof for salt A");
-        let proof_b =
-            AuthManager::derive_client_pin_proof("2580", &salt_b).expect("proof for salt B");
+            AuthManager::derive_client_pin_proof("2580", &salt_a)
+                .expect("repeat proof for salt A");
+        let proof_b = AuthManager::derive_client_pin_proof("2580", &salt_b)
+            .expect("proof for salt B");
 
         assert_eq!(
             proof_a, proof_a_repeat,
@@ -1800,12 +1988,14 @@ pub fn is_token_expired(token: &AuthToken) -> bool {
                     if let Some(exp) = token_data.claims.exp {
                         let now = Utc::now().timestamp();
                         let seconds_until_expiry = exp - now;
-                        let is_expired = now >= exp - TOKEN_EXPIRY_BUFFER_SECONDS;
+                        let is_expired =
+                            now >= exp - TOKEN_EXPIRY_BUFFER_SECONDS;
 
                         if is_expired {
                             info!(
                                 "JWT token considered expired: {} seconds until actual expiry (buffer: {} seconds)",
-                                seconds_until_expiry, TOKEN_EXPIRY_BUFFER_SECONDS
+                                seconds_until_expiry,
+                                TOKEN_EXPIRY_BUFFER_SECONDS
                             );
                         } else {
                             debug!(
@@ -1817,7 +2007,9 @@ pub fn is_token_expired(token: &AuthToken) -> bool {
                         is_expired
                     } else {
                         // No expiry claim, consider it expired
-                        warn!("JWT token has no expiry claim, considering it expired");
+                        warn!(
+                            "JWT token has no expiry claim, considering it expired"
+                        );
                         true
                     }
                 }
@@ -1847,7 +2039,11 @@ fn get_current_platform() -> Platform {
     #[cfg(target_os = "windows")]
     return Platform::Windows;
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows"
+    )))]
     return Platform::Unknown;
 }
 
@@ -1874,7 +2070,11 @@ fn extract_token_expiry(token_str: &str) -> Option<i64> {
             validation.leeway = 0;
 
             // Try to decode with a dummy key (signature validation is disabled)
-            match decode::<JwtClaims>(token_str, &DecodingKey::from_secret(b"dummy"), &validation) {
+            match decode::<JwtClaims>(
+                token_str,
+                &DecodingKey::from_secret(b"dummy"),
+                &validation,
+            ) {
                 Ok(token_data) => {
                     // Calculate seconds until expiry
                     if let Some(exp) = token_data.claims.exp {

@@ -53,14 +53,14 @@ async fn register_user(
 }
 
 async fn promote_to_admin(state: &AppState, user_id: Uuid) -> Result<()> {
-    let roles = state.unit_of_work.rbac.get_all_roles().await?;
+    let unit_of_work = state.unit_of_work();
+    let roles = unit_of_work.rbac.get_all_roles().await?;
     let admin_role = roles
         .into_iter()
         .find(|role| role.name == "admin")
         .expect("admin role seeded");
 
-    state
-        .unit_of_work
+    unit_of_work
         .rbac
         .assign_user_role(user_id, admin_role.id, user_id)
         .await?;
@@ -74,7 +74,8 @@ async fn user_management_requires_permissions(pool: PgPool) -> Result<()> {
     let _tempdir = tempdir;
 
     let router: Router<()> = router.with_state(state.clone());
-    let make_service = router.into_make_service_with_connect_info::<SocketAddr>();
+    let make_service =
+        router.into_make_service_with_connect_info::<SocketAddr>();
     let server = TestServer::builder()
         .http_transport()
         .build(make_service)
@@ -103,7 +104,11 @@ async fn user_management_requires_permissions(pool: PgPool) -> Result<()> {
     create.assert_status(StatusCode::FORBIDDEN);
 
     // Updating an existing user without permissions should fail.
-    let update_path = route_utils::replace_param(api_routes::v1::users::ITEM, "{id}", &user_id);
+    let update_path = route_utils::replace_param(
+        api_routes::v1::users::ITEM,
+        "{id}",
+        &user_id,
+    );
     let update = server
         .put(&update_path)
         .add_header("Authorization", bearer(&access_token))
@@ -124,13 +129,16 @@ async fn user_management_requires_permissions(pool: PgPool) -> Result<()> {
 }
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
-async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Result<()> {
+async fn admin_user_crud_flow_enforces_audit_expectations(
+    pool: PgPool,
+) -> Result<()> {
     let app = build_test_app(pool).await?;
     let (router, state, tempdir) = app.into_parts();
     let _tempdir = tempdir;
 
     let router: Router<()> = router.with_state(state.clone());
-    let make_service = router.into_make_service_with_connect_info::<SocketAddr>();
+    let make_service =
+        router.into_make_service_with_connect_info::<SocketAddr>();
     let server = TestServer::builder()
         .http_transport()
         .build(make_service)
@@ -145,7 +153,7 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
     // Track baseline admin_actions entries; user CRUD should eventually populate this log.
     let admin_actions_before: i64 =
         sqlx::query!("SELECT COUNT(*) as \"count!\" FROM admin_actions")
-            .fetch_one(state.postgres.pool())
+            .fetch_one(state.postgres().pool())
             .await?
             .count;
 
@@ -170,7 +178,7 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
 
     // Verify the user exists in the repository with the expected fields.
     let stored_user = state
-        .unit_of_work
+        .unit_of_work()
         .users
         .get_user_by_id(managed_id)
         .await?
@@ -194,8 +202,11 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
     assert_eq!(managed_entry["session_count"].as_u64(), Some(0));
 
     // Update the managed user profile.
-    let update_path =
-        route_utils::replace_param(api_routes::v1::users::ITEM, "{id}", &managed_id_raw);
+    let update_path = route_utils::replace_param(
+        api_routes::v1::users::ITEM,
+        "{id}",
+        &managed_id_raw,
+    );
     let update_response = server
         .put(&update_path)
         .add_header("Authorization", bearer(&admin_access))
@@ -206,7 +217,7 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
         .await;
     update_response.assert_status_ok();
     let updated_user = state
-        .unit_of_work
+        .unit_of_work()
         .users
         .get_user_by_id(managed_id)
         .await?
@@ -224,8 +235,10 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
         .await;
     login_response.assert_status_ok();
     let login_body: Value = login_response.json();
-    let managed_access = extract_token_field(&login_body, "access_token").to_string();
-    let managed_refresh = extract_token_field(&login_body, "refresh_token").to_string();
+    let managed_access =
+        extract_token_field(&login_body, "access_token").to_string();
+    let managed_refresh =
+        extract_token_field(&login_body, "refresh_token").to_string();
     assert!(!managed_access.is_empty());
     assert!(!managed_refresh.is_empty());
 
@@ -236,7 +249,8 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
         .await;
     list_after_login.assert_status_ok();
     let list_after_login_body: Value = list_after_login.json();
-    let users_after_login = list_after_login_body["data"]["users"].as_array().unwrap();
+    let users_after_login =
+        list_after_login_body["data"]["users"].as_array().unwrap();
     let managed_entry_after_login = users_after_login
         .iter()
         .find(|entry| entry["username"].as_str() == Some("managed_user"))
@@ -248,7 +262,7 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
         "SELECT COUNT(*) as \"count!\" FROM auth_sessions WHERE user_id = $1",
         managed_id
     )
-    .fetch_one(state.postgres.pool())
+    .fetch_one(state.postgres().pool())
     .await?
     .count;
     assert_eq!(
@@ -260,7 +274,7 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
         "SELECT COUNT(*) as \"count!\" FROM auth_refresh_tokens WHERE user_id = $1",
         managed_id
     )
-    .fetch_one(state.postgres.pool())
+    .fetch_one(state.postgres().pool())
     .await?
     .count;
     assert_eq!(
@@ -276,14 +290,18 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
     delete_response.assert_status(StatusCode::NO_CONTENT);
 
     // The user should now be absent from the repository and all sessions should be gone.
-    let deleted_user = state.unit_of_work.users.get_user_by_id(managed_id).await?;
+    let deleted_user = state
+        .unit_of_work()
+        .users
+        .get_user_by_id(managed_id)
+        .await?;
     assert!(deleted_user.is_none(), "user record should be removed");
 
     let sessions_after: i64 = sqlx::query!(
         "SELECT COUNT(*) as \"count!\" FROM auth_sessions WHERE user_id = $1",
         managed_id
     )
-    .fetch_one(state.postgres.pool())
+    .fetch_one(state.postgres().pool())
     .await?
     .count;
     assert_eq!(
@@ -295,7 +313,7 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
         "SELECT COUNT(*) as \"count!\" FROM auth_refresh_tokens WHERE user_id = $1",
         managed_id
     )
-    .fetch_one(state.postgres.pool())
+    .fetch_one(state.postgres().pool())
     .await?
     .count;
     assert_eq!(
@@ -304,10 +322,11 @@ async fn admin_user_crud_flow_enforces_audit_expectations(pool: PgPool) -> Resul
     );
 
     // Admin actions are not yet persisted for user management flows; track the gap explicitly.
-    let admin_actions_after: i64 = sqlx::query!("SELECT COUNT(*) as \"count!\" FROM admin_actions")
-        .fetch_one(state.postgres.pool())
-        .await?
-        .count;
+    let admin_actions_after: i64 =
+        sqlx::query!("SELECT COUNT(*) as \"count!\" FROM admin_actions")
+            .fetch_one(state.postgres().pool())
+            .await?
+            .count;
     assert_eq!(
         admin_actions_after - admin_actions_before,
         0,
@@ -325,7 +344,8 @@ async fn admin_endpoints_record_audit_logs(pool: PgPool) -> Result<()> {
     let (router, state, _tempdir) = app.into_parts();
 
     let router: Router<()> = router.with_state(state.clone());
-    let make_service = router.into_make_service_with_connect_info::<SocketAddr>();
+    let make_service =
+        router.into_make_service_with_connect_info::<SocketAddr>();
     let server = TestServer::builder()
         .http_transport()
         .build(make_service)
@@ -361,7 +381,7 @@ async fn admin_endpoints_record_audit_logs(pool: PgPool) -> Result<()> {
         "SELECT COUNT(*) as \"count!\" FROM admin_actions WHERE action_type = 'user.create' AND target_id = $1",
         managed_id
     )
-    .fetch_one(state.postgres.pool())
+    .fetch_one(state.postgres().pool())
     .await?
     .count;
     assert_eq!(admin_actions_created, 1, "one admin action for create");
@@ -370,13 +390,17 @@ async fn admin_endpoints_record_audit_logs(pool: PgPool) -> Result<()> {
         "SELECT COUNT(*) as \"count!\" FROM security_audit_log WHERE event_type = 'user_created' AND user_id = $1",
         managed_id
     )
-    .fetch_one(state.postgres.pool())
+    .fetch_one(state.postgres().pool())
     .await?
     .count;
     assert_eq!(security_created, 1, "one security audit for create");
 
     // Update via admin API
-    let update_path = route_utils::replace_param(v1::admin::USER_ITEM, "{id}", &managed_id_raw);
+    let update_path = route_utils::replace_param(
+        v1::admin::USER_ITEM,
+        "{id}",
+        &managed_id_raw,
+    );
     let update_response = server
         .put(&update_path)
         .add_header("Authorization", bearer(&admin_access))
@@ -391,7 +415,7 @@ async fn admin_endpoints_record_audit_logs(pool: PgPool) -> Result<()> {
         "SELECT COUNT(*) as \"count!\" FROM admin_actions WHERE action_type = 'user.update' AND target_id = $1",
         managed_id
     )
-    .fetch_one(state.postgres.pool())
+    .fetch_one(state.postgres().pool())
     .await?
     .count;
     assert_eq!(admin_actions_updated, 1, "one admin action for update");
@@ -400,7 +424,7 @@ async fn admin_endpoints_record_audit_logs(pool: PgPool) -> Result<()> {
         "SELECT COUNT(*) as \"count!\" FROM security_audit_log WHERE event_type = 'user_updated' AND user_id = $1",
         managed_id
     )
-    .fetch_one(state.postgres.pool())
+    .fetch_one(state.postgres().pool())
     .await?
     .count;
     assert_eq!(security_updated, 1, "one security audit for update");
@@ -416,7 +440,7 @@ async fn admin_endpoints_record_audit_logs(pool: PgPool) -> Result<()> {
         "SELECT COUNT(*) as \"count!\" FROM admin_actions WHERE action_type = 'user.delete' AND target_id = $1",
         managed_id
     )
-    .fetch_one(state.postgres.pool())
+    .fetch_one(state.postgres().pool())
     .await?
     .count;
     assert_eq!(admin_actions_deleted, 1, "one admin action for delete");
@@ -426,7 +450,7 @@ async fn admin_endpoints_record_audit_logs(pool: PgPool) -> Result<()> {
         "SELECT COUNT(*) as \"count!\" FROM security_audit_log WHERE event_type = 'user_deleted' AND event_data->>'target_user_id' = $1",
         managed_id_str
     )
-    .fetch_one(state.postgres.pool())
+    .fetch_one(state.postgres().pool())
     .await?
     .count;
     assert_eq!(security_deleted, 1, "one security audit for delete");

@@ -14,11 +14,16 @@ pub fn handle_transcoding_started(
 ) -> DomainUpdateResult {
     match result {
         Ok(job_id) => {
-            log::info!("Transcoding started successfully with job ID: {}", job_id);
+            log::info!(
+                "Transcoding started successfully with job ID: {}",
+                job_id
+            );
 
             // Check if this is a cached response
             if job_id.starts_with("cached_") {
-                log::info!("Media is already cached, marking as ready immediately");
+                log::info!(
+                    "Media is already cached, marking as ready immediately"
+                );
                 state.domains.streaming.state.transcoding_job_id = None; // No job to track
                 state.domains.streaming.state.transcoding_status =
                     Some(TranscodingStatus::Completed);
@@ -54,7 +59,8 @@ pub fn handle_transcoding_started(
                 Some(TranscodingStatus::Failed { error: e.clone() });
 
             // Show error to user
-            state.domains.ui.state.error_message = Some(format!("Transcoding failed: {}", e));
+            state.domains.ui.state.error_message =
+                Some(format!("Transcoding failed: {}", e));
 
             DomainUpdateResult::task(Task::none())
         }
@@ -77,9 +83,9 @@ pub fn handle_check_transcoding_status(state: &State) -> DomainUpdateResult {
                             "queued" => TranscodingStatus::Queued,
                             "completed" => TranscodingStatus::Completed,
                             "failed" => TranscodingStatus::Failed {
-                                error: status
-                                    .message
-                                    .unwrap_or_else(|| "Unknown error".to_string()),
+                                error: status.message.unwrap_or_else(|| {
+                                    "Unknown error".to_string()
+                                }),
                             },
                             _ => TranscodingStatus::Processing {
                                 progress: status.progress.unwrap_or(0.0),
@@ -90,7 +96,11 @@ pub fn handle_check_transcoding_status(state: &State) -> DomainUpdateResult {
                     Err(e) => Err(e.to_string()),
                 }
             },
-            |result| DomainMessage::Streaming(Message::TranscodingStatusUpdate(result)),
+            |result| {
+                DomainMessage::Streaming(Message::TranscodingStatusUpdate(
+                    result,
+                ))
+            },
         ))
     } else {
         DomainUpdateResult::task(Task::none())
@@ -109,17 +119,20 @@ pub fn handle_transcoding_status_update(
                 TranscodingStatus::Processing { progress } => {
                     // For HLS, we can start playback once we have enough segments
                     // Continue checking if video not loaded yet or progress < 100%
-                    state.domains.player.state.video_opt.is_none() || *progress < 1.0
+                    state.domains.player.state.video_opt.is_none()
+                        || *progress < 1.0
                 }
                 _ => false,
             };
 
-            state.domains.streaming.state.transcoding_status = Some(status.clone());
+            state.domains.streaming.state.transcoding_status =
+                Some(status.clone());
 
             // Store duration from transcoding job if available and valid
             if let Some(dur) = duration {
                 if dur > 0.0 && dur.is_finite() {
-                    state.domains.streaming.state.transcoding_duration = Some(dur);
+                    state.domains.streaming.state.transcoding_duration =
+                        Some(dur);
 
                     // Store source duration separately - this is the full media duration
                     if state.domains.player.state.source_duration.is_none() {
@@ -136,10 +149,15 @@ pub fn handle_transcoding_status_update(
                         && state.domains.player.state.video_opt.is_some()
                     {
                         state.domains.player.state.last_valid_duration = dur;
-                        log::info!("Updated player duration from transcoding job");
+                        log::info!(
+                            "Updated player duration from transcoding job"
+                        );
                     }
                 } else {
-                    log::warn!("Invalid duration from transcoding job: {:?}", dur);
+                    log::warn!(
+                        "Invalid duration from transcoding job: {:?}",
+                        dur
+                    );
                 }
             }
 
@@ -163,7 +181,9 @@ pub fn handle_transcoding_status_update(
 
             // If we've checked too many times (30 checks = ~1 minute), give up and load video
             if state.domains.streaming.state.transcoding_check_count > 30 {
-                log::warn!("Transcoding status checks exceeded limit - loading video anyway");
+                log::warn!(
+                    "Transcoding status checks exceeded limit - loading video anyway"
+                );
                 state.domains.streaming.state.transcoding_status =
                     Some(TranscodingStatus::Completed);
                 state.domains.streaming.state.transcoding_job_id = None;
@@ -205,14 +225,22 @@ pub fn handle_transcoding_status_update(
                 // Continue checking every 2 seconds
                 tasks.push(Task::perform(
                     async {
-                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2))
+                            .await;
                     },
-                    |_| DomainMessage::Streaming(Message::CheckTranscodingStatus),
+                    |_| {
+                        DomainMessage::Streaming(
+                            Message::CheckTranscodingStatus,
+                        )
+                    },
                 ));
             }
 
             if should_try_playback {
-                log::info!("Attempting to start HLS playback (status: {:?})...", status);
+                log::info!(
+                    "Attempting to start HLS playback (status: {:?})...",
+                    status
+                );
                 // Load video now that we have segments ready
                 if state.domains.player.state.video_opt.is_none()
                     && state.domains.streaming.state.using_hls
@@ -221,17 +249,24 @@ pub fn handle_transcoding_status_update(
                     let check_playlist_task = if let Some(media) =
                         &state.domains.player.state.current_media
                     {
-                        if let Some(client) = &state.domains.streaming.state.hls_client {
+                        if let Some(client) =
+                            &state.domains.streaming.state.hls_client
+                        {
                             let client_clone = client.clone();
                             let media_id = media.id;
 
                             Some(Task::perform(
                                 async move {
                                     // Small delay to ensure playlist files are written
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(100))
-                                        .await;
+                                    tokio::time::sleep(
+                                        tokio::time::Duration::from_millis(100),
+                                    )
+                                    .await;
 
-                                    match client_clone.fetch_master_playlist(&media_id).await {
+                                    match client_clone
+                                        .fetch_master_playlist(&media_id)
+                                        .await
+                                    {
                                         Ok(playlist) => {
                                             log::info!(
                                                 "Master playlist fetched with {} variants",
@@ -240,13 +275,18 @@ pub fn handle_transcoding_status_update(
                                             Some(playlist)
                                         }
                                         Err(e) => {
-                                            log::error!("Failed to fetch master playlist: {}", e);
+                                            log::error!(
+                                                "Failed to fetch master playlist: {}",
+                                                e
+                                            );
                                             None
                                         }
                                     }
                                 },
                                 |playlist| {
-                                    DomainMessage::Streaming(Message::MasterPlaylistReady(playlist))
+                                    DomainMessage::Streaming(
+                                        Message::MasterPlaylistReady(playlist),
+                                    )
                                 },
                             ))
                         } else {
@@ -314,7 +354,9 @@ pub fn handle_transcoding_status_update(
                 if state.domains.streaming.state.using_hls
                     && state.domains.player.state.video_opt.is_none()
                 {
-                    if let Some(ref media) = state.domains.player.state.current_media {
+                    if let Some(ref media) =
+                        state.domains.player.state.current_media
+                    {
                         log::info!(
                             "Checking if master playlist is available for media {}",
                             media.id
@@ -334,7 +376,10 @@ pub fn handle_transcoding_status_update(
 
                             Some(Task::perform(
                                 async move {
-                                    match client_clone.fetch_master_playlist(&media_id).await {
+                                    match client_clone
+                                        .fetch_master_playlist(&media_id)
+                                        .await
+                                    {
                                         Ok(playlist) => {
                                             log::info!(
                                                 "Master playlist fetched with {} variants",
@@ -343,15 +388,18 @@ pub fn handle_transcoding_status_update(
                                             Some(playlist)
                                         }
                                         Err(e) => {
-                                            log::error!("Failed to fetch master playlist: {}", e);
+                                            log::error!(
+                                                "Failed to fetch master playlist: {}",
+                                                e
+                                            );
                                             None
                                         }
                                     }
                                 },
                                 |playlist| {
-                                    DomainMessage::Streaming(Message::MasterPlaylistLoaded(
-                                        playlist,
-                                    ))
+                                    DomainMessage::Streaming(
+                                        Message::MasterPlaylistLoaded(playlist),
+                                    )
                                 },
                             ))
                         } else {
@@ -382,9 +430,14 @@ pub fn handle_transcoding_status_update(
                 // Other errors - retry after 5 seconds
                 DomainUpdateResult::task(Task::perform(
                     async {
-                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_secs(5))
+                            .await;
                     },
-                    |_| DomainMessage::Streaming(Message::CheckTranscodingStatus),
+                    |_| {
+                        DomainMessage::Streaming(
+                            Message::CheckTranscodingStatus,
+                        )
+                    },
                 ))
             }
         }

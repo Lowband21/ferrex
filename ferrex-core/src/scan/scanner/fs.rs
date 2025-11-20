@@ -10,7 +10,10 @@ pub trait FileSystem: Send + Sync {
     async fn path_exists(&self, path: &Path) -> bool;
 
     /// Open a directory for iteration.
-    async fn read_dir(&self, path: &Path) -> Result<Box<dyn ReadDirStream + Send>, String>;
+    async fn read_dir(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn ReadDirStream + Send>, String>;
 
     /// Fetch lightweight file metadata.
     async fn metadata(&self, path: &Path) -> Result<FsMetadata, String>;
@@ -50,7 +53,10 @@ impl FileSystem for RealFs {
         tokio::fs::try_exists(path).await.unwrap_or(false)
     }
 
-    async fn read_dir(&self, path: &Path) -> Result<Box<dyn ReadDirStream + Send>, String> {
+    async fn read_dir(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn ReadDirStream + Send>, String> {
         let rd = tokio::fs::read_dir(path)
             .await
             .map_err(|e| format!("read_dir failed for {:?}: {}", path, e))?;
@@ -168,12 +174,17 @@ impl FileSystem for InMemoryFs {
         self.nodes.contains_key(path)
     }
 
-    async fn read_dir(&self, path: &Path) -> Result<Box<dyn ReadDirStream + Send>, String> {
+    async fn read_dir(
+        &self,
+        path: &Path,
+    ) -> Result<Box<dyn ReadDirStream + Send>, String> {
         match self.nodes.get(path) {
             Some(Node::Dir { children }) => Ok(Box::new(InMemReadDir {
                 queue: children.clone().into(),
             })),
-            Some(Node::File { .. }) => Err(format!("read_dir on file: {:?}", path)),
+            Some(Node::File { .. }) => {
+                Err(format!("read_dir on file: {:?}", path))
+            }
             None => Err(format!("read_dir on missing path: {:?}", path)),
         }
     }

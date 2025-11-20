@@ -11,22 +11,37 @@ use serde_json::Value;
 
 #[async_trait]
 pub trait UserAuthenticationRepository: Send + Sync {
-    async fn find_by_id(&self, user_id: Uuid) -> Result<Option<UserAuthentication>>;
-    async fn find_by_username(&self, username: &str) -> Result<Option<UserAuthentication>>;
+    async fn find_by_id(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<UserAuthentication>>;
+    async fn find_by_username(
+        &self,
+        username: &str,
+    ) -> Result<Option<UserAuthentication>>;
     async fn save(&self, user_auth: &UserAuthentication) -> Result<()>;
 }
 
 #[async_trait]
 pub trait DeviceSessionRepository: Send + Sync {
-    async fn find_by_id(&self, session_id: Uuid) -> Result<Option<DeviceSession>>;
+    async fn find_by_id(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Option<DeviceSession>>;
     async fn find_by_user_and_fingerprint(
         &self,
         user_id: Uuid,
         fingerprint: &DeviceFingerprint,
     ) -> Result<Option<DeviceSession>>;
-    async fn find_by_user_id(&self, user_id: Uuid) -> Result<Vec<DeviceSession>>;
+    async fn find_by_user_id(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<DeviceSession>>;
     async fn save(&self, session: &DeviceSession) -> Result<Option<Uuid>>;
-    async fn exists_by_fingerprint(&self, fingerprint: &DeviceFingerprint) -> Result<bool>;
+    async fn exists_by_fingerprint(
+        &self,
+        fingerprint: &DeviceFingerprint,
+    ) -> Result<bool>;
     async fn pin_status_by_fingerprint(
         &self,
         fingerprint: &DeviceFingerprint,
@@ -72,11 +87,23 @@ pub trait RefreshTokenRepository: Send + Sync {
         token_hash: &str,
     ) -> Result<Option<RefreshTokenRecord>>;
 
-    async fn mark_used(&self, token_id: Uuid, reason: RevocationReason) -> Result<()>;
+    async fn mark_used(
+        &self,
+        token_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<()>;
 
-    async fn revoke_family(&self, family_id: Uuid, reason: RevocationReason) -> Result<()>;
+    async fn revoke_family(
+        &self,
+        family_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<()>;
 
-    async fn revoke_for_user(&self, user_id: Uuid, reason: RevocationReason) -> Result<()>;
+    async fn revoke_for_user(
+        &self,
+        user_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<()>;
 
     async fn revoke_for_device(
         &self,
@@ -84,12 +111,19 @@ pub trait RefreshTokenRepository: Send + Sync {
         reason: RevocationReason,
     ) -> Result<()>;
 
-    async fn revoke_for_session(&self, session_id: Uuid, reason: RevocationReason) -> Result<()>;
+    async fn revoke_for_session(
+        &self,
+        session_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<()>;
 }
 
 #[async_trait]
 pub trait AuthSessionRepository: Send + Sync {
-    async fn find_by_id(&self, session_id: Uuid) -> Result<Option<AuthSessionRecord>>;
+    async fn find_by_id(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Option<AuthSessionRecord>>;
     async fn insert_session(
         &self,
         user_id: Uuid,
@@ -100,15 +134,29 @@ pub trait AuthSessionRepository: Send + Sync {
         expires_at: DateTime<Utc>,
     ) -> Result<Uuid>;
 
-    async fn revoke_by_hash(&self, token_hash: &str, reason: RevocationReason) -> Result<()>;
+    async fn revoke_by_hash(
+        &self,
+        token_hash: &str,
+        reason: RevocationReason,
+    ) -> Result<()>;
 
-    async fn find_by_hash(&self, token_hash: &str) -> Result<Option<AuthSessionRecord>>;
+    async fn find_by_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<AuthSessionRecord>>;
 
     async fn touch(&self, session_id: Uuid) -> Result<()>;
 
-    async fn list_by_user(&self, user_id: Uuid) -> Result<Vec<AuthSessionRecord>>;
+    async fn list_by_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<AuthSessionRecord>>;
 
-    async fn revoke_by_user(&self, user_id: Uuid, reason: RevocationReason) -> Result<()>;
+    async fn revoke_by_user(
+        &self,
+        user_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<()>;
 
     async fn revoke_by_device(
         &self,
@@ -116,7 +164,11 @@ pub trait AuthSessionRepository: Send + Sync {
         reason: RevocationReason,
     ) -> Result<()>;
 
-    async fn revoke_by_id(&self, session_id: Uuid, reason: RevocationReason) -> Result<()>;
+    async fn revoke_by_id(
+        &self,
+        session_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<()>;
 }
 
 #[derive(Debug, Clone)]
@@ -144,7 +196,10 @@ pub trait DeviceChallengeRepository: Send + Sync {
 
     /// Atomically mark a challenge as used if it is unused and not expired,
     /// returning (device_session_id, nonce) on success.
-    async fn consume_if_fresh(&self, id: Uuid) -> Result<Option<(Uuid, Vec<u8>)>>;
+    async fn consume_if_fresh(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<(Uuid, Vec<u8>)>>;
 }
 
 #[derive(Debug, Clone)]

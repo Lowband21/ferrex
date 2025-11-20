@@ -72,28 +72,36 @@ pub async fn check_reset_status(
 ) -> AppResult<Json<ApiResponse<ResetCheckResponse>>> {
     // Check if user has admin permissions
     let perms = state
-        .unit_of_work
+        .unit_of_work()
         .rbac
         .get_user_permissions(user.id)
         .await
-        .map_err(|e| AppError::internal(format!("Failed to get permissions: {}", e)))?;
+        .map_err(|e| {
+            AppError::internal(format!("Failed to get permissions: {}", e))
+        })?;
 
-    let can_reset = perms.has_permission("server:reset_database") || perms.has_role("admin");
+    let can_reset = perms.has_permission("server:reset_database")
+        || perms.has_role("admin");
 
     // Get current counts
-    let users = state
-        .unit_of_work
-        .users
-        .get_all_users()
-        .await
-        .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
+    let users =
+        state
+            .unit_of_work()
+            .users
+            .get_all_users()
+            .await
+            .map_err(|e| {
+                AppError::internal(format!("Failed to get users: {}", e))
+            })?;
 
     let libraries = state
-        .unit_of_work
+        .unit_of_work()
         .libraries
         .list_libraries()
         .await
-        .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
+        .map_err(|e| {
+            AppError::internal(format!("Failed to get libraries: {}", e))
+        })?;
 
     // Get media count (this is a simplified count - you might want to add a dedicated method)
     let media_count = 0; // TODO: Implement actual media count
@@ -120,13 +128,17 @@ pub async fn reset_database(
 ) -> AppResult<Json<ApiResponse<ResetResult>>> {
     // Check permissions
     let perms = state
-        .unit_of_work
+        .unit_of_work()
         .rbac
         .get_user_permissions(user.id)
         .await
-        .map_err(|e| AppError::internal(format!("Failed to get permissions: {}", e)))?;
+        .map_err(|e| {
+            AppError::internal(format!("Failed to get permissions: {}", e))
+        })?;
 
-    if !perms.has_permission("server:reset_database") && !perms.has_role("admin") {
+    if !perms.has_permission("server:reset_database")
+        && !perms.has_role("admin")
+    {
         return Err(AppError::forbidden(
             "Database reset requires admin permissions",
         ));
@@ -150,23 +162,29 @@ pub async fn reset_database(
         info!("Resetting user data...");
 
         // Get all users before deletion for count
-        let users = state
-            .unit_of_work
-            .users
-            .get_all_users()
-            .await
-            .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
+        let users =
+            state
+                .unit_of_work()
+                .users
+                .get_all_users()
+                .await
+                .map_err(|e| {
+                    AppError::internal(format!("Failed to get users: {}", e))
+                })?;
         result.users_deleted = users.len();
 
         // Delete all users (this should cascade to related tables)
         for user in users {
             state
-                .unit_of_work
+                .unit_of_work()
                 .users
                 .delete_user(user.id)
                 .await
                 .map_err(|e| {
-                    AppError::internal(format!("Failed to delete user {}: {}", user.id, e))
+                    AppError::internal(format!(
+                        "Failed to delete user {}: {}",
+                        user.id, e
+                    ))
                 })?;
         }
 
@@ -185,22 +203,27 @@ pub async fn reset_database(
 
         // Get all libraries
         let libraries = state
-            .unit_of_work
+            .unit_of_work()
             .libraries
             .list_libraries()
             .await
-            .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
+            .map_err(|e| {
+            AppError::internal(format!("Failed to get libraries: {}", e))
+        })?;
         result.libraries_deleted = libraries.len();
 
         // Delete all libraries
         for library in libraries {
             state
-                .unit_of_work
+                .unit_of_work()
                 .libraries
                 .delete_library(library.id)
                 .await
                 .map_err(|e| {
-                    AppError::internal(format!("Failed to delete library {}: {}", library.id, e))
+                    AppError::internal(format!(
+                        "Failed to delete library {}: {}",
+                        library.id, e
+                    ))
                 })?;
         }
 
@@ -254,13 +277,16 @@ pub async fn seed_database(
 ) -> AppResult<Json<ApiResponse<SeedResult>>> {
     // Check permissions
     let perms = state
-        .unit_of_work
+        .unit_of_work()
         .rbac
         .get_user_permissions(user.id)
         .await
-        .map_err(|e| AppError::internal(format!("Failed to get permissions: {}", e)))?;
+        .map_err(|e| {
+            AppError::internal(format!("Failed to get permissions: {}", e))
+        })?;
 
-    if !perms.has_permission("server:seed_database") && !perms.has_role("admin") {
+    if !perms.has_permission("server:seed_database") && !perms.has_role("admin")
+    {
         return Err(AppError::forbidden(
             "Database seeding requires admin permissions",
         ));
@@ -293,8 +319,9 @@ pub async fn seed_database(
         {
             Ok(admin) => {
                 // Assign admin role
-                let admin_role_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001")
-                    .expect("Invalid admin role UUID");
+                let admin_role_id =
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000001")
+                        .expect("Invalid admin role UUID");
                 user_service
                     .assign_role(admin.id, admin_role_id, admin.id)
                     .await?;
@@ -349,7 +376,7 @@ pub async fn seed_database(
             media: None,
         };
 
-        match state.unit_of_work.libraries.create_library(library).await {
+        match state.unit_of_work().libraries.create_library(library).await {
             Ok(_) => {
                 result.libraries_created = 1;
                 info!("Created test library at path: {}", path);

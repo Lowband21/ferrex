@@ -35,7 +35,9 @@ use crate::infrastructure::services::api::ApiService;
 use crate::infrastructure::services::settings::SettingsApiAdapter;
 use crate::infrastructure::services::streaming::StreamingApiAdapter;
 use crate::infrastructure::services::user_management::UserAdminApiAdapter;
-use ferrex_core::player_prelude::{LibraryID, SortBy, SortOrder, UiResolution, UiWatchStatus};
+use ferrex_core::player_prelude::{
+    LibraryID, SortBy, SortOrder, UiResolution, UiWatchStatus,
+};
 use parking_lot::RwLock as StdRwLock;
 use std::sync::Arc;
 
@@ -54,7 +56,8 @@ pub struct State {
     /// Shared services and infrastructure
     pub api_service: Arc<dyn ApiService>,
     pub image_service: UnifiedImageService,
-    pub image_receiver: Arc<std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
+    pub image_receiver:
+        Arc<std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
 
     //pub batch_metadata_fetcher:
     //    Option<Arc<crate::domains::metadata::batch_fetcher::BatchMetadataFetcher>>,
@@ -76,9 +79,11 @@ impl State {
         // Initialize MediaRepo (will be populated when libraries are loaded)
         let media_repo = Arc::new(StdRwLock::new(None));
         let ui_accessor: Accessor<ReadOnly> = Accessor::new(media_repo.clone());
-        let lib_accessor: Accessor<ReadWrite> = Accessor::new(media_repo.clone());
+        let lib_accessor: Accessor<ReadWrite> =
+            Accessor::new(media_repo.clone());
         // Media and library domains should be combined
-        let media_accessor: Accessor<ReadWrite> = Accessor::new(media_repo.clone());
+        let media_accessor: Accessor<ReadWrite> =
+            Accessor::new(media_repo.clone());
 
         let api_client = ApiClient::new(server_url.clone());
         let (image_service, _receiver) = UnifiedImageService::new(16);
@@ -87,7 +92,8 @@ impl State {
         let service_builder = ServiceBuilder::new();
 
         // RUS-136: Create single ApiClientAdapter instance to share across all domains
-        let api_adapter = Arc::new(ApiClientAdapter::new(Arc::new(api_client.clone())));
+        let api_adapter =
+            Arc::new(ApiClientAdapter::new(Arc::new(api_client.clone())));
         let api_service: Arc<dyn ApiService> = api_adapter.clone();
 
         // RUS-136: Create trait-based AuthService via adapter
@@ -98,11 +104,14 @@ impl State {
         let auth_service = std::sync::Arc::new(adapter);
 
         // Create domain states with required services
-        let auth_state = AuthDomainState::new(api_service.clone(), auth_service.clone());
+        let auth_state =
+            AuthDomainState::new(api_service.clone(), auth_service.clone());
 
-        let library_state = LibraryDomainState::new(Some(api_service.clone()), lib_accessor);
+        let library_state =
+            LibraryDomainState::new(Some(api_service.clone()), lib_accessor);
 
-        let media_state = MediaDomainState::new(media_accessor, Some(api_service.clone()));
+        let media_state =
+            MediaDomainState::new(media_accessor, Some(api_service.clone()));
 
         let metadata_state = MetadataDomainState::new(
             server_url.clone(),
@@ -170,16 +179,22 @@ impl State {
         let settings_adapter = SettingsApiAdapter::new(api_arc);
         let settings_service = Arc::new(settings_adapter);
 
-        let settings_state =
-            SettingsDomainState::new(auth_service.clone(), api_service.clone(), settings_service);
+        let settings_state = SettingsDomainState::new(
+            auth_service.clone(),
+            api_service.clone(),
+            settings_service,
+        );
 
         // Create streaming service adapter
         let api_arc_stream = Arc::new(api_client.clone());
         let streaming_adapter = StreamingApiAdapter::new(api_arc_stream);
         let streaming_service = Arc::new(streaming_adapter);
 
-        let streaming_state =
-            StreamingDomainState::new(api_service.clone(), streaming_service, ui_accessor.clone());
+        let streaming_state = StreamingDomainState::new(
+            api_service.clone(),
+            streaming_service,
+            ui_accessor.clone(),
+        );
 
         let mut user_mgmt_state = UserManagementDomainState {
             api_service: Some(api_service.clone()),
@@ -190,26 +205,35 @@ impl State {
         if service_builder.toggles().prefer_trait_services {
             let api_arc = std::sync::Arc::new(api_client.clone());
             let adapter = UserAdminApiAdapter::new(api_arc);
-            user_mgmt_state.user_admin_service = Some(std::sync::Arc::new(adapter));
+            user_mgmt_state.user_admin_service =
+                Some(std::sync::Arc::new(adapter));
         }
 
         let player_domain = PlayerDomain::new(Some(api_service.clone()));
 
-        let search_domain = SearchDomain::new_with_metrics(Some(api_service.clone()));
+        let search_domain =
+            SearchDomain::new_with_metrics(Some(api_service.clone()));
 
         // Create domain registry
         let domains = DomainRegistry {
             auth: crate::domains::auth::AuthDomain::new(auth_state),
             library: crate::domains::library::LibraryDomain::new(library_state),
             media: crate::domains::media::MediaDomain::new(media_state),
-            metadata: crate::domains::metadata::MetadataDomain::new(metadata_state),
+            metadata: crate::domains::metadata::MetadataDomain::new(
+                metadata_state,
+            ),
             player: player_domain,
             ui: crate::domains::ui::UIDomain::new(ui_state),
-            settings: crate::domains::settings::SettingsDomain::new(settings_state),
-            streaming: crate::domains::streaming::StreamingDomain::new(streaming_state),
-            user_management: crate::domains::user_management::UserManagementDomain::new(
-                user_mgmt_state,
+            settings: crate::domains::settings::SettingsDomain::new(
+                settings_state,
             ),
+            streaming: crate::domains::streaming::StreamingDomain::new(
+                streaming_state,
+            ),
+            user_management:
+                crate::domains::user_management::UserManagementDomain::new(
+                    user_mgmt_state,
+                ),
             search: search_domain,
         };
 
@@ -219,10 +243,14 @@ impl State {
         tab_manager.get_or_create_tab(crate::domains::ui::tabs::TabId::All);
         tab_manager.set_active_tab(crate::domains::ui::tabs::TabId::All);
         tab_manager.refresh_active_tab();
-        log::info!("[Startup] Initialized and activated All tab for curated view");
+        log::info!(
+            "[Startup] Initialized and activated All tab for curated view"
+        );
 
         // NOTE: Tabs and views use the repo accessor pattern for data access
-        log::info!("[Architecture] TabManager created for independent tab state management");
+        log::info!(
+            "[Architecture] TabManager created for independent tab state management"
+        );
 
         Self {
             domains,

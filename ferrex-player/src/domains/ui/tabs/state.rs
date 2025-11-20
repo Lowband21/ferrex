@@ -6,8 +6,8 @@ use crate::infrastructure::api_types::{LibraryType, Media};
 use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
 use ferrex_core::player_prelude::{
     ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedMovieReference,
-    ArchivedSeriesReference, LibraryID, MediaID, MediaIDLike, MediaOps, MovieID, SeriesID, SortBy,
-    SortOrder, compare_media,
+    ArchivedSeriesReference, LibraryID, MediaID, MediaIDLike, MediaOps,
+    MovieID, SeriesID, SortBy, SortOrder, compare_media,
 };
 use iced::widget::Id;
 use std::cmp::Ordering;
@@ -44,7 +44,11 @@ impl TabState {
         library_type: LibraryType,
         accessor: Accessor<ReadOnly>,
     ) -> Self {
-        TabState::Library(LibraryTabState::new(library_id, library_type, accessor))
+        TabState::Library(LibraryTabState::new(
+            library_id,
+            library_type,
+            accessor,
+        ))
     }
 
     /// Get the grid state if this is a library tab
@@ -280,7 +284,11 @@ impl LibraryTabState {
     }
 
     /// Apply server-provided sorted positions to reorder the current grid
-    pub fn apply_sorted_positions(&mut self, positions: &[u32], cache_key: Option<u64>) {
+    pub fn apply_sorted_positions(
+        &mut self,
+        positions: &[u32],
+        cache_key: Option<u64>,
+    ) {
         self.cached_positions = Some(positions.to_vec());
         if let Some(hash) = cache_key {
             self.cached_filter_positions
@@ -320,7 +328,11 @@ impl LibraryTabState {
 
         let authoritative_set = self
             .accessor
-            .get_sorted_index_by_library(&self.library_id, self.sort_by, self.sort_order)
+            .get_sorted_index_by_library(
+                &self.library_id,
+                self.sort_by,
+                self.sort_order,
+            )
             .ok()
             .and_then(|ids| {
                 if ids.is_empty() {
@@ -445,23 +457,30 @@ impl LibraryTabState {
             return false;
         }
 
-        let compare_with_fallback = |a: &Media, a_id: &Uuid, b: &Media, b_id: &Uuid| {
-            compare_media(a, b, self.sort_by, self.sort_order)
-                .unwrap_or_else(|| {
-                    compare_media(a, b, SortBy::Title, SortOrder::Ascending)
-                        .unwrap_or_else(|| a_id.cmp(b_id))
-                })
-                .then_with(|| a_id.cmp(b_id))
-        };
+        let compare_with_fallback =
+            |a: &Media, a_id: &Uuid, b: &Media, b_id: &Uuid| {
+                compare_media(a, b, self.sort_by, self.sort_order)
+                    .unwrap_or_else(|| {
+                        compare_media(a, b, SortBy::Title, SortOrder::Ascending)
+                            .unwrap_or_else(|| a_id.cmp(b_id))
+                    })
+                    .then_with(|| a_id.cmp(b_id))
+            };
 
         let mut insert_at = None;
 
         for (idx, existing_id) in self.cached_index_ids.iter().enumerate() {
-            let Some(existing_media) = self.fetch_media_by_uuid(*existing_id) else {
+            let Some(existing_media) = self.fetch_media_by_uuid(*existing_id)
+            else {
                 continue;
             };
 
-            let ordering = compare_with_fallback(media, &media_uuid, &existing_media, existing_id);
+            let ordering = compare_with_fallback(
+                media,
+                &media_uuid,
+                &existing_media,
+                existing_id,
+            );
             if ordering != Ordering::Greater {
                 insert_at = Some(idx);
                 break;
@@ -469,7 +488,9 @@ impl LibraryTabState {
         }
 
         match insert_at {
-            Some(position) => self.cached_index_ids.insert(position, media_uuid),
+            Some(position) => {
+                self.cached_index_ids.insert(position, media_uuid)
+            }
             None => self.cached_index_ids.push(media_uuid),
         }
 
@@ -482,7 +503,8 @@ impl LibraryTabState {
     fn matches_library_media(&self, media: &Media) -> bool {
         matches!(
             (self.library_type, media),
-            (LibraryType::Movies, Media::Movie(_)) | (LibraryType::Series, Media::Series(_))
+            (LibraryType::Movies, Media::Movie(_))
+                | (LibraryType::Series, Media::Series(_))
         )
     }
 
@@ -523,7 +545,10 @@ impl LibraryTabState {
     }
 
     /// Update the grid state's scroll position
-    pub fn update_scroll(&mut self, viewport: iced::widget::scrollable::Viewport) {
+    pub fn update_scroll(
+        &mut self,
+        viewport: iced::widget::scrollable::Viewport,
+    ) {
         self.grid_state.update_scroll(viewport);
     }
 

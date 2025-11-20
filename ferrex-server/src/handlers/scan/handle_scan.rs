@@ -4,10 +4,13 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json, Sse},
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use base64::{
+    Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
+};
 use ferrex_core::api_types::{
-    ActiveScansResponse, ApiResponse, LatestProgressResponse, ScanCommandAcceptedResponse,
-    ScanCommandRequest, ScanSnapshotDto, StartScanRequest,
+    ActiveScansResponse, ApiResponse, LatestProgressResponse,
+    ScanCommandAcceptedResponse, ScanCommandRequest, ScanSnapshotDto,
+    StartScanRequest,
 };
 use ferrex_core::types::{LibraryID, MediaEvent, ScanProgressEvent};
 use rkyv::{rancor::Error as RkyvError, to_bytes};
@@ -22,8 +25,9 @@ use crate::infra::scan::scan_manager::{
     ScanBroadcastFrame, ScanControlError, ScanControlPlane, ScanHistoryEntry,
 };
 use ferrex_core::api_scan::{
-    BudgetConfigView, BulkModeView, LeaseConfigView, MetadataLimitsView, OrchestratorConfigView,
-    QueueConfigView, RetryConfigView, ScanConfig, ScanMetrics, WatchConfigView,
+    BudgetConfigView, BulkModeView, LeaseConfigView, MetadataLimitsView,
+    OrchestratorConfigView, QueueConfigView, RetryConfigView, ScanConfig,
+    ScanMetrics, WatchConfigView,
 };
 
 const LAST_EVENT_ID_HEADER: &str = "last-event-id";
@@ -77,7 +81,7 @@ pub async fn start_scan_handler(
     Json(request): Json<StartScanRequest>,
 ) -> Result<impl IntoResponse, ScanHttpError> {
     let accepted = state
-        .scan_control
+        .scan_control()
         .start_library_scan(LibraryID(library_id), request.correlation_id)
         .await?;
 
@@ -95,7 +99,7 @@ pub async fn pause_scan_handler(
     Path((_library_id,)): Path<(Uuid,)>,
     Json(request): Json<ScanCommandRequest>,
 ) -> Result<impl IntoResponse, ScanHttpError> {
-    let accepted = state.scan_control.pause_scan(&request.scan_id).await?;
+    let accepted = state.scan_control().pause_scan(&request.scan_id).await?;
 
     Ok((
         StatusCode::ACCEPTED,
@@ -111,7 +115,7 @@ pub async fn resume_scan_handler(
     Path((_library_id,)): Path<(Uuid,)>,
     Json(request): Json<ScanCommandRequest>,
 ) -> Result<impl IntoResponse, ScanHttpError> {
-    let accepted = state.scan_control.resume_scan(&request.scan_id).await?;
+    let accepted = state.scan_control().resume_scan(&request.scan_id).await?;
 
     Ok((
         StatusCode::ACCEPTED,
@@ -127,7 +131,7 @@ pub async fn cancel_scan_handler(
     Path((_library_id,)): Path<(Uuid,)>,
     Json(request): Json<ScanCommandRequest>,
 ) -> Result<impl IntoResponse, ScanHttpError> {
-    let accepted = state.scan_control.cancel_scan(&request.scan_id).await?;
+    let accepted = state.scan_control().cancel_scan(&request.scan_id).await?;
 
     Ok((
         StatusCode::ACCEPTED,
@@ -141,9 +145,10 @@ pub async fn cancel_scan_handler(
 pub async fn active_scans_handler(
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<ActiveScansResponse>>, ScanHttpError> {
-    let scans = state.scan_control.active_scans().await;
+    let scans = state.scan_control().active_scans().await;
     let count = scans.len();
-    let dto_scans: Vec<ScanSnapshotDto> = scans.into_iter().map(Into::into).collect();
+    let dto_scans: Vec<ScanSnapshotDto> =
+        scans.into_iter().map(Into::into).collect();
     Ok(Json(ApiResponse::success(ActiveScansResponse {
         scans: dto_scans,
         count,
@@ -154,7 +159,10 @@ pub async fn scan_history_handler(
     State(state): State<AppState>,
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<ApiResponse<ScanHistoryResponse>>, ScanHttpError> {
-    let history = state.scan_control.history(query.limit.unwrap_or(25)).await;
+    let history = state
+        .scan_control()
+        .history(query.limit.unwrap_or(25))
+        .await;
     let count = history.len();
     Ok(Json(ApiResponse::success(ScanHistoryResponse {
         history,
@@ -166,7 +174,7 @@ pub async fn latest_progress_handler(
     State(state): State<AppState>,
     Query(query): Query<ProgressQuery>,
 ) -> Result<Json<ApiResponse<LatestProgressResponse>>, ScanHttpError> {
-    let frames = state.scan_control.events(&query.scan_id).await?;
+    let frames = state.scan_control().events(&query.scan_id).await?;
     let latest = frames.last().map(|frame| frame.payload.clone());
     Ok(Json(ApiResponse::success(LatestProgressResponse {
         scan_id: query.scan_id,
@@ -178,7 +186,7 @@ pub async fn scan_events_handler(
     State(state): State<AppState>,
     Path(scan_id): Path<Uuid>,
 ) -> Result<Json<ApiResponse<ScanEventsResponse>>, ScanHttpError> {
-    let events = state.scan_control.events(&scan_id).await?;
+    let events = state.scan_control().events(&scan_id).await?;
     Ok(Json(ApiResponse::success(ScanEventsResponse {
         scan_id,
         events,
@@ -189,13 +197,20 @@ pub async fn scan_progress_sse_handler(
     State(state): State<AppState>,
     Path(scan_id): Path<Uuid>,
     headers: HeaderMap,
-) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ScanHttpError> {
+) -> Result<
+    Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>,
+    ScanHttpError,
+> {
     let last_sequence = headers
         .get(LAST_EVENT_ID_HEADER)
         .and_then(|value| value.to_str().ok())
         .and_then(|raw| raw.trim().parse::<u64>().ok());
-    let stream =
-        build_scan_progress_stream(Arc::clone(&state.scan_control), scan_id, last_sequence).await?;
+    let stream = build_scan_progress_stream(
+        Arc::clone(&state.scan_control()),
+        scan_id,
+        last_sequence,
+    )
+    .await?;
 
     Ok(Sse::new(stream).keep_alive(default_keep_alive()))
 }
@@ -204,7 +219,7 @@ pub async fn scan_metrics_handler(
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<ScanMetrics>>, ScanHttpError> {
     let depths = state
-        .scan_control
+        .scan_control()
         .orchestrator()
         .queue_depths()
         .await
@@ -212,7 +227,7 @@ pub async fn scan_metrics_handler(
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: e.to_string(),
         })?;
-    let active = state.scan_control.active_scans().await.len();
+    let active = state.scan_control().active_scans().await.len();
     Ok(Json(ApiResponse::success(ScanMetrics {
         queue_depths: depths,
         active_scans: active,
@@ -222,7 +237,7 @@ pub async fn scan_metrics_handler(
 pub async fn scan_config_handler(
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<ScanConfig>>, ScanHttpError> {
-    let cfg = state.scan_control.orchestrator().config();
+    let cfg = state.scan_control().orchestrator().config();
     // Map internal config to view that is feature-agnostic
     let view = OrchestratorConfigView {
         queue: QueueConfigView {
@@ -231,7 +246,9 @@ pub async fn scan_config_handler(
             max_parallel_metadata: cfg.queue.max_parallel_metadata,
             max_parallel_index: cfg.queue.max_parallel_index,
             max_parallel_image_fetch: cfg.queue.max_parallel_image_fetch,
-            max_parallel_scans_per_device: cfg.queue.max_parallel_scans_per_device,
+            max_parallel_scans_per_device: cfg
+                .queue
+                .max_parallel_scans_per_device,
             default_library_cap: cfg.queue.default_library_cap,
         },
         retry: RetryConfigView {
@@ -240,8 +257,12 @@ pub async fn scan_config_handler(
             backoff_max_ms: cfg.retry.backoff_max_ms,
             fast_retry_attempts: cfg.retry.fast_retry_attempts,
             fast_retry_factor: cfg.retry.fast_retry_factor,
-            heavy_library_attempt_threshold: cfg.retry.heavy_library_attempt_threshold,
-            heavy_library_slowdown_factor: cfg.retry.heavy_library_slowdown_factor,
+            heavy_library_attempt_threshold: cfg
+                .retry
+                .heavy_library_attempt_threshold,
+            heavy_library_slowdown_factor: cfg
+                .retry
+                .heavy_library_slowdown_factor,
             jitter_ratio: cfg.retry.jitter_ratio,
             jitter_min_ms: cfg.retry.jitter_min_ms,
         },
@@ -251,7 +272,9 @@ pub async fn scan_config_handler(
         },
         bulk_mode: BulkModeView {
             speedup_factor: cfg.bulk_mode.speedup_factor,
-            maintenance_partition_count: cfg.bulk_mode.maintenance_partition_count,
+            maintenance_partition_count: cfg
+                .bulk_mode
+                .maintenance_partition_count,
         },
         lease: LeaseConfigView {
             lease_ttl_secs: cfg.lease.lease_ttl_secs,
@@ -274,7 +297,13 @@ pub async fn build_scan_progress_stream(
     scan_id: Uuid,
     last_sequence: Option<u64>,
 ) -> Result<
-    Pin<Box<dyn tokio_stream::Stream<Item = Result<Event, Infallible>> + Send + 'static>>,
+    Pin<
+        Box<
+            dyn tokio_stream::Stream<Item = Result<Event, Infallible>>
+                + Send
+                + 'static,
+        >,
+    >,
     ScanControlError,
 > {
     let history = scan_control.events(&scan_id).await?;
@@ -324,7 +353,7 @@ pub async fn build_scan_progress_stream(
 pub async fn media_events_sse_handler(
     State(state): State<AppState>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
-    let receiver = state.scan_control.subscribe_media_events();
+    let receiver = state.scan_control().subscribe_media_events();
     let stream = BroadcastStream::new(receiver).filter_map(|item| match item {
         Ok(event) => media_event_to_sse(event).map(Ok),
         Err(err) => {
@@ -349,7 +378,8 @@ fn scan_frame_to_event(frame: ScanBroadcastFrame) -> Option<Event> {
 fn media_event_to_sse(event: MediaEvent) -> Option<Event> {
     let name = event.sse_event_type().event_name();
 
-    encode_media_event(&event).map(|data| Event::default().event(name).data(data))
+    encode_media_event(&event)
+        .map(|data| Event::default().event(name).data(data))
 }
 
 fn encode_media_event(event: &MediaEvent) -> Option<String> {

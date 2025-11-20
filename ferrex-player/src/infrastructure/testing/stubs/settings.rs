@@ -71,7 +71,9 @@ impl TestSettingsService {
 
 #[async_trait]
 impl SettingsService for TestSettingsService {
-    async fn list_user_devices(&self) -> anyhow::Result<Vec<AuthenticatedDevice>> {
+    async fn list_user_devices(
+        &self,
+    ) -> anyhow::Result<Vec<AuthenticatedDevice>> {
         Ok(self.devices.read().expect("lock poisoned").clone())
     }
 

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE user_credentials\n            SET password_hash = $2,\n                pin_hash = $3,\n                pin_client_salt = $4,\n                pin_updated_at = $5,\n                updated_at = NOW()\n            WHERE user_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Text",
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a59b6d00164dd4ae8ee9ac097a4d0a6fba8ba2bd712b5470f5d04c968d20805e"
+}

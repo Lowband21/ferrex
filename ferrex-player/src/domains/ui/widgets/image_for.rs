@@ -7,13 +7,17 @@ use crate::domains::metadata::image_service::FirstDisplayHint;
 use crate::domains::ui::widgets::rounded_image_shader::AnimatedPosterBounds;
 use crate::{
     domains::ui::messages::Message,
-    domains::ui::widgets::{AnimationBehavior, AnimationType, rounded_image_shader},
+    domains::ui::widgets::{
+        AnimationBehavior, AnimationType, rounded_image_shader,
+    },
     infrastructure::api_types::{
         EpisodeReference, MovieReference, SeasonReference, SeriesReference,
     },
     infrastructure::service_registry,
 };
-use ferrex_core::player_prelude::{ImageRequest, ImageSize, ImageType, MediaIDLike, Priority};
+use ferrex_core::player_prelude::{
+    ImageRequest, ImageSize, ImageType, MediaIDLike, Priority,
+};
 use iced::{Color, Element, Length, widget::image::Handle};
 use lucide_icons::Icon;
 use std::hash::{Hash, Hasher};
@@ -65,7 +69,8 @@ impl ImageFor {
             media_id,
             size: ImageSize::Poster,
             image_type: ImageType::Movie,
-            radius: crate::infrastructure::constants::layout::poster::CORNER_RADIUS,
+            radius:
+                crate::infrastructure::constants::layout::poster::CORNER_RADIUS,
             width: Length::Fixed(200.0),
             height: Length::Fixed(300.0),
             // Might want to use a different default icon
@@ -243,9 +248,10 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
         let bounds = AnimatedPosterBounds::new(width, height);
 
         // Create the image request
-        let request = ImageRequest::new(image.media_id, image.size, image.image_type)
-            .with_priority(image.priority)
-            .with_index(image.image_index);
+        let request =
+            ImageRequest::new(image.media_id, image.size, image.image_type)
+                .with_priority(image.priority)
+                .with_index(image.image_index);
 
         // Calculate request hash for cache invalidation
         let request_hash = {
@@ -308,7 +314,9 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                     });
 
                     let animation_behavior = match hint {
-                        Some(FirstDisplayHint::FlipOnce) => AnimationBehavior::flip_then_fade(),
+                        Some(FirstDisplayHint::FlipOnce) => {
+                            AnimationBehavior::flip_then_fade()
+                        }
                         None => image.animation,
                     };
 
@@ -331,9 +339,10 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                     }
 
                     let (selected_animation, load_time_opt) = match loaded_at {
-                        Some(load_time) => {
-                            (animation_behavior.select(Some(load_time)), Some(load_time))
-                        }
+                        Some(load_time) => (
+                            animation_behavior.select(Some(load_time)),
+                            Some(load_time),
+                        ),
                         None => (AnimationType::None, None),
                     };
 
@@ -375,7 +384,12 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
             }
         } else {
             // Service not initialized, show loading state
-            create_loading_placeholder(bounds, image.radius, image.theme_color, request_hash)
+            create_loading_placeholder(
+                bounds,
+                image.radius,
+                image.theme_color,
+                request_hash,
+            )
         }
     }
 }

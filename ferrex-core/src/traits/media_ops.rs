@@ -1,11 +1,13 @@
 use super::id::MediaIDLike;
-use crate::types::details::{MediaDetailsOption, MediaDetailsOptionLike, TmdbDetails};
+use crate::types::details::{
+    MediaDetailsOption, MediaDetailsOptionLike, TmdbDetails,
+};
 use crate::types::files::MediaFile;
 use crate::types::ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID};
 use crate::types::media::{
-    ArchivedEpisodeReference, ArchivedMedia, ArchivedMovieReference, ArchivedSeasonReference,
-    ArchivedSeriesReference, EpisodeReference, Media, MovieReference, SeasonReference,
-    SeriesReference,
+    ArchivedEpisodeReference, ArchivedMedia, ArchivedMovieReference,
+    ArchivedSeasonReference, ArchivedSeriesReference, EpisodeReference, Media,
+    MovieReference, SeasonReference, SeriesReference,
 };
 use crate::types::media_id::{ArchivedMediaID, MediaID};
 use crate::types::urls::UrlLike;
@@ -127,16 +129,24 @@ impl MediaOps for ArchivedMedia {
             ArchivedMedia::Movie(movie) => ArchivedMediaID::Movie(movie.id),
             ArchivedMedia::Series(series) => ArchivedMediaID::Series(series.id),
             ArchivedMedia::Season(season) => ArchivedMediaID::Season(season.id),
-            ArchivedMedia::Episode(episode) => ArchivedMediaID::Episode(episode.id),
+            ArchivedMedia::Episode(episode) => {
+                ArchivedMediaID::Episode(episode.id)
+            }
         }
     }
 
     fn media_id(&self) -> MediaID {
         match &self {
             ArchivedMedia::Movie(movie) => MediaID::Movie(MovieID(movie.id.0)),
-            ArchivedMedia::Series(series) => MediaID::Series(SeriesID(series.id.0)),
-            ArchivedMedia::Season(season) => MediaID::Season(SeasonID(season.id.0)),
-            ArchivedMedia::Episode(episode) => MediaID::Episode(EpisodeID(episode.id.0)),
+            ArchivedMedia::Series(series) => {
+                MediaID::Series(SeriesID(series.id.0))
+            }
+            ArchivedMedia::Season(season) => {
+                MediaID::Season(SeasonID(season.id.0))
+            }
+            ArchivedMedia::Episode(episode) => {
+                MediaID::Episode(EpisodeID(episode.id.0))
+            }
         }
     }
 

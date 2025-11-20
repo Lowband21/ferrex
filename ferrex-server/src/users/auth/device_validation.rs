@@ -11,7 +11,9 @@ use ferrex_core::{
         AuthError,
         domain::{
             aggregates::{DeviceSession, DeviceStatus},
-            services::{AuthenticationError, DeviceTrustError, PinManagementError},
+            services::{
+                AuthenticationError, DeviceTrustError, PinManagementError,
+            },
         },
     },
     user::User,
@@ -70,12 +72,11 @@ pub async fn validate_device_trust(
     Extension(device_id_ext): Extension<Option<Uuid>>,
     Query(params): Query<DeviceTrustQuery>,
 ) -> AppResult<Json<ApiResponse<DeviceTrustStatus>>> {
-    let device_id = params
-        .device_id
-        .or(device_id_ext)
-        .ok_or_else(|| AppError::bad_request("Device ID required".to_string()))?;
+    let device_id = params.device_id.or(device_id_ext).ok_or_else(|| {
+        AppError::bad_request("Device ID required".to_string())
+    })?;
 
-    let facade = state.auth_facade.clone();
+    let facade = state.auth_facade().clone();
     let status = match facade.get_device_by_id(device_id).await {
         Ok(session) if session.user_id() == user.id => {
             validate_session(session, params.fingerprint.as_deref())?
@@ -107,7 +108,7 @@ pub async fn revoke_device_trust(
     Extension(user): Extension<User>,
     Json(request): Json<RevokeDeviceRequest>,
 ) -> AppResult<Json<ApiResponse<()>>> {
-    let facade = state.auth_facade.clone();
+    let facade = state.auth_facade().clone();
     let session = facade
         .get_device_by_id(request.device_id)
         .await
@@ -137,7 +138,7 @@ pub async fn list_trusted_devices(
     Extension(user): Extension<User>,
     Extension(current_device): Extension<Option<Uuid>>,
 ) -> AppResult<Json<ApiResponse<Vec<TrustedDevice>>>> {
-    let facade = state.auth_facade.clone();
+    let facade = state.auth_facade().clone();
     let devices = facade
         .list_user_devices(user.id)
         .await
@@ -163,12 +164,11 @@ pub async fn extend_device_trust(
     Extension(device_id_ext): Extension<Option<Uuid>>,
     Json(request): Json<ExtendTrustRequest>,
 ) -> AppResult<Json<ApiResponse<DeviceTrustStatus>>> {
-    let device_id = request
-        .device_id
-        .or(device_id_ext)
-        .ok_or_else(|| AppError::bad_request("Device ID required".to_string()))?;
+    let device_id = request.device_id.or(device_id_ext).ok_or_else(|| {
+        AppError::bad_request("Device ID required".to_string())
+    })?;
 
-    let facade = state.auth_facade.clone();
+    let facade = state.auth_facade().clone();
     let session = facade
         .get_device_by_id(device_id)
         .await
@@ -244,26 +244,34 @@ fn map_facade_error(err: AuthFacadeError) -> AppError {
         AuthFacadeError::Authentication(err) => map_authentication_error(err),
         AuthFacadeError::DeviceTrust(err) => map_device_trust_error(err),
         AuthFacadeError::PinManagement(err) => map_pin_error(err),
-        AuthFacadeError::UserNotFound => AppError::not_found("User not found".to_string()),
-        AuthFacadeError::Storage(err) => AppError::internal(format!("Storage error: {err}")),
+        AuthFacadeError::UserNotFound => {
+            AppError::not_found("User not found".to_string())
+        }
+        AuthFacadeError::Storage(err) => {
+            AppError::internal(format!("Storage error: {err}"))
+        }
     }
 }
 
 fn map_authentication_error(err: AuthenticationError) -> AppError {
     match err {
-        AuthenticationError::InvalidCredentials | AuthenticationError::InvalidPin => {
+        AuthenticationError::InvalidCredentials
+        | AuthenticationError::InvalidPin => {
             AppError::unauthorized(AuthError::InvalidCredentials.to_string())
         }
-        AuthenticationError::TooManyFailedAttempts => {
-            AppError::rate_limited("Too many failed authentication attempts".to_string())
-        }
+        AuthenticationError::TooManyFailedAttempts => AppError::rate_limited(
+            "Too many failed authentication attempts".to_string(),
+        ),
         AuthenticationError::SessionExpired => {
             AppError::unauthorized(AuthError::SessionExpired.to_string())
         }
-        AuthenticationError::DeviceNotFound | AuthenticationError::DeviceNotTrusted => {
-            AppError::forbidden("Device not eligible for authentication".to_string())
+        AuthenticationError::DeviceNotFound
+        | AuthenticationError::DeviceNotTrusted => AppError::forbidden(
+            "Device not eligible for authentication".to_string(),
+        ),
+        AuthenticationError::UserNotFound => {
+            AppError::not_found("User not found".to_string())
         }
-        AuthenticationError::UserNotFound => AppError::not_found("User not found".to_string()),
         AuthenticationError::DatabaseError(e) => {
             AppError::internal(format!("Authentication failed: {e}"))
         }
@@ -274,15 +282,27 @@ fn map_device_trust_error(err: DeviceTrustError) -> AppError {
     use DeviceTrustError as E;
     match err {
         E::UserNotFound => AppError::not_found("User not found".to_string()),
-        E::UserInactive | E::UserLocked => {
-            AppError::forbidden("User is not allowed to authenticate".to_string())
+        E::UserInactive | E::UserLocked => AppError::forbidden(
+            "User is not allowed to authenticate".to_string(),
+        ),
+        E::DeviceNotFound => {
+            AppError::not_found("Device not found".to_string())
         }
-        E::DeviceNotFound => AppError::not_found("Device not found".to_string()),
-        E::DeviceAlreadyTrusted => AppError::conflict("Device already trusted".to_string()),
-        E::DeviceRevoked => AppError::forbidden("Device has been revoked".to_string()),
-        E::TooManyDevices { .. } => AppError::conflict("Too many devices registered".to_string()),
-        E::DeviceNotTrusted => AppError::forbidden("Device is not trusted".to_string()),
-        E::DatabaseError(e) => AppError::internal(format!("Device trust error: {e}")),
+        E::DeviceAlreadyTrusted => {
+            AppError::conflict("Device already trusted".to_string())
+        }
+        E::DeviceRevoked => {
+            AppError::forbidden("Device has been revoked".to_string())
+        }
+        E::TooManyDevices { .. } => {
+            AppError::conflict("Too many devices registered".to_string())
+        }
+        E::DeviceNotTrusted => {
+            AppError::forbidden("Device is not trusted".to_string())
+        }
+        E::DatabaseError(e) => {
+            AppError::internal(format!("Device trust error: {e}"))
+        }
     }
 }
 
@@ -293,14 +313,26 @@ fn map_pin_error(err: PinManagementError) -> AppError {
         E::UserInactive | E::UserLocked => {
             AppError::forbidden("User is not allowed to update PIN".to_string())
         }
-        E::DeviceNotFound => AppError::not_found("Device not found".to_string()),
-        E::DeviceRevoked => AppError::forbidden("Device has been revoked".to_string()),
-        E::PinNotSet => AppError::not_found("PIN is not configured".to_string()),
-        E::InvalidPinFormat => AppError::bad_request("Invalid PIN format".to_string()),
-        E::PinVerificationFailed => AppError::unauthorized("PIN verification failed".to_string()),
+        E::DeviceNotFound => {
+            AppError::not_found("Device not found".to_string())
+        }
+        E::DeviceRevoked => {
+            AppError::forbidden("Device has been revoked".to_string())
+        }
+        E::PinNotSet => {
+            AppError::not_found("PIN is not configured".to_string())
+        }
+        E::InvalidPinFormat => {
+            AppError::bad_request("Invalid PIN format".to_string())
+        }
+        E::PinVerificationFailed => {
+            AppError::unauthorized("PIN verification failed".to_string())
+        }
         E::TooManyFailedAttempts => {
             AppError::rate_limited("Too many failed PIN attempts".to_string())
         }
-        E::DatabaseError(e) => AppError::internal(format!("PIN management error: {e}")),
+        E::DatabaseError(e) => {
+            AppError::internal(format!("PIN management error: {e}"))
+        }
     }
 }

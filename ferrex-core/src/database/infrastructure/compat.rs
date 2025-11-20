@@ -6,7 +6,8 @@ use async_trait::async_trait;
 use crate::database::MediaDatabase;
 use crate::database::ports::images::ImageRepository;
 use crate::database::traits::{
-    ImageLookupParams, ImageRecord, ImageVariant, MediaDatabaseTrait, MediaImage,
+    ImageLookupParams, ImageRecord, ImageVariant, MediaDatabaseTrait,
+    MediaImage,
 };
 use crate::error::Result;
 use crate::image::MediaImageKind;
@@ -36,11 +37,17 @@ impl ImageRepository for MediaDatabaseImageRepository {
         self.backend().create_image(tmdb_path).await
     }
 
-    async fn get_image_by_tmdb_path(&self, tmdb_path: &str) -> Result<Option<ImageRecord>> {
+    async fn get_image_by_tmdb_path(
+        &self,
+        tmdb_path: &str,
+    ) -> Result<Option<ImageRecord>> {
         self.backend().get_image_by_tmdb_path(tmdb_path).await
     }
 
-    async fn get_image_by_hash(&self, hash: &str) -> Result<Option<ImageRecord>> {
+    async fn get_image_by_hash(
+        &self,
+        hash: &str,
+    ) -> Result<Option<ImageRecord>> {
         self.backend().get_image_by_hash(hash).await
     }
 
@@ -68,7 +75,9 @@ impl ImageRepository for MediaDatabaseImageRepository {
         height: Option<i32>,
     ) -> Result<ImageVariant> {
         self.backend()
-            .create_image_variant(image_id, variant, file_path, size, width, height)
+            .create_image_variant(
+                image_id, variant, file_path, size, width, height,
+            )
             .await
     }
 
@@ -80,7 +89,10 @@ impl ImageRepository for MediaDatabaseImageRepository {
         self.backend().get_image_variant(image_id, variant).await
     }
 
-    async fn get_image_variants(&self, image_id: uuid::Uuid) -> Result<Vec<ImageVariant>> {
+    async fn get_image_variants(
+        &self,
+        image_id: uuid::Uuid,
+    ) -> Result<Vec<ImageVariant>> {
         self.backend().get_image_variants(image_id).await
     }
 
@@ -147,7 +159,13 @@ impl ImageRepository for MediaDatabaseImageRepository {
         theme_color: Option<&str>,
     ) -> Result<MediaImageVariantRecord> {
         self.backend()
-            .mark_media_image_variant_cached(key, width, height, content_hash, theme_color)
+            .mark_media_image_variant_cached(
+                key,
+                width,
+                height,
+                content_hash,
+                theme_color,
+            )
             .await
     }
 

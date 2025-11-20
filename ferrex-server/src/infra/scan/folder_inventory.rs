@@ -135,7 +135,7 @@ pub async fn get_folder_inventory(
 ) -> Result<Json<FolderInventoryResponse>, StatusCode> {
     // Fetch all folders for the library
     let all_folders = state
-        .unit_of_work
+        .unit_of_work()
         .folder_inventory
         .get_folder_inventory(LibraryID(library_id))
         .await
@@ -155,18 +155,21 @@ pub async fn get_folder_inventory(
     // Filter by search term if provided
     if let Some(search) = &params.search {
         let search_lower = search.to_lowercase();
-        filtered.retain(|f| f.folder_path.to_lowercase().contains(&search_lower));
+        filtered
+            .retain(|f| f.folder_path.to_lowercase().contains(&search_lower));
     }
 
     // Calculate pagination
     let total_items = filtered.len();
-    let total_pages = ((total_items as f32) / (params.per_page as f32)).ceil() as u32;
+    let total_pages =
+        ((total_items as f32) / (params.per_page as f32)).ceil() as u32;
     let total_pages = total_pages.max(1);
 
     // Apply pagination
     let skip = ((params.page - 1) * params.per_page) as usize;
     let take = params.per_page as usize;
-    let paginated: Vec<FolderInventory> = filtered.into_iter().skip(skip).take(take).collect();
+    let paginated: Vec<FolderInventory> =
+        filtered.into_iter().skip(skip).take(take).collect();
 
     // Convert to response items
     let folders: Vec<FolderInventoryItem> = paginated
@@ -197,7 +200,7 @@ pub async fn get_scan_progress(
 ) -> Result<Json<ScanProgressResponse>, StatusCode> {
     // Fetch all folders for the library
     let folders = state
-        .unit_of_work
+        .unit_of_work()
         .folder_inventory
         .get_folder_inventory(LibraryID(library_id))
         .await

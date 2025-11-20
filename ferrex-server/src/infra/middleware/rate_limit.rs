@@ -13,8 +13,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ferrex_core::auth::rate_limit::{
-    EndpointLimits, RateLimitDecision, RateLimitError, RateLimitKey, RateLimitResult,
-    RateLimitRule, RateLimiter, TrustedSources, backoff,
+    EndpointLimits, RateLimitDecision, RateLimitError, RateLimitKey,
+    RateLimitResult, RateLimitRule, RateLimiter, TrustedSources, backoff,
 };
 use redis::AsyncCommands;
 use redis::aio::ConnectionManager;
@@ -210,8 +210,12 @@ struct RateLimitMetrics {
 
 impl RedisRateLimiter {
     /// Create a new Redis-backed rate limiter
-    pub async fn new(redis_url: &str, config: RateLimiterConfig) -> Result<Self> {
-        let client = redis::Client::open(redis_url).context("Failed to create Redis client")?;
+    pub async fn new(
+        redis_url: &str,
+        config: RateLimiterConfig,
+    ) -> Result<Self> {
+        let client = redis::Client::open(redis_url)
+            .context("Failed to create Redis client")?;
 
         let redis = ConnectionManager::new(client)
             .await
@@ -278,7 +282,8 @@ impl RedisRateLimiter {
                     metrics_guard.allowed_requests,
                     metrics_guard.denied_requests,
                     if metrics_guard.total_requests > 0 {
-                        (metrics_guard.cache_hits as f64 / metrics_guard.total_requests as f64)
+                        (metrics_guard.cache_hits as f64
+                            / metrics_guard.total_requests as f64)
                             * 100.0
                     } else {
                         0.0
@@ -308,7 +313,11 @@ impl RedisRateLimiter {
                             guard.trusted_sources = sources;
                         }
                         ConfigUpdate::DynamicRule { endpoint, rule } => {
-                            apply_dynamic_rule(&mut guard.endpoint_limits, &endpoint, rule);
+                            apply_dynamic_rule(
+                                &mut guard.endpoint_limits,
+                                &endpoint,
+                                rule,
+                            );
                         }
                     }
                 }
@@ -319,7 +328,11 @@ impl RedisRateLimiter {
         });
     }
     /// Get cache key with namespace
-    fn get_cache_key(&self, key: &RateLimitKey, rule: &RateLimitRule) -> String {
+    fn get_cache_key(
+        &self,
+        key: &RateLimitKey,
+        rule: &RateLimitRule,
+    ) -> String {
         format!(
             "{}:{}:{}",
             self.config.blocking_read().key_prefix,
@@ -346,7 +359,11 @@ impl RedisRateLimiter {
     }
 
     /// Update cache with decision
-    async fn update_cache(&self, cache_key: String, decision: RateLimitDecision) {
+    async fn update_cache(
+        &self,
+        cache_key: String,
+        decision: RateLimitDecision,
+    ) {
         let config = self.config.read().await;
         let expires_at = SystemTime::now() + config.cache_ttl;
 
@@ -504,16 +521,18 @@ impl RateLimiter for RedisRateLimiter {
         };
 
         // Calculate actual reset time with backoff
-        let actual_reset_after =
-            if !allowed && rule.exponential_backoff && violation_count > rule.violation_threshold {
-                backoff::exponential(
-                    rule.backoff_base,
-                    violation_count - rule.violation_threshold,
-                    rule.max_backoff,
-                )
-            } else {
-                reset_after
-            };
+        let actual_reset_after = if !allowed
+            && rule.exponential_backoff
+            && violation_count > rule.violation_threshold
+        {
+            backoff::exponential(
+                rule.backoff_base,
+                violation_count - rule.violation_threshold,
+                rule.max_backoff,
+            )
+        } else {
+            reset_after
+        };
 
         let decision = RateLimitDecision {
             allowed,
@@ -537,16 +556,20 @@ impl RateLimiter for RedisRateLimiter {
             }
 
             let elapsed = start_time.elapsed().as_micros() as u64;
-            metrics.avg_check_latency_us =
-                (metrics.avg_check_latency_us * (metrics.total_requests - 1) + elapsed)
-                    / metrics.total_requests;
+            metrics.avg_check_latency_us = (metrics.avg_check_latency_us
+                * (metrics.total_requests - 1)
+                + elapsed)
+                / metrics.total_requests;
         }
 
         if !allowed {
             self.record_violation(key, &rule.name).await;
 
             return Err(RateLimitError::RateLimitExceeded {
-                reason: format!("Exceeded {} requests per {:?}", rule.limit, rule.window),
+                reason: format!(
+                    "Exceeded {} requests per {:?}",
+                    rule.limit, rule.window
+                ),
                 retry_after: actual_reset_after,
                 violations: violation_count,
             });
@@ -557,7 +580,8 @@ impl RateLimiter for RedisRateLimiter {
 
     async fn reset(&self, key: &RateLimitKey) -> RateLimitResult<()> {
         let config = self.config.read().await;
-        let pattern = format!("{}:*:{}", config.key_prefix, key.to_cache_key("*"));
+        let pattern =
+            format!("{}:*:{}", config.key_prefix, key.to_cache_key("*"));
 
         let mut conn = self.redis.clone();
 
@@ -694,7 +718,11 @@ impl RateLimiter for RedisRateLimiter {
     }
 }
 
-fn apply_dynamic_rule(limits: &mut EndpointLimits, endpoint: &str, rule: RateLimitRule) {
+fn apply_dynamic_rule(
+    limits: &mut EndpointLimits,
+    endpoint: &str,
+    rule: RateLimitRule,
+) {
     match endpoint {
         "login" => limits.login = rule,
         "register" => limits.register = rule,
@@ -726,7 +754,9 @@ fn extract_rate_limit_key(request: &Request<Body>) -> RateLimitKey {
     }
 
     // Fall back to IP address
-    if let Some(ConnectInfo(addr)) = request.extensions().get::<ConnectInfo<SocketAddr>>() {
+    if let Some(ConnectInfo(addr)) =
+        request.extensions().get::<ConnectInfo<SocketAddr>>()
+    {
         return RateLimitKey::IpAddress(addr.ip().to_string());
     }
 
@@ -757,7 +787,7 @@ async fn rate_limit_middleware(
 
     // Get endpoint-specific rule
     let rule = {
-        let config = state.config.clone();
+        let config = state.config_handle();
         // TODO: Get rule from config based on endpoint
         RateLimitRule::default()
     };

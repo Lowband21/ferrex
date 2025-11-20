@@ -17,12 +17,15 @@ pub mod state_machine;
 
 pub use crypto::{AuthCrypto, AuthCryptoError};
 pub use device::*;
-pub use policy::{AuthSecuritySettings, PasswordPolicy, PasswordPolicyCheck, PasswordPolicyRule};
+pub use policy::{
+    AuthSecuritySettings, PasswordPolicy, PasswordPolicyCheck,
+    PasswordPolicyRule,
+};
 // Re-export session types with explicit naming to avoid conflicts
 pub use session::{
-    CreateSessionRequest, CreateSessionResponse, ListSessionsRequest, RevokeSessionRequest,
-    SessionActivity, SessionConfig, SessionSummary, SessionValidationResult,
-    generate_session_token,
+    CreateSessionRequest, CreateSessionResponse, ListSessionsRequest,
+    RevokeSessionRequest, SessionActivity, SessionConfig, SessionSummary,
+    SessionValidationResult, generate_session_token,
 };
 // Export session DeviceSession with alias to avoid conflict with domain DeviceSession
 pub use session::DeviceSession as SessionDeviceSession;
@@ -51,7 +54,10 @@ pub struct AuthResult {
 /// Authentication method trait
 #[async_trait::async_trait]
 pub trait AuthenticationMethod {
-    async fn authenticate(&self, ctx: &AuthContext) -> Result<AuthResult, AuthError>;
+    async fn authenticate(
+        &self,
+        ctx: &AuthContext,
+    ) -> Result<AuthResult, AuthError>;
 }
 
 /// Errors that can occur during authentication

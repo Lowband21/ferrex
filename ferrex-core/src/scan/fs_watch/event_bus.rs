@@ -16,7 +16,8 @@ pub mod postgres;
 pub use postgres::PostgresFileChangeEventBus;
 
 /// Stream of file change events for a subscriber group.
-pub type FileChangeEventStream = Pin<Box<dyn Stream<Item = FileWatchEvent> + Send>>;
+pub type FileChangeEventStream =
+    Pin<Box<dyn Stream<Item = FileWatchEvent> + Send>>;
 
 /// Represents a durable cursor for a subscriber group.
 #[derive(Debug, Clone)]
@@ -111,13 +112,15 @@ impl FileChangeEventBus for LegacyDatabaseFileChangeEventBus {
 
     async fn ack(&self, _group: &str, _event_id: Uuid) -> Result<()> {
         Err(MediaError::Internal(
-            "LegacyDatabaseFileChangeEventBus does not support durable ack".into(),
+            "LegacyDatabaseFileChangeEventBus does not support durable ack"
+                .into(),
         ))
     }
 
     async fn commit_cursor(&self, _cursor: FileChangeCursor) -> Result<()> {
         Err(MediaError::Internal(
-            "LegacyDatabaseFileChangeEventBus does not support cursor commits".into(),
+            "LegacyDatabaseFileChangeEventBus does not support cursor commits"
+                .into(),
         ))
     }
 

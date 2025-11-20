@@ -2,7 +2,9 @@
 mod search_decision_engine_tests {
     use ferrex_core::query::types::SearchField;
     use ferrex_player::domains::search::metrics::SearchPerformanceMetrics;
-    use ferrex_player::domains::search::types::{SearchDecisionEngine, SearchStrategy};
+    use ferrex_player::domains::search::types::{
+        SearchDecisionEngine, SearchStrategy,
+    };
     use std::time::{Duration, Instant};
 
     #[test]
@@ -72,8 +74,12 @@ mod search_decision_engine_tests {
         }
 
         // Now the engine should prefer client based on historical performance
-        let strategy =
-            engine.determine_strategy_enhanced("test query", 0.5, &[SearchField::Title], true);
+        let strategy = engine.determine_strategy_enhanced(
+            "test query",
+            0.5,
+            &[SearchField::Title],
+            true,
+        );
 
         // Should prefer client due to better performance history
         assert_eq!(strategy, SearchStrategy::Client);
@@ -100,8 +106,12 @@ mod search_decision_engine_tests {
         }
 
         // Now the engine should avoid server
-        let strategy =
-            engine.determine_strategy_enhanced("test query", 0.5, &[SearchField::Title], true);
+        let strategy = engine.determine_strategy_enhanced(
+            "test query",
+            0.5,
+            &[SearchField::Title],
+            true,
+        );
 
         // Should prefer client due to server failures
         assert_eq!(strategy, SearchStrategy::Client);

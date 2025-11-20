@@ -31,7 +31,12 @@ pub struct ImageQuery {
 /// Example: /images/movie/12345/poster/0
 pub async fn serve_image_handler(
     State(state): State<AppState>,
-    Path((media_type, media_id, category, index)): Path<(String, String, String, u32)>,
+    Path((media_type, media_id, category, index)): Path<(
+        String,
+        String,
+        String,
+        u32,
+    )>,
     Query(query): Query<ImageQuery>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
@@ -48,7 +53,9 @@ pub async fn serve_image_handler(
     );
 
     // Validate media type
-    if !["movie", "series", "season", "episode", "person"].contains(&media_type.as_str()) {
+    if !["movie", "series", "season", "episode", "person"]
+        .contains(&media_type.as_str())
+    {
         warn!("Invalid media type: {}", media_type);
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -82,7 +89,7 @@ pub async fn serve_image_handler(
         let mut attempt_params = params.clone();
         attempt_params.variant = Some(variant.clone());
         match state
-            .image_service
+            .image_service()
             .ensure_variant_async(&attempt_params)
             .await
         {
@@ -93,7 +100,10 @@ pub async fn serve_image_handler(
             }
             Ok(None) => continue,
             Err(e) => {
-                error!("ensure_variant_async failed for variant {}: {}", variant, e);
+                error!(
+                    "ensure_variant_async failed for variant {}: {}",
+                    variant, e
+                );
             }
         }
     }
@@ -109,11 +119,13 @@ pub async fn serve_image_handler(
         )
     } else {
         match state
-            .image_service
+            .image_service()
             .pick_best_available(&params, plan.target_width)
             .await
         {
-            Ok(Some((fallback_path, fallback_variant))) => (fallback_path, fallback_variant),
+            Ok(Some((fallback_path, fallback_variant))) => {
+                (fallback_path, fallback_variant)
+            }
             Ok(None) => {
                 warn!(
                     "No fallback available: {}/{}/{}/{}",
@@ -133,14 +145,19 @@ pub async fn serve_image_handler(
 
     let mut fetch_attempted = false;
     let (meta, data, resolved_path) = loop {
-        let normalized = normalize_image_path(&image_path, state.config.cache_dir.as_path());
+        let normalized =
+            normalize_image_path(&image_path, state.config().cache_root());
 
         match tokio::fs::metadata(&normalized).await {
             Ok(meta) => match tokio::fs::read(&normalized).await {
                 Ok(bytes) => break (meta, bytes, normalized),
-                Err(e) if e.kind() == ErrorKind::NotFound && !fetch_attempted => {
+                Err(e)
+                    if e.kind() == ErrorKind::NotFound && !fetch_attempted =>
+                {
                     fetch_attempted = true;
-                    match redownload_variant(&state, &params, &served_variant).await {
+                    match redownload_variant(&state, &params, &served_variant)
+                        .await
+                    {
                         Ok(new_path) => {
                             image_path = new_path;
                             continue;
@@ -155,7 +172,8 @@ pub async fn serve_image_handler(
             },
             Err(e) if e.kind() == ErrorKind::NotFound && !fetch_attempted => {
                 fetch_attempted = true;
-                match redownload_variant(&state, &params, &served_variant).await {
+                match redownload_variant(&state, &params, &served_variant).await
+                {
                     Ok(new_path) => {
                         image_path = new_path;
                         continue;
@@ -260,7 +278,7 @@ async fn redownload_variant(
     let mut lookup = params.clone();
     lookup.variant = Some(served_variant.to_string());
 
-    match state.image_service.get_or_download_variant(&lookup).await {
+    match state.image_service().get_or_download_variant(&lookup).await {
         Ok(Some(path)) => {
             info!(
                 "Fetched missing image variant on-demand: {}/{}/{}/{} variant {}",
@@ -325,8 +343,7 @@ fn normalize_image_path(original: &FsPath, cache_root: &FsPath) -> PathBuf {
     // Skip the first segment if it matches the cache directory name to avoid
     // producing `.../cache/cache/...` when we join below.
     if let Some(basename) = cache_basename {
-        let drop_prefix =
-            matches!(components.peek(), Some(Component::Normal(first)) if *first == basename);
+        let drop_prefix = matches!(components.peek(), Some(Component::Normal(first)) if *first == basename);
         if drop_prefix {
             components.next();
         }
@@ -344,7 +361,9 @@ fn normalize_image_path(original: &FsPath, cache_root: &FsPath) -> PathBuf {
             // Other component types (Prefix, RootDir) should not appear for
             // non-absolute inputs. If they do, fall back to returning the
             // cache root so we at least stay within a known-good directory.
-            Component::Prefix(_) | Component::RootDir => return cache_root.to_path_buf(),
+            Component::Prefix(_) | Component::RootDir => {
+                return cache_root.to_path_buf();
+            }
         }
     }
 
@@ -363,7 +382,10 @@ struct VariantPlan {
     target_width: Option<u32>,
 }
 
-fn determine_variant_plan(category: &MediaImageKind, query: &ImageQuery) -> VariantPlan {
+fn determine_variant_plan(
+    category: &MediaImageKind,
+    query: &ImageQuery,
+) -> VariantPlan {
     if let Some(w) = query.w.or(query.max_width) {
         let variant = map_width_to_tmdb_variant(category, w).to_string();
         return variant_plan_exact(variant, None);
@@ -374,13 +396,18 @@ fn determine_variant_plan(category: &MediaImageKind, query: &ImageQuery) -> Vari
         let normalized = trimmed.to_ascii_lowercase();
 
         match normalized.as_str() {
-            "quality" => return auto_plan_for_category(category, Some("quality")),
+            "quality" => {
+                return auto_plan_for_category(category, Some("quality"));
+            }
             "any" if matches!(category, MediaImageKind::Cast) => {
                 return auto_plan_for_category(category, Some("any"));
             }
             _ => {
                 if is_recognized_tmdb_variant(&normalized) {
-                    return variant_plan_exact(normalized, Some(trimmed.to_string()));
+                    return variant_plan_exact(
+                        normalized,
+                        Some(trimmed.to_string()),
+                    );
                 }
             }
         }
@@ -401,7 +428,10 @@ fn variant_plan_exact(variant: String, header: Option<String>) -> VariantPlan {
     }
 }
 
-fn auto_plan_for_category(category: &MediaImageKind, label: Option<&str>) -> VariantPlan {
+fn auto_plan_for_category(
+    category: &MediaImageKind,
+    label: Option<&str>,
+) -> VariantPlan {
     match category {
         MediaImageKind::Poster => build_variant_plan(
             label,
@@ -415,19 +445,27 @@ fn auto_plan_for_category(category: &MediaImageKind, label: Option<&str>) -> Var
             &["w780", "w1280", "original"],
             Some(1280),
         ),
-        MediaImageKind::Thumbnail => {
-            build_variant_plan(label, Some("w300"), &["w300", "w500", "w185"], Some(300))
+        MediaImageKind::Thumbnail => build_variant_plan(
+            label,
+            Some("w300"),
+            &["w300", "w500", "w185"],
+            Some(300),
+        ),
+        MediaImageKind::Logo => {
+            build_variant_plan(label, Some("original"), &["original"], None)
         }
-        MediaImageKind::Logo => build_variant_plan(label, Some("original"), &["original"], None),
         MediaImageKind::Cast => build_variant_plan(
             label,
             Some("w185"),
             &["w185", "h632", "w45", "original"],
             Some(300),
         ),
-        MediaImageKind::Other(_) => {
-            build_variant_plan(label, Some("w500"), &["w500", "original"], Some(500))
-        }
+        MediaImageKind::Other(_) => build_variant_plan(
+            label,
+            Some("w500"),
+            &["w500", "original"],
+            Some(500),
+        ),
     }
 }
 
@@ -449,8 +487,8 @@ fn build_variant_plan(
         push_unique(&mut ensure_variants, &normalized);
     }
 
-    let target_width =
-        explicit_target.or_else(|| fallback_norm.as_deref().and_then(variant_width_hint));
+    let target_width = explicit_target
+        .or_else(|| fallback_norm.as_deref().and_then(variant_width_hint));
 
     VariantPlan {
         requested_header: label.map(|s| s.to_string()),
@@ -480,7 +518,10 @@ fn variant_width_hint(variant: &str) -> Option<u32> {
 }
 
 /// Map desired width to a TMDB variant string for a given category
-fn map_width_to_tmdb_variant(category: &MediaImageKind, w: u32) -> &'static str {
+fn map_width_to_tmdb_variant(
+    category: &MediaImageKind,
+    w: u32,
+) -> &'static str {
     // Choose nearest bucket >= requested; fall back to largest known or original
     match category {
         // Posters: 92, 154, 185, 342, 500, 780, original

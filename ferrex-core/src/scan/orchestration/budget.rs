@@ -69,7 +69,10 @@ pub trait WorkloadBudget: Send + Sync {
     async fn release(&self, token: Arc<BudgetToken>) -> Result<()>;
 
     /// Get current budget utilization for a workload type
-    async fn utilization(&self, workload: WorkloadType) -> Result<(usize, usize)>;
+    async fn utilization(
+        &self,
+        workload: WorkloadType,
+    ) -> Result<(usize, usize)>;
 
     /// Check if budget is available without acquiring
     async fn has_budget(&self, workload: WorkloadType) -> Result<bool>;
@@ -132,15 +135,21 @@ impl WorkloadBudget for InMemoryBudget {
         let mut state = self.state.lock().await;
 
         let (current, limit) = match workload {
-            WorkloadType::LibraryScan => (&mut state.library_scans, self.config.library_scan_limit),
+            WorkloadType::LibraryScan => {
+                (&mut state.library_scans, self.config.library_scan_limit)
+            }
             WorkloadType::MediaAnalysis => {
                 (&mut state.media_analyses, self.config.media_analysis_limit)
             }
             WorkloadType::MetadataEnrichment => {
                 (&mut state.metadata_jobs, self.config.metadata_limit)
             }
-            WorkloadType::Indexing => (&mut state.indexing_jobs, self.config.indexing_limit),
-            WorkloadType::ImageFetch => (&mut state.image_jobs, self.config.image_fetch_limit),
+            WorkloadType::Indexing => {
+                (&mut state.indexing_jobs, self.config.indexing_limit)
+            }
+            WorkloadType::ImageFetch => {
+                (&mut state.image_jobs, self.config.image_fetch_limit)
+            }
         };
 
         if *current < limit {
@@ -182,22 +191,39 @@ impl WorkloadBudget for InMemoryBudget {
             WorkloadType::MetadataEnrichment => {
                 state.metadata_jobs = state.metadata_jobs.saturating_sub(1)
             }
-            WorkloadType::Indexing => state.indexing_jobs = state.indexing_jobs.saturating_sub(1),
-            WorkloadType::ImageFetch => state.image_jobs = state.image_jobs.saturating_sub(1),
+            WorkloadType::Indexing => {
+                state.indexing_jobs = state.indexing_jobs.saturating_sub(1)
+            }
+            WorkloadType::ImageFetch => {
+                state.image_jobs = state.image_jobs.saturating_sub(1)
+            }
         }
 
         Ok(())
     }
 
-    async fn utilization(&self, workload: WorkloadType) -> Result<(usize, usize)> {
+    async fn utilization(
+        &self,
+        workload: WorkloadType,
+    ) -> Result<(usize, usize)> {
         let state = self.state.lock().await;
 
         let (current, limit) = match workload {
-            WorkloadType::LibraryScan => (state.library_scans, self.config.library_scan_limit),
-            WorkloadType::MediaAnalysis => (state.media_analyses, self.config.media_analysis_limit),
-            WorkloadType::MetadataEnrichment => (state.metadata_jobs, self.config.metadata_limit),
-            WorkloadType::Indexing => (state.indexing_jobs, self.config.indexing_limit),
-            WorkloadType::ImageFetch => (state.image_jobs, self.config.image_fetch_limit),
+            WorkloadType::LibraryScan => {
+                (state.library_scans, self.config.library_scan_limit)
+            }
+            WorkloadType::MediaAnalysis => {
+                (state.media_analyses, self.config.media_analysis_limit)
+            }
+            WorkloadType::MetadataEnrichment => {
+                (state.metadata_jobs, self.config.metadata_limit)
+            }
+            WorkloadType::Indexing => {
+                (state.indexing_jobs, self.config.indexing_limit)
+            }
+            WorkloadType::ImageFetch => {
+                (state.image_jobs, self.config.image_fetch_limit)
+            }
         };
 
         Ok((current, limit))

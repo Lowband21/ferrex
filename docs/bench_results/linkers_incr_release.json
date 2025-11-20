@@ -1,0 +1,64 @@
+{
+  "results": [
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL CARGO_PROFILE_RELEASE_INCREMENTAL=true cargo build --profile release -j3",
+      "mean": 135.12997939647335,
+      "stddev": 5.234865076932432,
+      "median": 132.16426553314,
+      "user": 248.94045986666663,
+      "system": 2.3680019599999995,
+      "min": 132.05134333414,
+      "max": 141.17432932214,
+      "times": [
+        141.17432932214,
+        132.05134333414,
+        132.16426553314
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL CARGO_PROFILE_RELEASE_INCREMENTAL=true RUSTFLAGS='-Clinker=clang -Clink-args=--ld-path=wild' cargo build --profile release -j3",
+      "mean": 130.9789877098067,
+      "stddev": 0.4768563219596796,
+      "median": 130.87079515714,
+      "user": 240.85321986666665,
+      "system": 2.1827109599999996,
+      "min": 130.56552358314002,
+      "max": 131.50064438914,
+      "times": [
+        131.50064438914,
+        130.87079515714,
+        130.56552358314002
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL CARGO_PROFILE_RELEASE_INCREMENTAL=true mold -run cargo build --profile release -j3",
+      "mean": 132.07829789147334,
+      "stddev": 0.7244267075201728,
+      "median": 132.24912803514002,
+      "user": 242.9595515333333,
+      "system": 2.210423293333333,
+      "min": 131.28372356314,
+      "max": 132.70204207614,
+      "times": [
+        131.28372356314,
+        132.70204207614,
+        132.24912803514002
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}

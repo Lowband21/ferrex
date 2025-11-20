@@ -29,7 +29,10 @@ impl PlayerDomainState {
     pub fn select_audio_track(&mut self, index: i32) -> Result<(), String> {
         if let Some(video) = &mut self.video_opt {
             if let Err(e) = video.select_audio_track(index) {
-                return Err(format!("Failed to select audio track {}: {}", index, e));
+                return Err(format!(
+                    "Failed to select audio track {}: {}",
+                    index, e
+                ));
             }
             self.current_audio_track = index;
 
@@ -44,13 +47,17 @@ impl PlayerDomainState {
     }
 
     /// Select a subtitle track by index, or None to disable
-    pub fn select_subtitle_track(&mut self, index: Option<i32>) -> Result<(), String> {
+    pub fn select_subtitle_track(
+        &mut self,
+        index: Option<i32>,
+    ) -> Result<(), String> {
         if let Some(video) = &mut self.video_opt {
             log::info!("Selecting subtitle track: {:?}", index);
 
             // Debug: print available tracks
             if let Some(idx) = index
-                && let Some(track) = self.available_subtitle_tracks.get(idx as usize)
+                && let Some(track) =
+                    self.available_subtitle_tracks.get(idx as usize)
             {
                 log::info!(
                     "Track {} details: lang={:?}, codec={:?}, title={:?}",
@@ -99,13 +106,14 @@ impl PlayerDomainState {
             let enable = !self.subtitles_enabled;
             if enable {
                 // When enabling via toggle, ensure a concrete track is selected for reliable behavior
-                let target_index = if let Some(cur) = self.current_subtitle_track {
-                    Some(cur)
-                } else if !self.available_subtitle_tracks.is_empty() {
-                    Some(0)
-                } else {
-                    None
-                };
+                let target_index =
+                    if let Some(cur) = self.current_subtitle_track {
+                        Some(cur)
+                    } else if !self.available_subtitle_tracks.is_empty() {
+                        Some(0)
+                    } else {
+                        None
+                    };
 
                 if let Some(idx) = target_index {
                     // This updates backend and UI state, and shows the toast
@@ -132,7 +140,8 @@ impl PlayerDomainState {
             return Err("No audio tracks available".to_string());
         }
 
-        let next_index = (self.current_audio_track + 1) % self.available_audio_tracks.len() as i32;
+        let next_index = (self.current_audio_track + 1)
+            % self.available_audio_tracks.len() as i32;
         self.select_audio_track(next_index)
     }
 
@@ -170,7 +179,9 @@ impl PlayerDomainState {
             // Currently showing first track -> Turn off and remember this track
             self.last_subtitle_track = Some(0);
             None
-        } else if self.current_subtitle_track.is_none() && self.last_subtitle_track.is_some() {
+        } else if self.current_subtitle_track.is_none()
+            && self.last_subtitle_track.is_some()
+        {
             // Currently off but we have a last track -> Restore last track
             self.last_subtitle_track
         } else {
@@ -195,7 +206,8 @@ impl PlayerDomainState {
 
     /// Format subtitle track for display
     pub fn format_subtitle_track(&self, index: i32) -> String {
-        if let Some(track) = self.available_subtitle_tracks.get(index as usize) {
+        if let Some(track) = self.available_subtitle_tracks.get(index as usize)
+        {
             format_subtitle_track(track)
         } else {
             format!("Track {}", index + 1)

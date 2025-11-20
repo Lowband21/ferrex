@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO image_variants (\n                id,\n                image_id,\n                variant,\n                file_path,\n                file_size,\n                width,\n                height,\n                created_at,\n                downloaded_at\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())\n            ON CONFLICT (image_id, variant) DO UPDATE SET\n                file_path = EXCLUDED.file_path,\n                file_size = EXCLUDED.file_size,\n                width = EXCLUDED.width,\n                height = EXCLUDED.height,\n                downloaded_at = NOW()\n            RETURNING id, image_id, variant, file_path, file_size, width, height, created_at, downloaded_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "image_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "variant",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "file_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "file_size",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "width",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "height",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "downloaded_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Text",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "2407f12f57ce75c65cff22c293cfcd693d1260eb374b4d9f2341d33416929223"
+}

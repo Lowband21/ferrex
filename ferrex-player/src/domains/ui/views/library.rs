@@ -6,7 +6,9 @@ use crate::{
         theme,
         views::{
             all::view_all_content,
-            grid::{virtual_movie_references_grid, virtual_series_references_grid},
+            grid::{
+                virtual_movie_references_grid, virtual_series_references_grid,
+            },
         },
         widgets::{collect_cached_handles_for_media, texture_preloader},
     },
@@ -129,19 +131,24 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
 
                     let active_tab = state.tab_manager.active_tab();
                     match active_tab {
-                        TabState::Library(lib_state) => match lib_state.library_type {
+                        TabState::Library(lib_state) => match lib_state
+                            .library_type
+                        {
                             LibraryType::Movies => {
                                 // Compute a small prefetch set and preload their textures into the atlas
                                 let preload_range = lib_state.grid_state.get_preload_range(crate::infrastructure::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
-                                let ids_slice =
-                                    lib_state.cached_index_ids.get(preload_range).unwrap_or(&[]);
+                                let ids_slice = lib_state
+                                    .cached_index_ids
+                                    .get(preload_range)
+                                    .unwrap_or(&[]);
                                 let handles = collect_cached_handles_for_media(
                                     ids_slice.iter().copied(),
                                     ImageType::Movie,
                                     ImageSize::Poster,
                                 );
                                 let budget = crate::infrastructure::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
-                                let preloader = texture_preloader(handles, budget);
+                                let preloader =
+                                    texture_preloader(handles, budget);
 
                                 let grid = virtual_movie_references_grid(
                                     &lib_state.cached_index_ids,
@@ -155,15 +162,18 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                             }
                             LibraryType::Series => {
                                 let preload_range = lib_state.grid_state.get_preload_range(crate::infrastructure::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
-                                let ids_slice =
-                                    lib_state.cached_index_ids.get(preload_range).unwrap_or(&[]);
+                                let ids_slice = lib_state
+                                    .cached_index_ids
+                                    .get(preload_range)
+                                    .unwrap_or(&[]);
                                 let handles = collect_cached_handles_for_media(
                                     ids_slice.iter().copied(),
                                     ImageType::Series,
                                     ImageSize::Poster,
                                 );
                                 let budget = crate::infrastructure::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
-                                let preloader = texture_preloader(handles, budget);
+                                let preloader =
+                                    texture_preloader(handles, budget);
 
                                 let grid = virtual_series_references_grid(
                                     &lib_state.cached_index_ids,
@@ -188,12 +198,12 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                 }
             };
 
-            let filter_panel: Option<Element<Message>> = if state.domains.ui.state.show_filter_panel
-            {
-                Some(library_filter_panel(state))
-            } else {
-                None
-            };
+            let filter_panel: Option<Element<Message>> =
+                if state.domains.ui.state.show_filter_panel {
+                    Some(library_filter_panel(state))
+                } else {
+                    None
+                };
 
             // Create main content with proper spacing
             let mut main_col = column![error_section];

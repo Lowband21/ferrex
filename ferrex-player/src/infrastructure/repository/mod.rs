@@ -7,9 +7,9 @@ pub use repository::*;
 use std::sync::Arc;
 
 use ferrex_core::player_prelude::{
-    ArchivedEpisodeReference, ArchivedLibrary, ArchivedMedia, ArchivedMovieReference,
-    ArchivedSeasonReference, ArchivedSeriesReference, Media, MediaOps, MovieReference,
-    SeriesReference,
+    ArchivedEpisodeReference, ArchivedLibrary, ArchivedMedia,
+    ArchivedMovieReference, ArchivedSeasonReference, ArchivedSeriesReference,
+    Media, MediaOps, MovieReference, SeriesReference,
 };
 use rkyv::util::AlignedVec;
 use yoke::Yoke;
@@ -42,12 +42,15 @@ pub type LibraryYoke = Yoke<&'static ArchivedLibrary, Arc<AlignedVec>>;
 //pub type MediaYoke = Yoke<&'static MediaMaybeArchived<'static>, Arc<AlignedVec>>;
 pub type MediaYoke = Yoke<&'static ArchivedMedia, Arc<AlignedVec>>;
 
-pub type MovieVecYoke = Yoke<&'static Vec<ArchivedMovieReference>, Arc<AlignedVec>>;
+pub type MovieVecYoke =
+    Yoke<&'static Vec<ArchivedMovieReference>, Arc<AlignedVec>>;
 
-pub type ArcMovieYoke = Arc<Yoke<&'static ArchivedMovieReference, Arc<AlignedVec>>>;
+pub type ArcMovieYoke =
+    Arc<Yoke<&'static ArchivedMovieReference, Arc<AlignedVec>>>;
 pub type MovieYoke = Yoke<&'static ArchivedMovieReference, Arc<AlignedVec>>;
 
-pub type ArcSeriesYoke = Arc<Yoke<&'static ArchivedSeriesReference, Arc<AlignedVec>>>;
+pub type ArcSeriesYoke =
+    Arc<Yoke<&'static ArchivedSeriesReference, Arc<AlignedVec>>>;
 pub type SeriesYoke = Yoke<&'static ArchivedSeriesReference, Arc<AlignedVec>>;
 
 pub type SeasonYoke = Yoke<&'static ArchivedSeasonReference, Arc<AlignedVec>>;

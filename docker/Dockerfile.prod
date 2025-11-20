@@ -1,0 +1,63 @@
+# Multi-stage build for ferrex-server on Unraid
+
+# Build stage
+FROM rust:1.90.0-slim-trixie AS builder
+ARG BUILD_PROFILE=release
+
+# Build dependencies for ffmpeg bindings and general build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    clang \
+    libclang-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libswscale-dev \
+    libswresample-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy full workspace (simpler and robust for Unraid builds)
+COPY . .
+
+# Build the server with the selected Cargo profile and stage the binary
+RUN set -eux; \
+    cargo build --profile "${BUILD_PROFILE}" -p ferrex-server; \
+    case "${BUILD_PROFILE}" in \
+        dev) BIN_DIR="debug" ;; \
+        *) BIN_DIR="${BUILD_PROFILE}" ;; \
+    esac; \
+    cp "target/${BIN_DIR}/ferrex-server" /tmp/ferrex-server
+
+# Runtime stage
+FROM debian:trixie-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user
+RUN useradd -m -u 1000 ferrex
+WORKDIR /app
+
+# Create default cache directories
+RUN mkdir -p /app/cache/transcode /app/cache/thumbnails /app/cache \
+    && chown -R ferrex:ferrex /app
+
+# Copy the compiled binary
+COPY --from=builder /tmp/ferrex-server /usr/local/bin/ferrex-server
+
+USER ferrex
+ENV RUST_LOG=info
+EXPOSE 3000
+
+# Health check - server exposes /health
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=5 \
+  CMD curl -fsS http://localhost:3000/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/ferrex-server"]

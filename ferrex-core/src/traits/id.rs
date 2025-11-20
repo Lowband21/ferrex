@@ -7,8 +7,8 @@
 use uuid::Uuid;
 
 use crate::types::ids::{
-    ArchivedEpisodeID, ArchivedMovieID, ArchivedSeasonID, ArchivedSeriesID, EpisodeID, MovieID,
-    SeasonID, SeriesID,
+    ArchivedEpisodeID, ArchivedMovieID, ArchivedSeasonID, ArchivedSeriesID,
+    EpisodeID, MovieID, SeasonID, SeriesID,
 };
 use crate::types::media_id::{ArchivedMediaID, MediaID};
 use crate::types::util_types::MediaType;

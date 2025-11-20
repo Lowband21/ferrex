@@ -101,7 +101,9 @@ impl Container {
             },
             Container::CardHovered => |_| container::Style {
                 text_color: Some(MediaServerTheme::TEXT_PRIMARY),
-                background: Some(Background::Color(MediaServerTheme::CARD_HOVER)),
+                background: Some(Background::Color(
+                    MediaServerTheme::CARD_HOVER,
+                )),
                 border: Border {
                     color: MediaServerTheme::ACCENT_BLUE,
                     width: 1.0,
@@ -116,7 +118,9 @@ impl Container {
             },
             Container::ProgressBar => |_| container::Style {
                 text_color: None,
-                background: Some(Background::Color(MediaServerTheme::ACCENT_BLUE)),
+                background: Some(Background::Color(
+                    MediaServerTheme::ACCENT_BLUE,
+                )),
                 border: Border {
                     color: Color::TRANSPARENT,
                     width: 0.0,
@@ -142,7 +146,9 @@ impl Container {
             },
             Container::Header => |_| container::Style {
                 text_color: Some(MediaServerTheme::TEXT_PRIMARY),
-                background: Some(Background::Color(MediaServerTheme::BACKGROUND_DARK)),
+                background: Some(Background::Color(
+                    MediaServerTheme::BACKGROUND_DARK,
+                )),
                 border: Border {
                     color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
                     width: 0.0,
@@ -153,7 +159,9 @@ impl Container {
             },
             Container::HeaderAccent => |_| container::Style {
                 text_color: Some(MediaServerTheme::TEXT_PRIMARY),
-                background: Some(Background::Color(MediaServerTheme::BACKGROUND_ACCENT)),
+                background: Some(Background::Color(
+                    MediaServerTheme::BACKGROUND_ACCENT,
+                )),
                 border: Border {
                     color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
                     width: 0.0,
@@ -164,7 +172,9 @@ impl Container {
             },
             Container::ErrorBox => |_| container::Style {
                 text_color: Some(MediaServerTheme::ERROR_COLOR),
-                background: Some(Background::Color(Color::from_rgba(1.0, 0.2, 0.2, 0.1))),
+                background: Some(Background::Color(Color::from_rgba(
+                    1.0, 0.2, 0.2, 0.1,
+                ))),
                 border: Border {
                     color: MediaServerTheme::ERROR_COLOR,
                     width: 1.0,
@@ -175,7 +185,9 @@ impl Container {
             },
             Container::SuccessBox => |_| container::Style {
                 text_color: Some(MediaServerTheme::TEXT_PRIMARY),
-                background: Some(Background::Color(Color::from_rgba(0.0, 0.8, 0.4, 0.12))),
+                background: Some(Background::Color(Color::from_rgba(
+                    0.0, 0.8, 0.4, 0.12,
+                ))),
                 border: Border {
                     color: MediaServerTheme::SUCCESS,
                     width: 1.0,
@@ -201,14 +213,18 @@ impl Container {
             },
             Container::ModalOverlay => |_| container::Style {
                 text_color: None,
-                background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.7))),
+                background: Some(Background::Color(Color::from_rgba(
+                    0.0, 0.0, 0.0, 0.7,
+                ))),
                 border: Border::default(),
                 shadow: Shadow::default(),
                 snap: false,
             },
             Container::TechDetail => |_| container::Style {
                 text_color: Some(MediaServerTheme::TEXT_PRIMARY),
-                background: Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.02))),
+                background: Some(Background::Color(Color::from_rgba(
+                    1.0, 1.0, 1.0, 0.02,
+                ))),
                 border: Border {
                     color: Color::TRANSPARENT,
                     width: 0.0,
@@ -320,13 +336,18 @@ impl Button {
             },
             Button::Secondary => |_, status| {
                 let (background, border_color) = match status {
-                    button::Status::Active => {
-                        (MediaServerTheme::CARD_BG, MediaServerTheme::BORDER_COLOR)
-                    }
-                    button::Status::Hovered => {
-                        (MediaServerTheme::CARD_HOVER, MediaServerTheme::ACCENT_BLUE)
-                    }
-                    _ => (MediaServerTheme::CARD_BG, MediaServerTheme::BORDER_COLOR),
+                    button::Status::Active => (
+                        MediaServerTheme::CARD_BG,
+                        MediaServerTheme::BORDER_COLOR,
+                    ),
+                    button::Status::Hovered => (
+                        MediaServerTheme::CARD_HOVER,
+                        MediaServerTheme::ACCENT_BLUE,
+                    ),
+                    _ => (
+                        MediaServerTheme::CARD_BG,
+                        MediaServerTheme::BORDER_COLOR,
+                    ),
                 };
 
                 button::Style {
@@ -417,7 +438,9 @@ impl Button {
                     button::Status::Hovered => {
                         Some(Background::Color(MediaServerTheme::ACCENT_BLUE))
                     }
-                    _ => Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.1))),
+                    _ => Some(Background::Color(Color::from_rgba(
+                        1.0, 1.0, 1.0, 0.1,
+                    ))),
                 };
 
                 let icon_color = match status {
@@ -447,7 +470,9 @@ impl Button {
                         },
                     ),
                     _ => (
-                        Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.6))),
+                        Some(Background::Color(Color::from_rgba(
+                            0.0, 0.0, 0.0, 0.6,
+                        ))),
                         Shadow {
                             color: Color::from_rgba(0.0, 0.0, 0.0, 0.3),
                             offset: iced::Vector::new(0.0, 2.0),
@@ -471,15 +496,21 @@ impl Button {
             Button::HeaderIcon => |_, status| {
                 let (background, text_color) = match status {
                     button::Status::Active => (
-                        Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.02))),
+                        Some(Background::Color(Color::from_rgba(
+                            1.0, 1.0, 1.0, 0.02,
+                        ))),
                         MediaServerTheme::TEXT_PRIMARY,
                     ),
                     button::Status::Hovered => (
-                        Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
+                        Some(Background::Color(Color::from_rgba(
+                            1.0, 1.0, 1.0, 0.05,
+                        ))),
                         MediaServerTheme::TEXT_PRIMARY,
                     ),
                     button::Status::Pressed => (
-                        Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.08))),
+                        Some(Background::Color(Color::from_rgba(
+                            1.0, 1.0, 1.0, 0.08,
+                        ))),
                         MediaServerTheme::ACCENT_BLUE,
                     ),
                     _ => (None, MediaServerTheme::TEXT_SECONDARY),
@@ -500,7 +531,9 @@ impl Button {
             Button::DetailAction => |_, status| {
                 let (background, text_color) = match status {
                     button::Status::Active => (
-                        Some(Background::Color(Color::from_rgba(0.0, 0.5, 1.0, 0.1))), // Brighter blue glow
+                        Some(Background::Color(Color::from_rgba(
+                            0.0, 0.5, 1.0, 0.1,
+                        ))), // Brighter blue glow
                         MediaServerTheme::TEXT_PRIMARY,
                     ),
                     button::Status::Hovered => (
@@ -512,7 +545,9 @@ impl Button {
                         MediaServerTheme::TEXT_PRIMARY,
                     ),
                     _ => (
-                        Some(Background::Color(Color::from_rgba(0.0, 0.5, 1.0, 0.08))),
+                        Some(Background::Color(Color::from_rgba(
+                            0.0, 0.5, 1.0, 0.08,
+                        ))),
                         MediaServerTheme::TEXT_PRIMARY,
                     ),
                 };
@@ -532,15 +567,21 @@ impl Button {
             Button::BackdropControl => |_, status| {
                 let (background, text_color) = match status {
                     button::Status::Active => (
-                        Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.02))),
+                        Some(Background::Color(Color::from_rgba(
+                            1.0, 1.0, 1.0, 0.02,
+                        ))),
                         MediaServerTheme::TEXT_PRIMARY,
                     ),
                     button::Status::Hovered => (
-                        Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
+                        Some(Background::Color(Color::from_rgba(
+                            1.0, 1.0, 1.0, 0.05,
+                        ))),
                         MediaServerTheme::TEXT_PRIMARY,
                     ),
                     button::Status::Pressed => (
-                        Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.08))),
+                        Some(Background::Color(Color::from_rgba(
+                            1.0, 1.0, 1.0, 0.08,
+                        ))),
                         MediaServerTheme::ACCENT_BLUE,
                     ),
                     _ => (None, MediaServerTheme::TEXT_SECONDARY),
@@ -621,14 +662,18 @@ impl Scrollable {
     pub fn style() -> fn(&Theme, scrollable::Status) -> scrollable::Style {
         |_, status| {
             let scroller_color = match status {
-                scrollable::Status::Hovered { .. } => MediaServerTheme::ACCENT_BLUE_HOVER,
+                scrollable::Status::Hovered { .. } => {
+                    MediaServerTheme::ACCENT_BLUE_HOVER
+                }
                 _ => MediaServerTheme::ACCENT_BLUE,
             };
 
             scrollable::Style {
                 container: container::Style::default(),
                 vertical_rail: scrollable::Rail {
-                    background: Some(Background::Color(MediaServerTheme::CARD_BG)),
+                    background: Some(Background::Color(
+                        MediaServerTheme::CARD_BG,
+                    )),
                     border: Border {
                         color: MediaServerTheme::BORDER_COLOR,
                         width: 1.0,
@@ -644,7 +689,9 @@ impl Scrollable {
                     },
                 },
                 horizontal_rail: scrollable::Rail {
-                    background: Some(Background::Color(MediaServerTheme::CARD_BG)),
+                    background: Some(Background::Color(
+                        MediaServerTheme::CARD_BG,
+                    )),
                     border: Border {
                         color: MediaServerTheme::BORDER_COLOR,
                         width: 1.0,
@@ -714,10 +761,18 @@ impl TextInput {
     pub fn style() -> fn(&Theme, text_input::Status) -> text_input::Style {
         |_, status| {
             let (border_color, border_width) = match status {
-                text_input::Status::Active => (MediaServerTheme::BORDER_COLOR, 1.0),
-                text_input::Status::Hovered => (MediaServerTheme::ACCENT_BLUE, 1.0),
-                text_input::Status::Focused { .. } => (MediaServerTheme::ACCENT_BLUE, 2.0),
-                text_input::Status::Disabled => (MediaServerTheme::BORDER_COLOR, 1.0),
+                text_input::Status::Active => {
+                    (MediaServerTheme::BORDER_COLOR, 1.0)
+                }
+                text_input::Status::Hovered => {
+                    (MediaServerTheme::ACCENT_BLUE, 1.0)
+                }
+                text_input::Status::Focused { .. } => {
+                    (MediaServerTheme::ACCENT_BLUE, 2.0)
+                }
+                text_input::Status::Disabled => {
+                    (MediaServerTheme::BORDER_COLOR, 1.0)
+                }
             };
 
             let background = match status {
@@ -742,26 +797,36 @@ impl TextInput {
         }
     }
 
-    pub fn header_search() -> fn(&Theme, text_input::Status) -> text_input::Style {
+    pub fn header_search() -> fn(&Theme, text_input::Status) -> text_input::Style
+    {
         |_, status| {
             let (background, text_color) = match status {
                 text_input::Status::Active => (
-                    Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.02))),
+                    Some(Background::Color(Color::from_rgba(
+                        1.0, 1.0, 1.0, 0.02,
+                    ))),
                     MediaServerTheme::TEXT_SECONDARY,
                 ),
                 text_input::Status::Hovered => (
-                    Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
+                    Some(Background::Color(Color::from_rgba(
+                        1.0, 1.0, 1.0, 0.05,
+                    ))),
                     MediaServerTheme::TEXT_PRIMARY,
                 ),
                 text_input::Status::Focused { .. } => (
-                    Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.08))),
+                    Some(Background::Color(Color::from_rgba(
+                        1.0, 1.0, 1.0, 0.08,
+                    ))),
                     MediaServerTheme::TEXT_PRIMARY,
                 ),
-                text_input::Status::Disabled => (None, MediaServerTheme::TEXT_DIMMED),
+                text_input::Status::Disabled => {
+                    (None, MediaServerTheme::TEXT_DIMMED)
+                }
             };
 
             text_input::Style {
-                background: background.unwrap_or(Background::Color(Color::TRANSPARENT)),
+                background: background
+                    .unwrap_or(Background::Color(Color::TRANSPARENT)),
                 border: Border {
                     color: Color::TRANSPARENT,
                     width: 0.0,

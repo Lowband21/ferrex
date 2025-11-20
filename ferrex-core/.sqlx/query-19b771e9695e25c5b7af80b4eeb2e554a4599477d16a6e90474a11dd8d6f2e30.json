@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE orchestrator_jobs\nSET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond',\n                updated_at = NOW()\n            WHERE lease_id = $2 AND state = 'leased'\n            RETURNING lease_expires_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lease_expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "19b771e9695e25c5b7af80b4eeb2e554a4599477d16a6e90474a11dd8d6f2e30"
+}

@@ -19,10 +19,16 @@ pub fn require_permission(
 + Send
 + Sync
 + 'static {
-    move |request: Request, next: Next| Box::pin(check_permission_async(request, next, permission))
+    move |request: Request, next: Next| {
+        Box::pin(check_permission_async(request, next, permission))
+    }
 }
 
-async fn check_permission_async(request: Request, next: Next, permission: &str) -> Response {
+async fn check_permission_async(
+    request: Request,
+    next: Next,
+    permission: &str,
+) -> Response {
     // Extract the user from extensions (set by auth_middleware)
     let user = match request.extensions().get::<User>() {
         Some(user) => user,
@@ -151,26 +157,32 @@ pub async fn require_permission_async(
     };
 
     // Load permissions if not already loaded
-    let permissions = if let Some(perms) = request.extensions().get::<UserPermissions>() {
-        perms.clone()
-    } else {
-        // Load permissions from database
-        match state.unit_of_work.rbac.get_user_permissions(user.id).await {
-            Ok(perms) => {
-                request.extensions_mut().insert(perms.clone());
-                perms
+    let permissions =
+        if let Some(perms) = request.extensions().get::<UserPermissions>() {
+            perms.clone()
+        } else {
+            // Load permissions from database
+            match state
+                .unit_of_work()
+                .rbac
+                .get_user_permissions(user.id)
+                .await
+            {
+                Ok(perms) => {
+                    request.extensions_mut().insert(perms.clone());
+                    perms
+                }
+                Err(_) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        axum::Json(ApiResponse::<()>::error(
+                            "Failed to load permissions".to_string(),
+                        )),
+                    )
+                        .into_response();
+                }
             }
-            Err(_) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    axum::Json(ApiResponse::<()>::error(
-                        "Failed to load permissions".to_string(),
-                    )),
-                )
-                    .into_response();
-            }
-        }
-    };
+        };
 
     // Check if user has the required permission
     if !permissions.has_permission(permission) {

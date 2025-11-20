@@ -29,9 +29,10 @@ pub async fn prepare_demo_database(base: &str) -> Result<String> {
     admin_url.set_path("/postgres");
     let admin_url = admin_url.into_string();
 
-    let mut connection = PgConnection::connect(&admin_url)
-        .await
-        .with_context(|| format!("failed to connect to admin database via {}", admin_url))?;
+    let mut connection =
+        PgConnection::connect(&admin_url).await.with_context(|| {
+            format!("failed to connect to admin database via {}", admin_url)
+        })?;
 
     sqlx::query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1")
         .bind(DEMO_DATABASE_NAME)

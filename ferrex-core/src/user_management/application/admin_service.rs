@@ -7,13 +7,16 @@ use chrono::Utc;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::auth::policy::{PasswordPolicy, PasswordPolicyCheck, PasswordPolicyRule};
+use crate::auth::policy::{
+    PasswordPolicy, PasswordPolicyCheck, PasswordPolicyRule,
+};
 use crate::auth::{
     AuthCrypto,
     domain::services::{AuthenticationError, AuthenticationService},
 };
 use crate::database::ports::{
-    rbac::RbacRepository, security_settings::SecuritySettingsRepository, users::UsersRepository,
+    rbac::RbacRepository, security_settings::SecuritySettingsRepository,
+    users::UsersRepository,
 };
 use crate::error::{MediaError, Result as CoreResult};
 use crate::rbac::Role;
@@ -82,11 +85,14 @@ impl UserAdministrationService {
             a.display_name
                 .to_lowercase()
                 .cmp(&b.display_name.to_lowercase())
-                .then_with(|| a.username.to_lowercase().cmp(&b.username.to_lowercase()))
+                .then_with(|| {
+                    a.username.to_lowercase().cmp(&b.username.to_lowercase())
+                })
         });
 
         let limit = options.limit.unwrap_or(50).clamp(1, 1_000) as usize;
-        let offset = cmp::min(options.offset.unwrap_or(0).max(0) as usize, total);
+        let offset =
+            cmp::min(options.offset.unwrap_or(0).max(0) as usize, total);
 
         let paged = users
             .into_iter()
@@ -184,7 +190,11 @@ impl UserAdministrationService {
         } else {
             for role in role_map.values() {
                 self.rbac
-                    .assign_user_role(user.id, role.id, command.created_by.unwrap_or(user.id))
+                    .assign_user_role(
+                        user.id,
+                        role.id,
+                        command.created_by.unwrap_or(user.id),
+                    )
                     .await
                     .map_err(UserAdminError::from)?;
                 assigned_roles.push(role.clone());
@@ -241,7 +251,8 @@ impl UserAdministrationService {
                 .await
                 .map_err(UserAdminError::from)?;
 
-            let desired_ids: Vec<Uuid> = desired_roles.keys().copied().collect();
+            let desired_ids: Vec<Uuid> =
+                desired_roles.keys().copied().collect();
 
             for role in &current_permissions.roles {
                 if !desired_ids.contains(&role.id) {
@@ -283,7 +294,10 @@ impl UserAdministrationService {
         })
     }
 
-    pub async fn delete_user(&self, command: DeleteUserCommand) -> Result<(), UserAdminError> {
+    pub async fn delete_user(
+        &self,
+        command: DeleteUserCommand,
+    ) -> Result<(), UserAdminError> {
         let is_admin = self
             .rbac
             .user_has_role(command.user_id, "admin")
@@ -291,7 +305,10 @@ impl UserAdministrationService {
             .map_err(UserAdminError::from)?;
 
         self.users
-            .delete_user_atomic(command.user_id, is_admin && command.check_admin)
+            .delete_user_atomic(
+                command.user_id,
+                is_admin && command.check_admin,
+            )
             .await
             .map_err(UserAdminError::from)?;
 
@@ -389,7 +406,10 @@ impl UserAdministrationService {
             )));
         }
 
-        if policy.enforce && policy.min_length > 0 && password.len() < policy.min_length as usize {
+        if policy.enforce
+            && policy.min_length > 0
+            && password.len() < policy.min_length as usize
+        {
             return Err(UserAdminError::Validation(format!(
                 "Password must be at least {} characters",
                 policy.min_length
@@ -414,9 +434,10 @@ impl UserAdministrationService {
                 .map_err(UserAdminError::from)?;
 
             if let Some(role_name) = &role_filter
-                && !permissions.has_role(role_name) {
-                    continue;
-                }
+                && !permissions.has_role(role_name)
+            {
+                continue;
+            }
 
             let session_count = self
                 .auth
@@ -450,7 +471,11 @@ impl UserAdministrationService {
                 .iter()
                 .find(|role| &role.id == role_id)
                 .cloned()
-                .ok_or_else(|| MediaError::NotFound(format!("Role {role_id} does not exist")))?;
+                .ok_or_else(|| {
+                    MediaError::NotFound(format!(
+                        "Role {role_id} does not exist"
+                    ))
+                })?;
             map.insert(*role_id, role);
         }
         Ok(map)

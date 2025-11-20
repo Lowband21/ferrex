@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO movie_references (id, library_id, file_id, tmdb_id, title, theme_color)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        ON CONFLICT (tmdb_id, library_id) DO UPDATE SET\n            file_id = EXCLUDED.file_id,\n            title = EXCLUDED.title,\n            theme_color = EXCLUDED.theme_color,\n            updated_at = NOW()\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1c163304558cfb2b54ba242947d63f6594f7212d09779b9868eb6cc62a7ff94a"
+}

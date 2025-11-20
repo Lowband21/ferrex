@@ -6,6 +6,6 @@ pub mod tmdb_folder_generator;
 // event bus. The `scanner` namespace is scoped to filesystem enumeration helpers and test fixtures.
 pub use fs::{FileSystem, InMemoryFs, RealFs};
 pub use tmdb_folder_generator::{
-    DefaultNamingStrategy, GeneratedNode, NamingStrategy, StructurePlan, TmdbFolderGenerator,
-    apply_plan_to_inmemory_fs,
+    DefaultNamingStrategy, GeneratedNode, NamingStrategy, StructurePlan,
+    TmdbFolderGenerator, apply_plan_to_inmemory_fs,
 };

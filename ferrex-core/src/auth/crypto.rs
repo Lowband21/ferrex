@@ -1,6 +1,8 @@
 use argon2::{
     Algorithm, Argon2, Params, ParamsBuilder, Version,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    password_hash::{
+        PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+    },
 };
 use hmac::{Hmac, Mac};
 use password_hash::{Error as PasswordHashError, rand_core::OsRng};
@@ -62,7 +64,9 @@ impl AuthCrypto {
                 .p_cost(Self::DEFAULT_PARALLELISM)
                 .output_len(32)
                 .build()
-                .map_err(|err| AuthCryptoError::InvalidArgon2Params(err.to_string()))?,
+                .map_err(|err| {
+                    AuthCryptoError::InvalidArgon2Params(err.to_string())
+                })?,
         )
     }
 
@@ -83,7 +87,8 @@ impl AuthCrypto {
             return Err(AuthCryptoError::EmptyTokenKey);
         }
 
-        let argon2 = Argon2::new(Algorithm::Argon2id, Version::default(), params);
+        let argon2 =
+            Argon2::new(Algorithm::Argon2id, Version::default(), params);
 
         Ok(Self {
             argon2,
@@ -94,7 +99,10 @@ impl AuthCrypto {
 
     /// Hash a password (or PIN) using Argon2id with a random salt and shared
     /// pepper. The resulting PHC string is suitable for storage.
-    pub fn hash_password(&self, password: &str) -> Result<String, AuthCryptoError> {
+    pub fn hash_password(
+        &self,
+        password: &str,
+    ) -> Result<String, AuthCryptoError> {
         let mut material = Zeroizing::new(Vec::with_capacity(
             password.len() + self.password_pepper.len(),
         ));

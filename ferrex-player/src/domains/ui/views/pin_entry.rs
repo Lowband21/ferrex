@@ -108,7 +108,9 @@ impl PinEntryView {
                 .width(40)
                 .height(40)
                 .style(|_theme: &Theme| container::Style {
-                    background: Some(iced::Background::Color(FerrexTheme::card_background())),
+                    background: Some(iced::Background::Color(
+                        FerrexTheme::card_background(),
+                    )),
                     border: iced::Border {
                         color: FerrexTheme::border_color(),
                         width: 1.0,
@@ -137,7 +139,8 @@ impl PinEntryView {
         };
 
         // Number pad
-        let number_pad = Self::create_number_pad(self.is_complete(), self.loading);
+        let number_pad =
+            Self::create_number_pad(self.is_complete(), self.loading);
 
         // Back button
         let back_button = button("← Back")
@@ -170,7 +173,10 @@ impl PinEntryView {
     }
 
     /// Create the number pad
-    fn create_number_pad(is_complete: bool, loading: bool) -> Element<'static, Message> {
+    fn create_number_pad(
+        is_complete: bool,
+        loading: bool,
+    ) -> Element<'static, Message> {
         let button_size = 80u32;
         let button_spacing = 10;
 
@@ -247,7 +253,8 @@ impl PinEntryView {
             });
 
         let row4 =
-            row![clear_button, create_num_button('0'), backspace_button,].spacing(button_spacing);
+            row![clear_button, create_num_button('0'), backspace_button,]
+                .spacing(button_spacing);
 
         // Submit button (only enabled when PIN is complete)
         let submit_button = if is_complete && !loading {
@@ -267,7 +274,9 @@ impl PinEntryView {
                     background: Some(iced::Background::Color(
                         FerrexTheme::card_background().scale_alpha(0.5),
                     )),
-                    text_color: FerrexTheme::SubduedText.text_color().scale_alpha(0.5),
+                    text_color: FerrexTheme::SubduedText
+                        .text_color()
+                        .scale_alpha(0.5),
                     border: iced::Border {
                         color: FerrexTheme::border_color().scale_alpha(0.5),
                         width: 1.0,

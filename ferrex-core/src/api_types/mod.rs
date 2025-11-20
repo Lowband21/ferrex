@@ -8,23 +8,25 @@ pub mod library;
 pub mod media;
 pub mod responses;
 pub mod scan;
-pub mod users_admin;
 pub mod setup;
+pub mod users_admin;
 
 pub use demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
 pub use filters::{
-    FilterIndicesRequest, IndicesResponse, LibraryFilters, RATING_DECIMAL_SCALE,
-    RATING_SCALE_FACTOR, RatingValue, ScalarRange, rating_value_from_f32, rating_value_to_f32,
+    FilterIndicesRequest, IndicesResponse, LibraryFilters,
+    RATING_DECIMAL_SCALE, RATING_SCALE_FACTOR, RatingValue, ScalarRange,
+    rating_value_from_f32, rating_value_to_f32,
 };
 pub use library::{
-    BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest, FetchMediaRequest,
-    LibraryMediaCache, LibraryMediaResponse, ManualMatchRequest, UpdateLibraryRequest,
+    BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest,
+    FetchMediaRequest, LibraryMediaCache, LibraryMediaResponse,
+    ManualMatchRequest, UpdateLibraryRequest,
 };
 pub use media::ImageData;
 pub use responses::{ApiResponse, MediaStats, MetadataRequest};
 pub use scan::{
-    ActiveScansResponse, LatestProgressResponse, ScanCommandAcceptedResponse, ScanCommandRequest,
-    ScanLifecycleStatus, ScanSnapshotDto, StartScanRequest,
+    ActiveScansResponse, LatestProgressResponse, ScanCommandAcceptedResponse,
+    ScanCommandRequest, ScanLifecycleStatus, ScanSnapshotDto, StartScanRequest,
 };
 pub use users_admin::{AdminUserInfo, CreateUserRequest, UpdateUserRequest};
 
@@ -32,21 +34,26 @@ pub use users_admin::{AdminUserInfo, CreateUserRequest, UpdateUserRequest};
 pub mod player {
     pub use super::demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
     pub use super::library::{
-        BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest, FetchMediaRequest,
-        LibraryMediaCache, LibraryMediaResponse, ManualMatchRequest, UpdateLibraryRequest,
+        BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest,
+        FetchMediaRequest, LibraryMediaCache, LibraryMediaResponse,
+        ManualMatchRequest, UpdateLibraryRequest,
     };
     pub use super::media::ImageData;
     pub use super::responses::ApiResponse;
     pub use super::scan::{
-        ActiveScansResponse, LatestProgressResponse, ScanCommandAcceptedResponse,
-        ScanCommandRequest, ScanLifecycleStatus, ScanSnapshotDto, StartScanRequest, events::*,
+        ActiveScansResponse, LatestProgressResponse,
+        ScanCommandAcceptedResponse, ScanCommandRequest, ScanLifecycleStatus,
+        ScanSnapshotDto, StartScanRequest, events::*,
     };
     pub use super::setup::{
-        ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest, StartClaimResponse,
+        ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest,
+        StartClaimResponse,
+    };
+    pub use super::users_admin::{
+        AdminUserInfo, CreateUserRequest, UpdateUserRequest,
     };
     pub use super::{
-        FilterIndicesRequest, IndicesResponse, MetadataRequest, RatingValue, ScalarRange,
-        rating_value_from_f32, rating_value_to_f32,
+        FilterIndicesRequest, IndicesResponse, MetadataRequest, RatingValue,
+        ScalarRange, rating_value_from_f32, rating_value_to_f32,
     };
-    pub use super::users_admin::{AdminUserInfo, CreateUserRequest, UpdateUserRequest};
 }

@@ -57,7 +57,9 @@ pub fn handle_show_security(state: &mut State) -> DomainUpdateResult {
     state.domains.settings.current_view = SettingsSubview::Security;
 
     // Check if user has PIN when entering security view
-    DomainUpdateResult::task(Task::done(Message::CheckUserHasPin).map(DomainMessage::Settings))
+    DomainUpdateResult::task(
+        Task::done(Message::CheckUserHasPin).map(DomainMessage::Settings),
+    )
 }
 
 /// Handle back to main settings view
@@ -65,12 +67,18 @@ pub fn handle_back_to_main(state: &mut State) -> DomainUpdateResult {
     state.domains.settings.current_view = SettingsSubview::Main;
 
     // Clear any sensitive data from security state
-    state.domains.settings.security.password_current = SecureCredential::new(String::new());
-    state.domains.settings.security.password_new = SecureCredential::new(String::new());
-    state.domains.settings.security.password_confirm = SecureCredential::new(String::new());
-    state.domains.settings.security.pin_current = SecureCredential::new(String::new());
-    state.domains.settings.security.pin_new = SecureCredential::new(String::new());
-    state.domains.settings.security.pin_confirm = SecureCredential::new(String::new());
+    state.domains.settings.security.password_current =
+        SecureCredential::new(String::new());
+    state.domains.settings.security.password_new =
+        SecureCredential::new(String::new());
+    state.domains.settings.security.password_confirm =
+        SecureCredential::new(String::new());
+    state.domains.settings.security.pin_current =
+        SecureCredential::new(String::new());
+    state.domains.settings.security.pin_new =
+        SecureCredential::new(String::new());
+    state.domains.settings.security.pin_confirm =
+        SecureCredential::new(String::new());
     state.domains.settings.security.password_error = None;
     state.domains.settings.security.pin_error = None;
 
@@ -80,12 +88,18 @@ pub fn handle_back_to_main(state: &mut State) -> DomainUpdateResult {
 /// Handle back to home (exit settings)
 pub fn handle_back_to_home(state: &mut State) -> DomainUpdateResult {
     // Clear sensitive data from security state
-    state.domains.settings.security.password_current = SecureCredential::new(String::new());
-    state.domains.settings.security.password_new = SecureCredential::new(String::new());
-    state.domains.settings.security.password_confirm = SecureCredential::new(String::new());
-    state.domains.settings.security.pin_current = SecureCredential::new(String::new());
-    state.domains.settings.security.pin_new = SecureCredential::new(String::new());
-    state.domains.settings.security.pin_confirm = SecureCredential::new(String::new());
+    state.domains.settings.security.password_current =
+        SecureCredential::new(String::new());
+    state.domains.settings.security.password_new =
+        SecureCredential::new(String::new());
+    state.domains.settings.security.password_confirm =
+        SecureCredential::new(String::new());
+    state.domains.settings.security.pin_current =
+        SecureCredential::new(String::new());
+    state.domains.settings.security.pin_new =
+        SecureCredential::new(String::new());
+    state.domains.settings.security.pin_confirm =
+        SecureCredential::new(String::new());
     state.domains.settings.security.password_error = None;
     state.domains.settings.security.pin_error = None;
 

@@ -64,7 +64,9 @@ impl Message {
             Self::UpdatePasswordCurrent(_) => "Settings::UpdatePasswordCurrent",
             Self::UpdatePasswordNew(_) => "Settings::UpdatePasswordNew",
             Self::UpdatePasswordConfirm(_) => "Settings::UpdatePasswordConfirm",
-            Self::TogglePasswordVisibility => "Settings::TogglePasswordVisibility",
+            Self::TogglePasswordVisibility => {
+                "Settings::TogglePasswordVisibility"
+            }
             Self::SubmitPasswordChange => "Settings::SubmitPasswordChange",
             Self::PasswordChangeResult(_) => "Settings::PasswordChangeResult",
             Self::CancelPasswordChange => "Settings::CancelPasswordChange",

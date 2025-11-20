@@ -35,7 +35,9 @@ pub fn close_video(state: &mut State) {
     ),
     profiling::function
 )]
-pub fn load_external_video(state: &mut State) -> Task<crate::domains::player::messages::Message> {
+pub fn load_external_video(
+    state: &mut State,
+) -> Task<crate::domains::player::messages::Message> {
     use super::external_mpv;
 
     // Check if video is already loaded or loading
@@ -90,13 +92,16 @@ pub fn load_external_video(state: &mut State) -> Task<crate::domains::player::me
         resume_position,
     ) {
         Ok(handle) => {
-            state.domains.player.state.external_mpv_handle = Some(Box::new(handle));
+            state.domains.player.state.external_mpv_handle =
+                Some(Box::new(handle));
             state.domains.player.state.is_loading_video = false;
 
             // Clear pending resume position after use
             state.domains.player.state.pending_resume_position = None;
 
-            log::info!("External MPV started successfully, emitting HideWindow event");
+            log::info!(
+                "External MPV started successfully, emitting HideWindow event"
+            );
 
             // Return no task - window hiding will be handled via domain event
             Task::none()
@@ -111,7 +116,9 @@ pub fn load_external_video(state: &mut State) -> Task<crate::domains::player::me
     }
 }
 
-pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::Message> {
+pub fn load_video(
+    state: &mut State,
+) -> Task<crate::domains::player::messages::Message> {
     // Check if video is already loaded or loading
     if state.domains.player.state.video_opt.is_some() {
         log::warn!("Video already loaded, skipping duplicate load");
@@ -130,8 +137,10 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::M
     state.domains.player.state.is_loading_video = true;
 
     // Preserve any resume/duration hints before closing the current pipeline
-    let pending_resume_hint = state.domains.player.state.pending_resume_position;
-    let duration_hint_before_close = state.domains.player.state.last_valid_duration;
+    let pending_resume_hint =
+        state.domains.player.state.pending_resume_position;
+    let duration_hint_before_close =
+        state.domains.player.state.last_valid_duration;
 
     // Close existing video if any (should not happen due to guard above)
     close_video(state);
@@ -146,7 +155,8 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::M
     }
 
     if duration_hint_before_close > 0.0 {
-        state.domains.player.state.last_valid_duration = duration_hint_before_close;
+        state.domains.player.state.last_valid_duration =
+            duration_hint_before_close;
     }
 
     let url = match &state.domains.player.state.current_url {
@@ -167,17 +177,19 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::M
     log::info!("URL path: {}", url.path());
 
     // Check if this is HDR content based on server metadata
-    let (use_hdr_pipeline, needs_metadata_fetch) =
-        if let Some(current_media) = &state.domains.player.state.current_media {
-            if let Some(metadata) = &current_media.media_file_metadata
-                && let Some(duration) = metadata.duration
-            {
-                state.domains.player.state.last_valid_duration = duration;
-            }
-            // Always log metadata for debugging
-            log::info!("Checking HDR status for: {}", current_media.filename);
+    let (use_hdr_pipeline, needs_metadata_fetch) = if let Some(current_media) =
+        &state.domains.player.state.current_media
+    {
+        if let Some(metadata) = &current_media.media_file_metadata
+            && let Some(duration) = metadata.duration
+        {
+            state.domains.player.state.last_valid_duration = duration;
+        }
+        // Always log metadata for debugging
+        log::info!("Checking HDR status for: {}", current_media.filename);
 
-            let has_color_metadata = if let Some(metadata) = &current_media.media_file_metadata {
+        let has_color_metadata =
+            if let Some(metadata) = &current_media.media_file_metadata {
                 log::info!("  Color transfer: {:?}", metadata.color_transfer);
                 log::info!("  Color space: {:?}", metadata.color_space);
                 log::info!("  Color primaries: {:?}", metadata.color_primaries);
@@ -193,26 +205,30 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::M
                 false
             };
 
-            // If no color metadata and filename suggests HDR, we need to fetch metadata
-            let filename_suggests_hdr = current_media.filename.contains("2160p")
-                || current_media.filename.contains("UHD")
-                || current_media.filename.contains("HDR")
-                || current_media.filename.contains("DV");
+        // If no color metadata and filename suggests HDR, we need to fetch metadata
+        let filename_suggests_hdr = current_media.filename.contains("2160p")
+            || current_media.filename.contains("UHD")
+            || current_media.filename.contains("HDR")
+            || current_media.filename.contains("DV");
 
-            let needs_fetch = !has_color_metadata && filename_suggests_hdr;
+        let needs_fetch = !has_color_metadata && filename_suggests_hdr;
 
-            if needs_fetch {
-                log::warn!("  No color metadata for potential HDR file, metadata fetch needed!");
-            }
+        if needs_fetch {
+            log::warn!(
+                "  No color metadata for potential HDR file, metadata fetch needed!"
+            );
+        }
 
-            (false, needs_fetch)
-        } else {
-            (false, false)
-        };
+        (false, needs_fetch)
+    } else {
+        (false, false)
+    };
 
     // Override HDR decision if filename suggests HDR but metadata is missing
     let use_hdr_pipeline_final = if needs_metadata_fetch {
-        log::warn!("No HDR metadata available, using filename heuristics for pipeline selection");
+        log::warn!(
+            "No HDR metadata available, using filename heuristics for pipeline selection"
+        );
         true // Use HDR pipeline for likely HDR content even without metadata
     } else {
         use_hdr_pipeline
@@ -265,11 +281,17 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::M
             }
 
             // Resume position if any
-            if let Some(resume_pos) = state.domains.player.state.pending_resume_position {
-                match video.seek(std::time::Duration::from_secs_f32(resume_pos), false) {
+            if let Some(resume_pos) =
+                state.domains.player.state.pending_resume_position
+            {
+                match video
+                    .seek(std::time::Duration::from_secs_f32(resume_pos), false)
+                {
                     Ok(_) => {
-                        state.domains.player.state.last_valid_position = resume_pos as f64;
-                        state.domains.player.state.pending_resume_position = None;
+                        state.domains.player.state.last_valid_position =
+                            resume_pos as f64;
+                        state.domains.player.state.pending_resume_position =
+                            None;
                     }
                     Err(e) => {
                         log::warn!(
@@ -278,8 +300,10 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::M
                             e
                         );
                         // Keep the pending resume so a later heartbeat can retry once the pipeline is ready
-                        state.domains.player.state.last_valid_position = resume_pos as f64;
-                        state.domains.player.state.pending_resume_position = Some(resume_pos);
+                        state.domains.player.state.last_valid_position =
+                            resume_pos as f64;
+                        state.domains.player.state.pending_resume_position =
+                            Some(resume_pos);
                     }
                 }
             } else {
@@ -296,7 +320,9 @@ pub fn load_video(state: &mut State) -> Task<crate::domains::player::messages::M
             state.domains.player.state.is_loading_video = false;
             state.domains.ui.state.view = ViewState::Player;
 
-            Task::done(crate::domains::player::messages::Message::VideoLoaded(true))
+            Task::done(crate::domains::player::messages::Message::VideoLoaded(
+                true,
+            ))
         }
         Err(e) => {
             log::error!("Failed to create video: {}", e);

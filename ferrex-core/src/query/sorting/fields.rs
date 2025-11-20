@@ -3,7 +3,10 @@
 //! These zero-sized types represent different fields that can be used for sorting.
 //! Each field marker implements the SortFieldMarker trait to specify its key type.
 
-use super::keys::{OptionalDateKey, OptionalFloatKey, OptionalU32Key, OptionalU64Key, StringKey};
+use super::keys::{
+    OptionalDateKey, OptionalFloatKey, OptionalU32Key, OptionalU64Key,
+    StringKey,
+};
 use super::traits::SortFieldMarker;
 use uuid::Uuid;
 

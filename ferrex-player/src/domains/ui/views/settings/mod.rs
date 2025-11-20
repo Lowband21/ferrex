@@ -4,7 +4,9 @@
 
 use iced::{
     Element, Length,
-    widget::{Space, button, column, container, row, scrollable, text, toggler},
+    widget::{
+        Space, button, column, container, row, scrollable, text, toggler,
+    },
 };
 
 use crate::{
@@ -36,7 +38,9 @@ pub fn view_user_settings<'a>(state: &'a State) -> Element<'a, Message> {
         SettingsView::Profile => profile::view_user_profile(state),
         SettingsView::Preferences => preferences::view_user_preferences(state),
         SettingsView::Security => security::view_user_security(state),
-        SettingsView::DeviceManagement => device_management::view_device_management(state),
+        SettingsView::DeviceManagement => {
+            device_management::view_device_management(state)
+        }
     }
 }
 
@@ -51,9 +55,10 @@ pub fn view_user_settings<'a>(state: &'a State) -> Element<'a, Message> {
 fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
     // RUS-136: Get current user from auth domain state instead of auth_manager
     let current_user: Option<User> = match &state.domains.auth.state.auth_flow {
-        crate::domains::auth::types::AuthenticationFlow::Authenticated { user, .. } => {
-            Some(user.clone())
-        }
+        crate::domains::auth::types::AuthenticationFlow::Authenticated {
+            user,
+            ..
+        } => Some(user.clone()),
         _ => None,
     };
 
@@ -162,8 +167,10 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, Message> {
                     ]
                     .spacing(5),
                     Space::new().width(Length::Fill),
-                    toggler(state.domains.settings.preferences.auto_login_enabled)
-                        .on_toggle(Message::ToggleAutoLogin),
+                    toggler(
+                        state.domains.settings.preferences.auto_login_enabled
+                    )
+                    .on_toggle(Message::ToggleAutoLogin),
                 ]
                 .align_y(iced::Alignment::Center),
             ]

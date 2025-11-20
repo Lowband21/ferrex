@@ -14,17 +14,19 @@ use crate::{
         media::{
             handle_image::serve_image_handler,
             handle_library::{
-                create_library_handler, delete_library_handler, get_libraries_with_media_handler,
-                get_library_handler, get_library_media_handler, get_library_sorted_indices_handler,
+                create_library_handler, delete_library_handler,
+                get_libraries_with_media_handler, get_library_handler,
+                get_library_media_handler, get_library_sorted_indices_handler,
                 post_library_filtered_indices_handler, update_library_handler,
             },
             handle_search::query_media_handler,
         },
         scan::handle_scan::{
             active_scans_handler, cancel_scan_handler, latest_progress_handler,
-            media_events_sse_handler, pause_scan_handler, resume_scan_handler, scan_config_handler,
-            scan_events_handler, scan_history_handler, scan_metrics_handler,
-            scan_progress_sse_handler, start_scan_handler,
+            media_events_sse_handler, pause_scan_handler, resume_scan_handler,
+            scan_config_handler, scan_events_handler, scan_history_handler,
+            scan_metrics_handler, scan_progress_sse_handler,
+            start_scan_handler,
         },
     },
     infra::{
@@ -34,7 +36,8 @@ use crate::{
     stream::stream_handlers,
     users::admin_user_management,
     users::{
-        admin_handlers, auth, role_handlers, security_settings_handlers, session_handlers,
+        admin_handlers, auth, role_handlers, security_settings_handlers,
+        session_handlers,
         setup::{
             claim::{confirm_secure_claim, start_secure_claim},
             setup::{check_setup_status, create_initial_admin},
@@ -151,7 +154,9 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         )
         .route(
             v1::users::sessions::COLLECTION,
-            axum::routing::delete(session_handlers::delete_all_sessions_handler),
+            axum::routing::delete(
+                session_handlers::delete_all_sessions_handler,
+            ),
         )
         // User preferences endpoint (for current user)
         .route(
@@ -191,7 +196,9 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         )
         .route(
             v1::watch::CLEAR_PROGRESS,
-            axum::routing::delete(watch_status_handlers::clear_progress_handler),
+            axum::routing::delete(
+                watch_status_handlers::clear_progress_handler,
+            ),
         )
         // Media endpoints
         //

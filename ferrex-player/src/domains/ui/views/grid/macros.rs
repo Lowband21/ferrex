@@ -2,7 +2,8 @@
 
 use ferrex_core::player_prelude::{
     ArchivedEpisodeReference, ArchivedMovieReference, ArchivedSeasonReference,
-    ArchivedSeriesReference, EpisodeReference, MovieReference, SeasonReference, SeriesReference,
+    ArchivedSeriesReference, EpisodeReference, MovieReference, SeasonReference,
+    SeriesReference,
 };
 /// Macro to generate virtual grid views for different reference types
 /// This eliminates code duplication between movie and series grids
@@ -222,12 +223,12 @@ pub fn parse_hex_color(hex: &str) -> Result<Color, String> {
         return Err(format!("Invalid hex color length: {}", hex.len()));
     }
 
-    let r =
-        u8::from_str_radix(&hex[0..2], 16).map_err(|e| format!("Invalid red component: {}", e))?;
+    let r = u8::from_str_radix(&hex[0..2], 16)
+        .map_err(|e| format!("Invalid red component: {}", e))?;
     let g = u8::from_str_radix(&hex[2..4], 16)
         .map_err(|e| format!("Invalid green component: {}", e))?;
-    let b =
-        u8::from_str_radix(&hex[4..6], 16).map_err(|e| format!("Invalid blue component: {}", e))?;
+    let b = u8::from_str_radix(&hex[4..6], 16)
+        .map_err(|e| format!("Invalid blue component: {}", e))?;
 
     Ok(Color::from_rgb8(r, g, b))
 }

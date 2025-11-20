@@ -4,13 +4,13 @@ use axum::{
     http::{HeaderMap, Request, Response, StatusCode, request::Parts},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use rand::{RngCore, thread_rng};
+use rand::{RngCore, rng};
 use sha2::{Digest, Sha256};
 
 /// Generates a cryptographically secure 32-byte CSRF token
 pub fn generate_token() -> String {
     let mut token_bytes = [0u8; 32];
-    thread_rng().fill_bytes(&mut token_bytes);
+    rng().fill_bytes(&mut token_bytes);
     URL_SAFE_NO_PAD.encode(token_bytes)
 }
 
@@ -75,14 +75,20 @@ impl<S> fmt::Debug for CsrfMiddleware<S> {
 
 impl<S> tower::Service<Request<Body>> for CsrfMiddleware<S>
 where
-    S: tower::Service<Request<Body>, Response = Response<Body>> + Clone + Send + 'static,
+    S: tower::Service<Request<Body>, Response = Response<Body>>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
     type Future = S::Future;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
@@ -104,8 +110,12 @@ where
     fn from_request_parts(
         _parts: &mut Parts,
         _state: &S,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self, Self::Rejection>> + Send>>
-    {
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Self, Self::Rejection>>
+                + Send,
+        >,
+    > {
         Box::pin(async move { Ok(ValidateCsrf) })
     }
 }

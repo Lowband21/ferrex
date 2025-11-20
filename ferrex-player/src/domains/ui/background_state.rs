@@ -79,7 +79,10 @@ impl BackgroundShaderState {
     /// Build a configured background shader instance for the provided view state.
     /// All shared properties (color, offsets, depth layout) are sourced from this persistent state
     /// so call sites do not need to manually wire them each frame.
-    pub fn build_shader(&self, view: &super::types::ViewState) -> BackgroundShader {
+    pub fn build_shader(
+        &self,
+        view: &super::types::ViewState,
+    ) -> BackgroundShader {
         let mut shader = background_shader()
             .colors(self.primary_color, self.secondary_color)
             .scroll_offset(self.scroll_offset)
@@ -137,7 +140,9 @@ impl BackgroundShaderState {
         match view {
             ViewState::Library => {
                 let content_start =
-                    library_controls_bar::calculate_top_bars_height(current_library_id.is_some());
+                    library_controls_bar::calculate_top_bars_height(
+                        current_library_id.is_some(),
+                    );
 
                 // Content region (flat)
                 self.depth_layout.regions.push(DepthRegion {
@@ -171,7 +176,8 @@ impl BackgroundShaderState {
                 // Account for scroll offset
                 let scroll_offset = self.scroll_offset;
                 // Calculate dynamic backdrop height based on aspect mode and window dimensions
-                let backdrop_aspect = self.calculate_display_aspect(window_width, window_height);
+                let backdrop_aspect =
+                    self.calculate_display_aspect(window_width, window_height);
                 let backdrop_height = window_width / backdrop_aspect;
                 // Content top is just backdrop height since header is outside scrollable
                 let content_top = backdrop_height - scroll_offset;
@@ -179,8 +185,10 @@ impl BackgroundShaderState {
                 let poster_height = detail::POSTER_HEIGHT;
                 let poster_padding = detail::POSTER_PADDING;
                 let poster_left = 0.0;
-                let poster_right = poster_left + poster_width + detail::POSTER_METADATA_GAP;
-                let poster_bottom = content_top + poster_height + poster_padding;
+                let poster_right =
+                    poster_left + poster_width + detail::POSTER_METADATA_GAP;
+                let poster_bottom =
+                    content_top + poster_height + poster_padding;
 
                 // Backdrop region (flat, no shadows)
                 self.depth_layout.regions.push(DepthRegion {
@@ -263,11 +271,16 @@ impl BackgroundShaderState {
         }
     }*/
     /// Calculate content offset for detail views based on backdrop dimensions with known window height
-    pub fn calculate_content_offset_height(&self, window_width: f32, window_height: f32) -> f32 {
+    pub fn calculate_content_offset_height(
+        &self,
+        window_width: f32,
+        window_height: f32,
+    ) -> f32 {
         use crate::infrastructure::constants::layout::header;
 
         // Calculate the display aspect based on current mode and actual window dimensions
-        let backdrop_aspect = self.calculate_display_aspect(window_width, window_height);
+        let backdrop_aspect =
+            self.calculate_display_aspect(window_width, window_height);
 
         // Calculate the backdrop height based on window width
         let backdrop_height = window_width / backdrop_aspect;
@@ -277,7 +290,11 @@ impl BackgroundShaderState {
     }
 
     /// Calculate the display aspect ratio based on mode and window dimensions
-    pub fn calculate_display_aspect(&self, window_width: f32, window_height: f32) -> f32 {
+    pub fn calculate_display_aspect(
+        &self,
+        window_width: f32,
+        window_height: f32,
+    ) -> f32 {
         use crate::infrastructure::constants::layout::backdrop;
 
         match self.backdrop_aspect_mode {

@@ -15,9 +15,11 @@ use uuid::Uuid;
 
 use crate::infra::app_state::AppState;
 use crate::infra::errors::{AppError, AppResult};
-use ferrex_core::api_types::users_admin::{AdminUserInfo, CreateUserRequest, UpdateUserRequest};
 use crate::users::user_management::map_auth_facade_error;
 use crate::users::{CreateUserParams, UpdateUserParams, UserService};
+use ferrex_core::api_types::users_admin::{
+    AdminUserInfo, CreateUserRequest, UpdateUserRequest,
+};
 
 /// Create a user via the admin API.
 pub async fn admin_create_user(
@@ -43,14 +45,15 @@ pub async fn admin_create_user(
 
     // Resolve roles and sessions
     let permissions = state
-        .unit_of_work
+        .unit_of_work()
         .rbac
         .get_user_permissions(created.id)
         .await?;
-    let role_names: Vec<String> = permissions.roles.into_iter().map(|r| r.name).collect();
+    let role_names: Vec<String> =
+        permissions.roles.into_iter().map(|r| r.name).collect();
 
     let sessions = state
-        .auth_facade
+        .auth_facade()
         .list_user_sessions(created.id)
         .await
         .map_err(map_auth_facade_error)?;
@@ -117,8 +120,7 @@ pub async fn admin_update_user(
         .await?;
 
     if let Some(new_password) = request.new_password.as_ref() {
-        state
-            .auth_facade
+        state.auth_facade()
             .change_password(ferrex_core::auth::domain::services::PasswordChangeRequest {
                 user_id,
                 new_password: new_password.clone(),
@@ -145,13 +147,14 @@ pub async fn admin_update_user(
     }
 
     let permissions = state
-        .unit_of_work
+        .unit_of_work()
         .rbac
         .get_user_permissions(user.id)
         .await?;
-    let role_names: Vec<String> = permissions.roles.into_iter().map(|r| r.name).collect();
+    let role_names: Vec<String> =
+        permissions.roles.into_iter().map(|r| r.name).collect();
     let sessions = state
-        .auth_facade
+        .auth_facade()
         .list_user_sessions(user.id)
         .await
         .map_err(map_auth_facade_error)?;
@@ -209,7 +212,7 @@ pub async fn admin_delete_user(
 
     // Forbid deleting users that currently have the admin role (policy parity with existing handler)
     let user_perms = state
-        .unit_of_work
+        .unit_of_work()
         .rbac
         .get_user_permissions(user_id)
         .await?;
@@ -271,7 +274,7 @@ async fn record_admin_action(
         metadata,
         ip
     )
-    .execute(state.postgres.pool())
+    .execute(state.postgres().pool())
     .await
     .map_err(AppError::from)?;
     Ok(())
@@ -306,7 +309,7 @@ async fn record_security_event(
         success,
         error_message
     )
-    .execute(state.postgres.pool())
+    .execute(state.postgres().pool())
     .await
     .map_err(AppError::from)?;
     Ok(())

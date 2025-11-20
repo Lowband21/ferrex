@@ -46,7 +46,7 @@ fn sample_auth(expires_in: u32) -> StoredAuth {
         scope: SessionScope::Full,
     },
         user,
-        server_url: "http://localhost:3000".into(),
+        server_url: "https://localhost:3000".into(),
         permissions: Some(permissions),
         stored_at: Utc::now(),
         device_trust_expires_at: None,

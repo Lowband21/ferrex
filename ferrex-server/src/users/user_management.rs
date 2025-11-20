@@ -7,7 +7,9 @@ use axum::{
 };
 use ferrex_core::{
     api_types::ApiResponse,
-    auth::domain::services::{AuthenticationError, PasswordChangeActor, PasswordChangeRequest},
+    auth::domain::services::{
+        AuthenticationError, PasswordChangeActor, PasswordChangeRequest,
+    },
     rbac::{self, UserPermissions},
     user::User,
     user_management::{ListUsersOptions, UserAdminRecord},
@@ -35,7 +37,9 @@ pub struct ListUsersQuery {
     pub include_inactive: bool,
 }
 
-pub use ferrex_core::api_types::users_admin::{CreateUserRequest, UpdateUserRequest};
+pub use ferrex_core::api_types::users_admin::{
+    CreateUserRequest, UpdateUserRequest,
+};
 
 #[derive(Debug, Serialize)]
 pub struct UserResponse {
@@ -120,7 +124,7 @@ pub async fn create_user(
         .await?;
 
     let roles = state
-        .unit_of_work
+        .unit_of_work()
         .rbac
         .get_user_permissions(user.id)
         .await?
@@ -179,7 +183,7 @@ pub async fn update_user(
 
     if let Some(new_password) = request.new_password.as_ref() {
         state
-            .auth_facade
+            .auth_facade()
             .change_password(PasswordChangeRequest {
                 user_id,
                 new_password: new_password.clone(),
@@ -201,13 +205,13 @@ pub async fn update_user(
     }
 
     let permissions = state
-        .unit_of_work
+        .unit_of_work()
         .rbac
         .get_user_permissions(user.id)
         .await?;
 
     let sessions = state
-        .auth_facade
+        .auth_facade()
         .list_user_sessions(user.id)
         .await
         .map_err(map_auth_facade_error)?;
@@ -272,15 +276,23 @@ pub fn map_auth_facade_error(err: AuthFacadeError) -> AppError {
         AuthFacadeError::UserNotFound => AppError::not_found("User not found"),
         AuthFacadeError::Storage(inner) => AppError::from(inner),
         AuthFacadeError::Authentication(inner) => match inner {
-            AuthenticationError::InvalidCredentials => AppError::bad_request("Invalid credentials"),
-            AuthenticationError::UserNotFound => AppError::not_found("User not found"),
+            AuthenticationError::InvalidCredentials => {
+                AppError::bad_request("Invalid credentials")
+            }
+            AuthenticationError::UserNotFound => {
+                AppError::not_found("User not found")
+            }
             AuthenticationError::TooManyFailedAttempts => {
                 AppError::forbidden("Too many failed attempts")
             }
             other => AppError::internal(other.to_string()),
         },
-        AuthFacadeError::DeviceTrust(inner) => AppError::internal(inner.to_string()),
-        AuthFacadeError::PinManagement(inner) => AppError::internal(inner.to_string()),
+        AuthFacadeError::DeviceTrust(inner) => {
+            AppError::internal(inner.to_string())
+        }
+        AuthFacadeError::PinManagement(inner) => {
+            AppError::internal(inner.to_string())
+        }
     }
 }
 
@@ -300,7 +312,10 @@ fn user_record_to_response(record: UserAdminRecord) -> UserResponse {
     }
 }
 
-fn require_permission(perms: &UserPermissions, required: &[&str]) -> AppResult<()> {
+fn require_permission(
+    perms: &UserPermissions,
+    required: &[&str],
+) -> AppResult<()> {
     if perms.has_role("admin") || perms.has_all_permissions(required) {
         Ok(())
     } else {

@@ -17,8 +17,15 @@ pub struct TranscodingStatus {
 
 #[async_trait]
 pub trait StreamingApiService: Send + Sync {
-    async fn start_transcoding(&self, media_id: &str, profile: &str) -> Result<String>;
-    async fn check_transcoding_status(&self, job_id: &str) -> Result<TranscodingStatus>;
+    async fn start_transcoding(
+        &self,
+        media_id: &str,
+        profile: &str,
+    ) -> Result<String>;
+    async fn check_transcoding_status(
+        &self,
+        job_id: &str,
+    ) -> Result<TranscodingStatus>;
     async fn get_master_playlist(&self, media_id: &str) -> Result<String>;
 }
 
@@ -35,13 +42,20 @@ impl StreamingApiAdapter {
 
 #[async_trait]
 impl StreamingApiService for StreamingApiAdapter {
-    async fn start_transcoding(&self, media_id: &str, profile: &str) -> Result<String> {
+    async fn start_transcoding(
+        &self,
+        media_id: &str,
+        profile: &str,
+    ) -> Result<String> {
         // Transcoding pipeline is temporarily unavailable; signal cached job
         let _ = profile; // profile selection is ignored for direct streaming
         Ok(format!("cached_{}", media_id))
     }
 
-    async fn check_transcoding_status(&self, job_id: &str) -> Result<TranscodingStatus> {
+    async fn check_transcoding_status(
+        &self,
+        job_id: &str,
+    ) -> Result<TranscodingStatus> {
         Ok(TranscodingStatus {
             job_id: job_id.to_string(),
             state: "completed".to_string(),
@@ -51,7 +65,8 @@ impl StreamingApiService for StreamingApiAdapter {
     }
 
     async fn get_master_playlist(&self, media_id: &str) -> Result<String> {
-        let stream_path = utils::replace_param(v1::stream::PLAY, "{id}", media_id);
+        let stream_path =
+            utils::replace_param(v1::stream::PLAY, "{id}", media_id);
         Ok(self.client.build_url(&stream_path))
     }
 }

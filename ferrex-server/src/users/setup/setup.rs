@@ -76,7 +76,8 @@ impl SetupRateLimiter {
         let window_start = now - Duration::minutes(self.window_minutes);
 
         // Get or create attempt list for this IP
-        let ip_attempts = attempts.entry(ip.to_string()).or_insert_with(Vec::new);
+        let ip_attempts =
+            attempts.entry(ip.to_string()).or_insert_with(Vec::new);
 
         // Remove old attempts outside the window
         ip_attempts.retain(|&attempt| attempt > window_start);
@@ -84,7 +85,8 @@ impl SetupRateLimiter {
         // Check if rate limit exceeded
         if ip_attempts.len() >= self.max_attempts {
             let oldest_attempt = ip_attempts.first().copied().unwrap_or(now);
-            let wait_time = (oldest_attempt + Duration::minutes(self.window_minutes)) - now;
+            let wait_time =
+                (oldest_attempt + Duration::minutes(self.window_minutes)) - now;
             let wait_minutes = wait_time.num_minutes().max(1);
 
             warn!(
@@ -122,7 +124,8 @@ impl SetupRateLimiter {
 // Global rate limiter instance
 // Using a function to get the rate limiter instead of lazy_static
 fn get_rate_limiter() -> &'static SetupRateLimiter {
-    static INSTANCE: std::sync::OnceLock<SetupRateLimiter> = std::sync::OnceLock::new();
+    static INSTANCE: std::sync::OnceLock<SetupRateLimiter> =
+        std::sync::OnceLock::new();
     INSTANCE.get_or_init(SetupRateLimiter::default)
 }
 
@@ -219,25 +222,33 @@ pub async fn check_setup_status(
     let needs_setup = user_service.needs_setup().await?;
 
     // Get user and library counts
-    let users = state
-        .unit_of_work
-        .users
-        .get_all_users()
-        .await
-        .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
+    let users =
+        state
+            .unit_of_work()
+            .users
+            .get_all_users()
+            .await
+            .map_err(|e| {
+                AppError::internal(format!("Failed to get users: {}", e))
+            })?;
 
     let libraries = state
-        .unit_of_work
+        .unit_of_work()
         .libraries
         .list_libraries()
         .await
-        .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
+        .map_err(|e| {
+            AppError::internal(format!("Failed to get libraries: {}", e))
+        })?;
 
-    let security_repo = state.unit_of_work.security_settings.clone();
-    let security_settings = security_repo
-        .get_settings()
-        .await
-        .map_err(|e| AppError::internal(format!("Failed to load security settings: {}", e)))?;
+    let security_repo = state.unit_of_work().security_settings.clone();
+    let security_settings =
+        security_repo.get_settings().await.map_err(|e| {
+            AppError::internal(format!(
+                "Failed to load security settings: {}",
+                e
+            ))
+        })?;
 
     let status = SetupStatus {
         needs_setup,
@@ -247,7 +258,9 @@ pub async fn check_setup_status(
         admin_password_policy: PasswordPolicyResponse::from(
             &security_settings.admin_password_policy,
         ),
-        user_password_policy: PasswordPolicyResponse::from(&security_settings.user_password_policy),
+        user_password_policy: PasswordPolicyResponse::from(
+            &security_settings.user_password_policy,
+        ),
     };
 
     Ok(Json(ApiResponse::success(status)))
@@ -268,9 +281,14 @@ pub async fn create_initial_admin(
     // Check rate limit
     get_rate_limiter().check_rate_limit(&client_ip).await?;
 
-    // Check setup token if configured
-    if let Ok(expected_token) = std::env::var("FERREX_SETUP_TOKEN")
-        && !expected_token.is_empty()
+    // Check setup token if configured, preferring config over direct env lookup
+    if let Some(expected_token) = state
+        .config()
+        .auth
+        .setup_token
+        .clone()
+        .or_else(|| std::env::var("FERREX_SETUP_TOKEN").ok())
+        .filter(|token| !token.is_empty())
     {
         // Token is required
         let provided_token = request
@@ -320,7 +338,11 @@ pub async fn create_initial_admin(
         .as_ref()
         .map(|token| token.trim())
         .filter(|token| !token.is_empty())
-        .ok_or_else(|| AppError::forbidden("Secure claim token required before admin setup"))?
+        .ok_or_else(|| {
+            AppError::forbidden(
+                "Secure claim token required before admin setup",
+            )
+        })?
         .to_string();
 
     claim_service
@@ -328,11 +350,14 @@ pub async fn create_initial_admin(
         .await
         .map_err(map_claim_error)?;
 
-    let security_repo = state.unit_of_work.security_settings.clone();
-    let security_settings = security_repo
-        .get_settings()
-        .await
-        .map_err(|e| AppError::internal(format!("Failed to load security settings: {}", e)))?;
+    let security_repo = state.unit_of_work().security_settings.clone();
+    let security_settings =
+        security_repo.get_settings().await.map_err(|e| {
+            AppError::internal(format!(
+                "Failed to load security settings: {}",
+                e
+            ))
+        })?;
 
     let admin_policy = security_settings.admin_password_policy.clone();
     let policy_check = admin_policy.check(&request.password);
@@ -377,14 +402,18 @@ pub async fn create_initial_admin(
 
     // Assign admin role
     let admin_role = state
-        .unit_of_work
+        .unit_of_work()
         .rbac
         .get_all_roles()
         .await
-        .map_err(|e| AppError::internal(format!("Failed to load roles: {}", e)))?
+        .map_err(|e| {
+            AppError::internal(format!("Failed to load roles: {}", e))
+        })?
         .into_iter()
         .find(|role| role.name == roles::ADMIN)
-        .ok_or_else(|| AppError::internal("Admin role missing after initialization"))?;
+        .ok_or_else(|| {
+            AppError::internal("Admin role missing after initialization")
+        })?;
 
     user_service
         .assign_role(user.id, admin_role.id, user.id)
@@ -417,29 +446,39 @@ pub async fn create_initial_admin(
 }
 
 /// Internal helper to check setup status
-async fn check_setup_status_internal(state: &AppState) -> AppResult<SetupStatus> {
+async fn check_setup_status_internal(
+    state: &AppState,
+) -> AppResult<SetupStatus> {
     let user_service = UserService::new(state);
     let needs_setup = user_service.needs_setup().await?;
 
-    let users = state
-        .unit_of_work
-        .users
-        .get_all_users()
-        .await
-        .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
+    let users =
+        state
+            .unit_of_work()
+            .users
+            .get_all_users()
+            .await
+            .map_err(|e| {
+                AppError::internal(format!("Failed to get users: {}", e))
+            })?;
 
     let libraries = state
-        .unit_of_work
+        .unit_of_work()
         .libraries
         .list_libraries()
         .await
-        .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
+        .map_err(|e| {
+            AppError::internal(format!("Failed to get libraries: {}", e))
+        })?;
 
-    let security_repo = state.unit_of_work.security_settings.clone();
-    let security_settings = security_repo
-        .get_settings()
-        .await
-        .map_err(|e| AppError::internal(format!("Failed to load security settings: {}", e)))?;
+    let security_repo = state.unit_of_work().security_settings.clone();
+    let security_settings =
+        security_repo.get_settings().await.map_err(|e| {
+            AppError::internal(format!(
+                "Failed to load security settings: {}",
+                e
+            ))
+        })?;
 
     Ok(SetupStatus {
         needs_setup,
@@ -449,25 +488,31 @@ async fn check_setup_status_internal(state: &AppState) -> AppResult<SetupStatus>
         admin_password_policy: PasswordPolicyResponse::from(
             &security_settings.admin_password_policy,
         ),
-        user_password_policy: PasswordPolicyResponse::from(&security_settings.user_password_policy),
+        user_password_policy: PasswordPolicyResponse::from(
+            &security_settings.user_password_policy,
+        ),
     })
 }
 
 fn auth_error_to_app(err: AuthenticationError) -> AppError {
     match err {
-        AuthenticationError::InvalidCredentials | AuthenticationError::InvalidPin => {
+        AuthenticationError::InvalidCredentials
+        | AuthenticationError::InvalidPin => {
             AppError::unauthorized("Invalid credentials".to_string())
         }
-        AuthenticationError::TooManyFailedAttempts => {
-            AppError::rate_limited("Too many failed authentication attempts".to_string())
-        }
+        AuthenticationError::TooManyFailedAttempts => AppError::rate_limited(
+            "Too many failed authentication attempts".to_string(),
+        ),
         AuthenticationError::SessionExpired => {
             AppError::unauthorized("Session expired".to_string())
         }
-        AuthenticationError::DeviceNotFound | AuthenticationError::DeviceNotTrusted => {
-            AppError::forbidden("Device not eligible for authentication".to_string())
+        AuthenticationError::DeviceNotFound
+        | AuthenticationError::DeviceNotTrusted => AppError::forbidden(
+            "Device not eligible for authentication".to_string(),
+        ),
+        AuthenticationError::UserNotFound => {
+            AppError::not_found("User not found".to_string())
         }
-        AuthenticationError::UserNotFound => AppError::not_found("User not found".to_string()),
         AuthenticationError::DatabaseError(e) => {
             AppError::internal(format!("Authentication failed: {e}"))
         }
@@ -507,9 +552,15 @@ fn describe_policy_failures(failures: &[PasswordPolicyRule]) -> String {
 
 fn map_claim_error(error: SetupClaimError) -> AppError {
     match error {
-        SetupClaimError::InvalidCode => AppError::bad_request("Invalid claim code"),
-        SetupClaimError::InvalidToken => AppError::forbidden("Invalid claim token"),
-        SetupClaimError::Expired { .. } => AppError::gone("Claim token has expired"),
+        SetupClaimError::InvalidCode => {
+            AppError::bad_request("Invalid claim code")
+        }
+        SetupClaimError::InvalidToken => {
+            AppError::forbidden("Invalid claim token")
+        }
+        SetupClaimError::Expired { .. } => {
+            AppError::gone("Claim token has expired")
+        }
         SetupClaimError::ActiveClaimPending { .. } => {
             AppError::conflict("A claim is still pending; restart the flow")
         }

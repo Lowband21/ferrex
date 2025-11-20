@@ -89,8 +89,10 @@ pub fn media_carousel<'a>(
 
     // Add spacer for items before visible range
     if visible_range.start > 0 {
-        let spacer_width = visible_range.start as f32 * (state.item_width + state.item_spacing);
-        item_row = item_row.push(Space::new().width(Length::Fixed(spacer_width)));
+        let spacer_width = visible_range.start as f32
+            * (state.item_width + state.item_spacing);
+        item_row =
+            item_row.push(Space::new().width(Length::Fixed(spacer_width)));
     }
 
     // Add only visible items
@@ -103,8 +105,10 @@ pub fn media_carousel<'a>(
     // Add spacer for items after visible range
     if visible_range.end < state.total_items {
         let remaining_items = state.total_items - visible_range.end;
-        let spacer_width = remaining_items as f32 * (state.item_width + state.item_spacing);
-        item_row = item_row.push(Space::new().width(Length::Fixed(spacer_width)));
+        let spacer_width =
+            remaining_items as f32 * (state.item_width + state.item_spacing);
+        item_row =
+            item_row.push(Space::new().width(Length::Fixed(spacer_width)));
     }
 
     // Create horizontal scrollable for items
@@ -119,7 +123,10 @@ pub fn media_carousel<'a>(
             .scroller_width(0),
     ))
     .on_scroll(move |viewport| {
-        Message::CarouselNavigation(CarouselMessage::Scrolled(section_id.clone(), viewport))
+        Message::CarouselNavigation(CarouselMessage::Scrolled(
+            section_id.clone(),
+            viewport,
+        ))
     })
     .width(Length::Fill)
     .height(Length::Fixed(370.0));

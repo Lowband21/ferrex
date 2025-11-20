@@ -30,16 +30,22 @@ impl<F> AsyncAssertions for F
 where
     F: Future,
 {
-    async fn completes_within(self, duration: Duration) -> Result<F::Output, String>
+    async fn completes_within(
+        self,
+        duration: Duration,
+    ) -> Result<F::Output, String>
     where
         F::Output: Send,
     {
-        timeout(duration, self)
-            .await
-            .map_err(|_| format!("Future did not complete within {:?}", duration))
+        timeout(duration, self).await.map_err(|_| {
+            format!("Future did not complete within {:?}", duration)
+        })
     }
 
-    async fn does_not_complete_within(self, duration: Duration) -> Result<(), String> {
+    async fn does_not_complete_within(
+        self,
+        duration: Duration,
+    ) -> Result<(), String> {
         match timeout(duration, self).await {
             Ok(_) => Err(format!(
                 "Future completed within {:?} when it shouldn't have",
@@ -177,13 +183,22 @@ pub trait StateAssertions {
     type State;
 
     /// Assert that state transitions follow a specific path
-    fn assert_transition_path(&self, path: &[Self::State]) -> Result<(), String>;
+    fn assert_transition_path(
+        &self,
+        path: &[Self::State],
+    ) -> Result<(), String>;
 
     /// Assert that state never enters certain states
-    fn assert_never_enters(&self, forbidden: &[Self::State]) -> Result<(), String>;
+    fn assert_never_enters(
+        &self,
+        forbidden: &[Self::State],
+    ) -> Result<(), String>;
 
     /// Assert that state eventually reaches a target
-    fn assert_eventually_reaches(&self, target: Self::State) -> Result<(), String>;
+    fn assert_eventually_reaches(
+        &self,
+        target: Self::State,
+    ) -> Result<(), String>;
 }
 
 /// Helper macro for asserting async results
@@ -221,7 +236,10 @@ macro_rules! assert_async_err {
 }
 
 /// Assert that events were emitted in a specific order
-pub fn assert_event_sequence<E>(events: &[E], expected: &[E]) -> Result<(), String>
+pub fn assert_event_sequence<E>(
+    events: &[E],
+    expected: &[E],
+) -> Result<(), String>
 where
     E: PartialEq + std::fmt::Debug,
 {
@@ -247,7 +265,10 @@ where
 }
 
 /// Assert that certain events were never emitted
-pub fn assert_events_never<E, F>(events: &[E], predicate: F) -> Result<(), String>
+pub fn assert_events_never<E, F>(
+    events: &[E],
+    predicate: F,
+) -> Result<(), String>
 where
     E: std::fmt::Debug,
     F: Fn(&E) -> bool,

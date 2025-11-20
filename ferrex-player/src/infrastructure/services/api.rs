@@ -10,11 +10,12 @@ use async_trait::async_trait;
 use ferrex_core::{
     api_types::setup::{ConfirmClaimResponse, StartClaimResponse},
     player_prelude::{
-        ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
-        FilterIndicesRequest, LatestProgressResponse, Library, LibraryID, Media, MediaQuery,
-        MediaWithStatus, ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics,
-        StartScanRequest, UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions,
-        UserWatchState,
+        ActiveScansResponse, AuthToken, AuthenticatedDevice,
+        CreateLibraryRequest, FilterIndicesRequest, LatestProgressResponse,
+        Library, LibraryID, Media, MediaQuery, MediaWithStatus,
+        ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig,
+        ScanMetrics, StartScanRequest, UpdateLibraryRequest,
+        UpdateProgressRequest, User, UserPermissions, UserWatchState,
     },
 };
 use rkyv::util::AlignedVec;
@@ -31,8 +32,11 @@ pub trait ApiService: Send + Sync + Debug {
     ) -> RepositoryResult<AlignedVec>;
 
     /// Make a GET request that returns raw bytes (for images and binary content)
-    async fn get_bytes(&self, path: &str, query: Option<(&str, &str)>)
-        -> RepositoryResult<Vec<u8>>;
+    async fn get_bytes(
+        &self,
+        path: &str,
+        query: Option<(&str, &str)>,
+    ) -> RepositoryResult<Vec<u8>>;
 
     // === Common API operations ===
 
@@ -40,11 +44,17 @@ pub trait ApiService: Send + Sync + Debug {
     async fn fetch_libraries(&self) -> RepositoryResult<Vec<Library>>;
 
     /// Fetch media for a specific library
-    async fn fetch_library_media(&self, library_id: Uuid) -> RepositoryResult<Vec<Media>>;
+    async fn fetch_library_media(
+        &self,
+        library_id: Uuid,
+    ) -> RepositoryResult<Vec<Media>>;
 
     // === Library management ===
     /// Create a library on the server
-    async fn create_library(&self, request: CreateLibraryRequest) -> RepositoryResult<LibraryID>;
+    async fn create_library(
+        &self,
+        request: CreateLibraryRequest,
+    ) -> RepositoryResult<LibraryID>;
     /// Update a library on the server
     async fn update_library(
         &self,
@@ -83,7 +93,8 @@ pub trait ApiService: Send + Sync + Debug {
     ) -> RepositoryResult<ScanCommandAcceptedResponse>;
 
     /// Fetch all active scans across libraries
-    async fn fetch_active_scans(&self) -> RepositoryResult<ActiveScansResponse>;
+    async fn fetch_active_scans(&self)
+    -> RepositoryResult<ActiveScansResponse>;
 
     /// Fetch the latest progress frame for a scan
     async fn fetch_latest_scan_progress(
@@ -104,7 +115,10 @@ pub trait ApiService: Send + Sync + Debug {
     async fn fetch_demo_status(&self) -> RepositoryResult<DemoStatus>;
 
     #[cfg(feature = "demo")]
-    async fn reset_demo(&self, request: DemoResetRequest) -> RepositoryResult<DemoStatus>;
+    async fn reset_demo(
+        &self,
+        request: DemoResetRequest,
+    ) -> RepositoryResult<DemoStatus>;
 
     // === Additional API operations ===
 
@@ -112,16 +126,24 @@ pub trait ApiService: Send + Sync + Debug {
     async fn get_watch_state(&self) -> RepositoryResult<UserWatchState>;
 
     /// Update progress for a media item
-    async fn update_progress(&self, request: &UpdateProgressRequest) -> RepositoryResult<()>;
+    async fn update_progress(
+        &self,
+        request: &UpdateProgressRequest,
+    ) -> RepositoryResult<()>;
 
     /// List authenticated devices for current user
-    async fn list_user_devices(&self) -> RepositoryResult<Vec<AuthenticatedDevice>>;
+    async fn list_user_devices(
+        &self,
+    ) -> RepositoryResult<Vec<AuthenticatedDevice>>;
 
     /// Revoke a device
     async fn revoke_device(&self, device_id: Uuid) -> RepositoryResult<()>;
 
     /// Query media with complex filters
-    async fn query_media(&self, query: MediaQuery) -> RepositoryResult<Vec<MediaWithStatus>>;
+    async fn query_media(
+        &self,
+        query: MediaQuery,
+    ) -> RepositoryResult<Vec<MediaWithStatus>>;
 
     /// Fetch filtered index positions for a library based on the provided filter spec
     async fn fetch_filtered_indices(

@@ -1,8 +1,10 @@
 [workspace]
 members = ["ferrex-server", "ferrex-core", "ferrex-player"]
+default-members = ["ferrex-server", "ferrex-core"]
 resolver = "3"
 
 [workspace.package]
+rust-version = "1.90"
 edition = "2024"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
@@ -101,6 +103,7 @@ axum = { version = "^0.8.6", default-features = false, features = [
   "json",
   "form",
   "query",
+  "matched-path",
 ] }
 axum-server = { version = "^0.7", default-features = false, features = [
   "tls-rustls-no-provider",

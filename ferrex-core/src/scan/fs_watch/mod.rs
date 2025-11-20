@@ -14,7 +14,9 @@ use std::sync::Arc;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use notify::event::{EventKind, ModifyKind, RemoveKind, RenameMode};
-use notify::{Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{
+    Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, Watcher,
+};
 use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::{JoinHandle, spawn_blocking};
@@ -62,7 +64,9 @@ impl Default for FsWatchConfig {
 impl From<WatchConfig> for FsWatchConfig {
     fn from(cfg: WatchConfig) -> Self {
         Self {
-            debounce_window: Duration::from_millis(cfg.debounce_window_ms.max(1)),
+            debounce_window: Duration::from_millis(
+                cfg.debounce_window_ms.max(1),
+            ),
             max_batch_events: cfg.max_batch_events.max(1),
         }
     }
@@ -177,8 +181,10 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
         let watcher_tx = tx.clone();
 
         tokio::spawn(async move {
-            let build_result =
-                spawn_blocking(move || init_watchers(watcher_roots, watcher_tx)).await;
+            let build_result = spawn_blocking(move || {
+                init_watchers(watcher_roots, watcher_tx)
+            })
+            .await;
 
             match build_result {
                 Ok(Ok(watchers)) => {
@@ -196,7 +202,8 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
                     }
                 }
                 Err(join_err) => {
-                    let msg = format!("watcher initialization panicked: {join_err}");
+                    let msg =
+                        format!("watcher initialization panicked: {join_err}");
                     observer.on_error(library_id, &msg);
                     let mut guard = libraries.write().await;
                     if let Some(entry) = guard.remove(&library_id) {
@@ -248,7 +255,8 @@ impl LibraryWatch {
 
 impl fmt::Debug for LibraryWatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let watcher_count = self.watchers.as_ref().map(|watchers| watchers.len());
+        let watcher_count =
+            self.watchers.as_ref().map(|watchers| watchers.len());
         f.debug_struct("LibraryWatch")
             .field("watcher_count", &watcher_count)
             .field("flush_task_finished", &self.flush_task.is_finished())
@@ -288,7 +296,8 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
     config: FsWatchConfig,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut pending: HashMap<LibraryRootsId, Vec<FileSystemEvent>> = HashMap::new();
+        let mut pending: HashMap<LibraryRootsId, Vec<FileSystemEvent>> =
+            HashMap::new();
 
         loop {
             let msg = if pending.is_empty() {
@@ -297,9 +306,13 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
                 match timeout(config.debounce_window, rx.recv()).await {
                     Ok(msg) => msg,
                     Err(_) => {
-                        if let Err(err) =
-                            flush_pending(Arc::clone(&observer), library_id, &mut pending, &actor)
-                                .await
+                        if let Err(err) = flush_pending(
+                            Arc::clone(&observer),
+                            library_id,
+                            &mut pending,
+                            &actor,
+                        )
+                        .await
                         {
                             observer.on_error(library_id, &err.to_string());
                         }
@@ -309,8 +322,13 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
             };
 
             let Some(msg) = msg else {
-                if let Err(err) =
-                    flush_pending(Arc::clone(&observer), library_id, &mut pending, &actor).await
+                if let Err(err) = flush_pending(
+                    Arc::clone(&observer),
+                    library_id,
+                    &mut pending,
+                    &actor,
+                )
+                .await
                 {
                     observer.on_error(library_id, &err.to_string());
                 }
@@ -319,8 +337,13 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
 
             match msg {
                 WatchMessage::Event(event) => {
-                    if let Some((root_id, fs_event)) = convert_event(library_id, &roots, event) {
-                        if matches!(fs_event.kind, FileSystemEventKind::Overflow) {
+                    if let Some((root_id, fs_event)) =
+                        convert_event(library_id, &roots, event)
+                    {
+                        if matches!(
+                            fs_event.kind,
+                            FileSystemEventKind::Overflow
+                        ) {
                             if let Err(err) = dispatch_events(
                                 Arc::clone(&observer),
                                 library_id,
@@ -355,7 +378,8 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
                 }
                 WatchMessage::Error(error) => {
                     observer.on_error(library_id, &error);
-                    let overflow_events = overflow_for_roots(library_id, &roots);
+                    let overflow_events =
+                        overflow_for_roots(library_id, &roots);
                     for (root_id, events) in overflow_events {
                         if let Err(err) = dispatch_events(
                             Arc::clone(&observer),
@@ -391,7 +415,14 @@ async fn flush_pending<O: FsWatchObserver + 'static>(
     }
 
     for (root_id, events) in batches {
-        dispatch_events(Arc::clone(&observer), library_id, actor, root_id, events).await?;
+        dispatch_events(
+            Arc::clone(&observer),
+            library_id,
+            actor,
+            root_id,
+            events,
+        )
+        .await?;
     }
     pending.clear();
     Ok(())
@@ -490,7 +521,10 @@ fn path_within_root(path: &Path, root: &Path) -> bool {
     path.starts_with(root)
 }
 
-fn extract_paths(event: &Event, root_path: &Path) -> Option<(PathBuf, Option<PathBuf>)> {
+fn extract_paths(
+    event: &Event,
+    root_path: &Path,
+) -> Option<(PathBuf, Option<PathBuf>)> {
     let mut paths = event.paths.iter();
     let first = paths.next()?;
 
@@ -532,9 +566,9 @@ fn classify_event(kind: &EventKind) -> FileSystemEventKind {
             FileSystemEventKind::Modified
         }
         EventKind::Modify(ModifyKind::Name(_)) => FileSystemEventKind::Moved,
-        EventKind::Remove(RemoveKind::File | RemoveKind::Folder | RemoveKind::Any) => {
-            FileSystemEventKind::Deleted
-        }
+        EventKind::Remove(
+            RemoveKind::File | RemoveKind::Folder | RemoveKind::Any,
+        ) => FileSystemEventKind::Deleted,
         EventKind::Other => FileSystemEventKind::Overflow,
         _ => FileSystemEventKind::Modified,
     }
@@ -598,7 +632,9 @@ fn overflow_for_roots(
         .collect()
 }
 
-fn resolve_roots(roots: Vec<(LibraryRootsId, PathBuf)>) -> Vec<(LibraryRootsId, PathBuf)> {
+fn resolve_roots(
+    roots: Vec<(LibraryRootsId, PathBuf)>,
+) -> Vec<(LibraryRootsId, PathBuf)> {
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     roots
         .into_iter()
@@ -623,7 +659,9 @@ fn init_watchers(
         let mut watcher = RecommendedWatcher::new(
             move |res: std::result::Result<Event, notify::Error>| match res {
                 Ok(event) => {
-                    if let Err(err) = tx_event.blocking_send(WatchMessage::Event(event)) {
+                    if let Err(err) =
+                        tx_event.blocking_send(WatchMessage::Event(event))
+                    {
                         warn!(
                             "fs_watch channel send failed for {}: {}",
                             path_clone.display(),
@@ -676,8 +714,9 @@ mod tests {
     use crate::error::Result;
     use crate::fs_watch::{FsWatchConfig, FsWatchService, NoopFsWatchObserver};
     use crate::orchestration::{
-        LibraryActor, LibraryActorCommand, LibraryActorConfig, LibraryActorEvent,
-        LibraryActorHandle, LibraryActorState, LibraryRootsId,
+        LibraryActor, LibraryActorCommand, LibraryActorConfig,
+        LibraryActorEvent, LibraryActorHandle, LibraryActorState,
+        LibraryRootsId,
     };
     use crate::types::ids::LibraryID;
 
@@ -713,10 +752,13 @@ mod tests {
         let tmp = tempdir().unwrap();
         let root = tmp.path().to_path_buf();
 
-        let service: FsWatchService =
-            FsWatchService::new(FsWatchConfig::default(), Arc::new(NoopFsWatchObserver));
+        let service: FsWatchService = FsWatchService::new(
+            FsWatchConfig::default(),
+            Arc::new(NoopFsWatchObserver),
+        );
 
-        let actor: LibraryActorHandle = Arc::new(Mutex::new(Box::new(DummyActor)));
+        let actor: LibraryActorHandle =
+            Arc::new(Mutex::new(Box::new(DummyActor)));
         let library_id = LibraryID::new();
         service
             .register_library(

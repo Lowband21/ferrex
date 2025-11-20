@@ -19,7 +19,10 @@ use lucide_icons::Icon;
     ),
     profiling::function
 )]
-pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Message> {
+pub fn view_loading_video<'a>(
+    state: &'a State,
+    url: &'a str,
+) -> Element<'a, Message> {
     let mut content = column![].spacing(20).align_x(iced::Alignment::Center);
 
     // Back button
@@ -39,7 +42,8 @@ pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Mes
     content = content.push(Space::new().height(Length::Fill));
 
     // Loading indicator with status
-    let mut loading_content = column![].spacing(20).align_x(iced::Alignment::Center);
+    let mut loading_content =
+        column![].spacing(20).align_x(iced::Alignment::Center);
 
     // Spinner icon (using refresh icon that will be animated via CSS)
     loading_content = loading_content.push(
@@ -63,15 +67,26 @@ pub fn view_loading_video<'a>(state: &'a State, url: &'a str) -> Element<'a, Mes
     );
 
     // Status message based on transcoding state
-    let status_message = match &state.domains.streaming.state.transcoding_status {
-        Some(TranscodingStatus::Pending) => "Initializing transcoding...".to_string(),
-        Some(TranscodingStatus::Queued) => "Waiting in transcoding queue...".to_string(),
+    let status_message = match &state.domains.streaming.state.transcoding_status
+    {
+        Some(TranscodingStatus::Pending) => {
+            "Initializing transcoding...".to_string()
+        }
+        Some(TranscodingStatus::Queued) => {
+            "Waiting in transcoding queue...".to_string()
+        }
         Some(TranscodingStatus::Processing { progress }) => {
             format!("Processing: {:.0}%", progress * 100.0)
         }
-        Some(TranscodingStatus::Completed) => "Video ready, starting playback...".to_string(),
-        Some(TranscodingStatus::Failed { error }) => format!("Error: {}", error),
-        Some(TranscodingStatus::Cancelled) => "Transcoding cancelled".to_string(),
+        Some(TranscodingStatus::Completed) => {
+            "Video ready, starting playback...".to_string()
+        }
+        Some(TranscodingStatus::Failed { error }) => {
+            format!("Error: {}", error)
+        }
+        Some(TranscodingStatus::Cancelled) => {
+            "Transcoding cancelled".to_string()
+        }
         None => {
             if state.domains.streaming.state.using_hls {
                 "Preparing adaptive bitrate streams...".to_string()

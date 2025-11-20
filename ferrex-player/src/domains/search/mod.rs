@@ -35,7 +35,9 @@ impl SearchDomain {
     )]
     pub fn new(
         //media_store: Arc<StdRwLock<crate::domains::media::store::MediaStore>>,
-        api_service: Option<Arc<dyn crate::infrastructure::services::api::ApiService>>,
+        api_service: Option<
+            Arc<dyn crate::infrastructure::services::api::ApiService>,
+        >,
     ) -> Self {
         Self {
             state: SearchState::default(),
@@ -53,7 +55,9 @@ impl SearchDomain {
     )]
     pub fn new_with_metrics(
         //media_store: Arc<StdRwLock<crate::domains::media::store::MediaStore>>,
-        api_service: Option<Arc<dyn crate::infrastructure::services::api::ApiService>>,
+        api_service: Option<
+            Arc<dyn crate::infrastructure::services::api::ApiService>,
+        >,
     ) -> Self {
         let mut state = SearchState::default();
         // Enable the enhanced decision engine with metrics
@@ -86,7 +90,10 @@ impl SearchDomain {
         ),
         profiling::function
     )]
-    pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
+    pub fn handle_event(
+        &mut self,
+        event: &CrossDomainEvent,
+    ) -> Task<DomainMessage> {
         match event {
             // NOTE: MediaStoreRefreshed moved to direct Search messages in Task 2.10
             CrossDomainEvent::LibrarySelected(library_id) => {
@@ -118,8 +125,12 @@ impl SearchDomain {
                 // Notify UI to navigate to the selected media
                 CrossDomainEvent::NavigateToMedia(media_ref)
             }
-            SearchEvent::SearchStarted => CrossDomainEvent::SearchInProgress(true),
-            SearchEvent::SearchCompleted(_) => CrossDomainEvent::SearchInProgress(false),
+            SearchEvent::SearchStarted => {
+                CrossDomainEvent::SearchInProgress(true)
+            }
+            SearchEvent::SearchCompleted(_) => {
+                CrossDomainEvent::SearchInProgress(false)
+            }
             _ => CrossDomainEvent::NoOp,
         }
     }

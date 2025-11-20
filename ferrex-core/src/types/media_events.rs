@@ -1,15 +1,26 @@
 use chrono::{DateTime, Utc};
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
 use super::{
-    EpisodeReference, LibraryID, Media, MediaID, MovieReference, SeasonReference, SeriesReference,
+    EpisodeReference, LibraryID, Media, MediaID, MovieReference,
+    SeasonReference, SeriesReference,
 };
 
 #[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct ScanStageLatencySummary {
@@ -18,7 +29,15 @@ pub struct ScanStageLatencySummary {
     pub index: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct ScanProgressEvent {
     pub version: String,
@@ -64,7 +83,14 @@ impl fmt::Debug for ScanProgressEvent {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct ScanEventMetadata {
@@ -75,7 +101,14 @@ pub struct ScanEventMetadata {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[rkyv(derive(Debug, PartialEq))]
@@ -132,16 +165,18 @@ pub enum MediaEvent {
 impl MediaEvent {
     pub fn into_media(self) -> Option<Media> {
         match self {
-            MediaEvent::MovieAdded { movie } | MediaEvent::MovieUpdated { movie } => {
-                Some(Media::Movie(movie))
-            }
-            MediaEvent::SeriesAdded { series } | MediaEvent::SeriesUpdated { series } => {
+            MediaEvent::MovieAdded { movie }
+            | MediaEvent::MovieUpdated { movie } => Some(Media::Movie(movie)),
+            MediaEvent::SeriesAdded { series }
+            | MediaEvent::SeriesUpdated { series } => {
                 Some(Media::Series(series))
             }
-            MediaEvent::SeasonAdded { season } | MediaEvent::SeasonUpdated { season } => {
+            MediaEvent::SeasonAdded { season }
+            | MediaEvent::SeasonUpdated { season } => {
                 Some(Media::Season(season))
             }
-            MediaEvent::EpisodeAdded { episode } | MediaEvent::EpisodeUpdated { episode } => {
+            MediaEvent::EpisodeAdded { episode }
+            | MediaEvent::EpisodeUpdated { episode } => {
                 Some(Media::Episode(episode))
             }
             MediaEvent::MediaDeleted { .. }

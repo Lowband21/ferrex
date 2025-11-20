@@ -129,8 +129,9 @@ impl FilenameParser {
         let mut title = raw.replace(['.', '_'], " ");
 
         let noise_tokens = [
-            "1080p", "720p", "2160p", "4K", "BluRay", "Bluray", "WEB-DL", "WEBRip", "WEBDL",
-            "HDRip", "HDTV", "DVDRip", "x264", "x265", "HEVC", "10bit", "AAC", "DTS", "FLAC",
+            "1080p", "720p", "2160p", "4K", "BluRay", "Bluray", "WEB-DL",
+            "WEBRip", "WEBDL", "HDRip", "HDTV", "DVDRip", "x264", "x265",
+            "HEVC", "10bit", "AAC", "DTS", "FLAC",
         ];
         for token in noise_tokens {
             let pattern = Regex::new(&format!(r"(?i)\b{}\b", token)).unwrap();
@@ -150,7 +151,11 @@ impl FilenameParser {
     }
 
     /// Force parse as movie (used when we know from folder structure)
-    fn parse_as_movie(&self, filename: &str, file_path: &Path) -> Option<ParsedMediaInfo> {
+    fn parse_as_movie(
+        &self,
+        filename: &str,
+        file_path: &Path,
+    ) -> Option<ParsedMediaInfo> {
         // First, try to parse the parent folder name
         if let Some(parent) = file_path.parent()
             && let Some(folder_name) = parent.file_name()
@@ -162,7 +167,8 @@ impl FilenameParser {
             let folder_regex = Regex::new(r"^(.+?)\s*\((\d{4})\)\s*$").ok();
             if let Some(regex) = folder_regex
                 && let Some(captures) = regex.captures(folder_str)
-                && let (Some(title_match), Some(year_match)) = (captures.get(1), captures.get(2))
+                && let (Some(title_match), Some(year_match)) =
+                    (captures.get(1), captures.get(2))
             {
                 let title = title_match.as_str().trim().to_string();
                 if let Ok(year) = year_match.as_str().parse::<u16>()
@@ -191,10 +197,11 @@ impl FilenameParser {
 
         // Remove file extension first before any processing
         let mut cleaned_title = filename.to_string();
-        cleaned_title = Regex::new(r"(?i)\.(mkv|mp4|avi|mov|wmv|flv|webm|m4v|mpg|mpeg)$")
-            .unwrap()
-            .replace(&cleaned_title, "")
-            .to_string();
+        cleaned_title =
+            Regex::new(r"(?i)\.(mkv|mp4|avi|mov|wmv|flv|webm|m4v|mpg|mpeg)$")
+                .unwrap()
+                .replace(&cleaned_title, "")
+                .to_string();
 
         // Handle multi-language titles (e.g., "Il Gladiatore II - Gladiator II")
         // If there's a dash with potential duplicate title, take the part after the dash
@@ -237,10 +244,11 @@ impl FilenameParser {
         let mut cleaned = title.to_string();
 
         // Remove file extensions first (case-insensitive)
-        cleaned = Regex::new(r"(?i)\.(mkv|mp4|avi|mov|wmv|flv|webm|m4v|mpg|mpeg)$")
-            .unwrap()
-            .replace(&cleaned, "")
-            .to_string();
+        cleaned =
+            Regex::new(r"(?i)\.(mkv|mp4|avi|mov|wmv|flv|webm|m4v|mpg|mpeg)$")
+                .unwrap()
+                .replace(&cleaned, "")
+                .to_string();
 
         // First pass: Remove everything in square brackets
         cleaned = Regex::new(r"\[.*?\]")
@@ -296,7 +304,9 @@ impl FilenameParser {
 
         // Final cleanup: remove any trailing punctuation
         cleaned = cleaned
-            .trim_matches(|c: char| c.is_whitespace() || c == '-' || c == '_' || c == '.')
+            .trim_matches(|c: char| {
+                c.is_whitespace() || c == '-' || c == '_' || c == '.'
+            })
             .to_string();
 
         cleaned
@@ -306,7 +316,8 @@ impl FilenameParser {
     pub fn extract_year(&self, filename: &str) -> Option<u16> {
         // Updated regex to match years more accurately
         // Look for 4-digit years between 1900-2100, surrounded by non-digit characters
-        let year_regex = Regex::new(r"(?:^|[^\d])(19\d{2}|20\d{2})(?:[^\d]|$)").ok()?;
+        let year_regex =
+            Regex::new(r"(?:^|[^\d])(19\d{2}|20\d{2})(?:[^\d]|$)").ok()?;
 
         if let Some(captures) = year_regex.captures(filename)
             && let Some(year_match) = captures.get(1)
@@ -339,8 +350,9 @@ impl FilenameParser {
     /// Extract source (e.g., BluRay, WEB-DL, HDTV)
     pub fn extract_source(&self, filename: &str) -> Option<String> {
         let sources = [
-            "BluRay", "Bluray", "BDRip", "BRRip", "WEBRip", "WEB-DL", "WebDl", "HDTV", "SDTV",
-            "DVDRip", "DVD", "CAM", "TS", "HC", "HDCAM", "HDRip",
+            "BluRay", "Bluray", "BDRip", "BRRip", "WEBRip", "WEB-DL", "WebDl",
+            "HDTV", "SDTV", "DVDRip", "DVD", "CAM", "TS", "HC", "HDCAM",
+            "HDRip",
         ];
 
         for source in sources {
@@ -385,8 +397,8 @@ impl FilenameParser {
 
         // Remove quality indicators
         let quality_indicators = [
-            "1080p", "720p", "480p", "2160p", "4K", "BluRay", "BDRip", "WEBRip", "WEB-DL", "HDTV",
-            "x264", "x265", "HEVC", "10bit", "HDR",
+            "1080p", "720p", "480p", "2160p", "4K", "BluRay", "BDRip",
+            "WEBRip", "WEB-DL", "HDTV", "x264", "x265", "HEVC", "10bit", "HDR",
         ];
 
         for indicator in quality_indicators {
@@ -446,7 +458,9 @@ mod tests {
 
         // Test pattern 1
         let result = parser
-            .try_parse_episode(Path::new("Breaking.Bad.S01E01.Pilot.1080p.BluRay.mkv"))
+            .try_parse_episode(Path::new(
+                "Breaking.Bad.S01E01.Pilot.1080p.BluRay.mkv",
+            ))
             .unwrap();
         if let ParsedMediaInfo::Episode(info) = result {
             assert_eq!(info.show_name, "Breaking Bad");
@@ -475,7 +489,10 @@ mod tests {
         let parser = FilenameParser::new();
 
         let result = parser
-            .parse_as_movie("The.Dark.Knight.2008.1080p.BluRay.x264.mkv", Path::new(""))
+            .parse_as_movie(
+                "The.Dark.Knight.2008.1080p.BluRay.x264.mkv",
+                Path::new(""),
+            )
             .unwrap();
         if let ParsedMediaInfo::Movie(info) = result {
             assert_eq!(info.title, "The Dark Knight");

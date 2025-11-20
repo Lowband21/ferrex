@@ -179,11 +179,6 @@ pub mod watch_status;
 /// Application-level composition utilities (Unit of Work, facades)
 pub mod application;
 
-pub mod api;
-/// Context facades exposing intentional module surfaces
-pub mod catalog;
-pub mod identity;
-pub mod playback;
 pub mod player_prelude;
 
 /// Query helper exports grouped for UI/search crates

@@ -156,7 +156,10 @@ impl SearchState {
     }
 
     /// Get cached results if available and not expired
-    pub fn get_cached_results(&self, query: &str) -> Option<&CachedSearchResults> {
+    pub fn get_cached_results(
+        &self,
+        query: &str,
+    ) -> Option<&CachedSearchResults> {
         self.cache.get(query).and_then(|cached| {
             if cached.timestamp.elapsed() < self.cache_ttl {
                 Some(cached)
@@ -275,17 +278,25 @@ impl SearchDecisionEngine {
         Self {
             metrics: Some(Box::new(super::metrics::PerformanceHistory::new())),
             calibration: None,
-            network_monitor: Some(Box::new(super::metrics::NetworkMonitor::new())),
+            network_monitor: Some(Box::new(
+                super::metrics::NetworkMonitor::new(),
+            )),
         }
     }
 
     /// Update calibration results
-    pub fn set_calibration(&mut self, calibration: super::calibrator::CalibrationResults) {
+    pub fn set_calibration(
+        &mut self,
+        calibration: super::calibrator::CalibrationResults,
+    ) {
         self.calibration = Some(calibration);
     }
 
     /// Record a search execution for learning
-    pub fn record_execution(&mut self, metric: super::metrics::SearchPerformanceMetrics) {
+    pub fn record_execution(
+        &mut self,
+        metric: super::metrics::SearchPerformanceMetrics,
+    ) {
         if let Some(ref mut metrics) = self.metrics {
             metrics.add_metric(metric);
         }
@@ -346,15 +357,19 @@ impl SearchDecisionEngine {
             }
 
             // Use historical performance data
-            let client_avg = metrics.get_average_execution_time(SearchStrategy::Client);
-            let server_avg = metrics.get_average_execution_time(SearchStrategy::Server);
+            let client_avg =
+                metrics.get_average_execution_time(SearchStrategy::Client);
+            let server_avg =
+                metrics.get_average_execution_time(SearchStrategy::Server);
 
             match (client_avg, server_avg) {
                 (Some(client), Some(server)) => {
                     // Prefer faster strategy with 20% margin
                     if client.as_millis() * 120 < server.as_millis() * 100 {
                         SearchStrategy::Client
-                    } else if server.as_millis() * 120 < client.as_millis() * 100 {
+                    } else if server.as_millis() * 120
+                        < client.as_millis() * 100
+                    {
                         SearchStrategy::Server
                     } else {
                         SearchStrategy::Hybrid
@@ -372,7 +387,12 @@ impl SearchDecisionEngine {
             }
         } else {
             // Use simple heuristics
-            Self::determine_strategy(query, data_completeness, is_complex, network_available)
+            Self::determine_strategy(
+                query,
+                data_completeness,
+                is_complex,
+                network_available,
+            )
         }
     }
 

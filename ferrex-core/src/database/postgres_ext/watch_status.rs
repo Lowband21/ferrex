@@ -1,7 +1,8 @@
 use crate::error::Result;
 use crate::watch_status::{InProgressItem, UserWatchState};
 use crate::{
-    database::PostgresDatabase, playback::ports::WatchStatusRepository,
+    database::PostgresDatabase,
+    database::ports::watch_status::WatchStatusRepository,
     watch_status::UpdateProgressRequest,
 };
 use uuid::Uuid;
@@ -17,7 +18,10 @@ impl PostgresDatabase {
             .await
     }
 
-    pub async fn get_user_watch_state(&self, user_id: Uuid) -> Result<UserWatchState> {
+    pub async fn get_user_watch_state(
+        &self,
+        user_id: Uuid,
+    ) -> Result<UserWatchState> {
         self.watch_status_repository()
             .get_user_watch_state(user_id)
             .await
@@ -33,13 +37,21 @@ impl PostgresDatabase {
             .await
     }
 
-    pub async fn clear_watch_progress(&self, user_id: Uuid, media_id: &Uuid) -> Result<()> {
+    pub async fn clear_watch_progress(
+        &self,
+        user_id: Uuid,
+        media_id: &Uuid,
+    ) -> Result<()> {
         self.watch_status_repository()
             .clear_watch_progress(user_id, media_id)
             .await
     }
 
-    pub async fn is_media_completed(&self, user_id: Uuid, media_id: &Uuid) -> Result<bool> {
+    pub async fn is_media_completed(
+        &self,
+        user_id: Uuid,
+        media_id: &Uuid,
+    ) -> Result<bool> {
         self.watch_status_repository()
             .is_media_completed(user_id, media_id)
             .await

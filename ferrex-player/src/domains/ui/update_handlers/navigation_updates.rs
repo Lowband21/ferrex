@@ -16,7 +16,8 @@ use ferrex_core::{
     types::{
         ids::{EpisodeID, MovieID, SeasonID, SeriesID},
         image_request::{
-            BackdropKind, BackdropSize, ImageRequest, PosterKind, PosterSize, Priority, ProfileSize,
+            BackdropKind, BackdropSize, ImageRequest, PosterKind, PosterSize,
+            Priority, ProfileSize,
         },
         media_id::MediaID,
     },
@@ -32,7 +33,10 @@ use ferrex_core::{
     ),
     profiling::function
 )]
-fn prepare_depth_regions_for_transition(state: &mut State, new_view: &ViewState) {
+fn prepare_depth_regions_for_transition(
+    state: &mut State,
+    new_view: &ViewState,
+) {
     // Update depth regions for the new view BEFORE changing view state
     // This triggers the fade animation between different depth layouts
 
@@ -130,7 +134,10 @@ pub fn handle_view_details(state: &mut State, media: MediaID) -> Task<Message> {
     ),
     profiling::function
 )]
-pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<Message> {
+pub fn handle_view_movie_details(
+    state: &mut State,
+    movie_id: MovieID,
+) -> Task<Message> {
     let mut buff = Uuid::encode_buffer();
     log::info!(
         "Viewing movie details for id: {})",
@@ -219,9 +226,12 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
             }
 
             // Ensure the hero poster is ready when the detail view renders
-            let poster_request =
-                ImageRequest::poster(movie.id.to_uuid(), PosterKind::Movie, PosterSize::Original)
-                    .with_priority(Priority::Visible);
+            let poster_request = ImageRequest::poster(
+                movie.id.to_uuid(),
+                PosterKind::Movie,
+                PosterSize::Original,
+            )
+            .with_priority(Priority::Visible);
             if state.image_service.get(&poster_request).is_none() {
                 state.image_service.request_image(poster_request);
             }
@@ -237,9 +247,12 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
                     ArchivedOption::Some(index) => index.to_native(),
                     ArchivedOption::None => 0,
                 };
-                let cast_request = ImageRequest::person_profile(person_uuid, ProfileSize::Standard)
-                    .with_priority(Priority::Preload)
-                    .with_index(image_index);
+                let cast_request = ImageRequest::person_profile(
+                    person_uuid,
+                    ProfileSize::Standard,
+                )
+                .with_priority(Priority::Preload)
+                .with_index(image_index);
 
                 if state.image_service.get(&cast_request).is_none() {
                     state.image_service.request_image(cast_request);
@@ -279,7 +292,10 @@ pub fn handle_view_movie_details(state: &mut State, movie_id: MovieID) -> Task<M
     ),
     profiling::function
 )]
-pub fn handle_view_series(state: &mut State, series_id: SeriesID) -> Task<Message> {
+pub fn handle_view_series(
+    state: &mut State,
+    series_id: SeriesID,
+) -> Task<Message> {
     log::info!("Viewing series: {:?}", series_id);
 
     // Save current view to navigation history
@@ -375,9 +391,12 @@ pub fn handle_view_series(state: &mut State, series_id: SeriesID) -> Task<Messag
                     ArchivedOption::Some(index) => index.to_native(),
                     ArchivedOption::None => 0,
                 };
-                let cast_request = ImageRequest::person_profile(person_uuid, ProfileSize::Standard)
-                    .with_priority(Priority::Preload)
-                    .with_index(image_index);
+                let cast_request = ImageRequest::person_profile(
+                    person_uuid,
+                    ProfileSize::Standard,
+                )
+                .with_priority(Priority::Preload)
+                .with_index(image_index);
 
                 if state.image_service.get(&cast_request).is_none() {
                     state.image_service.request_image(cast_request);
@@ -536,7 +555,10 @@ pub fn handle_view_season(
     ),
     profiling::function
 )]
-pub fn handle_view_episode(state: &mut State, episode_id: EpisodeID) -> Task<Message> {
+pub fn handle_view_episode(
+    state: &mut State,
+    episode_id: EpisodeID,
+) -> Task<Message> {
     let mut buff = Uuid::encode_buffer();
     log::info!("Viewing episode: {}", episode_id.as_str(&mut buff));
 
@@ -615,7 +637,8 @@ pub fn handle_exit_fullscreen(state: &mut State) -> Task<Message> {
     if state.domains.player.state.is_fullscreen {
         state.domains.player.state.is_fullscreen = false;
         let mode = iced::window::Mode::Windowed;
-        iced::window::latest().and_then(move |id| iced::window::set_mode(id, mode))
+        iced::window::latest()
+            .and_then(move |id| iced::window::set_mode(id, mode))
     } else {
         Task::none()
     }

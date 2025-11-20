@@ -14,8 +14,13 @@ use crate::orchestration::{
     config::OrchestratorConfig,
     correlation::CorrelationCache,
     dispatcher::{DispatchStatus, JobDispatcher},
-    events::{JobEvent, JobEventPayload, ScanEvent, ScanEventBus, stable_path_key},
-    job::{DedupeKey, EnqueueRequest, FolderScanJob, JobKind, JobPayload, JobPriority, ScanReason},
+    events::{
+        JobEvent, JobEventPayload, ScanEvent, ScanEventBus, stable_path_key,
+    },
+    job::{
+        DedupeKey, EnqueueRequest, FolderScanJob, JobKind, JobPayload,
+        JobPriority, ScanReason,
+    },
     lease::{DequeueRequest, LeaseRenewal, QueueSelector},
     queue::{LeaseExpiryScanner, QueueService},
     scheduler::WeightedFairScheduler,
@@ -36,7 +41,10 @@ pub type LibraryActorHandle = Arc<Mutex<Box<dyn LibraryActor>>>;
 pub struct OrchestratorRuntime<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
+    E: ScanEventBus
+        + JobEventStream
+        + crate::orchestration::runtime::ScanEventStream
+        + 'static,
     B: WorkloadBudget + 'static,
 {
     config: OrchestratorConfig,
@@ -47,7 +55,8 @@ where
     correlations: CorrelationCache,
     scheduler: WeightedFairScheduler,
     library_actors: Arc<RwLock<HashMap<LibraryID, LibraryActorHandle>>>,
-    mailbox_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<OrchestratorCommand>>>>,
+    mailbox_tx:
+        Arc<Mutex<Option<tokio::sync::mpsc::Sender<OrchestratorCommand>>>>,
     // Runtime supervision
     shutdown_token: CancellationToken,
     worker_handles: Mutex<Vec<tokio::task::JoinHandle<()>>>,
@@ -56,7 +65,10 @@ where
 impl<Q, E, B> fmt::Debug for OrchestratorRuntime<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
+    E: ScanEventBus
+        + JobEventStream
+        + crate::orchestration::runtime::ScanEventStream
+        + 'static,
     B: WorkloadBudget + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -99,7 +111,10 @@ where
 impl<Q, E, B> OrchestratorRuntime<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
+    E: ScanEventBus
+        + JobEventStream
+        + crate::orchestration::runtime::ScanEventStream
+        + 'static,
     B: WorkloadBudget + 'static,
 {
     pub fn new(
@@ -110,7 +125,8 @@ where
         dispatcher: Arc<dyn JobDispatcher>,
         correlations: CorrelationCache,
     ) -> Self {
-        let scheduler = WeightedFairScheduler::new(&config.queue, config.priority_weights);
+        let scheduler =
+            WeightedFairScheduler::new(&config.queue, config.priority_weights);
 
         Self {
             config,
@@ -165,7 +181,10 @@ where
         Ok(())
     }
 
-    pub async fn library_actor(&self, library_id: LibraryID) -> Option<LibraryActorHandle> {
+    pub async fn library_actor(
+        &self,
+        library_id: LibraryID,
+    ) -> Option<LibraryActorHandle> {
         let guard = self.library_actors.read().await;
         guard.get(&library_id).cloned()
     }
@@ -182,8 +201,11 @@ where
         self.spawn_domain_event_router();
 
         // Spawn worker pools for each queue kind according to config limits
-        self.spawn_worker_pool(JobKind::FolderScan, self.config.queue.max_parallel_scans)
-            .await;
+        self.spawn_worker_pool(
+            JobKind::FolderScan,
+            self.config.queue.max_parallel_scans,
+        )
+        .await;
         self.spawn_worker_pool(
             JobKind::MediaAnalyze,
             self.config.queue.max_parallel_analyses,
@@ -194,8 +216,11 @@ where
             self.config.queue.max_parallel_metadata,
         )
         .await;
-        self.spawn_worker_pool(JobKind::IndexUpsert, self.config.queue.max_parallel_index)
-            .await;
+        self.spawn_worker_pool(
+            JobKind::IndexUpsert,
+            self.config.queue.max_parallel_index,
+        )
+        .await;
         self.spawn_worker_pool(
             JobKind::ImageFetch,
             self.config.queue.max_parallel_image_fetch,
@@ -223,7 +248,10 @@ pub enum OrchestratorCommand {
 impl<Q, E, B> OrchestratorRuntime<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
+    E: ScanEventBus
+        + JobEventStream
+        + crate::orchestration::runtime::ScanEventStream
+        + 'static,
     B: WorkloadBudget + 'static,
 {
     fn spawn_domain_event_router(&self) {
@@ -236,8 +264,12 @@ where
         // Helper mirrors dispatcher priority mapping
         fn priority_for_reason(reason: &ScanReason) -> JobPriority {
             match reason {
-                ScanReason::HotChange | ScanReason::WatcherOverflow => JobPriority::P0,
-                ScanReason::UserRequested | ScanReason::BulkSeed => JobPriority::P1,
+                ScanReason::HotChange | ScanReason::WatcherOverflow => {
+                    JobPriority::P0
+                }
+                ScanReason::UserRequested | ScanReason::BulkSeed => {
+                    JobPriority::P1
+                }
                 ScanReason::MaintenanceSweep => JobPriority::P2,
             }
         }
@@ -307,7 +339,8 @@ where
         });
     }
     pub async fn start_mailbox_runner(&self) -> Result<()> {
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<OrchestratorCommand>(1024);
+        let (tx, mut rx) =
+            tokio::sync::mpsc::channel::<OrchestratorCommand>(1024);
         {
             let mut guard = self.mailbox_tx.lock().await;
             *guard = Some(tx);
@@ -338,7 +371,10 @@ where
                                     drop(actor);
                                     // Process actor-emitted events (e.g., enqueue requests)
                                     // Batch EnqueueFolderScan events for transactional enqueue
-                                    let mut batch: Vec<(JobPayload, EnqueueRequest)> = Vec::new();
+                                    let mut batch: Vec<(
+                                        JobPayload,
+                                        EnqueueRequest,
+                                    )> = Vec::new();
                                     for evt in events {
                                         if let crate::orchestration::actors::LibraryActorEvent::EnqueueFolderScan { folder_path, priority, reason, parent, correlation_id } = evt {
                                             let encoded_parent = match serde_json::to_string(&parent) {
@@ -365,49 +401,68 @@ where
 
                                     if !batch.is_empty() {
                                         // Preserve correlation_ids for event publication
-                                        let payloads: Vec<JobPayload> =
-                                            batch.iter().map(|(p, _)| p.clone()).collect();
+                                        let payloads: Vec<JobPayload> = batch
+                                            .iter()
+                                            .map(|(p, _)| p.clone())
+                                            .collect();
                                         let corrs: Vec<Option<uuid::Uuid>> =
-                                            batch.iter().map(|(_, r)| r.correlation_id).collect();
+                                            batch
+                                                .iter()
+                                                .map(|(_, r)| r.correlation_id)
+                                                .collect();
                                         let requests: Vec<EnqueueRequest> =
-                                            batch.into_iter().map(|(_, r)| r).collect();
+                                            batch
+                                                .into_iter()
+                                                .map(|(_, r)| r)
+                                                .collect();
                                         match q.enqueue_many(requests).await {
                                             Ok(handles) => {
-                                                for (idx, handle) in handles.into_iter().enumerate()
+                                                for (idx, handle) in handles
+                                                    .into_iter()
+                                                    .enumerate()
                                                 {
-                                                    let payload = &payloads[idx];
-                                                    let path_key = stable_path_key(payload);
-                                                    let correlation_id = corrs[idx];
+                                                    let payload =
+                                                        &payloads[idx];
+                                                    let path_key =
+                                                        stable_path_key(
+                                                            payload,
+                                                        );
+                                                    let correlation_id =
+                                                        corrs[idx];
 
-                                                    let event_payload = if handle.accepted {
-                                                        JobEventPayload::Enqueued {
+                                                    let event_payload =
+                                                        if handle.accepted {
+                                                            JobEventPayload::Enqueued {
                                                             job_id: handle.job_id,
                                                             kind: handle.kind,
                                                             priority: handle.priority,
                                                         }
-                                                    } else if let Some(existing_job_id) =
-                                                        handle.merged_into
-                                                    {
-                                                        JobEventPayload::Merged {
+                                                        } else if let Some(
+                                                            existing_job_id,
+                                                        ) =
+                                                            handle.merged_into
+                                                        {
+                                                            JobEventPayload::Merged {
                                                             existing_job_id,
                                                             merged_job_id: handle.job_id,
                                                             kind: handle.kind,
                                                             priority: handle.priority,
                                                         }
-                                                    } else {
-                                                        JobEventPayload::Enqueued {
+                                                        } else {
+                                                            JobEventPayload::Enqueued {
                                                             job_id: handle.job_id,
                                                             kind: handle.kind,
                                                             priority: handle.priority,
                                                         }
-                                                    };
+                                                        };
 
-                                                    let event = JobEvent::from_handle(
-                                                        &handle,
-                                                        correlation_id,
-                                                        event_payload,
-                                                        path_key,
-                                                    );
+                                                    let event =
+                                                        JobEvent::from_handle(
+                                                            &handle,
+                                                            correlation_id,
+                                                            event_payload,
+                                                            path_key,
+                                                        );
                                                     // Remember correlation for job. If it's None here, correlator will backfill when first seen elsewhere.
                                                     if handle.accepted {
                                                         correlations
@@ -425,7 +480,9 @@ where
                                                             .await;
                                                     }
 
-                                                    if let Err(err) = e.publish(event).await {
+                                                    if let Err(err) =
+                                                        e.publish(event).await
+                                                    {
                                                         tracing::warn!(target: "scan::mailbox", error = %err, "failed to publish enqueue event");
                                                     }
                                                 }
@@ -438,11 +495,16 @@ where
                                     continue;
                                 }
                                 Err(err) => {
-                                    tracing::warn!("library actor command failed: {err}");
+                                    tracing::warn!(
+                                        "library actor command failed: {err}"
+                                    );
                                 }
                             }
                         } else {
-                            tracing::warn!("library actor not registered for {:?}", library_id);
+                            tracing::warn!(
+                                "library actor not registered for {:?}",
+                                library_id
+                            );
                         }
                     }
                 }
@@ -537,15 +599,23 @@ where
                     }
 
                     // Preflight global budget: avoid growing inflight leases when at cap
-                    if let Ok(false) = b.has_budget(workload_for(worker_kind)).await {
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    if let Ok(false) =
+                        b.has_budget(workload_for(worker_kind)).await
+                    {
+                        tokio::time::sleep(std::time::Duration::from_millis(
+                            50,
+                        ))
+                        .await;
                         continue;
                     }
 
                     let reservation = match scheduler.reserve().await {
                         Some(reservation) => reservation,
                         None => {
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                            tokio::time::sleep(
+                                std::time::Duration::from_millis(50),
+                            )
+                            .await;
                             continue;
                         }
                     };
@@ -562,7 +632,9 @@ where
                     let dequeue = DequeueRequest {
                         kind: worker_kind,
                         worker_id: worker_id.clone(),
-                        lease_ttl: chrono::Duration::seconds(lease_cfg.lease_ttl_secs),
+                        lease_ttl: chrono::Duration::seconds(
+                            lease_cfg.lease_ttl_secs,
+                        ),
                         selector: Some(QueueSelector {
                             library_id: reservation.library_id,
                             priority: reservation.priority,
@@ -591,7 +663,9 @@ where
                             let library_id = lease.job.payload.library_id();
                             let current_expires_at = lease.expires_at;
 
-                            let correlation_id = correlation_cache.fetch_or_generate(job_id).await;
+                            let correlation_id = correlation_cache
+                                .fetch_or_generate(job_id)
+                                .await;
 
                             // Publish dequeue event
                             let dequeue_event = JobEvent::from_job(
@@ -609,17 +683,32 @@ where
                             let _ = e.publish(dequeue_event).await;
 
                             // Acquire budget token for the specific library & workload
-                            let token = match b.acquire(workload_for(worker_kind), library_id).await
+                            let token = match b
+                                .acquire(workload_for(worker_kind), library_id)
+                                .await
                             {
                                 Ok(t) => t,
                                 Err(err) => {
-                                    tracing::error!("budget acquire error: {err}");
+                                    tracing::error!(
+                                        "budget acquire error: {err}"
+                                    );
                                     // Return lease as retryable failure to avoid starvation
                                     let _ = q
-                                        .fail(lease_id, true, Some("budget acquire failed".into()))
+                                        .fail(
+                                            lease_id,
+                                            true,
+                                            Some(
+                                                "budget acquire failed".into(),
+                                            ),
+                                        )
                                         .await;
                                     scheduler.release(library_id).await;
-                                    scheduler.record_enqueued(library_id, job_priority).await;
+                                    scheduler
+                                        .record_enqueued(
+                                            library_id,
+                                            job_priority,
+                                        )
+                                        .await;
                                     continue;
                                 }
                             };
@@ -628,12 +717,16 @@ where
                             let renewer_q = Arc::clone(&q);
                             let renewer_e = Arc::clone(&e);
                             let worker_id_clone = worker_id.clone();
-                            let ttl = chrono::Duration::seconds(lease_cfg.lease_ttl_secs);
-                            let renew_margin =
-                                std::time::Duration::from_millis(lease_cfg.renew_min_margin_ms);
+                            let ttl = chrono::Duration::seconds(
+                                lease_cfg.lease_ttl_secs,
+                            );
+                            let renew_margin = std::time::Duration::from_millis(
+                                lease_cfg.renew_min_margin_ms,
+                            );
                             let renew_fraction = lease_cfg.renew_at_fraction;
 
-                            let (cancel_tx, mut cancel_rx) = tokio::sync::mpsc::channel::<()>(1);
+                            let (cancel_tx, mut cancel_rx) =
+                                tokio::sync::mpsc::channel::<()>(1);
 
                             let mut local_expires_at = current_expires_at;
                             let renew_correlations = correlation_cache.clone();
@@ -641,12 +734,14 @@ where
                                 loop {
                                     // Compute next sleep based on current expiry (best-effort using local expiry)
                                     let now = chrono::Utc::now();
-                                    let mut sleep_dur = std::time::Duration::from_millis(500);
+                                    let mut sleep_dur =
+                                        std::time::Duration::from_millis(500);
                                     if local_expires_at > now {
-                                        let ttl_total = ttl
-                                            .to_std()
-                                            .unwrap_or(std::time::Duration::from_secs(30));
-                                        let target = ttl_total.mul_f32(1.0 - renew_fraction);
+                                        let ttl_total = ttl.to_std().unwrap_or(
+                                            std::time::Duration::from_secs(30),
+                                        );
+                                        let target = ttl_total
+                                            .mul_f32(1.0 - renew_fraction);
                                         let remaining = (local_expires_at - now)
                                             .to_std()
                                             .unwrap_or(std::time::Duration::from_millis(0));
@@ -674,10 +769,14 @@ where
                                         .await
                                     {
                                         Ok(updated) => {
-                                            local_expires_at = updated.expires_at;
-                                            let correlation_id = renew_correlations
-                                                .fetch_or_generate(updated.job.id)
-                                                .await;
+                                            local_expires_at =
+                                                updated.expires_at;
+                                            let correlation_id =
+                                                renew_correlations
+                                                    .fetch_or_generate(
+                                                        updated.job.id,
+                                                    )
+                                                    .await;
                                             let renew_event = JobEvent::from_job(
                                                 Some(correlation_id),
                                                 updated.job.payload.library_id(),
@@ -689,7 +788,9 @@ where
                                                     renewals: updated.renewals,
                                                 },
                                             );
-                                            let _ = renewer_e.publish(renew_event).await;
+                                            let _ = renewer_e
+                                                .publish(renew_event)
+                                                .await;
                                         }
                                         Err(MediaError::NotFound(_)) => {
                                             tracing::trace!(
@@ -699,7 +800,9 @@ where
                                             break;
                                         }
                                         Err(err) => {
-                                            tracing::warn!("lease renew failed: {err}");
+                                            tracing::warn!(
+                                                "lease renew failed: {err}"
+                                            );
                                             // Continue; housekeeping may reclaim
                                         }
                                     }
@@ -712,15 +815,20 @@ where
                             let _ = cancel_tx.try_send(());
                             let _ = renew_handle.await;
 
-                            let dedupe_key: DedupeKey = lease.job.payload.dedupe_key();
+                            let dedupe_key: DedupeKey =
+                                lease.job.payload.dedupe_key();
                             let library_id = lease.job.payload.library_id();
                             let notify_command = match dispatch_status {
                                 DispatchStatus::Success => {
-                                    if let Err(err) = q.complete(lease_id).await {
-                                        tracing::error!("queue complete error: {err}");
+                                    if let Err(err) = q.complete(lease_id).await
+                                    {
+                                        tracing::error!(
+                                            "queue complete error: {err}"
+                                        );
                                     }
-                                    let correlation_id =
-                                        correlation_cache.take_or_generate(job_id).await;
+                                    let correlation_id = correlation_cache
+                                        .take_or_generate(job_id)
+                                        .await;
                                     let event = JobEvent::from_job(
                                         Some(correlation_id),
                                         library_id,
@@ -733,22 +841,34 @@ where
                                         },
                                     );
                                     if let Err(err) = e.publish(event).await {
-                                        tracing::error!("publish complete event failed: {err}");
+                                        tracing::error!(
+                                            "publish complete event failed: {err}"
+                                        );
                                     }
-                                    scheduler.record_completed(library_id).await;
+                                    scheduler
+                                        .record_completed(library_id)
+                                        .await;
                                     Some(LibraryActorCommand::JobCompleted {
                                         job_id,
                                         dedupe_key: dedupe_key.clone(),
                                     })
                                 }
                                 DispatchStatus::Retry { error } => {
-                                    if let Err(err) =
-                                        q.fail(lease_id, true, Some(error.clone())).await
+                                    if let Err(err) = q
+                                        .fail(
+                                            lease_id,
+                                            true,
+                                            Some(error.clone()),
+                                        )
+                                        .await
                                     {
-                                        tracing::error!("queue fail error: {err}");
+                                        tracing::error!(
+                                            "queue fail error: {err}"
+                                        );
                                     }
-                                    let correlation_id =
-                                        correlation_cache.fetch_or_generate(job_id).await;
+                                    let correlation_id = correlation_cache
+                                        .fetch_or_generate(job_id)
+                                        .await;
                                     let event = JobEvent::from_job(
                                         Some(correlation_id),
                                         library_id,
@@ -762,10 +882,17 @@ where
                                         },
                                     );
                                     if let Err(err) = e.publish(event).await {
-                                        tracing::error!("publish retry event failed: {err}");
+                                        tracing::error!(
+                                            "publish retry event failed: {err}"
+                                        );
                                     }
                                     scheduler.release(library_id).await;
-                                    scheduler.record_enqueued(library_id, job_priority).await;
+                                    scheduler
+                                        .record_enqueued(
+                                            library_id,
+                                            job_priority,
+                                        )
+                                        .await;
                                     Some(LibraryActorCommand::JobFailed {
                                         job_id,
                                         dedupe_key: dedupe_key.clone(),
@@ -774,13 +901,20 @@ where
                                     })
                                 }
                                 DispatchStatus::DeadLetter { error } => {
-                                    if let Err(err) =
-                                        q.dead_letter(lease_id, Some(error.clone())).await
+                                    if let Err(err) = q
+                                        .dead_letter(
+                                            lease_id,
+                                            Some(error.clone()),
+                                        )
+                                        .await
                                     {
-                                        tracing::error!("queue dead-letter error: {err}");
+                                        tracing::error!(
+                                            "queue dead-letter error: {err}"
+                                        );
                                     }
-                                    let correlation_id =
-                                        correlation_cache.take_or_generate(job_id).await;
+                                    let correlation_id = correlation_cache
+                                        .take_or_generate(job_id)
+                                        .await;
                                     let event = JobEvent::from_job(
                                         Some(correlation_id),
                                         library_id,
@@ -793,9 +927,13 @@ where
                                         },
                                     );
                                     if let Err(err) = e.publish(event).await {
-                                        tracing::error!("publish dead-letter event failed: {err}");
+                                        tracing::error!(
+                                            "publish dead-letter event failed: {err}"
+                                        );
                                     }
-                                    scheduler.record_completed(library_id).await;
+                                    scheduler
+                                        .record_completed(library_id)
+                                        .await;
                                     Some(LibraryActorCommand::JobFailed {
                                         job_id,
                                         dedupe_key: dedupe_key.clone(),
@@ -837,7 +975,10 @@ where
                                 reservation = %reservation.id,
                                 "scheduler reservation cancelled (no job ready)"
                             );
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            tokio::time::sleep(
+                                std::time::Duration::from_millis(100),
+                            )
+                            .await;
                             continue;
                         }
                         Err(err) => {
@@ -852,7 +993,10 @@ where
                                 "scheduler reservation cancelled (dequeue error)"
                             );
                             tracing::error!("dequeue error: {err}");
-                            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                            tokio::time::sleep(
+                                std::time::Duration::from_millis(250),
+                            )
+                            .await;
                             continue;
                         }
                     }
@@ -866,7 +1010,9 @@ where
 
     fn spawn_housekeeper(&self) {
         let q = self.queue();
-        let interval = std::time::Duration::from_millis(self.config.lease.housekeeper_interval_ms);
+        let interval = std::time::Duration::from_millis(
+            self.config.lease.housekeeper_interval_ms,
+        );
         let shutdown = self.shutdown_token.clone();
         let handle = tokio::spawn(async move {
             loop {
@@ -907,10 +1053,17 @@ where
         };
 
         for handle in handles {
-            match tokio::time::timeout(std::time::Duration::from_secs(30), handle).await {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                handle,
+            )
+            .await
+            {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => tracing::warn!("Worker task failed: {:?}", e),
-                Err(_) => tracing::warn!("Worker task timed out during shutdown"),
+                Err(_) => {
+                    tracing::warn!("Worker task timed out during shutdown")
+                }
             }
         }
 
@@ -934,7 +1087,10 @@ where
 impl<Q, E, B> OrchestratorRuntime<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
+    E: ScanEventBus
+        + JobEventStream
+        + crate::orchestration::runtime::ScanEventStream
+        + 'static,
     B: WorkloadBudget + 'static,
 {
     pub async fn submit_library_command(
@@ -944,9 +1100,9 @@ where
     ) -> Result<()> {
         let tx = {
             let guard = self.mailbox_tx.lock().await;
-            guard
-                .clone()
-                .ok_or_else(|| MediaError::Internal("mailbox not started".into()))?
+            guard.clone().ok_or_else(|| {
+                MediaError::Internal("mailbox not started".into())
+            })?
         };
         tx.send(OrchestratorCommand::Library {
             library_id,
@@ -980,7 +1136,10 @@ impl fmt::Debug for OrchestratorRuntimeHandle {
 pub struct OrchestratorRuntimeBuilder<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
+    E: ScanEventBus
+        + JobEventStream
+        + crate::orchestration::runtime::ScanEventStream
+        + 'static,
     B: WorkloadBudget + 'static,
 {
     config: OrchestratorConfig,
@@ -994,7 +1153,10 @@ where
 impl<Q, E, B> fmt::Debug for OrchestratorRuntimeBuilder<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
+    E: ScanEventBus
+        + JobEventStream
+        + crate::orchestration::runtime::ScanEventStream
+        + 'static,
     B: WorkloadBudget + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1023,7 +1185,10 @@ where
 impl<Q, E, B> OrchestratorRuntimeBuilder<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
+    E: ScanEventBus
+        + JobEventStream
+        + crate::orchestration::runtime::ScanEventStream
+        + 'static,
     B: WorkloadBudget + 'static,
 {
     pub fn new(config: OrchestratorConfig) -> Self {
@@ -1052,7 +1217,10 @@ where
         self
     }
 
-    pub fn with_dispatcher(mut self, dispatcher: Arc<dyn JobDispatcher>) -> Self {
+    pub fn with_dispatcher(
+        mut self,
+        dispatcher: Arc<dyn JobDispatcher>,
+    ) -> Self {
         self.dispatcher = Some(dispatcher);
         self
     }
@@ -1063,18 +1231,18 @@ where
     }
 
     pub fn build(self) -> Result<OrchestratorRuntime<Q, E, B>> {
-        let queue = self
-            .queue
-            .ok_or_else(|| MediaError::Internal("queue dependency missing".into()))?;
-        let events = self
-            .events
-            .ok_or_else(|| MediaError::Internal("event publisher dependency missing".into()))?;
-        let budget = self
-            .budget
-            .ok_or_else(|| MediaError::Internal("budget manager dependency missing".into()))?;
-        let dispatcher = self
-            .dispatcher
-            .ok_or_else(|| MediaError::Internal("dispatcher dependency missing".into()))?;
+        let queue = self.queue.ok_or_else(|| {
+            MediaError::Internal("queue dependency missing".into())
+        })?;
+        let events = self.events.ok_or_else(|| {
+            MediaError::Internal("event publisher dependency missing".into())
+        })?;
+        let budget = self.budget.ok_or_else(|| {
+            MediaError::Internal("budget manager dependency missing".into())
+        })?;
+        let dispatcher = self.dispatcher.ok_or_else(|| {
+            MediaError::Internal("dispatcher dependency missing".into())
+        })?;
         let correlations = self.correlations.unwrap_or_default();
 
         Ok(OrchestratorRuntime::new(
@@ -1105,10 +1273,12 @@ mod tests {
     use crate::orchestration::config::{LibraryQueuePolicy, PriorityWeights};
     use crate::orchestration::dispatcher::DispatchStatus;
     use crate::orchestration::events::{
-        EventMeta, JobEvent, JobEventPayload, JobEventPublisher, stable_path_key,
+        EventMeta, JobEvent, JobEventPayload, JobEventPublisher,
+        stable_path_key,
     };
     use crate::orchestration::job::{
-        EnqueueRequest, FolderScanJob, JobId, JobPayload, JobPriority, ScanReason,
+        EnqueueRequest, FolderScanJob, JobId, JobPayload, JobPriority,
+        ScanReason,
     };
     use crate::orchestration::lease::JobLease;
     use crate::orchestration::persistence::PostgresQueueService;
@@ -1217,7 +1387,8 @@ mod tests {
                     *counter
                 };
 
-                let max_entry = state.max_seen.entry(library_id).or_insert(current);
+                let max_entry =
+                    state.max_seen.entry(library_id).or_insert(current);
                 if current > *max_entry {
                     *max_entry = current;
                 }
@@ -1266,7 +1437,12 @@ mod tests {
             }
         };
 
-        let event = JobEvent::from_handle(&handle, None, event_payload, stable_path_key(&payload));
+        let event = JobEvent::from_handle(
+            &handle,
+            None,
+            event_payload,
+            stable_path_key(&payload),
+        );
         events.publish(event).await.expect("publish enqueue event");
     }
 
@@ -1293,7 +1469,10 @@ mod tests {
         }
     }
 
-    fn max_consecutive_library(events: &[(LibraryID, JobPriority)], library: LibraryID) -> usize {
+    fn max_consecutive_library(
+        events: &[(LibraryID, JobPriority)],
+        library: LibraryID,
+    ) -> usize {
         let mut max_run = 0usize;
         let mut current = 0usize;
         for (lib, _) in events {
@@ -1325,7 +1504,8 @@ mod tests {
         );
         let events = Arc::new(InProcJobEventBus::new(32));
         let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
-        let dispatcher = Arc::new(TestDispatcher::new(Duration::from_millis(0)));
+        let dispatcher =
+            Arc::new(TestDispatcher::new(Duration::from_millis(0)));
 
         let runtime = OrchestratorRuntimeBuilder::new(config)
             .with_queue(queue.clone())
@@ -1403,7 +1583,12 @@ mod tests {
         let merged_correlation = Uuid::now_v7();
 
         let merged_event = JobEvent {
-            meta: EventMeta::new(Some(merged_correlation), library_id, idempotency_key, None),
+            meta: EventMeta::new(
+                Some(merged_correlation),
+                library_id,
+                idempotency_key,
+                None,
+            ),
             payload: JobEventPayload::Merged {
                 existing_job_id: existing_job,
                 merged_job_id: merged_job,
@@ -1419,7 +1604,9 @@ mod tests {
 
         time::timeout(Duration::from_secs(1), async {
             loop {
-                if correlations.fetch(&merged_job).await == Some(merged_correlation) {
+                if correlations.fetch(&merged_job).await
+                    == Some(merged_correlation)
+                {
                     break;
                 }
                 time::sleep(Duration::from_millis(10)).await;
@@ -1483,7 +1670,8 @@ mod tests {
         );
         let events = Arc::new(InProcJobEventBus::new(256));
         let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
-        let dispatcher = Arc::new(TestDispatcher::new(Duration::from_millis(5)));
+        let dispatcher =
+            Arc::new(TestDispatcher::new(Duration::from_millis(5)));
 
         let runtime = OrchestratorRuntimeBuilder::new(config)
             .with_queue(queue.clone())
@@ -1506,13 +1694,21 @@ mod tests {
                 enqueue_job(
                     queue.clone(),
                     events.clone(),
-                    make_scan_request(lib_a, idx * priorities.len() + priority as usize, priority),
+                    make_scan_request(
+                        lib_a,
+                        idx * priorities.len() + priority as usize,
+                        priority,
+                    ),
                 )
                 .await;
                 enqueue_job(
                     queue.clone(),
                     events.clone(),
-                    make_scan_request(lib_b, idx * priorities.len() + priority as usize, priority),
+                    make_scan_request(
+                        lib_b,
+                        idx * priorities.len() + priority as usize,
+                        priority,
+                    ),
                 )
                 .await;
             }
@@ -1599,7 +1795,8 @@ mod tests {
         );
         let events = Arc::new(InProcJobEventBus::new(512));
         let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
-        let dispatcher = Arc::new(TestDispatcher::new(Duration::from_millis(5)));
+        let dispatcher =
+            Arc::new(TestDispatcher::new(Duration::from_millis(5)));
 
         let runtime = OrchestratorRuntimeBuilder::new(config)
             .with_queue(queue.clone())
@@ -1622,7 +1819,10 @@ mod tests {
                 loop {
                     match job_events.recv().await {
                         Ok(event) => {
-                            if let JobEventPayload::Dequeued { priority, .. } = event.payload {
+                            if let JobEventPayload::Dequeued {
+                                priority, ..
+                            } = event.payload
+                            {
                                 let mut guard = collected.lock().await;
                                 guard.push((event.meta.library_id, priority));
                                 if guard.len() >= total_jobs {
@@ -1630,8 +1830,12 @@ mod tests {
                                 }
                             }
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(
+                            tokio::sync::broadcast::error::RecvError::Closed,
+                        ) => break,
+                        Err(
+                            tokio::sync::broadcast::error::RecvError::Lagged(_),
+                        ) => continue,
                     }
                 }
             })
@@ -1692,7 +1896,8 @@ mod tests {
         let p0_total = p0_pairs * 2;
         let max_priority_bias = 2usize;
         assert!(
-            p0_total >= first_p1_index && p0_total - first_p1_index <= max_priority_bias,
+            p0_total >= first_p1_index
+                && p0_total - first_p1_index <= max_priority_bias,
             "lower priority work leaked ahead of P0: first_p1_index={first_p1_index}, expected boundary {p0_total}"
         );
 
@@ -1720,8 +1925,10 @@ mod tests {
         assert_eq!(p1_a, p1_per_library, "library A P1 count mismatch: {p1_a}");
         assert_eq!(p1_b, p1_per_library, "library B P1 count mismatch: {p1_b}");
 
-        let p1_max_run_a = max_consecutive_library(p1_entries.as_slice(), lib_a);
-        let p1_max_run_b = max_consecutive_library(p1_entries.as_slice(), lib_b);
+        let p1_max_run_a =
+            max_consecutive_library(p1_entries.as_slice(), lib_a);
+        let p1_max_run_b =
+            max_consecutive_library(p1_entries.as_slice(), lib_b);
         let max_allowed_run = 6;
         assert!(
             p1_max_run_a <= max_allowed_run,

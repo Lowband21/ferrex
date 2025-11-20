@@ -124,7 +124,11 @@ impl DeviceSession {
     }
 
     /// Create a new device session
-    pub fn new(user_id: Uuid, device_fingerprint: DeviceFingerprint, device_name: String) -> Self {
+    pub fn new(
+        user_id: Uuid,
+        device_fingerprint: DeviceFingerprint,
+        device_name: String,
+    ) -> Self {
         let now = Utc::now();
         let id = Uuid::now_v7();
 
@@ -155,7 +159,11 @@ impl DeviceSession {
     }
 
     /// Attach a device public key and algorithm once registered
-    pub fn set_device_public_key(&mut self, alg: impl Into<String>, key: impl Into<String>) {
+    pub fn set_device_public_key(
+        &mut self,
+        alg: impl Into<String>,
+        key: impl Into<String>,
+    ) {
         self.device_key_alg = Some(alg.into());
         self.device_public_key = Some(key.into());
         self.last_activity = Utc::now();
@@ -208,10 +216,17 @@ impl DeviceSession {
     }
 
     /// Ensure the device can attempt PIN authentication.
-    pub fn ensure_pin_available(&self, max_attempts: u8) -> Result<(), DeviceSessionError> {
+    pub fn ensure_pin_available(
+        &self,
+        max_attempts: u8,
+    ) -> Result<(), DeviceSessionError> {
         match self.status {
-            DeviceStatus::Revoked => return Err(DeviceSessionError::DeviceRevoked),
-            DeviceStatus::Pending => return Err(DeviceSessionError::DeviceNotTrusted),
+            DeviceStatus::Revoked => {
+                return Err(DeviceSessionError::DeviceRevoked);
+            }
+            DeviceStatus::Pending => {
+                return Err(DeviceSessionError::DeviceNotTrusted);
+            }
             DeviceStatus::Trusted => {}
         }
 
@@ -227,7 +242,10 @@ impl DeviceSession {
     }
 
     /// Record a failed PIN authentication attempt for this device.
-    pub fn register_pin_failure(&mut self, max_attempts: u8) -> DeviceSessionError {
+    pub fn register_pin_failure(
+        &mut self,
+        max_attempts: u8,
+    ) -> DeviceSessionError {
         self.failed_attempts = self.failed_attempts.saturating_add(1);
         self.last_activity = Utc::now();
 
@@ -423,8 +441,11 @@ mod tests {
         )
         .unwrap();
 
-        let mut session =
-            DeviceSession::new(Uuid::now_v7(), fingerprint, "Test Device".to_string());
+        let mut session = DeviceSession::new(
+            Uuid::now_v7(),
+            fingerprint,
+            "Test Device".to_string(),
+        );
 
         // Initially pending
         assert_eq!(session.status(), DeviceStatus::Pending);

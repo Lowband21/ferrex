@@ -120,7 +120,8 @@ impl UserSelectionView {
 
                 for row_idx in 0..num_rows {
                     let start_idx = row_idx * users_per_row;
-                    let end_idx = ((row_idx + 1) * users_per_row).min(self.users.len());
+                    let end_idx =
+                        ((row_idx + 1) * users_per_row).min(self.users.len());
 
                     let mut row_elements = Vec::new();
 
@@ -132,11 +133,14 @@ impl UserSelectionView {
                     }
 
                     // Add the "Add Profile" button in the last row if needed
-                    if row_idx == num_rows - 1 && total_users > self.users.len() {
+                    if row_idx == num_rows - 1 && total_users > self.users.len()
+                    {
                         row_elements.push(Self::create_add_profile_card());
                     }
 
-                    let row = row(row_elements).spacing(30).align_y(Alignment::Center);
+                    let row = row(row_elements)
+                        .spacing(30)
+                        .align_y(Alignment::Center);
                     rows.push(row.into());
                 }
 
@@ -182,7 +186,9 @@ impl UserSelectionView {
                     .width(150)
                     .height(150)
                     .style(|_theme: &Theme| container::Style {
-                        background: Some(iced::Background::Color(FerrexTheme::card_background())),
+                        background: Some(iced::Background::Color(
+                            FerrexTheme::card_background()
+                        )),
                         border: iced::Border {
                             color: FerrexTheme::border_color(),
                             width: 2.0,

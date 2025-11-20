@@ -7,9 +7,10 @@ use ferrex_core::{
         aggregates::DeviceSession,
         repositories::AuthSessionRecord,
         services::{
-            AuthEventContext, AuthenticationError, AuthenticationService, DeviceTrustError,
-            DeviceTrustService, PasswordChangeActor, PasswordChangeRequest, PinManagementError,
-            PinManagementService, TokenBundle,
+            AuthEventContext, AuthenticationError, AuthenticationService,
+            DeviceTrustError, DeviceTrustService, PasswordChangeActor,
+            PasswordChangeRequest, PinManagementError, PinManagementService,
+            TokenBundle,
         },
         value_objects::{DeviceFingerprint, PinPolicy, RevocationReason},
     },
@@ -85,7 +86,10 @@ impl AuthApplicationFacade {
         self.unit_of_work.users.clone()
     }
 
-    pub async fn get_pin_client_salt(&self, user_id: Uuid) -> Result<Vec<u8>, AuthFacadeError> {
+    pub async fn get_pin_client_salt(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<u8>, AuthFacadeError> {
         let salt = self.auth_service.get_pin_client_salt(user_id).await?;
         Ok(salt)
     }
@@ -105,13 +109,21 @@ impl AuthApplicationFacade {
 
         let session = self
             .device_trust_service
-            .register_device(bundle.user_id, fingerprint, device_name, Some(context))
+            .register_device(
+                bundle.user_id,
+                fingerprint,
+                device_name,
+                Some(context),
+            )
             .await?;
 
         Ok((bundle, session))
     }
 
-    pub async fn get_user_by_id(&self, user_id: Uuid) -> Result<User, AuthFacadeError> {
+    pub async fn get_user_by_id(
+        &self,
+        user_id: Uuid,
+    ) -> Result<User, AuthFacadeError> {
         self.unit_of_work
             .users
             .get_user_by_id(user_id)
@@ -144,7 +156,9 @@ impl AuthApplicationFacade {
         &self,
         request: PasswordChangeRequest,
     ) -> Result<(), AuthFacadeError> {
-        if let PasswordChangeActor::AdminInitiated { admin_user_id } = &request.actor {
+        if let PasswordChangeActor::AdminInitiated { admin_user_id } =
+            &request.actor
+        {
             let is_admin = self
                 .unit_of_work
                 .rbac
@@ -265,7 +279,10 @@ impl AuthApplicationFacade {
         Ok(())
     }
 
-    pub async fn revoke_all_user_sessions(&self, user_id: Uuid) -> Result<(), AuthFacadeError> {
+    pub async fn revoke_all_user_sessions(
+        &self,
+        user_id: Uuid,
+    ) -> Result<(), AuthFacadeError> {
         self.auth_service
             .revoke_all_sessions_for_user(user_id, RevocationReason::UserLogout)
             .await?;

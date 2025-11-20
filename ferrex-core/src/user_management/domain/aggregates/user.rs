@@ -1,4 +1,6 @@
-use crate::user_management::domain::value_objects::{DisplayName, UserRole, Username};
+use crate::user_management::domain::value_objects::{
+    DisplayName, UserRole, Username,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -34,7 +36,11 @@ pub struct UserAggregate {
 
 impl UserAggregate {
     /// Create a new user with validated inputs
-    pub fn new(username: Username, display_name: DisplayName, role: UserRole) -> Self {
+    pub fn new(
+        username: Username,
+        display_name: DisplayName,
+        role: UserRole,
+    ) -> Self {
         let now = Utc::now();
 
         Self {
@@ -66,7 +72,10 @@ impl UserAggregate {
     }
 
     /// Update the user's role
-    pub fn update_role(&mut self, role: UserRole) -> Result<(), UserAggregateError> {
+    pub fn update_role(
+        &mut self,
+        role: UserRole,
+    ) -> Result<(), UserAggregateError> {
         if !self.is_active {
             return Err(UserAggregateError::UserInactive);
         }
@@ -77,7 +86,10 @@ impl UserAggregate {
     }
 
     /// Update the user's email
-    pub fn update_email(&mut self, email: Option<String>) -> Result<(), UserAggregateError> {
+    pub fn update_email(
+        &mut self,
+        email: Option<String>,
+    ) -> Result<(), UserAggregateError> {
         if !self.is_active {
             return Err(UserAggregateError::UserInactive);
         }

@@ -51,7 +51,10 @@ pub(crate) fn map_domain_events(
         .collect()
 }
 
-fn map_domain_event(event: AuthEvent, context: &AuthEventContext) -> Option<AuthEventLog> {
+fn map_domain_event(
+    event: AuthEvent,
+    context: &AuthEventContext,
+) -> Option<AuthEventLog> {
     let occurred_at = event.timestamp();
     let user_id = event.user_id();
     match event {

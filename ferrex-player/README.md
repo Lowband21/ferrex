@@ -33,11 +33,11 @@ A high-performance media player built with Iced and GStreamer, featuring video r
 
 2. **Run the media player**:
    ```bash
-   # Default (connects to http://localhost:3000)
+   # Default (connects to https://localhost:3000)
    cargo run -p ferrex-player
 
    # Or with a custom server URL
-   FERREX_SERVER_URL=http://localhost:3000 cargo run -p ferrex-player
+   FERREX_SERVER_URL=https://localhost:3000 cargo run -p ferrex-player
    ```
 
 3. **Media scanning**:
@@ -45,7 +45,7 @@ A high-performance media player built with Iced and GStreamer, featuring video r
    - Make sure the server has at least one library configured (with `MEDIA_ROOT` set) and trigger a scan via the API if needed:
      ```bash
      # Start a scan for a library (replace {id} with the library UUID)
-     curl -X POST http://localhost:3000/api/v1/libraries/{id}/scans:start
+    curl -X POST https://localhost:3000/api/v1/libraries/{id}/scans:start
      ```
    - The media path must exist on the server machine.
 

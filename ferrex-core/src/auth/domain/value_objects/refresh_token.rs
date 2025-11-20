@@ -29,8 +29,15 @@ impl RefreshToken {
         Self::generate_with_family(lifetime, Uuid::now_v7(), 1)
     }
 
-    pub fn rotate(&self, lifetime: Duration) -> Result<Self, RefreshTokenError> {
-        Self::generate_with_family(lifetime, self.family_id, self.generation + 1)
+    pub fn rotate(
+        &self,
+        lifetime: Duration,
+    ) -> Result<Self, RefreshTokenError> {
+        Self::generate_with_family(
+            lifetime,
+            self.family_id,
+            self.generation + 1,
+        )
     }
 
     pub fn from_value(
@@ -45,7 +52,8 @@ impl RefreshToken {
         }
 
         let is_b64 = URL_SAFE_NO_PAD.decode(&value).is_ok();
-        let is_hex = value.len().is_multiple_of(2) && value.chars().all(|c| c.is_ascii_hexdigit());
+        let is_hex = value.len().is_multiple_of(2)
+            && value.chars().all(|c| c.is_ascii_hexdigit());
 
         if !is_b64 && !is_hex {
             return Err(RefreshTokenError::InvalidFormat);

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM file_watch_events\n            WHERE processed = true AND processed_at < NOW() - CAST($1 || ' days' AS INTERVAL)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7ab0e6c0855ef65d03d3751c5d9480d3a46a4d0a1176411bc09cc5d7031ae00e"
+}

@@ -8,7 +8,10 @@ use axum::{
 use ferrex_core::{
     api_types::{
         ApiResponse,
-        setup::{ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest, StartClaimResponse},
+        setup::{
+            ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest,
+            StartClaimResponse,
+        },
     },
     setup::{ConfirmedClaim, SetupClaimError, StartedClaim},
 };
@@ -18,7 +21,7 @@ use crate::{
         app_state::AppState,
         errors::{AppError, AppResult},
     },
-    users::{UserService, setup::setup::SetupRateLimiter},
+    users::UserService,
 };
 
 pub async fn start_secure_claim(
@@ -37,15 +40,14 @@ pub async fn start_secure_claim(
         .map(|name| name.to_string());
 
     if let Some(ref name) = validated_name
-        && name.len() > 64 {
-            return Err(AppError::bad_request(
-                "Device name cannot exceed 64 characters",
-            ));
-        }
+        && name.len() > 64
+    {
+        return Err(AppError::bad_request(
+            "Device name cannot exceed 64 characters",
+        ));
+    }
 
-    claim_rate_limiter()
-        .check_rate_limit(&client_ip.to_string())
-        .await?;
+    // Global rate limiter enforces setup claim limits; no local limiter here.
 
     let user_service = UserService::new(&state);
     if !user_service.needs_setup().await? {
@@ -89,9 +91,7 @@ pub async fn confirm_secure_claim(
         return Err(AppError::bad_request("Claim code cannot be empty"));
     }
 
-    claim_rate_limiter()
-        .check_rate_limit(&client_ip.to_string())
-        .await?;
+    // Global rate limiter enforces setup claim limits; no local limiter here.
 
     let user_service = UserService::new(&state);
     if !user_service.needs_setup().await? {
@@ -126,7 +126,11 @@ fn require_lan(ip: IpAddr) -> AppResult<()> {
 fn is_lan_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || is_cgnat(v4),
-        IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local(),
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+        }
     }
 }
 
@@ -139,25 +143,28 @@ fn is_cgnat(ip: Ipv4Addr) -> bool {
 
 fn map_claim_error(error: SetupClaimError) -> AppError {
     match error {
-        SetupClaimError::InvalidCode => AppError::bad_request("Invalid claim code supplied"),
-        SetupClaimError::InvalidToken => AppError::forbidden("Invalid claim token supplied"),
-        SetupClaimError::Expired { .. } => AppError::gone("Claim secret has expired"),
-        SetupClaimError::ActiveClaimPending { expires_at, .. } => AppError::conflict(format!(
-            "Another claim is already pending until {}",
-            expires_at.to_rfc3339()
-        )),
+        SetupClaimError::InvalidCode => {
+            AppError::bad_request("Invalid claim code supplied")
+        }
+        SetupClaimError::InvalidToken => {
+            AppError::forbidden("Invalid claim token supplied")
+        }
+        SetupClaimError::Expired { .. } => {
+            AppError::gone("Claim secret has expired")
+        }
+        SetupClaimError::ActiveClaimPending { expires_at, .. } => {
+            AppError::conflict(format!(
+                "Another claim is already pending until {}",
+                expires_at.to_rfc3339()
+            ))
+        }
         SetupClaimError::Storage(err) => {
             AppError::internal(format!("Setup claim persistence failed: {err}"))
         }
     }
 }
 
-fn claim_rate_limiter() -> &'static SetupRateLimiter {
-    static INSTANCE: OnceLock<SetupRateLimiter> = OnceLock::new();
-    INSTANCE.get_or_init(SetupRateLimiter::default)
-}
-
 #[doc(hidden)]
 pub async fn reset_claim_rate_limiter_for_tests() {
-    claim_rate_limiter().reset().await;
+    // No-op: rate limiting is now enforced by global middleware
 }

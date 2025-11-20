@@ -32,7 +32,12 @@ async fn pin_login_rejects_after_30_days_inactive(pool: PgPool) -> Result<()> {
     let fingerprint = sample_fingerprint();
 
     let device_id = harness
-        .register_device_with_pin(user_id, fingerprint.clone(), TEST_DEVICE_NAME, TEST_PIN)
+        .register_device_with_pin(
+            user_id,
+            fingerprint.clone(),
+            TEST_DEVICE_NAME,
+            TEST_PIN,
+        )
         .await?;
 
     let inactive_since = Utc::now() - Duration::days(31);
@@ -56,7 +61,12 @@ async fn pin_login_succeeds_within_30_days(pool: PgPool) -> Result<()> {
     let fingerprint = sample_fingerprint();
 
     let device_id = harness
-        .register_device_with_pin(user_id, fingerprint.clone(), TEST_DEVICE_NAME, TEST_PIN)
+        .register_device_with_pin(
+            user_id,
+            fingerprint.clone(),
+            TEST_DEVICE_NAME,
+            TEST_PIN,
+        )
         .await?;
 
     // Simulate recent activity to keep the device within the trust window

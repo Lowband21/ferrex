@@ -21,7 +21,7 @@ pub async fn get_user_sessions_handler(
     Extension(user): Extension<User>,
 ) -> AppResult<Json<Vec<UserSession>>> {
     let sessions = state
-        .auth_facade
+        .auth_facade()
         .list_user_sessions(user.id)
         .await
         .map_err(map_facade_error)?;
@@ -36,7 +36,7 @@ pub async fn delete_session_handler(
     Path(session_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     state
-        .auth_facade
+        .auth_facade()
         .revoke_user_session(user.id, session_id)
         .await
         .map_err(map_facade_error)?;
@@ -55,14 +55,14 @@ pub async fn delete_all_sessions_handler(
     updated_user.updated_at = chrono::Utc::now();
 
     state
-        .unit_of_work
+        .unit_of_work()
         .users
         .update_user(&updated_user)
         .await
         .map_err(|_| AppError::internal("Failed to update user preferences"))?;
 
     state
-        .auth_facade
+        .auth_facade()
         .revoke_all_user_sessions(user.id)
         .await
         .map_err(map_facade_error)?;
@@ -73,18 +73,25 @@ pub async fn delete_all_sessions_handler(
 fn map_facade_error(err: AuthFacadeError) -> AppError {
     match err {
         AuthFacadeError::Authentication(auth_err) => map_auth_error(auth_err),
-        AuthFacadeError::UserNotFound => AppError::not_found("User not found".to_string()),
-        AuthFacadeError::Storage(e) => AppError::internal(format!("Storage error: {e}")),
+        AuthFacadeError::UserNotFound => {
+            AppError::not_found("User not found".to_string())
+        }
+        AuthFacadeError::Storage(e) => {
+            AppError::internal(format!("Storage error: {e}"))
+        }
         other => AppError::internal(format!("Auth facade error: {other}")),
     }
 }
 
 fn map_auth_error(err: AuthenticationError) -> AppError {
     match err {
-        AuthenticationError::InvalidCredentials | AuthenticationError::InvalidPin => {
+        AuthenticationError::InvalidCredentials
+        | AuthenticationError::InvalidPin => {
             AppError::forbidden("Invalid credentials".to_string())
         }
-        AuthenticationError::UserNotFound => AppError::not_found("User not found".to_string()),
+        AuthenticationError::UserNotFound => {
+            AppError::not_found("User not found".to_string())
+        }
         AuthenticationError::DeviceNotFound => {
             AppError::not_found("Device session not found".to_string())
         }

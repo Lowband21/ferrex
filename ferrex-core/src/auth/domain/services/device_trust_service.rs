@@ -9,8 +9,9 @@ use super::{AuthEventContext, map_domain_events};
 use crate::auth::domain::aggregates::{DeviceSession, DeviceStatus};
 use crate::auth::domain::events::AuthEvent;
 use crate::auth::domain::repositories::{
-    AuthEventRepository, AuthSessionRepository, DevicePinStatus, DeviceSessionRepository,
-    RefreshTokenRepository, UserAuthenticationRepository,
+    AuthEventRepository, AuthSessionRepository, DevicePinStatus,
+    DeviceSessionRepository, RefreshTokenRepository,
+    UserAuthenticationRepository,
 };
 use crate::auth::domain::value_objects::{DeviceFingerprint, RevocationReason};
 
@@ -255,7 +256,10 @@ impl DeviceTrustService {
                 .revoke_by_device(session.id(), RevocationReason::DeviceRevoked)
                 .await?;
             self.refresh_repo
-                .revoke_for_device(session.id(), RevocationReason::DeviceRevoked)
+                .revoke_for_device(
+                    session.id(),
+                    RevocationReason::DeviceRevoked,
+                )
                 .await?;
         }
 
@@ -328,7 +332,10 @@ impl DeviceTrustService {
         Ok(())
     }
 
-    async fn ensure_user_exists(&self, user_id: Uuid) -> Result<(), DeviceTrustError> {
+    async fn ensure_user_exists(
+        &self,
+        user_id: Uuid,
+    ) -> Result<(), DeviceTrustError> {
         if self.user_repo.find_by_id(user_id).await?.is_none() {
             return Err(DeviceTrustError::UserNotFound);
         }
@@ -339,11 +346,14 @@ impl DeviceTrustService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::AuthCrypto;
-    use crate::auth::domain::aggregates::{DeviceSession, DeviceStatus, UserAuthentication};
+
+    use crate::auth::domain::aggregates::{
+        DeviceSession, DeviceStatus, UserAuthentication,
+    };
     use crate::auth::domain::repositories::{
-        AuthAuditEventKind, AuthEventLog, AuthSessionRecord, AuthSessionRepository,
-        DevicePinStatus, RefreshTokenRecord, RefreshTokenRepository,
+        AuthAuditEventKind, AuthEventLog, AuthSessionRecord,
+        AuthSessionRepository, DevicePinStatus, RefreshTokenRecord,
+        RefreshTokenRepository,
     };
     use crate::auth::domain::value_objects::RevocationReason;
     use crate::auth::domain::value_objects::{DeviceFingerprint, SessionScope};
@@ -361,7 +371,10 @@ mod tests {
 
     #[async_trait]
     impl UserAuthenticationRepository for InMemoryUserRepo {
-        async fn find_by_id(&self, user_id: Uuid) -> anyhow::Result<Option<UserAuthentication>> {
+        async fn find_by_id(
+            &self,
+            user_id: Uuid,
+        ) -> anyhow::Result<Option<UserAuthentication>> {
             let users = self.users.lock().unwrap();
             Ok(users.get(&user_id).cloned())
         }
@@ -377,7 +390,10 @@ mod tests {
                 .cloned())
         }
 
-        async fn save(&self, user_auth: &UserAuthentication) -> anyhow::Result<()> {
+        async fn save(
+            &self,
+            user_auth: &UserAuthentication,
+        ) -> anyhow::Result<()> {
             let mut users = self.users.lock().unwrap();
             users.insert(user_auth.user_id(), user_auth.clone());
             Ok(())
@@ -391,7 +407,10 @@ mod tests {
 
     #[async_trait]
     impl DeviceSessionRepository for InMemoryDeviceRepo {
-        async fn find_by_id(&self, session_id: Uuid) -> anyhow::Result<Option<DeviceSession>> {
+        async fn find_by_id(
+            &self,
+            session_id: Uuid,
+        ) -> anyhow::Result<Option<DeviceSession>> {
             let sessions = self.sessions.lock().unwrap();
             Ok(sessions.get(&session_id).cloned())
         }
@@ -406,12 +425,16 @@ mod tests {
                 .values()
                 .find(|session| {
                     session.user_id() == user_id
-                        && session.device_fingerprint().as_str() == fingerprint.as_str()
+                        && session.device_fingerprint().as_str()
+                            == fingerprint.as_str()
                 })
                 .cloned())
         }
 
-        async fn find_by_user_id(&self, user_id: Uuid) -> anyhow::Result<Vec<DeviceSession>> {
+        async fn find_by_user_id(
+            &self,
+            user_id: Uuid,
+        ) -> anyhow::Result<Vec<DeviceSession>> {
             let sessions = self.sessions.lock().unwrap();
             Ok(sessions
                 .values()
@@ -420,7 +443,10 @@ mod tests {
                 .collect())
         }
 
-        async fn save(&self, session: &DeviceSession) -> anyhow::Result<Option<Uuid>> {
+        async fn save(
+            &self,
+            session: &DeviceSession,
+        ) -> anyhow::Result<Option<Uuid>> {
             let mut sessions = self.sessions.lock().unwrap();
             sessions.insert(session.id(), session.clone());
             Ok(None)
@@ -431,9 +457,9 @@ mod tests {
             fingerprint: &DeviceFingerprint,
         ) -> anyhow::Result<bool> {
             let sessions = self.sessions.lock().unwrap();
-            Ok(sessions
-                .values()
-                .any(|session| session.device_fingerprint().as_str() == fingerprint.as_str()))
+            Ok(sessions.values().any(|session| {
+                session.device_fingerprint().as_str() == fingerprint.as_str()
+            }))
         }
 
         async fn pin_status_by_fingerprint(
@@ -443,7 +469,10 @@ mod tests {
             let sessions = self.sessions.lock().unwrap();
             Ok(sessions
                 .values()
-                .filter(|session| session.device_fingerprint().as_str() == fingerprint.as_str())
+                .filter(|session| {
+                    session.device_fingerprint().as_str()
+                        == fingerprint.as_str()
+                })
                 .map(|session| DevicePinStatus {
                     user_id: session.user_id(),
                     has_pin: session.has_pin(),
@@ -459,7 +488,10 @@ mod tests {
 
     #[async_trait]
     impl AuthEventRepository for InMemoryEventRepo {
-        async fn record(&self, events: Vec<AuthEventLog>) -> anyhow::Result<()> {
+        async fn record(
+            &self,
+            events: Vec<AuthEventLog>,
+        ) -> anyhow::Result<()> {
             let mut storage = self.events.lock().unwrap();
             storage.extend(events);
             Ok(())
@@ -479,7 +511,10 @@ mod tests {
 
     #[async_trait]
     impl AuthSessionRepository for RecordingSessionRepo {
-        async fn find_by_id(&self, _session_id: Uuid) -> anyhow::Result<Option<AuthSessionRecord>> {
+        async fn find_by_id(
+            &self,
+            _session_id: Uuid,
+        ) -> anyhow::Result<Option<AuthSessionRecord>> {
             Ok(None)
         }
 
@@ -514,7 +549,10 @@ mod tests {
             Ok(())
         }
 
-        async fn list_by_user(&self, _user_id: Uuid) -> anyhow::Result<Vec<AuthSessionRecord>> {
+        async fn list_by_user(
+            &self,
+            _user_id: Uuid,
+        ) -> anyhow::Result<Vec<AuthSessionRecord>> {
             Ok(Vec::new())
         }
 
@@ -636,7 +674,12 @@ mod tests {
 
     fn sample_user(max_devices: usize) -> UserAuthentication {
         let user_id = Uuid::now_v7();
-        UserAuthentication::new(user_id, "user".to_string(), "hash".to_string(), max_devices)
+        UserAuthentication::new(
+            user_id,
+            "user".to_string(),
+            "hash".to_string(),
+            max_devices,
+        )
     }
 
     fn sample_fingerprint() -> DeviceFingerprint {
@@ -692,8 +735,14 @@ mod tests {
     #[tokio::test]
     async fn register_device_creates_pending_session_and_logs_event() {
         let user = sample_user(3);
-        let (service, device_repo, event_repo, _session_repo, _refresh_repo, user_id) =
-            build_service(user);
+        let (
+            service,
+            device_repo,
+            event_repo,
+            _session_repo,
+            _refresh_repo,
+            user_id,
+        ) = build_service(user);
         let fingerprint = sample_fingerprint();
 
         let session = service
@@ -716,21 +765,30 @@ mod tests {
         assert_eq!(stored.id(), session.id());
 
         let events = event_repo.events();
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event.event_type, AuthAuditEventKind::DeviceRegistered))
-        );
+        assert!(events.iter().any(|event| matches!(
+            event.event_type,
+            AuthAuditEventKind::DeviceRegistered
+        )));
     }
 
     #[tokio::test]
     async fn register_device_enforces_device_limit() {
         let user = sample_user(1);
-        let (service, device_repo, _event_repo, _session_repo, _refresh_repo, user_id) =
-            build_service(user);
+        let (
+            service,
+            device_repo,
+            _event_repo,
+            _session_repo,
+            _refresh_repo,
+            user_id,
+        ) = build_service(user);
 
         let fingerprint = sample_fingerprint();
-        let mut session = DeviceSession::new(user_id, fingerprint.clone(), "Existing".to_string());
+        let mut session = DeviceSession::new(
+            user_id,
+            fingerprint.clone(),
+            "Existing".to_string(),
+        );
         let _ = session.take_events();
         // No user-level PIN needed for device limit tests; inserting a device session is sufficient
         let _ = session.take_events();
@@ -746,11 +804,18 @@ mod tests {
         .unwrap();
 
         let result = service
-            .register_device(user_id, new_fingerprint, "Overflow".to_string(), None)
+            .register_device(
+                user_id,
+                new_fingerprint,
+                "Overflow".to_string(),
+                None,
+            )
             .await;
 
         match result {
-            Err(DeviceTrustError::TooManyDevices { limit }) => assert_eq!(limit, 1),
+            Err(DeviceTrustError::TooManyDevices { limit }) => {
+                assert_eq!(limit, 1)
+            }
             other => panic!("unexpected result: {other:?}"),
         }
     }
@@ -758,12 +823,23 @@ mod tests {
     #[tokio::test]
     async fn revoke_device_marks_session_and_logs_reason() {
         let user = sample_user(3);
-        let (service, device_repo, event_repo, _session_repo, _refresh_repo, user_id) =
-            build_service(user);
+        let (
+            service,
+            device_repo,
+            event_repo,
+            _session_repo,
+            _refresh_repo,
+            user_id,
+        ) = build_service(user);
         let fingerprint = sample_fingerprint();
 
         service
-            .register_device(user_id, fingerprint.clone(), "Test".to_string(), None)
+            .register_device(
+                user_id,
+                fingerprint.clone(),
+                "Test".to_string(),
+                None,
+            )
             .await
             .unwrap();
 
@@ -787,7 +863,9 @@ mod tests {
         let events = event_repo.events();
         let revoke_event = events
             .iter()
-            .find(|event| matches!(event.event_type, AuthAuditEventKind::DeviceRevoked))
+            .find(|event| {
+                matches!(event.event_type, AuthAuditEventKind::DeviceRevoked)
+            })
             .expect("revocation event");
         assert_eq!(
             revoke_event
@@ -802,8 +880,14 @@ mod tests {
     #[tokio::test]
     async fn revoke_device_cascades_to_session_and_refresh_records() {
         let user = sample_user(3);
-        let (service, device_repo, _event_repo, session_repo, refresh_repo, user_id) =
-            build_service(user);
+        let (
+            service,
+            device_repo,
+            _event_repo,
+            session_repo,
+            refresh_repo,
+            user_id,
+        ) = build_service(user);
         let fingerprint = sample_fingerprint();
 
         let session = service
@@ -826,7 +910,12 @@ mod tests {
         );
 
         service
-            .revoke_device(user_id, &fingerprint, Some("security".to_string()), None)
+            .revoke_device(
+                user_id,
+                &fingerprint,
+                Some("security".to_string()),
+                None,
+            )
             .await
             .expect("revoke device");
 
@@ -837,8 +926,14 @@ mod tests {
     #[tokio::test]
     async fn revoke_all_devices_revokes_sessions_and_refresh_records() {
         let user = sample_user(3);
-        let (service, _device_repo, _event_repo, session_repo, refresh_repo, user_id) =
-            build_service(user);
+        let (
+            service,
+            _device_repo,
+            _event_repo,
+            session_repo,
+            refresh_repo,
+            user_id,
+        ) = build_service(user);
 
         let first = sample_fingerprint();
         let second = DeviceFingerprint::new(

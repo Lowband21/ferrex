@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use std::path::Path;
 use uuid::Uuid;
 
-use crate::database::traits::{FolderInventory, FolderProcessingStatus, FolderScanFilters};
+use crate::database::traits::{
+    FolderInventory, FolderProcessingStatus, FolderScanFilters,
+};
 use crate::error::Result;
 use crate::types::ids::LibraryID;
 
@@ -24,7 +26,10 @@ pub trait FolderInventoryRepository: Send + Sync {
         error: &str,
         next_retry: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<()>;
-    async fn get_folder_inventory(&self, library_id: LibraryID) -> Result<Vec<FolderInventory>>;
+    async fn get_folder_inventory(
+        &self,
+        library_id: LibraryID,
+    ) -> Result<Vec<FolderInventory>>;
     async fn upsert_folder(&self, folder: &FolderInventory) -> Result<Uuid>;
     async fn cleanup_stale_folders(
         &self,
@@ -45,6 +50,12 @@ pub trait FolderInventoryRepository: Send + Sync {
         file_types: Vec<String>,
     ) -> Result<()>;
     async fn mark_folder_processed(&self, folder_id: Uuid) -> Result<()>;
-    async fn get_child_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>>;
-    async fn get_season_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>>;
+    async fn get_child_folders(
+        &self,
+        parent_folder_id: Uuid,
+    ) -> Result<Vec<FolderInventory>>;
+    async fn get_season_folders(
+        &self,
+        parent_folder_id: Uuid,
+    ) -> Result<Vec<FolderInventory>>;
 }

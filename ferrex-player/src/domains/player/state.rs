@@ -28,7 +28,7 @@ pub struct PlayerDomainState {
     pub dragging: bool,
     pub last_seek_position: Option<f64>,
     pub last_mouse_y: Option<f32>, // Track vertical mouse position for seek bar validation
-    pub seek_bar_hovered: bool,    // Track if mouse is hovering over the seek bar
+    pub seek_bar_hovered: bool, // Track if mouse is hovering over the seek bar
     pub seeking: bool,
     pub seek_started_time: Option<Instant>,
 
@@ -78,7 +78,8 @@ pub struct PlayerDomainState {
     pub is_loading_video: bool, // Flag to prevent duplicate video loading TODO: refactor out
     pub source_duration: Option<f64>, // Original source video duration (never changes)
 
-    pub external_mpv_handle: Option<Box<super::external_mpv::ExternalMpvHandle>>,
+    pub external_mpv_handle:
+        Option<Box<super::external_mpv::ExternalMpvHandle>>,
     pub external_mpv_active: bool,
 }
 
@@ -188,7 +189,9 @@ impl PlayerDomainState {
         if in_use || !self.has_video() {
             self.controls = true;
             self.controls_time = Instant::now();
-        } else if self.controls && self.controls_time.elapsed() > Duration::from_secs(3) {
+        } else if self.controls
+            && self.controls_time.elapsed() > Duration::from_secs(3)
+        {
             self.controls = false;
         }
     }

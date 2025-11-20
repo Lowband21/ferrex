@@ -52,7 +52,10 @@ impl ExternalMpvHandle {
             match (window_size, window_position) {
                 (Some((width, height)), Some((x, y))) => {
                     // Full geometry with position
-                    cmd.arg(format!("--geometry={}x{}+{}+{}", width, height, x, y));
+                    cmd.arg(format!(
+                        "--geometry={}x{}+{}+{}",
+                        width, height, x, y
+                    ));
                 }
                 (Some((width, height)), None) => {
                     // Just size
@@ -125,7 +128,10 @@ impl ExternalMpvHandle {
     }
 
     /// Send a command to MPV via IPC
-    fn send_command(&mut self, args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
+    fn send_command(
+        &mut self,
+        args: &[&str],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let command = json!({
             "command": args,
             "request_id": self.request_id,
@@ -185,29 +191,49 @@ impl ExternalMpvHandle {
                             if msg["event"] == "property-change" {
                                 match msg["name"].as_str() {
                                     Some("time-pos") => {
-                                        if let Some(pos) = msg["data"].as_f64() {
-                                            *self.last_position.lock().unwrap() = pos;
+                                        if let Some(pos) = msg["data"].as_f64()
+                                        {
+                                            *self
+                                                .last_position
+                                                .lock()
+                                                .unwrap() = pos;
                                         }
                                     }
                                     Some("duration") => {
-                                        if let Some(dur) = msg["data"].as_f64() {
-                                            *self.last_duration.lock().unwrap() = dur;
+                                        if let Some(dur) = msg["data"].as_f64()
+                                        {
+                                            *self
+                                                .last_duration
+                                                .lock()
+                                                .unwrap() = dur;
                                         }
                                     }
                                     Some("fullscreen") => {
-                                        if let Some(fs) = msg["data"].as_bool() {
-                                            *self.last_fullscreen.lock().unwrap() = fs;
+                                        if let Some(fs) = msg["data"].as_bool()
+                                        {
+                                            *self
+                                                .last_fullscreen
+                                                .lock()
+                                                .unwrap() = fs;
                                         }
                                     }
                                     Some("eof-reached") => {
                                         if let Some(eof) = msg["data"].as_bool()
                                             && eof
                                         {
-                                            log::info!("MPV reached end of file");
+                                            log::info!(
+                                                "MPV reached end of file"
+                                            );
                                             // When EOF is reached, set position to duration
-                                            let duration = *self.last_duration.lock().unwrap();
+                                            let duration = *self
+                                                .last_duration
+                                                .lock()
+                                                .unwrap();
                                             if duration > 0.0 {
-                                                *self.last_position.lock().unwrap() = duration;
+                                                *self
+                                                    .last_position
+                                                    .lock()
+                                                    .unwrap() = duration;
                                             }
                                         }
                                     }

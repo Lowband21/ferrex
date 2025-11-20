@@ -13,7 +13,10 @@ use crate::{
 #[async_trait]
 pub trait IndicesRepository: Send + Sync {
     /// Rebuild the precomputed movie sort positions for a library.
-    async fn rebuild_movie_sort_positions(&self, library_id: LibraryID) -> Result<()>;
+    async fn rebuild_movie_sort_positions(
+        &self,
+        library_id: LibraryID,
+    ) -> Result<()>;
 
     /// Fetch presorted movie indices for the given library using the
     /// precomputed position columns. Returns zero-based offsets.

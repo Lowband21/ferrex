@@ -1,6 +1,8 @@
 use std::{convert::Infallible, fmt, str::FromStr};
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Logical categories of images associated with media items.
@@ -9,7 +11,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// lowercase snake_case (`poster`, `backdrop`, ...). Unknown categories are
 /// preserved as-is to avoid data loss during migration; they should be mapped
 /// to first-class variants before being produced by new code.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, Hash, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub enum MediaImageKind {
     Poster,

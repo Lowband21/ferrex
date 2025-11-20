@@ -11,16 +11,20 @@ use crate::{
     traits::prelude::MediaIDLike,
     types::{
         details::{
-            AlternativeTitle, CastMember, CollectionInfo, ContentRating, CrewMember,
-            EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeGroupMembership,
-            ExternalIds, GenreInfo, Keyword, MediaDetailsOption, NetworkInfo, PersonExternalIds,
-            ProductionCompany, ProductionCountry, RelatedMediaRef, ReleaseDateEntry,
-            ReleaseDatesByCountry, SeasonDetails, SpokenLanguage, TmdbDetails, Translation, Video,
+            AlternativeTitle, CastMember, CollectionInfo, ContentRating,
+            CrewMember, EnhancedMovieDetails, EnhancedSeriesDetails,
+            EpisodeDetails, EpisodeGroupMembership, ExternalIds, GenreInfo,
+            Keyword, MediaDetailsOption, NetworkInfo, PersonExternalIds,
+            ProductionCompany, ProductionCountry, RelatedMediaRef,
+            ReleaseDateEntry, ReleaseDatesByCountry, SeasonDetails,
+            SpokenLanguage, TmdbDetails, Translation, Video,
         },
         files::{MediaFile, MediaFileMetadata},
         ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID},
         image::MediaImages,
-        media::{EpisodeReference, MovieReference, SeasonReference, SeriesReference},
+        media::{
+            EpisodeReference, MovieReference, SeasonReference, SeriesReference,
+        },
         numbers::{EpisodeNumber, SeasonNumber},
         titles::{MovieTitle, SeriesTitle},
         urls::{EpisodeURL, MovieURL, SeasonURL, SeriesURL, UrlLike},
@@ -46,7 +50,10 @@ impl<'a> TmdbMetadataRepository<'a> {
         Self { pool }
     }
 
-    pub async fn store_movie_reference(&self, movie: &MovieReference) -> Result<()> {
+    pub async fn store_movie_reference(
+        &self,
+        movie: &MovieReference,
+    ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(|e| {
             MediaError::Internal(format!(
                 "Failed to begin transaction for movie reference {}: {}",
@@ -62,19 +69,33 @@ impl<'a> TmdbMetadataRepository<'a> {
             upsert_tmdb_movie_reference(&mut tx, movie, actual_file_id).await?
         };
 
-        if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) = &movie.details {
-            persist_movie_metadata(&mut tx, target_movie_id, movie.tmdb_id, details).await?;
+        if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) =
+            &movie.details
+        {
+            persist_movie_metadata(
+                &mut tx,
+                target_movie_id,
+                movie.tmdb_id,
+                details,
+            )
+            .await?;
         } else if movie.tmdb_id != 0 {
             // TMDB id present but no metadata; ensure relations removed
             purge_movie_metadata(&mut tx, target_movie_id).await?;
         }
 
-        tx.commit()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to commit movie transaction: {}", e)))
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to commit movie transaction: {}",
+                e
+            ))
+        })
     }
 
-    pub async fn store_series_reference(&self, series: &SeriesReference) -> Result<()> {
+    pub async fn store_series_reference(
+        &self,
+        series: &SeriesReference,
+    ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(|e| {
             MediaError::Internal(format!(
                 "Failed to begin transaction for series reference {}: {}",
@@ -84,18 +105,32 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         let target_series_id = upsert_series_reference(&mut tx, series).await?;
 
-        if let MediaDetailsOption::Details(TmdbDetails::Series(details)) = &series.details {
-            persist_series_metadata(&mut tx, target_series_id, series.tmdb_id, details).await?;
+        if let MediaDetailsOption::Details(TmdbDetails::Series(details)) =
+            &series.details
+        {
+            persist_series_metadata(
+                &mut tx,
+                target_series_id,
+                series.tmdb_id,
+                details,
+            )
+            .await?;
         } else if series.tmdb_id != 0 {
             purge_series_metadata(&mut tx, target_series_id).await?;
         }
 
         tx.commit().await.map_err(|e| {
-            MediaError::Internal(format!("Failed to commit series transaction: {}", e))
+            MediaError::Internal(format!(
+                "Failed to commit series transaction: {}",
+                e
+            ))
         })
     }
 
-    pub async fn store_season_reference(&self, season: &SeasonReference) -> Result<Uuid> {
+    pub async fn store_season_reference(
+        &self,
+        season: &SeasonReference,
+    ) -> Result<Uuid> {
         let mut tx = self.pool.begin().await.map_err(|e| {
             MediaError::Internal(format!(
                 "Failed to begin transaction for season reference {}: {}",
@@ -105,20 +140,34 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         let season_id = upsert_season_reference(&mut tx, season).await?;
 
-        if let MediaDetailsOption::Details(TmdbDetails::Season(details)) = &season.details {
-            persist_season_metadata(&mut tx, season_id, season.tmdb_series_id, details).await?;
+        if let MediaDetailsOption::Details(TmdbDetails::Season(details)) =
+            &season.details
+        {
+            persist_season_metadata(
+                &mut tx,
+                season_id,
+                season.tmdb_series_id,
+                details,
+            )
+            .await?;
         } else {
             purge_season_metadata(&mut tx, season_id).await?;
         }
 
         tx.commit().await.map_err(|e| {
-            MediaError::Internal(format!("Failed to commit season transaction: {}", e))
+            MediaError::Internal(format!(
+                "Failed to commit season transaction: {}",
+                e
+            ))
         })?;
 
         Ok(season_id)
     }
 
-    pub async fn store_episode_reference(&self, episode: &EpisodeReference) -> Result<()> {
+    pub async fn store_episode_reference(
+        &self,
+        episode: &EpisodeReference,
+    ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(|e| {
             MediaError::Internal(format!(
                 "Failed to begin transaction for episode reference {}: {}",
@@ -152,20 +201,39 @@ impl<'a> TmdbMetadataRepository<'a> {
         )
         .fetch_one(&mut *tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to upsert episode reference: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to upsert episode reference: {}",
+                e
+            ))
+        })?;
 
-        if let MediaDetailsOption::Details(TmdbDetails::Episode(details)) = &episode.details {
-            persist_episode_metadata(&mut tx, insert_id, episode.tmdb_series_id, details).await?;
+        if let MediaDetailsOption::Details(TmdbDetails::Episode(details)) =
+            &episode.details
+        {
+            persist_episode_metadata(
+                &mut tx,
+                insert_id,
+                episode.tmdb_series_id,
+                details,
+            )
+            .await?;
         } else {
             purge_episode_metadata(&mut tx, insert_id).await?;
         }
 
         tx.commit().await.map_err(|e| {
-            MediaError::Internal(format!("Failed to commit episode transaction: {}", e))
+            MediaError::Internal(format!(
+                "Failed to commit episode transaction: {}",
+                e
+            ))
         })
     }
 
-    pub async fn load_movie_reference(&self, row: PgRow) -> Result<MovieReference> {
+    pub async fn load_movie_reference(
+        &self,
+        row: PgRow,
+    ) -> Result<MovieReference> {
         let movie_id = row.try_get::<Uuid, _>("id")?;
         let file_id = row.try_get::<Uuid, _>("file_id")?;
 
@@ -181,25 +249,35 @@ impl<'a> TmdbMetadataRepository<'a> {
             library_id: media_file.library_id,
             tmdb_id: tmdb_id as u64,
             title: MovieTitle::new(title.clone()).map_err(|e| {
-                MediaError::Internal(format!("Invalid stored movie title '{}': {}", title, e))
+                MediaError::Internal(format!(
+                    "Invalid stored movie title '{}': {}",
+                    title, e
+                ))
             })?,
             details: details
                 .map(|d| MediaDetailsOption::Details(TmdbDetails::Movie(d)))
-                .unwrap_or_else(|| MediaDetailsOption::Endpoint(format!("/movie/{}", movie_id))),
+                .unwrap_or_else(|| {
+                    MediaDetailsOption::Endpoint(format!("/movie/{}", movie_id))
+                }),
             endpoint: MovieURL::from_string(format!("/stream/{}", file_id)),
             file: media_file,
             theme_color,
         })
     }
 
-    pub async fn load_series_reference(&self, row: PgRow) -> Result<SeriesReference> {
+    pub async fn load_series_reference(
+        &self,
+        row: PgRow,
+    ) -> Result<SeriesReference> {
         let series_id = row.try_get::<Uuid, _>("id")?;
         let library_id = row.try_get::<Uuid, _>("library_id")?;
         let tmdb_id: Option<i64> = row.try_get("tmdb_id")?;
         let title: String = row.try_get("title")?;
         let theme_color: Option<String> = row.try_get("theme_color")?;
-        let discovered_at: chrono::DateTime<chrono::Utc> = row.try_get("discovered_at")?;
-        let created_at: chrono::DateTime<chrono::Utc> = row.try_get("created_at")?;
+        let discovered_at: chrono::DateTime<chrono::Utc> =
+            row.try_get("discovered_at")?;
+        let created_at: chrono::DateTime<chrono::Utc> =
+            row.try_get("created_at")?;
 
         let details = load_series_details(self.pool, series_id).await?;
 
@@ -208,11 +286,19 @@ impl<'a> TmdbMetadataRepository<'a> {
             library_id: LibraryID(library_id),
             tmdb_id: tmdb_id.unwrap_or_default() as u64,
             title: SeriesTitle::new(title.clone()).map_err(|e| {
-                MediaError::Internal(format!("Invalid stored series title '{}': {}", title, e))
+                MediaError::Internal(format!(
+                    "Invalid stored series title '{}': {}",
+                    title, e
+                ))
             })?,
             details: details
                 .map(|d| MediaDetailsOption::Details(TmdbDetails::Series(d)))
-                .unwrap_or_else(|| MediaDetailsOption::Endpoint(format!("/series/{}", series_id))),
+                .unwrap_or_else(|| {
+                    MediaDetailsOption::Endpoint(format!(
+                        "/series/{}",
+                        series_id
+                    ))
+                }),
             endpoint: SeriesURL::from_string(format!("/series/{}", series_id)),
             discovered_at,
             created_at,
@@ -220,14 +306,19 @@ impl<'a> TmdbMetadataRepository<'a> {
         })
     }
 
-    pub async fn load_season_reference(&self, row: PgRow) -> Result<SeasonReference> {
+    pub async fn load_season_reference(
+        &self,
+        row: PgRow,
+    ) -> Result<SeasonReference> {
         let season_id = row.try_get::<Uuid, _>("id")?;
         let series_id = row.try_get::<Uuid, _>("series_id")?;
         let library_id = row.try_get::<Uuid, _>("library_id")?;
         let season_number = row.try_get::<i16, _>("season_number")? as u8;
         let tmdb_series_id: i64 = row.try_get("tmdb_series_id")?;
-        let discovered_at: chrono::DateTime<chrono::Utc> = row.try_get("discovered_at")?;
-        let created_at: chrono::DateTime<chrono::Utc> = row.try_get("created_at")?;
+        let discovered_at: chrono::DateTime<chrono::Utc> =
+            row.try_get("discovered_at")?;
+        let created_at: chrono::DateTime<chrono::Utc> =
+            row.try_get("created_at")?;
         let theme_color = row
             .try_get::<Option<String>, _>("theme_color")
             .unwrap_or(None);
@@ -235,7 +326,9 @@ impl<'a> TmdbMetadataRepository<'a> {
         let details = load_season_details(self.pool, season_id).await?;
         let details_option = details
             .map(|d| MediaDetailsOption::Details(TmdbDetails::Season(d)))
-            .unwrap_or_else(|| MediaDetailsOption::Endpoint(format!("/media/{}", season_id)));
+            .unwrap_or_else(|| {
+                MediaDetailsOption::Endpoint(format!("/media/{}", season_id))
+            });
 
         Ok(SeasonReference {
             id: SeasonID(season_id),
@@ -251,7 +344,10 @@ impl<'a> TmdbMetadataRepository<'a> {
         })
     }
 
-    pub async fn load_episode_reference(&self, row: PgRow) -> Result<EpisodeReference> {
+    pub async fn load_episode_reference(
+        &self,
+        row: PgRow,
+    ) -> Result<EpisodeReference> {
         let episode_id = row.try_get::<Uuid, _>("id")?;
         let season_id = row.try_get::<Uuid, _>("season_id")?;
         let series_id = row.try_get::<Uuid, _>("series_id")?;
@@ -271,7 +367,9 @@ impl<'a> TmdbMetadataRepository<'a> {
         let details = load_episode_details(self.pool, episode_id).await?;
         let details_option = details
             .map(|d| MediaDetailsOption::Details(TmdbDetails::Episode(d)))
-            .unwrap_or_else(|| MediaDetailsOption::Endpoint(format!("/media/{}", episode_id)));
+            .unwrap_or_else(|| {
+                MediaDetailsOption::Endpoint(format!("/media/{}", episode_id))
+            });
 
         Ok(EpisodeReference {
             id: EpisodeID(episode_id),
@@ -282,7 +380,10 @@ impl<'a> TmdbMetadataRepository<'a> {
             series_id: SeriesID(series_id),
             tmdb_series_id: tmdb_series_id as u64,
             details: details_option,
-            endpoint: EpisodeURL::from_string(format!("/stream/{}", media_file.id)),
+            endpoint: EpisodeURL::from_string(format!(
+                "/stream/{}",
+                media_file.id
+            )),
             file: media_file,
             discovered_at,
             created_at,
@@ -552,7 +653,9 @@ async fn persist_season_metadata(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear season keywords: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to clear season keywords: {}", e))
+    })?;
 
     for keyword in &details.keywords {
         sqlx::query!(
@@ -569,7 +672,12 @@ async fn persist_season_metadata(
     sqlx::query!("DELETE FROM season_videos WHERE season_id = $1", season_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear season videos: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to clear season videos: {}",
+                e
+            ))
+        })?;
 
     for video in &details.videos {
         sqlx::query!(
@@ -594,7 +702,12 @@ async fn persist_season_metadata(
         )
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to insert season video: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to insert season video: {}",
+                e
+            ))
+        })?;
     }
 
     sqlx::query!(
@@ -603,7 +716,12 @@ async fn persist_season_metadata(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear season translations: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear season translations: {}",
+            e
+        ))
+    })?;
 
     for translation in &details.translations {
         sqlx::query!(
@@ -701,33 +819,51 @@ async fn persist_episode_metadata(
     sync_episode_child_tables(tx, episode_id, details).await
 }
 
-async fn purge_movie_metadata(tx: &mut Transaction<'_, Postgres>, movie_id: Uuid) -> Result<()> {
+async fn purge_movie_metadata(
+    tx: &mut Transaction<'_, Postgres>,
+    movie_id: Uuid,
+) -> Result<()> {
     sqlx::query!("DELETE FROM movie_metadata WHERE movie_id = $1", movie_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to purge movie metadata: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to purge movie metadata: {}",
+                e
+            ))
+        })?;
     Ok(())
 }
 
-async fn purge_series_metadata(tx: &mut Transaction<'_, Postgres>, series_id: Uuid) -> Result<()> {
+async fn purge_series_metadata(
+    tx: &mut Transaction<'_, Postgres>,
+    series_id: Uuid,
+) -> Result<()> {
     sqlx::query!(
         "DELETE FROM series_metadata WHERE series_id = $1",
         series_id
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to purge series metadata: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to purge series metadata: {}", e))
+    })?;
     Ok(())
 }
 
-async fn purge_season_metadata(tx: &mut Transaction<'_, Postgres>, season_id: Uuid) -> Result<()> {
+async fn purge_season_metadata(
+    tx: &mut Transaction<'_, Postgres>,
+    season_id: Uuid,
+) -> Result<()> {
     sqlx::query!(
         "DELETE FROM season_metadata WHERE season_id = $1",
         season_id
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to purge season metadata: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to purge season metadata: {}", e))
+    })?;
     Ok(())
 }
 
@@ -741,7 +877,9 @@ async fn purge_episode_metadata(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to purge episode metadata: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to purge episode metadata: {}", e))
+    })?;
     Ok(())
 }
 
@@ -753,7 +891,9 @@ async fn sync_movie_child_tables(
     sqlx::query!("DELETE FROM movie_genres WHERE movie_id = $1", movie_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear movie genres: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to clear movie genres: {}", e))
+        })?;
 
     for genre in &details.genres {
         sqlx::query!(
@@ -766,7 +906,9 @@ async fn sync_movie_child_tables(
         )
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to insert movie genre: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to insert movie genre: {}", e))
+        })?;
     }
 
     sqlx::query!(
@@ -775,7 +917,12 @@ async fn sync_movie_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear movie spoken languages: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear movie spoken languages: {}",
+            e
+        ))
+    })?;
 
     for language in &details.spoken_languages {
         sqlx::query!(
@@ -788,7 +935,12 @@ async fn sync_movie_child_tables(
         )
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to insert movie language: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to insert movie language: {}",
+                e
+            ))
+        })?;
     }
 
     sqlx::query!(
@@ -797,7 +949,9 @@ async fn sync_movie_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear movie companies: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to clear movie companies: {}", e))
+    })?;
 
     for company in &details.production_companies {
         sqlx::query!(
@@ -820,7 +974,9 @@ async fn sync_movie_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear movie countries: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to clear movie countries: {}", e))
+    })?;
 
     for country in &details.production_countries {
         sqlx::query!(
@@ -842,7 +998,12 @@ async fn sync_movie_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear movie release dates: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear movie release dates: {}",
+            e
+        ))
+    })?;
 
     for country in &details.release_dates {
         for entry in &country.release_dates {
@@ -879,9 +1040,15 @@ async fn sync_movie_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear alternative titles: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear alternative titles: {}",
+            e
+        ))
+    })?;
 
-    let mut seen_alternative_titles: HashSet<(String, String, String)> = HashSet::new();
+    let mut seen_alternative_titles: HashSet<(String, String, String)> =
+        HashSet::new();
 
     for title in &details.alternative_titles {
         let iso = title
@@ -934,7 +1101,12 @@ async fn sync_movie_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear movie translations: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear movie translations: {}",
+            e
+        ))
+    })?;
 
     for translation in &details.translations {
         sqlx::query!(
@@ -955,13 +1127,20 @@ async fn sync_movie_child_tables(
         )
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to insert movie translation: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to insert movie translation: {}",
+                e
+            ))
+        })?;
     }
 
     sqlx::query!("DELETE FROM movie_videos WHERE movie_id = $1", movie_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear movie videos: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to clear movie videos: {}", e))
+        })?;
 
     for video in &details.videos {
         sqlx::query!(
@@ -987,13 +1166,20 @@ async fn sync_movie_child_tables(
         )
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to insert movie video: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to insert movie video: {}", e))
+        })?;
     }
 
     sqlx::query!("DELETE FROM movie_keywords WHERE movie_id = $1", movie_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear movie keywords: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to clear movie keywords: {}",
+                e
+            ))
+        })?;
 
     for keyword in &details.keywords {
         sqlx::query!(
@@ -1006,7 +1192,12 @@ async fn sync_movie_child_tables(
         )
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to insert movie keyword: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to insert movie keyword: {}",
+                e
+            ))
+        })?;
     }
 
     sqlx::query!(
@@ -1015,7 +1206,12 @@ async fn sync_movie_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear movie recommendations: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear movie recommendations: {}",
+            e
+        ))
+    })?;
 
     for recommendation in &details.recommendations {
         sqlx::query!(
@@ -1036,7 +1232,12 @@ async fn sync_movie_child_tables(
     sqlx::query!("DELETE FROM movie_similar WHERE movie_id = $1", movie_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear similar movies: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to clear similar movies: {}",
+                e
+            ))
+        })?;
 
     for similar in &details.similar {
         sqlx::query!(
@@ -1049,7 +1250,12 @@ async fn sync_movie_child_tables(
         )
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to insert similar movie: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to insert similar movie: {}",
+                e
+            ))
+        })?;
     }
 
     if let Some(collection) = &details.collection {
@@ -1071,7 +1277,12 @@ async fn sync_movie_child_tables(
         )
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to upsert movie collection: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to upsert movie collection: {}",
+                e
+            ))
+        })?;
     } else {
         sqlx::query!(
             "DELETE FROM movie_collection_membership WHERE movie_id = $1",
@@ -1165,7 +1376,9 @@ async fn sync_movie_people(
     sqlx::query!("DELETE FROM movie_cast WHERE movie_id = $1", movie_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear movie cast: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to clear movie cast: {}", e))
+        })?;
 
     for member in cast {
         let character = member.character.trim().to_string();
@@ -1173,7 +1386,8 @@ async fn sync_movie_people(
             continue;
         }
 
-        let profile_image_id = ensure_profile_image_id(tx, &mut profile_cache, member).await?;
+        let profile_image_id =
+            ensure_profile_image_id(tx, &mut profile_cache, member).await?;
         sqlx::query!(
             r#"INSERT INTO movie_cast (
                 movie_id, person_tmdb_id, credit_id, cast_id, character, order_index, profile_image_id
@@ -1195,7 +1409,9 @@ async fn sync_movie_people(
     sqlx::query!("DELETE FROM movie_crew WHERE movie_id = $1", movie_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear movie crew: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to clear movie crew: {}", e))
+        })?;
 
     for member in crew {
         let department = member.department.trim().to_string();
@@ -1231,7 +1447,12 @@ async fn sync_series_child_tables(
     sqlx::query!("DELETE FROM series_genres WHERE series_id = $1", series_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear series genres: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to clear series genres: {}",
+                e
+            ))
+        })?;
 
     for genre in &details.genres {
         sqlx::query!(
@@ -1251,7 +1472,12 @@ async fn sync_series_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear series origin countries: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear series origin countries: {}",
+            e
+        ))
+    })?;
 
     for country in &details.origin_countries {
         sqlx::query!(
@@ -1272,7 +1498,9 @@ async fn sync_series_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear series languages: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to clear series languages: {}", e))
+    })?;
 
     for language in &details.spoken_languages {
         sqlx::query!(
@@ -1292,7 +1520,9 @@ async fn sync_series_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear series companies: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to clear series companies: {}", e))
+    })?;
 
     for company in &details.production_companies {
         sqlx::query!(
@@ -1338,7 +1568,9 @@ async fn sync_series_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear series networks: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to clear series networks: {}", e))
+    })?;
 
     for network in &details.networks {
         sqlx::query!(
@@ -1359,7 +1591,12 @@ async fn sync_series_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear series content ratings: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear series content ratings: {}",
+            e
+        ))
+    })?;
 
     for rating in &details.content_ratings {
         sqlx::query!(
@@ -1381,7 +1618,9 @@ async fn sync_series_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear series keywords: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to clear series keywords: {}", e))
+    })?;
 
     for keyword in &details.keywords {
         sqlx::query!(
@@ -1401,7 +1640,12 @@ async fn sync_series_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear series episode groups: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear series episode groups: {}",
+            e
+        ))
+    })?;
 
     for group in &details.episode_groups {
         sqlx::query!(
@@ -1423,7 +1667,12 @@ async fn sync_series_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear series translations: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear series translations: {}",
+            e
+        ))
+    })?;
 
     for translation in &details.translations {
         sqlx::query!(
@@ -1443,13 +1692,23 @@ async fn sync_series_child_tables(
         )
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to insert series translation: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to insert series translation: {}",
+                e
+            ))
+        })?;
     }
 
     sqlx::query!("DELETE FROM series_videos WHERE series_id = $1", series_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear series videos: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to clear series videos: {}",
+                e
+            ))
+        })?;
 
     for video in &details.videos {
         sqlx::query!(
@@ -1474,7 +1733,12 @@ async fn sync_series_child_tables(
         )
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to insert series video: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to insert series video: {}",
+                e
+            ))
+        })?;
     }
 
     sqlx::query!(
@@ -1483,7 +1747,12 @@ async fn sync_series_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear series recommendations: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear series recommendations: {}",
+            e
+        ))
+    })?;
 
     for recommendation in &details.recommendations {
         sqlx::query!(
@@ -1500,7 +1769,12 @@ async fn sync_series_child_tables(
     sqlx::query!("DELETE FROM series_similar WHERE series_id = $1", series_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear similar series: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to clear similar series: {}",
+                e
+            ))
+        })?;
 
     for similar in &details.similar {
         sqlx::query!(
@@ -1542,7 +1816,9 @@ async fn sync_series_people(
     sqlx::query!("DELETE FROM series_cast WHERE series_id = $1", series_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear series cast: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to clear series cast: {}", e))
+        })?;
 
     for member in cast {
         let character = member.character.trim().to_string();
@@ -1550,7 +1826,8 @@ async fn sync_series_people(
             continue;
         }
 
-        let profile_image_id = ensure_profile_image_id(tx, &mut profile_cache, member).await?;
+        let profile_image_id =
+            ensure_profile_image_id(tx, &mut profile_cache, member).await?;
         sqlx::query!(
             r#"INSERT INTO series_cast (
                 series_id, person_tmdb_id, credit_id, character, total_episode_count, order_index, profile_image_id
@@ -1572,7 +1849,9 @@ async fn sync_series_people(
     sqlx::query!("DELETE FROM series_crew WHERE series_id = $1", series_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear series crew: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to clear series crew: {}", e))
+        })?;
 
     for member in crew {
         let department = member.department.trim().to_string();
@@ -1613,7 +1892,9 @@ async fn sync_episode_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear episode keywords: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to clear episode keywords: {}", e))
+    })?;
 
     for keyword in &details.keywords {
         sqlx::query!(
@@ -1633,7 +1914,9 @@ async fn sync_episode_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear episode videos: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to clear episode videos: {}", e))
+    })?;
 
     for video in &details.videos {
         sqlx::query!(
@@ -1658,7 +1941,12 @@ async fn sync_episode_child_tables(
         )
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to insert episode video: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to insert episode video: {}",
+                e
+            ))
+        })?;
     }
 
     sqlx::query!(
@@ -1667,7 +1955,12 @@ async fn sync_episode_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear episode translations: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear episode translations: {}",
+            e
+        ))
+    })?;
 
     for translation in &details.translations {
         sqlx::query!(
@@ -1688,7 +1981,10 @@ async fn sync_episode_child_tables(
         .execute(&mut **tx)
         .await
         .map_err(|e| {
-            MediaError::Internal(format!("Failed to insert episode translation: {}", e))
+            MediaError::Internal(format!(
+                "Failed to insert episode translation: {}",
+                e
+            ))
         })?;
     }
 
@@ -1698,7 +1994,12 @@ async fn sync_episode_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear episode content ratings: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear episode content ratings: {}",
+            e
+        ))
+    })?;
 
     for rating in &details.content_ratings {
         sqlx::query!(
@@ -1719,13 +2020,16 @@ async fn sync_episode_child_tables(
     sqlx::query!("DELETE FROM episode_cast WHERE episode_id = $1", episode_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear episode cast: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to clear episode cast: {}", e))
+        })?;
 
     for member in &details.guest_stars {
         if processed_people.insert(member.id) {
             upsert_person(tx, member.id, member).await?;
         }
-        let profile_image_id = ensure_profile_image_id(tx, &mut profile_cache, member).await?;
+        let profile_image_id =
+            ensure_profile_image_id(tx, &mut profile_cache, member).await?;
         sqlx::query!(
             "INSERT INTO episode_cast (episode_id, person_tmdb_id, credit_id, character, order_index, profile_image_id) VALUES ($1, $2, $3, $4, $5, $6)",
             episode_id,
@@ -1746,10 +2050,16 @@ async fn sync_episode_child_tables(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear episode guest stars: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to clear episode guest stars: {}",
+            e
+        ))
+    })?;
 
     for member in &details.guest_stars {
-        let profile_image_id = ensure_profile_image_id(tx, &mut profile_cache, member).await?;
+        let profile_image_id =
+            ensure_profile_image_id(tx, &mut profile_cache, member).await?;
         sqlx::query!(
             "INSERT INTO episode_guest_stars (episode_id, person_tmdb_id, credit_id, character, order_index, profile_image_id) VALUES ($1, $2, $3, $4, $5, $6)",
             episode_id,
@@ -1767,7 +2077,9 @@ async fn sync_episode_child_tables(
     sqlx::query!("DELETE FROM episode_crew WHERE episode_id = $1", episode_id)
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear episode crew: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to clear episode crew: {}", e))
+        })?;
 
     for member in &details.crew {
         if processed_people.insert(member.id) {
@@ -1855,7 +2167,9 @@ async fn upsert_person(
     )
     .execute(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to clear person aliases: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to clear person aliases: {}", e))
+    })?;
 
     for alias in member.aliases() {
         sqlx::query!(
@@ -1865,7 +2179,12 @@ async fn upsert_person(
         )
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to insert person alias: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to insert person alias: {}",
+                e
+            ))
+        })?;
     }
 
     Ok(())
@@ -1961,7 +2280,12 @@ async fn store_media_file(
         .as_ref()
         .map(serde_json::to_value)
         .transpose()
-        .map_err(|e| MediaError::InvalidMedia(format!("Failed to serialize metadata: {}", e)))?;
+        .map_err(|e| {
+            MediaError::InvalidMedia(format!(
+                "Failed to serialize metadata: {}",
+                e
+            ))
+        })?;
 
     let parsed_info = technical_metadata
         .as_ref()
@@ -1996,7 +2320,9 @@ async fn store_media_file(
     )
     .fetch_one(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to upsert media file: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to upsert media file: {}", e))
+    })?;
 
     Ok(actual_id)
 }
@@ -2014,7 +2340,10 @@ async fn upsert_local_movie_reference(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|e| {
-        MediaError::Internal(format!("Failed to check existing movie reference: {}", e))
+        MediaError::Internal(format!(
+            "Failed to check existing movie reference: {}",
+            e
+        ))
     })?;
 
     if let Some(row) = existing {
@@ -2030,7 +2359,12 @@ async fn upsert_local_movie_reference(
         )
         .execute(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to update movie reference: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to update movie reference: {}",
+                e
+            ))
+        })?;
         Ok(row.id)
     } else {
         sqlx::query!(
@@ -2103,7 +2437,12 @@ async fn upsert_series_reference(
         )
         .fetch_optional(&mut **tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to lookup series reference: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to lookup series reference: {}",
+                e
+            ))
+        })?;
 
         if let Some(row) = existing {
             sqlx::query!(
@@ -2119,7 +2458,10 @@ async fn upsert_series_reference(
             .execute(&mut **tx)
             .await
             .map_err(|e| {
-                MediaError::Internal(format!("Failed to update series reference: {}", e))
+                MediaError::Internal(format!(
+                    "Failed to update series reference: {}",
+                    e
+                ))
             })?;
 
             row.id
@@ -2204,16 +2546,22 @@ async fn upsert_season_reference(
     )
     .fetch_one(&mut **tx)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to upsert season reference: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to upsert season reference: {}",
+            e
+        ))
+    })?;
 
     Ok(row.id)
 }
 
 fn hydrate_media_file_row(row: &PgRow) -> Result<MediaFile> {
-    let media_file_metadata: Option<serde_json::Value> = row.try_get("technical_metadata").ok();
-    let parsed = media_file_metadata
-        .as_ref()
-        .and_then(|tm| serde_json::from_value::<MediaFileMetadata>(tm.clone()).ok());
+    let media_file_metadata: Option<serde_json::Value> =
+        row.try_get("technical_metadata").ok();
+    let parsed = media_file_metadata.as_ref().and_then(|tm| {
+        serde_json::from_value::<MediaFileMetadata>(tm.clone()).ok()
+    });
 
     let library_id = LibraryID(row.try_get("library_id")?);
 
@@ -2268,7 +2616,9 @@ async fn load_series_details(
     )
     .fetch_optional(pool)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to load series metadata: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to load series metadata: {}", e))
+    })?;
 
     let Some(row) = metadata else {
         return Ok(None);
@@ -2280,7 +2630,9 @@ async fn load_series_details(
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to load series genres: {}", e)))?
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to load series genres: {}", e))
+    })?
     .into_iter()
     .map(|record| GenreInfo {
         id: record.genre_id as u64,
@@ -2294,7 +2646,12 @@ async fn load_series_details(
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to load series origin countries: {}", e)))?
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to load series origin countries: {}",
+            e
+        ))
+    })?
     .into_iter()
     .map(|record| record.iso_3166_1)
     .collect();
@@ -2381,7 +2738,9 @@ async fn load_series_details(
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to load series keywords: {}", e)))?
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to load series keywords: {}", e))
+    })?
     .into_iter()
     .map(|record| Keyword {
         id: record.keyword_id as u64,
@@ -2536,7 +2895,10 @@ async fn load_series_details(
     Ok(Some(details))
 }
 
-async fn load_movie_details(pool: &PgPool, movie_id: Uuid) -> Result<Option<EnhancedMovieDetails>> {
+async fn load_movie_details(
+    pool: &PgPool,
+    movie_id: Uuid,
+) -> Result<Option<EnhancedMovieDetails>> {
     let metadata = sqlx::query!(
         r#"
         SELECT * FROM movie_metadata WHERE movie_id = $1
@@ -2545,7 +2907,9 @@ async fn load_movie_details(pool: &PgPool, movie_id: Uuid) -> Result<Option<Enha
     )
     .fetch_optional(pool)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to load movie metadata: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to load movie metadata: {}", e))
+    })?;
 
     let Some(row) = metadata else {
         return Ok(None);
@@ -2557,7 +2921,9 @@ async fn load_movie_details(pool: &PgPool, movie_id: Uuid) -> Result<Option<Enha
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to load movie genres: {}", e)))?
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to load movie genres: {}", e))
+    })?
     .into_iter()
     .map(|record| GenreInfo {
         id: record.genre_id as u64,
@@ -2617,19 +2983,24 @@ async fn load_movie_details(pool: &PgPool, movie_id: Uuid) -> Result<Option<Enha
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load movie release dates: {}", e)))?;
 
-    let mut release_map: HashMap<String, Vec<ReleaseDateEntry>> = HashMap::new();
+    let mut release_map: HashMap<String, Vec<ReleaseDateEntry>> =
+        HashMap::new();
     for record in release_dates_rows {
-        release_map
-            .entry(record.iso_3166_1)
-            .or_default()
-            .push(ReleaseDateEntry {
+        release_map.entry(record.iso_3166_1).or_default().push(
+            ReleaseDateEntry {
                 certification: record.certification,
-                release_date: Some(record.release_date.with_timezone(&chrono::Utc).to_rfc3339()),
+                release_date: Some(
+                    record
+                        .release_date
+                        .with_timezone(&chrono::Utc)
+                        .to_rfc3339(),
+                ),
                 release_type: Some(i32::from(record.release_type)),
                 note: record.note,
                 iso_639_1: record.iso_639_1,
                 descriptors: record.descriptors.unwrap_or_default(),
-            });
+            },
+        );
     }
 
     let release_dates: Vec<ReleaseDatesByCountry> = release_map
@@ -2640,8 +3011,10 @@ async fn load_movie_details(pool: &PgPool, movie_id: Uuid) -> Result<Option<Enha
         })
         .collect();
 
-    let content_ratings =
-        build_movie_content_ratings(&release_dates, row.primary_certification.clone());
+    let content_ratings = build_movie_content_ratings(
+        &release_dates,
+        row.primary_certification.clone(),
+    );
 
     let alternative_titles = sqlx::query!(
         "SELECT iso_3166_1, title, title_type FROM movie_alternative_titles WHERE movie_id = $1",
@@ -2807,7 +3180,10 @@ async fn load_movie_details(pool: &PgPool, movie_id: Uuid) -> Result<Option<Enha
     Ok(Some(details))
 }
 
-async fn load_season_details(pool: &PgPool, season_id: Uuid) -> Result<Option<SeasonDetails>> {
+async fn load_season_details(
+    pool: &PgPool,
+    season_id: Uuid,
+) -> Result<Option<SeasonDetails>> {
     let row = sqlx::query!(
         r#"
         SELECT
@@ -2832,7 +3208,9 @@ async fn load_season_details(pool: &PgPool, season_id: Uuid) -> Result<Option<Se
     )
     .fetch_optional(pool)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to load season metadata: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to load season metadata: {}", e))
+    })?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -2868,7 +3246,9 @@ async fn load_season_details(pool: &PgPool, season_id: Uuid) -> Result<Option<Se
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to load season keywords: {}", e)))?
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to load season keywords: {}", e))
+    })?
     .into_iter()
     .map(|record| Keyword {
         id: record.keyword_id as u64,
@@ -2935,7 +3315,10 @@ async fn load_season_details(pool: &PgPool, season_id: Uuid) -> Result<Option<Se
     Ok(Some(details))
 }
 
-async fn load_episode_details(pool: &PgPool, episode_id: Uuid) -> Result<Option<EpisodeDetails>> {
+async fn load_episode_details(
+    pool: &PgPool,
+    episode_id: Uuid,
+) -> Result<Option<EpisodeDetails>> {
     let row = sqlx::query!(
         r#"
         SELECT
@@ -2963,7 +3346,9 @@ async fn load_episode_details(pool: &PgPool, episode_id: Uuid) -> Result<Option<
     )
     .fetch_optional(pool)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to load episode metadata: {}", e)))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to load episode metadata: {}", e))
+    })?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -2999,7 +3384,9 @@ async fn load_episode_details(pool: &PgPool, episode_id: Uuid) -> Result<Option<
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| MediaError::Internal(format!("Failed to load episode keywords: {}", e)))?
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to load episode keywords: {}", e))
+    })?
     .into_iter()
     .map(|record| Keyword {
         id: record.keyword_id as u64,
@@ -3531,7 +3918,10 @@ async fn load_crew(pool: &PgPool, movie_id: Uuid) -> Result<Vec<CrewMember>> {
         .collect())
 }
 
-async fn load_series_cast(pool: &PgPool, series_id: Uuid) -> Result<Vec<CastMember>> {
+async fn load_series_cast(
+    pool: &PgPool,
+    series_id: Uuid,
+) -> Result<Vec<CastMember>> {
     let cast_rows = sqlx::query!(
         r#"SELECT
                 sc.person_tmdb_id,
@@ -3612,7 +4002,10 @@ async fn load_series_cast(pool: &PgPool, series_id: Uuid) -> Result<Vec<CastMemb
         .collect())
 }
 
-async fn load_series_crew(pool: &PgPool, series_id: Uuid) -> Result<Vec<CrewMember>> {
+async fn load_series_crew(
+    pool: &PgPool,
+    series_id: Uuid,
+) -> Result<Vec<CrewMember>> {
     let crew_rows = sqlx::query!(
         r#"SELECT
                 sc.person_tmdb_id,

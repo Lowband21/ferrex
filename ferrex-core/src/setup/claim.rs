@@ -98,7 +98,10 @@ where
         })
     }
 
-    pub async fn confirm_claim(&self, code: &str) -> Result<ConfirmedClaim, SetupClaimError> {
+    pub async fn confirm_claim(
+        &self,
+        code: &str,
+    ) -> Result<ConfirmedClaim, SetupClaimError> {
         if code.trim().is_empty() {
             return Err(SetupClaimError::InvalidCode);
         }
@@ -168,7 +171,10 @@ where
         })
     }
 
-    pub async fn consume_claim_token(&self, token: &str) -> Result<ConsumedClaim, SetupClaimError> {
+    pub async fn consume_claim_token(
+        &self,
+        token: &str,
+    ) -> Result<ConsumedClaim, SetupClaimError> {
         let validated = self.validate_claim_token(token).await?;
         let now = Utc::now();
 
@@ -184,7 +190,10 @@ where
         })
     }
 
-    pub async fn revoke_all(&self, reason: Option<&str>) -> Result<u64, SetupClaimError> {
+    pub async fn revoke_all(
+        &self,
+        reason: Option<&str>,
+    ) -> Result<u64, SetupClaimError> {
         let now = Utc::now();
         self.repository
             .revoke_all(reason, now)
@@ -192,7 +201,10 @@ where
             .map_err(SetupClaimError::from)
     }
 
-    pub async fn purge_stale(&self, older_than: DateTime<Utc>) -> Result<u64, SetupClaimError> {
+    pub async fn purge_stale(
+        &self,
+        older_than: DateTime<Utc>,
+    ) -> Result<u64, SetupClaimError> {
         self.repository
             .purge_stale(older_than)
             .await
@@ -269,7 +281,9 @@ fn random_string(length: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::ports::setup_claims::{SetupClaimRecord, SetupClaimsRepository};
+    use crate::database::ports::setup_claims::{
+        SetupClaimRecord, SetupClaimsRepository,
+    };
     use async_trait::async_trait;
     use std::collections::HashMap;
     use tokio::sync::Mutex;
@@ -288,7 +302,10 @@ mod tests {
 
     #[async_trait]
     impl SetupClaimsRepository for InMemoryRepo {
-        async fn create(&self, claim: NewSetupClaim) -> Result<SetupClaimRecord, MediaError> {
+        async fn create(
+            &self,
+            claim: NewSetupClaim,
+        ) -> Result<SetupClaimRecord, MediaError> {
             let record = SetupClaimRecord {
                 id: Uuid::new_v4(),
                 code_hash: claim.code_hash,
@@ -319,7 +336,8 @@ mod tests {
                         && record.revoked_at.is_none()
                         && record.expires_at > now
                 })
-                .next().cloned())
+                .next()
+                .cloned())
         }
 
         async fn find_active_by_code_hash(
@@ -333,8 +351,8 @@ mod tests {
                 .filter(|record| record.code_hash == code_hash)
                 .filter(|record| record.confirmed_at.is_none())
                 .filter(|record| record.revoked_at.is_none())
-                .filter(|record| record.expires_at > now)
-                .next().cloned())
+                .find(|record| record.expires_at > now)
+                .cloned())
         }
 
         async fn mark_confirmed(
@@ -351,7 +369,11 @@ mod tests {
             Ok(record.clone())
         }
 
-        async fn increment_attempt(&self, id: Uuid, now: DateTime<Utc>) -> Result<(), MediaError> {
+        async fn increment_attempt(
+            &self,
+            id: Uuid,
+            now: DateTime<Utc>,
+        ) -> Result<(), MediaError> {
             let mut claims = self.claims.lock().await;
             let record = claims.get_mut(&id).unwrap();
             record.attempts += 1;
@@ -367,11 +389,13 @@ mod tests {
             let claims = self.claims.lock().await;
             Ok(claims
                 .values()
-                .filter(|record| record.claim_token_hash.as_deref() == Some(token_hash))
+                .filter(|record| {
+                    record.claim_token_hash.as_deref() == Some(token_hash)
+                })
                 .filter(|record| record.revoked_at.is_none())
                 .filter(|record| record.confirmed_at.is_some())
-                .filter(|record| record.expires_at > now)
-                .next().cloned())
+                .find(|record| record.expires_at > now)
+                .cloned())
         }
 
         async fn revoke_by_id(
@@ -404,7 +428,10 @@ mod tests {
             Ok(count)
         }
 
-        async fn purge_stale(&self, before: DateTime<Utc>) -> Result<u64, MediaError> {
+        async fn purge_stale(
+            &self,
+            before: DateTime<Utc>,
+        ) -> Result<u64, MediaError> {
             let mut claims = self.claims.lock().await;
             let initial = claims.len();
             claims.retain(|_, record| {

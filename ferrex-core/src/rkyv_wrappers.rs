@@ -13,7 +13,11 @@ impl ArchiveWith<PathBuf> for PathBufWrapper {
     type Archived = Archived<String>;
     type Resolver = <String as Archive>::Resolver;
 
-    fn resolve_with(field: &PathBuf, resolver: Self::Resolver, out: Place<Self::Archived>) {
+    fn resolve_with(
+        field: &PathBuf,
+        resolver: Self::Resolver,
+        out: Place<Self::Archived>,
+    ) {
         let path_str = field.to_string_lossy().to_string();
         path_str.resolve(resolver, out);
     }
@@ -23,13 +27,17 @@ impl<S: Fallible + ?Sized> SerializeWith<PathBuf, S> for PathBufWrapper
 where
     String: Serialize<S>,
 {
-    fn serialize_with(field: &PathBuf, serializer: &mut S) -> Result<Self::Resolver, S::Error> {
+    fn serialize_with(
+        field: &PathBuf,
+        serializer: &mut S,
+    ) -> Result<Self::Resolver, S::Error> {
         let path_str = field.to_string_lossy().to_string();
         path_str.serialize(serializer)
     }
 }
 
-impl<D: Fallible + ?Sized> DeserializeWith<Archived<String>, PathBuf, D> for PathBufWrapper
+impl<D: Fallible + ?Sized> DeserializeWith<Archived<String>, PathBuf, D>
+    for PathBufWrapper
 where
     Archived<String>: Deserialize<String, D>,
 {
@@ -60,7 +68,8 @@ impl ArchiveWith<chrono::DateTime<chrono::Utc>> for DateTimeWrapper {
     }
 }
 
-impl<S: Fallible + ?Sized> SerializeWith<chrono::DateTime<chrono::Utc>, S> for DateTimeWrapper
+impl<S: Fallible + ?Sized> SerializeWith<chrono::DateTime<chrono::Utc>, S>
+    for DateTimeWrapper
 where
     i64: Serialize<S>,
 {
@@ -73,7 +82,8 @@ where
     }
 }
 
-impl<D: Fallible + ?Sized> DeserializeWith<Archived<i64>, chrono::DateTime<chrono::Utc>, D>
+impl<D: Fallible + ?Sized>
+    DeserializeWith<Archived<i64>, chrono::DateTime<chrono::Utc>, D>
     for DateTimeWrapper
 where
     Archived<i64>: Deserialize<i64, D>,
@@ -83,7 +93,8 @@ where
         deserializer: &mut D,
     ) -> Result<chrono::DateTime<chrono::Utc>, <D as Fallible>::Error> {
         let timestamp: i64 = field.deserialize(deserializer)?;
-        Ok(chrono::DateTime::from_timestamp(timestamp, 0).unwrap_or_else(chrono::Utc::now))
+        Ok(chrono::DateTime::from_timestamp(timestamp, 0)
+            .unwrap_or_else(chrono::Utc::now))
     }
 }
 
@@ -95,7 +106,11 @@ impl ArchiveWith<Vec<PathBuf>> for VecPathBuf {
     type Archived = Archived<Vec<String>>;
     type Resolver = <Vec<String> as Archive>::Resolver;
 
-    fn resolve_with(field: &Vec<PathBuf>, resolver: Self::Resolver, out: Place<Self::Archived>) {
+    fn resolve_with(
+        field: &Vec<PathBuf>,
+        resolver: Self::Resolver,
+        out: Place<Self::Archived>,
+    ) {
         let strings: Vec<String> = field
             .iter()
             .map(|p| p.to_string_lossy().to_string())
@@ -120,7 +135,8 @@ where
     }
 }
 
-impl<D: Fallible + ?Sized> DeserializeWith<Archived<Vec<String>>, Vec<PathBuf>, D> for VecPathBuf
+impl<D: Fallible + ?Sized>
+    DeserializeWith<Archived<Vec<String>>, Vec<PathBuf>, D> for VecPathBuf
 where
     Archived<Vec<String>>: Deserialize<Vec<String>, D>,
 {
@@ -151,8 +167,8 @@ impl ArchiveWith<Option<chrono::DateTime<chrono::Utc>>> for OptionDateTime {
     }
 }
 
-impl<S: Fallible + ?Sized> SerializeWith<Option<chrono::DateTime<chrono::Utc>>, S>
-    for OptionDateTime
+impl<S: Fallible + ?Sized>
+    SerializeWith<Option<chrono::DateTime<chrono::Utc>>, S> for OptionDateTime
 where
     Option<i64>: Serialize<S>,
 {
@@ -166,15 +182,19 @@ where
 }
 
 impl<D: Fallible + ?Sized>
-    DeserializeWith<Archived<Option<i64>>, Option<chrono::DateTime<chrono::Utc>>, D>
-    for OptionDateTime
+    DeserializeWith<
+        Archived<Option<i64>>,
+        Option<chrono::DateTime<chrono::Utc>>,
+        D,
+    > for OptionDateTime
 where
     Archived<Option<i64>>: Deserialize<Option<i64>, D>,
 {
     fn deserialize_with(
         field: &Archived<Option<i64>>,
         deserializer: &mut D,
-    ) -> Result<Option<chrono::DateTime<chrono::Utc>>, <D as Fallible>::Error> {
+    ) -> Result<Option<chrono::DateTime<chrono::Utc>>, <D as Fallible>::Error>
+    {
         let timestamp: Option<i64> = field.deserialize(deserializer)?;
         Ok(timestamp.and_then(|ts| chrono::DateTime::from_timestamp(ts, 0)))
     }
@@ -198,7 +218,8 @@ impl ArchiveWith<std::time::Duration> for DurationWrapper {
     }
 }
 
-impl<S: Fallible + ?Sized> SerializeWith<std::time::Duration, S> for DurationWrapper
+impl<S: Fallible + ?Sized> SerializeWith<std::time::Duration, S>
+    for DurationWrapper
 where
     u64: Serialize<S>,
 {
@@ -211,8 +232,8 @@ where
     }
 }
 
-impl<D: Fallible + ?Sized> DeserializeWith<Archived<u64>, std::time::Duration, D>
-    for DurationWrapper
+impl<D: Fallible + ?Sized>
+    DeserializeWith<Archived<u64>, std::time::Duration, D> for DurationWrapper
 where
     Archived<u64>: Deserialize<u64, D>,
 {

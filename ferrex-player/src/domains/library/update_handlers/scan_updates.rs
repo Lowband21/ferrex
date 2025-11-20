@@ -8,7 +8,10 @@ use ferrex_core::player_prelude::{
 use iced::Task;
 use uuid::Uuid;
 
-pub fn handle_scan_library(state: &mut State, library_id: LibraryID) -> Task<Message> {
+pub fn handle_scan_library(
+    state: &mut State,
+    library_id: LibraryID,
+) -> Task<Message> {
     let api_service = state.api_service.clone();
     Task::perform(
         async move {
@@ -30,7 +33,11 @@ pub fn handle_scan_library(state: &mut State, library_id: LibraryID) -> Task<Mes
     )
 }
 
-pub fn handle_pause_scan(state: &mut State, library_id: LibraryID, scan_id: Uuid) -> Task<Message> {
+pub fn handle_pause_scan(
+    state: &mut State,
+    library_id: LibraryID,
+    scan_id: Uuid,
+) -> Task<Message> {
     let api_service = state.api_service.clone();
     Task::perform(
         async move {
@@ -132,7 +139,10 @@ pub fn handle_fetch_scan_config(state: &mut State) -> Task<Message> {
     )
 }
 
-pub fn apply_active_scan_snapshot(state: &mut State, snapshots: Vec<ScanSnapshotDto>) {
+pub fn apply_active_scan_snapshot(
+    state: &mut State,
+    snapshots: Vec<ScanSnapshotDto>,
+) {
     if snapshots.is_empty() {
         log::debug!("Active scan snapshot list empty");
     } else {
@@ -191,7 +201,8 @@ pub fn apply_scan_progress_frame(state: &mut State, frame: ScanProgressEvent) {
     {
         snapshot.completed_items = frame.completed_items;
         snapshot.total_items = frame.total_items;
-        snapshot.retrying_items = frame.retrying_items.unwrap_or(snapshot.retrying_items);
+        snapshot.retrying_items =
+            frame.retrying_items.unwrap_or(snapshot.retrying_items);
         snapshot.dead_lettered_items = frame
             .dead_lettered_items
             .unwrap_or(snapshot.dead_lettered_items);
@@ -214,14 +225,20 @@ pub fn remove_scan(state: &mut State, scan_id: Uuid) {
     log::info!("Removed scan {} from active tracking", scan_id);
 }
 
-fn map_status(status: &str) -> Option<ferrex_core::api_types::ScanLifecycleStatus> {
+fn map_status(
+    status: &str,
+) -> Option<ferrex_core::api_types::ScanLifecycleStatus> {
     match status {
         "pending" => Some(ferrex_core::api_types::ScanLifecycleStatus::Pending),
         "running" => Some(ferrex_core::api_types::ScanLifecycleStatus::Running),
         "paused" => Some(ferrex_core::api_types::ScanLifecycleStatus::Paused),
-        "completed" => Some(ferrex_core::api_types::ScanLifecycleStatus::Completed),
+        "completed" => {
+            Some(ferrex_core::api_types::ScanLifecycleStatus::Completed)
+        }
         "failed" => Some(ferrex_core::api_types::ScanLifecycleStatus::Failed),
-        "canceled" | "cancelled" => Some(ferrex_core::api_types::ScanLifecycleStatus::Canceled),
+        "canceled" | "cancelled" => {
+            Some(ferrex_core::api_types::ScanLifecycleStatus::Canceled)
+        }
         _ => None,
     }
 }

@@ -132,7 +132,9 @@ impl JobPayload {
                 library_id: job.library_id,
                 folder_path_norm: job.folder_path_norm.clone(),
             },
-            JobPayload::MediaAnalyze(job) => DedupeKey::MediaAnalyze(job.fingerprint.clone()),
+            JobPayload::MediaAnalyze(job) => {
+                DedupeKey::MediaAnalyze(job.fingerprint.clone())
+            }
             JobPayload::MetadataEnrich(job) => DedupeKey::MetadataEnrich {
                 candidate_id: job.logical_candidate_id.clone(),
             },
@@ -220,7 +222,9 @@ impl fmt::Display for DedupeKey {
                 library_id,
                 folder_path_norm,
             } => write!(f, "scan:{}:{}", library_id, folder_path_norm),
-            DedupeKey::MediaAnalyze(fp) => write!(f, "analyze:{}", fp.hash_repr()),
+            DedupeKey::MediaAnalyze(fp) => {
+                write!(f, "analyze:{}", fp.hash_repr())
+            }
             DedupeKey::MetadataEnrich { candidate_id } => {
                 write!(f, "metadata:{}", candidate_id)
             }
@@ -373,7 +377,11 @@ pub struct JobHandle {
 }
 
 impl JobHandle {
-    pub fn accepted(job_id: JobId, payload: &JobPayload, priority: JobPriority) -> Self {
+    pub fn accepted(
+        job_id: JobId,
+        payload: &JobPayload,
+        priority: JobPriority,
+    ) -> Self {
         Self {
             job_id,
             kind: payload.kind(),
@@ -385,7 +393,11 @@ impl JobHandle {
         }
     }
 
-    pub fn merged(existing: JobId, payload: &JobPayload, priority: JobPriority) -> Self {
+    pub fn merged(
+        existing: JobId,
+        payload: &JobPayload,
+        priority: JobPriority,
+    ) -> Self {
         Self {
             job_id: existing,
             kind: payload.kind(),

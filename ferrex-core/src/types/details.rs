@@ -1,4 +1,6 @@
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
@@ -144,7 +146,14 @@ pub struct Keyword {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct EpisodeGroupMembership {
@@ -155,7 +164,14 @@ pub struct EpisodeGroupMembership {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct GenreInfo {
@@ -164,7 +180,14 @@ pub struct GenreInfo {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct ProductionCompany {
@@ -174,7 +197,14 @@ pub struct ProductionCompany {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct ProductionCountry {
@@ -183,7 +213,14 @@ pub struct ProductionCountry {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct SpokenLanguage {
@@ -192,7 +229,14 @@ pub struct SpokenLanguage {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct NetworkInfo {
@@ -202,7 +246,14 @@ pub struct NetworkInfo {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct RelatedMediaRef {
@@ -235,7 +286,14 @@ pub struct PersonExternalIds {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub enum TmdbDetails {
@@ -246,7 +304,15 @@ pub enum TmdbDetails {
 }
 
 /// Enhanced metadata that includes images, credits, and additional information
-#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct EnhancedMovieDetails {
     // Basic details
@@ -305,7 +371,15 @@ pub struct EnhancedMovieDetails {
     pub similar: Vec<RelatedMediaRef>,
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct EnhancedSeriesDetails {
     // Basic details
@@ -370,7 +444,15 @@ pub struct EnhancedSeriesDetails {
     pub similar: Vec<RelatedMediaRef>,
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct SeasonDetails {
     pub id: u64,
@@ -393,7 +475,15 @@ pub struct SeasonDetails {
     pub translations: Vec<Translation>,
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct EpisodeDetails {
     pub id: u64,
@@ -531,7 +621,14 @@ impl fmt::Debug for EpisodeDetails {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct CastMember {
@@ -560,7 +657,14 @@ pub struct CastMember {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct CrewMember {
@@ -582,7 +686,14 @@ pub struct CrewMember {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq, Hash))]
 pub struct Video {
@@ -623,7 +734,15 @@ pub struct ExternalIds {
 }
 
 // Library reference type - no media references
-#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq, Hash))]
 pub struct LibraryReference {
     pub id: LibraryID,
@@ -638,7 +757,14 @@ pub trait MediaDetailsOptionLike {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub enum MediaDetailsOption {

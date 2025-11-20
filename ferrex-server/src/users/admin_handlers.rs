@@ -57,7 +57,7 @@ pub async fn list_all_users(
     Query(filters): Query<UserFilters>,
 ) -> AppResult<Json<ApiResponse<Vec<AdminUserInfo>>>> {
     // Get all users from database
-    let mut users = state.unit_of_work.users.get_all_users().await?;
+    let mut users = state.unit_of_work().users.get_all_users().await?;
 
     // We'll filter by role after fetching role info
 
@@ -73,16 +73,17 @@ pub async fn list_all_users(
     let mut admin_users = Vec::new();
     for user in users {
         let sessions = state
-            .auth_facade
+            .auth_facade()
             .list_user_sessions(user.id)
             .await
             .map_err(map_facade_error)?;
         let permissions = state
-            .unit_of_work
+            .unit_of_work()
             .rbac
             .get_user_permissions(user.id)
             .await?;
-        let role_names: Vec<String> = permissions.roles.into_iter().map(|r| r.name).collect();
+        let role_names: Vec<String> =
+            permissions.roles.into_iter().map(|r| r.name).collect();
 
         // Apply role filter if specified
         if let Some(ref role_filter) = filters.role
@@ -106,7 +107,8 @@ pub async fn list_all_users(
     let limit = filters.limit.unwrap_or(100).min(1000) as usize;
 
     admin_users.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    let paginated: Vec<_> = admin_users.into_iter().skip(offset).take(limit).collect();
+    let paginated: Vec<_> =
+        admin_users.into_iter().skip(offset).take(limit).collect();
 
     Ok(Json(ApiResponse::success(paginated)))
 }
@@ -119,24 +121,26 @@ pub async fn assign_user_roles(
     Json(request): Json<AssignRolesRequest>,
 ) -> AppResult<Json<ApiResponse<()>>> {
     // Get admin role ID
-    let admin_role_id =
-        Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("Invalid admin role UUID");
+    let admin_role_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001")
+        .expect("Invalid admin role UUID");
 
     // Prevent admin from removing their own admin role
     if admin.id == user_id && !request.role_ids.contains(&admin_role_id) {
         let current_perms = state
-            .unit_of_work
+            .unit_of_work()
             .rbac
             .get_user_permissions(user_id)
             .await?;
         if current_perms.has_role("admin") {
-            return Err(AppError::bad_request("Cannot remove your own admin role"));
+            return Err(AppError::bad_request(
+                "Cannot remove your own admin role",
+            ));
         }
     }
 
     // Verify user exists
     let user = state
-        .unit_of_work
+        .unit_of_work()
         .users
         .get_user_by_id(user_id)
         .await?
@@ -178,7 +182,7 @@ pub async fn delete_user_admin(
 
     // Check if user exists
     let user = state
-        .unit_of_work
+        .unit_of_work()
         .users
         .get_user_by_id(user_id)
         .await?
@@ -186,7 +190,7 @@ pub async fn delete_user_admin(
 
     // Check if user has admin role
     let user_perms = state
-        .unit_of_work
+        .unit_of_work()
         .rbac
         .get_user_permissions(user_id)
         .await?;
@@ -195,7 +199,7 @@ pub async fn delete_user_admin(
     }
 
     // Delete the user
-    state.unit_of_work.users.delete_user(user_id).await?;
+    state.unit_of_work().users.delete_user(user_id).await?;
 
     // Log admin action
     tracing::info!(
@@ -216,7 +220,11 @@ pub async fn register_admin_session(
     Json(request): Json<RegisterAdminSessionRequest>,
 ) -> AppResult<StatusCode> {
     match state
-        .register_admin_session(user.id, request.device_id, request.session_token)
+        .register_admin_session(
+            user.id,
+            request.device_id,
+            request.session_token,
+        )
         .await
     {
         Ok(_) => Ok(StatusCode::CREATED),
@@ -245,7 +253,7 @@ pub async fn get_user_sessions_admin(
 ) -> AppResult<Json<ApiResponse<Vec<ferrex_core::user::UserSession>>>> {
     // Verify user exists
     let user = state
-        .unit_of_work
+        .unit_of_work()
         .users
         .get_user_by_id(user_id)
         .await?
@@ -253,7 +261,7 @@ pub async fn get_user_sessions_admin(
 
     // Get user sessions
     let sessions = state
-        .auth_facade
+        .auth_facade()
         .list_user_sessions(user_id)
         .await
         .map_err(map_facade_error)?;
@@ -268,7 +276,7 @@ pub async fn revoke_user_session_admin(
     Path((user_id, session_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<StatusCode> {
     state
-        .auth_facade
+        .auth_facade()
         .revoke_user_session(user_id, session_id)
         .await
         .map_err(map_facade_error)?;
@@ -302,14 +310,14 @@ pub async fn get_admin_stats(
     Extension(admin): Extension<User>,
 ) -> AppResult<Json<ApiResponse<AdminStats>>> {
     // Get user stats
-    let users = state.unit_of_work.users.get_all_users().await?;
+    let users = state.unit_of_work().users.get_all_users().await?;
     let total_users = users.len() as i64;
 
     // Count users with admin role
     let mut admin_users = 0i64;
     for user in &users {
         let perms = state
-            .unit_of_work
+            .unit_of_work()
             .rbac
             .get_user_permissions(user.id)
             .await?;
@@ -322,7 +330,7 @@ pub async fn get_admin_stats(
     let mut active_sessions = 0;
     for user in &users {
         let sessions = state
-            .auth_facade
+            .auth_facade()
             .list_user_sessions(user.id)
             .await
             .map_err(map_facade_error)?;
@@ -330,7 +338,7 @@ pub async fn get_admin_stats(
     }
 
     // Get library stats
-    let libraries = state.unit_of_work.libraries.list_libraries().await?;
+    let libraries = state.unit_of_work().libraries.list_libraries().await?;
     let total_libraries = libraries.len() as i64;
 
     // Get media stats (simplified - in production you'd want dedicated queries)
@@ -350,18 +358,25 @@ pub async fn get_admin_stats(
 fn map_facade_error(err: AuthFacadeError) -> AppError {
     match err {
         AuthFacadeError::Authentication(err) => map_auth_error(err),
-        AuthFacadeError::UserNotFound => AppError::not_found("User not found".to_string()),
-        AuthFacadeError::Storage(err) => AppError::internal(format!("Storage error: {err}")),
+        AuthFacadeError::UserNotFound => {
+            AppError::not_found("User not found".to_string())
+        }
+        AuthFacadeError::Storage(err) => {
+            AppError::internal(format!("Storage error: {err}"))
+        }
         other => AppError::internal(format!("Auth facade error: {other}")),
     }
 }
 
 fn map_auth_error(err: AuthenticationError) -> AppError {
     match err {
-        AuthenticationError::InvalidCredentials | AuthenticationError::InvalidPin => {
+        AuthenticationError::InvalidCredentials
+        | AuthenticationError::InvalidPin => {
             AppError::forbidden("Invalid credentials".to_string())
         }
-        AuthenticationError::UserNotFound => AppError::not_found("User not found".to_string()),
+        AuthenticationError::UserNotFound => {
+            AppError::not_found("User not found".to_string())
+        }
         AuthenticationError::DeviceNotFound => {
             AppError::not_found("Device session not found".to_string())
         }

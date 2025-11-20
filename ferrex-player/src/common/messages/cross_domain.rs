@@ -19,12 +19,17 @@ use iced::Task;
     ),
     profiling::function
 )]
-pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMessage> {
+pub fn handle_event(
+    state: &mut State,
+    event: CrossDomainEvent,
+) -> Task<DomainMessage> {
     log::debug!("[CrossDomain] Processing event: {:?}", event);
 
     match event {
         // Authentication flow completion
-        CrossDomainEvent::AuthenticationComplete => handle_authentication_complete(state),
+        CrossDomainEvent::AuthenticationComplete => {
+            handle_authentication_complete(state)
+        }
 
         // Auth command execution requested
         CrossDomainEvent::AuthCommandRequested(command) => {
@@ -50,7 +55,9 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
                 auth::messages::AuthCommand::ChangePassword { .. } => {
                     let settings_result = match result {
                         auth::messages::AuthCommandResult::Success => Ok(()),
-                        auth::messages::AuthCommandResult::Error(msg) => Err(msg.clone()),
+                        auth::messages::AuthCommandResult::Error(msg) => {
+                            Err(msg.clone())
+                        }
                     };
                     Task::done(DomainMessage::Settings(
                         crate::domains::settings::messages::Message::PasswordChangeResult(
@@ -62,7 +69,9 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
                 | auth::messages::AuthCommand::ChangeUserPin { .. } => {
                     let settings_result = match result {
                         auth::messages::AuthCommandResult::Success => Ok(()),
-                        auth::messages::AuthCommandResult::Error(msg) => Err(msg.clone()),
+                        auth::messages::AuthCommandResult::Error(msg) => {
+                            Err(msg.clone())
+                        }
                     };
                     Task::done(DomainMessage::Settings(
                         crate::domains::settings::messages::Message::PinChangeResult(
@@ -103,13 +112,21 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         CrossDomainEvent::UserLoggedOut => {
             state.is_authenticated = false;
             state.domains.auth.state.user_permissions = None;
-            log::info!("[CrossDomain] User logged out - emitting cleanup events");
+            log::info!(
+                "[CrossDomain] User logged out - emitting cleanup events"
+            );
 
             // Clear all sensitive data
             Task::batch(vec![
-                Task::done(DomainMessage::Event(CrossDomainEvent::ClearMediaStore)),
-                Task::done(DomainMessage::Event(CrossDomainEvent::ClearLibraries)),
-                Task::done(DomainMessage::Event(CrossDomainEvent::ClearCurrentShowData)),
+                Task::done(DomainMessage::Event(
+                    CrossDomainEvent::ClearMediaStore,
+                )),
+                Task::done(DomainMessage::Event(
+                    CrossDomainEvent::ClearLibraries,
+                )),
+                Task::done(DomainMessage::Event(
+                    CrossDomainEvent::ClearCurrentShowData,
+                )),
             ])
         }
 
@@ -160,12 +177,15 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
             Task::none()
         }
         CrossDomainEvent::MediaLoaded => {
-            log::info!("[CrossDomain] Media loaded - running search calibration");
+            log::info!(
+                "[CrossDomain] Media loaded - running search calibration"
+            );
             // Run search calibration after media is loaded
             Task::perform(
                 async move {
                     // Small delay to ensure media store is fully populated
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500))
+                        .await;
                 },
                 |_| {
                     DomainMessage::Search(crate::domains::search::messages::Message::RunCalibration)
@@ -188,8 +208,10 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
             // Derive resume position from media domain watch state (resume-at-last-position by default)
             let mut resume_opt: Option<f32> = None;
             let mut watch_duration_hint: Option<f64> = None;
-            if let Some(watch_state) = &state.domains.media.state.user_watch_state
-                && let Some(item) = watch_state.get_by_media_id(media_id.as_uuid())
+            if let Some(watch_state) =
+                &state.domains.media.state.user_watch_state
+                && let Some(item) =
+                    watch_state.get_by_media_id(media_id.as_uuid())
             {
                 // Use the last known position from watch state
                 if item.position > 0.0 && item.duration > 0.0 {
@@ -213,7 +235,8 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
             // Seed player state with progress hints so UI can update immediately
             state.domains.player.state.last_valid_position =
                 resume_opt.map(|pos| pos as f64).unwrap_or(0.0);
-            state.domains.player.state.last_valid_duration = duration_hint.unwrap_or(0.0);
+            state.domains.player.state.last_valid_duration =
+                duration_hint.unwrap_or(0.0);
 
             // Store resume position so the player picks it up during PlayMediaWithId
             state.domains.media.state.pending_resume_position = resume_opt;
@@ -221,13 +244,18 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
             state.domains.player.state.pending_resume_position = resume_opt;
 
             Task::done(DomainMessage::Player(
-                crate::domains::player::messages::Message::PlayMediaWithId(media_file, media_id),
+                crate::domains::player::messages::Message::PlayMediaWithId(
+                    media_file, media_id,
+                ),
             ))
         }
 
         // Legacy transcoding events (deprecated)
-        CrossDomainEvent::RequestTranscoding(_) | CrossDomainEvent::TranscodingReady(_) => {
-            log::warn!("[CrossDomain] Legacy transcoding event received - ignoring");
+        CrossDomainEvent::RequestTranscoding(_)
+        | CrossDomainEvent::TranscodingReady(_) => {
+            log::warn!(
+                "[CrossDomain] Legacy transcoding event received - ignoring"
+            );
             Task::none()
         }
 
@@ -275,9 +303,9 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
         // Media playback events
         CrossDomainEvent::MediaStartedPlaying(media_file) => {
             log::info!("[CrossDomain] Media started playing");
-            Task::done(DomainMessage::Player(player::messages::Message::PlayMedia(
-                media_file,
-            )))
+            Task::done(DomainMessage::Player(
+                player::messages::Message::PlayMedia(media_file),
+            ))
         }
 
         CrossDomainEvent::MediaStopped => {
@@ -307,7 +335,10 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
 
         // Metadata events
         CrossDomainEvent::BatchMetadataReady(items) => {
-            log::info!("[CrossDomain] Batch metadata ready: {} items", items.len());
+            log::info!(
+                "[CrossDomain] Batch metadata ready: {} items",
+                items.len()
+            );
 
             // Log details about what we received
             let movies_with_details = 0;
@@ -401,12 +432,19 @@ pub fn handle_event(state: &mut State, event: CrossDomainEvent) -> Task<DomainMe
             use crate::infrastructure::api_types::Media;
 
             let ui_message = match media_ref {
-                Media::Movie(movie) => ui::messages::Message::ViewMovieDetails(movie.id),
-                Media::Series(series) => ui::messages::Message::ViewTvShow(series.id),
-                Media::Season(season) => {
-                    ui::messages::Message::ViewSeason(season.series_id, season.id)
+                Media::Movie(movie) => {
+                    ui::messages::Message::ViewMovieDetails(movie.id)
                 }
-                Media::Episode(episode) => ui::messages::Message::ViewEpisode(episode.id),
+                Media::Series(series) => {
+                    ui::messages::Message::ViewTvShow(series.id)
+                }
+                Media::Season(season) => ui::messages::Message::ViewSeason(
+                    season.series_id,
+                    season.id,
+                ),
+                Media::Episode(episode) => {
+                    ui::messages::Message::ViewEpisode(episode.id)
+                }
             };
 
             Task::done(DomainMessage::Ui(ui_message))

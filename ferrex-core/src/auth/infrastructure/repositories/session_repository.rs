@@ -6,7 +6,9 @@ use sqlx::PgPool;
 use std::fmt;
 use uuid::Uuid;
 
-use crate::auth::domain::repositories::{AuthSessionRecord, AuthSessionRepository};
+use crate::auth::domain::repositories::{
+    AuthSessionRecord, AuthSessionRepository,
+};
 use crate::auth::domain::value_objects::{RevocationReason, SessionScope};
 
 pub struct PostgresAuthSessionRepository {
@@ -25,7 +27,8 @@ impl PostgresAuthSessionRepository {
     }
 
     fn scope_from_str(&self, scope: &str) -> Result<SessionScope> {
-        SessionScope::try_from(scope).map_err(|_| anyhow!("invalid session scope in database"))
+        SessionScope::try_from(scope)
+            .map_err(|_| anyhow!("invalid session scope in database"))
     }
 
     fn map_row(
@@ -60,7 +63,10 @@ impl PostgresAuthSessionRepository {
 
 #[async_trait]
 impl AuthSessionRepository for PostgresAuthSessionRepository {
-    async fn find_by_id(&self, session_id: Uuid) -> Result<Option<AuthSessionRecord>> {
+    async fn find_by_id(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Option<AuthSessionRecord>> {
         let record = sqlx::query!(
             r#"
             SELECT
@@ -140,7 +146,11 @@ impl AuthSessionRepository for PostgresAuthSessionRepository {
         Ok(record.id)
     }
 
-    async fn revoke_by_hash(&self, token_hash: &str, reason: RevocationReason) -> Result<()> {
+    async fn revoke_by_hash(
+        &self,
+        token_hash: &str,
+        reason: RevocationReason,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             UPDATE auth_sessions
@@ -159,7 +169,10 @@ impl AuthSessionRepository for PostgresAuthSessionRepository {
         Ok(())
     }
 
-    async fn find_by_hash(&self, token_hash: &str) -> Result<Option<AuthSessionRecord>> {
+    async fn find_by_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<AuthSessionRecord>> {
         let record = sqlx::query!(
             r#"
             SELECT
@@ -213,7 +226,10 @@ impl AuthSessionRepository for PostgresAuthSessionRepository {
         Ok(())
     }
 
-    async fn list_by_user(&self, user_id: Uuid) -> Result<Vec<AuthSessionRecord>> {
+    async fn list_by_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<AuthSessionRecord>> {
         let rows = sqlx::query!(
             r#"
             SELECT
@@ -256,7 +272,11 @@ impl AuthSessionRepository for PostgresAuthSessionRepository {
             .collect()
     }
 
-    async fn revoke_by_user(&self, user_id: Uuid, reason: RevocationReason) -> Result<()> {
+    async fn revoke_by_user(
+        &self,
+        user_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             UPDATE auth_sessions
@@ -298,7 +318,11 @@ impl AuthSessionRepository for PostgresAuthSessionRepository {
         Ok(())
     }
 
-    async fn revoke_by_id(&self, session_id: Uuid, reason: RevocationReason) -> Result<()> {
+    async fn revoke_by_id(
+        &self,
+        session_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             UPDATE auth_sessions

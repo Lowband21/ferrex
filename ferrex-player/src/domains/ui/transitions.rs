@@ -81,7 +81,11 @@ pub struct Transition<T: Clone> {
 )]
 impl<T: Clone> Transition<T> {
     /// Create a new transition
-    pub fn new(initial_value: T, duration: Duration, easing: EasingFunction) -> Self {
+    pub fn new(
+        initial_value: T,
+        duration: Duration,
+        easing: EasingFunction,
+    ) -> Self {
         Self {
             from: initial_value.clone(),
             to: initial_value,
@@ -109,7 +113,8 @@ impl<T: Clone> Transition<T> {
     pub fn update(&mut self) {
         if let Some(start) = self.start_time {
             let elapsed = Instant::now().duration_since(start);
-            let raw_progress = elapsed.as_secs_f32() / self.duration.as_secs_f32();
+            let raw_progress =
+                elapsed.as_secs_f32() / self.duration.as_secs_f32();
 
             if raw_progress >= 1.0 {
                 self.progress = 1.0;
@@ -173,7 +178,11 @@ impl ColorTransitionState {
     }
 
     /// Transition to new colors
-    pub fn transition_to(&mut self, primary: iced::Color, secondary: iced::Color) {
+    pub fn transition_to(
+        &mut self,
+        primary: iced::Color,
+        secondary: iced::Color,
+    ) {
         self.primary.transition_to(primary);
         self.secondary.transition_to(secondary);
     }
@@ -305,13 +314,21 @@ impl BackdropTransitionState {
                 self.slide_offset.to,
                 self.slide_offset.get_progress(),
             ),
-            interpolate_f32(self.scale.from, self.scale.to, self.scale.get_progress()),
+            interpolate_f32(
+                self.scale.from,
+                self.scale.to,
+                self.scale.get_progress(),
+            ),
         )
     }
 }
 
 /// Interpolate between two colors
-fn interpolate_color(from: iced::Color, to: iced::Color, t: f32) -> iced::Color {
+fn interpolate_color(
+    from: iced::Color,
+    to: iced::Color,
+    t: f32,
+) -> iced::Color {
     iced::Color {
         r: interpolate_f32(from.r, to.r, t),
         g: interpolate_f32(from.g, to.g, t),
@@ -374,7 +391,7 @@ impl GradientTransitionState {
 // Non-functional
 pub fn generate_random_gradient_center() -> (f32, f32) {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     (
         0.01 + rng.r#gen::<f32>() * 0.99,
         0.01 + rng.r#gen::<f32>() * 0.9,

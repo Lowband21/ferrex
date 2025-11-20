@@ -27,7 +27,10 @@ impl PostgresUserAuthRepository {
 
 #[async_trait]
 impl UserAuthenticationRepository for PostgresUserAuthRepository {
-    async fn find_by_id(&self, user_id: Uuid) -> Result<Option<UserAuthentication>> {
+    async fn find_by_id(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<UserAuthentication>> {
         let user = sqlx::query!(
             r#"
             SELECT
@@ -53,7 +56,8 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
 
         match user {
             Some(row) => {
-                let failed_attempts = row.failed_login_attempts.clamp(0, u8::MAX as i16) as u8;
+                let failed_attempts =
+                    row.failed_login_attempts.clamp(0, u8::MAX as i16) as u8;
 
                 let user_auth = UserAuthentication::hydrate(
                     row.id,
@@ -76,7 +80,10 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
         }
     }
 
-    async fn find_by_username(&self, username: &str) -> Result<Option<UserAuthentication>> {
+    async fn find_by_username(
+        &self,
+        username: &str,
+    ) -> Result<Option<UserAuthentication>> {
         let user = sqlx::query!(
             r#"
             SELECT
@@ -102,7 +109,8 @@ impl UserAuthenticationRepository for PostgresUserAuthRepository {
 
         match user {
             Some(row) => {
-                let failed_attempts = row.failed_login_attempts.clamp(0, u8::MAX as i16) as u8;
+                let failed_attempts =
+                    row.failed_login_attempts.clamp(0, u8::MAX as i16) as u8;
 
                 let user_auth = UserAuthentication::hydrate(
                     row.id,

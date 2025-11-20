@@ -10,7 +10,9 @@ use crate::types::ids::LibraryID;
 use crate::types::library::LibraryType;
 use tracing::info;
 
-use super::messages::{FolderScanSummary, MediaFileDiscovered, ParentDescriptors};
+use super::messages::{
+    FolderScanSummary, MediaFileDiscovered, ParentDescriptors,
+};
 use crate::orchestration::job::{FolderScanJob, MediaFingerprint, ScanReason};
 use crate::orchestration::scan_cursor::{ListingEntry, compute_listing_hash};
 
@@ -58,7 +60,10 @@ impl FolderScanState {
         }
     }
 
-    pub fn complete(mut self, mut summary: FolderScanSummary) -> FolderScanSummary {
+    pub fn complete(
+        mut self,
+        mut summary: FolderScanSummary,
+    ) -> FolderScanSummary {
         let completed_at = Utc::now();
         self.completed_at = Some(completed_at);
         summary.completed_at = completed_at;
@@ -69,7 +74,10 @@ impl FolderScanState {
 /// Trait describing behaviour required from folder scan actors.
 #[async_trait]
 pub trait FolderScanActor: Send + Sync {
-    async fn plan_listing(&self, command: &FolderScanCommand) -> Result<FolderListingPlan>;
+    async fn plan_listing(
+        &self,
+        command: &FolderScanCommand,
+    ) -> Result<FolderListingPlan>;
 
     async fn discover_media(
         &self,
@@ -155,7 +163,11 @@ impl DefaultFolderScanActor {
         is_media_file_path(path)
     }
 
-    fn is_subfolder_relevant(&self, name: &str, library_type: LibraryType) -> bool {
+    fn is_subfolder_relevant(
+        &self,
+        name: &str,
+        library_type: LibraryType,
+    ) -> bool {
         match library_type {
             LibraryType::Series => {
                 // Season folders, specials, extras
@@ -206,7 +218,9 @@ impl DefaultFolderScanActor {
                     let modified_ms = metadata
                         .modified()
                         .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .and_then(|t| {
+                            t.duration_since(std::time::UNIX_EPOCH).ok()
+                        })
                         .map(|d| d.as_millis() as i64)
                         .unwrap_or_default();
                     (is_dir, size, modified_ms)
@@ -233,7 +247,10 @@ impl DefaultFolderScanActor {
 
 #[async_trait]
 impl FolderScanActor for DefaultFolderScanActor {
-    async fn plan_listing(&self, command: &FolderScanCommand) -> Result<FolderListingPlan> {
+    async fn plan_listing(
+        &self,
+        command: &FolderScanCommand,
+    ) -> Result<FolderListingPlan> {
         info!(
             target: "scan::jobs",
             library_id = %command.context.library_id,
@@ -256,7 +273,8 @@ impl FolderScanActor for DefaultFolderScanActor {
                     continue;
                 }
 
-                let filter = self.should_filter_directories(&command.context.parent);
+                let filter =
+                    self.should_filter_directories(&command.context.parent);
                 if filter
                     && let Some(lib_type) = command.context.parent.resolved_type
                     && !self.is_subfolder_relevant(&entry.name, lib_type)
@@ -311,8 +329,12 @@ impl FolderScanActor for DefaultFolderScanActor {
             };
 
             let kind_hint = match context.parent.resolved_type {
-                Some(LibraryType::Movies) => super::messages::MediaKindHint::Movie,
-                Some(LibraryType::Series) => super::messages::MediaKindHint::Episode,
+                Some(LibraryType::Movies) => {
+                    super::messages::MediaKindHint::Movie
+                }
+                Some(LibraryType::Series) => {
+                    super::messages::MediaKindHint::Episode
+                }
                 None => super::messages::MediaKindHint::Unknown,
             };
 
@@ -386,13 +408,16 @@ mod tests {
 
     use crate::{
         orchestration::{
-            DefaultFolderScanActor, FolderScanActor, FolderScanCommand, FolderScanContext,
-            FolderScanJob, ParentDescriptors, ScanReason,
+            DefaultFolderScanActor, FolderScanActor, FolderScanCommand,
+            FolderScanContext, FolderScanJob, ParentDescriptors, ScanReason,
         },
         types::{LibraryID, LibraryType, MovieID},
     };
 
-    fn make_command(path: &Path, parent: ParentDescriptors) -> FolderScanCommand {
+    fn make_command(
+        path: &Path,
+        parent: ParentDescriptors,
+    ) -> FolderScanCommand {
         let folder_path_norm = path.to_string_lossy().to_string();
         let library_id = LibraryID(Uuid::now_v7());
         FolderScanCommand {

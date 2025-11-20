@@ -4,8 +4,10 @@
 //! Different sections are shown/hidden based on what the user can access.
 
 use crate::{
-    common::ui_utils::icon_text, domains::auth::permissions::StatePermissionExt,
-    domains::ui::messages::Message, domains::ui::theme, state_refactored::State,
+    common::ui_utils::icon_text,
+    domains::auth::permissions::StatePermissionExt,
+    domains::ui::messages::Message, domains::ui::theme,
+    state_refactored::State,
 };
 use iced::{
     Element, Length,

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT iso_3166_1, rating, rating_system, descriptors FROM episode_content_ratings WHERE episode_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "iso_3166_1",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "rating",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "rating_system",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "descriptors",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "9cd33e380996dc5bf3be9472f0bbedaacab1ea126780939bcc7a22ab594952cd"
+}

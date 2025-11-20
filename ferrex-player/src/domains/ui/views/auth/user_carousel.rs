@@ -1,6 +1,8 @@
 //! User selection carousel view
 
-use super::components::{auth_card, auth_container, error_message, spacing, title};
+use super::components::{
+    auth_card, auth_container, error_message, spacing, title,
+};
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::messages as auth;
 use crate::domains::ui::views::carousel::CarouselState;
@@ -43,7 +45,8 @@ impl Default for UserCarouselState {
 impl UserCarouselState {
     /// Create new state with users
     pub fn new(users: Vec<crate::domains::auth::dto::UserListItemDto>) -> Self {
-        let mut carousel_state = CarouselState::new_with_dimensions(users.len(), 120.0, 20.0);
+        let mut carousel_state =
+            CarouselState::new_with_dimensions(users.len(), 120.0, 20.0);
         carousel_state.items_per_page = 5; // Show 5 users at a time
 
         Self {
@@ -55,7 +58,10 @@ impl UserCarouselState {
     }
 
     /// Update users and refresh carousel state
-    pub fn set_users(&mut self, users: Vec<crate::domains::auth::dto::UserListItemDto>) {
+    pub fn set_users(
+        &mut self,
+        users: Vec<crate::domains::auth::dto::UserListItemDto>,
+    ) {
         self.users = users;
         self.carousel_state.set_total_items(self.users.len());
         self.selected_index = None;
@@ -74,7 +80,9 @@ impl UserCarouselState {
     }
 
     /// Get selected user
-    pub fn selected_user(&self) -> Option<&crate::domains::auth::dto::UserListItemDto> {
+    pub fn selected_user(
+        &self,
+    ) -> Option<&crate::domains::auth::dto::UserListItemDto> {
         self.selected_index.and_then(|i| self.users.get(i))
     }
 }
@@ -104,13 +112,13 @@ pub fn view_user_carousel<'a>(
     // User carousel
     if state.users.is_empty() {
         content = content.push(
-            container(
-                text("No users found")
-                    .size(16)
-                    .style(|theme: &Theme| text::Style {
-                        color: Some(theme.extended_palette().background.strong.text),
-                    }),
-            )
+            container(text("No users found").size(16).style(
+                |theme: &Theme| text::Style {
+                    color: Some(
+                        theme.extended_palette().background.strong.text,
+                    ),
+                },
+            ))
             .width(Length::Fill)
             .padding(40)
             .align_x(iced::alignment::Horizontal::Center),
@@ -131,11 +139,16 @@ pub fn view_user_selection_with_carousel<'a>(
     user_permissions: Option<&'a UserPermissions>,
 ) -> Element<'a, DomainMessage> {
     // Create a static carousel state that will persist between renders
-    static CAROUSEL_STATE: std::sync::OnceLock<std::sync::Mutex<CarouselState>> =
-        std::sync::OnceLock::new();
+    static CAROUSEL_STATE: std::sync::OnceLock<
+        std::sync::Mutex<CarouselState>,
+    > = std::sync::OnceLock::new();
 
     let carousel_state = CAROUSEL_STATE.get_or_init(|| {
-        std::sync::Mutex::new(CarouselState::new_with_dimensions(users.len(), 120.0, 20.0))
+        std::sync::Mutex::new(CarouselState::new_with_dimensions(
+            users.len(),
+            120.0,
+            20.0,
+        ))
     });
 
     // Update carousel state if user count changed
@@ -156,13 +169,13 @@ pub fn view_user_selection_with_carousel<'a>(
     // User carousel
     if users.is_empty() {
         content = content.push(
-            container(
-                text("No users found")
-                    .size(16)
-                    .style(|theme: &Theme| text::Style {
-                        color: Some(theme.extended_palette().background.strong.text),
-                    }),
-            )
+            container(text("No users found").size(16).style(
+                |theme: &Theme| text::Style {
+                    color: Some(
+                        theme.extended_palette().background.strong.text,
+                    ),
+                },
+            ))
             .width(Length::Fill)
             .padding(40)
             .align_x(iced::alignment::Horizontal::Center),
@@ -242,21 +255,23 @@ fn create_user_carousel<'a>(
 
     // Add "Add User" button for admins
     if let Some(permissions) = user_permissions
-        && (permissions.has_role("admin") || permissions.has_permission("users:create"))
+        && (permissions.has_role("admin")
+            || permissions.has_permission("users:create"))
     {
         user_row = user_row.push(create_add_user_button());
     }
 
     // Create scrollable carousel
-    let carousel_content = scrollable(container(user_row).padding([20, 40]).width(Length::Fill))
-        .id(carousel_state.scrollable_id.clone())
-        .direction(scrollable::Direction::Horizontal(
-            scrollable::Scrollbar::new()
-                .width(0) // Hide scrollbar
-                .scroller_width(0),
-        ))
-        .width(Length::Fill)
-        .height(Length::Fixed(200.0));
+    let carousel_content =
+        scrollable(container(user_row).padding([20, 40]).width(Length::Fill))
+            .id(carousel_state.scrollable_id.clone())
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new()
+                    .width(0) // Hide scrollbar
+                    .scroller_width(0),
+            ))
+            .width(Length::Fill)
+            .height(Length::Fixed(200.0));
 
     // Build complete carousel layout
     column![
@@ -295,7 +310,8 @@ fn create_user_carousel_from_data<'a>(
 
     // Add "Add User" button for admins
     if let Some(permissions) = user_permissions
-        && (permissions.has_role("admin") || permissions.has_permission("users:create"))
+        && (permissions.has_role("admin")
+            || permissions.has_permission("users:create"))
     {
         user_row = user_row.push(create_add_user_button());
     }
@@ -322,27 +338,29 @@ fn create_user_avatar<'a>(
 ) -> Element<'a, DomainMessage> {
     let avatar_content = column![
         // Avatar circle
-        container(text(user.display_name.chars().next().unwrap_or('U')).size(32))
-            .width(Length::Fixed(80.0))
-            .height(Length::Fixed(80.0))
-            .align_x(iced::alignment::Horizontal::Center)
-            .align_y(iced::alignment::Vertical::Center)
-            .style(move |theme: &Theme| {
-                let palette = theme.extended_palette();
-                container::Style {
-                    background: Some(if is_selected {
-                        palette.primary.base.color.into()
-                    } else {
-                        palette.primary.weak.color.into()
-                    }),
-                    border: iced::Border {
-                        radius: 40.0.into(),
-                        width: if is_selected { 3.0 } else { 0.0 },
-                        color: palette.primary.strong.color,
-                    },
-                    ..Default::default()
-                }
-            }),
+        container(
+            text(user.display_name.chars().next().unwrap_or('U')).size(32)
+        )
+        .width(Length::Fixed(80.0))
+        .height(Length::Fixed(80.0))
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center)
+        .style(move |theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+                background: Some(if is_selected {
+                    palette.primary.base.color.into()
+                } else {
+                    palette.primary.weak.color.into()
+                }),
+                border: iced::Border {
+                    radius: 40.0.into(),
+                    width: if is_selected { 3.0 } else { 0.0 },
+                    color: palette.primary.strong.color,
+                },
+                ..Default::default()
+            }
+        }),
         Space::new().height(8),
         // User name
         text(&user.display_name)
@@ -410,7 +428,10 @@ fn button_style(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
-fn button_style_disabled(theme: &Theme, _status: button::Status) -> button::Style {
+fn button_style_disabled(
+    theme: &Theme,
+    _status: button::Status,
+) -> button::Style {
     let palette = theme.extended_palette();
     button::Style {
         background: Some(palette.background.weak.color.into()),

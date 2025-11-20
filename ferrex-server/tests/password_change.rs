@@ -29,7 +29,8 @@ async fn user_password_change_revokes_tokens(pool: PgPool) -> Result<()> {
     let (router, state, tempdir) = app.into_parts();
     let _tempdir = tempdir;
     let router: Router<()> = router.with_state(state.clone());
-    let make_service = router.into_make_service_with_connect_info::<SocketAddr>();
+    let make_service =
+        router.into_make_service_with_connect_info::<SocketAddr>();
     let server = TestServer::builder()
         .http_transport()
         .build(make_service)
@@ -105,7 +106,8 @@ async fn admin_password_reset_revokes_user_tokens(pool: PgPool) -> Result<()> {
     let (router, state, tempdir) = app.into_parts();
     let _tempdir = tempdir;
     let router: Router<()> = router.with_state(state.clone());
-    let make_service = router.into_make_service_with_connect_info::<SocketAddr>();
+    let make_service =
+        router.into_make_service_with_connect_info::<SocketAddr>();
     let server = TestServer::builder()
         .http_transport()
         .build(make_service)
@@ -123,12 +125,15 @@ async fn admin_password_reset_revokes_user_tokens(pool: PgPool) -> Result<()> {
         .await;
     admin_register.assert_status_ok();
     let admin_body: serde_json::Value = admin_register.json();
-    let admin_access = extract_token_field(&admin_body, "access_token").to_string();
-    let admin_user_id = admin_body["data"]["user_id"].as_str().unwrap().to_string();
+    let admin_access =
+        extract_token_field(&admin_body, "access_token").to_string();
+    let admin_user_id =
+        admin_body["data"]["user_id"].as_str().unwrap().to_string();
     let admin_uuid = Uuid::parse_str(&admin_user_id)?;
-    let admin_role_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001")?;
+    let admin_role_id =
+        Uuid::parse_str("00000000-0000-0000-0000-000000000001")?;
     state
-        .unit_of_work
+        .unit_of_work()
         .rbac
         .assign_user_role(admin_uuid, admin_role_id, admin_uuid)
         .await?;
@@ -145,11 +150,15 @@ async fn admin_password_reset_revokes_user_tokens(pool: PgPool) -> Result<()> {
         .await;
     member_register.assert_status_ok();
     let member_body: serde_json::Value = member_register.json();
-    let member_access = extract_token_field(&member_body, "access_token").to_string();
-    let member_refresh = extract_token_field(&member_body, "refresh_token").to_string();
-    let member_user_id = member_body["data"]["user_id"].as_str().unwrap().to_string();
+    let member_access =
+        extract_token_field(&member_body, "access_token").to_string();
+    let member_refresh =
+        extract_token_field(&member_body, "refresh_token").to_string();
+    let member_user_id =
+        member_body["data"]["user_id"].as_str().unwrap().to_string();
 
-    let reset_path = route_utils::replace_param(v1::users::ITEM, "{id}", &member_user_id);
+    let reset_path =
+        route_utils::replace_param(v1::users::ITEM, "{id}", &member_user_id);
     let reset_password = "ResetMember#456";
     let reset = server
         .put(&reset_path)

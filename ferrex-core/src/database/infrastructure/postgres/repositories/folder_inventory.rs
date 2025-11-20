@@ -3,7 +3,8 @@ use std::{fmt, path::Path};
 
 use crate::database::ports::folder_inventory::FolderInventoryRepository;
 use crate::database::traits::{
-    FolderDiscoverySource, FolderInventory, FolderProcessingStatus, FolderScanFilters, FolderType,
+    FolderDiscoverySource, FolderInventory, FolderProcessingStatus,
+    FolderScanFilters, FolderType,
 };
 use crate::error::{MediaError, Result};
 use crate::types::ids::LibraryID;
@@ -56,7 +57,10 @@ impl FolderInventoryRepository for PostgresFolderInventoryRepository {
             .await
     }
 
-    async fn get_folder_inventory(&self, library_id: LibraryID) -> Result<Vec<FolderInventory>> {
+    async fn get_folder_inventory(
+        &self,
+        library_id: LibraryID,
+    ) -> Result<Vec<FolderInventory>> {
         self.get_folder_inventory_impl(library_id).await
     }
 
@@ -103,11 +107,17 @@ impl FolderInventoryRepository for PostgresFolderInventoryRepository {
         self.mark_folder_processed_impl(folder_id).await
     }
 
-    async fn get_child_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>> {
+    async fn get_child_folders(
+        &self,
+        parent_folder_id: Uuid,
+    ) -> Result<Vec<FolderInventory>> {
         self.get_child_folders_impl(parent_folder_id).await
     }
 
-    async fn get_season_folders(&self, parent_folder_id: Uuid) -> Result<Vec<FolderInventory>> {
+    async fn get_season_folders(
+        &self,
+        parent_folder_id: Uuid,
+    ) -> Result<Vec<FolderInventory>> {
         self.get_season_folders_impl(parent_folder_id).await
     }
 }
@@ -202,7 +212,10 @@ impl PostgresFolderInventoryRepository {
             .fetch_all(self.pool())
             .await
             .map_err(|e| {
-                MediaError::Internal(format!("Failed to get folders needing scan: {}", e))
+                MediaError::Internal(format!(
+                    "Failed to get folders needing scan: {}",
+                    e
+                ))
             })?;
 
         Ok(rows.into_iter().map(|row| row.into()).collect())
@@ -242,7 +255,12 @@ impl PostgresFolderInventoryRepository {
         )
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to update folder status: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to update folder status: {}",
+                e
+            ))
+        })?;
 
         Ok(())
     }
@@ -270,7 +288,12 @@ impl PostgresFolderInventoryRepository {
         )
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to record folder scan error: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to record folder scan error: {}",
+                e
+            ))
+        })?;
 
         Ok(())
     }
@@ -298,28 +321,38 @@ impl PostgresFolderInventoryRepository {
         .bind(library_id.as_uuid())
         .fetch_all(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get folder inventory: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to get folder inventory: {}",
+                e
+            ))
+        })?;
 
         Ok(rows.into_iter().map(|row| row.into()).collect())
     }
 
     /// Upsert a folder (insert or update if exists)
-    pub async fn upsert_folder_impl(&self, folder: &FolderInventory) -> Result<Uuid> {
+    pub async fn upsert_folder_impl(
+        &self,
+        folder: &FolderInventory,
+    ) -> Result<Uuid> {
         let folder_type_str = serde_json::to_string(&folder.folder_type)
             .unwrap()
             .trim_matches('"')
             .to_string();
-        let discovery_source_str = serde_json::to_string(&folder.discovery_source)
-            .unwrap()
-            .trim_matches('"')
-            .to_string();
-        let processing_status_str = serde_json::to_string(&folder.processing_status)
-            .unwrap()
-            .trim_matches('"')
-            .to_string();
+        let discovery_source_str =
+            serde_json::to_string(&folder.discovery_source)
+                .unwrap()
+                .trim_matches('"')
+                .to_string();
+        let processing_status_str =
+            serde_json::to_string(&folder.processing_status)
+                .unwrap()
+                .trim_matches('"')
+                .to_string();
 
-        let file_types_json =
-            serde_json::to_value(&folder.file_types).unwrap_or_else(|_| serde_json::json!([]));
+        let file_types_json = serde_json::to_value(&folder.file_types)
+            .unwrap_or_else(|_| serde_json::json!([]));
 
         let result = sqlx::query!(
             r#"
@@ -396,7 +429,12 @@ impl PostgresFolderInventoryRepository {
         )
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to cleanup stale folders: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to cleanup stale folders: {}",
+                e
+            ))
+        })?;
 
         let deleted_count = result.rows_affected() as u32;
 
@@ -434,7 +472,9 @@ impl PostgresFolderInventoryRepository {
         .bind(path.to_string_lossy().to_string())
         .fetch_optional(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get folder by path: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to get folder by path: {}", e))
+        })?;
 
         Ok(row.map(|r| r.into()))
     }
@@ -448,8 +488,8 @@ impl PostgresFolderInventoryRepository {
         total_size_bytes: i64,
         file_types: Vec<String>,
     ) -> Result<()> {
-        let file_types_json =
-            serde_json::to_value(&file_types).unwrap_or_else(|_| serde_json::json!([]));
+        let file_types_json = serde_json::to_value(&file_types)
+            .unwrap_or_else(|_| serde_json::json!([]));
 
         sqlx::query!(
             r#"
@@ -469,13 +509,21 @@ impl PostgresFolderInventoryRepository {
         )
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to update folder stats: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to update folder stats: {}",
+                e
+            ))
+        })?;
 
         Ok(())
     }
 
     /// Mark folder as processed
-    pub async fn mark_folder_processed_impl(&self, folder_id: Uuid) -> Result<()> {
+    pub async fn mark_folder_processed_impl(
+        &self,
+        folder_id: Uuid,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             UPDATE folder_inventory
@@ -489,7 +537,12 @@ impl PostgresFolderInventoryRepository {
         )
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to mark folder as processed: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to mark folder as processed: {}",
+                e
+            ))
+        })?;
 
         Ok(())
     }
@@ -517,7 +570,9 @@ impl PostgresFolderInventoryRepository {
         .bind(parent_folder_id)
         .fetch_all(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get child folders: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to get child folders: {}", e))
+        })?;
 
         Ok(rows.into_iter().map(|row| row.into()).collect())
     }
@@ -545,7 +600,9 @@ impl PostgresFolderInventoryRepository {
         .bind(parent_folder_id)
         .fetch_all(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get season folders: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to get season folders: {}", e))
+        })?;
 
         Ok(rows.into_iter().map(|row| row.into()).collect())
     }
@@ -596,14 +653,19 @@ impl fmt::Debug for FolderInventoryRow {
             serde_json::Value::String(value) => {
                 format!("string(len={})", value.len())
             }
-            serde_json::Value::Array(values) => format!("array(len={})", values.len()),
-            serde_json::Value::Object(map) => format!("object(keys={})", map.len()),
+            serde_json::Value::Array(values) => {
+                format!("array(len={})", values.len())
+            }
+            serde_json::Value::Object(map) => {
+                format!("object(keys={})", map.len())
+            }
         };
 
         let processing_error = self.processing_error.as_ref().map(|msg| {
             const MAX_CHARS: usize = 120;
             if msg.chars().count() > MAX_CHARS {
-                let mut truncated: String = msg.chars().take(MAX_CHARS).collect();
+                let mut truncated: String =
+                    msg.chars().take(MAX_CHARS).collect();
                 truncated.push('…');
                 truncated
             } else {

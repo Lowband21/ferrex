@@ -64,7 +64,9 @@ pub fn image_loading(
 fn image_loader_stream(
     api_service: Arc<dyn ApiService>,
     server_url: String,
-    wake_receiver_arc: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
+    wake_receiver_arc: Arc<
+        Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>,
+    >,
     auth_token: Option<String>,
 ) -> impl futures::Stream<Item = Message> {
     enum ImageLoaderState {
@@ -117,23 +119,38 @@ fn image_loader_stream(
                             let (media_type, id) = match &image_type {
                                 ImageType::Movie => (
                                     "movie",
-                                    request.media_id.hyphenated().encode_lower(&mut buf),
+                                    request
+                                        .media_id
+                                        .hyphenated()
+                                        .encode_lower(&mut buf),
                                 ),
                                 ImageType::Series => (
                                     "series",
-                                    request.media_id.hyphenated().encode_lower(&mut buf),
+                                    request
+                                        .media_id
+                                        .hyphenated()
+                                        .encode_lower(&mut buf),
                                 ),
                                 ImageType::Season => (
                                     "season",
-                                    request.media_id.hyphenated().encode_lower(&mut buf),
+                                    request
+                                        .media_id
+                                        .hyphenated()
+                                        .encode_lower(&mut buf),
                                 ),
                                 ImageType::Episode => (
                                     "episode",
-                                    request.media_id.hyphenated().encode_lower(&mut buf),
+                                    request
+                                        .media_id
+                                        .hyphenated()
+                                        .encode_lower(&mut buf),
                                 ),
                                 ImageType::Person => (
                                     "person",
-                                    request.media_id.hyphenated().encode_lower(&mut buf),
+                                    request
+                                        .media_id
+                                        .hyphenated()
+                                        .encode_lower(&mut buf),
                                 ),
                             };
 
@@ -147,7 +164,9 @@ fn image_loader_stream(
 
                             // Server uses /images/{type}/{id}/{category}/{index}
                             if server_url.is_empty() {
-                                log::error!("Server URL is empty! Cannot download images.");
+                                log::error!(
+                                    "Server URL is empty! Cannot download images."
+                                );
                                 return Some((
                                     Message::UnifiedImageLoadFailed(
                                         request,
@@ -185,7 +204,10 @@ fn image_loader_stream(
 
                             let message = match result.await {
                                 Ok(bytes) => {
-                                    let handle = iced::widget::image::Handle::from_bytes(bytes);
+                                    let handle =
+                                        iced::widget::image::Handle::from_bytes(
+                                            bytes,
+                                        );
                                     Message::UnifiedImageLoaded(request, handle)
                                 }
                                 Err(e) => {
@@ -194,14 +216,18 @@ fn image_loader_stream(
                                         path, e
                                     );
                                     log::error!("{}", msg);
-                                    Message::UnifiedImageLoadFailed(request, msg)
+                                    Message::UnifiedImageLoadFailed(
+                                        request, msg,
+                                    )
                                 }
                             };
 
                             Some((
                                 message,
                                 ImageLoaderState::Running {
-                                    last_request_time: Some(std::time::Instant::now()),
+                                    last_request_time: Some(
+                                        std::time::Instant::now(),
+                                    ),
                                     receiver,
                                 },
                             ))
@@ -219,7 +245,10 @@ fn image_loader_stream(
                                 let _ = rx.recv().await; // Wake on new work
                             } else {
                                 // Fallback: avoid tight loop if no receiver available
-                                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                                tokio::time::sleep(
+                                    std::time::Duration::from_millis(250),
+                                )
+                                .await;
                             }
 
                             Some((

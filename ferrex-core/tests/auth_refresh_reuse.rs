@@ -3,7 +3,10 @@ use std::sync::Arc;
 use anyhow::Result;
 use ferrex_core::auth::{
     AuthCrypto,
-    domain::services::{AuthenticationError, AuthenticationService, create_authentication_service},
+    domain::services::{
+        AuthenticationError, AuthenticationService,
+        create_authentication_service,
+    },
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -11,7 +14,9 @@ use uuid::Uuid;
 const TEST_USERNAME: &str = "testuser";
 const TEST_PASSWORD: &str = "CorrectHorseBattery1!";
 
-fn build_service(pool: PgPool) -> Result<(AuthenticationService, Arc<AuthCrypto>)> {
+fn build_service(
+    pool: PgPool,
+) -> Result<(AuthenticationService, Arc<AuthCrypto>)> {
     let crypto = Arc::new(AuthCrypto::new("test-pepper", "test-token-key")?);
     let service = create_authentication_service(pool, crypto.clone());
     Ok((service, crypto))
@@ -59,7 +64,8 @@ async fn refresh_reuse_revokes_family(pool: PgPool) -> Result<()> {
     let family_id = initial_bundle.refresh_token.family_id();
     let initial_token = initial_bundle.refresh_token.clone();
 
-    let rotated_bundle = service.refresh_session(initial_token.as_str()).await?;
+    let rotated_bundle =
+        service.refresh_session(initial_token.as_str()).await?;
 
     let reused = service.refresh_session(initial_token.as_str()).await;
     assert!(matches!(reused, Err(AuthenticationError::SessionExpired)));

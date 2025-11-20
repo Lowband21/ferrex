@@ -4,8 +4,8 @@ pub mod subscriptions;
 
 use crate::infrastructure::api_types::{Library, Media, MediaID};
 use ferrex_core::player_prelude::{
-    LibraryID, LibraryMediaResponse, MediaFile, MediaIDLike, ScanConfig, ScanMetrics,
-    ScanProgressEvent, ScanSnapshotDto,
+    LibraryID, LibraryMediaResponse, MediaFile, MediaIDLike, ScanConfig,
+    ScanMetrics, ScanProgressEvent, ScanSnapshotDto,
 };
 use rkyv::util::AlignedVec;
 use uuid::Uuid;
@@ -71,11 +71,15 @@ pub enum Message {
     #[cfg(feature = "demo")]
     FetchDemoStatus,
     #[cfg(feature = "demo")]
-    DemoStatusLoaded(Result<crate::infrastructure::api_types::DemoStatus, String>),
+    DemoStatusLoaded(
+        Result<crate::infrastructure::api_types::DemoStatus, String>,
+    ),
     #[cfg(feature = "demo")]
     ApplyDemoSizing(crate::infrastructure::api_types::DemoResetRequest),
     #[cfg(feature = "demo")]
-    DemoSizingApplied(Result<crate::infrastructure::api_types::DemoStatus, String>),
+    DemoSizingApplied(
+        Result<crate::infrastructure::api_types::DemoStatus, String>,
+    ),
     // Scanner metrics/config
     FetchScanMetrics,
     ScanMetricsLoaded(Result<ScanMetrics, String>),
@@ -133,10 +137,18 @@ impl Message {
             Self::HideLibraryForm => "Library::HideLibraryForm",
             Self::UpdateLibraryFormName(_) => "Library::UpdateLibraryFormName",
             Self::UpdateLibraryFormType(_) => "Library::UpdateLibraryFormType",
-            Self::UpdateLibraryFormPaths(_) => "Library::UpdateLibraryFormPaths",
-            Self::UpdateLibraryFormScanInterval(_) => "Library::UpdateLibraryFormScanInterval",
-            Self::ToggleLibraryFormEnabled => "Library::ToggleLibraryFormEnabled",
-            Self::ToggleLibraryFormStartScan => "Library::ToggleLibraryFormStartScan",
+            Self::UpdateLibraryFormPaths(_) => {
+                "Library::UpdateLibraryFormPaths"
+            }
+            Self::UpdateLibraryFormScanInterval(_) => {
+                "Library::UpdateLibraryFormScanInterval"
+            }
+            Self::ToggleLibraryFormEnabled => {
+                "Library::ToggleLibraryFormEnabled"
+            }
+            Self::ToggleLibraryFormStartScan => {
+                "Library::ToggleLibraryFormStartScan"
+            }
             Self::SubmitLibraryForm => "Library::SubmitLibraryForm",
 
             // Scanning
@@ -203,7 +215,11 @@ impl std::fmt::Debug for Message {
 
             // Library management
             Self::LibrariesLoaded(result) => match result {
-                Ok(libs) => write!(f, "Library::LibrariesLoaded(Ok: {} libraries)", libs.len()),
+                Ok(libs) => write!(
+                    f,
+                    "Library::LibrariesLoaded(Ok: {} libraries)",
+                    libs.len()
+                ),
                 Err(e) => write!(f, "Library::LibrariesLoaded(Err: {})", e),
             },
             Self::LoadLibraries => write!(f, "Library::LoadLibraries"),
@@ -216,20 +232,30 @@ impl std::fmt::Debug for Message {
                 library.name, start_scan
             ),
             Self::LibraryCreated(result) => match result {
-                Ok(lib) => write!(f, "Library::LibraryCreated(Ok: {})", lib.name),
+                Ok(lib) => {
+                    write!(f, "Library::LibraryCreated(Ok: {})", lib.name)
+                }
                 Err(e) => write!(f, "Library::LibraryCreated(Err: {})", e),
             },
-            Self::UpdateLibrary(lib) => write!(f, "Library::UpdateLibrary({})", lib.name),
+            Self::UpdateLibrary(lib) => {
+                write!(f, "Library::UpdateLibrary({})", lib.name)
+            }
             Self::LibraryUpdated(result) => match result {
-                Ok(lib) => write!(f, "Library::LibraryUpdated(Ok: {})", lib.name),
+                Ok(lib) => {
+                    write!(f, "Library::LibraryUpdated(Ok: {})", lib.name)
+                }
                 Err(e) => write!(f, "Library::LibraryUpdated(Err: {})", e),
             },
-            Self::DeleteLibrary(id) => write!(f, "Library::DeleteLibrary({})", id),
+            Self::DeleteLibrary(id) => {
+                write!(f, "Library::DeleteLibrary({})", id)
+            }
             Self::LibraryDeleted(result) => match result {
                 Ok(id) => write!(f, "Library::LibraryDeleted(Ok: {})", id),
                 Err(e) => write!(f, "Library::LibraryDeleted(Err: {})", e),
             },
-            Self::SelectLibrary(id) => write!(f, "Library::SelectLibrary({:?})", id),
+            Self::SelectLibrary(id) => {
+                write!(f, "Library::SelectLibrary({:?})", id)
+            }
             Self::LibrarySelected(id, result) => match result {
                 Ok(files) => write!(
                     f,
@@ -237,7 +263,9 @@ impl std::fmt::Debug for Message {
                     id,
                     files.len()
                 ),
-                Err(e) => write!(f, "Library::LibrarySelected({}, Err: {})", id, e),
+                Err(e) => {
+                    write!(f, "Library::LibrarySelected({}, Err: {})", id, e)
+                }
             },
 
             // Library form management
@@ -252,14 +280,18 @@ impl std::fmt::Debug for Message {
             Self::UpdateLibraryFormName(name) => {
                 write!(f, "Library::UpdateLibraryFormName({})", name)
             }
-            Self::UpdateLibraryFormType(t) => write!(f, "Library::UpdateLibraryFormType({})", t),
+            Self::UpdateLibraryFormType(t) => {
+                write!(f, "Library::UpdateLibraryFormType({})", t)
+            }
             Self::UpdateLibraryFormPaths(paths) => {
                 write!(f, "Library::UpdateLibraryFormPaths({})", paths)
             }
             Self::UpdateLibraryFormScanInterval(i) => {
                 write!(f, "Library::UpdateLibraryFormScanInterval({})", i)
             }
-            Self::ToggleLibraryFormEnabled => write!(f, "Library::ToggleLibraryFormEnabled"),
+            Self::ToggleLibraryFormEnabled => {
+                write!(f, "Library::ToggleLibraryFormEnabled")
+            }
             Self::ToggleLibraryFormStartScan => {
                 write!(f, "Library::ToggleLibraryFormStartScan")
             }
@@ -311,7 +343,9 @@ impl std::fmt::Debug for Message {
                     "Library::DemoStatusLoaded(Ok: {} libraries)",
                     status.libraries.len()
                 ),
-                Err(err) => write!(f, "Library::DemoStatusLoaded(Err: {})", err),
+                Err(err) => {
+                    write!(f, "Library::DemoStatusLoaded(Err: {})", err)
+                }
             },
             #[cfg(feature = "demo")]
             Self::ApplyDemoSizing(_) => write!(f, "Library::ApplyDemoSizing"),
@@ -322,7 +356,9 @@ impl std::fmt::Debug for Message {
                     "Library::DemoSizingApplied(Ok: {} libraries)",
                     status.libraries.len()
                 ),
-                Err(err) => write!(f, "Library::DemoSizingApplied(Err: {})", err),
+                Err(err) => {
+                    write!(f, "Library::DemoSizingApplied(Err: {})", err)
+                }
             },
 
             // Media references
@@ -336,8 +372,12 @@ impl std::fmt::Debug for Message {
             },
 
             // Library operations
-            Self::RefreshCurrentLibrary => write!(f, "Library::RefreshCurrentLibrary"),
-            Self::ScanCurrentLibrary => write!(f, "Library::ScanCurrentLibrary"),
+            Self::RefreshCurrentLibrary => {
+                write!(f, "Library::RefreshCurrentLibrary")
+            }
+            Self::ScanCurrentLibrary => {
+                write!(f, "Library::ScanCurrentLibrary")
+            }
 
             // Media events from server
             Self::MediaDiscovered(refs) => {
@@ -345,10 +385,18 @@ impl std::fmt::Debug for Message {
             }
             Self::MediaUpdated(media) => match media {
                 Media::Movie(m) => {
-                    write!(f, "Library::MediaUpdated(Movie: {})", m.title.as_str())
+                    write!(
+                        f,
+                        "Library::MediaUpdated(Movie: {})",
+                        m.title.as_str()
+                    )
                 }
                 Media::Series(s) => {
-                    write!(f, "Library::MediaUpdated(Series: {})", s.title.as_str())
+                    write!(
+                        f,
+                        "Library::MediaUpdated(Series: {})",
+                        s.title.as_str()
+                    )
                 }
                 Media::Season(s) => {
                     let mut buf = Uuid::encode_buffer();
@@ -368,7 +416,9 @@ impl std::fmt::Debug for Message {
                     )
                 }
             },
-            Self::MediaDeleted(id) => write!(f, "Library::MediaDeleted({})", id),
+            Self::MediaDeleted(id) => {
+                write!(f, "Library::MediaDeleted({})", id)
+            }
 
             // No-op
             Self::NoOp => write!(f, "Library::NoOp"),
@@ -377,7 +427,9 @@ impl std::fmt::Debug for Message {
             Self::MediaDetailsBatch(batch) => {
                 write!(f, "Library::MediaDetailsBatch({} items)", batch.len())
             }
-            Self::BatchMetadataComplete => write!(f, "Library::BatchMetadataComplete"),
+            Self::BatchMetadataComplete => {
+                write!(f, "Library::BatchMetadataComplete")
+            }
 
             // View model refresh
             Self::RefreshViewModels => write!(f, "Library::RefreshViewModels"),
@@ -394,7 +446,9 @@ impl std::fmt::Debug for Message {
             Self::FetchScanConfig => write!(f, "Library::FetchScanConfig"),
             Self::ScanConfigLoaded(_) => write!(f, "Library::ScanConfigLoaded"),
             // Reset
-            Self::ResetLibrary(id) => write!(f, "Library::ResetLibrary({})", id),
+            Self::ResetLibrary(id) => {
+                write!(f, "Library::ResetLibrary({})", id)
+            }
             Self::ResetLibraryDone(result) => match result {
                 Ok(()) => write!(f, "Library::ResetLibraryDone(Ok)"),
                 Err(e) => write!(f, "Library::ResetLibraryDone(Err: {})", e),

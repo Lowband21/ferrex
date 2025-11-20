@@ -2,17 +2,21 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use ferrex_core::player_prelude::{
-    ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, EpisodeReference, Library, LibraryID,
-    Media, MediaIDLike, MediaLike, MediaType, SeasonID, SeasonReference, SeriesID, SortBy,
-    SortOrder,
+    ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, EpisodeReference,
+    Library, LibraryID, Media, MediaIDLike, MediaLike, MediaType, SeasonID,
+    SeasonReference, SeriesID, SortBy, SortOrder,
 };
-use rkyv::{deserialize, rancor::Error, to_bytes, util::AlignedVec, vec::ArchivedVec};
+use rkyv::{
+    deserialize, rancor::Error, to_bytes, util::AlignedVec, vec::ArchivedVec,
+};
 use uuid::Uuid;
 use yoke::Yoke;
 
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 
-use super::{EpisodeYoke, LibraryYoke, MediaYoke, MovieYoke, SeasonYoke, SeriesYoke};
+use super::{
+    EpisodeYoke, LibraryYoke, MediaYoke, MovieYoke, SeasonYoke, SeriesYoke,
+};
 
 /// Archived runtime media entry backed by an `AlignedVec` to enable zero-copy access.
 #[derive(Debug, Clone)]
@@ -41,7 +45,8 @@ impl RuntimeMediaEntry {
     #[inline]
     fn with_archived<T>(&self, f: impl FnOnce(&ArchivedMedia) -> T) -> T {
         // SAFETY: The aligned buffer is owned by an Arc, so it lives for the duration of the closure
-        let archived = unsafe { rkyv::access_unchecked::<ArchivedMedia>(&self.buffer) };
+        let archived =
+            unsafe { rkyv::access_unchecked::<ArchivedMedia>(&self.buffer) };
         f(archived)
     }
 
@@ -121,9 +126,10 @@ pub struct MediaRepo {
     pub(super) sorted_indices: Option<HashMap<Uuid, Vec<Uuid>>>, // Hashmap of library IDs to Vec of media IDs
 
     // Current sort criteria
-    pub(super) current_library_sort_states: Option<HashMap<Uuid, (SortBy, SortOrder)>>, // Hashmap of library IDs to sort criteria
+    pub(super) current_library_sort_states:
+        Option<HashMap<Uuid, (SortBy, SortOrder)>>, // Hashmap of library IDs to sort criteria
 
-                                                                                        //pending_events: Vec<MediaChangeEvent>,
+                                                    //pending_events: Vec<MediaChangeEvent>,
 }
 
 impl MediaRepo {
@@ -133,7 +139,8 @@ impl MediaRepo {
         let mut libraries_index = Vec::new();
 
         // Access the archived data directly without unsafe transmute
-        let archived_libraries = rkyv::access::<ArchivedVec<ArchivedLibrary>, Error>(&buffer)?;
+        let archived_libraries =
+            rkyv::access::<ArchivedVec<ArchivedLibrary>, Error>(&buffer)?;
 
         // Build indices
         for library in archived_libraries.iter() {
@@ -175,7 +182,10 @@ impl MediaRepo {
     }
 
     /// Internal method to get media by ID, checking modifications first
-    pub(super) fn get_internal(&self, id: &impl MediaIDLike) -> RepositoryResult<Media> {
+    pub(super) fn get_internal(
+        &self,
+        id: &impl MediaIDLike,
+    ) -> RepositoryResult<Media> {
         let uuid = id.as_uuid();
         let mut buf = Uuid::encode_buffer();
 
@@ -197,7 +207,9 @@ impl MediaRepo {
             // Access archived data on demand
             let archived_libraries = unsafe {
                 // SAFETY: We hold the buffer through Arc, it won't be dropped while we're using it
-                rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&self.libraries_buffer)
+                rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(
+                    &self.libraries_buffer,
+                )
             };
 
             // Find the library
@@ -207,10 +219,14 @@ impl MediaRepo {
                         for media_ref in media_list.iter() {
                             if media_ref.archived_media_id().as_uuid() == uuid {
                                 // Deserialize to owned
-                                let owned =
-                                    deserialize::<Media, Error>(media_ref).map_err(|e| {
-                                        RepositoryError::DeserializationError(e.to_string())
-                                    })?;
+                                let owned = deserialize::<Media, Error>(
+                                    media_ref,
+                                )
+                                .map_err(|e| {
+                                    RepositoryError::DeserializationError(
+                                        e.to_string(),
+                                    )
+                                })?;
                                 return Ok(owned);
                             }
                         }
@@ -248,7 +264,8 @@ impl MediaRepo {
             return Ok(MediaYoke::attach_to_cart(
                 cart,
                 move |data: &AlignedVec| unsafe {
-                    let archived = rkyv::access_unchecked::<ArchivedMedia>(data);
+                    let archived =
+                        rkyv::access_unchecked::<ArchivedMedia>(data);
                     debug_assert_eq!(archived.media_type(), expected_type);
                     archived
                 },
@@ -262,8 +279,9 @@ impl MediaRepo {
             Ok(MediaYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
                 |data: &AlignedVec| unsafe {
-                    let archived_libraries =
-                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(data);
+                    let archived_libraries = rkyv::access_unchecked::<
+                        ArchivedVec<ArchivedLibrary>,
+                    >(data);
                     archived_libraries
                         .iter()
                         .find(|l| l.get_id().as_uuid() == library_id)
@@ -318,8 +336,9 @@ impl MediaRepo {
             Ok(MovieYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
                 |data: &AlignedVec| unsafe {
-                    let archived_libraries =
-                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(data);
+                    let archived_libraries = rkyv::access_unchecked::<
+                        ArchivedVec<ArchivedLibrary>,
+                    >(data);
                     match archived_libraries
                         .iter()
                         .find(|l| l.get_id().as_uuid() == library_id)
@@ -382,8 +401,9 @@ impl MediaRepo {
             Ok(SeriesYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
                 |data: &AlignedVec| unsafe {
-                    let archived_libraries =
-                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(data);
+                    let archived_libraries = rkyv::access_unchecked::<
+                        ArchivedVec<ArchivedLibrary>,
+                    >(data);
                     match archived_libraries
                         .iter()
                         .find(|l| l.get_id().as_uuid() == library_id)
@@ -442,8 +462,9 @@ impl MediaRepo {
             return Ok(SeasonYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
                 |data: &AlignedVec| unsafe {
-                    let archived_libraries =
-                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(data);
+                    let archived_libraries = rkyv::access_unchecked::<
+                        ArchivedVec<ArchivedLibrary>,
+                    >(data);
                     match archived_libraries
                         .iter()
                         .find(|l| l.get_id().as_uuid() == library_id)
@@ -456,7 +477,9 @@ impl MediaRepo {
                         .unwrap()
                     {
                         ArchivedMedia::Season(season) => season,
-                        _ => unreachable!("We just filtered by media type Season"),
+                        _ => unreachable!(
+                            "We just filtered by media type Season"
+                        ),
                     }
                 },
             ));
@@ -498,8 +521,9 @@ impl MediaRepo {
             return Ok(EpisodeYoke::attach_to_cart(
                 Arc::clone(&self.libraries_buffer),
                 |data: &AlignedVec| unsafe {
-                    let archived_libraries =
-                        rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(data);
+                    let archived_libraries = rkyv::access_unchecked::<
+                        ArchivedVec<ArchivedLibrary>,
+                    >(data);
                     match archived_libraries
                         .iter()
                         .find(|l| l.get_id().as_uuid() == library_id)
@@ -512,7 +536,9 @@ impl MediaRepo {
                         .unwrap()
                     {
                         ArchivedMedia::Episode(ep) => ep,
-                        _ => unreachable!("We just filtered by media type Episode"),
+                        _ => unreachable!(
+                            "We just filtered by media type Episode"
+                        ),
                     }
                 },
             ));
@@ -534,7 +560,9 @@ impl MediaRepo {
         // Access archived data
         let archived_libraries = unsafe {
             // SAFETY: We hold the buffer through Arc, it won't be dropped while we're using it
-            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&self.libraries_buffer)
+            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(
+                &self.libraries_buffer,
+            )
         };
 
         // Find the library and collect its media
@@ -550,13 +578,18 @@ impl MediaRepo {
                         }
 
                         // Use modified version if available
-                        if let Some(modified) = self.modifications.get_entry(&media_id) {
+                        if let Some(modified) =
+                            self.modifications.get_entry(&media_id)
+                        {
                             results.push(modified.deserialize()?);
                         } else {
                             // Deserialize archived version
-                            let owned = deserialize::<Media, Error>(media_ref).map_err(|e| {
-                                RepositoryError::DeserializationError(e.to_string())
-                            })?;
+                            let owned = deserialize::<Media, Error>(media_ref)
+                                .map_err(|e| {
+                                    RepositoryError::DeserializationError(
+                                        e.to_string(),
+                                    )
+                                })?;
                             results.push(owned);
                         }
                     }
@@ -656,14 +689,17 @@ impl MediaRepo {
     pub(super) fn get_libraries_internal(&self) -> Vec<Library> {
         let archived_libraries = unsafe {
             // SAFETY: We hold the buffer through Arc, it won't be dropped while we're using it
-            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&self.libraries_buffer)
+            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(
+                &self.libraries_buffer,
+            )
         };
 
         archived_libraries
             .iter()
             .map(|archived| {
                 // Deserialize to owned Library
-                deserialize::<Library, Error>(archived).expect("Failed to deserialize library")
+                deserialize::<Library, Error>(archived)
+                    .expect("Failed to deserialize library")
             })
             .collect()
     }
@@ -705,18 +741,27 @@ impl MediaRepo {
     }
 
     /// Get all archived libraries
-    pub(super) fn get_archived_libraries_internal(&self) -> &ArchivedVec<ArchivedLibrary> {
+    pub(super) fn get_archived_libraries_internal(
+        &self,
+    ) -> &ArchivedVec<ArchivedLibrary> {
         unsafe {
             // SAFETY: We hold the buffer through Arc, it won't be dropped while we're using it
-            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&self.libraries_buffer)
+            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(
+                &self.libraries_buffer,
+            )
         }
     }
 
     /// Get a specific library by ID
-    pub(super) fn get_library_internal(&self, library_id: &LibraryID) -> Option<Library> {
+    pub(super) fn get_library_internal(
+        &self,
+        library_id: &LibraryID,
+    ) -> Option<Library> {
         let archived_libraries = unsafe {
             // SAFETY: We hold the buffer through Arc, it won't be dropped while we're using it
-            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&self.libraries_buffer)
+            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(
+                &self.libraries_buffer,
+            )
         };
 
         for library in archived_libraries.iter() {
@@ -752,7 +797,9 @@ impl MediaRepo {
 
         let archived_libraries = unsafe {
             // SAFETY: We hold the buffer through Arc, it won't be dropped while we're using it
-            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&self.libraries_buffer)
+            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(
+                &self.libraries_buffer,
+            )
         };
 
         for library in archived_libraries.iter() {
@@ -766,13 +813,17 @@ impl MediaRepo {
                     }
 
                     // Use modified version if available
-                    if let Some(modified) = self.modifications.get_entry(&media_id) {
+                    if let Some(modified) =
+                        self.modifications.get_entry(&media_id)
+                    {
                         if let Ok(deser) = modified.deserialize() {
                             results.push(deser);
                         }
                     } else {
                         // Deserialize archived version
-                        if let Ok(owned) = deserialize::<Media, Error>(media_ref) {
+                        if let Ok(owned) =
+                            deserialize::<Media, Error>(media_ref)
+                        {
                             results.push(owned);
                         }
                     }
@@ -799,18 +850,20 @@ impl MediaRepo {
 
         // Determine which library this series belongs to
         let &library_id =
-            self.media_id_index
-                .get(series_uuid)
-                .ok_or_else(|| RepositoryError::NotFound {
+            self.media_id_index.get(series_uuid).ok_or_else(|| {
+                RepositoryError::NotFound {
                     entity_type: "Series".to_string(),
                     id: series_uuid.to_string(),
-                })?;
+                }
+            })?;
 
         let mut results: Vec<SeasonReference> = Vec::new();
 
         // Access archived data for the library
         let archived_libraries = unsafe {
-            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&self.libraries_buffer)
+            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(
+                &self.libraries_buffer,
+            )
         };
 
         if let Some(library) = archived_libraries
@@ -829,15 +882,20 @@ impl MediaRepo {
                     // Match parent series
                     if season.series_id.as_uuid() == series_uuid {
                         // Prefer runtime modified version if present
-                        if let Some(modified) = self.modifications.get_entry(&media_uuid) {
-                            if let Some(season) = modified.deserialize()?.to_season() {
+                        if let Some(modified) =
+                            self.modifications.get_entry(&media_uuid)
+                        {
+                            if let Some(season) =
+                                modified.deserialize()?.to_season()
+                            {
                                 results.push(season);
                             } else if let Ok(Media::Season(s)) =
                                 deserialize::<Media, Error>(media_ref)
                             {
                                 results.push(s);
                             }
-                        } else if let Ok(Media::Season(s)) = deserialize::<Media, Error>(media_ref)
+                        } else if let Ok(Media::Season(s)) =
+                            deserialize::<Media, Error>(media_ref)
                         {
                             results.push(s);
                         }
@@ -847,7 +905,8 @@ impl MediaRepo {
         }
 
         // Include runtime-added media in this library that match the series
-        if let Some(ids) = self.modifications.added_by_library.get(&library_id) {
+        if let Some(ids) = self.modifications.added_by_library.get(&library_id)
+        {
             for id in ids {
                 if let Some(media) = self.modifications.added.get(id)
                     && let Some(season) = media.deserialize()?.to_season()
@@ -873,18 +932,20 @@ impl MediaRepo {
 
         // Determine which library this season belongs to
         let &library_id =
-            self.media_id_index
-                .get(season_uuid)
-                .ok_or_else(|| RepositoryError::NotFound {
+            self.media_id_index.get(season_uuid).ok_or_else(|| {
+                RepositoryError::NotFound {
                     entity_type: "Season".to_string(),
                     id: season_uuid.to_string(),
-                })?;
+                }
+            })?;
 
         let mut results: Vec<EpisodeReference> = Vec::new();
 
         // Access archived data for the library
         let archived_libraries = unsafe {
-            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(&self.libraries_buffer)
+            rkyv::access_unchecked::<ArchivedVec<ArchivedLibrary>>(
+                &self.libraries_buffer,
+            )
         };
 
         if let Some(library) = archived_libraries
@@ -902,14 +963,19 @@ impl MediaRepo {
                 if let ArchivedMedia::Episode(ep) = media_ref
                     && ep.season_id.as_uuid() == season_uuid
                 {
-                    if let Some(modified) = self.modifications.get_entry(&media_uuid) {
+                    if let Some(modified) =
+                        self.modifications.get_entry(&media_uuid)
+                    {
                         if let Some(ep) = modified.deserialize()?.to_episode() {
                             results.push(ep);
-                        } else if let Ok(Media::Episode(e)) = deserialize::<Media, Error>(media_ref)
+                        } else if let Ok(Media::Episode(e)) =
+                            deserialize::<Media, Error>(media_ref)
                         {
                             results.push(e);
                         }
-                    } else if let Ok(Media::Episode(e)) = deserialize::<Media, Error>(media_ref) {
+                    } else if let Ok(Media::Episode(e)) =
+                        deserialize::<Media, Error>(media_ref)
+                    {
                         results.push(e);
                     }
                 }
@@ -917,7 +983,8 @@ impl MediaRepo {
         }
 
         // Include runtime-added media in this library that match the season
-        if let Some(ids) = self.modifications.added_by_library.get(&library_id) {
+        if let Some(ids) = self.modifications.added_by_library.get(&library_id)
+        {
             for id in ids {
                 if let Some(media) = self.modifications.added.get(id)
                     && let Some(ep) = media.deserialize()?.to_episode()

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO media_files (\n            id, library_id, file_path, filename, file_size, created_at,\n            technical_metadata, parsed_info\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n        ON CONFLICT (file_path) DO UPDATE SET\n            filename = EXCLUDED.filename,\n            file_size = EXCLUDED.file_size,\n            technical_metadata = EXCLUDED.technical_metadata,\n            parsed_info = EXCLUDED.parsed_info,\n            updated_at = NOW()\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Varchar",
+        "Int8",
+        "Timestamptz",
+        "Jsonb",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "23a11425b5b302d1f2d92c512f665320cfc2641938236d14f54956b270ade21c"
+}

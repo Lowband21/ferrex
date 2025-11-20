@@ -1,0 +1,107 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, library_id, scan_type, status, total_folders, processed_folders,\n                   total_files, processed_files, current_path, error_count, errors,\n                   started_at, updated_at, completed_at, options\n            FROM scan_state\n            WHERE library_id = $1 AND scan_type = $2\n            ORDER BY started_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scan_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "total_folders",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "processed_folders",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "total_files",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "processed_files",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "current_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "error_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "errors",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "options",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "5e834975ee621d2d02e37683d4297b248aee671e4dca9490e06fd06d480b9ced"
+}

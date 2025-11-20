@@ -1,4 +1,6 @@
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -42,7 +44,15 @@ pub struct FilterIndicesRequest {
 }
 
 /// Compact response for index-based sorting/filtering
-#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct IndicesResponse {
     /// Version of the library content used to compute indices (for cache/mismatch detection)
@@ -97,6 +107,9 @@ impl ScalarRange<f32> {
 impl ScalarRange<RatingValue> {
     /// Convert a scaled rating range back into floating-point representation.
     pub fn to_f32(self) -> ScalarRange<f32> {
-        ScalarRange::new(rating_value_to_f32(self.min), rating_value_to_f32(self.max))
+        ScalarRange::new(
+            rating_value_to_f32(self.min),
+            rating_value_to_f32(self.max),
+        )
     }
 }

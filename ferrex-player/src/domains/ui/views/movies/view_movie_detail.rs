@@ -3,8 +3,9 @@ use crate::domains::ui::views::grid::macros::parse_hex_color;
 use crate::domains::ui::widgets::AnimationType;
 use crate::infrastructure::api_types::{MediaDetailsOption, TmdbDetails};
 use crate::{
-    domains::ui::components, domains::ui::messages::Message, domains::ui::theme,
-    domains::ui::widgets::image_for::image_for, state_refactored::State,
+    domains::ui::components, domains::ui::messages::Message,
+    domains::ui::theme, domains::ui::widgets::image_for::image_for,
+    state_refactored::State,
 };
 
 use ferrex_core::{
@@ -32,7 +33,10 @@ use rkyv::rancor::Error;
     ),
     profiling::function
 )]
-pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a, Message> {
+pub fn view_movie_detail<'a>(
+    state: &'a State,
+    movie_id: MovieID,
+) -> Element<'a, Message> {
     // Borrow from UI yoke cache to satisfy lifetime 'a
     let movie_uuid = movie_id.to_uuid();
     match state.domains.ui.state.movie_yoke_cache.peek(&movie_uuid) {
@@ -40,7 +44,9 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
             let media_id = movie_id.to_media_id();
 
             let movie = *yoke_arc.get();
-            let theme_color = deserialize::<Option<String>, Error>(&movie.theme_color).unwrap();
+            let theme_color =
+                deserialize::<Option<String>, Error>(&movie.theme_color)
+                    .unwrap();
 
             // Create the main content with proper spacing from top
             let mut content = column![].spacing(20);
@@ -54,7 +60,8 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 .state
                 .background_shader_state
                 .calculate_content_offset_height(window_width, window_height);
-            content = content.push(Space::new().height(Length::Fixed(content_offset)));
+            content = content
+                .push(Space::new().height(Length::Fixed(content_offset)));
 
             let mut poster_element = image_for(media_id.to_uuid())
                 .size(ImageSize::Full)
@@ -84,36 +91,38 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
             );
 
-            let movie_details = deserialize::<MediaDetailsOption, Error>(&movie.details).unwrap();
+            let movie_details =
+                deserialize::<MediaDetailsOption, Error>(&movie.details)
+                    .unwrap();
 
             // Extract movie details for easier access
-            let movie_details_opt =
-                if let MediaDetailsOption::Details(TmdbDetails::Movie(movie_details)) =
-                    movie_details
-                {
-                    log::debug!(
-                        "[MovieDetail] Movie '{}' has full TMDB details with overview",
-                        movie.title
-                    );
-                    Some(movie_details)
-                } else {
-                    match &movie.details {
-                        ArchivedMediaDetailsOption::Endpoint(endpoint) => {
-                            log::warn!(
-                                "[MovieDetail] Movie '{}' only has Endpoint: {}, NOT Details!",
-                                movie.title,
-                                endpoint
-                            );
-                        }
-                        _ => {
-                            log::warn!(
-                                "[MovieDetail] Movie '{}' has unexpected details variant",
-                                movie.title
-                            );
-                        }
+            let movie_details_opt = if let MediaDetailsOption::Details(
+                TmdbDetails::Movie(movie_details),
+            ) = movie_details
+            {
+                log::debug!(
+                    "[MovieDetail] Movie '{}' has full TMDB details with overview",
+                    movie.title
+                );
+                Some(movie_details)
+            } else {
+                match &movie.details {
+                    ArchivedMediaDetailsOption::Endpoint(endpoint) => {
+                        log::warn!(
+                            "[MovieDetail] Movie '{}' only has Endpoint: {}, NOT Details!",
+                            movie.title,
+                            endpoint
+                        );
                     }
-                    None
-                };
+                    _ => {
+                        log::warn!(
+                            "[MovieDetail] Movie '{}' has unexpected details variant",
+                            movie.title
+                        );
+                    }
+                }
+                None
+            };
 
             // Director info
             if let Some(ref movie_details) = movie_details_opt {
@@ -155,7 +164,8 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                         info_parts.push(format!("{}m", minutes));
                     }
                 }
-            } else if let ArchivedOption::Some(metadata) = &movie.file.media_file_metadata
+            } else if let ArchivedOption::Some(metadata) =
+                &movie.file.media_file_metadata
                 && let ArchivedOption::Some(duration) = metadata.duration
             {
                 // TODO: Is to_native necessary here?
@@ -169,7 +179,9 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
             }
 
             // Watch status - add to info_parts
-            if let Some(progress) = state.domains.media.state.get_media_progress(&media_id) {
+            if let Some(progress) =
+                state.domains.media.state.get_media_progress(&media_id)
+            {
                 if state.domains.media.state.is_watched(&media_id) {
                     info_parts.push("✓ Watched".to_string());
                 } else {
@@ -208,7 +220,9 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 // Rating and votes
                 if let Some(rating) = movie_details.vote_average {
                     let mut rating_row = row![
-                        text("★").size(16).color(theme::MediaServerTheme::WARNING),
+                        text("★")
+                            .size(16)
+                            .color(theme::MediaServerTheme::WARNING),
                         Space::new().width(5),
                         text(format!("{:.1}", rating))
                             .size(14)
@@ -229,10 +243,11 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 }
             }
 
-            let button_row = crate::domains::ui::components::create_action_button_row(
-                Message::PlayMediaWithId(media_id),
-                vec![], // No additional buttons yet
-            );
+            let button_row =
+                crate::domains::ui::components::create_action_button_row(
+                    Message::PlayMediaWithId(media_id),
+                    vec![], // No additional buttons yet
+                );
 
             details = details.push(Space::new().height(10));
             details = details.push(button_row);
@@ -280,7 +295,9 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
             );
 
             // Technical details section - displayed as cards below the poster
-            if let ArchivedOption::Some(metadata) = &movie.file.media_file_metadata {
+            if let ArchivedOption::Some(metadata) =
+                &movie.file.media_file_metadata
+            {
                 let mut tech_row = row![Space::new().width(20)].spacing(8); // Start padding and tighter spacing
 
                 // Resolution
@@ -362,7 +379,8 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 }
 
                 // File size
-                let size_gb = movie.file.size.to_native() as f64 / (1024.0 * 1024.0 * 1024.0);
+                let size_gb = movie.file.size.to_native() as f64
+                    / (1024.0 * 1024.0 * 1024.0);
                 let size_card = container(
                     text(format!("{:.2} GB", size_gb))
                         .size(14)
@@ -375,7 +393,8 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
 
                 // HDR info - enhanced with bit depth
                 let mut hdr_info = None;
-                if let ArchivedOption::Some(transfer) = &metadata.color_transfer {
+                if let ArchivedOption::Some(transfer) = &metadata.color_transfer
+                {
                     if transfer.contains("2084") {
                         hdr_info = Some("HDR10");
                     } else if transfer.contains("hlg") {
@@ -385,7 +404,8 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
 
                 if let Some(hdr_type) = hdr_info {
                     let mut hdr_text = hdr_type.to_string();
-                    if let ArchivedOption::Some(bit_depth) = metadata.bit_depth {
+                    if let ArchivedOption::Some(bit_depth) = metadata.bit_depth
+                    {
                         hdr_text.push_str(&format!(" {}bit", bit_depth));
                     }
 
@@ -398,7 +418,9 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                     .style(theme::Container::TechDetail.style());
 
                     tech_row = tech_row.push(hdr_card);
-                } else if let ArchivedOption::Some(bit_depth) = metadata.bit_depth {
+                } else if let ArchivedOption::Some(bit_depth) =
+                    metadata.bit_depth
+                {
                     // Show bit depth even if not HDR
                     let bit_card = container(
                         text(format!("{}bit", bit_depth))
@@ -415,7 +437,9 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
                 // Wrap in a scrollable container for narrow screens
                 let tech_details = scrollable(tech_row)
                     .direction(scrollable::Direction::Horizontal(
-                        scrollable::Scrollbar::default().scroller_width(4).margin(2),
+                        scrollable::Scrollbar::default()
+                            .scroller_width(4)
+                            .margin(2),
                     ))
                     .style(theme::Scrollable::style());
 
@@ -423,11 +447,12 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
             }
 
             // Cast section - now in a full-width container at the bottom
-            if let ArchivedMediaDetailsOption::Details(ArchivedTmdbDetails::Movie(
-                ref movie_details,
-            )) = movie.details
+            if let ArchivedMediaDetailsOption::Details(
+                ArchivedTmdbDetails::Movie(ref movie_details),
+            ) = movie.details
             {
-                let cast_section = components::create_cast_scrollable(&movie_details.cast);
+                let cast_section =
+                    components::create_cast_scrollable(&movie_details.cast);
                 content = content.push(cast_section);
             }
 
@@ -447,7 +472,8 @@ pub fn view_movie_detail<'a>(state: &'a State, movie_id: MovieID) -> Element<'a,
             //let header_offset = constants::layout::header::HEIGHT;
 
             // Create aspect ratio toggle button
-            let aspect_button = components::create_backdrop_aspect_button(state);
+            let aspect_button =
+                components::create_backdrop_aspect_button(state);
 
             // Position the button at bottom-right of backdrop with small margin
             let button_container = container(aspect_button)

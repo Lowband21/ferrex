@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 use crate::{
     database::{
-        ports::processing_status::ProcessingStatusRepository, traits::MediaProcessingStatus,
+        ports::processing_status::ProcessingStatusRepository,
+        traits::MediaProcessingStatus,
     },
     error::{MediaError, Result},
     types::{files::MediaFile, ids::LibraryID},
@@ -26,14 +27,20 @@ impl PostgresProcessingStatusRepository {
         &self.pool
     }
 
-    pub async fn create_or_update(&self, status: &MediaProcessingStatus) -> Result<()> {
+    pub async fn create_or_update(
+        &self,
+        status: &MediaProcessingStatus,
+    ) -> Result<()> {
         let error_details_json = status
             .error_details
             .as_ref()
             .map(serde_json::to_value)
             .transpose()
             .map_err(|e| {
-                MediaError::Internal(format!("Failed to serialize error details: {}", e))
+                MediaError::Internal(format!(
+                    "Failed to serialize error details: {}",
+                    e
+                ))
             })?;
 
         sqlx::query!(
@@ -77,13 +84,19 @@ impl PostgresProcessingStatusRepository {
         .execute(self.pool())
         .await
         .map_err(|e| {
-            MediaError::Internal(format!("Failed to create/update processing status: {}", e))
+            MediaError::Internal(format!(
+                "Failed to create/update processing status: {}",
+                e
+            ))
         })?;
 
         Ok(())
     }
 
-    pub async fn get(&self, media_file_id: Uuid) -> Result<Option<MediaProcessingStatus>> {
+    pub async fn get(
+        &self,
+        media_file_id: Uuid,
+    ) -> Result<Option<MediaProcessingStatus>> {
         let row = sqlx::query!(
             r#"
             SELECT media_file_id, metadata_extracted, metadata_extracted_at,
@@ -359,7 +372,12 @@ impl PostgresProcessingStatusRepository {
         )
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to reset processing status: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to reset processing status: {}",
+                e
+            ))
+        })?;
 
         Ok(())
     }

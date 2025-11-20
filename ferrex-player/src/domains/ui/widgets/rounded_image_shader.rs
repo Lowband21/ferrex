@@ -16,9 +16,12 @@ use iced::widget::shader::Program;
 use iced::{Color, Element, Event, Length, Point, Rectangle, Size, mouse};
 use iced_wgpu::AtlasRegion;
 use iced_wgpu::primitive::{
-    BatchEncodeContext, BatchPrimitive, PrimitiveBatchState, register_batchable_type,
+    BatchEncodeContext, BatchPrimitive, PrimitiveBatchState,
+    register_batchable_type,
 };
-use rounded_image_batch_state::{PendingPrimitive, RoundedImageBatchState, RoundedImageInstance};
+use rounded_image_batch_state::{
+    PendingPrimitive, RoundedImageBatchState, RoundedImageInstance,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -68,8 +71,10 @@ impl AnimatedPosterBounds {
     pub fn layout_bounds(&self) -> (f32, f32) {
         // Return size with padding included - this is what the layout system sees
         (
-            (self.base_width + self.horizontal_padding * 2.0) * self.ui_scale_factor,
-            (self.base_height + self.vertical_padding * 2.0) * self.ui_scale_factor,
+            (self.base_width + self.horizontal_padding * 2.0)
+                * self.ui_scale_factor,
+            (self.base_height + self.vertical_padding * 2.0)
+                * self.ui_scale_factor,
         )
     }
 
@@ -121,7 +126,9 @@ impl AnimationType {
         use crate::infrastructure::constants::animation;
 
         AnimationType::Flip {
-            total_duration: Duration::from_millis(animation::DEFAULT_DURATION_MS),
+            total_duration: Duration::from_millis(
+                animation::DEFAULT_DURATION_MS,
+            ),
             rise_end: 0.10,
             emerge_end: 0.20,
             flip_end: 0.80,
@@ -130,7 +137,9 @@ impl AnimationType {
 
     fn effective_duration(&self) -> Duration {
         match self {
-            AnimationType::None | AnimationType::PlaceholderSunken => Duration::ZERO,
+            AnimationType::None | AnimationType::PlaceholderSunken => {
+                Duration::ZERO
+            }
             AnimationType::Fade { duration } => *duration,
             AnimationType::Flip { total_duration, .. } => *total_duration,
         }
@@ -160,10 +169,13 @@ impl AnimationBehavior {
 
     /// Use `first` for freshly loaded textures, then fall back to `repeat` after the window.
     pub fn first_then(first: AnimationType, repeat: AnimationType) -> Self {
-        let window = std::cmp::max(first.effective_duration(), repeat.effective_duration())
-            .saturating_mul(2)
-            .max(Duration::from_millis(50))
-            .max(Duration::from_secs(10));
+        let window = std::cmp::max(
+            first.effective_duration(),
+            repeat.effective_duration(),
+        )
+        .saturating_mul(2)
+        .max(Duration::from_millis(50))
+        .max(Duration::from_secs(10));
         Self {
             first,
             repeat,
@@ -188,7 +200,9 @@ impl AnimationBehavior {
     /// Flip animations degrade to flip-then-fade, other animations stay constant.
     pub fn from_primary(animation: AnimationType) -> Self {
         match animation {
-            AnimationType::Flip { .. } | AnimationType::Fade { .. } => Self::flip_then_fade(),
+            AnimationType::Flip { .. } | AnimationType::Fade { .. } => {
+                Self::flip_then_fade()
+            }
             _ => Self::constant(animation),
         }
     }
@@ -312,8 +326,10 @@ impl Program<Message> for RoundedImageProgram {
                     if let Some(position) = cursor.position() {
                         if bounds.contains(position) {
                             // Convert to relative position within widget
-                            let relative_pos =
-                                Point::new(position.x - bounds.x, position.y - bounds.y);
+                            let relative_pos = Point::new(
+                                position.x - bounds.x,
+                                position.y - bounds.y,
+                            );
 
                             let was_hovered = state.is_hovered;
                             state.mouse_position = Some(relative_pos);
@@ -329,7 +345,9 @@ impl Program<Message> for RoundedImageProgram {
 
                             // Request redraw if state changed
                             if was_hovered {
-                                return Some(iced::widget::Action::request_redraw());
+                                return Some(
+                                    iced::widget::Action::request_redraw(),
+                                );
                             }
                         }
                     } else {
@@ -357,13 +375,16 @@ impl Program<Message> for RoundedImageProgram {
                     // Verify state mouse position matches current cursor position
                     // This handles cases where the app lost/regained focus
                     if let Some(cursor_pos) = cursor.position() {
-                        let current_relative =
-                            Point::new(cursor_pos.x - bounds.x, cursor_pos.y - bounds.y);
+                        let current_relative = Point::new(
+                            cursor_pos.x - bounds.x,
+                            cursor_pos.y - bounds.y,
+                        );
 
                         // Update state if mouse position is stale
                         if let Some(old_pos) = state.mouse_position {
                             let delta = old_pos - current_relative;
-                            let distance = (delta.x * delta.x + delta.y * delta.y).sqrt();
+                            let distance =
+                                (delta.x * delta.x + delta.y * delta.y).sqrt();
                             if distance > 1.0 {
                                 state.mouse_position = Some(current_relative);
                             }
@@ -388,34 +409,45 @@ impl Program<Message> for RoundedImageProgram {
                         let center_x = 0.5;
                         let center_y = 0.5;
                         let radius = 0.08;
-                        let dist_from_center =
-                            ((norm_x - center_x).powi(2) + (norm_y - center_y).powi(2)).sqrt();
+                        let dist_from_center = ((norm_x - center_x).powi(2)
+                            + (norm_y - center_y).powi(2))
+                        .sqrt();
                         if dist_from_center <= radius {
                             if let Some(on_play) = &self.on_play {
                                 log::debug!("Play button clicked!");
-                                return Some(iced::widget::Action::publish(on_play.clone()));
+                                return Some(iced::widget::Action::publish(
+                                    on_play.clone(),
+                                ));
                             }
                         }
                         // Top-right edit button (radius 0.06 at 0.85, 0.15)
-                        else if (0.79..=0.91).contains(&norm_x) && (0.09..=0.21).contains(&norm_y)
+                        else if (0.79..=0.91).contains(&norm_x)
+                            && (0.09..=0.21).contains(&norm_y)
                         {
                             if let Some(on_edit) = &self.on_edit {
                                 log::debug!("Edit button clicked!");
-                                return Some(iced::widget::Action::publish(on_edit.clone()));
+                                return Some(iced::widget::Action::publish(
+                                    on_edit.clone(),
+                                ));
                             }
                         }
                         // Bottom-right options button (radius 0.06 at 0.85, 0.85)
-                        else if (0.79..=0.91).contains(&norm_x) && (0.79..=0.91).contains(&norm_y)
+                        else if (0.79..=0.91).contains(&norm_x)
+                            && (0.79..=0.91).contains(&norm_y)
                         {
                             if let Some(on_options) = &self.on_options {
                                 log::debug!("Options button clicked!");
-                                return Some(iced::widget::Action::publish(on_options.clone()));
+                                return Some(iced::widget::Action::publish(
+                                    on_options.clone(),
+                                ));
                             }
                         }
                         // Empty space - trigger on_click
                         else if let Some(on_click) = &self.on_click {
                             log::debug!("Empty space clicked!");
-                            return Some(iced::widget::Action::publish(on_click.clone()));
+                            return Some(iced::widget::Action::publish(
+                                on_click.clone(),
+                            ));
                         }
                     }
                 }
@@ -424,7 +456,10 @@ impl Program<Message> for RoundedImageProgram {
                     if let Some(position) = cursor.position()
                         && bounds.contains(position)
                     {
-                        let relative_pos = Point::new(position.x - bounds.x, position.y - bounds.y);
+                        let relative_pos = Point::new(
+                            position.x - bounds.x,
+                            position.y - bounds.y,
+                        );
                         state.mouse_position = Some(relative_pos);
                         state.is_hovered = true;
                         //log::debug!("Cursor entered widget at: {:?}", relative_pos);
@@ -558,10 +593,13 @@ impl Pipeline {
         log::debug!("Creating rounded image shader pipeline");
 
         // Load shader
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Rounded Image Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/rounded_image.wgsl").into()),
-        });
+        let shader =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Rounded Image Shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!("../shaders/rounded_image.wgsl").into(),
+                ),
+            });
 
         // Create globals bind group layout (includes sampler)
         log::debug!("Creating globals bind group layout");
@@ -575,14 +613,18 @@ impl Pipeline {
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
-                            min_binding_size: Some(std::num::NonZeroU64::new(96).unwrap()),
+                            min_binding_size: Some(
+                                std::num::NonZeroU64::new(96).unwrap(),
+                            ),
                         },
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        ty: wgpu::BindingType::Sampler(
+                            wgpu::SamplerBindingType::Filtering,
+                        ),
                         count: None,
                     },
                 ],
@@ -596,7 +638,9 @@ impl Pipeline {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        sample_type: wgpu::TextureSampleType::Float {
+                            filterable: true,
+                        },
                         view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
@@ -605,11 +649,15 @@ impl Pipeline {
             });
 
         // Create pipeline layout
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Rounded Image Pipeline Layout"),
-            bind_group_layouts: &[&globals_bind_group_layout, &atlas_bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Rounded Image Pipeline Layout"),
+                bind_group_layouts: &[
+                    &globals_bind_group_layout,
+                    &atlas_bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
 
         // Create vertex buffer layout for instance data
         let vertex_buffer_layout = wgpu::VertexBufferLayout {
@@ -674,43 +722,44 @@ impl Pipeline {
         };
 
         // Create render pipeline
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Rounded Image Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[vertex_buffer_layout],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        });
+        let render_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Rounded Image Pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[vertex_buffer_layout],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
 
         // Create sampler
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -811,23 +860,24 @@ pub(super) fn create_batch_instance(
     };
 
     // Calculate poster position and size
-    let (poster_position, poster_size) = if let Some(animated_bounds) = animated_bounds {
-        let offset_x = (bounds.width - animated_bounds.base_width) / 2.0;
-        let offset_y = (bounds.height - animated_bounds.base_height) / 2.0;
-        let poster_x = bounds.x + offset_x;
-        let poster_y = bounds.y + offset_y;
-        (
-            [poster_x, poster_y],
-            [animated_bounds.base_width, animated_bounds.base_height],
-        )
-    } else {
-        let border_padding = 3.0;
-        let poster_x = bounds.x + border_padding;
-        let poster_y = bounds.y + border_padding;
-        let poster_width = bounds.width - (border_padding * 2.0);
-        let poster_height = bounds.height - (border_padding * 2.0);
-        ([poster_x, poster_y], [poster_width, poster_height])
-    };
+    let (poster_position, poster_size) =
+        if let Some(animated_bounds) = animated_bounds {
+            let offset_x = (bounds.width - animated_bounds.base_width) / 2.0;
+            let offset_y = (bounds.height - animated_bounds.base_height) / 2.0;
+            let poster_x = bounds.x + offset_x;
+            let poster_y = bounds.y + offset_y;
+            (
+                [poster_x, poster_y],
+                [animated_bounds.base_width, animated_bounds.base_height],
+            )
+        } else {
+            let border_padding = 3.0;
+            let poster_x = bounds.x + border_padding;
+            let poster_y = bounds.y + border_padding;
+            let poster_width = bounds.width - (border_padding * 2.0);
+            let poster_height = bounds.height - (border_padding * 2.0);
+            ([poster_x, poster_y], [poster_width, poster_height])
+        };
 
     // Calculate overlay state
     let animation_complete = match animation {
@@ -862,7 +912,8 @@ pub(super) fn create_batch_instance(
         let norm_x = mouse_x_relative / scaled_poster_width;
         let norm_y = mouse_y_relative / scaled_poster_height;
 
-        if (-0.01..=1.01).contains(&norm_x) && (-0.01..=1.01).contains(&norm_y) {
+        if (-0.01..=1.01).contains(&norm_x) && (-0.01..=1.01).contains(&norm_y)
+        {
             [norm_x.clamp(0.0, 1.0), norm_y.clamp(0.0, 1.0)]
         } else {
             [-1.0, -1.0]
@@ -879,8 +930,18 @@ pub(super) fn create_batch_instance(
             poster_size[0],
             poster_size[1],
         ],
-        radius_opacity_rotation_anim: [radius, actual_opacity, rotation_y, animation_progress],
-        theme_color_zdepth: [theme_color.r, theme_color.g, theme_color.b, z_depth],
+        radius_opacity_rotation_anim: [
+            radius,
+            actual_opacity,
+            rotation_y,
+            animation_progress,
+        ],
+        theme_color_zdepth: [
+            theme_color.r,
+            theme_color.g,
+            theme_color.b,
+            z_depth,
+        ],
         scale_shadow_glow_type: [
             scale,
             shadow_intensity,
@@ -893,8 +954,18 @@ pub(super) fn create_batch_instance(
             show_border,
             progress.unwrap_or(-1.0),
         ],
-        mouse_pos_and_padding: [mouse_pos_normalized[0], mouse_pos_normalized[1], 0.0, 0.0],
-        progress_color_and_padding: [progress_color.r, progress_color.g, progress_color.b, 0.0],
+        mouse_pos_and_padding: [
+            mouse_pos_normalized[0],
+            mouse_pos_normalized[1],
+            0.0,
+            0.0,
+        ],
+        progress_color_and_padding: [
+            progress_color.r,
+            progress_color.g,
+            progress_color.b,
+            0.0,
+        ],
         atlas_uvs: [uv_min[0], uv_min[1], uv_max[0], uv_max[1]],
         atlas_layer_and_padding: [layer as f32, 0.0, 0.0, 0.0],
     }
@@ -966,12 +1037,32 @@ pub(super) fn create_placeholder_instance(
             poster_size[0],
             poster_size[1],
         ],
-        radius_opacity_rotation_anim: [radius, actual_opacity, rotation_y, animation_progress],
-        theme_color_zdepth: [theme_color.r, theme_color.g, theme_color.b, z_depth],
+        radius_opacity_rotation_anim: [
+            radius,
+            actual_opacity,
+            rotation_y,
+            animation_progress,
+        ],
+        theme_color_zdepth: [
+            theme_color.r,
+            theme_color.g,
+            theme_color.b,
+            z_depth,
+        ],
         scale_shadow_glow_type: [scale, shadow_intensity, border_glow, 0.0],
-        hover_overlay_border_progress: [0.0, show_overlay, show_border, progress.unwrap_or(-1.0)],
+        hover_overlay_border_progress: [
+            0.0,
+            show_overlay,
+            show_border,
+            progress.unwrap_or(-1.0),
+        ],
         mouse_pos_and_padding: [0.0, 0.0, 0.0, 0.0],
-        progress_color_and_padding: [progress_color.r, progress_color.g, progress_color.b, 0.0],
+        progress_color_and_padding: [
+            progress_color.r,
+            progress_color.g,
+            progress_color.b,
+            0.0,
+        ],
         atlas_uvs: [-1.0, -1.0, -1.0, -1.0],
         atlas_layer_and_padding: [0.0, 0.0, 0.0, 0.0],
     }
@@ -993,9 +1084,12 @@ fn calculate_animation_state(
 ) -> (f32, f32, f32, f32, f32, f32, f32) {
     match animation {
         AnimationType::None => (opacity, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0),
-        AnimationType::PlaceholderSunken => (0.7, std::f32::consts::PI, 0.0, -10.0, 1.0, 0.0, 0.0),
+        AnimationType::PlaceholderSunken => {
+            (0.7, std::f32::consts::PI, 0.0, -10.0, 1.0, 0.0, 0.0)
+        }
         AnimationType::Fade { duration } => {
-            let progress = (elapsed.as_secs_f32() / duration.as_secs_f32()).min(1.0);
+            let progress =
+                (elapsed.as_secs_f32() / duration.as_secs_f32()).min(1.0);
             (opacity * progress, 0.0, progress, 0.0, 1.0, 0.0, 0.0)
         }
         AnimationType::Flip {
@@ -1004,7 +1098,8 @@ fn calculate_animation_state(
             emerge_end,
             flip_end,
         } => {
-            let overall_progress = (elapsed.as_secs_f32() / total_duration.as_secs_f32()).min(1.0);
+            let overall_progress =
+                (elapsed.as_secs_f32() / total_duration.as_secs_f32()).min(1.0);
 
             // Simplified easing functions
             let ease_out_cubic = |t: f32| -> f32 {
@@ -1016,36 +1111,45 @@ fn calculate_animation_state(
                 -(t * std::f32::consts::PI).cos() / 2.0 + 0.5
             };
 
-            let (z_depth, scale, shadow_intensity, border_glow, rotation_y, final_opacity) =
-                if overall_progress < rise_end {
-                    let phase_progress = overall_progress / rise_end;
-                    let eased = ease_out_cubic(phase_progress);
-                    let z = -10.0 * (1.0 - eased);
-                    let shadow = 0.5 * eased;
-                    let opacity = opacity * (0.7 + 0.2 * eased);
-                    (z, 1.0, shadow, 0.0, std::f32::consts::PI, opacity)
-                } else if overall_progress < emerge_end {
-                    let phase_progress = (overall_progress - rise_end) / (emerge_end - rise_end);
-                    let eased = ease_out_cubic(phase_progress);
-                    let z = 10.0 * eased;
-                    let scale = 1.0 + 0.05 * eased;
-                    let shadow = 0.5 + 0.5 * eased;
-                    let glow = 0.5 * eased;
-                    (z, scale, shadow, glow, std::f32::consts::PI, opacity * 0.9)
-                } else if overall_progress < flip_end {
-                    let phase_progress = (overall_progress - emerge_end) / (flip_end - emerge_end);
-                    let rotation_eased = ease_in_out_sine(phase_progress);
-                    let rotation = std::f32::consts::PI * (1.0 - rotation_eased);
-                    let glow = 0.5 * (1.0 - phase_progress);
-                    (10.0, 1.05, 1.0, glow, rotation, opacity)
-                } else {
-                    let phase_progress = (overall_progress - flip_end) / (1.0 - flip_end);
-                    let eased = ease_out_cubic(phase_progress);
-                    let z = 10.0 * (1.0 - eased);
-                    let scale = 1.0 + 0.05 * (1.0 - eased);
-                    let shadow = 1.0 * (1.0 - eased) + 0.3;
-                    (z, scale, shadow, 0.0, 0.0, opacity)
-                };
+            let (
+                z_depth,
+                scale,
+                shadow_intensity,
+                border_glow,
+                rotation_y,
+                final_opacity,
+            ) = if overall_progress < rise_end {
+                let phase_progress = overall_progress / rise_end;
+                let eased = ease_out_cubic(phase_progress);
+                let z = -10.0 * (1.0 - eased);
+                let shadow = 0.5 * eased;
+                let opacity = opacity * (0.7 + 0.2 * eased);
+                (z, 1.0, shadow, 0.0, std::f32::consts::PI, opacity)
+            } else if overall_progress < emerge_end {
+                let phase_progress =
+                    (overall_progress - rise_end) / (emerge_end - rise_end);
+                let eased = ease_out_cubic(phase_progress);
+                let z = 10.0 * eased;
+                let scale = 1.0 + 0.05 * eased;
+                let shadow = 0.5 + 0.5 * eased;
+                let glow = 0.5 * eased;
+                (z, scale, shadow, glow, std::f32::consts::PI, opacity * 0.9)
+            } else if overall_progress < flip_end {
+                let phase_progress =
+                    (overall_progress - emerge_end) / (flip_end - emerge_end);
+                let rotation_eased = ease_in_out_sine(phase_progress);
+                let rotation = std::f32::consts::PI * (1.0 - rotation_eased);
+                let glow = 0.5 * (1.0 - phase_progress);
+                (10.0, 1.05, 1.0, glow, rotation, opacity)
+            } else {
+                let phase_progress =
+                    (overall_progress - flip_end) / (1.0 - flip_end);
+                let eased = ease_out_cubic(phase_progress);
+                let z = 10.0 * (1.0 - eased);
+                let scale = 1.0 + 0.05 * (1.0 - eased);
+                let shadow = 1.0 * (1.0 - eased) + 0.3;
+                (z, scale, shadow, 0.0, 0.0, opacity)
+            };
 
             (
                 final_opacity,
@@ -1069,7 +1173,6 @@ impl Primitive for RoundedImagePrimitive {
         _queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
     ) -> Self::Renderer {
-        
     }
 
     fn prepare(
@@ -1087,11 +1190,18 @@ impl Primitive for RoundedImagePrimitive {
 impl BatchPrimitive for RoundedImagePrimitive {
     type BatchState = RoundedImageBatchState;
 
-    fn create_batch_state(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self::BatchState {
+    fn create_batch_state(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+    ) -> Self::BatchState {
         RoundedImageBatchState::new(device, format)
     }
 
-    fn encode_batch(&self, state: &mut Self::BatchState, context: &BatchEncodeContext<'_>) -> bool {
+    fn encode_batch(
+        &self,
+        state: &mut Self::BatchState,
+        context: &BatchEncodeContext<'_>,
+    ) -> bool {
         let transformed_bounds = Rectangle::new(
             Point::new(context.bounds.x, context.bounds.y),
             Size::new(context.bounds.width, context.bounds.height),
@@ -1147,7 +1257,8 @@ impl RoundedImage {
         Self {
             id: id.unwrap_or(0),
             handle,
-            radius: crate::infrastructure::constants::layout::poster::CORNER_RADIUS,
+            radius:
+                crate::infrastructure::constants::layout::poster::CORNER_RADIUS,
             width: Length::Fixed(200.0),
             height: Length::Fixed(300.0),
             animation: AnimationType::None,
@@ -1212,7 +1323,10 @@ impl RoundedImage {
     }
 
     /// Sets animated bounds with padding
-    pub fn with_animated_bounds(mut self, bounds: AnimatedPosterBounds) -> Self {
+    pub fn with_animated_bounds(
+        mut self,
+        bounds: AnimatedPosterBounds,
+    ) -> Self {
         self.bounds = Some(bounds);
         // Use layout bounds for stable grid positioning
         let (width, height) = bounds.layout_bounds();

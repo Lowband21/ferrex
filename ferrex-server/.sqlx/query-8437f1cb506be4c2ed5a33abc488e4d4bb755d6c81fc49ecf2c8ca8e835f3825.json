@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM orchestrator_jobs\n            WHERE id = $1 AND state IN ('ready','deferred')\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8437f1cb506be4c2ed5a33abc488e4d4bb755d6c81fc49ecf2c8ca8e835f3825"
+}

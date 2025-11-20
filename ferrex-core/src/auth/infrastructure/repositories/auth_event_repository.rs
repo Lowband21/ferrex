@@ -7,7 +7,9 @@ use ipnetwork::IpNetwork;
 use sqlx::PgPool;
 
 use crate::auth::AuthEventType;
-use crate::auth::domain::repositories::{AuthAuditEventKind, AuthEventLog, AuthEventRepository};
+use crate::auth::domain::repositories::{
+    AuthAuditEventKind, AuthEventLog, AuthEventRepository,
+};
 
 pub struct PostgresAuthEventRepository {
     pool: PgPool,
@@ -27,8 +29,12 @@ impl PostgresAuthEventRepository {
 
 fn map_event_kind(kind: AuthAuditEventKind) -> AuthEventType {
     match kind {
-        AuthAuditEventKind::PasswordLoginSuccess => AuthEventType::PasswordLoginSuccess,
-        AuthAuditEventKind::PasswordLoginFailure => AuthEventType::PasswordLoginFailure,
+        AuthAuditEventKind::PasswordLoginSuccess => {
+            AuthEventType::PasswordLoginSuccess
+        }
+        AuthAuditEventKind::PasswordLoginFailure => {
+            AuthEventType::PasswordLoginFailure
+        }
         AuthAuditEventKind::PinLoginSuccess => AuthEventType::PinLoginSuccess,
         AuthAuditEventKind::PinLoginFailure => AuthEventType::PinLoginFailure,
         AuthAuditEventKind::DeviceRegistered => AuthEventType::DeviceRegistered,

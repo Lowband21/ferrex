@@ -1,0 +1,49 @@
+version: '3.9'
+
+# Optional Tailscale sidecar to provide private tailnet access.
+# Use with: docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+
+services:
+  # Optional: if you have a `ferrex` service in another compose file,
+  # you can overlay the following on that service there:
+  #
+  # ferrex:
+  #   network_mode: "service:tailscale"   # share network namespace with tailscale
+  #   ports: []                            # ensure no host ports are exposed
+  #   depends_on:
+  #     tailscale:
+  #       condition: service_healthy       # wait for tailscale to be ready
+
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: ferrex_tailscale
+    hostname: ferrex-tailscale
+    environment:
+      - TS_AUTH_ONCE=true                 # only prompt for login on first run
+      - TS_STATE_DIR=/var/lib/tailscale   # persist state across restarts
+      - TS_ENABLE_HEALTH_CHECK=true       # exposes http://localhost:9002/healthz inside container
+      - TS_AUTHKEY=${TS_AUTHKEY:-}        # optional: set for headless/CI joins
+      # - TS_EXTRA_ARGS=--advertise-tags=tag:ferrex  # optional: ACL tags
+    volumes:
+      - tailscale-data:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    # Minimal healthcheck; for stricter gating, query /healthz with a tiny HTTP client.
+    healthcheck:
+      test: ["CMD", "tailscale", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # When running with tailscale, you typically don't want to expose
+  # database/cache host ports. The following overrides clear them.
+  db:
+    ports: []
+  cache:
+    ports: []
+
+volumes:
+  tailscale-data:
+

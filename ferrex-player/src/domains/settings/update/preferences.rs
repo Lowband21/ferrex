@@ -14,7 +14,10 @@ use iced::Task;
     ),
     profiling::function
 )]
-pub fn handle_toggle_auto_login(state: &mut State, enabled: bool) -> DomainUpdateResult {
+pub fn handle_toggle_auto_login(
+    state: &mut State,
+    enabled: bool,
+) -> DomainUpdateResult {
     let auth_service = state.domains.settings.auth_service.clone();
     // We need to update both the device-specific setting and synced preference via auth service
     let task = Task::perform(
@@ -23,16 +26,28 @@ pub fn handle_toggle_auto_login(state: &mut State, enabled: bool) -> DomainUpdat
             auth_service
                 .set_auto_login_scope(enabled, AutoLoginScope::UserDefault)
                 .await
-                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+                .map_err(|e| {
+                    AuthError::Network(NetworkError::RequestFailed(
+                        e.to_string(),
+                    ))
+                })?;
 
             auth_service
                 .set_auto_login_scope(enabled, AutoLoginScope::DeviceOnly)
                 .await
-                .map_err(|e| AuthError::Network(NetworkError::RequestFailed(e.to_string())))?;
+                .map_err(|e| {
+                    AuthError::Network(NetworkError::RequestFailed(
+                        e.to_string(),
+                    ))
+                })?;
 
             Ok(enabled)
         },
-        |result| Message::AutoLoginToggled(result.map_err(|e: AuthError| e.to_string())),
+        |result| {
+            Message::AutoLoginToggled(
+                result.map_err(|e: AuthError| e.to_string()),
+            )
+        },
     );
     DomainUpdateResult::task(task.map(DomainMessage::Settings))
 }

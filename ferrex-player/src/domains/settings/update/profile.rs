@@ -3,14 +3,20 @@ use crate::state_refactored::State;
 use iced::Task;
 
 /// Handle update display name
-pub fn handle_update_display_name(state: &mut State, name: String) -> DomainUpdateResult {
+pub fn handle_update_display_name(
+    state: &mut State,
+    name: String,
+) -> DomainUpdateResult {
     // TODO: Store display name in profile state when we add it
     log::debug!("Update display name: {}", name);
     DomainUpdateResult::task(Task::none())
 }
 
 /// Handle update email
-pub fn handle_update_email(state: &mut State, email: String) -> DomainUpdateResult {
+pub fn handle_update_email(
+    state: &mut State,
+    email: String,
+) -> DomainUpdateResult {
     // TODO: Store email in profile state when we add it
     log::debug!("Update email: {}", email);
     DomainUpdateResult::task(Task::none())

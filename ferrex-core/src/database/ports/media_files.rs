@@ -97,11 +97,21 @@ pub trait MediaFilesReadPort: Send + Sync {
 #[async_trait]
 pub trait MediaFilesWritePort: Send + Sync {
     async fn upsert(&self, file: MediaFile) -> Result<UpsertOutcome>;
-    async fn upsert_batch(&self, files: Vec<MediaFile>) -> Result<Vec<UpsertOutcome>>;
+    async fn upsert_batch(
+        &self,
+        files: Vec<MediaFile>,
+    ) -> Result<Vec<UpsertOutcome>>;
     async fn delete_by_id(&self, id: Uuid) -> Result<()>;
-    async fn delete_by_path(&self, library_id: LibraryID, path: &str) -> Result<()>;
-    async fn update_technical_metadata(&self, id: Uuid, metadata: &MediaFileMetadata)
-    -> Result<()>;
+    async fn delete_by_path(
+        &self,
+        library_id: LibraryID,
+        path: &str,
+    ) -> Result<()>;
+    async fn update_technical_metadata(
+        &self,
+        id: Uuid,
+        metadata: &MediaFileMetadata,
+    ) -> Result<()>;
     async fn move_by_path(
         &self,
         _library_id: LibraryID,

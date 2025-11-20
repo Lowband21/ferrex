@@ -6,7 +6,9 @@ use uuid::Uuid;
 use crate::{error::Result, types::ids::LibraryID};
 
 use super::{
-    job::{ImageFetchSource, JobHandle, JobId, JobKind, JobPayload, JobPriority},
+    job::{
+        ImageFetchSource, JobHandle, JobId, JobKind, JobPayload, JobPriority,
+    },
     lease::LeaseId,
 };
 
@@ -120,7 +122,12 @@ impl JobEvent {
         path_key: Option<String>,
         payload: JobEventPayload,
     ) -> Self {
-        let meta = EventMeta::new(correlation_id, library_id, idempotency_key, path_key);
+        let meta = EventMeta::new(
+            correlation_id,
+            library_id,
+            idempotency_key,
+            path_key,
+        );
         Self { meta, payload }
     }
 }
@@ -199,11 +206,15 @@ pub fn stable_path_key(payload: &JobPayload) -> Option<String> {
     match payload {
         JobPayload::FolderScan(job) => Some(job.folder_path_norm.clone()),
         JobPayload::MediaAnalyze(job) => Some(job.fingerprint.hash_repr()),
-        JobPayload::MetadataEnrich(job) => Some(job.logical_candidate_id.clone()),
+        JobPayload::MetadataEnrich(job) => {
+            Some(job.logical_candidate_id.clone())
+        }
         JobPayload::IndexUpsert(job) => Some(job.path_norm.clone()),
         JobPayload::ImageFetch(job) => match &job.source {
             ImageFetchSource::Tmdb { tmdb_path } => Some(tmdb_path.clone()),
-            ImageFetchSource::EpisodeThumbnail { image_key, .. } => Some(image_key.clone()),
+            ImageFetchSource::EpisodeThumbnail { image_key, .. } => {
+                Some(image_key.clone())
+            }
         },
     }
 }

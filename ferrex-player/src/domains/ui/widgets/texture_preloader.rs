@@ -3,12 +3,15 @@ use iced::widget::shader::{Primitive, Program};
 use iced::{Element, Length};
 use iced::{Rectangle, mouse};
 use iced_wgpu::primitive::{
-    BatchEncodeContext, BatchPrimitive, PrepareContext, PrimitiveBatchState, RenderContext,
+    BatchEncodeContext, BatchPrimitive, PrepareContext, PrimitiveBatchState,
+    RenderContext,
 };
 use iced_wgpu::wgpu;
 
 use crate::domains::ui::messages::Message;
-use ferrex_core::player_prelude::{ImageRequest, ImageSize, ImageType, Priority};
+use ferrex_core::player_prelude::{
+    ImageRequest, ImageSize, ImageType, Priority,
+};
 
 /// A minimal shader program that preloads a set of image handles into the Iced atlas.
 /// It does not render anything; it only triggers atlas uploads during the prepare pass.
@@ -71,7 +74,6 @@ impl Primitive for TexturePreloaderPrimitive {
         _queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
     ) -> Self::Renderer {
-        
     }
 
     fn prepare(
@@ -123,7 +125,11 @@ impl PrimitiveBatchState for TexturePreloaderBatchState {
         };
 
         for handle in self.pending_handles.drain(..) {
-            let _ = image_cache.ensure_raster_region(context.device, context.encoder, &handle);
+            let _ = image_cache.ensure_raster_region(
+                context.device,
+                context.encoder,
+                &handle,
+            );
         }
     }
 
@@ -170,7 +176,10 @@ impl BatchPrimitive for TexturePreloaderPrimitive {
 }
 
 /// Construct a texture preloader element. Place it inside a visible container so it runs every frame.
-pub fn texture_preloader(handles: Vec<Handle>, max_per_frame: usize) -> Element<'static, Message> {
+pub fn texture_preloader(
+    handles: Vec<Handle>,
+    max_per_frame: usize,
+) -> Element<'static, Message> {
     iced::widget::shader(TexturePreloaderProgram {
         handles,
         max_per_frame,
@@ -200,7 +209,9 @@ pub fn collect_cached_handles_for_media(
         let request = ImageRequest::new(id, size, image_type)
             .with_priority(Priority::Visible)
             .with_index(0);
-        if let Some((handle, _loaded_at)) = image_service.get().get_with_load_time(&request) {
+        if let Some((handle, _loaded_at)) =
+            image_service.get().get_with_load_time(&request)
+        {
             out.push(handle.clone());
         }
     }

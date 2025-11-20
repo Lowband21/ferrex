@@ -96,25 +96,34 @@ impl HstsLayer {
     fn build_header_value(config: &HstsConfig) -> HeaderValue {
         // Common configurations using static strings for performance
         match (config.max_age, config.include_subdomains, config.preload) {
-            (31536000, false, false) => HeaderValue::from_static("max-age=31536000"),
+            (31536000, false, false) => {
+                HeaderValue::from_static("max-age=31536000")
+            }
             (31536000, true, false) => {
                 HeaderValue::from_static("max-age=31536000; includeSubDomains")
             }
-            (31536000, false, true) => HeaderValue::from_static("max-age=31536000; preload"),
-            (31536000, true, true) => {
-                HeaderValue::from_static("max-age=31536000; includeSubDomains; preload")
+            (31536000, false, true) => {
+                HeaderValue::from_static("max-age=31536000; preload")
             }
-            (63072000, false, false) => HeaderValue::from_static("max-age=63072000"), // 2 years
+            (31536000, true, true) => HeaderValue::from_static(
+                "max-age=31536000; includeSubDomains; preload",
+            ),
+            (63072000, false, false) => {
+                HeaderValue::from_static("max-age=63072000")
+            } // 2 years
             (63072000, true, false) => {
                 HeaderValue::from_static("max-age=63072000; includeSubDomains")
             }
-            (63072000, false, true) => HeaderValue::from_static("max-age=63072000; preload"),
-            (63072000, true, true) => {
-                HeaderValue::from_static("max-age=63072000; includeSubDomains; preload")
+            (63072000, false, true) => {
+                HeaderValue::from_static("max-age=63072000; preload")
             }
+            (63072000, true, true) => HeaderValue::from_static(
+                "max-age=63072000; includeSubDomains; preload",
+            ),
             _ => {
                 // Dynamic header value for custom configurations
-                let mut directives = vec![format!("max-age={}", config.max_age)];
+                let mut directives =
+                    vec![format!("max-age={}", config.max_age)];
 
                 if config.include_subdomains {
                     directives.push("includeSubDomains".to_string());
@@ -124,8 +133,9 @@ impl HstsLayer {
                     directives.push("preload".to_string());
                 }
 
-                HeaderValue::from_str(&directives.join("; "))
-                    .unwrap_or_else(|_| HeaderValue::from_static("max-age=31536000"))
+                HeaderValue::from_str(&directives.join("; ")).unwrap_or_else(
+                    |_| HeaderValue::from_static("max-age=31536000"),
+                )
             }
         }
     }
@@ -184,15 +194,23 @@ impl<S> HstsMiddleware<S> {
 
 impl<S> Service<Request<Body>> for HstsMiddleware<S>
 where
-    S: Service<Request<Body>, Response = Response<Body>> + Send + Clone + 'static,
+    S: Service<Request<Body>, Response = Response<Body>>
+        + Send
+        + Clone
+        + 'static,
     S::Future: Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     type Response = Response<Body>;
     type Error = Box<dyn std::error::Error + Send + Sync>;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = Pin<
+        Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx).map_err(Into::into)
     }
 

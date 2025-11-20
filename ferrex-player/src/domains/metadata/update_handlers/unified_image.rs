@@ -20,7 +20,9 @@ pub fn handle_unified_image_loaded(
         .mark_loaded(&request, handle.clone());
 
     // Keep UI alive briefly to allow poster animations to play smoothly
-    if matches!(request.size, ImageSize::Poster) || matches!(request.size, ImageSize::Thumbnail) {
+    if matches!(request.size, ImageSize::Poster)
+        || matches!(request.size, ImageSize::Thumbnail)
+    {
         use std::time::{Duration, Instant};
         let until = Instant::now()
             + Duration::from_millis(

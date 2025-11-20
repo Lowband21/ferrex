@@ -8,7 +8,8 @@ use crate::{
 use iced::{
     Element, Length,
     widget::{
-        Space, button, checkbox, column, container, radio, row, scrollable, text, text_input,
+        Space, button, checkbox, column, container, radio, row, scrollable,
+        text, text_input,
     },
 };
 
@@ -132,10 +133,13 @@ pub fn view_library_form<'a>(
             text("Enter one or more paths separated by commas")
                 .size(12)
                 .color(theme::MediaServerTheme::TEXT_DIMMED),
-            text_input("e.g., /media/movies, /mnt/storage/films", &form_data.paths)
-                .on_input(Message::UpdateLibraryFormPaths)
-                .padding(10)
-                .size(16),
+            text_input(
+                "e.g., /media/movies, /mnt/storage/films",
+                &form_data.paths
+            )
+            .on_input(Message::UpdateLibraryFormPaths)
+            .padding(10)
+            .size(16),
         ]
         .spacing(5),
     );

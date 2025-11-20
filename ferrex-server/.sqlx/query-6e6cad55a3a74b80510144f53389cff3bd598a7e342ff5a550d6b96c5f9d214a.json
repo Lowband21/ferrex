@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE sync_sessions\n            SET room_code = $2,\n                host_id = $3,\n                media_uuid = $4,\n                media_type = $5,\n                playback_state = $6\n            WHERE id = $1 AND is_active = true\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Uuid",
+        "Uuid",
+        "Int2",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6e6cad55a3a74b80510144f53389cff3bd598a7e342ff5a550d6b96c5f9d214a"
+}

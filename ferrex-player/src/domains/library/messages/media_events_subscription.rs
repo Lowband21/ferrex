@@ -3,7 +3,9 @@ use crate::infrastructure::{
     api_types::{Media, MediaID},
     services::api::ApiService,
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use base64::{
+    Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
+};
 use ferrex_core::{
     api_routes::v1, player_prelude::MediaEvent, traits::id::MediaIDLike,
     types::events::MediaSseEventType,
@@ -27,7 +29,8 @@ struct MediaEventsId {
 
 impl PartialEq for MediaEventsId {
     fn eq(&self, other: &Self) -> bool {
-        self.server_url == other.server_url && Arc::ptr_eq(&self.api, &other.api)
+        self.server_url == other.server_url
+            && Arc::ptr_eq(&self.api, &other.api)
     }
 }
 
@@ -41,7 +44,10 @@ impl Hash for MediaEventsId {
 }
 
 /// Creates a subscription to server-sent events for library media changes
-pub fn media_events(server_url: String, api_service: Arc<dyn ApiService>) -> Subscription<Message> {
+pub fn media_events(
+    server_url: String,
+    api_service: Arc<dyn ApiService>,
+) -> Subscription<Message> {
     Subscription::run_with(
         MediaEventsId {
             server_url: server_url.clone(),
@@ -51,12 +57,16 @@ pub fn media_events(server_url: String, api_service: Arc<dyn ApiService>) -> Sub
     )
 }
 
-fn build_media_subscription_stream(id: &MediaEventsId) -> BoxStream<'static, Message> {
+fn build_media_subscription_stream(
+    id: &MediaEventsId,
+) -> BoxStream<'static, Message> {
     let server_url = id.server_url.clone();
     let api = Arc::clone(&id.api);
     Box::pin(stream::unfold(
         MediaEventState::new(server_url.to_owned(), api),
-        |mut state| async move { state.next_event().await.map(|message| (message, state)) },
+        |mut state| async move {
+            state.next_event().await.map(|message| (message, state))
+        },
     ))
 }
 
@@ -102,7 +112,9 @@ impl MediaEventState {
             if let Some(receiver) = &mut self.event_receiver {
                 match receiver.recv().await {
                     Some(MediaSseEvent::Open) => {
-                        log::info!("Library media events SSE connection opened");
+                        log::info!(
+                            "Library media events SSE connection opened"
+                        );
                         self.retry_count = 0;
                         // Continue to next event
                         continue;
@@ -156,7 +168,8 @@ impl MediaEventState {
                 delay_secs,
                 self.retry_count + 1
             );
-            tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(delay_secs))
+                .await;
         }
 
         let url = format!("{}{}", self.server_url, v1::events::MEDIA);
@@ -179,7 +192,9 @@ impl MediaEventState {
                 Ok(mut event_source) => {
                     while let Some(event) = event_source.next().await {
                         let sse_event = match event {
-                            Ok(reqwest_eventsource::Event::Open) => MediaSseEvent::Open,
+                            Ok(reqwest_eventsource::Event::Open) => {
+                                MediaSseEvent::Open
+                            }
                             Ok(reqwest_eventsource::Event::Message(msg)) => {
                                 MediaSseEvent::Message(msg)
                             }
@@ -202,25 +217,31 @@ impl MediaEventState {
         self.task_handle = Some(task_handle);
     }
 
-    fn handle_sse_message(&mut self, msg: eventsource_stream::Event) -> Option<Message> {
+    fn handle_sse_message(
+        &mut self,
+        msg: eventsource_stream::Event,
+    ) -> Option<Message> {
         // Skip keepalive messages silently
-        if matches!(msg.data.as_str(), "keepalive" | "keep-alive") || msg.data.is_empty() {
+        if matches!(msg.data.as_str(), "keepalive" | "keep-alive")
+            || msg.data.is_empty()
+        {
             log::debug!("Received media event keepalive");
             return None;
         }
 
-        let declared_event = match MediaSseEventType::from_str(msg.event.as_str()) {
-            Ok(event_type) => event_type,
-            Err(err) => {
-                log::debug!(
-                    "Unknown media event type: {} with data: {} ({})",
-                    msg.event,
-                    msg.data,
-                    err
-                );
-                return None;
-            }
-        };
+        let declared_event =
+            match MediaSseEventType::from_str(msg.event.as_str()) {
+                Ok(event_type) => event_type,
+                Err(err) => {
+                    log::debug!(
+                        "Unknown media event type: {} with data: {} ({})",
+                        msg.event,
+                        msg.data,
+                        err
+                    );
+                    return None;
+                }
+            };
 
         log::debug!(
             "Received media event '{}' with payload of {} bytes",
@@ -241,7 +262,11 @@ impl MediaEventState {
                 self.convert_media_event(event)
             }
             Err(err) => {
-                log::error!("Failed to decode media event {}: {}", msg.event, err);
+                log::error!(
+                    "Failed to decode media event {}: {}",
+                    msg.event,
+                    err
+                );
                 None
             }
         }
@@ -375,7 +400,9 @@ fn decode_media_event(payload: &str) -> Result<MediaEvent, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+    use base64::{
+        Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
+    };
     use ferrex_core::player_prelude::{MediaID, MovieID};
     use rkyv::rancor::Error as RkyvError;
     use rkyv::to_bytes;

@@ -244,7 +244,9 @@ impl Default for TestExecutor {
 }
 
 /// Creates a test waker that re-enqueues tasks
-fn create_test_waker(pending_tasks: Arc<Mutex<VecDeque<BoxedFuture>>>) -> Waker {
+fn create_test_waker(
+    pending_tasks: Arc<Mutex<VecDeque<BoxedFuture>>>,
+) -> Waker {
     struct TestWake {
         pending_tasks: Arc<Mutex<VecDeque<BoxedFuture>>>,
     }
@@ -274,7 +276,9 @@ impl<T> TaskTestExt<T> for iced::Task<T> {
     async fn into_test_future(self) -> Vec<T>
     where
         T: Send + 'static,
-    { Vec::new() }
+    {
+        Vec::new()
+    }
 }
 
 #[cfg(test)]
@@ -361,7 +365,8 @@ mod tests {
         }
 
         let counter_clone = Arc::clone(&counter);
-        let executed = executor.execute_until(|| counter_clone.load(Ordering::SeqCst) >= 5);
+        let executed = executor
+            .execute_until(|| counter_clone.load(Ordering::SeqCst) >= 5);
 
         assert!(executed >= 5);
         assert!(counter.load(Ordering::SeqCst) >= 5);

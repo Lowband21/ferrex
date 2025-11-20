@@ -1,4 +1,7 @@
-use crate::{common::ui_utils::icon_text, domains::ui::messages::Message, domains::ui::theme};
+use crate::{
+    common::ui_utils::icon_text, domains::ui::messages::Message,
+    domains::ui::theme,
+};
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, text},

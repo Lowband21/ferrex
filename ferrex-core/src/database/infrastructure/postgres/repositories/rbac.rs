@@ -26,7 +26,10 @@ impl PostgresRbacRepository {
 #[async_trait]
 impl RbacRepository for PostgresRbacRepository {
     /// Get all permissions for a user (from roles + overrides)
-    async fn get_user_permissions(&self, user_id: Uuid) -> Result<UserPermissions> {
+    async fn get_user_permissions(
+        &self,
+        user_id: Uuid,
+    ) -> Result<UserPermissions> {
         // First, get all roles for the user
         let roles: Vec<Role> = sqlx::query_as!(
             Role,
@@ -128,7 +131,12 @@ impl RbacRepository for PostgresRbacRepository {
         Ok(permissions)
     }
 
-    async fn assign_user_role(&self, user_id: Uuid, role_id: Uuid, granted_by: Uuid) -> Result<()> {
+    async fn assign_user_role(
+        &self,
+        user_id: Uuid,
+        role_id: Uuid,
+        granted_by: Uuid,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             INSERT INTO user_roles (user_id, role_id, granted_by, granted_at)
@@ -145,7 +153,11 @@ impl RbacRepository for PostgresRbacRepository {
         Ok(())
     }
 
-    async fn remove_user_role(&self, user_id: Uuid, role_id: Uuid) -> Result<()> {
+    async fn remove_user_role(
+        &self,
+        user_id: Uuid,
+        role_id: Uuid,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             DELETE FROM user_roles
@@ -167,11 +179,9 @@ impl RbacRepository for PostgresRbacRepository {
         role_id: Uuid,
         check_last_admin: bool,
     ) -> Result<()> {
-        let mut tx = self
-            .pool()
-            .begin()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to start transaction: {}", e)))?;
+        let mut tx = self.pool().begin().await.map_err(|e| {
+            MediaError::Internal(format!("Failed to start transaction: {}", e))
+        })?;
 
         if check_last_admin {
             // Check if this is the admin role
@@ -186,7 +196,12 @@ impl RbacRepository for PostgresRbacRepository {
             )
             .fetch_one(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to check if admin role: {}", e)))?;
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to check if admin role: {}",
+                    e
+                ))
+            })?;
 
             if is_admin_role {
                 // Lock all admin users except the one whose role is being removed
@@ -204,14 +219,23 @@ impl RbacRepository for PostgresRbacRepository {
                 )
                 .fetch_all(&mut *tx)
                 .await
-                .map_err(|e| MediaError::Internal(format!("Failed to lock admin users: {}", e)))?;
+                .map_err(|e| {
+                    MediaError::Internal(format!(
+                        "Failed to lock admin users: {}",
+                        e
+                    ))
+                })?;
 
                 if admin_users.is_empty() {
                     tx.rollback().await.map_err(|e| {
-                        MediaError::Internal(format!("Failed to rollback transaction: {}", e))
+                        MediaError::Internal(format!(
+                            "Failed to rollback transaction: {}",
+                            e
+                        ))
                     })?;
                     return Err(MediaError::Conflict(
-                        "Cannot remove admin role from the last admin".to_string(),
+                        "Cannot remove admin role from the last admin"
+                            .to_string(),
                     ));
                 }
             }
@@ -228,20 +252,25 @@ impl RbacRepository for PostgresRbacRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to remove user role: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to remove user role: {}", e))
+        })?;
 
         if result.rows_affected() == 0 {
             tx.rollback().await.map_err(|e| {
-                MediaError::Internal(format!("Failed to rollback transaction: {}", e))
+                MediaError::Internal(format!(
+                    "Failed to rollback transaction: {}",
+                    e
+                ))
             })?;
             return Err(MediaError::NotFound(
                 "User role assignment not found".to_string(),
             ));
         }
 
-        tx.commit()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!("Failed to commit transaction: {}", e))
+        })?;
 
         tracing::info!(
             "Atomically removed role {} from user {} with last admin check: {}",
@@ -269,7 +298,12 @@ impl RbacRepository for PostgresRbacRepository {
         )
         .fetch_optional(self.pool())
         .await?
-        .ok_or_else(|| MediaError::NotFound(format!("Permission '{}' not found", permission)))?
+        .ok_or_else(|| {
+            MediaError::NotFound(format!(
+                "Permission '{}' not found",
+                permission
+            ))
+        })?
         .id;
 
         // Insert or update the override
@@ -296,7 +330,10 @@ impl RbacRepository for PostgresRbacRepository {
         Ok(())
     }
 
-    async fn get_admin_count(&self, exclude_user_id: Option<Uuid>) -> Result<usize> {
+    async fn get_admin_count(
+        &self,
+        exclude_user_id: Option<Uuid>,
+    ) -> Result<usize> {
         let count = if let Some(exclude_id) = exclude_user_id {
             sqlx::query_scalar!(
                 r#"
@@ -311,7 +348,9 @@ impl RbacRepository for PostgresRbacRepository {
             )
             .fetch_one(self.pool())
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to count admins: {}", e)))?
+            .map_err(|e| {
+                MediaError::Internal(format!("Failed to count admins: {}", e))
+            })?
         } else {
             sqlx::query_scalar!(
                 r#"
@@ -324,13 +363,19 @@ impl RbacRepository for PostgresRbacRepository {
             )
             .fetch_one(self.pool())
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to count admins: {}", e)))?
+            .map_err(|e| {
+                MediaError::Internal(format!("Failed to count admins: {}", e))
+            })?
         };
 
         Ok(count as usize)
     }
 
-    async fn user_has_role(&self, user_id: Uuid, role_name: &str) -> Result<bool> {
+    async fn user_has_role(
+        &self,
+        user_id: Uuid,
+        role_name: &str,
+    ) -> Result<bool> {
         let has_role = sqlx::query_scalar!(
             r#"
             SELECT EXISTS(
@@ -345,7 +390,9 @@ impl RbacRepository for PostgresRbacRepository {
         )
         .fetch_one(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to check user role: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to check user role: {}", e))
+        })?;
 
         Ok(has_role)
     }
@@ -363,7 +410,12 @@ impl RbacRepository for PostgresRbacRepository {
         )
         .fetch_all(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get users with role: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to get users with role: {}",
+                e
+            ))
+        })?;
 
         Ok(user_ids)
     }
@@ -390,7 +442,12 @@ impl RbacRepository for PostgresRbacRepository {
         .bind(is_system)
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to upsert role '{}': {}", name, e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to upsert role '{}': {}",
+                name, e
+            ))
+        })?;
 
         Ok(())
     }
@@ -417,13 +474,20 @@ impl RbacRepository for PostgresRbacRepository {
         .fetch_one(self.pool())
         .await
         .map_err(|e| {
-            MediaError::Internal(format!("Failed to upsert permission '{}': {}", name, e))
+            MediaError::Internal(format!(
+                "Failed to upsert permission '{}': {}",
+                name, e
+            ))
         })?;
 
         Ok(row.try_get("id")?)
     }
 
-    async fn assign_permission_to_role(&self, role_id: Uuid, permission_id: Uuid) -> Result<()> {
+    async fn assign_permission_to_role(
+        &self,
+        role_id: Uuid,
+        permission_id: Uuid,
+    ) -> Result<()> {
         sqlx::query(
             r#"
             INSERT INTO role_permissions (role_id, permission_id)

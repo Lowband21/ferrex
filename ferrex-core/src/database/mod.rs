@@ -32,7 +32,10 @@ impl fmt::Debug for MediaDatabase {
 }
 
 impl MediaDatabase {
-    pub async fn new_postgres(connection_string: &str, with_cache: bool) -> Result<Self> {
+    pub async fn new_postgres(
+        connection_string: &str,
+        with_cache: bool,
+    ) -> Result<Self> {
         let backend = Arc::new(PostgresDatabase::new(connection_string).await?);
 
         let cache = if with_cache {
@@ -85,7 +88,8 @@ impl MediaDatabase {
         }
 
         // Generate cache key based on query parameters
-        let cache_key = CacheKeys::media_query(query, Some(library_id), query.user_context);
+        let cache_key =
+            CacheKeys::media_query(query, Some(library_id), query.user_context);
         debug!("Query cache key: {}", cache_key);
 
         // Try to get from cache
@@ -186,7 +190,10 @@ impl MediaDatabase {
     }
 
     /// Invalidate cached queries for a specific library
-    pub async fn invalidate_library_query_cache(&self, library_id: LibraryID) -> Result<()> {
+    pub async fn invalidate_library_query_cache(
+        &self,
+        library_id: LibraryID,
+    ) -> Result<()> {
         use cache::CacheKeys;
         use tracing::{info, warn};
 
@@ -198,7 +205,10 @@ impl MediaDatabase {
 
             match cache_conn.delete_pattern(&pattern).await {
                 Ok(_) => {
-                    info!("Invalidated query cache for library: {}", library_id);
+                    info!(
+                        "Invalidated query cache for library: {}",
+                        library_id
+                    );
                     Ok(())
                 }
                 Err(e) => {
@@ -242,7 +252,10 @@ impl MediaDatabase {
     }
 
     /// Delete media and invalidate related caches
-    pub async fn delete_media_with_cache_invalidation(&self, id: &str) -> Result<()> {
+    pub async fn delete_media_with_cache_invalidation(
+        &self,
+        id: &str,
+    ) -> Result<()> {
         // Delete the media
         self.backend.delete_media(id).await?;
 

@@ -47,11 +47,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
     ) -> Result<()> {
         let now = Utc::now().timestamp_millis();
 
-        let mut tx = self
-            .pool()
-            .begin()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to start transaction: {}", e)))?;
+        let mut tx = self.pool().begin().await.map_err(|e| {
+            MediaError::Internal(format!("Failed to start transaction: {}", e))
+        })?;
 
         // Update or insert watch progress
         sqlx::query!(
@@ -115,18 +113,24 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
             .execute(&mut *tx)
             .await
             .map_err(|e| {
-                MediaError::Internal(format!("Failed to remove from in-progress: {}", e))
+                MediaError::Internal(format!(
+                    "Failed to remove from in-progress: {}",
+                    e
+                ))
             })?;
         }
 
-        tx.commit()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!("Failed to commit transaction: {}", e))
+        })?;
 
         Ok(())
     }
 
-    async fn get_user_watch_state(&self, user_id: Uuid) -> Result<UserWatchState> {
+    async fn get_user_watch_state(
+        &self,
+        user_id: Uuid,
+    ) -> Result<UserWatchState> {
         // Get in-progress items
         let progress_rows = sqlx::query!(
             r#"
@@ -139,7 +143,9 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         )
         .fetch_all(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get watch progress: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to get watch progress: {}", e))
+        })?;
 
         let mut in_progress = HashMap::new();
         for row in progress_rows {
@@ -165,7 +171,12 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         )
         .fetch_all(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get completed media: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to get completed media: {}",
+                e
+            ))
+        })?;
 
         let mut completed = HashSet::new();
         for row in completed_rows {
@@ -203,7 +214,12 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         )
         .fetch_all(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get continue watching: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to get continue watching: {}",
+                e
+            ))
+        })?;
 
         let mut items = Vec::new();
         for row in rows {
@@ -218,12 +234,14 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         Ok(items)
     }
 
-    async fn clear_watch_progress(&self, user_id: Uuid, media_id: &Uuid) -> Result<()> {
-        let mut tx = self
-            .pool()
-            .begin()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to start transaction: {}", e)))?;
+    async fn clear_watch_progress(
+        &self,
+        user_id: Uuid,
+        media_id: &Uuid,
+    ) -> Result<()> {
+        let mut tx = self.pool().begin().await.map_err(|e| {
+            MediaError::Internal(format!("Failed to start transaction: {}", e))
+        })?;
 
         // Remove from progress
         let progress_result = sqlx::query!(
@@ -236,7 +254,12 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear watch progress: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to clear watch progress: {}",
+                e
+            ))
+        })?;
 
         // Remove from completed
         let completed_result = sqlx::query!(
@@ -249,11 +272,16 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to clear completed status: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to clear completed status: {}",
+                e
+            ))
+        })?;
 
-        tx.commit()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!("Failed to commit transaction: {}", e))
+        })?;
 
         info!(
             "Cleared watch progress for user {} media {}: {} progress, {} completed removed",
@@ -266,7 +294,11 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         Ok(())
     }
 
-    async fn is_media_completed(&self, user_id: Uuid, media_id: &Uuid) -> Result<bool> {
+    async fn is_media_completed(
+        &self,
+        user_id: Uuid,
+        media_id: &Uuid,
+    ) -> Result<bool> {
         let exists = sqlx::query!(
             r#"
             SELECT EXISTS(
@@ -279,7 +311,12 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         )
         .fetch_one(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to check completion status: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to check completion status: {}",
+                e
+            ))
+        })?;
 
         Ok(exists.exists)
     }

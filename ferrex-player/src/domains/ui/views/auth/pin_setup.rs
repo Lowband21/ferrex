@@ -1,7 +1,8 @@
 //! PIN setup view
 
 use super::components::{
-    auth_card, auth_container, error_message, primary_button, secondary_button, spacing, title,
+    auth_card, auth_container, error_message, primary_button, secondary_button,
+    spacing, title,
 };
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::messages as auth;
@@ -32,7 +33,9 @@ pub fn view_pin_setup<'a>(
             .size(16)
             .style(|theme: &Theme| {
                 text::Style {
-                    color: Some(theme.extended_palette().background.strong.text),
+                    color: Some(
+                        theme.extended_palette().background.strong.text,
+                    ),
                 }
             })
             .align_x(iced::alignment::Horizontal::Center),
@@ -46,13 +49,12 @@ pub fn view_pin_setup<'a>(
     }
 
     // PIN entry
-    content = content.push(
-        text("Enter PIN")
-            .size(14)
-            .style(|theme: &Theme| text::Style {
+    content =
+        content.push(text("Enter PIN").size(14).style(|theme: &Theme| {
+            text::Style {
                 color: Some(theme.extended_palette().background.strong.text),
-            }),
-    );
+            }
+        }));
 
     content = content.push(Space::new().height(Length::Fixed(8.0)));
 
@@ -65,13 +67,12 @@ pub fn view_pin_setup<'a>(
     content = content.push(spacing());
 
     // Confirm PIN entry
-    content = content.push(
-        text("Confirm PIN")
-            .size(14)
-            .style(|theme: &Theme| text::Style {
+    content =
+        content.push(text("Confirm PIN").size(14).style(|theme: &Theme| {
+            text::Style {
                 color: Some(theme.extended_palette().background.strong.text),
-            }),
-    );
+            }
+        }));
 
     content = content.push(Space::new().height(Length::Fixed(8.0)));
 
@@ -101,7 +102,8 @@ pub fn view_pin_setup<'a>(
     // Submit button
     let can_submit = pin.len() == 4 && confirm_pin.len() == 4;
     let submit_button = if can_submit {
-        primary_button("Set PIN").on_press(DomainMessage::Auth(auth::Message::SubmitPin))
+        primary_button("Set PIN")
+            .on_press(DomainMessage::Auth(auth::Message::SubmitPin))
     } else {
         primary_button("Set PIN")
     };
@@ -111,8 +113,10 @@ pub fn view_pin_setup<'a>(
     content = content.push(Space::new().height(Length::Fixed(12.0)));
 
     // Skip button
-    content = content
-        .push(secondary_button("Skip for now").on_press(DomainMessage::Auth(auth::Message::Back)));
+    content = content.push(
+        secondary_button("Skip for now")
+            .on_press(DomainMessage::Auth(auth::Message::Back)),
+    );
 
     let card = auth_card(content.align_x(Alignment::Center));
     auth_container(card).into()
@@ -126,7 +130,10 @@ pub fn view_pin_setup<'a>(
     ),
     profiling::function
 )]
-fn pin_display<'a>(value: &str, is_confirm: bool) -> Element<'a, DomainMessage> {
+fn pin_display<'a>(
+    value: &str,
+    is_confirm: bool,
+) -> Element<'a, DomainMessage> {
     let digits: Vec<Element<'a, DomainMessage>> = (0..4)
         .map(|i| {
             let digit = value.chars().nth(i);
@@ -176,7 +183,10 @@ fn pin_display<'a>(value: &str, is_confirm: bool) -> Element<'a, DomainMessage> 
     ),
     profiling::function
 )]
-fn numeric_keypad<'a>(current_value: &str, is_confirm: bool) -> Element<'a, DomainMessage> {
+fn numeric_keypad<'a>(
+    current_value: &str,
+    is_confirm: bool,
+) -> Element<'a, DomainMessage> {
     let button_size = 60.0;
 
     let create_digit_button = |digit: char| {

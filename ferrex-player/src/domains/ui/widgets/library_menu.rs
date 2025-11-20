@@ -20,7 +20,8 @@ pub fn library_sort_filter_menu<'a>(
     is_filter_panel_open: bool,
 ) -> Element<'a, Message> {
     let sort_item = build_sort_menu(current_sort, current_order);
-    let filter_item = build_filter_menu(active_filter_count, is_filter_panel_open);
+    let filter_item =
+        build_filter_menu(active_filter_count, is_filter_panel_open);
 
     let menu_bar = MenuBar::new(vec![sort_item, filter_item])
         .spacing(8.0)
@@ -147,8 +148,12 @@ fn menu_item(
     )
 }
 
-fn menu_row(label: &'static str, icon: Option<Icon>) -> container::Container<'static, Message> {
-    let mut content: Row<'static, Message> = Row::new().align_y(Alignment::Center);
+fn menu_row(
+    label: &'static str,
+    icon: Option<Icon>,
+) -> container::Container<'static, Message> {
+    let mut content: Row<'static, Message> =
+        Row::new().align_y(Alignment::Center);
 
     if let Some(icon) = icon {
         content = content

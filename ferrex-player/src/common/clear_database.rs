@@ -27,9 +27,9 @@ pub fn handle_clear_database(state: &mut State) -> Task<DomainMessage> {
             }
         },
         |result| {
-            DomainMessage::Ui(crate::domains::ui::messages::Message::DatabaseCleared(
-                result,
-            ))
+            DomainMessage::Ui(
+                crate::domains::ui::messages::Message::DatabaseCleared(result),
+            )
         },
     )
 }
@@ -94,7 +94,8 @@ pub fn handle_database_cleared(
         }
         Err(e) => {
             log::error!("Failed to clear database: {}", e);
-            state.domains.ui.state.error_message = Some(format!("Failed to clear database: {}", e));
+            state.domains.ui.state.error_message =
+                Some(format!("Failed to clear database: {}", e));
             Task::none()
         }
     }

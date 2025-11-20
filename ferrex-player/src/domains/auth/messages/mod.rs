@@ -107,28 +107,32 @@ impl std::fmt::Debug for Message {
         match self {
             // Core auth flow
             Self::CheckAuthStatus => write!(f, "CheckAuthStatus"),
-            Self::AuthStatusConfirmedWithPin => write!(f, "AuthStatusConfirmedWithPin"),
+            Self::AuthStatusConfirmedWithPin => {
+                write!(f, "AuthStatusConfirmedWithPin")
+            }
             Self::CheckSetupStatus => write!(f, "CheckSetupStatus"),
             Self::SetupStatusChecked(needs_setup) => {
                 write!(f, "SetupStatusChecked({})", needs_setup)
             }
             Self::AutoLoginCheckComplete => write!(f, "AutoLoginCheckComplete"),
-            Self::AutoLoginSuccessful(_) => write!(f, "AutoLoginSuccessful(...)"),
+            Self::AutoLoginSuccessful(_) => {
+                write!(f, "AutoLoginSuccessful(...)")
+            }
 
             // User management
             Self::LoadUsers => write!(f, "LoadUsers"),
-            Self::UsersLoaded(result) => write!(
-                f,
-                "UsersLoaded({:?})",
-                result.as_ref().map(|v| v.len())
-            ),
+            Self::UsersLoaded(result) => {
+                write!(f, "UsersLoaded({:?})", result.as_ref().map(|v| v.len()))
+            }
             Self::SelectUser(uuid) => write!(f, "SelectUser({})", uuid),
             Self::ShowCreateUser => write!(f, "ShowCreateUser"),
             Self::BackToUserSelection => write!(f, "BackToUserSelection"),
 
             // PIN authentication
             Self::ShowPinEntry(_) => write!(f, "ShowPinEntry(...)"),
-            Self::PinDigitPressed(digit) => write!(f, "PinDigitPressed({})", digit),
+            Self::PinDigitPressed(digit) => {
+                write!(f, "PinDigitPressed({})", digit)
+            }
             Self::PinBackspace => write!(f, "PinBackspace"),
             Self::PinClear => write!(f, "PinClear"),
             Self::PinSubmit => write!(f, "PinSubmit"),
@@ -140,20 +144,32 @@ impl std::fmt::Debug for Message {
             Self::LogoutComplete => write!(f, "LogoutComplete"),
 
             // Password login - hide sensitive data
-            Self::ShowPasswordLogin(username) => write!(f, "ShowPasswordLogin({})", username),
+            Self::ShowPasswordLogin(username) => {
+                write!(f, "ShowPasswordLogin({})", username)
+            }
             Self::PasswordLoginUpdateUsername(username) => {
                 write!(f, "PasswordLoginUpdateUsername({})", username)
             }
-            Self::PasswordLoginUpdatePassword(_) => write!(f, "PasswordLoginUpdatePassword(***)"),
-            Self::PasswordLoginToggleVisibility => write!(f, "PasswordLoginToggleVisibility"),
-            Self::PasswordLoginToggleRemember => write!(f, "PasswordLoginToggleRemember"),
+            Self::PasswordLoginUpdatePassword(_) => {
+                write!(f, "PasswordLoginUpdatePassword(***)")
+            }
+            Self::PasswordLoginToggleVisibility => {
+                write!(f, "PasswordLoginToggleVisibility")
+            }
+            Self::PasswordLoginToggleRemember => {
+                write!(f, "PasswordLoginToggleRemember")
+            }
             Self::PasswordLoginSubmit => write!(f, "PasswordLoginSubmit"),
 
             // Device auth flow - hide sensitive data
-            Self::DeviceStatusChecked(_, _) => write!(f, "DeviceStatusChecked(...)"),
+            Self::DeviceStatusChecked(_, _) => {
+                write!(f, "DeviceStatusChecked(...)")
+            }
             Self::UpdateCredential(_) => write!(f, "UpdateCredential(***)"),
             Self::SubmitCredential => write!(f, "SubmitCredential"),
-            Self::TogglePasswordVisibility => write!(f, "TogglePasswordVisibility"),
+            Self::TogglePasswordVisibility => {
+                write!(f, "TogglePasswordVisibility")
+            }
             Self::ToggleRememberDevice => write!(f, "ToggleRememberDevice"),
             Self::RememberDeviceSynced(value) => {
                 write!(f, "RememberDeviceSynced({})", value)
@@ -169,18 +185,28 @@ impl std::fmt::Debug for Message {
 
             // Admin setup flow - hide sensitive data
             Self::UpdateSetupField(field) => match field {
-                SetupField::Username(u) => write!(f, "UpdateSetupField(Username({}))", u),
-                SetupField::DisplayName(d) => write!(f, "UpdateSetupField(DisplayName({}))", d),
-                SetupField::Password(_) => write!(f, "UpdateSetupField(Password(***)"),
+                SetupField::Username(u) => {
+                    write!(f, "UpdateSetupField(Username({}))", u)
+                }
+                SetupField::DisplayName(d) => {
+                    write!(f, "UpdateSetupField(DisplayName({}))", d)
+                }
+                SetupField::Password(_) => {
+                    write!(f, "UpdateSetupField(Password(***)")
+                }
                 SetupField::ConfirmPassword(_) => {
                     write!(f, "UpdateSetupField(ConfirmPassword(***)")
                 }
-                SetupField::SetupToken(t) => write!(f, "UpdateSetupField(SetupToken({}))", t),
+                SetupField::SetupToken(t) => {
+                    write!(f, "UpdateSetupField(SetupToken({}))", t)
+                }
                 SetupField::ClaimToken(_) => {
                     write!(f, "UpdateSetupField(ClaimToken(***)")
                 }
             },
-            Self::ToggleSetupPasswordVisibility => write!(f, "ToggleSetupPasswordVisibility"),
+            Self::ToggleSetupPasswordVisibility => {
+                write!(f, "ToggleSetupPasswordVisibility")
+            }
             Self::SubmitSetup => write!(f, "SubmitSetup"),
             Self::SetupComplete(_, _) => write!(f, "SetupComplete(***, ***)"),
             Self::SetupError(error) => write!(f, "SetupError({})", error),
@@ -189,9 +215,13 @@ impl std::fmt::Debug for Message {
             }
             Self::StartSetupClaim => write!(f, "StartSetupClaim"),
             Self::SetupClaimStarted(_) => write!(f, "SetupClaimStarted(...)"),
-            Self::SetupClaimFailed(error) => write!(f, "SetupClaimFailed({})", error),
+            Self::SetupClaimFailed(error) => {
+                write!(f, "SetupClaimFailed({})", error)
+            }
             Self::ConfirmSetupClaim => write!(f, "ConfirmSetupClaim"),
-            Self::SetupClaimConfirmed(_) => write!(f, "SetupClaimConfirmed(...)"),
+            Self::SetupClaimConfirmed(_) => {
+                write!(f, "SetupClaimConfirmed(...)")
+            }
             Self::SetupClaimConfirmFailed(error) => {
                 write!(f, "SetupClaimConfirmFailed({})", error)
             }
@@ -200,11 +230,15 @@ impl std::fmt::Debug for Message {
             // Admin PIN unlock management
             Self::EnableAdminPinUnlock => write!(f, "EnableAdminPinUnlock"),
             Self::DisableAdminPinUnlock => write!(f, "DisableAdminPinUnlock"),
-            Self::AdminPinUnlockToggled(result) => write!(f, "AdminPinUnlockToggled({:?})", result),
+            Self::AdminPinUnlockToggled(result) => {
+                write!(f, "AdminPinUnlockToggled({:?})", result)
+            }
 
             // Command execution
             Self::ExecuteCommand(cmd) => write!(f, "ExecuteCommand({:?})", cmd),
-            Self::CommandResult(cmd, result) => write!(f, "CommandResult({:?}, {:?})", cmd, result),
+            Self::CommandResult(cmd, result) => {
+                write!(f, "CommandResult({:?}, {:?})", cmd, result)
+            }
         }
     }
 }
@@ -217,7 +251,9 @@ impl Message {
             Self::UpdateCredential(_) => "UpdateCredential(***)".to_string(),
             Self::UpdatePin(_) => "UpdatePin(***)".to_string(),
             Self::UpdateConfirmPin(_) => "UpdateConfirmPin(***)".to_string(),
-            Self::PasswordLoginUpdatePassword(_) => "PasswordLoginUpdatePassword(***)".to_string(),
+            Self::PasswordLoginUpdatePassword(_) => {
+                "PasswordLoginUpdatePassword(***)".to_string()
+            }
             Self::UpdateSetupField(SetupField::Password(_)) => {
                 "UpdateSetupField(Password(***)".to_string()
             }
@@ -237,7 +273,9 @@ impl Message {
         match self {
             // Core auth flow
             Self::CheckAuthStatus => "Auth::CheckAuthStatus",
-            Self::AuthStatusConfirmedWithPin => "Auth::AuthStatusConfirmedWithPin",
+            Self::AuthStatusConfirmedWithPin => {
+                "Auth::AuthStatusConfirmedWithPin"
+            }
             Self::CheckSetupStatus => "Auth::CheckSetupStatus",
             Self::SetupStatusChecked(_) => "Auth::SetupStatusChecked",
             Self::AutoLoginCheckComplete => "Auth::AutoLoginCheckComplete",
@@ -265,10 +303,18 @@ impl Message {
 
             // Password login
             Self::ShowPasswordLogin(_) => "Auth::ShowPasswordLogin",
-            Self::PasswordLoginUpdateUsername(_) => "Auth::PasswordLoginUpdateUsername",
-            Self::PasswordLoginUpdatePassword(_) => "Auth::PasswordLoginUpdatePassword",
-            Self::PasswordLoginToggleVisibility => "Auth::PasswordLoginToggleVisibility",
-            Self::PasswordLoginToggleRemember => "Auth::PasswordLoginToggleRemember",
+            Self::PasswordLoginUpdateUsername(_) => {
+                "Auth::PasswordLoginUpdateUsername"
+            }
+            Self::PasswordLoginUpdatePassword(_) => {
+                "Auth::PasswordLoginUpdatePassword"
+            }
+            Self::PasswordLoginToggleVisibility => {
+                "Auth::PasswordLoginToggleVisibility"
+            }
+            Self::PasswordLoginToggleRemember => {
+                "Auth::PasswordLoginToggleRemember"
+            }
             Self::PasswordLoginSubmit => "Auth::PasswordLoginSubmit",
 
             // Device auth flow
@@ -289,7 +335,9 @@ impl Message {
 
             // Admin setup flow
             Self::UpdateSetupField(_) => "Auth::UpdateSetupField",
-            Self::ToggleSetupPasswordVisibility => "Auth::ToggleSetupPasswordVisibility",
+            Self::ToggleSetupPasswordVisibility => {
+                "Auth::ToggleSetupPasswordVisibility"
+            }
             Self::SubmitSetup => "Auth::SubmitSetup",
             Self::SetupComplete(_, _) => "Auth::SetupComplete",
             Self::SetupError(_) => "Auth::SetupError",

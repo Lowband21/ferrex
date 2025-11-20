@@ -178,9 +178,14 @@ impl ImageService {
     }
 
     /// Register a TMDB image in the database
-    pub async fn register_tmdb_image(&self, tmdb_path: &str) -> Result<ImageRecord> {
+    pub async fn register_tmdb_image(
+        &self,
+        tmdb_path: &str,
+    ) -> Result<ImageRecord> {
         // Check if already registered
-        if let Some(existing) = self.images.get_image_by_tmdb_path(tmdb_path).await? {
+        if let Some(existing) =
+            self.images.get_image_by_tmdb_path(tmdb_path).await?
+        {
             return Ok(existing);
         }
 
@@ -225,7 +230,10 @@ impl ImageService {
                 let mut content_hash: Option<String> = None;
 
                 if let Ok(bytes) = tokio::fs::read(&path).await {
-                    if should_extract_theme_color(context.as_ref(), variant_name) {
+                    if should_extract_theme_color(
+                        context.as_ref(),
+                        variant_name,
+                    ) {
                         theme_color = self.extract_theme_color(&bytes);
                     }
                     content_hash = Some(self.calculate_hash(&bytes));
@@ -244,7 +252,11 @@ impl ImageService {
 
                     if let Some(color) = theme_color {
                         self.images
-                            .update_media_theme_color(&key.media_type, key.media_id, Some(&color))
+                            .update_media_theme_color(
+                                &key.media_type,
+                                key.media_id,
+                                Some(&color),
+                            )
                             .await?;
                     }
                 }
@@ -258,15 +270,16 @@ impl ImageService {
             }
         }
 
-        let url = format!("https://image.tmdb.org/t/p/{}/{}", variant_name, tmdb_path);
+        let url = format!(
+            "https://image.tmdb.org/t/p/{}/{}",
+            variant_name, tmdb_path
+        );
         //debug!("Downloading image variant: {}", url);
 
-        let response = self
-            .http_client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to download image: {}", e)))?;
+        let response =
+            self.http_client.get(&url).send().await.map_err(|e| {
+                MediaError::Internal(format!("Failed to download image: {}", e))
+            })?;
 
         if !response.status().is_success() {
             return Err(MediaError::Internal(format!(
@@ -275,10 +288,9 @@ impl ImageService {
             )));
         }
 
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to read image data: {}", e)))?;
+        let bytes = response.bytes().await.map_err(|e| {
+            MediaError::Internal(format!("Failed to read image data: {}", e))
+        })?;
 
         let variant_dir = self
             .cache_dir
@@ -289,8 +301,12 @@ impl ImageService {
             .await
             .map_err(MediaError::Io)?;
 
-        let filename =
-            build_variant_filename(tmdb_path, variant_name, image_folder, context.as_ref());
+        let filename = build_variant_filename(
+            tmdb_path,
+            variant_name,
+            image_folder,
+            context.as_ref(),
+        );
         let file_path = variant_dir.join(&filename);
 
         tokio::fs::write(&file_path, &bytes)
@@ -307,11 +323,12 @@ impl ImageService {
 
         let hash = self.calculate_hash(&bytes);
         let format = self.detect_format(&bytes);
-        let theme_color = if should_extract_theme_color(context.as_ref(), variant_name) {
-            self.extract_theme_color(&bytes)
-        } else {
-            None
-        };
+        let theme_color =
+            if should_extract_theme_color(context.as_ref(), variant_name) {
+                self.extract_theme_color(&bytes)
+            } else {
+                None
+            };
 
         if image_record.file_hash.is_none() {
             self.images
@@ -326,7 +343,9 @@ impl ImageService {
                 .await?;
         }
 
-        if let Some(existing_image) = self.images.get_image_by_hash(&hash).await? {
+        if let Some(existing_image) =
+            self.images.get_image_by_hash(&hash).await?
+        {
             debug!("Found duplicate image by hash: {}", hash);
 
             if let Some(existing_variant) = self
@@ -347,7 +366,11 @@ impl ImageService {
 
                     if let Some(color) = theme_color {
                         self.images
-                            .update_media_theme_color(&key.media_type, key.media_id, Some(&color))
+                            .update_media_theme_color(
+                                &key.media_type,
+                                key.media_id,
+                                Some(&color),
+                            )
                             .await?;
                     }
                 }
@@ -380,7 +403,11 @@ impl ImageService {
 
                 if let Some(color) = theme_color {
                     self.images
-                        .update_media_theme_color(&key.media_type, key.media_id, Some(&color))
+                        .update_media_theme_color(
+                            &key.media_type,
+                            key.media_id,
+                            Some(&color),
+                        )
                         .await?;
                 }
             }
@@ -413,7 +440,11 @@ impl ImageService {
 
             if let Some(color) = theme_color {
                 self.images
-                    .update_media_theme_color(&key.media_type, key.media_id, Some(&color))
+                    .update_media_theme_color(
+                        &key.media_type,
+                        key.media_id,
+                        Some(&color),
+                    )
                     .await?;
             }
         }
@@ -483,7 +514,9 @@ impl ImageService {
             .get_by_id(&media_file_id)
             .await?
             .ok_or_else(|| {
-                MediaError::NotFound("Media file missing for thumbnail generation".into())
+                MediaError::NotFound(
+                    "Media file missing for thumbnail generation".into(),
+                )
             })?;
 
         let video_path = media.path.clone();
@@ -497,7 +530,12 @@ impl ImageService {
             .await
             .map_err(MediaError::Io)?;
 
-        let filename = build_variant_filename(image_key, &variant_name, image_folder, Some(&key));
+        let filename = build_variant_filename(
+            image_key,
+            &variant_name,
+            image_folder,
+            Some(&key),
+        );
         let file_path = variant_dir.join(&filename);
 
         let output_path = file_path.clone();
@@ -506,9 +544,12 @@ impl ImageService {
             extract_frame_at_percentage(&video_path_string, &output_path, 0.3)
         })
         .await
-        .map_err(|err| MediaError::Internal(format!("Failed to join ffmpeg task: {err}")))??;
+        .map_err(|err| {
+            MediaError::Internal(format!("Failed to join ffmpeg task: {err}"))
+        })??;
 
-        let bytes = tokio::fs::read(&file_path).await.map_err(MediaError::Io)?;
+        let bytes =
+            tokio::fs::read(&file_path).await.map_err(MediaError::Io)?;
         let file_size_i32 = bytes.len() as i32;
 
         let (width, height) = match self.get_image_dimensions(&bytes) {
@@ -535,7 +576,9 @@ impl ImageService {
                 .await?;
         }
 
-        if let Some(existing_image) = self.images.get_image_by_hash(&hash).await? {
+        if let Some(existing_image) =
+            self.images.get_image_by_hash(&hash).await?
+        {
             if let Some(existing_variant) = self
                 .images
                 .get_image_variant(existing_image.id, &variant_name)
@@ -578,7 +621,13 @@ impl ImageService {
         }
 
         self.images
-            .mark_media_image_variant_cached(&key, width, height, Some(&hash), None)
+            .mark_media_image_variant_cached(
+                &key,
+                width,
+                height,
+                Some(&hash),
+                None,
+            )
             .await?;
 
         Ok(file_path)
@@ -625,7 +674,11 @@ impl ImageService {
     ) -> Result<Option<PathBuf>> {
         debug!(
             "ensure_variant_async: type={}, id={}, image_type={}, index={}, variant={:?}",
-            params.media_type, params.media_id, params.image_type, params.index, params.variant
+            params.media_type,
+            params.media_id,
+            params.image_type,
+            params.index,
+            params.variant
         );
 
         // Lookup the image record and check if the desired variant exists
@@ -633,7 +686,8 @@ impl ImageService {
             self.images.lookup_image_variant(params).await?
         {
             let requested_variant = params.variant.as_deref();
-            let variant_key_struct = requested_variant.and_then(|v| build_variant_key(params, v));
+            let variant_key_struct =
+                requested_variant.and_then(|v| build_variant_key(params, v));
 
             if let Some(variant) = existing_variant {
                 if let Some(ref key) = variant_key_struct {
@@ -681,9 +735,14 @@ impl ImageService {
                     let permits = self.permits.clone();
                     let key_struct = variant_key_struct.clone();
                     tokio::spawn(async move {
-                        let _permit = permits.acquire().await.expect("semaphore");
+                        let _permit =
+                            permits.acquire().await.expect("semaphore");
                         if let Err(e) = this
-                            .download_variant(&tmdb_path, size, key_struct.clone())
+                            .download_variant(
+                                &tmdb_path,
+                                size,
+                                key_struct.clone(),
+                            )
                             .await
                         {
                             warn!(
@@ -698,7 +757,10 @@ impl ImageService {
                     });
                 } else {
                     drop(guard);
-                    debug!("Variant generation already in-flight for key: {}", key);
+                    debug!(
+                        "Variant generation already in-flight for key: {}",
+                        key
+                    );
                 }
             }
 
@@ -716,8 +778,11 @@ impl ImageService {
         params: &ImageLookupParams,
         target_width: Option<u32>,
     ) -> Result<Option<(PathBuf, String)>> {
-        if let Some((image_record, _)) = self.images.lookup_image_variant(params).await? {
-            let mut variants = self.images.get_image_variants(image_record.id).await?;
+        if let Some((image_record, _)) =
+            self.images.lookup_image_variant(params).await?
+        {
+            let mut variants =
+                self.images.get_image_variants(image_record.id).await?;
             if variants.is_empty() {
                 return Ok(None);
             }
@@ -731,8 +796,10 @@ impl ImageService {
                 })
                 .unwrap_or(500);
 
-            variants
-                .sort_by_key(|v| tmdb_variant_to_width_hint(&v.variant).unwrap_or(i32::MAX as u32));
+            variants.sort_by_key(|v| {
+                tmdb_variant_to_width_hint(&v.variant)
+                    .unwrap_or(i32::MAX as u32)
+            });
 
             // Prefer <= target; else smallest > target
             let mut best: Option<&ImageVariant> = None;
@@ -762,7 +829,10 @@ impl ImageService {
             }
 
             if let Some(v) = best {
-                return Ok(Some((PathBuf::from(&v.file_path), v.variant.clone())));
+                return Ok(Some((
+                    PathBuf::from(&v.file_path),
+                    v.variant.clone(),
+                )));
             }
         }
         Ok(None)
@@ -786,11 +856,17 @@ impl ImageService {
     ) -> Result<Option<PathBuf>> {
         debug!(
             "get_or_download_variant called with params: type={}, id={}, image_type={}, index={}, variant={:?}",
-            params.media_type, params.media_id, params.image_type, params.index, params.variant
+            params.media_type,
+            params.media_id,
+            params.image_type,
+            params.index,
+            params.variant
         );
 
         // Look up the image in database
-        if let Some((image_record, _)) = self.images.lookup_image_variant(params).await? {
+        if let Some((image_record, _)) =
+            self.images.lookup_image_variant(params).await?
+        {
             if let Some(size_str) = &params.variant
                 && let Some(size) = TmdbImageSize::from_str(size_str)
             {
@@ -801,7 +877,8 @@ impl ImageService {
                 return Ok(Some(path));
             }
 
-            let variants = self.images.get_image_variants(image_record.id).await?;
+            let variants =
+                self.images.get_image_variants(image_record.id).await?;
             if let Some(variant) = variants.first() {
                 return Ok(Some(PathBuf::from(&variant.file_path)));
             }
@@ -836,8 +913,9 @@ impl ImageService {
     fn get_image_dimensions(&self, data: &[u8]) -> Result<(u32, u32)> {
         use image::GenericImageView;
 
-        let img = image::load_from_memory(data)
-            .map_err(|e| MediaError::InvalidMedia(format!("Failed to decode image: {}", e)))?;
+        let img = image::load_from_memory(data).map_err(|e| {
+            MediaError::InvalidMedia(format!("Failed to decode image: {}", e))
+        })?;
 
         Ok(img.dimensions())
     }
@@ -912,7 +990,9 @@ impl ImageService {
             let saturation = if max > 0.0 { (max - min) / max } else { 0.0 };
 
             // Prefer more saturated colors
-            if *count > best_count || (*count == best_count && saturation > best_saturation) {
+            if *count > best_count
+                || (*count == best_count && saturation > best_saturation)
+            {
                 best_color = Some(*color);
                 best_count = *count;
                 best_saturation = saturation;
@@ -920,7 +1000,8 @@ impl ImageService {
         }
 
         // Convert to hex color
-        let hex_color = best_color.map(|[r, g, b]| format!("#{:02x}{:02x}{:02x}", r, g, b));
+        let hex_color =
+            best_color.map(|[r, g, b]| format!("#{:02x}{:02x}{:02x}", r, g, b));
         if let Some(ref color) = hex_color {
             info!(
                 "Extracted theme color: {} (saturation: {:.2})",
@@ -939,8 +1020,11 @@ impl ImageService {
     fn ensure_ffmpeg_initialized(&self) -> Result<()> {
         static INIT: OnceCell<()> = OnceCell::new();
         INIT.get_or_try_init(|| {
-            ffmpeg::init()
-                .map_err(|e| MediaError::Internal(format!("Failed to initialize ffmpeg: {e}")))
+            ffmpeg::init().map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to initialize ffmpeg: {e}"
+                ))
+            })
         })
         .map(|_| ())
     }
@@ -958,7 +1042,9 @@ impl ImageService {
     }
 
     /// Get cache statistics
-    pub async fn get_stats(&self) -> Result<std::collections::HashMap<String, u64>> {
+    pub async fn get_stats(
+        &self,
+    ) -> Result<std::collections::HashMap<String, u64>> {
         self.images.get_image_cache_stats().await
     }
 }
@@ -996,7 +1082,10 @@ fn build_variant_filename(
     }
 }
 
-fn should_extract_theme_color(context: Option<&MediaImageVariantKey>, variant: &str) -> bool {
+fn should_extract_theme_color(
+    context: Option<&MediaImageVariantKey>,
+    variant: &str,
+) -> bool {
     match context {
         Some(key) => {
             matches!(key.image_type, MediaImageKind::Poster)
@@ -1006,7 +1095,10 @@ fn should_extract_theme_color(context: Option<&MediaImageVariantKey>, variant: &
     }
 }
 
-fn build_variant_key(params: &ImageLookupParams, variant: &str) -> Option<MediaImageVariantKey> {
+fn build_variant_key(
+    params: &ImageLookupParams,
+    variant: &str,
+) -> Option<MediaImageVariantKey> {
     let media_id = Uuid::parse_str(&params.media_id).ok()?;
     Some(MediaImageVariantKey {
         media_type: params.media_type.clone(),
@@ -1036,30 +1128,34 @@ fn extract_frame_at_percentage(
 ) -> Result<()> {
     use ffmpeg::codec::context::Context as CodecContext;
 
-    let mut input_ctx = ffmpeg::format::input(&input_path)
-        .map_err(|e| MediaError::Internal(format!("Failed to open video file: {e}")))?;
+    let mut input_ctx = ffmpeg::format::input(&input_path).map_err(|e| {
+        MediaError::Internal(format!("Failed to open video file: {e}"))
+    })?;
 
     let video_stream = input_ctx
         .streams()
         .best(ffmpeg::media::Type::Video)
-        .ok_or_else(|| MediaError::InvalidMedia("No video stream found".into()))?;
+        .ok_or_else(|| {
+            MediaError::InvalidMedia("No video stream found".into())
+        })?;
 
     let video_stream_index = video_stream.index();
     let codec_params = video_stream.parameters();
 
-    let codec_ctx = CodecContext::from_parameters(codec_params)
-        .map_err(|e| MediaError::Internal(format!("Failed to create codec context: {e}")))?;
-    let mut decoder = codec_ctx
-        .decoder()
-        .video()
-        .map_err(|e| MediaError::Internal(format!("Failed to create video decoder: {e}")))?;
+    let codec_ctx =
+        CodecContext::from_parameters(codec_params).map_err(|e| {
+            MediaError::Internal(format!("Failed to create codec context: {e}"))
+        })?;
+    let mut decoder = codec_ctx.decoder().video().map_err(|e| {
+        MediaError::Internal(format!("Failed to create video decoder: {e}"))
+    })?;
 
     let duration = input_ctx.duration();
     if duration > 0 && percentage > 0.0 {
         let target_position = (duration as f64 * percentage) as i64;
-        input_ctx
-            .seek(target_position, ..)
-            .map_err(|e| MediaError::Internal(format!("Failed to seek: {e}")))?;
+        input_ctx.seek(target_position, ..).map_err(|e| {
+            MediaError::Internal(format!("Failed to seek: {e}"))
+        })?;
     }
 
     let mut received_frame = None;
@@ -1068,9 +1164,9 @@ fn extract_frame_at_percentage(
             continue;
         }
 
-        decoder
-            .send_packet(&packet)
-            .map_err(|e| MediaError::Internal(format!("Failed to send packet: {e}")))?;
+        decoder.send_packet(&packet).map_err(|e| {
+            MediaError::Internal(format!("Failed to send packet: {e}"))
+        })?;
 
         let mut frame = ffmpeg::frame::Video::empty();
         match decoder.receive_frame(&mut frame) {
@@ -1086,7 +1182,9 @@ fn extract_frame_at_percentage(
     }
 
     let frame = received_frame.ok_or_else(|| {
-        MediaError::InvalidMedia("Unable to decode frame for thumbnail generation".into())
+        MediaError::InvalidMedia(
+            "Unable to decode frame for thumbnail generation".into(),
+        )
     })?;
 
     let mut scaler = ffmpeg::software::scaling::Context::get(
@@ -1098,22 +1196,28 @@ fn extract_frame_at_percentage(
         decoder.height(),
         ffmpeg::software::scaling::flag::Flags::BILINEAR,
     )
-    .map_err(|e| MediaError::Internal(format!("Failed to create scaler: {e}")))?;
+    .map_err(|e| {
+        MediaError::Internal(format!("Failed to create scaler: {e}"))
+    })?;
 
     let mut rgb_frame = ffmpeg::frame::Video::empty();
-    scaler
-        .run(&frame, &mut rgb_frame)
-        .map_err(|e| MediaError::Internal(format!("Failed to scale frame: {e}")))?;
+    scaler.run(&frame, &mut rgb_frame).map_err(|e| {
+        MediaError::Internal(format!("Failed to scale frame: {e}"))
+    })?;
 
     let width = rgb_frame.width();
     let height = rgb_frame.height();
     let data = rgb_frame.data(0);
     let stride = rgb_frame.stride(0);
 
-    let buffer = image::ImageBuffer::<image::Rgb<u8>, Vec<u8>>::from_fn(width, height, |x, y| {
-        let offset = y as usize * stride + (x as usize * 3);
-        image::Rgb([data[offset], data[offset + 1], data[offset + 2]])
-    });
+    let buffer = image::ImageBuffer::<image::Rgb<u8>, Vec<u8>>::from_fn(
+        width,
+        height,
+        |x, y| {
+            let offset = y as usize * stride + (x as usize * 3);
+            image::Rgb([data[offset], data[offset + 1], data[offset + 2]])
+        },
+    );
 
     buffer
         .save(output_path)

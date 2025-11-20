@@ -1,11 +1,21 @@
 use std::fmt::{Display, Formatter};
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Serialize};
 
 /// Simple enum for media types
 #[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
 )]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub enum MediaType {
@@ -119,7 +129,7 @@ impl ImageSize {
             ImageSize::Poster => (200.0, 300.0),
             ImageSize::Backdrop => (1920.0, 1080.0), // Full HD backdrop
             ImageSize::Full => (0.0, 0.0),           // Dynamic
-            ImageSize::Profile => (120.0, 180.0),    // 2:3 aspect ratio for cast
+            ImageSize::Profile => (120.0, 180.0), // 2:3 aspect ratio for cast
         }
     }
 

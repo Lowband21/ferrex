@@ -11,7 +11,9 @@ mod user_carousel;
 mod user_selection;
 
 use crate::common::messages::DomainMessage;
-use crate::domains::auth::types::{AuthenticationFlow, SetupClaimStatus, SetupClaimUi};
+use crate::domains::auth::types::{
+    AuthenticationFlow, SetupClaimStatus, SetupClaimUi,
+};
 use ferrex_core::player_prelude::UserPermissions;
 use iced::Element;
 
@@ -20,7 +22,8 @@ pub use credential_entry::view_credential_entry;
 pub use loading_users::view_loading_users;
 pub use pin_setup::view_pin_setup;
 pub use user_carousel::{
-    UserCarouselMessage, UserCarouselState, view_user_carousel, view_user_selection_with_carousel,
+    UserCarouselMessage, UserCarouselState, view_user_carousel,
+    view_user_selection_with_carousel,
 };
 pub use user_selection::view_user_selection;
 
@@ -69,9 +72,11 @@ pub fn view_auth<'a>(
 
         LoadingUsers => view_loading_users(),
 
-        SelectingUser { users, error } => {
-            view_user_selection_with_carousel(users, error.as_deref(), user_permissions)
-        }
+        SelectingUser { users, error } => view_user_selection_with_carousel(
+            users,
+            error.as_deref(),
+            user_permissions,
+        ),
 
         CheckingDevice { user } => {
             view_loading_users() // Show loading while checking device
@@ -134,7 +139,9 @@ pub fn view_first_run_setup<'a>(
     use crate::domains::auth::messages as auth;
     use crate::domains::ui::theme;
     use chrono::{DateTime, Local};
-    use iced::widget::{Space, button, checkbox, column, container, row, text, text_input};
+    use iced::widget::{
+        Space, button, checkbox, column, container, row, text, text_input,
+    };
     use iced::{Alignment, Length};
 
     let title = text("Welcome to Ferrex Media Server").size(32);
@@ -142,50 +149,67 @@ pub fn view_first_run_setup<'a>(
     let subtitle = text("Let's create your admin account").size(18);
 
     let username_input = text_input("Username", username)
-        .on_input(|s| auth::Message::UpdateSetupField(auth::SetupField::Username(s)).into())
+        .on_input(|s| {
+            auth::Message::UpdateSetupField(auth::SetupField::Username(s))
+                .into()
+        })
         .padding(12)
         .size(16)
         .style(theme::TextInput::style());
 
     let display_name_input = text_input("Display Name", display_name)
-        .on_input(|s| auth::Message::UpdateSetupField(auth::SetupField::DisplayName(s)).into())
+        .on_input(|s| {
+            auth::Message::UpdateSetupField(auth::SetupField::DisplayName(s))
+                .into()
+        })
         .padding(12)
         .size(16)
         .style(theme::TextInput::style());
 
     let password_input = text_input("Password", password.as_str())
-        .on_input(|s| auth::Message::UpdateSetupField(auth::SetupField::Password(s)).into())
+        .on_input(|s| {
+            auth::Message::UpdateSetupField(auth::SetupField::Password(s))
+                .into()
+        })
         .secure(!show_password)
         .padding(12)
         .size(16)
         .style(theme::TextInput::style());
 
-    let confirm_password_input = text_input("Confirm Password", confirm_password.as_str())
-        .on_input(|s| auth::Message::UpdateSetupField(auth::SetupField::ConfirmPassword(s)).into())
-        .secure(!show_password)
-        .padding(12)
-        .size(16)
-        .style(theme::TextInput::style());
+    let confirm_password_input =
+        text_input("Confirm Password", confirm_password.as_str())
+            .on_input(|s| {
+                auth::Message::UpdateSetupField(
+                    auth::SetupField::ConfirmPassword(s),
+                )
+                .into()
+            })
+            .secure(!show_password)
+            .padding(12)
+            .size(16)
+            .style(theme::TextInput::style());
 
     let show_password_checkbox = checkbox("Show password", show_password)
         .on_toggle(|_| auth::Message::ToggleSetupPasswordVisibility.into())
         .size(16)
         .text_size(14);
 
-    let setup_token_input = text_input("Setup Token (if required)", setup_token)
-        .on_input(|s| auth::Message::UpdateSetupField(auth::SetupField::SetupToken(s)).into())
-        .padding(12)
-        .size(16)
-        .style(theme::TextInput::style());
+    let setup_token_input =
+        text_input("Setup Token (if required)", setup_token)
+            .on_input(|s| {
+                auth::Message::UpdateSetupField(auth::SetupField::SetupToken(s))
+                    .into()
+            })
+            .padding(12)
+            .size(16)
+            .style(theme::TextInput::style());
 
     let claim_token_display =
-        container(
-            text(claim_token)
-                .size(16)
-                .style(|theme: &iced::Theme| text::Style {
-                    color: Some(theme.extended_palette().background.strong.text),
-                }),
-        )
+        container(text(claim_token).size(16).style(|theme: &iced::Theme| {
+            text::Style {
+                color: Some(theme.extended_palette().background.strong.text),
+            }
+        }))
         .padding(12)
         .width(Length::Fill)
         .style(theme::Container::Default.style());
@@ -248,11 +272,12 @@ pub fn view_first_run_setup<'a>(
         .push(Space::new().height(16));
     }
 
-    let device_name_input = text_input("Player Name (appears in audit logs)", &claim.device_name)
-        .on_input(|s| auth::Message::UpdateClaimDeviceName(s).into())
-        .padding(12)
-        .size(16)
-        .style(theme::TextInput::style());
+    let device_name_input =
+        text_input("Player Name (appears in audit logs)", &claim.device_name)
+            .on_input(|s| auth::Message::UpdateClaimDeviceName(s).into())
+            .padding(12)
+            .size(16)
+            .style(theme::TextInput::style());
 
     claim_metadata = claim_metadata
         .push(text("Device Name").size(14))
@@ -265,16 +290,20 @@ pub fn view_first_run_setup<'a>(
         .style(theme::Button::Secondary.style());
 
     if !claim.is_requesting {
-        request_button = request_button.on_press(auth::Message::StartSetupClaim.into());
+        request_button =
+            request_button.on_press(auth::Message::StartSetupClaim.into());
     }
 
     let mut confirm_button = button(text("Confirm Binding").size(14))
         .padding([10, 16])
         .style(theme::Button::Primary.style());
 
-    let can_confirm = claim.claim_code.is_some() && !claim.is_confirming && !claim.is_expired();
+    let can_confirm = claim.claim_code.is_some()
+        && !claim.is_confirming
+        && !claim.is_expired();
     if can_confirm {
-        confirm_button = confirm_button.on_press(auth::Message::ConfirmSetupClaim.into());
+        confirm_button =
+            confirm_button.on_press(auth::Message::ConfirmSetupClaim.into());
     } else {
         confirm_button = confirm_button.style(theme::Button::Disabled.style());
     }
@@ -305,13 +334,13 @@ pub fn view_first_run_setup<'a>(
 
         if claim.lan_only {
             code_row = code_row.push(
-                container(
-                    text("LAN-only")
-                        .size(12)
-                        .style(|theme: &iced::Theme| text::Style {
-                            color: Some(theme.extended_palette().primary.strong.text),
-                        }),
-                )
+                container(text("LAN-only").size(12).style(
+                    |theme: &iced::Theme| text::Style {
+                        color: Some(
+                            theme.extended_palette().primary.strong.text,
+                        ),
+                    },
+                ))
                 .padding([4, 8])
                 .style(theme::Container::TechDetail.style()),
             );
@@ -366,7 +395,8 @@ pub fn view_first_run_setup<'a>(
     });
 
     if ready_to_submit {
-        create_button = create_button.on_press(auth::Message::SubmitSetup.into());
+        create_button =
+            create_button.on_press(auth::Message::SubmitSetup.into());
     }
 
     let mut content = column![

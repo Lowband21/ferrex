@@ -12,11 +12,12 @@ pub mod https;
 pub mod rate_limit;
 
 pub use csrf::{
-    CsrfLayer, CsrfMiddleware, ValidateCsrf, create_csrf_cookie, extract_csrf_from_cookies,
-    generate_token, hash_token,
+    CsrfLayer, CsrfMiddleware, ValidateCsrf, create_csrf_cookie,
+    extract_csrf_from_cookies, generate_token, hash_token,
 };
 pub use hsts::{HstsConfig, HstsLayer, HstsMiddleware};
 pub use https::{
-    HttpsEnforcementLayer, HttpsEnforcementMiddleware, HttpsRedirectLayer, HttpsRedirectMiddleware,
+    HttpsEnforcementLayer, HttpsEnforcementMiddleware, HttpsRedirectLayer,
+    HttpsRedirectMiddleware,
 };
 pub use rate_limit::{RateLimiterConfig, create_rate_limiter};

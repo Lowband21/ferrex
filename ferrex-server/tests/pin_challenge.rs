@@ -5,7 +5,10 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use ferrex_core::{
     api_routes::v1,
-    auth::domain::{services::AuthEventContext, value_objects::DeviceFingerprint},
+    auth::domain::{
+        aggregates::DeviceSession, services::AuthEventContext,
+        value_objects::DeviceFingerprint,
+    },
     user::User,
 };
 use serde_json::json;
@@ -23,7 +26,8 @@ async fn pin_challenge_returns_server_managed_salt(pool: PgPool) -> Result<()> {
     let (router, state, tempdir) = app.into_parts();
     let _tempdir = tempdir;
     let router: Router<()> = router.with_state(state.clone());
-    let make_service = router.into_make_service_with_connect_info::<SocketAddr>();
+    let make_service =
+        router.into_make_service_with_connect_info::<SocketAddr>();
     let server = TestServer::builder()
         .http_transport()
         .build(make_service)
@@ -33,7 +37,7 @@ async fn pin_challenge_returns_server_managed_salt(pool: PgPool) -> Result<()> {
     let username = "pin_challenge_user".to_string();
     let password = "PinSecret#123";
     let password_hash = state
-        .auth_crypto
+        .auth_crypto()
         .hash_password(password)
         .expect("password hash");
     let user = User {
@@ -50,14 +54,14 @@ async fn pin_challenge_returns_server_managed_salt(pool: PgPool) -> Result<()> {
     };
 
     state
-        .unit_of_work
+        .unit_of_work()
         .users
         .create_user_with_password(&user, &password_hash)
         .await?;
 
     let fingerprint = DeviceFingerprint::from_hash("a".repeat(64))?;
-    let session = state
-        .auth_facade
+    let session: DeviceSession = state
+        .auth_facade()
         .device_trust_service()
         .register_device(
             user_id,
@@ -70,7 +74,7 @@ async fn pin_challenge_returns_server_managed_salt(pool: PgPool) -> Result<()> {
     let device_id = session.id();
     let device_fingerprint = fingerprint;
 
-    let initial_salt = state.auth_facade.get_pin_client_salt(user_id).await?;
+    let initial_salt = state.auth_facade().get_pin_client_salt(user_id).await?;
 
     let challenge = server
         .post(v1::auth::device::PIN_CHALLENGE)
@@ -88,12 +92,12 @@ async fn pin_challenge_returns_server_managed_salt(pool: PgPool) -> Result<()> {
     );
 
     state
-        .auth_facade
+        .auth_facade()
         .pin_management_service()
         .force_clear_pin(user_id, &device_fingerprint, None)
         .await?;
 
-    let rotated_salt = state.auth_facade.get_pin_client_salt(user_id).await?;
+    let rotated_salt = state.auth_facade().get_pin_client_salt(user_id).await?;
     assert_ne!(
         rotated_salt, initial_salt,
         "force_clear_pin rotates the salt"

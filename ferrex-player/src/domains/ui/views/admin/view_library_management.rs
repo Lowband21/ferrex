@@ -12,7 +12,8 @@ use crate::{
     state_refactored::State,
 };
 use ferrex_core::player_prelude::{
-    ArchivedLibrary, ArchivedLibraryType, Library, LibraryID, ScanLifecycleStatus, ScanSnapshotDto,
+    ArchivedLibrary, ArchivedLibraryType, Library, LibraryID,
+    ScanLifecycleStatus, ScanSnapshotDto,
 };
 #[cfg(feature = "demo")]
 use iced::widget::text_input;
@@ -108,7 +109,9 @@ pub fn view_library_management(state: &State) -> Element<'_, Message> {
 
     content = content.push(header_row);
 
-    if let Some(success_message) = &state.domains.library.state.library_form_success {
+    if let Some(success_message) =
+        &state.domains.library.state.library_form_success
+    {
         let success_row = row![
             icon_text(Icon::Check),
             text(success_message)
@@ -193,7 +196,8 @@ fn create_library_card<'a>(
     //library: &'a LibraryYoke,
     permissions: &permissions::PermissionChecker,
 ) -> Element<'a, Message> {
-    let library_opt = repo_accessor.get_archived_library_yoke(library_id).unwrap(); // This should be safe but I should handle it anyway
+    let library_opt =
+        repo_accessor.get_archived_library_yoke(library_id).unwrap(); // This should be safe but I should handle it anyway
 
     if let Some(library_yoke) = library_opt {
         let library = *library_yoke.get();
@@ -215,13 +219,17 @@ fn create_library_card<'a>(
         if permissions.can_scan_libraries() && library.enabled {
             action_buttons = action_buttons.push(
                 button("Scan")
-                    .on_press(Message::ScanLibrary(LibraryID(library.id.as_uuid())))
+                    .on_press(Message::ScanLibrary(LibraryID(
+                        library.id.as_uuid(),
+                    )))
                     .style(theme::Button::Secondary.style()),
             );
             // Reset: delete and recreate library with start_scan=true
             action_buttons = action_buttons.push(
                 button("Reset Library")
-                    .on_press(Message::ResetLibrary(LibraryID(library.id.as_uuid())))
+                    .on_press(Message::ResetLibrary(LibraryID(
+                        library.id.as_uuid(),
+                    )))
                     .style(theme::Button::Secondary.style()),
             );
         }
@@ -242,7 +250,9 @@ fn create_library_card<'a>(
         if permissions.has_permission("libraries:delete") {
             action_buttons = action_buttons.push(
                 button("Delete")
-                    .on_press(Message::DeleteLibrary(LibraryID(library.id.as_uuid())))
+                    .on_press(Message::DeleteLibrary(LibraryID(
+                        library.id.as_uuid(),
+                    )))
                     .style(theme::Button::Destructive.style()),
             );
         }
@@ -292,9 +302,11 @@ fn create_library_card<'a>(
                     .size(24)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 Space::new().height(10),
-                text("Create a library to start managing your media collection.")
-                    .size(16)
-                    .color(theme::MediaServerTheme::TEXT_SUBDUED),
+                text(
+                    "Create a library to start managing your media collection."
+                )
+                .size(16)
+                .color(theme::MediaServerTheme::TEXT_SUBDUED),
             ]
             .spacing(10)
             .align_x(iced::Alignment::Center),
@@ -328,7 +340,10 @@ fn scan_status_panel(state: &State) -> Element<'_, Message> {
             log::debug!("Active scans panel rendered with no active scans");
         }
     } else {
-        log::debug!("Rendering active scans panel with {} entries", scans.len());
+        log::debug!(
+            "Rendering active scans panel with {} entries",
+            scans.len()
+        );
     }
 
     let header = row![
@@ -415,26 +430,34 @@ fn scan_status_panel(state: &State) -> Element<'_, Message> {
                 .get(&snapshot.scan_id)
                 .cloned();
 
-            let (completed_items, total_items, retrying_items, dead_lettered_items, current_path) =
-                if let Some(event) = &progress {
-                    (
-                        event.completed_items,
-                        event.total_items,
-                        event.retrying_items.unwrap_or(snapshot.retrying_items),
-                        event
-                            .dead_lettered_items
-                            .unwrap_or(snapshot.dead_lettered_items),
-                        event.current_path.clone().or(snapshot.current_path.clone()),
-                    )
-                } else {
-                    (
-                        snapshot.completed_items,
-                        snapshot.total_items,
-                        snapshot.retrying_items,
-                        snapshot.dead_lettered_items,
-                        snapshot.current_path.clone(),
-                    )
-                };
+            let (
+                completed_items,
+                total_items,
+                retrying_items,
+                dead_lettered_items,
+                current_path,
+            ) = if let Some(event) = &progress {
+                (
+                    event.completed_items,
+                    event.total_items,
+                    event.retrying_items.unwrap_or(snapshot.retrying_items),
+                    event
+                        .dead_lettered_items
+                        .unwrap_or(snapshot.dead_lettered_items),
+                    event
+                        .current_path
+                        .clone()
+                        .or(snapshot.current_path.clone()),
+                )
+            } else {
+                (
+                    snapshot.completed_items,
+                    snapshot.total_items,
+                    snapshot.retrying_items,
+                    snapshot.dead_lettered_items,
+                    snapshot.current_path.clone(),
+                )
+            };
 
             let percent = if total_items > 0 {
                 (completed_items as f32 / total_items as f32 * 100.0).round()
@@ -446,10 +469,18 @@ fn scan_status_panel(state: &State) -> Element<'_, Message> {
                 ScanLifecycleStatus::Pending => {
                     ("Pending", theme::MediaServerTheme::TEXT_SECONDARY)
                 }
-                ScanLifecycleStatus::Running => ("Running", theme::MediaServerTheme::ACCENT_BLUE),
-                ScanLifecycleStatus::Paused => ("Paused", theme::MediaServerTheme::WARNING),
-                ScanLifecycleStatus::Completed => ("Completed", theme::MediaServerTheme::SUCCESS),
-                ScanLifecycleStatus::Failed => ("Failed", theme::MediaServerTheme::ERROR),
+                ScanLifecycleStatus::Running => {
+                    ("Running", theme::MediaServerTheme::ACCENT_BLUE)
+                }
+                ScanLifecycleStatus::Paused => {
+                    ("Paused", theme::MediaServerTheme::WARNING)
+                }
+                ScanLifecycleStatus::Completed => {
+                    ("Completed", theme::MediaServerTheme::SUCCESS)
+                }
+                ScanLifecycleStatus::Failed => {
+                    ("Failed", theme::MediaServerTheme::ERROR)
+                }
                 ScanLifecycleStatus::Canceled => {
                     ("Canceled", theme::MediaServerTheme::TEXT_SECONDARY)
                 }
@@ -466,9 +497,10 @@ fn scan_status_panel(state: &State) -> Element<'_, Message> {
                 .map(|yoke| yoke.get().name.to_string())
                 .unwrap_or_else(|| snapshot.library_id.to_string());
 
-            let status_badge = container(text(status_label.0).size(13).color(status_label.1))
-                .padding([4, 8])
-                .style(theme::Container::HeaderAccent.style());
+            let status_badge =
+                container(text(status_label.0).size(13).color(status_label.1))
+                    .padding([4, 8])
+                    .style(theme::Container::HeaderAccent.style());
 
             let path_text = current_path
                 .as_deref()
@@ -568,9 +600,9 @@ fn scan_status_panel(state: &State) -> Element<'_, Message> {
                     row![
                         column![
                             row![
-                                text(library_name)
-                                    .size(16)
-                                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                                text(library_name).size(16).color(
+                                    theme::MediaServerTheme::TEXT_PRIMARY
+                                ),
                                 Space::new().width(Length::Fixed(12.0)),
                                 status_badge,
                             ]

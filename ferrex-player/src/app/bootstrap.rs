@@ -3,7 +3,9 @@ use std::sync::Arc;
 use iced::Task;
 
 use crate::common::messages::DomainMessage;
-use crate::domains::auth::{messages as auth_messages, types::AuthenticationFlow};
+use crate::domains::auth::{
+    messages as auth_messages, types::AuthenticationFlow,
+};
 use crate::state_refactored::State;
 
 #[derive(Clone, Debug)]
@@ -30,7 +32,7 @@ impl AppConfig {
 
     pub fn from_environment() -> Self {
         let server_url = std::env::var("FERREX_SERVER_URL")
-            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+            .unwrap_or_else(|_| "https://localhost:3000".to_string());
 
         #[cfg(feature = "demo")]
         {
@@ -43,8 +45,14 @@ impl AppConfig {
             ) || std::env::args().any(|arg| arg == "--demo");
 
             let demo_credentials = (
-                Arc::from(std::env::var("FERREX_DEMO_USERNAME").unwrap_or_else(|_| "demo".into())),
-                Arc::from(std::env::var("FERREX_DEMO_PASSWORD").unwrap_or_else(|_| "demo".into())),
+                Arc::from(
+                    std::env::var("FERREX_DEMO_USERNAME")
+                        .unwrap_or_else(|_| "demo".into()),
+                ),
+                Arc::from(
+                    std::env::var("FERREX_DEMO_PASSWORD")
+                        .unwrap_or_else(|_| "demo".into()),
+                ),
             );
 
             Self {
@@ -82,7 +90,9 @@ impl AppConfig {
 pub fn base_state(config: &AppConfig) -> State {
     let mut state = State::new(config.server_url().to_string());
 
-    crate::infrastructure::service_registry::init_registry(state.image_service.clone());
+    crate::infrastructure::service_registry::init_registry(
+        state.image_service.clone(),
+    );
 
     let lib_id = state
         .domains
@@ -119,7 +129,8 @@ fn apply_test_stubs(state: &mut State) {
         TestApiService, TestAuthService, TestSettingsService,
     };
 
-    let api_stub: Arc<TestApiService> = Arc::new(TestApiService::new(state.server_url.clone()));
+    let api_stub: Arc<TestApiService> =
+        Arc::new(TestApiService::new(state.server_url.clone()));
     let auth_stub: Arc<TestAuthService> = Arc::new(TestAuthService::new());
     let settings_stub: Arc<TestSettingsService> =
         Arc::new(TestSettingsService::with_default_device());
@@ -138,8 +149,8 @@ fn apply_test_stubs(state: &mut State) {
     let stub_devices = settings_stub.devices();
     state.domains.settings.device_management_state.devices = stub_devices
         .iter()
-        .map(
-            |device| crate::domains::ui::views::settings::device_management::UserDevice {
+        .map(|device| {
+            crate::domains::ui::views::settings::device_management::UserDevice {
                 device_id: device.id.to_string(),
                 device_name: device.name.clone(),
                 device_type: format!("{:?}", device.platform),
@@ -150,8 +161,8 @@ fn apply_test_stubs(state: &mut State) {
                     .get("location")
                     .and_then(|value| value.as_str())
                     .map(|s| s.to_string()),
-            },
-        )
+            }
+        })
         .collect();
 
     api_stub.set_devices(stub_devices);
@@ -163,7 +174,8 @@ fn apply_test_stubs(state: &mut State) {
     state.domains.user_management.state.api_service = Some(api_stub.clone());
     state.domains.player.api_service = Some(api_stub.clone());
 
-    state.domains.search = SearchDomain::new_with_metrics(Some(api_stub.clone()));
+    state.domains.search =
+        SearchDomain::new_with_metrics(Some(api_stub.clone()));
 }
 
 #[cfg(not(any(test, feature = "iced_tester")))]
@@ -192,16 +204,23 @@ pub fn runtime_boot(config: &AppConfig) -> (State, Task<DomainMessage>) {
                         .unwrap_or(false)
                         && stored_auth.user.preferences.auto_login_enabled;
 
-                    log::info!("[Auth] Auto-login enabled: {}", auto_login_enabled);
+                    log::info!(
+                        "[Auth] Auto-login enabled: {}",
+                        auto_login_enabled
+                    );
 
                     if auto_login_enabled {
-                        match auth_service.apply_stored_auth(stored_auth).await {
+                        match auth_service.apply_stored_auth(stored_auth).await
+                        {
                             Ok(()) => {
                                 log::info!("[Auth] Auto-login successful");
                                 Ok::<Option<bool>, String>(Some(true))
                             }
                             Err(e) => {
-                                log::error!("[Auth] Failed to apply stored auth: {}", e);
+                                log::error!(
+                                    "[Auth] Failed to apply stored auth: {}",
+                                    e
+                                );
                                 Ok::<Option<bool>, String>(Some(false))
                             }
                         }
@@ -222,11 +241,15 @@ pub fn runtime_boot(config: &AppConfig) -> (State, Task<DomainMessage>) {
         },
         |result| match result {
             Ok(Some(true)) => {
-                log::info!("[Auth] Auto-login enabled, sending CheckAuthStatus");
+                log::info!(
+                    "[Auth] Auto-login enabled, sending CheckAuthStatus"
+                );
                 DomainMessage::Auth(auth_messages::Message::CheckAuthStatus)
             }
             Ok(Some(false)) | Ok(None) => {
-                log::info!("[Auth] Auto-login disabled or no stored auth, sending LoadUsers");
+                log::info!(
+                    "[Auth] Auto-login disabled or no stored auth, sending LoadUsers"
+                );
                 DomainMessage::Auth(auth_messages::Message::LoadUsers)
             }
             Err(e) => {
@@ -243,15 +266,26 @@ pub fn runtime_boot(config: &AppConfig) -> (State, Task<DomainMessage>) {
         if config.demo_mode {
             let auth_service = state.domains.auth.state.auth_service.clone();
             let (username, password) = config.demo_credentials.clone();
-            log::info!("[Demo] Attempting automatic demo login as {}", username);
+            log::info!(
+                "[Demo] Attempting automatic demo login as {}",
+                username
+            );
             tasks.push(Task::perform(
                 async move {
                     auth_service
-                        .authenticate_device(username.to_string(), password.to_string(), true)
+                        .authenticate_device(
+                            username.to_string(),
+                            password.to_string(),
+                            true,
+                        )
                         .await
                         .map_err(|err| err.to_string())
                 },
-                |result| DomainMessage::Auth(auth_messages::Message::AuthResult(result)),
+                |result| {
+                    DomainMessage::Auth(auth_messages::Message::AuthResult(
+                        result,
+                    ))
+                },
             ));
         }
 

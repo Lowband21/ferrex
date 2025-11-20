@@ -107,7 +107,8 @@ impl ExtrasParser {
             // Filename contains extra type
             (
                 "bts_filename",
-                Regex::new(r"(?i)(behind[_\s-]?the[_\s-]?scenes?|bts)").unwrap(),
+                Regex::new(r"(?i)(behind[_\s-]?the[_\s-]?scenes?|bts)")
+                    .unwrap(),
                 ExtraType::BehindTheScenes,
             ),
             (
@@ -174,7 +175,9 @@ impl ExtrasParser {
                 && let Some(folder_str) = folder_name.to_str()
             {
                 // Check against all extras folder patterns
-                for (_name, pattern, extra_type) in Self::extras_folder_patterns() {
+                for (_name, pattern, extra_type) in
+                    Self::extras_folder_patterns()
+                {
                     if pattern.is_match(folder_str) {
                         debug!(
                             "Detected extras folder '{}' as {:?}",
@@ -233,7 +236,9 @@ impl ExtrasParser {
             && let Some(name_str) = filename.to_str()
         {
             // Look for patterns like "MovieTitle - ExtraType"
-            for (_name, pattern, _extra_type) in Self::extras_filename_patterns() {
+            for (_name, pattern, _extra_type) in
+                Self::extras_filename_patterns()
+            {
                 if pattern.is_match(name_str) {
                     // Try to extract the title before the extra type
                     if let Some(dash_pos) = name_str.find(" - ") {
@@ -309,7 +314,9 @@ impl ExtrasParser {
         // Check if any part of the path contains extras indicators
         for component in path.components() {
             if let Some(name) = component.as_os_str().to_str() {
-                for (_pattern_name, pattern, _extra_type) in Self::extras_folder_patterns() {
+                for (_pattern_name, pattern, _extra_type) in
+                    Self::extras_folder_patterns()
+                {
                     if pattern.is_match(name) {
                         return true;
                     }
@@ -435,7 +442,8 @@ mod tests {
     fn test_media_type_determination() {
         let _movie_lib = LibraryType::Movies;
 
-        let test_cases = vec![("/movies/The Matrix (1999).mkv", MediaType::Movie)];
+        let test_cases =
+            vec![("/movies/The Matrix (1999).mkv", MediaType::Movie)];
 
         for (path, _expected) in test_cases {
             let _path = PathBuf::from(path);

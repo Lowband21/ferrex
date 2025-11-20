@@ -48,10 +48,14 @@ impl Profiler {
             log::info!("Puffin profiling enabled");
 
             // Start puffin server if puffin_http is available
-            #[cfg(any(feature = "puffin-server", feature = "profile-with-puffin"))]
+            #[cfg(any(
+                feature = "puffin-server",
+                feature = "profile-with-puffin"
+            ))]
             {
                 let server_addr = "127.0.0.1:8585";
-                let puffin_server = puffin_http::Server::new(server_addr).unwrap();
+                let puffin_server =
+                    puffin_http::Server::new(server_addr).unwrap();
 
                 // Set the profiler callback to send data to the server
                 puffin::set_scopes_on(true);
@@ -86,7 +90,8 @@ impl Profiler {
 
             #[cfg(feature = "profiling-stats")]
             frame_times: RwLock::new(
-                Histogram::new_with_bounds(1, 1_000_000, 3).expect("Failed to create histogram"),
+                Histogram::new_with_bounds(1, 1_000_000, 3)
+                    .expect("Failed to create histogram"),
             ),
 
             #[cfg(feature = "profiling-stats")]
@@ -165,7 +170,10 @@ impl Profiler {
         let p95 = histogram.value_at_percentile(95.0);
         if p95 > 16_667 {
             // 16.67ms for 60fps
-            log::warn!("Frame budget violation: P95 = {}μs (target: 16667μs)", p95);
+            log::warn!(
+                "Frame budget violation: P95 = {}μs (target: 16667μs)",
+                p95
+            );
         }
     }
 
@@ -213,10 +221,16 @@ impl Profiler {
         let peak = self.peak_memory.load(Ordering::Relaxed);
 
         MemoryStats {
-            current_bytes: stats.as_ref().map(|s| s.physical_mem as u64).unwrap_or(0),
+            current_bytes: stats
+                .as_ref()
+                .map(|s| s.physical_mem as u64)
+                .unwrap_or(0),
             peak_bytes: peak,
             baseline_bytes: baseline,
-            virtual_bytes: stats.as_ref().map(|s| s.virtual_mem as u64).unwrap_or(0),
+            virtual_bytes: stats
+                .as_ref()
+                .map(|s| s.virtual_mem as u64)
+                .unwrap_or(0),
         }
     }
 }

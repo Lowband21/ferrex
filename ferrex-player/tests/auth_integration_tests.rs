@@ -30,7 +30,11 @@ mod auth_basic {
 
         // Admin can use PIN on trusted device
         let session = auth
-            .authenticate_with_pin(admin_id, "1234".to_string(), device1.clone())
+            .authenticate_with_pin(
+                admin_id,
+                "1234".to_string(),
+                device1.clone(),
+            )
             .await
             .expect("Admin should authenticate with PIN on trusted device");
 
@@ -39,7 +43,11 @@ mod auth_basic {
         // Admin CANNOT use PIN on untrusted device
         let device2 = "untrusted_device".to_string();
         let result = auth
-            .authenticate_with_pin(admin_id, "1234".to_string(), device2.clone())
+            .authenticate_with_pin(
+                admin_id,
+                "1234".to_string(),
+                device2.clone(),
+            )
             .await;
 
         assert!(
@@ -101,7 +109,6 @@ mod refresh_token_integration {
 // Previously pending tests - now implemented
 mod completed_tests {
     use ferrex_player::domains::auth::service::AuthService;
-    
 
     #[tokio::test]
     async fn auto_login_device_specific() {
@@ -119,7 +126,11 @@ mod completed_tests {
 
         // Authenticate with device1 and enable auto-login
         let _session = auth
-            .authenticate_with_device(user_id, "password123".to_string(), device1.clone())
+            .authenticate_with_device(
+                user_id,
+                "password123".to_string(),
+                device1.clone(),
+            )
             .await
             .expect("Authentication should succeed");
 
@@ -155,12 +166,20 @@ mod completed_tests {
 
         // Create sessions for the user
         let session1 = auth
-            .authenticate_with_device(user_id, "user_pass".to_string(), "device1".to_string())
+            .authenticate_with_device(
+                user_id,
+                "user_pass".to_string(),
+                "device1".to_string(),
+            )
             .await
             .expect("Auth should succeed");
 
         let session2 = auth
-            .authenticate_with_device(user_id, "user_pass".to_string(), "device2".to_string())
+            .authenticate_with_device(
+                user_id,
+                "user_pass".to_string(),
+                "device2".to_string(),
+            )
             .await
             .expect("Auth should succeed");
 
@@ -177,10 +196,7 @@ mod completed_tests {
         // Verify everything is set up
         assert!(auth.is_session_valid(&session1).await);
         assert!(auth.is_session_valid(&session2).await);
-        assert!(
-            auth.is_device_trusted(user_id, "device1")
-                .await
-        );
+        assert!(auth.is_device_trusted(user_id, "device1").await);
         assert!(
             auth.is_auto_login_enabled(user_id, "device1".to_string())
                 .await
@@ -206,9 +222,7 @@ mod completed_tests {
             "Session2 should be invalid"
         );
         assert!(
-            !auth
-                .is_device_trusted(user_id, "device1")
-                .await,
+            !auth.is_device_trusted(user_id, "device1").await,
             "Device should not be trusted"
         );
         assert!(

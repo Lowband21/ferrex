@@ -61,7 +61,9 @@ pub enum AuthError {
     AdminSessionRequired,
 
     /// Account temporarily locked due to failed attempts
-    #[error("Account temporarily locked due to multiple failed authentication attempts")]
+    #[error(
+        "Account temporarily locked due to multiple failed authentication attempts"
+    )]
     AccountLocked,
 
     /// Auto-login not enabled for this device

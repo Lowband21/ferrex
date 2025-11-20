@@ -31,7 +31,9 @@ pub trait AuthService: Send + Sync {
     async fn get_current_user(&self) -> RepositoryResult<Option<User>>;
 
     /// Get current user permissions, if any
-    async fn get_current_permissions(&self) -> RepositoryResult<Option<UserPermissions>>;
+    async fn get_current_permissions(
+        &self,
+    ) -> RepositoryResult<Option<UserPermissions>>;
 
     /// Check if this is first run (no users exist)
     async fn is_first_run(&self) -> RepositoryResult<bool>;
@@ -78,16 +80,26 @@ pub trait AuthService: Send + Sync {
     async fn load_from_keychain(&self) -> RepositoryResult<Option<StoredAuth>>;
 
     /// Apply stored authentication (restore session from keychain)
-    async fn apply_stored_auth(&self, stored_auth: StoredAuth) -> RepositoryResult<()>;
+    async fn apply_stored_auth(
+        &self,
+        stored_auth: StoredAuth,
+    ) -> RepositoryResult<()>;
 
     /// Check if auto-login is enabled for a specific user on this device
-    async fn is_auto_login_enabled(&self, user_id: &Uuid) -> RepositoryResult<bool>;
+    async fn is_auto_login_enabled(
+        &self,
+        user_id: &Uuid,
+    ) -> RepositoryResult<bool>;
 
     /// Validate the current session against the server returning fresh identity data
-    async fn validate_session(&self) -> RepositoryResult<(User, UserPermissions)>;
+    async fn validate_session(
+        &self,
+    ) -> RepositoryResult<(User, UserPermissions)>;
 
     /// Check if auto-login is enabled for the current user (both server and device preferences)
-    async fn is_current_user_auto_login_enabled(&self) -> RepositoryResult<bool>;
+    async fn is_current_user_auto_login_enabled(
+        &self,
+    ) -> RepositoryResult<bool>;
 
     /// Get the identifier for the current device
     async fn current_device_id(&self) -> RepositoryResult<Uuid>;
@@ -160,7 +172,8 @@ pub mod mock {
         ) -> RepositoryResult<(User, UserPermissions)> {
             self.login_called.write().await.push((username, pin));
             // Return first user (or create a dummy) with empty permissions
-            if let Some(user) = self.users.read().await.values().next().cloned() {
+            if let Some(user) = self.users.read().await.values().next().cloned()
+            {
                 Ok((
                     user.clone(),
                     UserPermissions {
@@ -209,7 +222,9 @@ pub mod mock {
             Ok(self.users.read().await.values().next().cloned())
         }
 
-        async fn get_current_permissions(&self) -> RepositoryResult<Option<UserPermissions>> {
+        async fn get_current_permissions(
+            &self,
+        ) -> RepositoryResult<Option<UserPermissions>> {
             Ok(None)
         }
 
@@ -219,14 +234,16 @@ pub mod mock {
 
         async fn get_all_users(
             &self,
-        ) -> RepositoryResult<Vec<crate::domains::auth::dto::UserListItemDto>> {
+        ) -> RepositoryResult<Vec<crate::domains::auth::dto::UserListItemDto>>
+        {
             Ok(vec![])
         }
 
         async fn check_device_auth(
             &self,
             _user_id: Uuid,
-        ) -> RepositoryResult<crate::domains::auth::manager::DeviceAuthStatus> {
+        ) -> RepositoryResult<crate::domains::auth::manager::DeviceAuthStatus>
+        {
             Ok(crate::domains::auth::manager::DeviceAuthStatus {
                 device_registered: true,
                 has_pin: true,
@@ -255,7 +272,8 @@ pub mod mock {
             _username: String,
             _password: String,
             _remember_device: bool,
-        ) -> RepositoryResult<crate::domains::auth::manager::PlayerAuthResult> {
+        ) -> RepositoryResult<crate::domains::auth::manager::PlayerAuthResult>
+        {
             let user = User {
                 id: Uuid::now_v7(),
                 username: "test".into(),
@@ -285,7 +303,8 @@ pub mod mock {
             &self,
             _user_id: Uuid,
             _pin: String,
-        ) -> RepositoryResult<crate::domains::auth::manager::PlayerAuthResult> {
+        ) -> RepositoryResult<crate::domains::auth::manager::PlayerAuthResult>
+        {
             let user = User {
                 id: Uuid::now_v7(),
                 username: "test".into(),
@@ -311,19 +330,29 @@ pub mod mock {
             })
         }
 
-        async fn load_from_keychain(&self) -> RepositoryResult<Option<StoredAuth>> {
+        async fn load_from_keychain(
+            &self,
+        ) -> RepositoryResult<Option<StoredAuth>> {
             Ok(None)
         }
 
-        async fn apply_stored_auth(&self, _stored_auth: StoredAuth) -> RepositoryResult<()> {
+        async fn apply_stored_auth(
+            &self,
+            _stored_auth: StoredAuth,
+        ) -> RepositoryResult<()> {
             Ok(())
         }
 
-        async fn is_auto_login_enabled(&self, _user_id: &Uuid) -> RepositoryResult<bool> {
+        async fn is_auto_login_enabled(
+            &self,
+            _user_id: &Uuid,
+        ) -> RepositoryResult<bool> {
             Ok(false)
         }
 
-        async fn validate_session(&self) -> RepositoryResult<(User, UserPermissions)> {
+        async fn validate_session(
+            &self,
+        ) -> RepositoryResult<(User, UserPermissions)> {
             let user = self
                 .users
                 .read()
@@ -331,7 +360,9 @@ pub mod mock {
                 .values()
                 .next()
                 .cloned()
-                .ok_or_else(|| RepositoryError::QueryFailed("No user available".into()))?;
+                .ok_or_else(|| {
+                    RepositoryError::QueryFailed("No user available".into())
+                })?;
 
             Ok((
                 user.clone(),
@@ -344,7 +375,9 @@ pub mod mock {
             ))
         }
 
-        async fn is_current_user_auto_login_enabled(&self) -> RepositoryResult<bool> {
+        async fn is_current_user_auto_login_enabled(
+            &self,
+        ) -> RepositoryResult<bool> {
             Ok(false)
         }
 

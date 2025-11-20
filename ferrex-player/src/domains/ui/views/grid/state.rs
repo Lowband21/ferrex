@@ -45,7 +45,12 @@ impl VirtualGridState {
     }
 
     /// Create a new VirtualGridState with a specific scrollable ID
-    pub fn with_id(total_items: usize, columns: usize, row_height: f32, scrollable_id: Id) -> Self {
+    pub fn with_id(
+        total_items: usize,
+        columns: usize,
+        row_height: f32,
+        scrollable_id: Id,
+    ) -> Self {
         let mut grid = Self {
             total_items,
             columns,
@@ -71,7 +76,9 @@ impl VirtualGridState {
 
     /// Update columns based on viewport width
     pub fn update_columns(&mut self, viewport_width: f32) {
-        use crate::infrastructure::constants::{calculations, poster, scale_presets};
+        use crate::infrastructure::constants::{
+            calculations, poster, scale_presets,
+        };
 
         // Calculate columns using centralized logic
         let scale = scale_presets::DEFAULT_SCALE;
@@ -86,7 +93,10 @@ impl VirtualGridState {
 
     /// Calculate visible item range
     pub fn calculate_visible_range(&mut self) -> Range<usize> {
-        if self.total_items == 0 || self.columns == 0 || self.viewport_height <= 0.0 {
+        if self.total_items == 0
+            || self.columns == 0
+            || self.viewport_height <= 0.0
+        {
             log::debug!(
                 "Empty visible range: items={}, cols={}, viewport_height={}",
                 self.total_items,
@@ -99,7 +109,8 @@ impl VirtualGridState {
 
         let total_rows = self.total_items.div_ceil(self.columns);
 
-        let mut first_visible_row = (self.scroll_position / self.row_height).floor() as usize;
+        let mut first_visible_row =
+            (self.scroll_position / self.row_height).floor() as usize;
         if first_visible_row >= total_rows {
             first_visible_row = total_rows.saturating_sub(1);
             let content_height = total_rows as f32 * self.row_height;
@@ -111,8 +122,10 @@ impl VirtualGridState {
             self.scroll_position = self.scroll_position.min(max_scroll);
         }
 
-        let visible_rows = (self.viewport_height / self.row_height).ceil() as usize;
-        let mut last_visible_row = (first_visible_row + visible_rows).min(total_rows);
+        let visible_rows =
+            (self.viewport_height / self.row_height).ceil() as usize;
+        let mut last_visible_row =
+            (first_visible_row + visible_rows).min(total_rows);
         if last_visible_row <= first_visible_row {
             last_visible_row = (first_visible_row + 1).min(total_rows);
         }
@@ -121,7 +134,8 @@ impl VirtualGridState {
         let start_row = first_visible_row
             .saturating_sub(self.overscan_rows_above)
             .min(total_rows);
-        let end_row = (last_visible_row + self.overscan_rows_below).min(total_rows);
+        let end_row =
+            (last_visible_row + self.overscan_rows_below).min(total_rows);
 
         // Convert to item indices
         let start_item = start_row * self.columns;
@@ -152,7 +166,8 @@ impl VirtualGridState {
     /// Get items to preload
     pub fn get_preload_range(&self, preload_rows: usize) -> Range<usize> {
         let preload_items = preload_rows * self.columns;
-        let end = (self.visible_range.end + preload_items).min(self.total_items);
+        let end =
+            (self.visible_range.end + preload_items).min(self.total_items);
         self.visible_range.end..end
     }
 

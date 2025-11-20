@@ -72,7 +72,9 @@ impl AuthStorage {
     /// Create a new auth storage instance
     pub fn new() -> Result<Self> {
         let proj_dirs = ProjectDirs::from("", "ferrex", "media-player")
-            .ok_or_else(|| anyhow::anyhow!("Unable to determine config directory"))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("Unable to determine config directory")
+            })?;
 
         let cache_path = proj_dirs.data_dir().join(AUTH_CACHE_FILE);
 
@@ -98,7 +100,8 @@ impl AuthStorage {
             tokio::fs::read(&wrap_path).await?
         } else {
             let mut key = [0u8; 32];
-            getrandom::getrandom(&mut key).map_err(|e| anyhow::anyhow!("rng failed: {}", e))?;
+            getrandom::getrandom(&mut key)
+                .map_err(|e| anyhow::anyhow!("rng failed: {}", e))?;
             if let Some(parent) = wrap_path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
@@ -106,7 +109,8 @@ impl AuthStorage {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let mut perms = tokio::fs::metadata(&wrap_path).await?.permissions();
+                let mut perms =
+                    tokio::fs::metadata(&wrap_path).await?.permissions();
                 perms.set_mode(0o600);
                 tokio::fs::set_permissions(&wrap_path, perms).await?;
             }
@@ -171,10 +175,18 @@ impl AuthStorage {
                 Some(32),
             )
             .map_err(|e| anyhow::anyhow!("Invalid Argon2 parameters: {}", e))?;
-            let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+            let argon2 = Argon2::new(
+                argon2::Algorithm::Argon2id,
+                argon2::Version::V0x13,
+                params,
+            );
             let mut out = [0u8; 32];
             argon2
-                .hash_password_into(&wrap_key, salt.as_str().as_bytes(), &mut out)
+                .hash_password_into(
+                    &wrap_key,
+                    salt.as_str().as_bytes(),
+                    &mut out,
+                )
                 .map_err(|e| anyhow::anyhow!("Key derivation failed: {}", e))?;
             *Key::<Aes256Gcm>::from_slice(&out)
         } else {
@@ -208,7 +220,10 @@ impl AuthStorage {
     /// This creates a deterministic key based on the device fingerprint,
     /// ensuring that auth data can only be decrypted on the same device.
     /// Uses Argon2id for strong key derivation resistant to GPU/ASIC attacks.
-    fn derive_key(device_fingerprint: &str, salt: &[u8]) -> Result<Key<Aes256Gcm>> {
+    fn derive_key(
+        device_fingerprint: &str,
+        salt: &[u8],
+    ) -> Result<Key<Aes256Gcm>> {
         // Create Argon2 instance with custom parameters
         let params = Params::new(
             ARGON2_MEM_COST,
@@ -218,7 +233,11 @@ impl AuthStorage {
         )
         .map_err(|e| anyhow::anyhow!("Invalid Argon2 parameters: {}", e))?;
 
-        let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+        let argon2 = Argon2::new(
+            argon2::Algorithm::Argon2id,
+            argon2::Version::V0x13,
+            params,
+        );
 
         // Combine device fingerprint with app-specific salt
         let password = format!("{}{}", device_fingerprint, KEY_DERIVATION_SALT);
@@ -233,14 +252,18 @@ impl AuthStorage {
     }
 
     /// Save authentication data encrypted with device-specific key
-    pub async fn save_auth(&self, auth: &StoredAuth, device_fingerprint: &str) -> Result<()> {
+    pub async fn save_auth(
+        &self,
+        auth: &StoredAuth,
+        device_fingerprint: &str,
+    ) -> Result<()> {
         // Add timestamp
         let mut auth_with_time = auth.clone();
         auth_with_time.stored_at = Utc::now();
 
         // Serialize the auth data
-        let plaintext =
-            serde_json::to_vec(&auth_with_time).context("Failed to serialize auth data")?;
+        let plaintext = serde_json::to_vec(&auth_with_time)
+            .context("Failed to serialize auth data")?;
 
         // Generate random salt for key derivation
         let salt = SaltString::generate(&mut OsRng);
@@ -290,7 +313,10 @@ impl AuthStorage {
     }
 
     /// Load and decrypt authentication data
-    pub async fn load_auth(&self, device_fingerprint: &str) -> Result<Option<StoredAuth>> {
+    pub async fn load_auth(
+        &self,
+        device_fingerprint: &str,
+    ) -> Result<Option<StoredAuth>> {
         // Check if file exists
         if !self.cache_path.exists() {
             log::debug!("No auth cache file found at {:?}", self.cache_path);
@@ -303,8 +329,8 @@ impl AuthStorage {
             .context("Failed to read auth cache")?;
 
         // Parse encrypted data
-        let encrypted_data: EncryptedAuthData =
-            serde_json::from_str(&json).context("Failed to parse encrypted auth data")?;
+        let encrypted_data: EncryptedAuthData = serde_json::from_str(&json)
+            .context("Failed to parse encrypted auth data")?;
 
         // Decode base64
         let nonce_bytes = BASE64
@@ -326,27 +352,39 @@ impl AuthStorage {
         let (key, needs_migration) = match encrypted_data.version {
             1 => {
                 // Legacy SHA256 format - derive key using old method
-                log::info!("Loading v1 auth cache - will migrate to v2 on next save");
+                log::info!(
+                    "Loading v1 auth cache - will migrate to v2 on next save"
+                );
                 panic!("Found v1 auth cache");
             }
             2 => {
                 // Current Argon2 format
                 match encrypted_data.salt.as_ref() {
                     Some(salt_str) => {
-                        let salt = SaltString::from_b64(salt_str)
-                            .map_err(|e| anyhow::anyhow!("Invalid salt format: {}", e))?;
+                        let salt =
+                            SaltString::from_b64(salt_str).map_err(|e| {
+                                anyhow::anyhow!("Invalid salt format: {}", e)
+                            })?;
                         (
-                            Self::derive_key(device_fingerprint, salt.as_str().as_bytes())?,
+                            Self::derive_key(
+                                device_fingerprint,
+                                salt.as_str().as_bytes(),
+                            )?,
                             false,
                         )
                     }
                     None => {
-                        return Err(anyhow::anyhow!("v2 auth cache missing required salt"));
+                        return Err(anyhow::anyhow!(
+                            "v2 auth cache missing required salt"
+                        ));
                     }
                 }
             }
             _ => {
-                log::warn!("Unsupported auth cache version: {}", encrypted_data.version);
+                log::warn!(
+                    "Unsupported auth cache version: {}",
+                    encrypted_data.version
+                );
                 return Ok(None);
             }
         };
@@ -366,8 +404,8 @@ impl AuthStorage {
         })?;
 
         // Deserialize auth data
-        let auth: StoredAuth =
-            serde_json::from_slice(&plaintext).context("Failed to deserialize auth data")?;
+        let auth: StoredAuth = serde_json::from_slice(&plaintext)
+            .context("Failed to deserialize auth data")?;
 
         log::info!("Successfully loaded auth for user: {}", auth.user.username);
 
@@ -419,13 +457,18 @@ impl AuthStorage {
         }
 
         let data = tokio::fs::read_to_string(&auto_login_path).await?;
-        let auto_login_map: std::collections::HashMap<Uuid, bool> = serde_json::from_str(&data)?;
+        let auto_login_map: std::collections::HashMap<Uuid, bool> =
+            serde_json::from_str(&data)?;
 
         Ok(auto_login_map.get(user_id).copied().unwrap_or(false))
     }
 
     /// Set auto-login preference for a specific user on this device
-    pub async fn set_auto_login(&self, user_id: &Uuid, enabled: bool) -> Result<()> {
+    pub async fn set_auto_login(
+        &self,
+        user_id: &Uuid,
+        enabled: bool,
+    ) -> Result<()> {
         let auto_login_path = self
             .cache_path
             .parent()
@@ -433,13 +476,13 @@ impl AuthStorage {
             .join("auto_login.json");
 
         // Read existing preferences
-        let mut auto_login_map: std::collections::HashMap<Uuid, bool> = if auto_login_path.exists()
-        {
-            let data = tokio::fs::read_to_string(&auto_login_path).await?;
-            serde_json::from_str(&data)?
-        } else {
-            std::collections::HashMap::new()
-        };
+        let mut auto_login_map: std::collections::HashMap<Uuid, bool> =
+            if auto_login_path.exists() {
+                let data = tokio::fs::read_to_string(&auto_login_path).await?;
+                serde_json::from_str(&data)?
+            } else {
+                std::collections::HashMap::new()
+            };
 
         // Update preference
         auto_login_map.insert(*user_id, enabled);
@@ -485,7 +528,10 @@ impl AuthStorage {
     }
 
     /// Enable admin PIN unlock for all users on this device
-    pub async fn enable_admin_pin_unlock(&self, admin_user_id: &Uuid) -> Result<()> {
+    pub async fn enable_admin_pin_unlock(
+        &self,
+        admin_user_id: &Uuid,
+    ) -> Result<()> {
         let admin_unlock_path = self
             .cache_path
             .parent()
@@ -559,10 +605,12 @@ mod tests {
                 email: None,
                 preferences: Default::default(),
             },
-            server_url: "http://localhost:3000".to_string(),
+            server_url: "https://localhost:3000".to_string(),
             permissions: None,
             stored_at: Utc::now(),
-            device_trust_expires_at: Some(Utc::now() + chrono::Duration::days(30)),
+            device_trust_expires_at: Some(
+                Utc::now() + chrono::Duration::days(30),
+            ),
             refresh_token: Some("refresh_token".to_string()),
         }
     }

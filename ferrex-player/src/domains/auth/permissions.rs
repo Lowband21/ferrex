@@ -40,7 +40,8 @@ impl<'a> PermissionChecker<'a> {
 
     /// Check if the user can view library settings
     pub fn can_view_library_settings(&self) -> bool {
-        self.has_permission(permissions::LIBRARIES_READ) || self.can_manage_libraries()
+        self.has_permission(permissions::LIBRARIES_READ)
+            || self.can_manage_libraries()
     }
 
     /// Check if the user can scan libraries
@@ -105,7 +106,9 @@ pub trait StatePermissionExt {
 
 impl StatePermissionExt for crate::state_refactored::State {
     fn permission_checker(&self) -> PermissionChecker<'_> {
-        PermissionChecker::new(self.domains.auth.state.user_permissions.as_ref())
+        PermissionChecker::new(
+            self.domains.auth.state.user_permissions.as_ref(),
+        )
     }
 
     fn has_permission(&self, permission: &str) -> bool {

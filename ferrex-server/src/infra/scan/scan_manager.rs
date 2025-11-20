@@ -1,9 +1,13 @@
 use axum::http::StatusCode;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use ferrex_core::api_types::{ScanLifecycleStatus as ApiScanLifecycleStatus, ScanSnapshotDto};
+use ferrex_core::api_types::{
+    ScanLifecycleStatus as ApiScanLifecycleStatus, ScanSnapshotDto,
+};
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::error::MediaError;
-use ferrex_core::orchestration::actors::pipeline::{IndexingChange, IndexingOutcome};
+use ferrex_core::orchestration::actors::pipeline::{
+    IndexingChange, IndexingOutcome,
+};
 use ferrex_core::orchestration::{
     JobEvent, LibraryActorCommand, PostgresCursorRepository, StartMode,
 };
@@ -15,7 +19,8 @@ use ferrex_core::orchestration::{
 use ferrex_core::types::events::ScanSseEventType;
 use ferrex_core::types::ids::{EpisodeID, MovieID, SeasonID, SeriesID};
 use ferrex_core::types::{
-    LibraryID, Media, MediaEvent, ScanEventMetadata, ScanProgressEvent, ScanStageLatencySummary,
+    LibraryID, Media, MediaEvent, ScanEventMetadata, ScanProgressEvent,
+    ScanStageLatencySummary,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
@@ -57,7 +62,8 @@ pub struct ScanControlPlane {
 impl fmt::Debug for ScanControlPlane {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let active = self.inner.active.try_read().ok().map(|guard| guard.len());
-        let history = self.inner.history.try_read().ok().map(|guard| guard.len());
+        let history =
+            self.inner.history.try_read().ok().map(|guard| guard.len());
         let receiver_count = self.inner.media_tx.receiver_count();
         let uow_ptr = Arc::as_ptr(&self.inner.unit_of_work);
         let orchestrator_ptr = Arc::as_ptr(&self.inner.orchestrator);
@@ -88,7 +94,12 @@ impl ScanControlPlane {
         postgres: Arc<PostgresDatabase>,
         orchestrator: Arc<ScanOrchestrator>,
     ) -> Self {
-        Self::with_quiescence_window(unit_of_work, postgres, orchestrator, DEFAULT_QUIESCENCE)
+        Self::with_quiescence_window(
+            unit_of_work,
+            postgres,
+            orchestrator,
+            DEFAULT_QUIESCENCE,
+        )
     }
 
     pub fn with_quiescence_window(
@@ -287,7 +298,12 @@ impl ScanControlPlaneInner {
         self.aggregator.register(run).await;
     }
 
-    async fn finalize_run(&self, scan_id: Uuid, correlation_id: Uuid, snapshot: ScanHistoryEntry) {
+    async fn finalize_run(
+        &self,
+        scan_id: Uuid,
+        correlation_id: Uuid,
+        snapshot: ScanHistoryEntry,
+    ) {
         {
             let mut guard = self.active.write().await;
             guard.remove(&scan_id);
@@ -323,7 +339,10 @@ impl ScanControlPlaneInner {
         }
     }
 
-    async fn lookup(&self, scan_id: &Uuid) -> Result<Arc<ScanRun>, ScanControlError> {
+    async fn lookup(
+        &self,
+        scan_id: &Uuid,
+    ) -> Result<Arc<ScanRun>, ScanControlError> {
         let guard = self.active.read().await;
         guard
             .get(scan_id)
@@ -617,7 +636,11 @@ impl ScanRun {
         }
     }
 
-    async fn persist_completed_cursor(&self, path_norm: &str, event_time: DateTime<Utc>) {
+    async fn persist_completed_cursor(
+        &self,
+        path_norm: &str,
+        event_time: DateTime<Utc>,
+    ) {
         if let Some(cursor) = self.make_cursor(path_norm, event_time)
             && let Err(err) = self.cursor_repository.upsert(cursor).await
         {
@@ -631,7 +654,11 @@ impl ScanRun {
         }
     }
 
-    fn make_cursor(&self, path_norm: &str, last_scan_at: DateTime<Utc>) -> Option<ScanCursor> {
+    fn make_cursor(
+        &self,
+        path_norm: &str,
+        last_scan_at: DateTime<Utc>,
+    ) -> Option<ScanCursor> {
         if path_norm.is_empty() {
             return None;
         }
@@ -644,7 +671,10 @@ impl ScanRun {
         ))
     }
 
-    async fn pause(&self, correlation_id: Uuid) -> Result<(), ScanControlError> {
+    async fn pause(
+        &self,
+        correlation_id: Uuid,
+    ) -> Result<(), ScanControlError> {
         let payload = {
             let mut state = self.state.lock().await;
             match state.status {
@@ -656,15 +686,22 @@ impl ScanRun {
                 ScanLifecycleStatus::Paused => return Ok(()),
                 ScanLifecycleStatus::Completed
                 | ScanLifecycleStatus::Failed
-                | ScanLifecycleStatus::Canceled => return Err(ScanControlError::ScanTerminal),
-                ScanLifecycleStatus::Pending => return Err(ScanControlError::ScanNotRunning),
+                | ScanLifecycleStatus::Canceled => {
+                    return Err(ScanControlError::ScanTerminal);
+                }
+                ScanLifecycleStatus::Pending => {
+                    return Err(ScanControlError::ScanNotRunning);
+                }
             }
         };
         self.emit_frame(ScanEventKind::Progress, payload).await;
         Ok(())
     }
 
-    async fn resume(&self, correlation_id: Uuid) -> Result<(), ScanControlError> {
+    async fn resume(
+        &self,
+        correlation_id: Uuid,
+    ) -> Result<(), ScanControlError> {
         let payload = {
             let mut state = self.state.lock().await;
             match state.status {
@@ -676,15 +713,22 @@ impl ScanRun {
                 ScanLifecycleStatus::Running => return Ok(()),
                 ScanLifecycleStatus::Completed
                 | ScanLifecycleStatus::Failed
-                | ScanLifecycleStatus::Canceled => return Err(ScanControlError::ScanTerminal),
-                ScanLifecycleStatus::Pending => return Err(ScanControlError::ScanNotRunning),
+                | ScanLifecycleStatus::Canceled => {
+                    return Err(ScanControlError::ScanTerminal);
+                }
+                ScanLifecycleStatus::Pending => {
+                    return Err(ScanControlError::ScanNotRunning);
+                }
             }
         };
         self.emit_frame(ScanEventKind::Progress, payload).await;
         Ok(())
     }
 
-    async fn cancel(&self, correlation_id: Uuid) -> Result<(), ScanControlError> {
+    async fn cancel(
+        &self,
+        correlation_id: Uuid,
+    ) -> Result<(), ScanControlError> {
         let frame = {
             let mut state = self.state.lock().await;
             if state.is_terminal() {
@@ -759,7 +803,9 @@ impl ScanRun {
                 );
 
                 if stale_terminal {
-                    if let Some(item) = state.item_states.get_mut(idempotency_key) {
+                    if let Some(item) =
+                        state.item_states.get_mut(idempotency_key)
+                    {
                         item.last_activity = event_time;
                         item.last_job_id = Some(job_id);
                         if let Some(p) = path.clone() {
@@ -786,16 +832,20 @@ impl ScanRun {
                     state.path_key = path.clone();
 
                     let mut frames = Vec::new();
-                    if let Some(frame) =
-                        state.handle_state_event(ScanStateEvent::NewItemFound, event_time)
-                    {
+                    if let Some(frame) = state.handle_state_event(
+                        ScanStateEvent::NewItemFound,
+                        event_time,
+                    ) {
                         frames.push(frame);
                     }
 
-                    let reopened = matches!(previous_phase, ScanPhase::Quiescing)
-                        && matches!(state.phase, ScanPhase::Processing);
+                    let reopened =
+                        matches!(previous_phase, ScanPhase::Quiescing)
+                            && matches!(state.phase, ScanPhase::Processing);
 
-                    if let Some(payload) = state.build_payload_if(changed || reopened) {
+                    if let Some(payload) =
+                        state.build_payload_if(changed || reopened)
+                    {
                         frames.push(QueuedFrame {
                             event: ScanEventKind::Progress,
                             payload,
@@ -851,8 +901,10 @@ impl ScanRun {
                     });
 
                     if state.can_enter_quiescing()
-                        && let Some(frame) =
-                            state.handle_state_event(ScanStateEvent::AllItemsProcessed, event_time)
+                        && let Some(frame) = state.handle_state_event(
+                            ScanStateEvent::AllItemsProcessed,
+                            event_time,
+                        )
                     {
                         frames.push(frame);
                     }
@@ -965,8 +1017,10 @@ impl ScanRun {
 
                     if !retryable
                         && state.can_enter_quiescing()
-                        && let Some(frame) =
-                            state.handle_state_event(ScanStateEvent::AllItemsProcessed, event_time)
+                        && let Some(frame) = state.handle_state_event(
+                            ScanStateEvent::AllItemsProcessed,
+                            event_time,
+                        )
                     {
                         frames.push(frame);
                     }
@@ -1021,8 +1075,10 @@ impl ScanRun {
                     });
 
                     if state.can_enter_quiescing()
-                        && let Some(frame) =
-                            state.handle_state_event(ScanStateEvent::AllItemsProcessed, event_time)
+                        && let Some(frame) = state.handle_state_event(
+                            ScanStateEvent::AllItemsProcessed,
+                            event_time,
+                        )
                     {
                         frames.push(frame);
                     }
@@ -1064,13 +1120,20 @@ impl ScanRun {
                 let now = Utc::now();
                 let mut frame: Option<QueuedFrame> = None;
 
-                if matches!(state.phase, ScanPhase::Processing | ScanPhase::Discovering)
-                    && state.can_enter_quiescing()
+                if matches!(
+                    state.phase,
+                    ScanPhase::Processing | ScanPhase::Discovering
+                ) && state.can_enter_quiescing()
                 {
-                    frame = state.handle_state_event(ScanStateEvent::AllItemsProcessed, now);
+                    frame = state.handle_state_event(
+                        ScanStateEvent::AllItemsProcessed,
+                        now,
+                    );
                 }
 
-                if frame.is_none() && matches!(state.phase, ScanPhase::Quiescing) {
+                if frame.is_none()
+                    && matches!(state.phase, ScanPhase::Quiescing)
+                {
                     let quiesced = state
                         .quiescence_started_at
                         .map(|ts| now - ts >= completion_quiescence)
@@ -1078,21 +1141,28 @@ impl ScanRun {
 
                     if quiesced && state.can_enter_quiescing() {
                         // Only complete if no new activity has occurred since quiescing began.
-                        let no_new_activity =
-                            match (state.quiescence_started_at, state.last_activity_at) {
-                                (Some(qts), Some(last)) => last <= qts,
-                                (Some(_), None) => true,
-                                _ => true,
-                            };
+                        let no_new_activity = match (
+                            state.quiescence_started_at,
+                            state.last_activity_at,
+                        ) {
+                            (Some(qts), Some(last)) => last <= qts,
+                            (Some(_), None) => true,
+                            _ => true,
+                        };
                         if no_new_activity {
-                            frame =
-                                state.handle_state_event(ScanStateEvent::QuiescenceComplete, now);
+                            frame = state.handle_state_event(
+                                ScanStateEvent::QuiescenceComplete,
+                                now,
+                            );
                         }
                     }
                 }
 
                 if frame.is_none()
-                    && matches!(state.phase, ScanPhase::Processing | ScanPhase::Discovering)
+                    && matches!(
+                        state.phase,
+                        ScanPhase::Processing | ScanPhase::Discovering
+                    )
                     && state.outstanding_items_stalled(stall_timeout, now)
                 {
                     frame = state.handle_state_event(
@@ -1103,11 +1173,16 @@ impl ScanRun {
                     );
                 }
 
-                let finalize = frame.as_ref().and_then(|queued| match queued.event {
-                    ScanEventKind::Completed => Some(ScanLifecycleStatus::Completed),
-                    ScanEventKind::Failed => Some(ScanLifecycleStatus::Failed),
-                    _ => None,
-                });
+                let finalize =
+                    frame.as_ref().and_then(|queued| match queued.event {
+                        ScanEventKind::Completed => {
+                            Some(ScanLifecycleStatus::Completed)
+                        }
+                        ScanEventKind::Failed => {
+                            Some(ScanLifecycleStatus::Failed)
+                        }
+                        _ => None,
+                    });
 
                 (frame, finalize)
             }
@@ -1125,7 +1200,11 @@ impl ScanRun {
         }
     }
 
-    async fn emit_frame(&self, event: ScanEventKind, payload: ScanProgressEvent) {
+    async fn emit_frame(
+        &self,
+        event: ScanEventKind,
+        payload: ScanProgressEvent,
+    ) {
         let frame = ScanBroadcastFrame {
             event: event.clone(),
             payload: payload.clone(),
@@ -1158,7 +1237,11 @@ impl ScanRun {
         pct.floor() as u8
     }
 
-    async fn maybe_log_summary(&self, event: &ScanEventKind, payload: &ScanProgressEvent) {
+    async fn maybe_log_summary(
+        &self,
+        event: &ScanEventKind,
+        payload: &ScanProgressEvent,
+    ) {
         use ScanEventKind::*;
         let mut guard = self.log.lock().await;
         let now = Instant::now();
@@ -1348,7 +1431,8 @@ impl ScanRunState {
         let mut latest = self.last_activity_at;
 
         for cursor in cursors {
-            let idempotency_key = format!("scan:{}:{}", self.library_id, cursor.folder_path_norm);
+            let idempotency_key =
+                format!("scan:{}:{}", self.library_id, cursor.folder_path_norm);
             if self.item_states.contains_key(&idempotency_key) {
                 continue;
             }
@@ -1437,23 +1521,37 @@ impl ScanRunState {
 
         match next {
             ScanPhase::Initializing => false,
-            ScanPhase::Discovering => matches!(self.phase, ScanPhase::Initializing),
+            ScanPhase::Discovering => {
+                matches!(self.phase, ScanPhase::Initializing)
+            }
             ScanPhase::Processing => {
-                matches!(self.phase, ScanPhase::Discovering | ScanPhase::Quiescing)
+                matches!(
+                    self.phase,
+                    ScanPhase::Discovering | ScanPhase::Quiescing
+                )
             }
             ScanPhase::Quiescing => {
-                matches!(self.phase, ScanPhase::Processing | ScanPhase::Discovering)
-                    && self.can_enter_quiescing()
+                matches!(
+                    self.phase,
+                    ScanPhase::Processing | ScanPhase::Discovering
+                ) && self.can_enter_quiescing()
             }
             ScanPhase::Completed => {
                 matches!(self.phase, ScanPhase::Quiescing)
-                    && self.completed_items + self.dead_lettered_items == self.total_items
+                    && self.completed_items + self.dead_lettered_items
+                        == self.total_items
             }
-            ScanPhase::Failed | ScanPhase::Canceled => !self.phase.is_terminal(),
+            ScanPhase::Failed | ScanPhase::Canceled => {
+                !self.phase.is_terminal()
+            }
         }
     }
 
-    fn transition(&mut self, next: ScanPhase, now: DateTime<Utc>) -> Option<QueuedFrame> {
+    fn transition(
+        &mut self,
+        next: ScanPhase,
+        now: DateTime<Utc>,
+    ) -> Option<QueuedFrame> {
         if !self.can_transition_to(next) {
             return None;
         }
@@ -1511,7 +1609,8 @@ impl ScanRunState {
 
     fn build_payload(&mut self) -> ScanProgressEvent {
         self.event_sequence += 1;
-        let idempotency_key = format!("{}{}", self.idempotency_prefix, self.event_sequence);
+        let idempotency_key =
+            format!("{}{}", self.idempotency_prefix, self.event_sequence);
         self.last_idempotency_key = idempotency_key.clone();
         ScanProgressEvent {
             version: EVENT_VERSION.to_string(),
@@ -1527,12 +1626,17 @@ impl ScanRunState {
             correlation_id: self.correlation_id,
             idempotency_key,
             emitted_at: Utc::now(),
-            retrying_items: (self.retrying_items > 0).then_some(self.retrying_items),
-            dead_lettered_items: (self.dead_lettered_items > 0).then_some(self.dead_lettered_items),
+            retrying_items: (self.retrying_items > 0)
+                .then_some(self.retrying_items),
+            dead_lettered_items: (self.dead_lettered_items > 0)
+                .then_some(self.dead_lettered_items),
         }
     }
 
-    fn build_payload_if(&mut self, condition: bool) -> Option<ScanProgressEvent> {
+    fn build_payload_if(
+        &mut self,
+        condition: bool,
+    ) -> Option<ScanProgressEvent> {
         condition.then(|| self.build_payload())
     }
 
@@ -1566,7 +1670,9 @@ impl ScanRunState {
                 self.total_items += 1;
                 match status {
                     ScanItemStatus::Completed => self.completed_items += 1,
-                    ScanItemStatus::DeadLettered => self.dead_lettered_items += 1,
+                    ScanItemStatus::DeadLettered => {
+                        self.dead_lettered_items += 1
+                    }
                     ScanItemStatus::Retrying => self.retrying_items += 1,
                     _ => {}
                 }
@@ -1628,20 +1734,25 @@ impl ScanRunState {
 
                 match old_status {
                     ScanItemStatus::Completed => {
-                        self.completed_items = self.completed_items.saturating_sub(1);
+                        self.completed_items =
+                            self.completed_items.saturating_sub(1);
                     }
                     ScanItemStatus::DeadLettered => {
-                        self.dead_lettered_items = self.dead_lettered_items.saturating_sub(1);
+                        self.dead_lettered_items =
+                            self.dead_lettered_items.saturating_sub(1);
                     }
                     ScanItemStatus::Retrying => {
-                        self.retrying_items = self.retrying_items.saturating_sub(1);
+                        self.retrying_items =
+                            self.retrying_items.saturating_sub(1);
                     }
                     _ => {}
                 }
 
                 match status {
                     ScanItemStatus::Completed => self.completed_items += 1,
-                    ScanItemStatus::DeadLettered => self.dead_lettered_items += 1,
+                    ScanItemStatus::DeadLettered => {
+                        self.dead_lettered_items += 1
+                    }
                     ScanItemStatus::Retrying => self.retrying_items += 1,
                     _ => {}
                 }
@@ -1656,7 +1767,8 @@ impl ScanRunState {
                     None => {
                         if matches!(
                             status,
-                            ScanItemStatus::Completed | ScanItemStatus::InProgress
+                            ScanItemStatus::Completed
+                                | ScanItemStatus::InProgress
                         ) {
                             item.last_error = None;
                         }
@@ -1671,14 +1783,20 @@ impl ScanRunState {
     }
 
     fn can_enter_quiescing(&self) -> bool {
-        self.total_items > 0 && self.completed_items + self.dead_lettered_items == self.total_items
+        self.total_items > 0
+            && self.completed_items + self.dead_lettered_items
+                == self.total_items
     }
 
     fn has_outstanding_items(&self) -> bool {
         !self.can_enter_quiescing()
     }
 
-    fn outstanding_items_stalled(&self, stall_timeout: ChronoDuration, now: DateTime<Utc>) -> bool {
+    fn outstanding_items_stalled(
+        &self,
+        stall_timeout: ChronoDuration,
+        now: DateTime<Utc>,
+    ) -> bool {
         if self.retrying_items > 0 {
             return false;
         }
@@ -1727,13 +1845,13 @@ impl ScanRunAggregator {
         unit_of_work: Arc<AppUnitOfWork>,
         postgres: Arc<PostgresDatabase>,
     ) -> Self {
-        let chrono_window =
-            ChronoDuration::from_std(quiescence).unwrap_or_else(|_| ChronoDuration::seconds(3));
+        let chrono_window = ChronoDuration::from_std(quiescence)
+            .unwrap_or_else(|_| ChronoDuration::seconds(3));
         let stall_std = quiescence
             .checked_mul(STALLED_SCAN_TIMEOUT_MULTIPLIER)
             .unwrap_or(Duration::from_secs(60));
-        let stall_window =
-            ChronoDuration::from_std(stall_std).unwrap_or_else(|_| ChronoDuration::seconds(60));
+        let stall_window = ChronoDuration::from_std(stall_std)
+            .unwrap_or_else(|_| ChronoDuration::seconds(60));
         let inner = Arc::new(ScanRunAggregatorInner {
             orchestrator,
             cursor_repository,
@@ -1850,8 +1968,11 @@ impl ScanRunAggregatorInner {
                             event.meta.path_key.clone(),
                         )
                         .await;
-                        run.try_complete(self.quiescence_chrono, self.stall_timeout)
-                            .await
+                        run.try_complete(
+                            self.quiescence_chrono,
+                            self.stall_timeout,
+                        )
+                        .await
                     } else {
                         false
                     }
@@ -1873,8 +1994,11 @@ impl ScanRunAggregatorInner {
                         .await;
 
                         if !retryable {
-                            run.try_complete(self.quiescence_chrono, self.stall_timeout)
-                                .await
+                            run.try_complete(
+                                self.quiescence_chrono,
+                                self.stall_timeout,
+                            )
+                            .await
                         } else {
                             false
                         }
@@ -1891,8 +2015,11 @@ impl ScanRunAggregatorInner {
                             event.meta.path_key.clone(),
                         )
                         .await;
-                        run.try_complete(self.quiescence_chrono, self.stall_timeout)
-                            .await
+                        run.try_complete(
+                            self.quiescence_chrono,
+                            self.stall_timeout,
+                        )
+                        .await
                     } else {
                         false
                     }
@@ -1919,12 +2046,16 @@ impl ScanRunAggregatorInner {
 
     async fn handle_scan_event(&self, event: ScanEvent) {
         if let ScanEvent::Indexed(outcome) = event
-            && let Err(err) = self.handle_indexed_outcome(outcome).await {
-                warn!("failed to process indexed outcome: {err}");
-            }
+            && let Err(err) = self.handle_indexed_outcome(outcome).await
+        {
+            warn!("failed to process indexed outcome: {err}");
+        }
     }
 
-    async fn handle_indexed_outcome(&self, outcome: IndexingOutcome) -> Result<(), String> {
+    async fn handle_indexed_outcome(
+        &self,
+        outcome: IndexingOutcome,
+    ) -> Result<(), String> {
         let mut media = outcome.media.clone();
         let media_id = outcome
             .media_id
@@ -1958,13 +2089,21 @@ impl ScanRunAggregatorInner {
         };
 
         let event = match (media, change) {
-            (Media::Movie(movie), IndexingChange::Created) => MediaEvent::MovieAdded { movie },
-            (Media::Movie(movie), IndexingChange::Updated) => MediaEvent::MovieUpdated { movie },
-            (Media::Series(series), IndexingChange::Created) => MediaEvent::SeriesAdded { series },
+            (Media::Movie(movie), IndexingChange::Created) => {
+                MediaEvent::MovieAdded { movie }
+            }
+            (Media::Movie(movie), IndexingChange::Updated) => {
+                MediaEvent::MovieUpdated { movie }
+            }
+            (Media::Series(series), IndexingChange::Created) => {
+                MediaEvent::SeriesAdded { series }
+            }
             (Media::Series(series), IndexingChange::Updated) => {
                 MediaEvent::SeriesUpdated { series }
             }
-            (Media::Season(season), IndexingChange::Created) => MediaEvent::SeasonAdded { season },
+            (Media::Season(season), IndexingChange::Created) => {
+                MediaEvent::SeasonAdded { season }
+            }
             (Media::Season(season), IndexingChange::Updated) => {
                 MediaEvent::SeasonUpdated { season }
             }
@@ -2069,8 +2208,16 @@ impl ScanRunAggregatorInner {
         };
 
         let should_persist = match event.payload {
-            JobEventPayload::Completed { kind, .. } if matches!(kind, FolderScan) => true,
-            JobEventPayload::DeadLettered { kind, .. } if matches!(kind, FolderScan) => true,
+            JobEventPayload::Completed { kind, .. }
+                if matches!(kind, FolderScan) =>
+            {
+                true
+            }
+            JobEventPayload::DeadLettered { kind, .. }
+                if matches!(kind, FolderScan) =>
+            {
+                true
+            }
             JobEventPayload::Failed {
                 kind, retryable, ..
             } if matches!(kind, FolderScan) && !retryable => true,

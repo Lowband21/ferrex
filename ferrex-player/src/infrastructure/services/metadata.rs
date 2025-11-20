@@ -6,8 +6,8 @@
 use crate::infrastructure::repository::RepositoryResult;
 use async_trait::async_trait;
 use ferrex_core::player_prelude::{
-    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, MovieReference, SeasonDetails,
-    SeriesReference,
+    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails,
+    MovieReference, SeasonDetails, SeriesReference,
 };
 
 /// Search result from metadata provider
@@ -25,16 +25,28 @@ pub struct MetadataSearchResult {
 #[async_trait]
 pub trait MetadataService: Send + Sync {
     /// Search for movies by title
-    async fn search_movies(&self, query: &str) -> RepositoryResult<Vec<MetadataSearchResult>>;
+    async fn search_movies(
+        &self,
+        query: &str,
+    ) -> RepositoryResult<Vec<MetadataSearchResult>>;
 
     /// Search for TV series by title
-    async fn search_series(&self, query: &str) -> RepositoryResult<Vec<MetadataSearchResult>>;
+    async fn search_series(
+        &self,
+        query: &str,
+    ) -> RepositoryResult<Vec<MetadataSearchResult>>;
 
     /// Get detailed movie metadata
-    async fn get_movie_details(&self, tmdb_id: u64) -> RepositoryResult<EnhancedMovieDetails>;
+    async fn get_movie_details(
+        &self,
+        tmdb_id: u64,
+    ) -> RepositoryResult<EnhancedMovieDetails>;
 
     /// Get detailed series metadata
-    async fn get_series_details(&self, tmdb_id: u64) -> RepositoryResult<EnhancedSeriesDetails>;
+    async fn get_series_details(
+        &self,
+        tmdb_id: u64,
+    ) -> RepositoryResult<EnhancedSeriesDetails>;
 
     /// Get season details
     async fn get_season_details(
@@ -64,10 +76,16 @@ pub trait MetadataService: Send + Sync {
     ) -> RepositoryResult<Vec<EnhancedSeriesDetails>>;
 
     /// Update movie metadata
-    async fn update_movie_metadata(&self, movie: &mut MovieReference) -> RepositoryResult<()>;
+    async fn update_movie_metadata(
+        &self,
+        movie: &mut MovieReference,
+    ) -> RepositoryResult<()>;
 
     /// Update series metadata
-    async fn update_series_metadata(&self, series: &mut SeriesReference) -> RepositoryResult<()>;
+    async fn update_series_metadata(
+        &self,
+        series: &mut SeriesReference,
+    ) -> RepositoryResult<()>;
 
     /// Get image URL from path
     fn get_image_url(&self, path: &str, size: ImageSize) -> String;
@@ -88,7 +106,8 @@ pub enum ImageSize {
 pub mod mock {
     use super::*;
     use ferrex_core::player_prelude::{
-        GenreInfo, NetworkInfo, ProductionCompany, ProductionCountry, SpokenLanguage,
+        GenreInfo, NetworkInfo, ProductionCompany, ProductionCountry,
+        SpokenLanguage,
     };
     use std::sync::Arc;
     use tokio::sync::RwLock;
@@ -109,7 +128,10 @@ pub mod mock {
 
     #[async_trait]
     impl MetadataService for MockMetadataService {
-        async fn search_movies(&self, query: &str) -> RepositoryResult<Vec<MetadataSearchResult>> {
+        async fn search_movies(
+            &self,
+            query: &str,
+        ) -> RepositoryResult<Vec<MetadataSearchResult>> {
             self.search_movies_called
                 .write()
                 .await
@@ -126,11 +148,17 @@ pub mod mock {
             }])
         }
 
-        async fn search_series(&self, _query: &str) -> RepositoryResult<Vec<MetadataSearchResult>> {
+        async fn search_series(
+            &self,
+            _query: &str,
+        ) -> RepositoryResult<Vec<MetadataSearchResult>> {
             Ok(vec![])
         }
 
-        async fn get_movie_details(&self, tmdb_id: u64) -> RepositoryResult<EnhancedMovieDetails> {
+        async fn get_movie_details(
+            &self,
+            tmdb_id: u64,
+        ) -> RepositoryResult<EnhancedMovieDetails> {
             self.get_movie_details_called.write().await.push(tmdb_id);
 
             Ok(EnhancedMovieDetails {
@@ -314,7 +342,10 @@ pub mod mock {
             Ok(results)
         }
 
-        async fn update_movie_metadata(&self, _movie: &mut MovieReference) -> RepositoryResult<()> {
+        async fn update_movie_metadata(
+            &self,
+            _movie: &mut MovieReference,
+        ) -> RepositoryResult<()> {
             // Mock implementation - just return success
             Ok(())
         }

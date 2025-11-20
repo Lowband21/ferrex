@@ -18,13 +18,15 @@ async fn test_user_logout_clears_authentication() {
     // Set up authenticated state
     state.is_authenticated = true;
     state.domains.auth.state.is_authenticated = true;
-    state.domains.auth.state.user_permissions = Some(UserPermissions::default());
+    state.domains.auth.state.user_permissions =
+        Some(UserPermissions::default());
 
     // Process the UserLoggedOut event through handle_event
-    let cleanup_task = ferrex_player::common::messages::cross_domain::handle_event(
-        &mut state,
-        CrossDomainEvent::UserLoggedOut,
-    );
+    let cleanup_task =
+        ferrex_player::common::messages::cross_domain::handle_event(
+            &mut state,
+            CrossDomainEvent::UserLoggedOut,
+        );
 
     // Verify state was cleared
     assert!(
@@ -68,7 +70,9 @@ async fn test_auth_command_routing() {
 /// Test that AuthCommandCompleted routes results back to settings domain
 #[tokio::test]
 async fn test_auth_command_completion_routing() {
-    use ferrex_player::domains::auth::messages::{AuthCommand, AuthCommandResult};
+    use ferrex_player::domains::auth::messages::{
+        AuthCommand, AuthCommandResult,
+    };
 
     let mut state = State::default();
 
@@ -85,7 +89,10 @@ async fn test_auth_command_completion_routing() {
     // Process completion event
     let task = ferrex_player::common::messages::cross_domain::handle_event(
         &mut state,
-        CrossDomainEvent::AuthCommandCompleted(password_command, success_result),
+        CrossDomainEvent::AuthCommandCompleted(
+            password_command,
+            success_result,
+        ),
     );
 
     // Verify state wasn't corrupted by the handler
@@ -176,9 +183,11 @@ async fn test_mediator_processes_multiple_events() {
     // Simulate what the mediator does
     let mut tasks = vec![update_result.task];
     for event in update_result.events {
-        tasks.push(ferrex_player::common::messages::cross_domain::handle_event(
-            &mut state, event,
-        ));
+        tasks.push(
+            ferrex_player::common::messages::cross_domain::handle_event(
+                &mut state, event,
+            ),
+        );
     }
 
     // All three events should have been processed
@@ -241,7 +250,10 @@ mod event_ordering_tests {
 
         // Process in order
         for event in &events {
-            ferrex_player::common::messages::cross_domain::handle_event(&mut state, event.clone());
+            ferrex_player::common::messages::cross_domain::handle_event(
+                &mut state,
+                event.clone(),
+            );
         }
 
         // Final state should reflect the last event

@@ -29,34 +29,18 @@ iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", features = [
   "batch",
 ] }
 
-# iced = { path = "/home/lowband/dev/ferrex-parent/ferrex-worktrees/iced_ferrex", default-features = false, features = [
-#     "tokio",
-#     "debug",
-#     "image",
-#     "canvas",
-#     "advanced",
-#     "wgpu",
-#     "prefer_10bit",
-#     "web-colors",
-#     "batch",
-#     "lazy",
-# ] }
-# iced_wgpu = { path = "/home/lowband/dev/ferrex-parent/ferrex-worktrees/iced_ferrex/wgpu", features = [
-#     "image",
-#     "batch",
-# ] }
-
-# iced_aw = { git = "https://github.com/iced-rs/iced_aw.git", default-features = false, features = ["menu"] }
-iced_aw = { path = "/home/lowband/dev/ferrex-parent/iced_aw", default-features = false, features = [
-    "menu",
+iced_aw = { git = "https://github.com/Lowband21/iced_aw_ferrex.git", default-features = false, features = [
+  "menu",
 ] }
 
 # Icons
-lucide-icons = { path = "/home/lowband/dev/ferrex-parent/lucide_icons_iced_0.14", features = ["iced"] }
+lucide-icons = { git = "https://github.com/Lowband21/lucide-icons-iced-0.14.git", features = [
+  "iced",
+] }
 
 # Unified video abstraction based on subwave
-subwave_unified = { path = "/home/lowband/dev/ferrex-parent/subwave/subwave_unified" }
-subwave_core = { path = "/home/lowband/dev/ferrex-parent/subwave/subwave_core" }
+subwave_unified = { git = "https://github.com/Lowband21/Subwave.git" }
+subwave_core = { git = "https://github.com/Lowband21/Subwave.git" }
 
 # Async runtime
 tokio.workspace = true

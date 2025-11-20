@@ -40,12 +40,16 @@ pub fn view_library_controls_bar<'a>(
                 .tab_manager
                 .get_tab(TabId::Library(library_id))
                 .and_then(|tab| match tab {
-                    TabState::Library(lib_state) => Some(lib_state.grid_state.total_items),
+                    TabState::Library(lib_state) => {
+                        Some(lib_state.grid_state.total_items)
+                    }
                     _ => None,
                 })
         })
         .or_else(|| match state.tab_manager.active_tab() {
-            TabState::Library(lib_state) => Some(lib_state.grid_state.total_items),
+            TabState::Library(lib_state) => {
+                Some(lib_state.grid_state.total_items)
+            }
             _ => None,
         })
         .unwrap_or(0);

@@ -19,7 +19,9 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
             .keys()
             .copied()
             .collect();
-        scan_ids.extend(state.domains.library.state.latest_progress.keys().copied());
+        scan_ids.extend(
+            state.domains.library.state.latest_progress.keys().copied(),
+        );
 
         for scan_id in scan_ids {
             subscriptions.push(

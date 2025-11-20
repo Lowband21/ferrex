@@ -4,7 +4,9 @@ use sqlx::PgPool;
 use std::fmt;
 use uuid::Uuid;
 
-use crate::auth::domain::repositories::{RefreshTokenRecord, RefreshTokenRepository};
+use crate::auth::domain::repositories::{
+    RefreshTokenRecord, RefreshTokenRepository,
+};
 use crate::auth::domain::value_objects::RefreshToken;
 use crate::auth::domain::value_objects::RevocationReason;
 
@@ -141,7 +143,11 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
             .transpose()?)
     }
 
-    async fn mark_used(&self, token_id: Uuid, reason: RevocationReason) -> Result<()> {
+    async fn mark_used(
+        &self,
+        token_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             UPDATE auth_refresh_tokens
@@ -161,7 +167,11 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
         Ok(())
     }
 
-    async fn revoke_family(&self, family_id: Uuid, reason: RevocationReason) -> Result<()> {
+    async fn revoke_family(
+        &self,
+        family_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             UPDATE auth_refresh_tokens
@@ -179,7 +189,11 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
         Ok(())
     }
 
-    async fn revoke_for_user(&self, user_id: Uuid, reason: RevocationReason) -> Result<()> {
+    async fn revoke_for_user(
+        &self,
+        user_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             UPDATE auth_refresh_tokens
@@ -221,7 +235,11 @@ impl RefreshTokenRepository for PostgresRefreshTokenRepository {
         Ok(())
     }
 
-    async fn revoke_for_session(&self, session_id: Uuid, reason: RevocationReason) -> Result<()> {
+    async fn revoke_for_session(
+        &self,
+        session_id: Uuid,
+        reason: RevocationReason,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             UPDATE auth_refresh_tokens

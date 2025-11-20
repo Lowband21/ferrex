@@ -16,7 +16,9 @@ use crate::error::Result;
 use crate::types::ids::LibraryID;
 
 /// Unique identifier for a scan cursor.
-#[derive(Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct ScanCursorId {
     pub library_id: LibraryID,
     pub path_hash: u64,
@@ -103,12 +105,17 @@ impl CursorDiff {
 }
 
 /// Compare new listing against stored cursor.
-pub fn diff_cursor(cursor: Option<&ScanCursor>, entries: &[ListingEntry]) -> CursorDiff {
+pub fn diff_cursor(
+    cursor: Option<&ScanCursor>,
+    entries: &[ListingEntry],
+) -> CursorDiff {
     let new_hash = compute_listing_hash(entries);
 
     match cursor {
         None => CursorDiff::NoCursor,
-        Some(cursor) if cursor.listing_hash == new_hash => CursorDiff::Unchanged,
+        Some(cursor) if cursor.listing_hash == new_hash => {
+            CursorDiff::Unchanged
+        }
         Some(cursor) => {
             // Simple count-based diff for now
             let old_count = cursor.entry_count;
@@ -137,7 +144,10 @@ pub trait ScanCursorRepository: Send + Sync {
     async fn get(&self, id: &ScanCursorId) -> Result<Option<ScanCursor>>;
 
     /// Get all cursors for a library.
-    async fn list_by_library(&self, library_id: LibraryID) -> Result<Vec<ScanCursor>>;
+    async fn list_by_library(
+        &self,
+        library_id: LibraryID,
+    ) -> Result<Vec<ScanCursor>>;
 
     /// Store or update a cursor.
     async fn upsert(&self, cursor: ScanCursor) -> Result<()>;

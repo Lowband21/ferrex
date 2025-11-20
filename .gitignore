@@ -1,5 +1,6 @@
 # Rust
-.cargo
+.cargo/*
+!.cargo/audit.toml
 target/
 Cargo.lock
 **/*.rs.bk
@@ -19,6 +20,7 @@ Thumbs.db
 # Environment
 .env
 .env.local
+config/
 
 # Build artifacts
 dist/
@@ -76,4 +78,8 @@ node_modules/
 
 # Postgres
 pg_hba.conf
-pgsock/
+pgsock/*
+
+# Bacon (rust code reloader) artifacts
+.bacon-locations
+.bacon.socket

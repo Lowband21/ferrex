@@ -1,5 +1,5 @@
-use ferrex_core::player_prelude::User;
 use ferrex_core::api_types::users_admin::AdminUserInfo;
+use ferrex_core::player_prelude::User;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -76,7 +76,9 @@ impl Message {
             Self::UpdateUserFormUpdateConfirmPassword(_) => {
                 "UpdateUserFormUpdateConfirmPassword(***)".to_string()
             }
-            Self::FirstRunUpdatePassword(_) => "FirstRunUpdatePassword(***)".to_string(),
+            Self::FirstRunUpdatePassword(_) => {
+                "FirstRunUpdatePassword(***)".to_string()
+            }
             Self::FirstRunUpdateConfirmPassword(_) => {
                 "FirstRunUpdateConfirmPassword(***)".to_string()
             }
@@ -98,36 +100,48 @@ impl Message {
 
             // User creation
             Self::CreateUser => "UserManagement::CreateUser",
-            Self::CreateUserFormUpdateUsername(_) => "UserManagement::CreateUserFormUpdateUsername",
+            Self::CreateUserFormUpdateUsername(_) => {
+                "UserManagement::CreateUserFormUpdateUsername"
+            }
             Self::CreateUserFormUpdateDisplayName(_) => {
                 "UserManagement::CreateUserFormUpdateDisplayName"
             }
-            Self::CreateUserFormUpdatePassword(_) => "UserManagement::CreateUserFormUpdatePassword",
+            Self::CreateUserFormUpdatePassword(_) => {
+                "UserManagement::CreateUserFormUpdatePassword"
+            }
             Self::CreateUserFormUpdateConfirmPassword(_) => {
                 "UserManagement::CreateUserFormUpdateConfirmPassword"
             }
             Self::CreateUserFormTogglePasswordVisibility => {
                 "UserManagement::CreateUserFormTogglePasswordVisibility"
             }
-            Self::CreateUserFormSubmit => "UserManagement::CreateUserFormSubmit",
+            Self::CreateUserFormSubmit => {
+                "UserManagement::CreateUserFormSubmit"
+            }
             Self::CreateUserSuccess(_) => "UserManagement::CreateUserSuccess",
             Self::CreateUserError(_) => "UserManagement::CreateUserError",
             Self::CreateUserCancel => "UserManagement::CreateUserCancel",
 
             // User updates
             Self::UpdateUser(_) => "UserManagement::UpdateUser",
-            Self::UpdateUserFormUpdateUsername(_) => "UserManagement::UpdateUserFormUpdateUsername",
+            Self::UpdateUserFormUpdateUsername(_) => {
+                "UserManagement::UpdateUserFormUpdateUsername"
+            }
             Self::UpdateUserFormUpdateDisplayName(_) => {
                 "UserManagement::UpdateUserFormUpdateDisplayName"
             }
-            Self::UpdateUserFormUpdatePassword(_) => "UserManagement::UpdateUserFormUpdatePassword",
+            Self::UpdateUserFormUpdatePassword(_) => {
+                "UserManagement::UpdateUserFormUpdatePassword"
+            }
             Self::UpdateUserFormUpdateConfirmPassword(_) => {
                 "UserManagement::UpdateUserFormUpdateConfirmPassword"
             }
             Self::UpdateUserFormTogglePasswordVisibility => {
                 "UserManagement::UpdateUserFormTogglePasswordVisibility"
             }
-            Self::UpdateUserFormSubmit => "UserManagement::UpdateUserFormSubmit",
+            Self::UpdateUserFormSubmit => {
+                "UserManagement::UpdateUserFormSubmit"
+            }
             Self::UpdateUserSuccess(_) => "UserManagement::UpdateUserSuccess",
             Self::UpdateUserError(_) => "UserManagement::UpdateUserError",
             Self::UpdateUserCancel => "UserManagement::UpdateUserCancel",
@@ -141,9 +155,15 @@ impl Message {
 
             // First-run user creation
             Self::FirstRunCreateUser => "UserManagement::FirstRunCreateUser",
-            Self::FirstRunUpdateUsername(_) => "UserManagement::FirstRunUpdateUsername",
-            Self::FirstRunUpdateDisplayName(_) => "UserManagement::FirstRunUpdateDisplayName",
-            Self::FirstRunUpdatePassword(_) => "UserManagement::FirstRunUpdatePassword",
+            Self::FirstRunUpdateUsername(_) => {
+                "UserManagement::FirstRunUpdateUsername"
+            }
+            Self::FirstRunUpdateDisplayName(_) => {
+                "UserManagement::FirstRunUpdateDisplayName"
+            }
+            Self::FirstRunUpdatePassword(_) => {
+                "UserManagement::FirstRunUpdatePassword"
+            }
             Self::FirstRunUpdateConfirmPassword(_) => {
                 "UserManagement::FirstRunUpdateConfirmPassword"
             }
@@ -192,7 +212,10 @@ impl std::fmt::Debug for Message {
                 write!(f, "UserManagement::CreateUserFormUpdateConfirmPassword")
             }
             Message::CreateUserFormTogglePasswordVisibility => {
-                write!(f, "UserManagement::CreateUserFormTogglePasswordVisibility")
+                write!(
+                    f,
+                    "UserManagement::CreateUserFormTogglePasswordVisibility"
+                )
             }
             Message::CreateUserFormSubmit => {
                 write!(f, "UserManagement::CreateUserFormSubmit")
@@ -222,7 +245,10 @@ impl std::fmt::Debug for Message {
                 write!(f, "UserManagement::UpdateUserFormUpdateConfirmPassword")
             }
             Message::UpdateUserFormTogglePasswordVisibility => {
-                write!(f, "UserManagement::UpdateUserFormTogglePasswordVisibility")
+                write!(
+                    f,
+                    "UserManagement::UpdateUserFormTogglePasswordVisibility"
+                )
             }
             Message::UpdateUserFormSubmit => {
                 write!(f, "UserManagement::UpdateUserFormSubmit")

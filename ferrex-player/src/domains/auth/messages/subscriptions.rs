@@ -35,7 +35,9 @@ impl std::hash::Hash for AuthStateSubscription {
 }
 
 /// Creates a subscription for auth state changes
-fn auth_state_subscription(auth_state: &AuthStateStore) -> Subscription<DomainMessage> {
+fn auth_state_subscription(
+    auth_state: &AuthStateStore,
+) -> Subscription<DomainMessage> {
     Subscription::run_with(
         AuthStateSubscription {
             auth_state: auth_state.clone(),

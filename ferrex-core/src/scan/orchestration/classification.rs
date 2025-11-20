@@ -3,7 +3,9 @@ use regex::Regex;
 use std::borrow::Cow;
 
 use crate::orchestration::actors::messages::ParentDescriptors;
-use crate::orchestration::series::{SeriesFolderClues, clean_series_title, slugify_series_title};
+use crate::orchestration::series::{
+    SeriesFolderClues, clean_series_title, slugify_series_title,
+};
 use crate::tv_parser::TvParser;
 use crate::types::library::LibraryType;
 
@@ -33,7 +35,9 @@ impl FolderClassifier {
             .unwrap_or(LibraryType::Series);
 
         match library_type {
-            LibraryType::Series => classify_series_folder(&mut next, parent, trimmed),
+            LibraryType::Series => {
+                classify_series_folder(&mut next, parent, trimmed)
+            }
             LibraryType::Movies => classify_movie_folder(&mut next, trimmed),
         }
 
@@ -65,7 +69,9 @@ fn classify_series_folder(
         }
         (Some(series_slug), None) => {
             descriptors.series_slug = Some(series_slug.to_string());
-            if let Some(season) = infer_season_number(name, parent.series_title_hint.as_deref()) {
+            if let Some(season) =
+                infer_season_number(name, parent.series_title_hint.as_deref())
+            {
                 descriptors.season_number = Some(season);
                 descriptors.season_id = None;
                 descriptors.extra_tag = None;
@@ -142,9 +148,16 @@ fn infer_extras_tag(name: &str) -> Option<String> {
 fn extract_trailing_season_hint(name: &str) -> Option<(String, u32)> {
     static SEASON_SUFFIX_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
         vec![
-            Regex::new(r"(?i)^(?P<title>.+?)[\s._-]*season[\s._-]*(?P<num>\d{1,3})$").unwrap(),
-            Regex::new(r"(?i)^(?P<title>.+?)[\s._-]*series[\s._-]*(?P<num>\d{1,3})$").unwrap(),
-            Regex::new(r"(?i)^(?P<title>.+?)[\s._-]*s(?P<num>\d{1,3})$").unwrap(),
+            Regex::new(
+                r"(?i)^(?P<title>.+?)[\s._-]*season[\s._-]*(?P<num>\d{1,3})$",
+            )
+            .unwrap(),
+            Regex::new(
+                r"(?i)^(?P<title>.+?)[\s._-]*series[\s._-]*(?P<num>\d{1,3})$",
+            )
+            .unwrap(),
+            Regex::new(r"(?i)^(?P<title>.+?)[\s._-]*s(?P<num>\d{1,3})$")
+                .unwrap(),
             Regex::new(r"(?i)^(?P<title>.+?)\((?P<num>\d{1,3})\)$").unwrap(),
         ]
     });
@@ -157,7 +170,9 @@ fn extract_trailing_season_hint(name: &str) -> Option<(String, u32)> {
             };
             let title = raw_title
                 .as_str()
-                .trim_matches(|ch: char| ch == '-' || ch == '_' || ch.is_whitespace())
+                .trim_matches(|ch: char| {
+                    ch == '-' || ch == '_' || ch.is_whitespace()
+                })
                 .trim();
             if title.is_empty() {
                 continue;
@@ -167,7 +182,8 @@ fn extract_trailing_season_hint(name: &str) -> Option<(String, u32)> {
                 continue;
             };
             if let Ok(number) = num_match.as_str().parse::<u32>()
-                && (number > 0 || trimmed.to_ascii_lowercase().contains("special"))
+                && (number > 0
+                    || trimmed.to_ascii_lowercase().contains("special"))
             {
                 return Some((clean_series_title(title), number));
             }

@@ -1,0 +1,144 @@
+{
+  "results": [
+    {
+      "command": "cargo build --profile release",
+      "mean": 132.13294902331336,
+      "stddev": 0.8073696973630246,
+      "median": 132.01239930898,
+      "user": 243.25725758666667,
+      "system": 2.29733334,
+      "min": 131.39263244098,
+      "max": 132.99381531998,
+      "times": [
+        132.99381531998,
+        132.01239930898,
+        131.39263244098
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL -u CARGO_PROFILE_RELEASE_OPT_LEVEL -u CARGO_PROFILE_DEBUG_OPT_LEVEL CARGO_PROFILE_DEV_OPT_LEVEL=0 CARGO_PROFILE_RELEASE_OPT_LEVEL=0 cargo build --profile release",
+      "mean": 116.63203914998,
+      "stddev": 0.4563412835716152,
+      "median": 116.47077469298,
+      "user": 165.67729558666667,
+      "system": 2.0776216733333333,
+      "min": 116.27822610198,
+      "max": 117.14711665498,
+      "times": [
+        117.14711665498,
+        116.47077469298,
+        116.27822610198
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL -u CARGO_PROFILE_RELEASE_OPT_LEVEL -u CARGO_PROFILE_DEBUG_OPT_LEVEL CARGO_PROFILE_DEV_OPT_LEVEL=1 CARGO_PROFILE_RELEASE_OPT_LEVEL=1 cargo build --profile release",
+      "mean": 84.09899557964665,
+      "stddev": 0.06709447112028528,
+      "median": 84.13213006497999,
+      "user": 143.03324525333335,
+      "system": 1.867087673333333,
+      "min": 84.02177977998,
+      "max": 84.14307689398,
+      "times": [
+        84.14307689398,
+        84.13213006497999,
+        84.02177977998
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL -u CARGO_PROFILE_RELEASE_OPT_LEVEL -u CARGO_PROFILE_DEBUG_OPT_LEVEL CARGO_PROFILE_DEV_OPT_LEVEL=2 CARGO_PROFILE_RELEASE_OPT_LEVEL=2 cargo build --profile release",
+      "mean": 126.66209739031332,
+      "stddev": 0.6211828906354742,
+      "median": 126.46346953998,
+      "user": 234.09828158666664,
+      "system": 2.207318006666666,
+      "min": 126.16452069198,
+      "max": 127.35830193897999,
+      "times": [
+        127.35830193897999,
+        126.16452069198,
+        126.46346953998
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL -u CARGO_PROFILE_RELEASE_OPT_LEVEL -u CARGO_PROFILE_DEBUG_OPT_LEVEL CARGO_PROFILE_DEV_OPT_LEVEL=3 CARGO_PROFILE_RELEASE_OPT_LEVEL=3 cargo build --profile release",
+      "mean": 132.37051756664667,
+      "stddev": 0.5633174198526136,
+      "median": 132.54023209798,
+      "user": 242.16831691999997,
+      "system": 2.2291856733333333,
+      "min": 131.74185495998,
+      "max": 132.82946564198002,
+      "times": [
+        132.82946564198002,
+        131.74185495998,
+        132.54023209798
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL -u CARGO_PROFILE_RELEASE_OPT_LEVEL -u CARGO_PROFILE_DEBUG_OPT_LEVEL CARGO_PROFILE_DEV_OPT_LEVEL=s CARGO_PROFILE_RELEASE_OPT_LEVEL=s cargo build --profile release",
+      "mean": 104.90752354131332,
+      "stddev": 0.5257298302949651,
+      "median": 104.90698836797999,
+      "user": 181.14761825333335,
+      "system": 1.94534834,
+      "min": 104.38206150197999,
+      "max": 105.43352075397999,
+      "times": [
+        104.90698836797999,
+        104.38206150197999,
+        105.43352075397999
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER     -u CARGO_PROFILE_RELEASE_INCREMENTAL -u CARGO_PROFILE_RELEASE_OPT_LEVEL -u CARGO_PROFILE_DEBUG_OPT_LEVEL CARGO_PROFILE_DEV_OPT_LEVEL=z CARGO_PROFILE_RELEASE_OPT_LEVEL=z cargo build --profile release",
+      "mean": 100.83634963164667,
+      "stddev": 1.1474935115870175,
+      "median": 101.48383329098,
+      "user": 169.87861825333331,
+      "system": 1.9250180066666667,
+      "min": 99.51145094998,
+      "max": 101.51376465397999,
+      "times": [
+        99.51145094998,
+        101.48383329098,
+        101.51376465397999
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}

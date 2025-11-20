@@ -157,16 +157,28 @@ impl MediaEvent {
             MediaEvent::SeasonAdded { .. } => MediaSseEventType::SeasonAdded,
             MediaEvent::EpisodeAdded { .. } => MediaSseEventType::EpisodeAdded,
             MediaEvent::MovieUpdated { .. } => MediaSseEventType::MovieUpdated,
-            MediaEvent::SeriesUpdated { .. } => MediaSseEventType::SeriesUpdated,
-            MediaEvent::SeasonUpdated { .. } => MediaSseEventType::SeasonUpdated,
-            MediaEvent::EpisodeUpdated { .. } => MediaSseEventType::EpisodeUpdated,
+            MediaEvent::SeriesUpdated { .. } => {
+                MediaSseEventType::SeriesUpdated
+            }
+            MediaEvent::SeasonUpdated { .. } => {
+                MediaSseEventType::SeasonUpdated
+            }
+            MediaEvent::EpisodeUpdated { .. } => {
+                MediaSseEventType::EpisodeUpdated
+            }
             MediaEvent::MediaDeleted { .. } => MediaSseEventType::MediaDeleted,
-            MediaEvent::ScanStarted { .. } => MediaSseEventType::Scan(ScanSseEventType::Started),
-            MediaEvent::ScanProgress { .. } => MediaSseEventType::Scan(ScanSseEventType::Progress),
+            MediaEvent::ScanStarted { .. } => {
+                MediaSseEventType::Scan(ScanSseEventType::Started)
+            }
+            MediaEvent::ScanProgress { .. } => {
+                MediaSseEventType::Scan(ScanSseEventType::Progress)
+            }
             MediaEvent::ScanCompleted { .. } => {
                 MediaSseEventType::Scan(ScanSseEventType::Completed)
             }
-            MediaEvent::ScanFailed { .. } => MediaSseEventType::Scan(ScanSseEventType::Failed),
+            MediaEvent::ScanFailed { .. } => {
+                MediaSseEventType::Scan(ScanSseEventType::Failed)
+            }
         }
     }
 }

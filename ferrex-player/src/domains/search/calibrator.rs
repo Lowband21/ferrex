@@ -51,8 +51,9 @@ impl SearchCalibrator {
                 .await;
         }
         let client_duration = client_start.elapsed();
-        results.client_baseline_ms =
-            Some((client_duration.as_millis() / test_queries.len() as u128) as u64);
+        results.client_baseline_ms = Some(
+            (client_duration.as_millis() / test_queries.len() as u128) as u64,
+        );
 
         // Test server performance (if available)
         if service.has_network() {
@@ -76,8 +77,10 @@ impl SearchCalibrator {
 
             if server_success {
                 let server_duration = server_start.elapsed();
-                results.server_baseline_ms =
-                    Some((server_duration.as_millis() / test_queries.len() as u128) as u64);
+                results.server_baseline_ms = Some(
+                    (server_duration.as_millis() / test_queries.len() as u128)
+                        as u64,
+                );
 
                 // Estimate network latency (rough approximation)
                 if let Some(client_ms) = results.client_baseline_ms
@@ -97,7 +100,9 @@ impl SearchCalibrator {
     }
 
     /// Quick network check without full search
-    pub async fn check_network_latency(service: &SearchService) -> Option<Duration> {
+    pub async fn check_network_latency(
+        service: &SearchService,
+    ) -> Option<Duration> {
         if !service.has_network() {
             return None;
         }
@@ -119,7 +124,9 @@ impl SearchCalibrator {
         }
     }
 
-    fn determine_optimal_strategy(results: &CalibrationResults) -> SearchStrategy {
+    fn determine_optimal_strategy(
+        results: &CalibrationResults,
+    ) -> SearchStrategy {
         match (results.client_baseline_ms, results.server_baseline_ms) {
             (Some(client), Some(server)) => {
                 // If server is more than 2x slower, prefer client

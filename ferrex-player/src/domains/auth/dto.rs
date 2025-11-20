@@ -105,7 +105,9 @@ impl UserDto {
             display_name: user.display_name,
             avatar_url: user.avatar_url,
             is_admin,
-            preferences: UserPreferencesDto::from_server_model(user.preferences),
+            preferences: UserPreferencesDto::from_server_model(
+                user.preferences,
+            ),
         }
     }
 }
@@ -130,7 +132,8 @@ impl UserPreferencesDto {
             } else {
                 SubtitleSize::Medium
             },
-            playback_quality: match prefs.playback_preferences.preferred_quality {
+            playback_quality: match prefs.playback_preferences.preferred_quality
+            {
                 core::PlaybackQuality::Auto => PlaybackQuality::Auto,
                 core::PlaybackQuality::Original => PlaybackQuality::Original,
                 core::PlaybackQuality::High4K => PlaybackQuality::UHD4K,

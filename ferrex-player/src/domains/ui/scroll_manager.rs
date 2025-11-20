@@ -62,7 +62,10 @@ impl ScrollState {
             viewport_width: grid_state.viewport_width,
             viewport_height: grid_state.viewport_height,
             columns: Some(grid_state.columns),
-            visible_range: Some((grid_state.visible_range.start, grid_state.visible_range.end)),
+            visible_range: Some((
+                grid_state.visible_range.start,
+                grid_state.visible_range.end,
+            )),
         }
     }
 }
@@ -73,57 +76,85 @@ pub trait ViewIdentifier {
     fn scroll_key(&self, library_id: Option<Uuid>) -> String;
 
     /// Generate a context-specific key (for views with sub-scrollables)
-    fn scroll_key_with_context(&self, library_id: Option<Uuid>, context: &Uuid) -> String;
+    fn scroll_key_with_context(
+        &self,
+        library_id: Option<Uuid>,
+        context: &Uuid,
+    ) -> String;
 }
 
 impl ViewIdentifier for ViewState {
     fn scroll_key(&self, library_id: Option<Uuid>) -> String {
         match self {
-            ViewState::Library => ScrollPositionManager::generate_key("library", library_id, None),
-            ViewState::MovieDetail { movie_id, .. } => ScrollPositionManager::generate_key(
-                "movie_detail",
-                library_id,
-                Some(movie_id.as_uuid()),
-            ),
-            ViewState::SeriesDetail { series_id, .. } => ScrollPositionManager::generate_key(
-                "tv_show_detail",
-                library_id,
-                Some(series_id.as_uuid()),
-            ),
-            ViewState::SeasonDetail { season_id, .. } => ScrollPositionManager::generate_key(
-                "season_detail",
-                library_id,
-                Some(season_id.as_uuid()),
-            ),
-            ViewState::EpisodeDetail { episode_id, .. } => ScrollPositionManager::generate_key(
-                "episode_detail",
-                library_id,
-                Some(episode_id.as_uuid()),
-            ),
+            ViewState::Library => {
+                ScrollPositionManager::generate_key("library", library_id, None)
+            }
+            ViewState::MovieDetail { movie_id, .. } => {
+                ScrollPositionManager::generate_key(
+                    "movie_detail",
+                    library_id,
+                    Some(movie_id.as_uuid()),
+                )
+            }
+            ViewState::SeriesDetail { series_id, .. } => {
+                ScrollPositionManager::generate_key(
+                    "tv_show_detail",
+                    library_id,
+                    Some(series_id.as_uuid()),
+                )
+            }
+            ViewState::SeasonDetail { season_id, .. } => {
+                ScrollPositionManager::generate_key(
+                    "season_detail",
+                    library_id,
+                    Some(season_id.as_uuid()),
+                )
+            }
+            ViewState::EpisodeDetail { episode_id, .. } => {
+                ScrollPositionManager::generate_key(
+                    "episode_detail",
+                    library_id,
+                    Some(episode_id.as_uuid()),
+                )
+            }
             ViewState::LibraryManagement => {
-                ScrollPositionManager::generate_key("library_management", None, None)
+                ScrollPositionManager::generate_key(
+                    "library_management",
+                    None,
+                    None,
+                )
             }
-            ViewState::AdminDashboard => {
-                ScrollPositionManager::generate_key("admin_dashboard", None, None)
-            }
+            ViewState::AdminDashboard => ScrollPositionManager::generate_key(
+                "admin_dashboard",
+                None,
+                None,
+            ),
             ViewState::AdminUsers => {
                 ScrollPositionManager::generate_key("admin_users", None, None)
             }
             ViewState::UserSettings => {
                 ScrollPositionManager::generate_key("user_settings", None, None)
             }
-            ViewState::Player | ViewState::LoadingVideo { .. } | ViewState::VideoError { .. } => {
+            ViewState::Player
+            | ViewState::LoadingVideo { .. }
+            | ViewState::VideoError { .. } => {
                 // These views don't need scroll persistence
                 ScrollPositionManager::generate_key("no_scroll", None, None)
             }
         }
     }
 
-    fn scroll_key_with_context(&self, library_id: Option<Uuid>, context: &Uuid) -> String {
+    fn scroll_key_with_context(
+        &self,
+        library_id: Option<Uuid>,
+        context: &Uuid,
+    ) -> String {
         match self {
-            ViewState::Library => {
-                ScrollPositionManager::generate_key("library", library_id, Some(context))
-            }
+            ViewState::Library => ScrollPositionManager::generate_key(
+                "library",
+                library_id,
+                Some(context),
+            ),
             _ => {
                 // For other views, append context to the base key
                 format!("{}.{}", self.scroll_key(library_id), context)
@@ -169,13 +200,20 @@ impl ScrollPositionManager {
     }
 
     /// Save state for library view (required library_id for specific library, None for "All")
-    pub fn save_library_scroll(&mut self, library_id: Option<LibraryID>, state: ScrollState) {
+    pub fn save_library_scroll(
+        &mut self,
+        library_id: Option<LibraryID>,
+        state: ScrollState,
+    ) {
         let key = Self::library_scroll_key(library_id);
         self.save_state(key, state);
     }
 
     /// Get state for library view (required library_id for specific library, None for "All")
-    pub fn get_library_scroll(&self, library_id: Option<LibraryID>) -> Option<&ScrollState> {
+    pub fn get_library_scroll(
+        &self,
+        library_id: Option<LibraryID>,
+    ) -> Option<&ScrollState> {
         let key = Self::library_scroll_key(library_id);
         self.get_state(&key)
     }
@@ -197,7 +235,10 @@ impl ScrollPositionManager {
     }
 
     /// Get scroll state for a specific tab
-    pub fn get_tab_scroll(&self, tab_id: &crate::domains::ui::tabs::TabId) -> Option<&ScrollState> {
+    pub fn get_tab_scroll(
+        &self,
+        tab_id: &crate::domains::ui::tabs::TabId,
+    ) -> Option<&ScrollState> {
         let key = Self::tab_scroll_key(tab_id);
         let state = self.get_state(&key);
         if let Some(s) = state {
@@ -211,7 +252,10 @@ impl ScrollPositionManager {
     }
 
     /// Clear scroll state for a specific tab
-    pub fn clear_tab_scroll(&mut self, tab_id: &crate::domains::ui::tabs::TabId) {
+    pub fn clear_tab_scroll(
+        &mut self,
+        tab_id: &crate::domains::ui::tabs::TabId,
+    ) {
         let key = Self::tab_scroll_key(tab_id);
         self.clear_state(&key);
     }
@@ -275,12 +319,17 @@ impl ScrollPositionManager {
     fn tab_scroll_key(tab_id: &crate::domains::ui::tabs::TabId) -> String {
         match tab_id {
             crate::domains::ui::tabs::TabId::All => "tab.all".to_string(),
-            crate::domains::ui::tabs::TabId::Library(id) => format!("tab.library.{}", id),
+            crate::domains::ui::tabs::TabId::Library(id) => {
+                format!("tab.library.{}", id)
+            }
         }
     }
 
     /// Generate key for ViewModel-specific library scroll state
-    fn viewmodel_library_scroll_key(source: &str, library_id: Option<LibraryID>) -> String {
+    fn viewmodel_library_scroll_key(
+        source: &str,
+        library_id: Option<LibraryID>,
+    ) -> String {
         match library_id {
             Some(id) => format!("{}.library.{}", source, id),
             None => format!("{}.library.all", source),
@@ -367,8 +416,15 @@ impl ScrollPositionManager {
 pub trait ScrollStateExt {
     fn save_scroll_state(&mut self, view_key: String, state: ScrollState);
     fn restore_scroll_state(&self, view_key: &str) -> Option<&ScrollState>;
-    fn save_library_scroll(&mut self, library_id: Option<LibraryID>, state: ScrollState);
-    fn restore_library_scroll(&self, library_id: Option<LibraryID>) -> Option<&ScrollState>;
+    fn save_library_scroll(
+        &mut self,
+        library_id: Option<LibraryID>,
+        state: ScrollState,
+    );
+    fn restore_library_scroll(
+        &self,
+        library_id: Option<LibraryID>,
+    ) -> Option<&ScrollState>;
     fn save_view_scroll(
         &mut self,
         view: &ViewState,
@@ -385,12 +441,33 @@ pub trait ScrollStateExt {
     fn restore_library_scroll_state(&mut self, library_id: Option<LibraryID>);
 
     // ViewModel-specific methods
-    fn save_movies_vm_scroll(&mut self, library_id: Option<LibraryID>, state: ScrollState);
-    fn restore_movies_vm_scroll(&self, library_id: Option<LibraryID>) -> Option<&ScrollState>;
-    fn save_tv_vm_scroll(&mut self, library_id: Option<LibraryID>, state: ScrollState);
-    fn restore_tv_vm_scroll(&self, library_id: Option<LibraryID>) -> Option<&ScrollState>;
-    fn save_all_vm_scroll(&mut self, library_id: Option<LibraryID>, state: ScrollState);
-    fn restore_all_vm_scroll(&self, library_id: Option<LibraryID>) -> Option<&ScrollState>;
+    fn save_movies_vm_scroll(
+        &mut self,
+        library_id: Option<LibraryID>,
+        state: ScrollState,
+    );
+    fn restore_movies_vm_scroll(
+        &self,
+        library_id: Option<LibraryID>,
+    ) -> Option<&ScrollState>;
+    fn save_tv_vm_scroll(
+        &mut self,
+        library_id: Option<LibraryID>,
+        state: ScrollState,
+    );
+    fn restore_tv_vm_scroll(
+        &self,
+        library_id: Option<LibraryID>,
+    ) -> Option<&ScrollState>;
+    fn save_all_vm_scroll(
+        &mut self,
+        library_id: Option<LibraryID>,
+        state: ScrollState,
+    );
+    fn restore_all_vm_scroll(
+        &self,
+        library_id: Option<LibraryID>,
+    ) -> Option<&ScrollState>;
 }
 
 #[cfg_attr(
@@ -414,7 +491,11 @@ impl ScrollStateExt for crate::state_refactored::State {
         self.domains.ui.state.scroll_manager.get_state(view_key)
     }
 
-    fn save_library_scroll(&mut self, library_id: Option<LibraryID>, state: ScrollState) {
+    fn save_library_scroll(
+        &mut self,
+        library_id: Option<LibraryID>,
+        state: ScrollState,
+    ) {
         self.domains
             .ui
             .state
@@ -422,7 +503,10 @@ impl ScrollStateExt for crate::state_refactored::State {
             .save_library_scroll(library_id, state);
     }
 
-    fn restore_library_scroll(&self, library_id: Option<LibraryID>) -> Option<&ScrollState> {
+    fn restore_library_scroll(
+        &self,
+        library_id: Option<LibraryID>,
+    ) -> Option<&ScrollState> {
         self.domains
             .ui
             .state
@@ -494,7 +578,11 @@ impl ScrollStateExt for crate::state_refactored::State {
     }
 
     // ViewModel-specific implementations
-    fn save_movies_vm_scroll(&mut self, library_id: Option<LibraryID>, state: ScrollState) {
+    fn save_movies_vm_scroll(
+        &mut self,
+        library_id: Option<LibraryID>,
+        state: ScrollState,
+    ) {
         self.domains
             .ui
             .state
@@ -502,7 +590,10 @@ impl ScrollStateExt for crate::state_refactored::State {
             .save_viewmodel_library_scroll("movies_vm", library_id, state);
     }
 
-    fn restore_movies_vm_scroll(&self, library_id: Option<LibraryID>) -> Option<&ScrollState> {
+    fn restore_movies_vm_scroll(
+        &self,
+        library_id: Option<LibraryID>,
+    ) -> Option<&ScrollState> {
         self.domains
             .ui
             .state
@@ -510,7 +601,11 @@ impl ScrollStateExt for crate::state_refactored::State {
             .get_viewmodel_library_scroll("movies_vm", library_id)
     }
 
-    fn save_tv_vm_scroll(&mut self, library_id: Option<LibraryID>, state: ScrollState) {
+    fn save_tv_vm_scroll(
+        &mut self,
+        library_id: Option<LibraryID>,
+        state: ScrollState,
+    ) {
         self.domains
             .ui
             .state
@@ -518,7 +613,10 @@ impl ScrollStateExt for crate::state_refactored::State {
             .save_viewmodel_library_scroll("tv_vm", library_id, state);
     }
 
-    fn restore_tv_vm_scroll(&self, library_id: Option<LibraryID>) -> Option<&ScrollState> {
+    fn restore_tv_vm_scroll(
+        &self,
+        library_id: Option<LibraryID>,
+    ) -> Option<&ScrollState> {
         self.domains
             .ui
             .state
@@ -526,7 +624,11 @@ impl ScrollStateExt for crate::state_refactored::State {
             .get_viewmodel_library_scroll("tv_vm", library_id)
     }
 
-    fn save_all_vm_scroll(&mut self, library_id: Option<LibraryID>, state: ScrollState) {
+    fn save_all_vm_scroll(
+        &mut self,
+        library_id: Option<LibraryID>,
+        state: ScrollState,
+    ) {
         self.domains
             .ui
             .state
@@ -534,7 +636,10 @@ impl ScrollStateExt for crate::state_refactored::State {
             .save_viewmodel_library_scroll("all_vm", library_id, state);
     }
 
-    fn restore_all_vm_scroll(&self, library_id: Option<LibraryID>) -> Option<&ScrollState> {
+    fn restore_all_vm_scroll(
+        &self,
+        library_id: Option<LibraryID>,
+    ) -> Option<&ScrollState> {
         self.domains
             .ui
             .state

@@ -6,12 +6,22 @@ use super::{
     titles::{MovieTitle, SeriesTitle},
     urls::{EpisodeURL, MovieURL, SeasonURL, SeriesURL},
 };
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Lightweight movie reference for lists/collections
-#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub enum Media {
     /// Movie media reference
@@ -25,7 +35,15 @@ pub enum Media {
 }
 
 /// Lightweight movie reference for lists/collections
-#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct MovieReference {
     pub id: MovieID,
@@ -40,7 +58,15 @@ pub struct MovieReference {
 }
 
 /// Lightweight series reference for lists/collections
-#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct SeriesReference {
     pub id: SeriesID,
@@ -62,7 +88,15 @@ pub struct SeriesReference {
 }
 
 /// Lightweight season reference
-#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct SeasonReference {
     pub id: SeasonID,
@@ -85,7 +119,15 @@ pub struct SeasonReference {
 }
 
 /// Lightweight episode reference
-#[derive(Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct EpisodeReference {
     pub id: EpisodeID,
@@ -111,10 +153,18 @@ pub struct EpisodeReference {
 impl fmt::Debug for Media {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Media::Movie(movie) => f.debug_tuple("Media::Movie").field(movie).finish(),
-            Media::Series(series) => f.debug_tuple("Media::Series").field(series).finish(),
-            Media::Season(season) => f.debug_tuple("Media::Season").field(season).finish(),
-            Media::Episode(episode) => f.debug_tuple("Media::Episode").field(episode).finish(),
+            Media::Movie(movie) => {
+                f.debug_tuple("Media::Movie").field(movie).finish()
+            }
+            Media::Series(series) => {
+                f.debug_tuple("Media::Series").field(series).finish()
+            }
+            Media::Season(season) => {
+                f.debug_tuple("Media::Season").field(season).finish()
+            }
+            Media::Episode(episode) => {
+                f.debug_tuple("Media::Episode").field(episode).finish()
+            }
         }
     }
 }

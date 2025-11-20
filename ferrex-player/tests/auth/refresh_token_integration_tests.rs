@@ -56,7 +56,7 @@ async fn test_token_stored_with_refresh_token() {
     let stored_auth = StoredAuth {
         token: token.clone(),
         user: user.clone(),
-        server_url: "http://localhost:3000".to_string(),
+        server_url: "https://localhost:3000".to_string(),
         permissions: None,
         stored_at: Utc::now(),
         device_trust_expires_at: Some(Utc::now() + Duration::days(30)),
@@ -92,7 +92,7 @@ async fn test_expired_token_triggers_refresh_attempt() {
     let stored_auth = StoredAuth {
         token: token.clone(),
         user: user.clone(),
-        server_url: "http://localhost:3000".to_string(),
+        server_url: "https://localhost:3000".to_string(),
         permissions: None,
         stored_at: Utc::now() - Duration::minutes(5), // Stored 5 minutes ago
         device_trust_expires_at: Some(Utc::now() + Duration::days(30)),
@@ -129,7 +129,7 @@ async fn test_device_trust_persists_across_refresh() {
     let stored_auth = StoredAuth {
         token: initial_token.clone(),
         user: user.clone(),
-        server_url: "http://localhost:3000".to_string(),
+        server_url: "https://localhost:3000".to_string(),
         permissions: None,
         stored_at: Utc::now(),
         device_trust_expires_at: Some(device_trust_expires),
@@ -146,7 +146,7 @@ async fn test_device_trust_persists_across_refresh() {
     let refreshed_auth = StoredAuth {
         token: new_token.clone(),
         user: user.clone(),
-        server_url: "http://localhost:3000".to_string(),
+        server_url: "https://localhost:3000".to_string(),
         permissions: None,
         stored_at: Utc::now(),
         device_trust_expires_at: Some(device_trust_expires), // Same device trust
@@ -188,7 +188,7 @@ async fn test_missing_refresh_token_clears_auth() {
     let stored_auth = StoredAuth {
         token: token.clone(),
         user: user.clone(),
-        server_url: "http://localhost:3000".to_string(),
+        server_url: "https://localhost:3000".to_string(),
         permissions: None,
         stored_at: Utc::now(),
         device_trust_expires_at: Some(Utc::now() + Duration::days(30)),
@@ -225,7 +225,7 @@ async fn test_token_within_buffer_triggers_refresh() {
     let stored_auth = StoredAuth {
         token: token.clone(),
         user: user.clone(),
-        server_url: "http://localhost:3000".to_string(),
+        server_url: "https://localhost:3000".to_string(),
         permissions: None,
         stored_at: Utc::now(),
         device_trust_expires_at: Some(Utc::now() + Duration::days(30)),
@@ -261,7 +261,7 @@ async fn test_concurrent_refresh_attempts() {
     let stored_auth = StoredAuth {
         token: token.clone(),
         user: user.clone(),
-        server_url: "http://localhost:3000".to_string(),
+        server_url: "https://localhost:3000".to_string(),
         permissions: None,
         stored_at: Utc::now(),
         device_trust_expires_at: Some(Utc::now() + Duration::days(30)),

@@ -48,13 +48,18 @@ impl QueuePlanProvider {
 
 #[async_trait]
 impl DemoPlanProvider for QueuePlanProvider {
-    async fn generate_plan(&self, root: &Path, _options: &DemoSeedOptions) -> Result<DemoSeedPlan> {
+    async fn generate_plan(
+        &self,
+        root: &Path,
+        _options: &DemoSeedOptions,
+    ) -> Result<DemoSeedPlan> {
         let template = {
             let mut guard = self.queue.lock().expect("lock plan queue");
             guard.pop_front()
         };
 
-        let template = template.ok_or_else(|| anyhow!("No demo plans left in provider"))?;
+        let template = template
+            .ok_or_else(|| anyhow!("No demo plans left in provider"))?;
 
         let libraries = template
             .libraries
@@ -62,9 +67,15 @@ impl DemoPlanProvider for QueuePlanProvider {
             .map(|lib| {
                 let library_root = root.join(&lib.relative_root);
                 let mut directories = vec![library_root.clone()];
-                directories.extend(lib.directories.iter().map(|rel| library_root.join(rel)));
+                directories.extend(
+                    lib.directories.iter().map(|rel| library_root.join(rel)),
+                );
 
-                let files = lib.files.iter().map(|rel| library_root.join(rel)).collect();
+                let files = lib
+                    .files
+                    .iter()
+                    .map(|rel| library_root.join(rel))
+                    .collect();
 
                 DemoLibraryPlan {
                     name: lib.name,
@@ -107,7 +118,9 @@ fn demo_plan_sequences() -> Vec<PlanTemplate> {
 }
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
-async fn demo_reset_preserves_libraries_and_cleans_files(pool: PgPool) -> Result<()> {
+async fn demo_reset_preserves_libraries_and_cleans_files(
+    pool: PgPool,
+) -> Result<()> {
     let app = build_test_app(pool).await?;
     let (_router, state, tempdir) = app.into_parts();
     let _tempdir = tempdir; // keep alive
@@ -118,13 +131,16 @@ async fn demo_reset_preserves_libraries_and_cleans_files(pool: PgPool) -> Result
     let mut options = DemoSeedOptions::default();
     options.allow_zero_length_files = true;
 
-    let mut config = state.config.as_ref().clone();
-    let coordinator =
-        DemoCoordinator::bootstrap_with_provider(&mut config, options.clone(), plan_provider)
-            .await?;
+    let mut config = state.config().clone();
+    let coordinator = DemoCoordinator::bootstrap_with_provider(
+        &mut config,
+        options.clone(),
+        plan_provider,
+    )
+    .await?;
 
     let initial_ids = coordinator
-        .sync_database(state.unit_of_work.clone())
+        .sync_database(state.unit_of_work())
         .await
         .context("failed to sync demo libraries")?;
     assert_eq!(initial_ids.len(), 1);
@@ -141,7 +157,7 @@ async fn demo_reset_preserves_libraries_and_cleans_files(pool: PgPool) -> Result
     assert!(first_file.exists(), "initial demo file should exist");
 
     coordinator
-        .reset(state.unit_of_work.clone(), None)
+        .reset(state.unit_of_work(), None)
         .await
         .context("demo reset should succeed")?;
 
@@ -181,12 +197,15 @@ async fn demo_reset_preserves_libraries_and_cleans_files(pool: PgPool) -> Result
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn prepare_demo_database_recreates_database(_pool: PgPool) -> Result<()> {
-    let raw_base_url =
-        std::env::var("DATABASE_URL").context("DATABASE_URL should be set for sqlx::test")?;
-    let mut base_url = Url::parse(&raw_base_url).context("DATABASE_URL must be valid URL")?;
+    let raw_base_url = std::env::var("DATABASE_URL")
+        .context("DATABASE_URL should be set for sqlx::test")?;
+    let mut base_url =
+        Url::parse(&raw_base_url).context("DATABASE_URL must be valid URL")?;
     let current_db = base_url.path().trim_start_matches('/');
 
-    if current_db.is_empty() || current_db.eq_ignore_ascii_case(DEMO_DATABASE_NAME) {
+    if current_db.is_empty()
+        || current_db.eq_ignore_ascii_case(DEMO_DATABASE_NAME)
+    {
         base_url.set_path("/ferrex_demo_test_primary");
     }
 
@@ -212,10 +231,11 @@ async fn prepare_demo_database_recreates_database(_pool: PgPool) -> Result<()> {
         .connect(&demo_url)
         .await
         .context("reconnect to recreated demo database")?;
-    let marker_exists = sqlx::query("SELECT 1 FROM pg_tables WHERE tablename = 'demo_marker'")
-        .fetch_optional(&demo_pool)
-        .await
-        .context("probe demo database for marker table")?;
+    let marker_exists =
+        sqlx::query("SELECT 1 FROM pg_tables WHERE tablename = 'demo_marker'")
+            .fetch_optional(&demo_pool)
+            .await
+            .context("probe demo database for marker table")?;
     demo_pool.close().await;
 
     assert!(

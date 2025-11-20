@@ -15,10 +15,13 @@ use crate::{
 };
 use ferrex_core::{
     player_prelude::{
-        EpisodeLike, ImageRequest, Media, MediaIDLike, MediaType, MediaTypeFilter, MovieLike,
-        PosterKind, PosterSize, Priority, SortOrder, UiResolution, UiWatchStatus,
+        EpisodeLike, ImageRequest, Media, MediaIDLike, MediaType,
+        MediaTypeFilter, MovieLike, PosterKind, PosterSize, Priority,
+        SortOrder, UiResolution, UiWatchStatus,
     },
-    query::filtering::{FilterRequestParams, build_filter_indices_request, hash_filter_spec},
+    query::filtering::{
+        FilterRequestParams, build_filter_indices_request, hash_filter_spec,
+    },
     types::image_request::EpisodeStillSize,
 };
 use iced::Task;
@@ -33,7 +36,10 @@ fn check_user_has_pin() -> DomainUpdateResult {
     )))
 }
 
-pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult {
+pub fn update_ui(
+    state: &mut State,
+    message: ui::Message,
+) -> DomainUpdateResult {
     match message {
         ui::Message::SetDisplayMode(display_mode) => {
             state.domains.ui.state.display_mode = display_mode;
@@ -285,16 +291,17 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
 
                     if let crate::domains::ui::tabs::TabState::Library(lib_state) =
                         state.tab_manager.get_active_tab()
-                        && let Some(cached) = lib_state.cached_positions_for_hash(spec_hash) {
-                            let cached_positions = cached.clone();
-                            return DomainUpdateResult::task(Task::done(DomainMessage::Ui(
-                                ui::Message::ApplySortedPositions(
-                                    lib_id,
-                                    Some(spec_hash),
-                                    cached_positions,
-                                ),
-                            )));
-                        }
+                        && let Some(cached) = lib_state.cached_positions_for_hash(spec_hash)
+                    {
+                        let cached_positions = cached.clone();
+                        return DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                            ui::Message::ApplySortedPositions(
+                                lib_id,
+                                Some(spec_hash),
+                                cached_positions,
+                            ),
+                        )));
+                    }
 
                     let task = Task::perform(
                         async move {
@@ -1435,7 +1442,10 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
 }
 
 /// Handle carousel navigation messages
-fn handle_carousel_navigation(state: &mut State, message: CarouselMessage) -> Task<ui::Message> {
+fn handle_carousel_navigation(
+    state: &mut State,
+    message: CarouselMessage,
+) -> Task<ui::Message> {
     match message {
         CarouselMessage::Next(carousel_id) => {
             // Carousel state not tracked in current state

@@ -79,7 +79,9 @@ pub enum UsernameError {
     #[error("Username too long: maximum 30 characters allowed")]
     TooLong,
 
-    #[error("Username contains invalid characters: only alphanumeric and underscore allowed")]
+    #[error(
+        "Username contains invalid characters: only alphanumeric and underscore allowed"
+    )]
     InvalidCharacters,
 
     #[error(

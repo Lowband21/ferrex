@@ -13,16 +13,19 @@ use crate::{
             folder::{FolderScanActor, FolderScanCommand, FolderScanContext},
             messages::ParentDescriptors,
             pipeline::{
-                ImageFetchActor, ImageFetchCommand, IndexCommand, IndexerActor, MediaAnalyzeActor,
-                MediaAnalyzeCommand, MediaAnalyzed, MediaReadyForIndex, MetadataActor,
-                MetadataCommand,
+                ImageFetchActor, ImageFetchCommand, IndexCommand, IndexerActor,
+                MediaAnalyzeActor, MediaAnalyzeCommand, MediaAnalyzed,
+                MediaReadyForIndex, MetadataActor, MetadataCommand,
             },
         },
         correlation::CorrelationCache,
-        events::{JobEvent, JobEventPayload, ScanEvent, ScanEventBus, stable_path_key},
+        events::{
+            JobEvent, JobEventPayload, ScanEvent, ScanEventBus, stable_path_key,
+        },
         job::{
-            EnqueueRequest, FolderScanJob, ImageFetchJob, IndexUpsertJob, JobHandle, JobPayload,
-            JobPriority, MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob, ScanReason,
+            EnqueueRequest, FolderScanJob, ImageFetchJob, IndexUpsertJob,
+            JobHandle, JobPayload, JobPriority, MediaAnalyzeJob,
+            MediaFingerprint, MetadataEnrichJob, ScanReason,
         },
         lease::JobLease,
         queue::QueueService,
@@ -248,12 +251,19 @@ where
         }
     }
 
-    async fn enqueue_follow_up(&self, request: EnqueueRequest) -> DispatchStatus {
+    async fn enqueue_follow_up(
+        &self,
+        request: EnqueueRequest,
+    ) -> DispatchStatus {
         let correlation_hint = request.correlation_id;
 
         match self.queue.enqueue(request.clone()).await {
             Ok(handle) => match self
-                .publish_enqueue_event(&handle, &request.payload, correlation_hint)
+                .publish_enqueue_event(
+                    &handle,
+                    &request.payload,
+                    correlation_hint,
+                )
                 .await
             {
                 Ok(()) => DispatchStatus::Success,
@@ -263,7 +273,10 @@ where
         }
     }
 
-    async fn enqueue_follow_up_many(&self, requests: Vec<EnqueueRequest>) -> DispatchStatus {
+    async fn enqueue_follow_up_many(
+        &self,
+        requests: Vec<EnqueueRequest>,
+    ) -> DispatchStatus {
         if requests.is_empty() {
             return DispatchStatus::Success;
         }
@@ -272,9 +285,15 @@ where
 
         match self.queue.enqueue_many(cloned_requests).await {
             Ok(handles) => {
-                for (handle, request) in handles.into_iter().zip(requests.into_iter()) {
+                for (handle, request) in
+                    handles.into_iter().zip(requests.into_iter())
+                {
                     if let Err(err) = self
-                        .publish_enqueue_event(&handle, &request.payload, request.correlation_id)
+                        .publish_enqueue_event(
+                            &handle,
+                            &request.payload,
+                            request.correlation_id,
+                        )
                         .await
                     {
                         return self.handle_media_error(err);
@@ -292,7 +311,11 @@ where
             .unwrap_or_default()
     }
 
-    async fn handle_folder_scan(&self, lease: &JobLease, job: &FolderScanJob) -> DispatchStatus {
+    async fn handle_folder_scan(
+        &self,
+        lease: &JobLease,
+        job: &FolderScanJob,
+    ) -> DispatchStatus {
         let parent = Self::parse_parent_context(&job.parent_context);
         let context = FolderScanContext {
             library_id: job.library_id,
@@ -324,7 +347,9 @@ where
             &vec![PathBuf::from(job.folder_path_norm.clone())],
         );
         match self.cursors.get(&cursor_id).await {
-            Ok(Some(existing)) if existing.listing_hash == plan.generated_listing_hash => {
+            Ok(Some(existing))
+                if existing.listing_hash == plan.generated_listing_hash =>
+            {
                 debug!("listing hash unchanged, refreshing cursor only");
                 let cursor = ScanCursor {
                     id: cursor_id,
@@ -346,10 +371,11 @@ where
             Err(err) => return self.handle_media_error(err),
         }
 
-        let discovered = match self.actors.folder.discover_media(&plan, &context).await {
-            Ok(files) => files,
-            Err(err) => return self.handle_media_error(err),
-        };
+        let discovered =
+            match self.actors.folder.discover_media(&plan, &context).await {
+                Ok(files) => files,
+                Err(err) => return self.handle_media_error(err),
+            };
         let children = match self
             .actors
             .folder
@@ -360,11 +386,12 @@ where
             Err(err) => return self.handle_media_error(err),
         };
 
-        let summary = match self
-            .actors
-            .folder
-            .finalize(&context, &plan, &discovered, &children)
-        {
+        let summary = match self.actors.folder.finalize(
+            &context,
+            &plan,
+            &discovered,
+            &children,
+        ) {
             Ok(summary) => summary,
             Err(err) => return self.handle_media_error(err),
         };
@@ -374,7 +401,9 @@ where
         for media in &discovered {
             if let Err(err) = self
                 .events
-                .publish_scan_event(ScanEvent::MediaFileDiscovered(media.clone()))
+                .publish_scan_event(ScanEvent::MediaFileDiscovered(
+                    media.clone(),
+                ))
                 .await
             {
                 // Continue discovering other items; collect error for admin visibility.
@@ -384,7 +413,8 @@ where
                     path = %media.path_norm,
                     "failed to publish MediaFileDiscovered; continuing"
                 );
-                followup_errors.push(format!("discover_event_failed:{}", media.path_norm));
+                followup_errors
+                    .push(format!("discover_event_failed:{}", media.path_norm));
                 continue;
             }
             discovered_events.push(media.clone());
@@ -407,7 +437,10 @@ where
                 context: analyze_context,
                 scan_reason: media.context.reason.clone(),
             };
-            let req = EnqueueRequest::new(analyze_priority, JobPayload::MediaAnalyze(analyze));
+            let req = EnqueueRequest::new(
+                analyze_priority,
+                JobPayload::MediaAnalyze(analyze),
+            );
             match self.enqueue_follow_up(req).await {
                 DispatchStatus::Success => {}
                 DispatchStatus::Retry { error } => {
@@ -417,7 +450,10 @@ where
                         path = %media.path_norm,
                         "enqueue MediaAnalyze scheduled for retry; continuing"
                     );
-                    followup_errors.push(format!("analyze_enqueue_retry:{}", media.path_norm));
+                    followup_errors.push(format!(
+                        "analyze_enqueue_retry:{}",
+                        media.path_norm
+                    ));
                 }
                 DispatchStatus::DeadLetter { error } => {
                     tracing::warn!(
@@ -426,7 +462,10 @@ where
                         path = %media.path_norm,
                         "enqueue MediaAnalyze dead-lettered; continuing"
                     );
-                    followup_errors.push(format!("analyze_enqueue_deadletter:{}", media.path_norm));
+                    followup_errors.push(format!(
+                        "analyze_enqueue_deadletter:{}",
+                        media.path_norm
+                    ));
                 }
             }
         }
@@ -492,7 +531,10 @@ where
         DispatchStatus::Success
     }
 
-    async fn handle_media_analyze(&self, job: &MediaAnalyzeJob) -> DispatchStatus {
+    async fn handle_media_analyze(
+        &self,
+        job: &MediaAnalyzeJob,
+    ) -> DispatchStatus {
         let analyzed = match self
             .actors
             .analyze
@@ -525,8 +567,10 @@ where
         let priority = priority_for_reason(&job.scan_reason);
 
         // Prefer advancing metadata for already-discovered items over additional scans.
-        let priority = priority.elevate(crate::orchestration::job::JobPriority::P0);
-        let req = EnqueueRequest::new(priority, JobPayload::MetadataEnrich(meta_job));
+        let priority =
+            priority.elevate(crate::orchestration::job::JobPriority::P0);
+        let req =
+            EnqueueRequest::new(priority, JobPayload::MetadataEnrich(meta_job));
         self.enqueue_follow_up(req).await
     }
 
@@ -540,39 +584,43 @@ where
         })
     }
 
-    async fn handle_metadata_enrich(&self, job: &MetadataEnrichJob) -> DispatchStatus {
-        let (path_norm, fingerprint, context) = match job.parse_fields.get("path") {
-            Some(Value::String(path)) => {
-                let fp = job
-                    .parse_fields
-                    .get("fingerprint")
-                    .map(Self::extract_fingerprint)
-                    .unwrap_or(MediaFingerprint {
+    async fn handle_metadata_enrich(
+        &self,
+        job: &MetadataEnrichJob,
+    ) -> DispatchStatus {
+        let (path_norm, fingerprint, context) =
+            match job.parse_fields.get("path") {
+                Some(Value::String(path)) => {
+                    let fp = job
+                        .parse_fields
+                        .get("fingerprint")
+                        .map(Self::extract_fingerprint)
+                        .unwrap_or(MediaFingerprint {
+                            device_id: None,
+                            inode: None,
+                            size: 0,
+                            mtime: 0,
+                            weak_hash: None,
+                        });
+                    let ctx = job
+                        .parse_fields
+                        .get("context")
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    (path.clone(), fp, ctx)
+                }
+                _ => (
+                    job.logical_candidate_id.clone(),
+                    MediaFingerprint {
                         device_id: None,
                         inode: None,
                         size: 0,
                         mtime: 0,
                         weak_hash: None,
-                    });
-                let ctx = job
-                    .parse_fields
-                    .get("context")
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                (path.clone(), fp, ctx)
-            }
-            _ => (
-                job.logical_candidate_id.clone(),
-                MediaFingerprint {
-                    device_id: None,
-                    inode: None,
-                    size: 0,
-                    mtime: 0,
-                    weak_hash: None,
-                },
-                Value::Null,
-            ),
-        };
+                    },
+                    Value::Null,
+                ),
+            };
 
         let analyzed = MediaAnalyzed {
             library_id: job.library_id,
@@ -629,15 +677,24 @@ where
             media_attrs: serde_json::json!({ "path": ready.analyzed.path_norm }),
             relations: serde_json::json!({}),
             path_norm: ready.analyzed.path_norm.clone(),
-            idempotency_key: format!("index:{}:{}", job.library_id, ready.analyzed.path_norm),
+            idempotency_key: format!(
+                "index:{}:{}",
+                job.library_id, ready.analyzed.path_norm
+            ),
         };
 
         // Bias index upserts to complete the item flow promptly.
-        let req = EnqueueRequest::new(JobPriority::P0, JobPayload::IndexUpsert(index_job));
+        let req = EnqueueRequest::new(
+            JobPriority::P0,
+            JobPayload::IndexUpsert(index_job),
+        );
         self.enqueue_follow_up(req).await
     }
 
-    async fn handle_index_upsert(&self, job: &IndexUpsertJob) -> DispatchStatus {
+    async fn handle_index_upsert(
+        &self,
+        job: &IndexUpsertJob,
+    ) -> DispatchStatus {
         let ready = MediaReadyForIndex {
             library_id: job.library_id,
             logical_id: None,
@@ -707,9 +764,15 @@ where
 {
     async fn dispatch(&self, lease: &JobLease) -> DispatchStatus {
         match &lease.job.payload {
-            JobPayload::FolderScan(job) => self.handle_folder_scan(lease, job).await,
-            JobPayload::MediaAnalyze(job) => self.handle_media_analyze(job).await,
-            JobPayload::MetadataEnrich(job) => self.handle_metadata_enrich(job).await,
+            JobPayload::FolderScan(job) => {
+                self.handle_folder_scan(lease, job).await
+            }
+            JobPayload::MediaAnalyze(job) => {
+                self.handle_media_analyze(job).await
+            }
+            JobPayload::MetadataEnrich(job) => {
+                self.handle_metadata_enrich(job).await
+            }
             JobPayload::IndexUpsert(job) => self.handle_index_upsert(job).await,
             JobPayload::ImageFetch(job) => self.handle_image_fetch(job).await,
         }
@@ -719,12 +782,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestration::actors::folder::{FolderListingPlan, FolderScanCommand};
+    use crate::orchestration::actors::folder::{
+        FolderListingPlan, FolderScanCommand,
+    };
     use crate::orchestration::actors::messages::{
         FolderScanSummary, MediaFileDiscovered, MediaKindHint,
     };
-    use crate::orchestration::actors::pipeline::{IndexingChange, IndexingOutcome};
-    use crate::orchestration::persistence::{PostgresCursorRepository, PostgresQueueService};
+    use crate::orchestration::actors::pipeline::{
+        IndexingChange, IndexingOutcome,
+    };
+    use crate::orchestration::persistence::{
+        PostgresCursorRepository, PostgresQueueService,
+    };
     use crate::orchestration::runtime::InProcJobEventBus;
     use crate::orchestration::{
         job::*,
@@ -736,8 +805,10 @@ mod tests {
     use tokio::time::Duration;
     use uuid::Uuid;
 
-    const FIXTURE_LIB_A: LibraryID = LibraryID(Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa));
-    const FIXTURE_LIB_B: LibraryID = LibraryID(Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb));
+    const FIXTURE_LIB_A: LibraryID =
+        LibraryID(Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa));
+    const FIXTURE_LIB_B: LibraryID =
+        LibraryID(Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb));
 
     async fn upsert_library(
         pool: &PgPool,
@@ -802,7 +873,10 @@ mod tests {
 
     #[async_trait]
     impl FolderScanActor for StubFolderActor {
-        async fn plan_listing(&self, _command: &FolderScanCommand) -> Result<FolderListingPlan> {
+        async fn plan_listing(
+            &self,
+            _command: &FolderScanCommand,
+        ) -> Result<FolderListingPlan> {
             Ok(self.plan.clone())
         }
 
@@ -837,7 +911,10 @@ mod tests {
 
     #[async_trait]
     impl MediaAnalyzeActor for StubAnalyzeActor {
-        async fn analyze(&self, command: MediaAnalyzeCommand) -> Result<MediaAnalyzed> {
+        async fn analyze(
+            &self,
+            command: MediaAnalyzeCommand,
+        ) -> Result<MediaAnalyzed> {
             Ok(MediaAnalyzed {
                 library_id: command.job.library_id,
                 path_norm: command.job.path_norm,
@@ -854,7 +931,10 @@ mod tests {
 
     #[async_trait]
     impl MetadataActor for StubMetadataActor {
-        async fn enrich(&self, command: MetadataCommand) -> Result<MediaReadyForIndex> {
+        async fn enrich(
+            &self,
+            command: MetadataCommand,
+        ) -> Result<MediaReadyForIndex> {
             Ok(MediaReadyForIndex {
                 library_id: command.job.library_id,
                 logical_id: Some(command.job.logical_candidate_id.clone()),
@@ -870,7 +950,10 @@ mod tests {
 
     #[async_trait]
     impl IndexerActor for StubIndexActor {
-        async fn index(&self, command: IndexCommand) -> Result<IndexingOutcome> {
+        async fn index(
+            &self,
+            command: IndexCommand,
+        ) -> Result<IndexingOutcome> {
             Ok(IndexingOutcome {
                 library_id: command.job.library_id,
                 path_norm: command.job.path_norm,
@@ -895,7 +978,11 @@ mod tests {
     async fn dispatcher_fixture(
         pool: &PgPool,
     ) -> (
-        DefaultJobDispatcher<PostgresQueueService, InProcJobEventBus, PostgresCursorRepository>,
+        DefaultJobDispatcher<
+            PostgresQueueService,
+            InProcJobEventBus,
+            PostgresCursorRepository,
+        >,
         Arc<PostgresQueueService>,
         Arc<InProcJobEventBus>,
         Arc<PostgresCursorRepository>,
@@ -992,12 +1079,17 @@ mod tests {
 
     fn lease_for_payload(payload: JobPayload) -> JobLease {
         let record = JobRecord::new(payload, JobPriority::P1);
-        JobLease::new(record, "test-worker".into(), chrono::Duration::seconds(30))
+        JobLease::new(
+            record,
+            "test-worker".into(),
+            chrono::Duration::seconds(30),
+        )
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn folder_scan_dispatch_enqueues_follow_up_work(pool: PgPool) {
-        let (dispatcher, queue, events, cursors, _correlations) = dispatcher_fixture(&pool).await;
+        let (dispatcher, queue, events, cursors, _correlations) =
+            dispatcher_fixture(&pool).await;
         let mut job_rx = events.subscribe();
         let mut domain_rx = events.subscribe_scan();
 
@@ -1057,7 +1149,8 @@ mod tests {
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn media_analyze_dispatch_enqueues_metadata(pool: PgPool) {
-        let (dispatcher, queue, events, _, _correlations) = dispatcher_fixture(&pool).await;
+        let (dispatcher, queue, events, _, _correlations) =
+            dispatcher_fixture(&pool).await;
         let mut job_rx = events.subscribe();
 
         let job = MediaAnalyzeJob {
@@ -1107,7 +1200,10 @@ mod tests {
 
         #[async_trait]
         impl MetadataActor for TransientMetadataActor {
-            async fn enrich(&self, _command: MetadataCommand) -> Result<MediaReadyForIndex> {
+            async fn enrich(
+                &self,
+                _command: MetadataCommand,
+            ) -> Result<MediaReadyForIndex> {
                 Err(MediaError::Internal("tmdb timeout".into()))
             }
         }
@@ -1187,7 +1283,10 @@ mod tests {
 
         #[async_trait]
         impl MetadataActor for FailingMetadataActor {
-            async fn enrich(&self, _command: MetadataCommand) -> Result<MediaReadyForIndex> {
+            async fn enrich(
+                &self,
+                _command: MetadataCommand,
+            ) -> Result<MediaReadyForIndex> {
                 Err(MediaError::InvalidMedia("bad metadata".into()))
             }
         }

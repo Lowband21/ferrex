@@ -56,12 +56,18 @@ impl UserManagementDomain {
     }
 
     /// Update function - delegates to existing update_user_management logic
-    pub fn update(&mut self, _message: UserManagementMessage) -> Task<DomainMessage> {
+    pub fn update(
+        &mut self,
+        _message: UserManagementMessage,
+    ) -> Task<DomainMessage> {
         // This will call the existing update_user_management function
         Task::none()
     }
 
-    pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
+    pub fn handle_event(
+        &mut self,
+        event: &CrossDomainEvent,
+    ) -> Task<DomainMessage> {
         match event {
             CrossDomainEvent::UserAuthenticated(_user, permissions) => {
                 self.state.user_permissions = Some(permissions.clone());

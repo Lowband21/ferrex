@@ -21,10 +21,12 @@ use ferrex_core::api_routes::{utils::replace_param, v1};
 use ferrex_core::api_types::setup::{ConfirmClaimResponse, StartClaimResponse};
 use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
-    FilterIndicesRequest, IndicesResponse, LatestProgressResponse, Library, LibraryID,
-    LibraryMediaResponse, Media, MediaID, MediaQuery, MediaWithStatus, ScanCommandAcceptedResponse,
-    ScanCommandRequest, ScanConfig, ScanMetrics, SortBy, SortOrder, StartScanRequest,
-    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions, UserWatchState,
+    FilterIndicesRequest, IndicesResponse, LatestProgressResponse, Library,
+    LibraryID, LibraryMediaResponse, Media, MediaID, MediaQuery,
+    MediaWithStatus, ScanCommandAcceptedResponse, ScanCommandRequest,
+    ScanConfig, ScanMetrics, SortBy, SortOrder, StartScanRequest,
+    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions,
+    UserWatchState,
 };
 use ferrex_core::player_prelude::{MediaIDLike, hash_filter_spec};
 use parking_lot::RwLock;
@@ -35,7 +37,8 @@ const FILTER_INDICES_CACHE_TTL: Duration = Duration::from_secs(30);
 #[derive(Debug, Clone)]
 pub struct ApiClientAdapter {
     client: Arc<ApiClient>,
-    filter_indices_cache: Arc<RwLock<HashMap<PlayerFilterCacheKey, CachedPositions>>>,
+    filter_indices_cache:
+        Arc<RwLock<HashMap<PlayerFilterCacheKey, CachedPositions>>>,
 }
 
 impl ApiClientAdapter {
@@ -64,7 +67,11 @@ impl ApiClientAdapter {
         let mut all_ids: Vec<Uuid> = Vec::new();
         let mut offset: usize = 0;
         let page_size: usize = 500;
-        let base = replace_param(v1::libraries::SORTED_IDS, "{id}", library_id.to_string());
+        let base = replace_param(
+            v1::libraries::SORTED_IDS,
+            "{id}",
+            library_id.to_string(),
+        );
 
         loop {
             let path = format!(
@@ -141,8 +148,15 @@ impl ApiClientAdapter {
             .get_rkyv(&url, None)
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
-        let decoded: IndicesResponse = rkyv::from_bytes::<IndicesResponse, Error>(&aligned)
-            .map_err(|e| RepositoryError::QueryFailed(format!("rkyv decode: {:?}", e)))?;
+        let decoded: IndicesResponse =
+            rkyv::from_bytes::<IndicesResponse, Error>(&aligned).map_err(
+                |e| {
+                    RepositoryError::QueryFailed(format!(
+                        "rkyv decode: {:?}",
+                        e
+                    ))
+                },
+            )?;
         Ok(decoded.indices)
     }
 
@@ -173,8 +187,15 @@ impl ApiClientAdapter {
             .execute_rkyv_request(req)
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
-        let decoded: IndicesResponse = rkyv::from_bytes::<IndicesResponse, Error>(&bytes)
-            .map_err(|e| RepositoryError::QueryFailed(format!("rkyv decode: {:?}", e)))?;
+        let decoded: IndicesResponse =
+            rkyv::from_bytes::<IndicesResponse, Error>(&bytes).map_err(
+                |e| {
+                    RepositoryError::QueryFailed(format!(
+                        "rkyv decode: {:?}",
+                        e
+                    ))
+                },
+            )?;
         self.store_cached_indices(cache_key, decoded.indices.clone());
         Ok(decoded.indices)
     }
@@ -209,7 +230,10 @@ impl ApiService for ApiClientAdapter {
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
     }
 
-    async fn fetch_library_media(&self, library_id: Uuid) -> RepositoryResult<Vec<Media>> {
+    async fn fetch_library_media(
+        &self,
+        library_id: Uuid,
+    ) -> RepositoryResult<Vec<Media>> {
         // Build URL for the library media endpoint
         let url = self.client.build_url(replace_param(
             v1::libraries::MEDIA,
@@ -230,10 +254,16 @@ impl ApiService for ApiClientAdapter {
         // Deserialize from rkyv bytes
         // For now, we deserialize to owned types for simplicity
         // Later we can optimize to work directly with archived data for zero-copy
-        let response = rkyv::from_bytes::<LibraryMediaResponse, rkyv::rancor::Error>(&bytes)
-            .map_err(|e| {
-                RepositoryError::QueryFailed(format!("Failed to deserialize rkyv data: {:?}", e))
-            })?;
+        let response = rkyv::from_bytes::<
+            LibraryMediaResponse,
+            rkyv::rancor::Error,
+        >(&bytes)
+        .map_err(|e| {
+            RepositoryError::QueryFailed(format!(
+                "Failed to deserialize rkyv data: {:?}",
+                e
+            ))
+        })?;
 
         Ok(response.media)
     }
@@ -250,7 +280,9 @@ impl ApiService for ApiClientAdapter {
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
         {
-            Ok(response) => Ok(response.status == "ok" || response.status == "healthy"),
+            Ok(response) => {
+                Ok(response.status == "ok" || response.status == "healthy")
+            }
             Err(_) => Ok(false),
         }
     }
@@ -262,14 +294,19 @@ impl ApiService for ApiClientAdapter {
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
     }
 
-    async fn update_progress(&self, request: &UpdateProgressRequest) -> RepositoryResult<()> {
+    async fn update_progress(
+        &self,
+        request: &UpdateProgressRequest,
+    ) -> RepositoryResult<()> {
         self.client
             .update_progress(request)
             .await
             .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
     }
 
-    async fn list_user_devices(&self) -> RepositoryResult<Vec<AuthenticatedDevice>> {
+    async fn list_user_devices(
+        &self,
+    ) -> RepositoryResult<Vec<AuthenticatedDevice>> {
         self.client
             .list_user_devices()
             .await
@@ -283,7 +320,10 @@ impl ApiService for ApiClientAdapter {
             .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
     }
 
-    async fn query_media(&self, query: MediaQuery) -> RepositoryResult<Vec<MediaWithStatus>> {
+    async fn query_media(
+        &self,
+        query: MediaQuery,
+    ) -> RepositoryResult<Vec<MediaWithStatus>> {
         self.client
             .query_media(query)
             .await
@@ -317,7 +357,13 @@ impl ApiService for ApiClientAdapter {
     ) -> RepositoryResult<(User, AuthToken)> {
         let token = self
             .client
-            .create_initial_admin(username, password, display_name, setup_token, claim_token)
+            .create_initial_admin(
+                username,
+                password,
+                display_name,
+                setup_token,
+                claim_token,
+            )
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
 
@@ -384,7 +430,10 @@ impl ApiService for ApiClientAdapter {
         self.client.get_token().await
     }
 
-    async fn create_library(&self, request: CreateLibraryRequest) -> RepositoryResult<LibraryID> {
+    async fn create_library(
+        &self,
+        request: CreateLibraryRequest,
+    ) -> RepositoryResult<LibraryID> {
         self.client
             .post(v1::libraries::COLLECTION, &request)
             .await
@@ -396,7 +445,11 @@ impl ApiService for ApiClientAdapter {
         id: LibraryID,
         request: UpdateLibraryRequest,
     ) -> RepositoryResult<()> {
-        let path = replace_param(v1::libraries::ITEM, "{id}", id.as_uuid().to_string());
+        let path = replace_param(
+            v1::libraries::ITEM,
+            "{id}",
+            id.as_uuid().to_string(),
+        );
         let _: String = self
             .client
             .put(&path, &request)
@@ -406,7 +459,11 @@ impl ApiService for ApiClientAdapter {
     }
 
     async fn delete_library(&self, id: LibraryID) -> RepositoryResult<()> {
-        let path = replace_param(v1::libraries::ITEM, "{id}", id.as_uuid().to_string());
+        let path = replace_param(
+            v1::libraries::ITEM,
+            "{id}",
+            id.as_uuid().to_string(),
+        );
         let _: String = self
             .client
             .delete(&path)
@@ -420,7 +477,11 @@ impl ApiService for ApiClientAdapter {
         library_id: LibraryID,
         request: StartScanRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
-        let path = replace_param(v1::libraries::scans::START, "{id}", library_id.to_string());
+        let path = replace_param(
+            v1::libraries::scans::START,
+            "{id}",
+            library_id.to_string(),
+        );
         self.client
             .post(&path, &request)
             .await
@@ -432,7 +493,11 @@ impl ApiService for ApiClientAdapter {
         library_id: LibraryID,
         request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
-        let path = replace_param(v1::libraries::scans::PAUSE, "{id}", library_id.to_string());
+        let path = replace_param(
+            v1::libraries::scans::PAUSE,
+            "{id}",
+            library_id.to_string(),
+        );
         self.client
             .post(&path, &request)
             .await
@@ -444,7 +509,11 @@ impl ApiService for ApiClientAdapter {
         library_id: LibraryID,
         request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
-        let path = replace_param(v1::libraries::scans::RESUME, "{id}", library_id.to_string());
+        let path = replace_param(
+            v1::libraries::scans::RESUME,
+            "{id}",
+            library_id.to_string(),
+        );
         self.client
             .post(&path, &request)
             .await
@@ -456,14 +525,20 @@ impl ApiService for ApiClientAdapter {
         library_id: LibraryID,
         request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
-        let path = replace_param(v1::libraries::scans::CANCEL, "{id}", library_id.to_string());
+        let path = replace_param(
+            v1::libraries::scans::CANCEL,
+            "{id}",
+            library_id.to_string(),
+        );
         self.client
             .post(&path, &request)
             .await
             .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
     }
 
-    async fn fetch_active_scans(&self) -> RepositoryResult<ActiveScansResponse> {
+    async fn fetch_active_scans(
+        &self,
+    ) -> RepositoryResult<ActiveScansResponse> {
         self.client
             .get(v1::scan::ACTIVE)
             .await
@@ -506,7 +581,10 @@ impl ApiService for ApiClientAdapter {
     }
 
     #[cfg(feature = "demo")]
-    async fn reset_demo(&self, request: DemoResetRequest) -> RepositoryResult<DemoStatus> {
+    async fn reset_demo(
+        &self,
+        request: DemoResetRequest,
+    ) -> RepositoryResult<DemoStatus> {
         self.client
             .post(v1::admin::demo::RESET, &request)
             .await
@@ -527,7 +605,10 @@ struct CachedPositions {
 }
 
 impl ApiClientAdapter {
-    fn lookup_cached_indices(&self, key: &PlayerFilterCacheKey) -> Option<Vec<u32>> {
+    fn lookup_cached_indices(
+        &self,
+        key: &PlayerFilterCacheKey,
+    ) -> Option<Vec<u32>> {
         let mut cache = self.filter_indices_cache.write();
         if let Some(entry) = cache.get(key) {
             if entry.stored_at.elapsed() < FILTER_INDICES_CACHE_TTL {
@@ -539,7 +620,11 @@ impl ApiClientAdapter {
         None
     }
 
-    fn store_cached_indices(&self, key: PlayerFilterCacheKey, indices: Vec<u32>) {
+    fn store_cached_indices(
+        &self,
+        key: PlayerFilterCacheKey,
+        indices: Vec<u32>,
+    ) {
         self.filter_indices_cache.write().insert(
             key,
             CachedPositions {

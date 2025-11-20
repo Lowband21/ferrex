@@ -85,8 +85,11 @@ pub struct AuthConfig<const MAX_ATTEMPTS: u8 = 3, const TIMEOUT_SECS: u64 = 300>
 
 /// Type-safe authentication state machine
 #[derive(Debug, Clone)]
-pub struct AuthStateMachine<S: AuthState, const MAX_ATTEMPTS: u8 = 3, const TIMEOUT_SECS: u64 = 300>
-{
+pub struct AuthStateMachine<
+    S: AuthState,
+    const MAX_ATTEMPTS: u8 = 3,
+    const TIMEOUT_SECS: u64 = 300,
+> {
     state_data: S,
     _phantom: PhantomData<S>,
 }
@@ -154,7 +157,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     pub fn select_user(
         self,
         user_id: Uuid,
-    ) -> TransitionResult<AuthStateMachine<UserSelected, MAX_ATTEMPTS, TIMEOUT_SECS>> {
+    ) -> TransitionResult<
+        AuthStateMachine<UserSelected, MAX_ATTEMPTS, TIMEOUT_SECS>,
+    > {
         if user_id == Uuid::nil() {
             return Err(AuthTransitionError::InvalidUser);
         }
@@ -186,7 +191,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     pub fn require_password(
         self,
         device_id: Uuid,
-    ) -> TransitionResult<AuthStateMachine<AwaitingPassword, MAX_ATTEMPTS, TIMEOUT_SECS>> {
+    ) -> TransitionResult<
+        AuthStateMachine<AwaitingPassword, MAX_ATTEMPTS, TIMEOUT_SECS>,
+    > {
         self.check_timeout()?;
 
         Ok(AuthStateMachine {
@@ -204,7 +211,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     pub fn require_pin(
         self,
         device_registration: DeviceRegistration,
-    ) -> TransitionResult<AuthStateMachine<AwaitingPin, MAX_ATTEMPTS, TIMEOUT_SECS>> {
+    ) -> TransitionResult<
+        AuthStateMachine<AwaitingPin, MAX_ATTEMPTS, TIMEOUT_SECS>,
+    > {
         self.check_timeout()?;
 
         Ok(AuthStateMachine {
@@ -219,7 +228,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     }
 
     /// Cancel and return to unauthenticated
-    pub fn cancel(self) -> AuthStateMachine<Unauthenticated, MAX_ATTEMPTS, TIMEOUT_SECS> {
+    pub fn cancel(
+        self,
+    ) -> AuthStateMachine<Unauthenticated, MAX_ATTEMPTS, TIMEOUT_SECS> {
         AuthStateMachine::new()
     }
 }
@@ -244,7 +255,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
         token: AuthToken,
         permissions: UserPermissions,
         server_url: String,
-    ) -> TransitionResult<AuthStateMachine<Authenticated, MAX_ATTEMPTS, TIMEOUT_SECS>> {
+    ) -> TransitionResult<
+        AuthStateMachine<Authenticated, MAX_ATTEMPTS, TIMEOUT_SECS>,
+    > {
         self.check_timeout()?;
 
         Ok(AuthStateMachine {
@@ -263,7 +276,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     /// Failed password attempt
     pub fn fail_attempt(
         mut self,
-    ) -> TransitionResult<AuthStateMachine<AwaitingPassword, MAX_ATTEMPTS, TIMEOUT_SECS>> {
+    ) -> TransitionResult<
+        AuthStateMachine<AwaitingPassword, MAX_ATTEMPTS, TIMEOUT_SECS>,
+    > {
         self.check_timeout()?;
 
         self.state_data.attempts += 1;
@@ -279,7 +294,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     }
 
     /// Cancel and return to unauthenticated
-    pub fn cancel(self) -> AuthStateMachine<Unauthenticated, MAX_ATTEMPTS, TIMEOUT_SECS> {
+    pub fn cancel(
+        self,
+    ) -> AuthStateMachine<Unauthenticated, MAX_ATTEMPTS, TIMEOUT_SECS> {
         AuthStateMachine::new()
     }
 }
@@ -304,7 +321,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
         token: AuthToken,
         permissions: UserPermissions,
         server_url: String,
-    ) -> TransitionResult<AuthStateMachine<Authenticated, MAX_ATTEMPTS, TIMEOUT_SECS>> {
+    ) -> TransitionResult<
+        AuthStateMachine<Authenticated, MAX_ATTEMPTS, TIMEOUT_SECS>,
+    > {
         self.check_timeout()?;
 
         Ok(AuthStateMachine {
@@ -323,7 +342,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     /// Failed PIN attempt
     pub fn fail_attempt(
         mut self,
-    ) -> TransitionResult<AuthStateMachine<AwaitingPin, MAX_ATTEMPTS, TIMEOUT_SECS>> {
+    ) -> TransitionResult<
+        AuthStateMachine<AwaitingPin, MAX_ATTEMPTS, TIMEOUT_SECS>,
+    > {
         self.check_timeout()?;
 
         self.state_data.attempts += 1;
@@ -339,7 +360,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     }
 
     /// Cancel and return to unauthenticated
-    pub fn cancel(self) -> AuthStateMachine<Unauthenticated, MAX_ATTEMPTS, TIMEOUT_SECS> {
+    pub fn cancel(
+        self,
+    ) -> AuthStateMachine<Unauthenticated, MAX_ATTEMPTS, TIMEOUT_SECS> {
         AuthStateMachine::new()
     }
 }
@@ -349,7 +372,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     AuthStateMachine<Authenticated, MAX_ATTEMPTS, TIMEOUT_SECS>
 {
     /// Begin token refresh
-    pub fn start_refresh(self) -> AuthStateMachine<Refreshing, MAX_ATTEMPTS, TIMEOUT_SECS> {
+    pub fn start_refresh(
+        self,
+    ) -> AuthStateMachine<Refreshing, MAX_ATTEMPTS, TIMEOUT_SECS> {
         AuthStateMachine {
             state_data: Refreshing {
                 previous_state: self.state_data,
@@ -360,7 +385,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     }
 
     /// Begin PIN setup for trusted device
-    pub fn start_pin_setup(self) -> AuthStateMachine<SettingUpPin, MAX_ATTEMPTS, TIMEOUT_SECS> {
+    pub fn start_pin_setup(
+        self,
+    ) -> AuthStateMachine<SettingUpPin, MAX_ATTEMPTS, TIMEOUT_SECS> {
         AuthStateMachine {
             state_data: SettingUpPin {
                 user: self.state_data.user,
@@ -373,7 +400,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     }
 
     /// Logout and return to unauthenticated
-    pub fn logout(self) -> AuthStateMachine<Unauthenticated, MAX_ATTEMPTS, TIMEOUT_SECS> {
+    pub fn logout(
+        self,
+    ) -> AuthStateMachine<Unauthenticated, MAX_ATTEMPTS, TIMEOUT_SECS> {
         AuthStateMachine::new()
     }
 }
@@ -398,7 +427,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     }
 
     /// Refresh failed, return to previous state
-    pub fn fail_refresh(self) -> AuthStateMachine<Authenticated, MAX_ATTEMPTS, TIMEOUT_SECS> {
+    pub fn fail_refresh(
+        self,
+    ) -> AuthStateMachine<Authenticated, MAX_ATTEMPTS, TIMEOUT_SECS> {
         AuthStateMachine {
             state_data: self.state_data.previous_state,
             _phantom: PhantomData,
@@ -406,7 +437,9 @@ impl<const MAX_ATTEMPTS: u8, const TIMEOUT_SECS: u64>
     }
 
     /// Refresh failed critically, logout
-    pub fn critical_failure(self) -> AuthStateMachine<Unauthenticated, MAX_ATTEMPTS, TIMEOUT_SECS> {
+    pub fn critical_failure(
+        self,
+    ) -> AuthStateMachine<Unauthenticated, MAX_ATTEMPTS, TIMEOUT_SECS> {
         AuthStateMachine::new()
     }
 }

@@ -87,38 +87,44 @@ impl MetadataExtractor {
     }
 
     /// Extract complete metadata from a media file
-    pub fn extract_metadata<P: AsRef<Path>>(&mut self, file_path: P) -> Result<MediaFileMetadata> {
+    pub fn extract_metadata<P: AsRef<Path>>(
+        &mut self,
+        file_path: P,
+    ) -> Result<MediaFileMetadata> {
         let file_path = file_path.as_ref();
 
         info!("Extracting metadata from: {}", file_path.display());
 
         // Extract technical metadata with FFmpeg
-        let technical_metadata = self.technical_extractor.extract_metadata(file_path)?;
+        let technical_metadata =
+            self.technical_extractor.extract_metadata(file_path)?;
 
         // Parse filename for show/episode info
-        let parsed_info = self.filename_parser.parse_filename_with_type(file_path);
+        let parsed_info =
+            self.filename_parser.parse_filename_with_type(file_path);
 
         // Get file size
         let file_size = file_path.metadata().map_err(MediaError::Io)?.len();
 
         // Extract HDR metadata if available
-        let hdr_metadata = match HdrMetadataExtractor::extract_hdr_metadata(file_path) {
-            Ok(hdr_info) => {
-                info!("HDR metadata extracted via ffprobe: {:?}", hdr_info);
-                hdr_info
-            }
-            Err(e) => {
-                warn!("Failed to extract HDR metadata via ffprobe: {}", e);
-                // DO NOT guess HDR metadata - this causes false positives
-                // If we can't extract proper metadata, assume SDR
-                super::hdr_metadata::HdrInfo {
-                    bit_depth: Some(8), // Default to 8-bit
-                    color_primaries: None,
-                    color_transfer: None,
-                    color_space: None,
+        let hdr_metadata =
+            match HdrMetadataExtractor::extract_hdr_metadata(file_path) {
+                Ok(hdr_info) => {
+                    info!("HDR metadata extracted via ffprobe: {:?}", hdr_info);
+                    hdr_info
                 }
-            }
-        };
+                Err(e) => {
+                    warn!("Failed to extract HDR metadata via ffprobe: {}", e);
+                    // DO NOT guess HDR metadata - this causes false positives
+                    // If we can't extract proper metadata, assume SDR
+                    super::hdr_metadata::HdrInfo {
+                        bit_depth: Some(8), // Default to 8-bit
+                        color_primaries: None,
+                        color_transfer: None,
+                        color_space: None,
+                    }
+                }
+            };
 
         Ok(MediaFileMetadata {
             duration: technical_metadata.duration,
@@ -136,7 +142,9 @@ impl MetadataExtractor {
             color_transfer: hdr_metadata
                 .color_transfer
                 .or(technical_metadata.color_transfer),
-            color_space: hdr_metadata.color_space.or(technical_metadata.color_space),
+            color_space: hdr_metadata
+                .color_space
+                .or(technical_metadata.color_space),
             bit_depth: hdr_metadata.bit_depth.or(technical_metadata.bit_depth),
             parsed_info,
         })

@@ -27,12 +27,14 @@ impl PostgresUsersRepository {
 
 #[async_trait]
 impl UsersRepository for PostgresUsersRepository {
-    async fn create_user_with_password(&self, user: &User, password_hash: &str) -> Result<()> {
-        let mut tx = self
-            .pool()
-            .begin()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to start transaction: {}", e)))?;
+    async fn create_user_with_password(
+        &self,
+        user: &User,
+        password_hash: &str,
+    ) -> Result<()> {
+        let mut tx = self.pool().begin().await.map_err(|e| {
+            MediaError::Internal(format!("Failed to start transaction: {}", e))
+        })?;
 
         // Insert user
         sqlx::query!(
@@ -60,10 +62,14 @@ impl UsersRepository for PostgresUsersRepository {
         .map_err(|e| {
             if let Some(db_err) = e.as_database_error() {
                 if db_err.constraint() == Some("users_username_key") {
-                    return MediaError::Conflict("Username already exists".to_string());
+                    return MediaError::Conflict(
+                        "Username already exists".to_string(),
+                    );
                 }
                 if db_err.constraint() == Some("idx_users_email_unique") {
-                    return MediaError::Conflict("Email already exists".to_string());
+                    return MediaError::Conflict(
+                        "Email already exists".to_string(),
+                    );
                 }
             }
             MediaError::Internal(format!("Failed to create user: {}", e))
@@ -80,11 +86,13 @@ impl UsersRepository for PostgresUsersRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to store password: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to store password: {}", e))
+        })?;
 
-        tx.commit()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!("Failed to commit transaction: {}", e))
+        })?;
 
         info!("Created user: {} ({})", user.username, user.id);
         Ok(())
@@ -104,7 +112,9 @@ impl UsersRepository for PostgresUsersRepository {
         )
         .fetch_optional(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get user by id: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to get user by id: {}", e))
+        })?;
 
         Ok(row.map(|r| User {
             id: r.id,
@@ -116,11 +126,15 @@ impl UsersRepository for PostgresUsersRepository {
             last_login: r.last_login,
             is_active: r.is_active,
             email: r.email,
-            preferences: serde_json::from_value(r.preferences).unwrap_or_default(),
+            preferences: serde_json::from_value(r.preferences)
+                .unwrap_or_default(),
         }))
     }
 
-    async fn get_user_by_username(&self, username: &str) -> Result<Option<User>> {
+    async fn get_user_by_username(
+        &self,
+        username: &str,
+    ) -> Result<Option<User>> {
         let row = sqlx::query!(
             r#"
             SELECT 
@@ -134,7 +148,12 @@ impl UsersRepository for PostgresUsersRepository {
         )
         .fetch_optional(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get user by username: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to get user by username: {}",
+                e
+            ))
+        })?;
 
         Ok(row.map(|r| User {
             id: r.id,
@@ -146,7 +165,8 @@ impl UsersRepository for PostgresUsersRepository {
             last_login: r.last_login,
             is_active: r.is_active,
             email: r.email,
-            preferences: serde_json::from_value(r.preferences).unwrap_or_default(),
+            preferences: serde_json::from_value(r.preferences)
+                .unwrap_or_default(),
         }))
     }
 
@@ -163,7 +183,9 @@ impl UsersRepository for PostgresUsersRepository {
         )
         .fetch_all(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get all users: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to get all users: {}", e))
+        })?;
 
         let users: Vec<User> = rows
             .into_iter()
@@ -177,7 +199,8 @@ impl UsersRepository for PostgresUsersRepository {
                 last_login: r.last_login,
                 is_active: r.is_active,
                 email: r.email,
-                preferences: serde_json::from_value(r.preferences).unwrap_or_default(),
+                preferences: serde_json::from_value(r.preferences)
+                    .unwrap_or_default(),
             })
             .collect();
 
@@ -202,7 +225,9 @@ impl UsersRepository for PostgresUsersRepository {
         )
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to update user: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to update user: {}", e))
+        })?;
 
         if result.rows_affected() == 0 {
             return Err(MediaError::NotFound("User not found".to_string()));
@@ -213,7 +238,10 @@ impl UsersRepository for PostgresUsersRepository {
     }
 
     /// Get password hash for a user
-    async fn get_user_password_hash(&self, user_id: Uuid) -> Result<Option<String>> {
+    async fn get_user_password_hash(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<String>> {
         let row = sqlx::query!(
             r#"
             SELECT password_hash
@@ -224,13 +252,19 @@ impl UsersRepository for PostgresUsersRepository {
         )
         .fetch_optional(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to get password hash: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to get password hash: {}", e))
+        })?;
 
         Ok(row.map(|r| r.password_hash))
     }
 
     /// Update user password
-    async fn update_user_password(&self, user_id: Uuid, password_hash: &str) -> Result<()> {
+    async fn update_user_password(
+        &self,
+        user_id: Uuid,
+        password_hash: &str,
+    ) -> Result<()> {
         let result = sqlx::query!(
             r#"
             INSERT INTO user_credentials (user_id, password_hash, updated_at)
@@ -244,7 +278,9 @@ impl UsersRepository for PostgresUsersRepository {
         )
         .execute(self.pool())
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to update password: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!("Failed to update password: {}", e))
+        })?;
 
         if result.rows_affected() == 0 {
             return Err(MediaError::NotFound("User not found".to_string()));
@@ -256,11 +292,9 @@ impl UsersRepository for PostgresUsersRepository {
 
     async fn delete_user(&self, id: Uuid) -> Result<()> {
         // Start a transaction to ensure all deletions happen atomically
-        let mut tx = self
-            .pool()
-            .begin()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to start transaction: {}", e)))?;
+        let mut tx = self.pool().begin().await.map_err(|e| {
+            MediaError::Internal(format!("Failed to start transaction: {}", e))
+        })?;
 
         // First, deactivate any sync sessions where the user is the host
         sqlx::query!(
@@ -269,68 +303,98 @@ impl UsersRepository for PostgresUsersRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to deactivate sync sessions: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to deactivate sync sessions: {}",
+                e
+            ))
+        })?;
 
         // Remove user from any sync sessions they're participating in
         sqlx::query!("DELETE FROM sync_participants WHERE user_id = $1", id)
             .execute(&mut *tx)
             .await
             .map_err(|e| {
-                MediaError::Internal(format!("Failed to remove from sync sessions: {}", e))
+                MediaError::Internal(format!(
+                    "Failed to remove from sync sessions: {}",
+                    e
+                ))
             })?;
 
         // Delete user watch progress
         sqlx::query!("DELETE FROM user_watch_progress WHERE user_id = $1", id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to delete watch progress: {}", e)))?;
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to delete watch progress: {}",
+                    e
+                ))
+            })?;
 
         // Delete completed media records
         sqlx::query!("DELETE FROM user_completed_media WHERE user_id = $1", id)
             .execute(&mut *tx)
             .await
             .map_err(|e| {
-                MediaError::Internal(format!("Failed to delete completed media: {}", e))
+                MediaError::Internal(format!(
+                    "Failed to delete completed media: {}",
+                    e
+                ))
             })?;
 
         // Delete user sessions
         sqlx::query!("DELETE FROM auth_sessions WHERE user_id = $1", id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to delete user sessions: {}", e)))?;
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to delete user sessions: {}",
+                    e
+                ))
+            })?;
 
         // Delete refresh tokens
         sqlx::query!("DELETE FROM auth_refresh_tokens WHERE user_id = $1", id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to delete refresh tokens: {}", e)))?;
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to delete refresh tokens: {}",
+                    e
+                ))
+            })?;
 
         // Finally, delete the user
         let result = sqlx::query!("DELETE FROM users WHERE id = $1", id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to delete user: {}", e)))?;
+            .map_err(|e| {
+                MediaError::Internal(format!("Failed to delete user: {}", e))
+            })?;
 
         if result.rows_affected() == 0 {
             return Err(MediaError::NotFound("User not found".to_string()));
         }
 
         // Commit the transaction
-        tx.commit()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!("Failed to commit transaction: {}", e))
+        })?;
 
         info!("Deleted user: {} and all associated data", id);
         Ok(())
     }
 
     /// Delete user with atomic check for last admin
-    async fn delete_user_atomic(&self, user_id: Uuid, check_last_admin: bool) -> Result<()> {
-        let mut tx = self
-            .pool()
-            .begin()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to start transaction: {}", e)))?;
+    async fn delete_user_atomic(
+        &self,
+        user_id: Uuid,
+        check_last_admin: bool,
+    ) -> Result<()> {
+        let mut tx = self.pool().begin().await.map_err(|e| {
+            MediaError::Internal(format!("Failed to start transaction: {}", e))
+        })?;
 
         if check_last_admin {
             // First, lock all admin users except the one being deleted
@@ -348,11 +412,19 @@ impl UsersRepository for PostgresUsersRepository {
             )
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to lock admin users: {}", e)))?;
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to lock admin users: {}",
+                    e
+                ))
+            })?;
 
             if admin_users.is_empty() {
                 tx.rollback().await.map_err(|e| {
-                    MediaError::Internal(format!("Failed to rollback transaction: {}", e))
+                    MediaError::Internal(format!(
+                        "Failed to rollback transaction: {}",
+                        e
+                    ))
                 })?;
                 return Err(MediaError::Conflict(
                     "Cannot delete the last admin user".to_string(),
@@ -367,15 +439,26 @@ impl UsersRepository for PostgresUsersRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to deactivate sync sessions: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to deactivate sync sessions: {}",
+                e
+            ))
+        })?;
 
         // Remove user from sync sessions
-        sqlx::query!("DELETE FROM sync_participants WHERE user_id = $1", user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                MediaError::Internal(format!("Failed to remove from sync sessions: {}", e))
-            })?;
+        sqlx::query!(
+            "DELETE FROM sync_participants WHERE user_id = $1",
+            user_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to remove from sync sessions: {}",
+                e
+            ))
+        })?;
 
         // Delete user watch progress
         sqlx::query!(
@@ -384,7 +467,12 @@ impl UsersRepository for PostgresUsersRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to delete watch progress: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to delete watch progress: {}",
+                e
+            ))
+        })?;
 
         // Delete completed media records
         sqlx::query!(
@@ -393,13 +481,23 @@ impl UsersRepository for PostgresUsersRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to delete completed media: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to delete completed media: {}",
+                e
+            ))
+        })?;
 
         // Delete user sessions
         sqlx::query!("DELETE FROM auth_sessions WHERE user_id = $1", user_id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to delete user sessions: {}", e)))?;
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to delete user sessions: {}",
+                    e
+                ))
+            })?;
 
         // Delete refresh tokens
         sqlx::query!(
@@ -408,24 +506,34 @@ impl UsersRepository for PostgresUsersRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| MediaError::Internal(format!("Failed to delete refresh tokens: {}", e)))?;
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to delete refresh tokens: {}",
+                e
+            ))
+        })?;
 
         // Delete the user
         let result = sqlx::query!("DELETE FROM users WHERE id = $1", user_id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to delete user: {}", e)))?;
+            .map_err(|e| {
+                MediaError::Internal(format!("Failed to delete user: {}", e))
+            })?;
 
         if result.rows_affected() == 0 {
             tx.rollback().await.map_err(|e| {
-                MediaError::Internal(format!("Failed to rollback transaction: {}", e))
+                MediaError::Internal(format!(
+                    "Failed to rollback transaction: {}",
+                    e
+                ))
             })?;
             return Err(MediaError::NotFound("User not found".to_string()));
         }
 
-        tx.commit()
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
+        tx.commit().await.map_err(|e| {
+            MediaError::Internal(format!("Failed to commit transaction: {}", e))
+        })?;
 
         info!(
             "Atomically deleted user: {} with last admin check: {}",

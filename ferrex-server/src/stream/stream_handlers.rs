@@ -4,7 +4,9 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::Response,
 };
-use ferrex_core::{types::MediaType, user::User, watch_status::UpdateProgressRequest};
+use ferrex_core::{
+    types::MediaType, user::User, watch_status::UpdateProgressRequest,
+};
 use serde::Deserialize;
 use tokio_util::io::ReaderStream;
 use tracing::{debug, info, warn};
@@ -32,7 +34,7 @@ pub async fn stream_with_progress_handler(
 
     // Fetch media metadata
     let media_file = state
-        .unit_of_work
+        .unit_of_work()
         .media_files_read
         .get_by_id(&media_id)
         .await
@@ -42,7 +44,9 @@ pub async fn stream_with_progress_handler(
                 format!("Database error retrieving media {}: {}", media_id, e),
             )
         })?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Media not found".to_string()))?;
+        .ok_or_else(|| {
+            (StatusCode::NOT_FOUND, "Media not found".to_string())
+        })?;
 
     debug!(
         "Found media file: {:?} (path: {:?})",
@@ -52,7 +56,7 @@ pub async fn stream_with_progress_handler(
     if !media_file.path.exists() {
         warn!("Media file not found on disk: {:?}", media_file.path);
 
-        if let Some(media_root) = &state.config.media_root
+        if let Some(media_root) = state.config().media.root.as_ref()
             && !media_root.exists()
         {
             warn!("Media library root is offline: {:?}", media_root);
@@ -172,7 +176,7 @@ pub async fn report_progress_handler(
 
     // Update progress
     state
-        .unit_of_work
+        .unit_of_work()
         .watch_status
         .update_watch_progress(user.id, &request)
         .await

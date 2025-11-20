@@ -41,7 +41,9 @@ pub struct SettingsDomainState {
 impl SettingsDomainState {
     /// Create a new SettingsDomainState with required services
     pub fn new(
-        auth_service: std::sync::Arc<dyn crate::infrastructure::services::auth::AuthService>,
+        auth_service: std::sync::Arc<
+            dyn crate::infrastructure::services::auth::AuthService,
+        >,
         api_service: std::sync::Arc<dyn ApiService>,
         settings_service: std::sync::Arc<
             dyn crate::infrastructure::services::settings::SettingsService,
@@ -108,7 +110,10 @@ impl SettingsDomain {
         Task::none()
     }
 
-    pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
+    pub fn handle_event(
+        &mut self,
+        event: &CrossDomainEvent,
+    ) -> Task<DomainMessage> {
         match event {
             CrossDomainEvent::UserAuthenticated(_user, permissions) => {
                 self.user_permissions = Some(permissions.clone());

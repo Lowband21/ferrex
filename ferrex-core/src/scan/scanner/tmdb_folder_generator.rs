@@ -40,7 +40,12 @@ impl StructurePlan {
 /// Strategy for naming folders and files.
 pub trait NamingStrategy: Send + Sync {
     fn movie_folder_name(&self, title: &str, year: Option<i32>) -> String;
-    fn movie_file_name(&self, title: &str, year: Option<i32>, ext: &str) -> String;
+    fn movie_file_name(
+        &self,
+        title: &str,
+        year: Option<i32>,
+        ext: &str,
+    ) -> String;
     fn series_folder_name(&self, title: &str) -> String;
     fn season_folder_name(&self, season_number: u8) -> String;
     fn episode_file_name(
@@ -80,7 +85,12 @@ impl NamingStrategy for DefaultNamingStrategy {
         }
     }
 
-    fn movie_file_name(&self, title: &str, year: Option<i32>, ext: &str) -> String {
+    fn movie_file_name(
+        &self,
+        title: &str,
+        year: Option<i32>,
+        ext: &str,
+    ) -> String {
         let base = self.movie_folder_name(title, year);
         format!("{}.{}", base, ext.trim_start_matches('.'))
     }
@@ -171,7 +181,12 @@ impl TmdbFolderGenerator {
                     region.map(|r| r.to_string()),
                 )
                 .await
-                .map_err(|e| MediaError::Internal(format!("TMDB popular movies error: {}", e)))?;
+                .map_err(|e| {
+                    MediaError::Internal(format!(
+                        "TMDB popular movies error: {}",
+                        e
+                    ))
+                })?;
             for m in page_res.results {
                 let title = m.inner.title;
                 let year = m.inner.release_date.map(|d| d.year());
@@ -193,8 +208,10 @@ impl TmdbFolderGenerator {
             plan.push_dir(folder_path.clone());
 
             // Make a plausible video file size between 700MB and 2.5GB
-            let size = rand::rng().random_range(700_u64..=2500_u64) * 1024 * 1024;
-            let file_name = self.naming.movie_file_name(&title, year, &self.video_ext);
+            let size =
+                rand::rng().random_range(700_u64..=2500_u64) * 1024 * 1024;
+            let file_name =
+                self.naming.movie_file_name(&title, year, &self.video_ext);
             plan.push_file(folder_path.join(file_name), size);
         }
 
@@ -218,9 +235,17 @@ impl TmdbFolderGenerator {
         while collected.len() < count {
             let page_res = self
                 .tmdb
-                .list_popular_tvshows(Some(page), language.map(|l| l.to_string()))
+                .list_popular_tvshows(
+                    Some(page),
+                    language.map(|l| l.to_string()),
+                )
                 .await
-                .map_err(|e| MediaError::Internal(format!("TMDB popular TV error: {}", e)))?;
+                .map_err(|e| {
+                    MediaError::Internal(format!(
+                        "TMDB popular TV error: {}",
+                        e
+                    ))
+                })?;
             for s in page_res.results {
                 let title = s.inner.name;
                 collected.push(title);
@@ -251,18 +276,23 @@ impl TmdbFolderGenerator {
                 let season_path = series_path.join(season_folder);
                 plan.push_dir(season_path.clone());
 
-                let episodes =
-                    if episodes_per_season_range.start() == episodes_per_season_range.end() {
-                        *episodes_per_season_range.start()
-                    } else {
-                        rng.random_range(episodes_per_season_range.clone())
-                    };
+                let episodes = if episodes_per_season_range.start()
+                    == episodes_per_season_range.end()
+                {
+                    *episodes_per_season_range.start()
+                } else {
+                    rng.random_range(episodes_per_season_range.clone())
+                };
 
                 for ep_idx in 1..=episodes {
-                    let fname =
-                        self.naming
-                            .episode_file_name(&title, season_idx, ep_idx, &self.video_ext);
-                    let size = rng.random_range(300_u64..=1600_u64) * 1024 * 1024; // 300MB - 1.6GB
+                    let fname = self.naming.episode_file_name(
+                        &title,
+                        season_idx,
+                        ep_idx,
+                        &self.video_ext,
+                    );
+                    let size =
+                        rng.random_range(300_u64..=1600_u64) * 1024 * 1024; // 300MB - 1.6GB
                     plan.push_file(season_path.join(fname), size);
                 }
             }

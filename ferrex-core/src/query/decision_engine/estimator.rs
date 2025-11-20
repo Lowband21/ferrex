@@ -1,7 +1,8 @@
 //! Cost estimation for different query execution strategies
 
 use crate::query::decision_engine::{
-    DataCompleteness, NetworkQuality, QueryComplexity, QueryContext, QueryMetrics,
+    DataCompleteness, NetworkQuality, QueryComplexity, QueryContext,
+    QueryMetrics,
 };
 
 /// Estimates the cost (in milliseconds) of different execution strategies
@@ -36,12 +37,12 @@ struct BaseCosts {
 impl Default for BaseCosts {
     fn default() -> Self {
         Self {
-            client_sort_per_item_us: 10,  // 10 microseconds per item
+            client_sort_per_item_us: 10, // 10 microseconds per item
             client_filter_per_item_us: 5, // 5 microseconds per item
-            network_base_latency_ms: 50,  // 50ms base latency
-            transfer_per_kb_ms: 0.1,      // 0.1ms per KB
-            server_query_base_ms: 20,     // 20ms base server processing
-            cache_lookup_ms: 1,           // 1ms cache lookup
+            network_base_latency_ms: 50, // 50ms base latency
+            transfer_per_kb_ms: 0.1,     // 0.1ms per KB
+            server_query_base_ms: 20,    // 20ms base server processing
+            cache_lookup_ms: 1,          // 1ms cache lookup
         }
     }
 }
@@ -64,7 +65,8 @@ impl CostEstimator {
         let dataset_size = context.available_data.len();
 
         // Base sorting cost
-        let sort_cost_us = dataset_size as u64 * self.base_costs.client_sort_per_item_us;
+        let sort_cost_us =
+            dataset_size as u64 * self.base_costs.client_sort_per_item_us;
 
         // Filtering cost (if applicable)
         let has_filters = !context.query.filters.library_ids.is_empty()
@@ -133,7 +135,9 @@ impl CostEstimator {
 
         // Network latency
         let network_latency = match network_quality {
-            NetworkQuality::Excellent => self.base_costs.network_base_latency_ms,
+            NetworkQuality::Excellent => {
+                self.base_costs.network_base_latency_ms
+            }
             NetworkQuality::Good => self.base_costs.network_base_latency_ms * 2,
             NetworkQuality::Poor => self.base_costs.network_base_latency_ms * 5,
             NetworkQuality::Offline => u64::MAX / 2, // Effectively infinite
@@ -141,8 +145,9 @@ impl CostEstimator {
 
         // Estimate data transfer cost (assuming ~1KB per item)
         let estimated_response_size_kb = 100; // Rough estimate
-        let transfer_cost =
-            (estimated_response_size_kb as f32 * self.base_costs.transfer_per_kb_ms) as u64;
+        let transfer_cost = (estimated_response_size_kb as f32
+            * self.base_costs.transfer_per_kb_ms)
+            as u64;
 
         // Apply historical adjustment if available
         let historical_adjustment = if !metrics.server_query_times.is_empty() {
@@ -155,7 +160,8 @@ impl CostEstimator {
                 .collect();
 
             if !similar_times.is_empty() {
-                let avg_time = similar_times.iter().sum::<u64>() / similar_times.len() as u64;
+                let avg_time = similar_times.iter().sum::<u64>()
+                    / similar_times.len() as u64;
                 avg_time as f32 / server_cost as f32
             } else {
                 1.0
@@ -253,8 +259,11 @@ mod tests {
         assert!(cost_excellent < 200);
 
         // Test with poor network
-        let cost_poor =
-            estimator.estimate_server_cost(QueryComplexity::Simple, NetworkQuality::Poor, &metrics);
+        let cost_poor = estimator.estimate_server_cost(
+            QueryComplexity::Simple,
+            NetworkQuality::Poor,
+            &metrics,
+        );
 
         // Should be much higher
         assert!(cost_poor > cost_excellent * 3);

@@ -7,7 +7,9 @@ use uuid::Uuid;
 
 use super::{AuthEventContext, map_domain_events};
 use crate::auth::AuthCrypto;
-use crate::auth::domain::aggregates::{DeviceSession, DeviceSessionError, UserAuthentication};
+use crate::auth::domain::aggregates::{
+    DeviceSession, DeviceSessionError, UserAuthentication,
+};
 use crate::auth::domain::repositories::{
     AuthEventRepository, DeviceSessionRepository, UserAuthenticationRepository,
 };
@@ -80,7 +82,8 @@ impl PinManagementService {
     ) -> Result<(), PinManagementError> {
         let mut ctx = context.unwrap_or_default();
         ctx.insert_metadata("operation", json!("set"));
-        let (mut user, mut session) = self.load_session(user_id, fingerprint).await?;
+        let (mut user, mut session) =
+            self.load_session(user_id, fingerprint).await?;
 
         user.set_user_pin(&new_pin, policy, &self.crypto)
             .map_err(|_| PinManagementError::InvalidPinFormat)?;
@@ -103,7 +106,8 @@ impl PinManagementService {
     ) -> Result<(), PinManagementError> {
         let mut ctx = context.unwrap_or_default();
         ctx.insert_metadata("operation", json!("rotate"));
-        let (mut user, mut session) = self.load_session(user_id, fingerprint).await?;
+        let (mut user, mut session) =
+            self.load_session(user_id, fingerprint).await?;
 
         session
             .ensure_pin_available(max_attempts)
@@ -139,7 +143,8 @@ impl PinManagementService {
     ) -> Result<(), PinManagementError> {
         let mut ctx = context.unwrap_or_default();
         ctx.insert_metadata("operation", json!("clear"));
-        let (mut user, mut session) = self.load_session(user_id, fingerprint).await?;
+        let (mut user, mut session) =
+            self.load_session(user_id, fingerprint).await?;
 
         session
             .ensure_pin_available(max_attempts)
@@ -177,7 +182,8 @@ impl PinManagementService {
         let mut ctx = context.unwrap_or_default();
         ctx.insert_metadata("operation", json!("force_clear"));
 
-        let (mut user, mut session) = self.load_session(user_id, fingerprint).await?;
+        let (mut user, mut session) =
+            self.load_session(user_id, fingerprint).await?;
         user.clear_user_pin();
         session
             .clear_pin_association()
@@ -195,7 +201,8 @@ impl PinManagementService {
         pin: &str,
         max_attempts: u8,
     ) -> Result<(), PinManagementError> {
-        let (user, mut session) = self.load_session(user_id, fingerprint).await?;
+        let (user, mut session) =
+            self.load_session(user_id, fingerprint).await?;
 
         session
             .ensure_pin_available(max_attempts)
@@ -207,13 +214,22 @@ impl PinManagementService {
 
         if verified {
             session.record_pin_success();
-            self.persist_state(&user, &mut session, AuthEventContext::default())
-                .await?;
+            self.persist_state(
+                &user,
+                &mut session,
+                AuthEventContext::default(),
+            )
+            .await?;
             Ok(())
         } else {
-            let err = map_pin_error(session.register_pin_failure(max_attempts), true);
-            self.persist_state(&user, &mut session, AuthEventContext::default())
-                .await?;
+            let err =
+                map_pin_error(session.register_pin_failure(max_attempts), true);
+            self.persist_state(
+                &user,
+                &mut session,
+                AuthEventContext::default(),
+            )
+            .await?;
             Err(err)
         }
     }
@@ -271,7 +287,10 @@ impl PinManagementService {
     }
 }
 
-fn map_pin_error(err: DeviceSessionError, verification: bool) -> PinManagementError {
+fn map_pin_error(
+    err: DeviceSessionError,
+    verification: bool,
+) -> PinManagementError {
     use DeviceSessionError as D;
 
     match err {
@@ -286,15 +305,21 @@ fn map_pin_error(err: DeviceSessionError, verification: bool) -> PinManagementEr
         }
         D::TooManyFailedAttempts => PinManagementError::TooManyFailedAttempts,
         D::SessionExpired => PinManagementError::PinVerificationFailed,
-        _ => PinManagementError::DatabaseError(anyhow!("unexpected device session error: {err}")),
+        _ => PinManagementError::DatabaseError(anyhow!(
+            "unexpected device session error: {err}"
+        )),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::domain::aggregates::{DeviceSession, DeviceStatus, UserAuthentication};
-    use crate::auth::domain::repositories::{AuthAuditEventKind, AuthEventLog, DevicePinStatus};
+    use crate::auth::domain::aggregates::{
+        DeviceSession, DeviceStatus, UserAuthentication,
+    };
+    use crate::auth::domain::repositories::{
+        AuthAuditEventKind, AuthEventLog, DevicePinStatus,
+    };
     use crate::auth::domain::value_objects::{DeviceFingerprint, PinPolicy};
     use async_trait::async_trait;
     use futures::FutureExt;
@@ -308,7 +333,10 @@ mod tests {
 
     #[async_trait]
     impl UserAuthenticationRepository for InMemoryUserRepo {
-        async fn find_by_id(&self, user_id: Uuid) -> anyhow::Result<Option<UserAuthentication>> {
+        async fn find_by_id(
+            &self,
+            user_id: Uuid,
+        ) -> anyhow::Result<Option<UserAuthentication>> {
             let users = self.users.lock().unwrap();
             Ok(users.get(&user_id).cloned())
         }
@@ -324,7 +352,10 @@ mod tests {
                 .cloned())
         }
 
-        async fn save(&self, user_auth: &UserAuthentication) -> anyhow::Result<()> {
+        async fn save(
+            &self,
+            user_auth: &UserAuthentication,
+        ) -> anyhow::Result<()> {
             let mut users = self.users.lock().unwrap();
             users.insert(user_auth.user_id(), user_auth.clone());
             Ok(())
@@ -338,7 +369,10 @@ mod tests {
 
     #[async_trait]
     impl DeviceSessionRepository for InMemoryDeviceRepo {
-        async fn find_by_id(&self, session_id: Uuid) -> anyhow::Result<Option<DeviceSession>> {
+        async fn find_by_id(
+            &self,
+            session_id: Uuid,
+        ) -> anyhow::Result<Option<DeviceSession>> {
             let sessions = self.sessions.lock().unwrap();
             Ok(sessions.get(&session_id).cloned())
         }
@@ -353,12 +387,16 @@ mod tests {
                 .values()
                 .find(|session| {
                     session.user_id() == user_id
-                        && session.device_fingerprint().as_str() == fingerprint.as_str()
+                        && session.device_fingerprint().as_str()
+                            == fingerprint.as_str()
                 })
                 .cloned())
         }
 
-        async fn find_by_user_id(&self, user_id: Uuid) -> anyhow::Result<Vec<DeviceSession>> {
+        async fn find_by_user_id(
+            &self,
+            user_id: Uuid,
+        ) -> anyhow::Result<Vec<DeviceSession>> {
             let sessions = self.sessions.lock().unwrap();
             Ok(sessions
                 .values()
@@ -367,7 +405,10 @@ mod tests {
                 .collect())
         }
 
-        async fn save(&self, session: &DeviceSession) -> anyhow::Result<Option<Uuid>> {
+        async fn save(
+            &self,
+            session: &DeviceSession,
+        ) -> anyhow::Result<Option<Uuid>> {
             let mut sessions = self.sessions.lock().unwrap();
             sessions.insert(session.id(), session.clone());
             Ok(None)
@@ -378,9 +419,9 @@ mod tests {
             fingerprint: &DeviceFingerprint,
         ) -> anyhow::Result<bool> {
             let sessions = self.sessions.lock().unwrap();
-            Ok(sessions
-                .values()
-                .any(|session| session.device_fingerprint().as_str() == fingerprint.as_str()))
+            Ok(sessions.values().any(|session| {
+                session.device_fingerprint().as_str() == fingerprint.as_str()
+            }))
         }
 
         async fn pin_status_by_fingerprint(
@@ -390,7 +431,10 @@ mod tests {
             let sessions = self.sessions.lock().unwrap();
             Ok(sessions
                 .values()
-                .filter(|session| session.device_fingerprint().as_str() == fingerprint.as_str())
+                .filter(|session| {
+                    session.device_fingerprint().as_str()
+                        == fingerprint.as_str()
+                })
                 .map(|session| DevicePinStatus {
                     user_id: session.user_id(),
                     has_pin: session.has_pin(),
@@ -406,7 +450,10 @@ mod tests {
 
     #[async_trait]
     impl AuthEventRepository for InMemoryEventRepo {
-        async fn record(&self, events: Vec<AuthEventLog>) -> anyhow::Result<()> {
+        async fn record(
+            &self,
+            events: Vec<AuthEventLog>,
+        ) -> anyhow::Result<()> {
             let mut storage = self.events.lock().unwrap();
             storage.extend(events);
             Ok(())
@@ -421,7 +468,12 @@ mod tests {
 
     fn sample_user() -> UserAuthentication {
         let user_id = Uuid::now_v7();
-        UserAuthentication::new(user_id, "user".to_string(), "hash".to_string(), 5)
+        UserAuthentication::new(
+            user_id,
+            "user".to_string(),
+            "hash".to_string(),
+            5,
+        )
     }
 
     fn sample_fingerprint() -> DeviceFingerprint {
@@ -461,16 +513,23 @@ mod tests {
 
         device_repo.save(&session).now_or_never().unwrap().unwrap();
 
-        let service =
-            PinManagementService::new(user_repo, device_repo.clone(), event_repo.clone(), crypto);
+        let service = PinManagementService::new(
+            user_repo,
+            device_repo.clone(),
+            event_repo.clone(),
+            crypto,
+        );
         (service, device_repo, event_repo, user_id, fingerprint)
     }
 
     #[tokio::test]
     async fn set_pin_trusts_device_and_logs_events() {
         let mut user = sample_user();
-        let mut session =
-            DeviceSession::new(user.user_id(), sample_fingerprint(), "Test".to_string());
+        let mut session = DeviceSession::new(
+            user.user_id(),
+            sample_fingerprint(),
+            "Test".to_string(),
+        );
         let _ = session.take_events();
         let crypto = test_crypto();
         user.set_user_pin("0000", &PinPolicy::default(), crypto.as_ref())
@@ -500,18 +559,20 @@ mod tests {
         assert!(stored.has_pin());
 
         let events = event_repo.events();
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event.event_type, AuthAuditEventKind::PinSet))
-        );
+        assert!(events.iter().any(|event| matches!(
+            event.event_type,
+            AuthAuditEventKind::PinSet
+        )));
     }
 
     #[tokio::test]
     async fn force_clear_pin_removes_pin_without_current_value() {
         let mut user = sample_user();
-        let mut session =
-            DeviceSession::new(user.user_id(), sample_fingerprint(), "Trusted".to_string());
+        let mut session = DeviceSession::new(
+            user.user_id(),
+            sample_fingerprint(),
+            "Trusted".to_string(),
+        );
         let crypto = test_crypto();
         user.set_user_pin("1357", &PinPolicy::default(), crypto.as_ref())
             .unwrap();
@@ -534,18 +595,20 @@ mod tests {
         assert_eq!(stored.status(), DeviceStatus::Pending);
 
         let events = event_repo.events();
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event.event_type, AuthAuditEventKind::PinRemoved))
-        );
+        assert!(events.iter().any(|event| matches!(
+            event.event_type,
+            AuthAuditEventKind::PinRemoved
+        )));
     }
 
     #[tokio::test]
     async fn rotate_pin_requires_current_value() {
         let mut user = sample_user();
-        let mut session =
-            DeviceSession::new(user.user_id(), sample_fingerprint(), "Test".to_string());
+        let mut session = DeviceSession::new(
+            user.user_id(),
+            sample_fingerprint(),
+            "Test".to_string(),
+        );
         let _ = session.take_events();
         let crypto = test_crypto();
         user.set_user_pin("4861", &PinPolicy::default(), crypto.as_ref())
@@ -577,8 +640,11 @@ mod tests {
     #[tokio::test]
     async fn clear_pin_returns_device_to_pending_state() {
         let mut user = sample_user();
-        let mut session =
-            DeviceSession::new(user.user_id(), sample_fingerprint(), "Test".to_string());
+        let mut session = DeviceSession::new(
+            user.user_id(),
+            sample_fingerprint(),
+            "Test".to_string(),
+        );
         let _ = session.take_events();
         let crypto = test_crypto();
         user.set_user_pin("1357", &PinPolicy::default(), crypto.as_ref())
@@ -603,10 +669,9 @@ mod tests {
         assert_eq!(stored.status(), DeviceStatus::Pending);
 
         let events = event_repo.events();
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event.event_type, AuthAuditEventKind::PinRemoved))
-        );
+        assert!(events.iter().any(|event| matches!(
+            event.event_type,
+            AuthAuditEventKind::PinRemoved
+        )));
     }
 }

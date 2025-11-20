@@ -32,12 +32,13 @@ impl ImageFetchActor for DefaultImageFetchActor {
 
         match source {
             ImageFetchSource::Tmdb { tmdb_path } => {
-                let size = TmdbImageSize::from_str(&key.variant).ok_or_else(|| {
-                    MediaError::InvalidMedia(format!(
-                        "Unsupported TMDB variant '{}' for {}",
-                        key.variant, tmdb_path
-                    ))
-                })?;
+                let size =
+                    TmdbImageSize::from_str(&key.variant).ok_or_else(|| {
+                        MediaError::InvalidMedia(format!(
+                            "Unsupported TMDB variant '{}' for {}",
+                            key.variant, tmdb_path
+                        ))
+                    })?;
 
                 info!(
                     media_type = %key.media_type,

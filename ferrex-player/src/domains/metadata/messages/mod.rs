@@ -4,7 +4,9 @@ pub mod subscription;
 pub mod subscriptions;
 
 use crate::infrastructure::api_types::{Media, SeriesReference};
-use ferrex_core::player_prelude::{EpisodeID, ImageRequest, MediaID, SeasonID, SeriesID};
+use ferrex_core::player_prelude::{
+    EpisodeID, ImageRequest, MediaID, SeasonID, SeriesID,
+};
 
 #[derive(Clone)]
 pub enum Message {
@@ -14,7 +16,7 @@ pub enum Message {
     RefreshShowMetadata(SeriesID), // Refresh metadata for all episodes in a show
     RefreshSeasonMetadata(SeasonID, u32), // Refresh metadata for all episodes in a season
     RefreshEpisodeMetadata(EpisodeID), // Refresh metadata for a single episode
-    ShowMetadataRefreshed(String), // show_name
+    ShowMetadataRefreshed(String),     // show_name
     ShowMetadataRefreshFailed(String, String), // show_name, error
 
     // Batch operations
@@ -45,22 +47,36 @@ impl Message {
             Message::SeasonLoaded(_, _, _) => "Metadata::SeasonLoaded",
              */
             Message::RefreshShowMetadata(_) => "Metadata::RefreshShowMetadata",
-            Message::RefreshSeasonMetadata(_, _) => "Metadata::RefreshSeasonMetadata",
-            Message::RefreshEpisodeMetadata(_) => "Metadata::RefreshEpisodeMetadata",
-            Message::ShowMetadataRefreshed(_) => "Metadata::ShowMetadataRefreshed",
-            Message::ShowMetadataRefreshFailed(_, _) => "Metadata::ShowMetadataRefreshFailed",
+            Message::RefreshSeasonMetadata(_, _) => {
+                "Metadata::RefreshSeasonMetadata"
+            }
+            Message::RefreshEpisodeMetadata(_) => {
+                "Metadata::RefreshEpisodeMetadata"
+            }
+            Message::ShowMetadataRefreshed(_) => {
+                "Metadata::ShowMetadataRefreshed"
+            }
+            Message::ShowMetadataRefreshFailed(_, _) => {
+                "Metadata::ShowMetadataRefreshFailed"
+            }
             Message::BatchMetadataComplete => "Metadata::BatchMetadataComplete",
             //Message::MediaDetailsUpdated(_) => "Metadata::MediaDetailsUpdated",
             //Message::MediaDetailsBatch(_) => "Metadata::MediaDetailsBatch",
-            Message::CheckDetailsFetcherQueue => "Metadata::CheckDetailsFetcherQueue",
+            Message::CheckDetailsFetcherQueue => {
+                "Metadata::CheckDetailsFetcherQueue"
+            }
             Message::MediaDetailsLoaded(_) => "Metadata::MediaDetailsLoaded",
             //Message::MediaDetailsFetched(_, _) => "Metadata::MediaDetailsFetched",
             //Message::MetadataUpdated(_) => "Metadata::MetadataUpdated",
             Message::ImageLoaded(_, _) => "Metadata::ImageLoaded",
             Message::UnifiedImageLoaded(_, _) => "Metadata::UnifiedImageLoaded",
-            Message::UnifiedImageLoadFailed(_, _) => "Metadata::UnifiedImageLoadFailed",
+            Message::UnifiedImageLoadFailed(_, _) => {
+                "Metadata::UnifiedImageLoadFailed"
+            }
             //Message::MediaOrganized(_, _) => "Metadata::MediaOrganized",
-            Message::SeriesSortingCompleted(_) => "Metadata::SeriesSortingCompleted",
+            Message::SeriesSortingCompleted(_) => {
+                "Metadata::SeriesSortingCompleted"
+            }
             Message::ForceRescan => "Metadata::ForceRescan",
             //Message::FetchBatchMetadata(_) => "Metadata::FetchBatchMetadata",
             Message::NoOp => "Metadata::NoOp",
@@ -94,7 +110,9 @@ impl std::fmt::Debug for Message {
                 .field(name)
                 .field(err)
                 .finish(),
-            Self::BatchMetadataComplete => write!(f, "Metadata::BatchMetadataComplete"),
+            Self::BatchMetadataComplete => {
+                write!(f, "Metadata::BatchMetadataComplete")
+            }
             //Self::MediaDetailsUpdated(media) => {
             //    // Show summary instead of full details
             //    match media {
@@ -124,9 +142,15 @@ impl std::fmt::Debug for Message {
             //Self::MediaDetailsBatch(batch) => {
             //    write!(f, "Metadata::MediaDetailsBatch({} items)", batch.len())
             //}
-            Self::CheckDetailsFetcherQueue => write!(f, "Metadata::CheckDetailsFetcherQueue"),
+            Self::CheckDetailsFetcherQueue => {
+                write!(f, "Metadata::CheckDetailsFetcherQueue")
+            }
             Self::MediaDetailsLoaded(result) => match result {
-                Ok(refs) => write!(f, "Metadata::MediaDetailsLoaded(Ok: {} items)", refs.len()),
+                Ok(refs) => write!(
+                    f,
+                    "Metadata::MediaDetailsLoaded(Ok: {} items)",
+                    refs.len()
+                ),
                 Err(e) => write!(f, "Metadata::MediaDetailsLoaded(Err: {})", e),
             },
             //Self::MediaDetailsFetched(id, result) => match result {
@@ -167,7 +191,11 @@ impl std::fmt::Debug for Message {
                     cache_key,
                     data.len()
                 ),
-                Err(e) => write!(f, "Metadata::ImageLoaded({}, Err: {})", cache_key, e),
+                Err(e) => write!(
+                    f,
+                    "Metadata::ImageLoaded({}, Err: {})",
+                    cache_key, e
+                ),
             },
             Self::UnifiedImageLoaded(req, _) => {
                 write!(f, "Metadata::UnifiedImageLoaded({:?}, <handle>)", req)

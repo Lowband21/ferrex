@@ -103,7 +103,10 @@ impl DomainBoundary {
     }
 
     /// Get a mutable service by name
-    pub fn service_mut(&mut self, name: &str) -> Option<&mut dyn ServiceDependency> {
+    pub fn service_mut(
+        &mut self,
+        name: &str,
+    ) -> Option<&mut dyn ServiceDependency> {
         match self.services.get_mut(name) {
             Some(service) => Some(&mut **service),
             None => None,
@@ -111,7 +114,11 @@ impl DomainBoundary {
     }
 
     /// Execute a command on a service
-    pub async fn execute_command(&mut self, service: &str, command: &str) -> Result<(), String> {
+    pub async fn execute_command(
+        &mut self,
+        service: &str,
+        command: &str,
+    ) -> Result<(), String> {
         self.service_mut(service)
             .ok_or_else(|| format!("Service '{}' not found", service))?
             .execute_command(command)
@@ -119,7 +126,11 @@ impl DomainBoundary {
     }
 
     /// Execute a query on a service
-    pub async fn execute_query(&self, service: &str, query: &str) -> Result<String, String> {
+    pub async fn execute_query(
+        &self,
+        service: &str,
+        query: &str,
+    ) -> Result<String, String> {
         self.service(service)
             .ok_or_else(|| format!("Service '{}' not found", service))?
             .execute_query(query)
@@ -165,7 +176,11 @@ impl MockService {
     }
 
     /// Set a response for a query
-    pub fn set_query_response(&self, query: impl Into<String>, response: impl Into<String>) {
+    pub fn set_query_response(
+        &self,
+        query: impl Into<String>,
+        response: impl Into<String>,
+    ) {
         self.query_responses
             .lock()
             .unwrap()
@@ -173,7 +188,11 @@ impl MockService {
     }
 
     /// Set an error for a command
-    pub fn set_command_error(&self, command: impl Into<String>, error: impl Into<String>) {
+    pub fn set_command_error(
+        &self,
+        command: impl Into<String>,
+        error: impl Into<String>,
+    ) {
         self.command_errors
             .lock()
             .unwrap()
@@ -212,7 +231,9 @@ impl ServiceDependency for MockService {
 
         let query_owned = query.to_string();
         Box::pin(async move {
-            response.ok_or_else(|| format!("No response configured for query: {}", query_owned))
+            response.ok_or_else(|| {
+                format!("No response configured for query: {}", query_owned)
+            })
         })
     }
 }

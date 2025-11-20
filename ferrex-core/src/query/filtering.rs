@@ -76,7 +76,9 @@ impl<'a> FilterRequestParams<'a> {
 }
 
 /// Convenience builder when the caller prefers a functional style.
-pub fn build_filter_indices_request(params: FilterRequestParams<'_>) -> FilterIndicesRequest {
+pub fn build_filter_indices_request(
+    params: FilterRequestParams<'_>,
+) -> FilterIndicesRequest {
     params.into_request()
 }
 
@@ -87,7 +89,9 @@ pub fn decade_to_year_range(decade: UiDecade) -> ScalarRange<u16> {
 }
 
 /// Convert UI resolution buckets into inclusive pixel ranges.
-pub fn resolution_to_range(resolution: UiResolution) -> Option<ScalarRange<u16>> {
+pub fn resolution_to_range(
+    resolution: UiResolution,
+) -> Option<ScalarRange<u16>> {
     use UiResolution::*;
     match resolution {
         Any => None,
@@ -101,7 +105,9 @@ pub fn resolution_to_range(resolution: UiResolution) -> Option<ScalarRange<u16>>
 }
 
 /// Map UI watch status to backend filter variant.
-pub fn watch_status_to_filter(status: UiWatchStatus) -> Option<WatchStatusFilter> {
+pub fn watch_status_to_filter(
+    status: UiWatchStatus,
+) -> Option<WatchStatusFilter> {
     use UiWatchStatus::*;
     match status {
         Any => None,
@@ -126,9 +132,8 @@ pub fn hash_filter_spec(spec: &FilterIndicesRequest) -> u64 {
     spec.resolution_range.hash(&mut hasher);
     spec.watch_status.hash(&mut hasher);
 
-    match spec.search.as_ref() {
-        Some(search) => search.trim().to_lowercase().hash(&mut hasher),
-        None => (),
+    if let Some(search) = spec.search.as_ref() {
+        search.trim().to_lowercase().hash(&mut hasher)
     }
 
     spec.sort.hash(&mut hasher);

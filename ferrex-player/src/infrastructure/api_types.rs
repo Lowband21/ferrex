@@ -1,17 +1,20 @@
 // Curated surface from ferrex-core for player-facing code
 pub use ferrex_core::player_prelude::UserWatchState;
 pub use ferrex_core::player_prelude::{
-    ApiResponse, BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest, EnhancedMovieDetails,
-    EnhancedSeriesDetails, EpisodeID, EpisodeReference, FetchMediaRequest, ImageData, Library,
-    LibraryID, LibraryMediaCache, LibraryMediaResponse, LibraryReference, LibraryType, Media,
-    MediaDetailsOption, MediaFile, MediaFileMetadata, MediaID, MovieID, MovieReference,
-    ParsedMediaInfo, ScanLifecycleStatus, ScanProgressEvent, ScanSnapshotDto, SeasonID,
-    SeasonReference, SeriesID, SeriesReference, SortOrder, TmdbDetails, UpdateLibraryRequest,
-    WatchProgress,
+    ApiResponse, BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest,
+    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeID, EpisodeReference,
+    FetchMediaRequest, ImageData, Library, LibraryID, LibraryMediaCache,
+    LibraryMediaResponse, LibraryReference, LibraryType, Media,
+    MediaDetailsOption, MediaFile, MediaFileMetadata, MediaID, MovieID,
+    MovieReference, ParsedMediaInfo, ScanLifecycleStatus, ScanProgressEvent,
+    ScanSnapshotDto, SeasonID, SeasonReference, SeriesID, SeriesReference,
+    SortOrder, TmdbDetails, UpdateLibraryRequest, WatchProgress,
 };
 
 #[cfg(feature = "demo")]
-pub use ferrex_core::api_types::demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
+pub use ferrex_core::api_types::demo::{
+    DemoLibraryStatus, DemoResetRequest, DemoStatus,
+};
 
 /// Helper to check if we need to fetch full details
 pub fn needs_details_fetch(details: &MediaDetailsOption) -> bool {
@@ -30,15 +33,21 @@ pub fn get_details_endpoint(details: &MediaDetailsOption) -> Option<&str> {
 pub fn extract_poster_url_from_reference(media_ref: &Media) -> Option<String> {
     match media_ref {
         Media::Movie(movie) => extract_poster_url_from_details(&movie.details),
-        Media::Series(series) => extract_poster_url_from_details(&series.details),
-        Media::Season(season) => extract_poster_url_from_details(&season.details),
+        Media::Series(series) => {
+            extract_poster_url_from_details(&series.details)
+        }
+        Media::Season(season) => {
+            extract_poster_url_from_details(&season.details)
+        }
         Media::Episode(episode) => {
             // Episodes use still images, not posters
             match &episode.details {
-                MediaDetailsOption::Details(TmdbDetails::Episode(details)) => details
-                    .still_path
-                    .as_ref()
-                    .map(|path| get_tmdb_image_url(path)),
+                MediaDetailsOption::Details(TmdbDetails::Episode(details)) => {
+                    details
+                        .still_path
+                        .as_ref()
+                        .map(|path| get_tmdb_image_url(path))
+                }
                 _ => None,
             }
         }
@@ -47,12 +56,18 @@ pub fn extract_poster_url_from_reference(media_ref: &Media) -> Option<String> {
 
 /// Extract poster URL from MediaDetailsOption
 /// Returns either a server-cached endpoint or TMDB URL
-pub fn extract_poster_url_from_details(details: &MediaDetailsOption) -> Option<String> {
+pub fn extract_poster_url_from_details(
+    details: &MediaDetailsOption,
+) -> Option<String> {
     match details {
         MediaDetailsOption::Details(tmdb_details) => match tmdb_details {
             TmdbDetails::Movie(movie) => {
                 movie.poster_path.as_ref().map(|path| {
-                    log::debug!("Movie {} has poster path: {}", movie.title, path);
+                    log::debug!(
+                        "Movie {} has poster path: {}",
+                        movie.title,
+                        path
+                    );
                     // Return the path as-is - it could be a server endpoint or TMDB path
                     path.clone()
                 })

@@ -27,7 +27,8 @@ pub struct MetadataDomainState {
     pub tmdb_poster_urls: HashMap<String, String>,
     pub metadata_fetch_attempts: HashMap<String, Instant>,
     pub image_service: UnifiedImageService,
-    pub image_receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
+    pub image_receiver:
+        Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
 
     // Shared references needed by metadata domain
     //pub media_store: Arc<StdRwLock<MediaStore>>,
@@ -89,7 +90,10 @@ impl MetadataDomain {
         Task::none()
     }
 
-    pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
+    pub fn handle_event(
+        &mut self,
+        event: &CrossDomainEvent,
+    ) -> Task<DomainMessage> {
         match event {
             CrossDomainEvent::MediaLoaded => {
                 // Could trigger metadata fetching for new media

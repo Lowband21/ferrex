@@ -39,7 +39,10 @@ impl DataCompletenessAnalyzer {
     }
 
     /// Analyze completeness for MovieReference data
-    pub fn analyze_movies(movies: &[MovieReference], query: &MediaQuery) -> DataCompleteness {
+    pub fn analyze_movies(
+        movies: &[MovieReference],
+        query: &MediaQuery,
+    ) -> DataCompleteness {
         if movies.is_empty() {
             return DataCompleteness::Low;
         }
@@ -58,7 +61,9 @@ impl DataCompletenessAnalyzer {
         // Count how many have TMDB details
         let with_details = sample
             .iter()
-            .filter(|movie| matches!(&movie.details, MediaDetailsOption::Details(_)))
+            .filter(|movie| {
+                matches!(&movie.details, MediaDetailsOption::Details(_))
+            })
             .count();
 
         let completeness_ratio = with_details as f32 / sample_size as f32;
@@ -71,7 +76,10 @@ impl DataCompletenessAnalyzer {
     }
 
     /// Analyze completeness for SeriesReference data
-    pub fn analyze_series(series: &[SeriesReference], query: &MediaQuery) -> DataCompleteness {
+    pub fn analyze_series(
+        series: &[SeriesReference],
+        query: &MediaQuery,
+    ) -> DataCompleteness {
         if series.is_empty() {
             return DataCompleteness::Low;
         }
@@ -100,7 +108,10 @@ impl DataCompletenessAnalyzer {
     }
 
     /// Analyze completeness for mixed Media data
-    pub fn analyze_media_refs(refs: &[Media], query: &MediaQuery) -> DataCompleteness {
+    pub fn analyze_media_refs(
+        refs: &[Media],
+        query: &MediaQuery,
+    ) -> DataCompleteness {
         if refs.is_empty() {
             return DataCompleteness::Low;
         }
@@ -117,8 +128,12 @@ impl DataCompletenessAnalyzer {
         let with_details = sample
             .iter()
             .filter(|media_ref| match media_ref {
-                Media::Movie(m) => matches!(&m.details, MediaDetailsOption::Details(_)),
-                Media::Series(s) => matches!(&s.details, MediaDetailsOption::Details(_)),
+                Media::Movie(m) => {
+                    matches!(&m.details, MediaDetailsOption::Details(_))
+                }
+                Media::Series(s) => {
+                    matches!(&s.details, MediaDetailsOption::Details(_))
+                }
                 _ => false,
             })
             .count();
@@ -248,43 +263,45 @@ mod tests {
             tmdb_id: 123,
             title: MovieTitle::new("Test Movie".to_string()).unwrap(),
             details: if has_details {
-                MediaDetailsOption::Details(TmdbDetails::Movie(EnhancedMovieDetails {
-                    id: 123,
-                    title: "Test Movie".to_string(),
-                    overview: Some("A test movie".to_string()),
-                    release_date: Some("2023-01-15".to_string()),
-                    runtime: Some(120),
-                    vote_average: Some(7.5),
-                    vote_count: Some(100),
-                    popularity: Some(50.0),
-                    content_rating: None,
-                    content_ratings: Vec::new(),
-                    release_dates: Vec::new(),
-                    genres: vec![],
-                    spoken_languages: vec![],
-                    production_companies: vec![],
-                    production_countries: vec![],
-                    homepage: None,
-                    status: None,
-                    tagline: None,
-                    budget: None,
-                    revenue: None,
-                    poster_path: None,
-                    backdrop_path: None,
-                    logo_path: None,
-                    images: Default::default(),
-                    cast: vec![],
-                    crew: vec![],
-                    videos: vec![],
-                    keywords: vec![],
-                    external_ids: Default::default(),
-                    alternative_titles: Vec::new(),
-                    translations: Vec::new(),
-                    collection: None,
-                    recommendations: Vec::new(),
-                    similar: Vec::new(),
-                    original_title: None,
-                }))
+                MediaDetailsOption::Details(TmdbDetails::Movie(
+                    EnhancedMovieDetails {
+                        id: 123,
+                        title: "Test Movie".to_string(),
+                        overview: Some("A test movie".to_string()),
+                        release_date: Some("2023-01-15".to_string()),
+                        runtime: Some(120),
+                        vote_average: Some(7.5),
+                        vote_count: Some(100),
+                        popularity: Some(50.0),
+                        content_rating: None,
+                        content_ratings: Vec::new(),
+                        release_dates: Vec::new(),
+                        genres: vec![],
+                        spoken_languages: vec![],
+                        production_companies: vec![],
+                        production_countries: vec![],
+                        homepage: None,
+                        status: None,
+                        tagline: None,
+                        budget: None,
+                        revenue: None,
+                        poster_path: None,
+                        backdrop_path: None,
+                        logo_path: None,
+                        images: Default::default(),
+                        cast: vec![],
+                        crew: vec![],
+                        videos: vec![],
+                        keywords: vec![],
+                        external_ids: Default::default(),
+                        alternative_titles: Vec::new(),
+                        translations: Vec::new(),
+                        collection: None,
+                        recommendations: Vec::new(),
+                        similar: Vec::new(),
+                        original_title: None,
+                    },
+                ))
             } else {
                 MediaDetailsOption::Endpoint("/movie/123".to_string())
             },
@@ -310,7 +327,10 @@ mod tests {
             (0..10).map(|_| create_test_movie(true)).collect();
 
         let query = MediaQuery::default();
-        let completeness = DataCompletenessAnalyzer::analyze_movies(&movies_with_details, &query);
+        let completeness = DataCompletenessAnalyzer::analyze_movies(
+            &movies_with_details,
+            &query,
+        );
         assert_eq!(completeness, DataCompleteness::High);
 
         // No movies with details - Low completeness
@@ -332,8 +352,10 @@ mod tests {
             mixed_movies.push(create_test_movie(i < 5));
         }
 
-        let completeness =
-            DataCompletenessAnalyzer::analyze_movies(&mixed_movies, &query_needs_metadata);
+        let completeness = DataCompletenessAnalyzer::analyze_movies(
+            &mixed_movies,
+            &query_needs_metadata,
+        );
         assert_eq!(completeness, DataCompleteness::Medium);
     }
 
@@ -362,7 +384,8 @@ mod tests {
         let mut complex_query = moderate_query.clone();
         complex_query.filters.genres = vec!["Action".to_string()];
         complex_query.filters.year_range = Some(ScalarRange::new(2020, 2024));
-        complex_query.filters.watch_status = Some(WatchStatusFilter::InProgress);
+        complex_query.filters.watch_status =
+            Some(WatchStatusFilter::InProgress);
         complex_query.search = Some(SearchQuery {
             text: "test".to_string(),
             fields: vec![SearchField::Title],

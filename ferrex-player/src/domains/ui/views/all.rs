@@ -2,7 +2,9 @@ use crate::domains::ui::theme;
 use crate::domains::ui::views::grid::{
     movie_reference_card_with_state, series_reference_card_with_state,
 };
-use crate::domains::ui::{messages::Message, views::carousel::windowed_media_carousel};
+use crate::domains::ui::{
+    messages::Message, views::carousel::windowed_media_carousel,
+};
 use crate::infrastructure::LibraryType;
 use crate::state_refactored::State;
 use ferrex_core::player_prelude::{MovieID, SeriesID};
@@ -26,7 +28,9 @@ pub fn view_all_content<'a>(state: &'a State) -> Element<'a, Message> {
         feature = "profile-with-tracy",
         feature = "profile-with-tracing"
     ))]
-    profiling::scope!(crate::infrastructure::profiling_scopes::scopes::VIEW_RENDER);
+    profiling::scope!(
+        crate::infrastructure::profiling_scopes::scopes::VIEW_RENDER
+    );
 
     let watch_state_opt = state.domains.media.state.get_watch_state();
 
@@ -68,11 +72,17 @@ pub fn view_all_content<'a>(state: &'a State) -> Element<'a, Message> {
                         &state.domains.ui.state.movies_carousel,
                         move |idx| {
                             movies_ids.get(idx).map(|uuid| {
-                                let is_hovered =
-                                    state.domains.ui.state.hovered_media_id.as_ref()
-                                        == Some(uuid);
+                                let is_hovered = state
+                                    .domains
+                                    .ui
+                                    .state
+                                    .hovered_media_id
+                                    .as_ref()
+                                    == Some(uuid);
 
-                                let item_watch_progress = if let Some(watch_state) = watch_state_opt
+                                let item_watch_progress = if let Some(
+                                    watch_state,
+                                ) = watch_state_opt
                                 {
                                     watch_state.get_watch_progress(uuid)
                                 } else {
@@ -117,11 +127,17 @@ pub fn view_all_content<'a>(state: &'a State) -> Element<'a, Message> {
                         &state.domains.ui.state.tv_carousel,
                         move |idx| {
                             series_ids.get(idx).map(|uuid| {
-                                let is_hovered =
-                                    state.domains.ui.state.hovered_media_id.as_ref()
-                                        == Some(uuid);
+                                let is_hovered = state
+                                    .domains
+                                    .ui
+                                    .state
+                                    .hovered_media_id
+                                    .as_ref()
+                                    == Some(uuid);
 
-                                let item_watch_progress = if let Some(watch_state) = watch_state_opt
+                                let item_watch_progress = if let Some(
+                                    watch_state,
+                                ) = watch_state_opt
                                 {
                                     watch_state.get_watch_progress(uuid)
                                 } else {

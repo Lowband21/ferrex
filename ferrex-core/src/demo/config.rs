@@ -59,53 +59,59 @@ impl DemoSeedOptions {
     /// per-field environment overrides and finally defaults.
     pub fn from_env() -> Self {
         if let Ok(raw) = std::env::var("FERREX_DEMO_OPTIONS")
-            && let Ok(parsed) = serde_json::from_str::<DemoSeedOptions>(&raw) {
-                return parsed;
-            }
+            && let Ok(parsed) = serde_json::from_str::<DemoSeedOptions>(&raw)
+        {
+            return parsed;
+        }
 
         let mut opts = DemoSeedOptions::default();
 
         if let Ok(path) = std::env::var("FERREX_DEMO_ROOT")
-            && !path.is_empty() {
-                opts.root = Some(PathBuf::from(path));
-            }
+            && !path.is_empty()
+        {
+            opts.root = Some(PathBuf::from(path));
+        }
 
         if let Ok(flag) = std::env::var("FERREX_DEMO_ALLOW_DEVIATIONS") {
-            opts.allow_deviations = matches_ignore_ascii_case(&flag, ["1", "true", "yes"]);
+            opts.allow_deviations =
+                matches_ignore_ascii_case(&flag, ["1", "true", "yes"]);
         }
 
         if let Ok(rate) = std::env::var("FERREX_DEMO_DEVIATION_RATE")
-            && let Ok(val) = rate.parse::<f32>() {
-                opts.deviation_rate = val.clamp(0.0, 1.0);
-            }
+            && let Ok(val) = rate.parse::<f32>()
+        {
+            opts.deviation_rate = val.clamp(0.0, 1.0);
+        }
 
         if let Ok(flag) = std::env::var("FERREX_DEMO_SKIP_METADATA") {
-            opts.skip_metadata_probe = matches_ignore_ascii_case(&flag, ["1", "true", "yes"]);
+            opts.skip_metadata_probe =
+                matches_ignore_ascii_case(&flag, ["1", "true", "yes"]);
         }
 
         if let Ok(flag) = std::env::var("FERREX_DEMO_ZERO_LENGTH") {
-            opts.allow_zero_length_files = matches_ignore_ascii_case(&flag, ["1", "true", "yes"]);
+            opts.allow_zero_length_files =
+                matches_ignore_ascii_case(&flag, ["1", "true", "yes"]);
         }
 
         if let Ok(count) = std::env::var("FERREX_DEMO_MOVIE_COUNT")
             && let Ok(parsed) = count.parse::<usize>()
-                && let Some(first) = opts
-                    .libraries
-                    .iter_mut()
-                    .find(|lib| lib.library_type == LibraryType::Movies)
-                {
-                    first.movie_count = Some(parsed.max(1));
-                }
+            && let Some(first) = opts
+                .libraries
+                .iter_mut()
+                .find(|lib| lib.library_type == LibraryType::Movies)
+        {
+            first.movie_count = Some(parsed.max(1));
+        }
 
         if let Ok(series) = std::env::var("FERREX_DEMO_SERIES_COUNT")
             && let Ok(parsed) = series.parse::<usize>()
-                && let Some(first) = opts
-                    .libraries
-                    .iter_mut()
-                    .find(|lib| lib.library_type == LibraryType::Series)
-                {
-                    first.series_count = Some(parsed.max(1));
-                }
+            && let Some(first) = opts
+                .libraries
+                .iter_mut()
+                .find(|lib| lib.library_type == LibraryType::Series)
+        {
+            first.series_count = Some(parsed.max(1));
+        }
 
         opts
     }
@@ -154,7 +160,10 @@ impl DemoLibraryOptions {
     }
 }
 
-fn matches_ignore_ascii_case(value: &str, options: impl IntoIterator<Item = &'static str>) -> bool {
+fn matches_ignore_ascii_case(
+    value: &str,
+    options: impl IntoIterator<Item = &'static str>,
+) -> bool {
     let value_lower = value.trim().to_ascii_lowercase();
     options
         .into_iter()

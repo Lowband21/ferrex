@@ -118,14 +118,14 @@ Set via `FERREX_DEMO_OPTIONS`.
 cargo run -p ferrex-server --features demo -- --demo
 
 # Start player in demo mode (separate terminal)
-FERREX_SERVER_URL=http://localhost:3000 \
+FERREX_SERVER_URL=https://localhost:3000 \
 FERREX_PLAYER_DEMO_MODE=1 \
 cargo run -p ferrex-player --features demo -- --demo
 
 # Reset demo libraries via curl (requires admin token)
 curl -X POST \
   -H "Authorization: Bearer <token>" \
-  http://localhost:3000/api/v1/admin/demo/reset
+  https://localhost:3000/api/v1/admin/demo/reset
 ```
 
 Happy demoing!

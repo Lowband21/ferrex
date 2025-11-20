@@ -24,9 +24,12 @@ use crate::domains::ui::messages::Message as UIMessage;
 use crate::domains::ui::scroll_manager::ScrollPositionManager;
 use crate::domains::ui::types::{DisplayMode, ViewState};
 use crate::infrastructure::repository::accessor::{Accessor, ReadOnly};
-use crate::infrastructure::repository::{EpisodeYoke, MovieYoke, SeasonYoke, SeriesYoke};
+use crate::infrastructure::repository::{
+    EpisodeYoke, MovieYoke, SeasonYoke, SeriesYoke,
+};
 use ferrex_core::player_prelude::{
-    LibraryID, SortBy, SortOrder, UiDecade, UiGenre, UiResolution, UiWatchStatus,
+    LibraryID, SortBy, SortOrder, UiDecade, UiGenre, UiResolution,
+    UiWatchStatus,
 };
 use iced::Task;
 use std::collections::{HashMap, HashSet};
@@ -127,7 +130,10 @@ impl UIDomain {
         Task::none()
     }
 
-    pub fn handle_event(&mut self, event: &CrossDomainEvent) -> Task<DomainMessage> {
+    pub fn handle_event(
+        &mut self,
+        event: &CrossDomainEvent,
+    ) -> Task<DomainMessage> {
         match event {
             CrossDomainEvent::LibraryChanged(library_id) => {
                 log::info!(
@@ -171,8 +177,10 @@ impl UIDomain {
                 if matches!(self.state.display_mode, DisplayMode::Curated) {
                     // Good - show all libraries
                     log::info!("UI: In Curated mode - will show all libraries");
-                } else if matches!(self.state.display_mode, DisplayMode::Library)
-                    && self.state.current_library_id.is_none()
+                } else if matches!(
+                    self.state.display_mode,
+                    DisplayMode::Library
+                ) && self.state.current_library_id.is_none()
                 {
                     // Bad state - Library mode but no library selected
                     log::warn!(

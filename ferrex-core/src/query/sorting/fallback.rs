@@ -74,7 +74,10 @@ impl<T> SmartFallbackSort<T> {
     }
 
     /// Add a default fallback strategy (lowest priority)
-    pub fn with_default(mut self, strategy: impl SortStrategy<T> + 'static) -> Self {
+    pub fn with_default(
+        mut self,
+        strategy: impl SortStrategy<T> + 'static,
+    ) -> Self {
         self.rules.push(FallbackRule {
             condition: Arc::new(|_| true), // Always matches
             strategy: Box::new(strategy),
@@ -102,9 +105,9 @@ impl<T: Clone> SortStrategy<T> for SmartFallbackSort<T> {
 
     fn can_apply(&self, sample: &T) -> bool {
         // Can apply if any rule matches
-        self.rules
-            .iter()
-            .any(|rule| (rule.condition)(sample) && rule.strategy.can_apply(sample))
+        self.rules.iter().any(|rule| {
+            (rule.condition)(sample) && rule.strategy.can_apply(sample)
+        })
     }
 
     fn cost_estimate(&self) -> SortCost {
@@ -167,7 +170,10 @@ impl<T> FallbackSortBuilder<T> {
     }
 
     /// Set the default fallback strategy
-    pub fn otherwise(self, strategy: impl SortStrategy<T> + 'static) -> SmartFallbackSort<T> {
+    pub fn otherwise(
+        self,
+        strategy: impl SortStrategy<T> + 'static,
+    ) -> SmartFallbackSort<T> {
         self.fallback.with_default(strategy)
     }
 

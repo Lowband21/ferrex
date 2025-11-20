@@ -8,17 +8,25 @@ use crate::{
 use iced::ContentFit;
 use iced::Theme;
 use iced::{
-    widget::{button, column, container, mouse_area, pick_list, row, slider, stack, text, Space},
     Alignment, Element, Length,
+    widget::{
+        Space, button, column, container, mouse_area, pick_list, row, slider,
+        stack, text,
+    },
 };
 use lucide_icons::Icon;
 use subwave_core::video::types::{AudioTrack, SubtitleTrack};
 use subwave_unified::video::BackendPreference;
 
 /// Helper function to create a control button with icon
-fn icon_button(icon: Icon, message: Option<Message>) -> Element<'static, Message> {
-    let btn = button(icon_text(icon))
-        .style(theme::button_transparent as fn(&iced::Theme, button::Status) -> button::Style);
+fn icon_button(
+    icon: Icon,
+    message: Option<Message>,
+) -> Element<'static, Message> {
+    let btn = button(icon_text(icon)).style(
+        theme::button_transparent
+            as fn(&iced::Theme, button::Status) -> button::Style,
+    );
 
     if let Some(msg) = message {
         btn.on_press(msg)
@@ -132,11 +140,13 @@ impl PlayerDomainState {
         };
 
         // Calculate buffered percentage - streaming domain should update this value
-        let buffered_percentage = self.buffered_percentage.clamp(played_percentage, 1.0); // Buffered can't be less than played
+        let buffered_percentage =
+            self.buffered_percentage.clamp(played_percentage, 1.0); // Buffered can't be less than played
 
         // Use FillPortion for dynamic resizing based on percentages
         let played_portion = (played_percentage * 1000.0).max(1.0) as u16;
-        let _buffered_portion = ((buffered_percentage - played_percentage) * 1000.0)
+        let _buffered_portion = ((buffered_percentage - played_percentage)
+            * 1000.0)
             .max(0.0)
             .min(50.0) as u16;
         let unplayed_portion = (1000u16)
@@ -170,7 +180,9 @@ impl PlayerDomainState {
             // Stack: transparent hit area with visual bar centered
             container(stack![
                 // Transparent hit area
-                container(Space::new().width(Length::Fill).height(hit_area_height),),
+                container(
+                    Space::new().width(Length::Fill).height(hit_area_height),
+                ),
                 // Visual bar centered vertically
                 container(seek_bar_visual)
                     .width(Length::Fill)
@@ -195,10 +207,13 @@ impl PlayerDomainState {
             // Build a Wayland-only backend toggle element
             let backend_toggle: Element<Message, Theme> =
                 if std::env::var("WAYLAND_DISPLAY").is_ok() {
-                    let label = match self.video_opt.as_ref().map(|v| v.backend()) {
-                        Some(BackendPreference::ForceAppsink) => "Use Wayland",
-                        _ => "Use AppSink",
-                    };
+                    let label =
+                        match self.video_opt.as_ref().map(|v| v.backend()) {
+                            Some(BackendPreference::ForceAppsink) => {
+                                "Use Wayland"
+                            }
+                            _ => "Use AppSink",
+                        };
                     button(text(label).size(14))
                         .on_press(Message::ToggleAppsinkBackend)
                         .style(theme::button_transparent)
@@ -350,10 +365,12 @@ impl PlayerDomainState {
                 row![
                     text("Player Settings").size(20).style(theme::text_bright),
                     Space::new().width(Length::Fill),
-                    button(text(Icon::X.unicode()).font(lucide_font()).size(20))
-                        .on_press(Message::ToggleSettings)
-                        .style(theme::button_ghost)
-                        .padding(4),
+                    button(
+                        text(Icon::X.unicode()).font(lucide_font()).size(20)
+                    )
+                    .on_press(Message::ToggleSettings)
+                    .style(theme::button_ghost)
+                    .padding(4),
                 ]
                 .align_y(Alignment::Center),
                 Space::new().height(Length::Fixed(10.0)),
@@ -407,36 +424,55 @@ impl PlayerDomainState {
                 if self.is_hdr_content {
                     container(
                         column![
-                            text("HDR Information").size(13).style(theme::text_muted),
+                            text("HDR Information")
+                                .size(13)
+                                .style(theme::text_muted),
                             Space::new().height(Length::Fixed(4.0)),
                             text("HDR content detected")
                                 .size(11)
                                 .style(theme::text_bright),
                             if let Some(media) = &self.current_media {
-                                if let Some(metadata) = &media.media_file_metadata {
-                                    let mut metadata_column = column![].spacing(2);
+                                if let Some(metadata) =
+                                    &media.media_file_metadata
+                                {
+                                    let mut metadata_column =
+                                        column![].spacing(2);
 
-                                    if let Some(bit_depth) = metadata.bit_depth {
+                                    if let Some(bit_depth) = metadata.bit_depth
+                                    {
                                         metadata_column = metadata_column.push(
-                                            text(format!("Bit depth: {}", bit_depth))
-                                                .size(11)
-                                                .style(theme::text_dim),
+                                            text(format!(
+                                                "Bit depth: {}",
+                                                bit_depth
+                                            ))
+                                            .size(11)
+                                            .style(theme::text_dim),
                                         );
                                     }
 
-                                    if let Some(color_transfer) = &metadata.color_transfer {
+                                    if let Some(color_transfer) =
+                                        &metadata.color_transfer
+                                    {
                                         metadata_column = metadata_column.push(
-                                            text(format!("Transfer: {}", color_transfer))
-                                                .size(11)
-                                                .style(theme::text_dim),
+                                            text(format!(
+                                                "Transfer: {}",
+                                                color_transfer
+                                            ))
+                                            .size(11)
+                                            .style(theme::text_dim),
                                         );
                                     }
 
-                                    if let Some(color_primaries) = &metadata.color_primaries {
+                                    if let Some(color_primaries) =
+                                        &metadata.color_primaries
+                                    {
                                         metadata_column = metadata_column.push(
-                                            text(format!("Primaries: {}", color_primaries))
-                                                .size(11)
-                                                .style(theme::text_dim),
+                                            text(format!(
+                                                "Primaries: {}",
+                                                color_primaries
+                                            ))
+                                            .size(11)
+                                            .style(theme::text_dim),
                                         );
                                     }
 
@@ -472,7 +508,9 @@ impl PlayerDomainState {
                     column![
                         text("Shortcuts").size(13).style(theme::text_muted),
                         Space::new().height(Length::Fixed(4.0)),
-                        text("Space: Play/Pause").size(11).style(theme::text_dim),
+                        text("Space: Play/Pause")
+                            .size(11)
+                            .style(theme::text_dim),
                         text("A/S: Audio/Subtitle cycle")
                             .size(11)
                             .style(theme::text_dim),
@@ -562,10 +600,15 @@ impl PlayerDomainState {
             row![
                 text("Subtitles:").size(14),
                 Space::new().width(Length::Fill),
-                pick_list(subtitle_options, current_selection, |option| match option {
-                    SubtitleOption::Disabled => Message::SubtitleTrackSelected(None),
-                    SubtitleOption::Track(track) =>
-                        Message::SubtitleTrackSelected(Some(track.index)),
+                pick_list(subtitle_options, current_selection, |option| {
+                    match option {
+                        SubtitleOption::Disabled => {
+                            Message::SubtitleTrackSelected(None)
+                        }
+                        SubtitleOption::Track(track) => {
+                            Message::SubtitleTrackSelected(Some(track.index))
+                        }
+                    }
                 })
                 .width(Length::Fixed(200.0))
                 .style(theme::pick_list_dark::<SubtitleOption>)
@@ -577,7 +620,9 @@ impl PlayerDomainState {
     }
 
     /// Build the quality/tone mapping menu popup
-    pub fn build_quality_menu(&self) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
+    pub fn build_quality_menu(
+        &self,
+    ) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
         let content = column![
             // Header
             row![
@@ -600,30 +645,35 @@ impl PlayerDomainState {
     }
 
     /// Build the subtitle menu popup
-    pub fn build_subtitle_menu(&self) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
+    pub fn build_subtitle_menu(
+        &self,
+    ) -> iced::Element<'_, Message, Theme, iced_wgpu::Renderer> {
         container(
             column![
                 // Header
                 row![
                     text("Subtitles").size(16).style(theme::text_bright),
                     Space::new().width(Length::Fill),
-                    button(text(Icon::X.unicode()).font(lucide_font()).size(16))
-                        .on_press(Message::ToggleSubtitleMenu)
-                        .style(theme::button_ghost)
-                        .padding(2),
+                    button(
+                        text(Icon::X.unicode()).font(lucide_font()).size(16)
+                    )
+                    .on_press(Message::ToggleSubtitleMenu)
+                    .style(theme::button_ghost)
+                    .padding(2),
                 ]
                 .align_y(Alignment::Center),
                 Space::new().height(Length::Fixed(15.0)),
                 // Disabled option
                 button({
-                    let check_icon: Element<Message> = if !self.subtitles_enabled {
-                        text(Icon::Check.unicode())
-                            .font(lucide_font())
-                            .size(14)
-                            .into()
-                    } else {
-                        Space::new().width(Length::Fixed(14.0)).into()
-                    };
+                    let check_icon: Element<Message> =
+                        if !self.subtitles_enabled {
+                            text(Icon::Check.unicode())
+                                .font(lucide_font())
+                                .size(14)
+                                .into()
+                        } else {
+                            Space::new().width(Length::Fixed(14.0)).into()
+                        };
 
                     row![
                         check_icon,
@@ -644,17 +694,21 @@ impl PlayerDomainState {
                         .filter(|track| track.is_text_based())
                         .map(|track| {
                             let is_selected = self.subtitles_enabled
-                                && self.current_subtitle_track == Some(track.index);
+                                && self.current_subtitle_track
+                                    == Some(track.index);
 
                             button({
-                                let check_icon: Element<Message> = if is_selected {
-                                    text(Icon::Check.unicode())
-                                        .font(lucide_font())
-                                        .size(14)
-                                        .into()
-                                } else {
-                                    Space::new().width(Length::Fixed(14.0)).into()
-                                };
+                                let check_icon: Element<Message> =
+                                    if is_selected {
+                                        text(Icon::Check.unicode())
+                                            .font(lucide_font())
+                                            .size(14)
+                                            .into()
+                                    } else {
+                                        Space::new()
+                                            .width(Length::Fixed(14.0))
+                                            .into()
+                                    };
 
                                 row![
                                     check_icon,
@@ -663,7 +717,9 @@ impl PlayerDomainState {
                                 ]
                                 .align_y(Alignment::Center)
                             })
-                            .on_press(Message::SubtitleTrackSelected(Some(track.index)))
+                            .on_press(Message::SubtitleTrackSelected(Some(
+                                track.index,
+                            )))
                             .width(Length::Fill)
                             .style(theme::button_menu_item)
                             .padding([6, 10])
@@ -693,7 +749,9 @@ impl std::fmt::Display for SubtitleOption {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SubtitleOption::Disabled => write!(f, "Disabled"),
-            SubtitleOption::Track(track) => write!(f, "{}", format_subtitle_track(track)),
+            SubtitleOption::Track(track) => {
+                write!(f, "{}", format_subtitle_track(track))
+            }
         }
     }
 }

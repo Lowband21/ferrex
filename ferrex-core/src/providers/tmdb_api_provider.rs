@@ -32,7 +32,9 @@ pub enum ProviderError {
 use tmdb_api::{
     client::{reqwest::ReqwestExecutor, Client},
     movie::{
-        alternative_titles::{MovieAlternativeTitles, MovieAlternativeTitlesResult},
+        alternative_titles::{
+            MovieAlternativeTitles, MovieAlternativeTitlesResult,
+        },
         credits::{MovieCredits, MovieCreditsResult},
         details::MovieDetails,
         external_ids::{MovieExternalIds, MovieExternalIdsResult},
@@ -48,8 +50,12 @@ use tmdb_api::{
     },
     prelude::Command,
     tvshow::{
-        aggregate_credits::{TVShowAggregateCredits, TVShowAggregateCreditsResult},
-        content_rating::{ContentRatingResult as TvContentRatingResult, TVShowContentRating},
+        aggregate_credits::{
+            TVShowAggregateCredits, TVShowAggregateCreditsResult,
+        },
+        content_rating::{
+            ContentRatingResult as TvContentRatingResult, TVShowContentRating,
+        },
         details::TVShowDetails,
         episode::details::TVShowEpisodeDetails,
         images::{TVShowImages, TVShowImagesResult},
@@ -131,7 +137,8 @@ impl Default for TmdbApiProvider {
 
 impl TmdbApiProvider {
     pub fn new() -> Self {
-        let api_key = std::env::var("TMDB_API_KEY").unwrap_or_else(|_| String::new());
+        let api_key =
+            std::env::var("TMDB_API_KEY").unwrap_or_else(|_| String::new());
         let client = Client::new(api_key);
         Self { client }
     }
@@ -142,7 +149,10 @@ impl TmdbApiProvider {
         page: Option<u32>,
         language: Option<String>,
         region: Option<String>,
-    ) -> Result<tmdb_api::common::PaginatedResult<tmdb_api::movie::MovieShort>, ProviderError> {
+    ) -> Result<
+        tmdb_api::common::PaginatedResult<tmdb_api::movie::MovieShort>,
+        ProviderError,
+    > {
         let movie_popular = MoviePopular::default()
             .with_language(language)
             .with_region(region)
@@ -157,8 +167,10 @@ impl TmdbApiProvider {
         &self,
         page: Option<u32>,
         language: Option<String>,
-    ) -> Result<tmdb_api::common::PaginatedResult<tmdb_api::tvshow::TVShowShort>, ProviderError>
-    {
+    ) -> Result<
+        tmdb_api::common::PaginatedResult<tmdb_api::tvshow::TVShowShort>,
+        ProviderError,
+    > {
         let tv_show_popular = TVShowPopular::default()
             .with_language(language)
             .with_page(page);
@@ -188,8 +200,14 @@ impl TmdbApiProvider {
                 library_id: LibraryID(uuid::Uuid::nil()), // Search results aren't tied to a library yet
                 tmdb_id: r.inner.id,
                 title: MovieTitle::new(r.inner.title).unwrap(),
-                details: MediaDetailsOption::Endpoint(format!("/movie/{}", r.inner.id)),
-                endpoint: MovieURL::from(format!("/stream/movie/{}", r.inner.id)),
+                details: MediaDetailsOption::Endpoint(format!(
+                    "/movie/{}",
+                    r.inner.id
+                )),
+                endpoint: MovieURL::from(format!(
+                    "/stream/movie/{}",
+                    r.inner.id
+                )),
                 file: MediaFile::default(), // Placeholder - will be filled during scan
                 theme_color: None,
             })
@@ -231,8 +249,14 @@ impl TmdbApiProvider {
                 library_id: LibraryID(uuid::Uuid::nil()),
                 tmdb_id: item.inner.id,
                 title,
-                details: MediaDetailsOption::Endpoint(format!("/series/{}", item.inner.id)),
-                endpoint: SeriesURL::from_string(format!("/series/{}", item.inner.id)),
+                details: MediaDetailsOption::Endpoint(format!(
+                    "/series/{}",
+                    item.inner.id
+                )),
+                endpoint: SeriesURL::from_string(format!(
+                    "/series/{}",
+                    item.inner.id
+                )),
                 discovered_at: chrono::Utc::now(),
                 created_at: chrono::Utc::now(),
                 theme_color: None,
@@ -270,7 +294,10 @@ impl TmdbApiProvider {
     }
 
     /// Get full movie details - returns TMDB type directly
-    pub async fn get_movie(&self, id: u64) -> Result<tmdb_api::movie::Movie, ProviderError> {
+    pub async fn get_movie(
+        &self,
+        id: u64,
+    ) -> Result<tmdb_api::movie::Movie, ProviderError> {
         let details_cmd = MovieDetails::new(id);
         details_cmd
             .execute(&self.client)
@@ -290,7 +317,10 @@ impl TmdbApiProvider {
     }
 
     /// Get movie keywords
-    pub async fn get_movie_keywords(&self, id: u64) -> Result<MovieKeywordsResult, ProviderError> {
+    pub async fn get_movie_keywords(
+        &self,
+        id: u64,
+    ) -> Result<MovieKeywordsResult, ProviderError> {
         MovieKeywords::new(id)
             .execute(&self.client)
             .await
@@ -298,7 +328,10 @@ impl TmdbApiProvider {
     }
 
     /// Get movie videos (trailers, clips, etc.)
-    pub async fn get_movie_videos(&self, id: u64) -> Result<MovieVideosResult, ProviderError> {
+    pub async fn get_movie_videos(
+        &self,
+        id: u64,
+    ) -> Result<MovieVideosResult, ProviderError> {
         MovieVideos::new(id)
             .execute(&self.client)
             .await
@@ -331,7 +364,10 @@ impl TmdbApiProvider {
     pub async fn get_movie_recommendations(
         &self,
         id: u64,
-    ) -> Result<tmdb_api::common::PaginatedResult<tmdb_api::movie::MovieShort>, ProviderError> {
+    ) -> Result<
+        tmdb_api::common::PaginatedResult<tmdb_api::movie::MovieShort>,
+        ProviderError,
+    > {
         MovieRecommendations::new(id)
             .execute(&self.client)
             .await
@@ -342,7 +378,10 @@ impl TmdbApiProvider {
     pub async fn get_movie_similar(
         &self,
         id: u64,
-    ) -> Result<tmdb_api::common::PaginatedResult<tmdb_api::movie::MovieShort>, ProviderError> {
+    ) -> Result<
+        tmdb_api::common::PaginatedResult<tmdb_api::movie::MovieShort>,
+        ProviderError,
+    > {
         GetSimilarMovies::new(id)
             .execute(&self.client)
             .await
@@ -361,7 +400,10 @@ impl TmdbApiProvider {
     }
 
     /// Get movie images
-    pub async fn get_movie_images(&self, id: u64) -> Result<MovieImagesResult, ProviderError> {
+    pub async fn get_movie_images(
+        &self,
+        id: u64,
+    ) -> Result<MovieImagesResult, ProviderError> {
         let images_cmd = MovieImages::new(id);
         images_cmd
             .execute(&self.client)
@@ -370,7 +412,10 @@ impl TmdbApiProvider {
     }
 
     /// Get movie credits (cast and crew)
-    pub async fn get_movie_credits(&self, id: u64) -> Result<MovieCreditsResult, ProviderError> {
+    pub async fn get_movie_credits(
+        &self,
+        id: u64,
+    ) -> Result<MovieCreditsResult, ProviderError> {
         let credits_cmd = MovieCredits::new(id);
         credits_cmd
             .execute(&self.client)
@@ -379,7 +424,10 @@ impl TmdbApiProvider {
     }
 
     /// Get full TV series details - returns TMDB type directly
-    pub async fn get_series(&self, id: u64) -> Result<tmdb_api::tvshow::TVShow, ProviderError> {
+    pub async fn get_series(
+        &self,
+        id: u64,
+    ) -> Result<tmdb_api::tvshow::TVShow, ProviderError> {
         let details_cmd = TVShowDetails::new(id);
         details_cmd
             .execute(&self.client)
@@ -399,7 +447,10 @@ impl TmdbApiProvider {
     }
 
     /// Get TV series images
-    pub async fn get_series_images(&self, id: u64) -> Result<TVShowImagesResult, ProviderError> {
+    pub async fn get_series_images(
+        &self,
+        id: u64,
+    ) -> Result<TVShowImagesResult, ProviderError> {
         let images_cmd = TVShowImages::new(id);
         images_cmd
             .execute(&self.client)
@@ -425,7 +476,8 @@ impl TmdbApiProvider {
         series_id: u64,
         season_number: u8,
     ) -> Result<tmdb_api::tvshow::Season, ProviderError> {
-        let details_cmd = TVShowSeasonDetails::new(series_id, season_number as u64);
+        let details_cmd =
+            TVShowSeasonDetails::new(series_id, season_number as u64);
         details_cmd
             .execute(&self.client)
             .await
@@ -439,8 +491,11 @@ impl TmdbApiProvider {
         season_number: u8,
         episode_number: u8,
     ) -> Result<tmdb_api::tvshow::Episode, ProviderError> {
-        let details_cmd =
-            TVShowEpisodeDetails::new(series_id, season_number as u64, episode_number as u64);
+        let details_cmd = TVShowEpisodeDetails::new(
+            series_id,
+            season_number as u64,
+            episode_number as u64,
+        );
         details_cmd
             .execute(&self.client)
             .await
@@ -448,7 +503,9 @@ impl TmdbApiProvider {
     }
 
     /// Get all movie genres
-    pub async fn get_movie_genres(&self) -> Result<Vec<tmdb_api::genre::Genre>, ProviderError> {
+    pub async fn get_movie_genres(
+        &self,
+    ) -> Result<Vec<tmdb_api::genre::Genre>, ProviderError> {
         let genres_cmd = tmdb_api::genre::list::GenreList::movie();
         genres_cmd
             .execute(&self.client)
@@ -457,7 +514,9 @@ impl TmdbApiProvider {
     }
 
     /// Get all TV genres
-    pub async fn get_tv_genres(&self) -> Result<Vec<tmdb_api::genre::Genre>, ProviderError> {
+    pub async fn get_tv_genres(
+        &self,
+    ) -> Result<Vec<tmdb_api::genre::Genre>, ProviderError> {
         let genres_cmd = tmdb_api::genre::list::GenreList::tv();
         genres_cmd
             .execute(&self.client)

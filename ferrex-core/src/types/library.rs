@@ -1,6 +1,6 @@
 use rkyv::{
-    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize, option::ArchivedOption,
-    vec::ArchivedVec,
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+    option::ArchivedOption, vec::ArchivedVec,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -33,19 +33,37 @@ pub trait LibraryLike {
 
 /// Mutable operations for library types (only implemented by owned types like Library)
 pub trait LibraryLikeMut: LibraryLike {
-    fn new(name: String, library_type: LibraryType, paths: Vec<PathBuf>) -> Self;
+    fn new(
+        name: String,
+        library_type: LibraryType,
+        paths: Vec<PathBuf>,
+    ) -> Self;
     fn update_last_scan(&mut self);
     fn set_paths(&mut self, paths: Vec<PathBuf>);
     fn set_scan_interval(&mut self, interval: u32);
-    fn set_last_scan(&mut self, last_scan: Option<chrono::DateTime<chrono::Utc>>);
+    fn set_last_scan(
+        &mut self,
+        last_scan: Option<chrono::DateTime<chrono::Utc>>,
+    );
     fn set_auto_scan(&mut self, auto_scan: bool);
     fn set_max_retry_attempts(&mut self, max_retry_attempts: u32);
-    fn set_updated_at(&mut self, updated_at: Option<chrono::DateTime<chrono::Utc>>);
+    fn set_updated_at(
+        &mut self,
+        updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    );
     fn set_media_references(&mut self, media_references: Vec<Media>);
 }
 
 /// Represents a media library with a specific type
-#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub struct Library {
     pub id: LibraryID,
@@ -134,7 +152,8 @@ impl LibraryLike for Library {
         match self.last_scan {
             None => true,
             Some(last_scan) => {
-                let elapsed = chrono::Utc::now().signed_duration_since(last_scan);
+                let elapsed =
+                    chrono::Utc::now().signed_duration_since(last_scan);
                 elapsed.num_minutes() >= self.scan_interval_minutes as i64
             }
         }
@@ -228,7 +247,11 @@ impl ArchivedLibrary {
 }
 
 impl LibraryLikeMut for Library {
-    fn new(name: String, library_type: LibraryType, paths: Vec<PathBuf>) -> Self {
+    fn new(
+        name: String,
+        library_type: LibraryType,
+        paths: Vec<PathBuf>,
+    ) -> Self {
         let now = chrono::Utc::now();
         Self {
             id: LibraryID::new_uuid(),
@@ -263,7 +286,10 @@ impl LibraryLikeMut for Library {
         self.updated_at = chrono::Utc::now();
     }
 
-    fn set_last_scan(&mut self, last_scan: Option<chrono::DateTime<chrono::Utc>>) {
+    fn set_last_scan(
+        &mut self,
+        last_scan: Option<chrono::DateTime<chrono::Utc>>,
+    ) {
         self.last_scan = last_scan;
         self.updated_at = chrono::Utc::now();
     }
@@ -278,7 +304,10 @@ impl LibraryLikeMut for Library {
         self.updated_at = chrono::Utc::now();
     }
 
-    fn set_updated_at(&mut self, updated_at: Option<chrono::DateTime<chrono::Utc>>) {
+    fn set_updated_at(
+        &mut self,
+        updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) {
         self.updated_at = updated_at.unwrap_or_else(chrono::Utc::now);
     }
 

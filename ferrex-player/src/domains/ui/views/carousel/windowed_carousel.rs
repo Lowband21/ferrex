@@ -87,8 +87,10 @@ where
     if state.visible_start > 0 {
         const ITEM_WIDTH: f32 = 200.0;
         const ITEM_SPACING: f32 = 15.0;
-        let spacer_width = state.visible_start as f32 * (ITEM_WIDTH + ITEM_SPACING);
-        item_row = item_row.push(Space::new().width(Length::Fixed(spacer_width)));
+        let spacer_width =
+            state.visible_start as f32 * (ITEM_WIDTH + ITEM_SPACING);
+        item_row =
+            item_row.push(Space::new().width(Length::Fixed(spacer_width)));
     }
 
     // Only create cards for visible items
@@ -117,7 +119,8 @@ where
         const ITEM_SPACING: f32 = 15.0;
         let remaining_items = total_items - state.visible_end;
         let spacer_width = remaining_items as f32 * (ITEM_WIDTH + ITEM_SPACING);
-        item_row = item_row.push(Space::new().width(Length::Fixed(spacer_width)));
+        item_row =
+            item_row.push(Space::new().width(Length::Fixed(spacer_width)));
     }
 
     // Create horizontal scrollable for items
@@ -132,7 +135,10 @@ where
             .scroller_width(0),
     ))
     .on_scroll(move |viewport| {
-        Message::CarouselNavigation(CarouselMessage::Scrolled(section_id.clone(), viewport))
+        Message::CarouselNavigation(CarouselMessage::Scrolled(
+            section_id.clone(),
+            viewport,
+        ))
     })
     .width(Length::Fill)
     .height(Length::Fixed(370.0));

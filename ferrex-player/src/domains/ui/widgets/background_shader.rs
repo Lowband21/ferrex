@@ -297,7 +297,7 @@ struct Globals {
     texture_params: [f32; 4], // texture_aspect, scroll_offset, header_offset, 0 (offset 128, size 16)
 
     // Transition colors
-    prev_primary_color: [f32; 4],   // offset 144, size 16
+    prev_primary_color: [f32; 4], // offset 144, size 16
     prev_secondary_color: [f32; 4], // offset 160, size 16
 
     // Transition parameters
@@ -314,22 +314,22 @@ struct Globals {
     region1_shadow_params: [f32; 4], // shadow_intensity, z_order, border_width, border_opacity (offset 272, size 16)
     region1_border_color: [f32; 4],  // r, g, b, a (offset 288, size 16)
 
-    region2_bounds: [f32; 4],        // (offset 304, size 16)
-    region2_depth_params: [f32; 4],  // (offset 320, size 16)
+    region2_bounds: [f32; 4], // (offset 304, size 16)
+    region2_depth_params: [f32; 4], // (offset 320, size 16)
     region2_shadow_params: [f32; 4], // (offset 336, size 16)
-    region2_border_color: [f32; 4],  // (offset 352, size 16)
+    region2_border_color: [f32; 4], // (offset 352, size 16)
 
-    region3_bounds: [f32; 4],        // (offset 368, size 16)
-    region3_depth_params: [f32; 4],  // (offset 384, size 16)
+    region3_bounds: [f32; 4], // (offset 368, size 16)
+    region3_depth_params: [f32; 4], // (offset 384, size 16)
     region3_shadow_params: [f32; 4], // (offset 400, size 16)
-    region3_border_color: [f32; 4],  // (offset 416, size 16)
+    region3_border_color: [f32; 4], // (offset 416, size 16)
 
-    region4_bounds: [f32; 4],        // (offset 432, size 16)
-    region4_depth_params: [f32; 4],  // (offset 448, size 16)
+    region4_bounds: [f32; 4], // (offset 432, size 16)
+    region4_depth_params: [f32; 4], // (offset 448, size 16)
     region4_shadow_params: [f32; 4], // (offset 464, size 16)
-    region4_border_color: [f32; 4],  // (offset 480, size 16)
+    region4_border_color: [f32; 4], // (offset 480, size 16)
 
-                                     // Total: 496 bytes (31 * 16)
+                              // Total: 496 bytes (31 * 16)
 }
 
 // Compile-time assertion to verify our struct size
@@ -400,10 +400,13 @@ impl Pipeline {
                 .unwrap()
                 .as_millis()
         );
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(&shader_label),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/background.wgsl").into()),
-        });
+        let shader =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(&shader_label),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!("../shaders/background.wgsl").into(),
+                ),
+            });
 
         // Create globals bind group layout
         let globals_bind_group_layout =
@@ -429,14 +432,18 @@ impl Pipeline {
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        ty: wgpu::BindingType::Sampler(
+                            wgpu::SamplerBindingType::Filtering,
+                        ),
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: true,
+                            },
                             view_dimension: wgpu::TextureViewDimension::D2,
                             multisampled: false,
                         },
@@ -469,73 +476,82 @@ impl Pipeline {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
 
         // Create default texture bind group
-        let default_texture_view =
-            default_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let default_texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Default Texture Bind Group"),
-            layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&default_texture_view),
-                },
-            ],
-        });
+        let default_texture_view = default_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let default_texture_bind_group =
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Default Texture Bind Group"),
+                layout: &texture_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(
+                            &default_texture_view,
+                        ),
+                    },
+                ],
+            });
 
         // Create pipeline layout
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Background Pipeline Layout"),
-            bind_group_layouts: &[&globals_bind_group_layout, &texture_bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Background Pipeline Layout"),
+                bind_group_layouts: &[
+                    &globals_bind_group_layout,
+                    &texture_bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
 
         // Create render pipeline
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Background Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[], // No vertex buffers - we generate vertices in shader
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING), // Use alpha blending like rounded_image_shader
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        });
+        let render_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Background Pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[], // No vertex buffers - we generate vertices in shader
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING), // Use alpha blending like rounded_image_shader
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
 
         Pipeline {
             render_pipeline,
@@ -572,7 +588,11 @@ fn load_texture(
                 (rgba.into_raw(), w, h)
             }
             Err(e) => {
-                log::error!("Failed to load backdrop from path {:?}: {}", path, e);
+                log::error!(
+                    "Failed to load backdrop from path {:?}: {}",
+                    path,
+                    e
+                );
                 return None;
             }
         },
@@ -606,7 +626,8 @@ fn load_texture(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8Unorm, // Match rounded_image_shader format
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
 
@@ -702,21 +723,24 @@ impl Primitive for BackgroundPrimitive {
         if state.globals_buffer.is_none() {
             const EXPECTED_SIZE: u64 = 496;
 
-            let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Background Globals"),
-                size: EXPECTED_SIZE,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let globals_buffer =
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Background Globals"),
+                    size: EXPECTED_SIZE,
+                    usage: wgpu::BufferUsages::UNIFORM
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
 
-            let globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Background Globals Bind Group"),
-                layout: pipeline.globals_bind_group_layout.as_ref(),
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: globals_buffer.as_entire_binding(),
-                }],
-            });
+            let globals_bind_group =
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Background Globals Bind Group"),
+                    layout: pipeline.globals_bind_group_layout.as_ref(),
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: globals_buffer.as_entire_binding(),
+                    }],
+                });
 
             state.globals_buffer = Some(globals_buffer);
             state.globals_bind_group = Some(globals_bind_group);
@@ -734,15 +758,17 @@ impl Primitive for BackgroundPrimitive {
             let image_id = handle.id();
 
             if !state.texture_cache.contains_key(&image_id)
-                && let Some((texture, aspect_ratio)) = load_texture(device, queue, handle) {
-                    state.texture_cache.insert(
-                        image_id,
-                        TextureInfo {
-                            texture,
-                            aspect_ratio,
-                        },
-                    );
-                }
+                && let Some((texture, aspect_ratio)) =
+                    load_texture(device, queue, handle)
+            {
+                state.texture_cache.insert(
+                    image_id,
+                    TextureInfo {
+                        texture,
+                        aspect_ratio,
+                    },
+                );
+            }
 
             if state.texture_cache.contains_key(&image_id)
                 && !state.texture_bind_groups.contains_key(&image_id)
@@ -755,20 +781,25 @@ impl Primitive for BackgroundPrimitive {
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
 
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("Background Texture Bind Group"),
-                    layout: pipeline.texture_bind_group_layout.as_ref(),
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(pipeline.sampler.as_ref()),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::TextureView(&texture_view),
-                        },
-                    ],
-                });
+                let bind_group =
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("Background Texture Bind Group"),
+                        layout: pipeline.texture_bind_group_layout.as_ref(),
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(
+                                    pipeline.sampler.as_ref(),
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::TextureView(
+                                    &texture_view,
+                                ),
+                            },
+                        ],
+                    });
 
                 state.texture_bind_groups.insert(image_id, bind_group);
             }
@@ -787,7 +818,9 @@ impl Primitive for BackgroundPrimitive {
         let (effect_param1, effect_param2) = match &self.effect {
             BackgroundEffect::Solid | BackgroundEffect::Gradient => (0.0, 0.0),
             BackgroundEffect::SubtleNoise { scale, speed } => (*scale, *speed),
-            BackgroundEffect::FloatingParticles { count, size } => (*count as f32, *size),
+            BackgroundEffect::FloatingParticles { count, size } => {
+                (*count as f32, *size)
+            }
             BackgroundEffect::WaveRipple {
                 frequency,
                 amplitude,
@@ -859,7 +892,12 @@ impl Primitive for BackgroundPrimitive {
                 self.backdrop_slide_offset,
                 self.backdrop_scale,
             ],
-            gradient_center: [self.gradient_center.0, self.gradient_center.1, 0.0, 0.0],
+            gradient_center: [
+                self.gradient_center.0,
+                self.gradient_center.1,
+                0.0,
+                0.0,
+            ],
             depth_params: [
                 self.depth_layout.regions.len().min(4) as f32,
                 self.depth_layout.base_depth,
@@ -890,7 +928,8 @@ impl Primitive for BackgroundPrimitive {
             region4_border_color: [0.0; 4],
         };
 
-        for (i, region) in self.depth_layout.regions.iter().take(4).enumerate() {
+        for (i, region) in self.depth_layout.regions.iter().take(4).enumerate()
+        {
             let bounds = [
                 region.bounds.x,
                 region.bounds.y,
@@ -969,16 +1008,23 @@ impl Primitive for BackgroundPrimitive {
             queue.write_buffer(buffer, 0, bytemuck::cast_slice(&[globals]));
         }
 
-        let texture_bind_group =
-            backdrop_handle.and_then(|handle| state.texture_bind_groups.get(&handle.id()).cloned());
+        let texture_bind_group = backdrop_handle.and_then(|handle| {
+            state.texture_bind_groups.get(&handle.id()).cloned()
+        });
 
         state
             .primitive_data
             .insert(self.program_id, PrimitiveData { texture_bind_group });
     }
 
-    fn draw(&self, renderer: &Self::Renderer, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
-        let Some(globals_bind_group) = renderer.state.globals_bind_group.as_ref() else {
+    fn draw(
+        &self,
+        renderer: &Self::Renderer,
+        render_pass: &mut wgpu::RenderPass<'_>,
+    ) -> bool {
+        let Some(globals_bind_group) =
+            renderer.state.globals_bind_group.as_ref()
+        else {
             return false;
         };
 
@@ -1172,15 +1218,19 @@ impl BackgroundShader {
             let b = color.b;
 
             // Increase brightness and saturation slightly for secondary
-            let secondary =
-                Color::from_rgb((r * 1.2).min(1.0), (g * 1.2).min(1.0), (b * 1.2).min(1.0));
+            let secondary = Color::from_rgb(
+                (r * 1.2).min(1.0),
+                (g * 1.2).min(1.0),
+                (b * 1.2).min(1.0),
+            );
 
             self.secondary_color = secondary;
         } else {
             // Fallback to default theme colors
             use crate::domains::ui::theme::MediaServerTheme;
             self.primary_color = MediaServerTheme::BLACK;
-            self.secondary_color = MediaServerTheme::ACCENT_BLUE.scale_alpha(0.2);
+            self.secondary_color =
+                MediaServerTheme::ACCENT_BLUE.scale_alpha(0.2);
         }
         self
     }
@@ -1200,7 +1250,8 @@ pub fn background_shader() -> BackgroundShader {
 impl<'a> From<BackgroundShader> for Element<'a, Message> {
     fn from(background: BackgroundShader) -> Self {
         // Generate a unique ID for this background shader instance
-        let id = BACKGROUND_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let id = BACKGROUND_ID_COUNTER
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         iced::widget::shader(BackgroundShaderProgram {
             effect: background.effect,
